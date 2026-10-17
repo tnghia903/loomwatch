@@ -5,7 +5,6 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 
-import type { DetectedHarness } from '../lib/harnesses'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { Workspace } from './Workspace'
 
@@ -39,11 +38,6 @@ vi.mock('@xyflow/react', async (importOriginal) => ({
 
 const SCHEMA = parse(readFileSync(resolve(process.cwd(), '../schemas/team.schema.yaml'), 'utf8')) as object
 
-const HARNESSES: DetectedHarness[] = [
-  { id: 'opencode', name: 'OpenCode', command: 'opencode', executablePath: '/bin/opencode', acpAvailable: true, spawn: { cmd: 'opencode', args: ['acp'] } },
-  { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] } },
-]
-
 const WRITER = `  - id: writer
     name: Writer
     role: Write the summary.
@@ -54,28 +48,28 @@ const SHAPES: Array<{ name: string; yaml: string; card: string }> = [
   {
     name: 'a spawn with cmd and cwd but no args or env',
     yaml: `schemaVersion: 1\nid: no-args\nname: No args\nentrypoint: writer\nagents:\n${WRITER}    spawn:\n      cmd: opencode\n      cwd: .\nedges: []\n`,
-    card: 'Writer, OpenCode, Write the summary.',
+    card: 'Writer, Claude Sonnet 5.5, Write the summary.',
   },
   {
-    name: 'an npx spawn with no args, which detection compares against both npx harnesses',
+    name: 'an npx spawn with no args, left from an AI app',
     yaml: `schemaVersion: 1\nid: npx\nname: Npx\nentrypoint: writer\nagents:\n${WRITER}    spawn:\n      cmd: npx\n      cwd: .\nedges: []\n`,
-    card: 'Writer, Custom command: npx, Write the summary.',
+    card: 'Writer, Claude Sonnet 5.5, Write the summary.',
   },
   {
     name: 'a memory block with inherits and no brief',
     yaml: `schemaVersion: 1\nid: inherits-only\nname: Inherits only\nentrypoint: writer\nmemory:\n  inherits:\n    - team: research\nagents:\n${WRITER}    spawn:\n      cmd: opencode\n      args: [acp]\n      env: {}\n      cwd: .\nedges: []\n`,
-    card: 'Writer, OpenCode, Write the summary.',
+    card: 'Writer, Claude Sonnet 5.5, Write the summary.',
   },
   {
     name: 'a memory block with inherits, no brief, and no edges key',
     yaml: `schemaVersion: 1\nid: no-edges\nname: No edges\nentrypoint: writer\nmemory:\n  inherits:\n    - team: research\nagents:\n${WRITER}    spawn:\n      cmd: opencode\n      args: [acp]\n      env: {}\n      cwd: .\n`,
-    card: 'Writer, OpenCode, Write the summary.',
+    card: 'Writer, Claude Sonnet 5.5, Write the summary.',
   },
   {
     name: 'an agent with no name or role, in a team with no id, name or edges',
     yaml: 'schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: sonnet\n    spawn:\n      cmd: opencode\n      cwd: .\n',
-    // The card's label leaves out empty parts, so with no name or role only the app is left.
-    card: 'OpenCode',
+    // The card's label leaves out empty parts, so with no name or role only the model is left.
+    card: 'Claude Sonnet 5.5',
   },
 ]
 
@@ -99,7 +93,7 @@ describe('Workspace opens team files that omit keys the daemon defaults', () => 
 
     render(
       <ErrorBoundary>
-        <Workspace harnesses={HARNESSES} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onDocumentOpen={vi.fn()} initialRunId={null} />
+        <Workspace onDocumentOpen={vi.fn()} initialRunId={null} />
       </ErrorBoundary>,
     )
 

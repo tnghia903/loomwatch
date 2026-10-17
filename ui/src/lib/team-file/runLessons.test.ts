@@ -63,13 +63,12 @@ describe('runLessons', () => {
     const merged = mergeFindings(checkup(team([scout])), lessons)
     expect(merged.filter((finding) => finding.id === 'needs-web:scout')).toEqual([lessons[0]])
     expect(runLessons(runs, team([{ ...scout, allow: { web: true } }]))).toEqual([])
-    expect(runLessons(runs, team([{ ...scout, spawn: { ...CLAUDE, cmd: 'opencode', args: ['acp'] } }]))).toEqual([])
   })
 
   it('says when an agent fails again, with the last reason the record gives', () => {
     const agents = [agent('coder', 'Fix the bug and run the tests, then reply with what changed.')]
     const runs = [run('a', 'team', ['coder'], [], [['coder', 'refusal']]), run('b', 'team', ['coder']), run('c', 'team', ['coder'], [], [['coder', null]])]
-    expect(runLessons(runs, team(agents))).toEqual([expect.objectContaining({ rule: 'keeps-failing', severity: 'fix', title: 'Coder failed in 2 of 3 runs', why: 'Last time: refusal. Check its AI app and model first, then its instructions.' })])
+    expect(runLessons(runs, team(agents))).toEqual([expect.objectContaining({ rule: 'keeps-failing', severity: 'fix', title: 'Coder failed in 2 of 3 runs', why: 'Last time: refusal. Check its model first, then its instructions.' })])
   })
 
   it('reads only the most recent runs', () => {
@@ -110,10 +109,21 @@ describe('lessonRun', () => {
         { agentId: 'w', kind: 'usage', payload: { used: 39_000, size: 200_000 } },
       ],
     )
-    expect([...reduced.failed]).toEqual([['r', 'its app exited with code 2']])
+    expect([...reduced.failed]).toEqual([['r', 'it stopped with exit code 2']])
     expect(reduced.succeeded).toBe(false)
-    // The first reading is the opening cost; an agent that reported nothing has no entry.
-    expect([...reduced.usage]).toEqual([['w', { tokens: 41_000, opening: 28_500 }]])
+    // The first reading is the opening cost; an agent that reported nothing has no entry. A run
+    // recorded before spend was kept says nothing of cost.
+    expect([...reduced.usage]).toEqual([['w', { tokens: 41_000, opening: 28_500, costUsd: null }]])
+  })
+
+  // ADR 0068: what each agent cost comes from the run's own record, exact.
+  it('takes what each agent cost from the run record', () => {
+    const reduced = lessonRun(
+      { runId: 'a', status: 'succeeded', mode: 'pipeline', entrypoint: 'r', agentIds: ['r', 'w'], spend: { limitUsd: 1, spentUsd: 0.05, agents: { r: { spentUsd: 0.05 } } } },
+      { messages: [], agents: [{ id: 'r', status: 'succeeded', stopReason: null, exitCode: 0, tokens: 9_000 }, { id: 'w', status: 'succeeded', stopReason: null, exitCode: 0, tokens: 1_000 }] as never },
+    )
+    expect(reduced.usage.get('r')?.costUsd).toBe(0.05)
+    expect(reduced.usage.get('w')?.costUsd).toBe(0)
   })
 
   // 2026-10-14: Codex refused the model and ended the turn `end_turn`; "Last time: end_turn" says nothing.
@@ -138,10 +148,22 @@ describe('teamUsage', () => {
     expect(teamUsage(runs, agents)).toEqual({
       runs: 2, perRun: 85_000,
       agents: [
-        { id: 'scout', name: 'Scout', perRun: 45_000, share: 90_000 / 170_000, opening: 12_000 },
-        { id: 'lead', name: 'Lead', perRun: 40_000, share: 80_000 / 170_000, opening: 20_000 },
+        { id: 'scout', name: 'Scout', perRun: 45_000, share: 90_000 / 170_000, opening: 12_000, costPerRun: null },
+        { id: 'lead', name: 'Lead', perRun: 40_000, share: 80_000 / 170_000, opening: 20_000, costPerRun: null },
       ],
     })
+  })
+
+  // "≈ $0.04 a run, the last 5 runs": over the runs that kept spend, a run it sat out costing nothing.
+  it('says what each agent costs a run, from the runs that kept it', () => {
+    const runs = [
+      run('a', 'team', ['lead', 'scout'], [], [], [['lead', { tokens: 30_000, opening: 20_000, costUsd: 0.02 }], ['scout', { tokens: 90_000, opening: 12_000, costUsd: 0.06 }]]),
+      run('b', 'team', ['lead', 'scout'], [], [], [['lead', { tokens: 50_000, opening: 24_000, costUsd: 0.04 }]]),
+      run('c', 'team', ['lead', 'scout'], [], [], [['lead', { tokens: 10_000, opening: 24_000, costUsd: null }]]),
+    ]
+    const usage = teamUsage(runs, agents)
+    expect(usage?.agents.find((row) => row.id === 'lead')?.costPerRun).toBeCloseTo(0.03)
+    expect(usage?.agents.find((row) => row.id === 'scout')?.costPerRun).toBeCloseTo(0.03)
   })
 
   it('has nothing to say before any run reported usage', () => {

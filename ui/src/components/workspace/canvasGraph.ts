@@ -498,7 +498,7 @@ function addOutput(graph: GraphAccumulator, input: CanvasGraphInput, frame: Grap
     const strip = session.error && live ? { tone: 'halt' as const, message: `Live events reconnecting — answer shown to`, watermark: `seq ${session.lastSeq}` }
       : phase === 'partial' || phase === 'failed' ? {
           tone: 'alert' as const,
-          message: (record?.error ? plainRunError(record.error, new Map(doc.nodes.map((node) => [node.id, { name: node.data.agent.name || node.id, command: node.data.agent.spawn?.cmd }]))) : null) ?? crash?.message
+          message: (record?.error ? plainRunError(record.error, new Map(doc.nodes.map((node) => [node.id, { name: node.data.agent.name || node.id }]))) : null) ?? crash?.message
             ?? (phase === 'failed' && (record?.errorCode ?? record?.stopReason ?? projection.errorCode) === 'missing_canonical_response'
               ? 'The run finished but no agent produced an answer.'
               : 'No error message was reported.'),

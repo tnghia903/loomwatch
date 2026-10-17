@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { createElement, useRef, type ReactNode } from 'react'
 
-import type { HarnessModel } from '../../lib/harnesses'
+import { openRouterId } from '../../lib/ai/modelIds'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
 import type { AgentUsage } from '../../lib/team-file/runLessons'
@@ -13,6 +13,7 @@ import { StatusGlyph } from '../ui/glyphs'
 import { AgentCheckup, type AgentCheckupProps } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
+import { AgentSpendGuard } from './AgentSpendGuard'
 import { AgentUsageLine } from './AgentUsageLine'
 import { CheckStep, type CheckStepProps } from './CheckStep'
 import { DoneWhen } from './DoneWhen'
@@ -20,6 +21,9 @@ import { InstructionShape } from './InstructionShape'
 import { AgentWorkFolder } from './AgentWorkFolder'
 import { InstructionsUpdated, type InstructionsUpdatedProps } from './InstructionsUpdated'
 import { roleGlyph } from './roleGlyph'
+import { EffortSlider } from '../models/EffortSlider'
+import { ModelPicker } from '../models/ModelPicker'
+import { keys } from '../../lib/platform'
 
 export interface InspectorProps {
   node: AgentNode
@@ -33,6 +37,8 @@ export interface InspectorProps {
   onAddKnowledge?: (added: CapabilityRef[]) => void
   onRename: (field: 'name' | 'role', value: string) => void
   onModelChange: (value: string) => void
+  /** The agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
+  onSpendChange?: (perRun: number | null) => void
   /** `undefined` takes the effort out, so the model runs at its own default. */
   onThinkingEffortChange?: (value: string | undefined) => void
   /** Write the agent's Done when list (ADR 0062); absent hides the list. */
@@ -56,14 +62,9 @@ export interface InspectorProps {
   onDelete: () => void
   onClose: () => void
   onFieldBlur: (field: AgentField) => void
-  modelOptions?: readonly HarnessModel[]
-  defaultThinkingEffort?: string
-  modelOptionsLoading?: boolean
-  modelOptionsError?: string | null
   /** Why the operator was sent to this agent, when something else opened the panel for them. */
   fixHint?: string
   onDismissFixHint?: () => void
-  onRetryModelOptions?: () => void
   fieldProblems?: AgentFieldProblems
   readOnly?: boolean
   pipeline?: boolean
@@ -88,39 +89,17 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in Show YAML).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onThinkingEffortChange, onDoneWhenChange, checkStep, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, modelOptions = [], defaultThinkingEffort, modelOptionsLoading = false, modelOptionsError = null, onRetryModelOptions, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
   // The fields a link to Your agents copies are changed there, or after unlinking.
   const locked = readOnly || Boolean(linked)
   const roleField = useRef<HTMLTextAreaElement>(null)
   const { agent, runtime } = node.data
   const status = runtime?.status ?? agent.status ?? 'idle'
-  const parsedSelector = splitModelSelector(agent.model ?? '')
-  const selectableModelsById = new Map<string, HarnessModel>(modelOptions.map((model) => [model.id, model]))
-  if (parsedSelector.modelId && !selectableModelsById.has(parsedSelector.modelId)) selectableModelsById.set(parsedSelector.modelId, { id: parsedSelector.modelId, name: parsedSelector.modelId, thinkingEfforts: [], effortsKnown: false })
-  const selectableModels = [...selectableModelsById.values()]
-  const selectedModel = selectableModels.find((model) => model.id === parsedSelector.modelId)
-  const askedEffort = agent.thinkingEffort ?? parsedSelector.thinkingEffort
-  const configuredEffort = askedEffort ?? defaultThinkingEffort
-  const thinkingOptions = selectedModel?.thinkingEfforts ?? []
-  const selectedEffortIndex = Math.max(0, thinkingOptions.findIndex((effort) => effort.id === configuredEffort))
-  const selectedEffort = thinkingOptions[selectedEffortIndex]
-  // The app lists efforts only for the model it runs on (and Codex for each model it lists them
-  // for). Another model runs at its own default; one the file still asks an effort of gets it only
-  // if the model has that setting.
-  const effortsUnknown = !selectedModel?.effortsKnown
-  const askedOfUnknown = effortsUnknown && askedEffort ? modelOptions.flatMap((model) => model.thinkingEfforts).find((effort) => effort.id === askedEffort)?.name ?? askedEffort : null
   const nativeFile = (agent.memory?.deliverAs ?? teamDeliverAs) === 'native-file'
   const connected = (agent.capabilities ?? []).length > 0
   const zoneClass = (field: AgentField) => fieldProblems?.[field] ? (fieldProblems[field]?.weight === 'error' ? 'error' : 'needs') : ''
   const hint = (field: AgentField, fallback = '') => fieldProblems?.[field]?.message ?? fallback
-  // A catalog failure outranks the field problem it causes. Switching harness clears the model,
-  // so `model` is always "Required" in exactly the state where the catalog could not be read —
-  // showing the field problem there left an empty list, no reason for it, and no way back.
-  const modelHint = modelOptionsLoading
-    ? 'Loading models from this app…'
-    : modelOptionsError
-      ? `Could not load this app's models: ${modelOptionsError}`
-      : hint('model', 'The models this AI app offers.')
+
 
   if (agent.kind === 'operator') return (
     <aside className="panel right top e1 lw-inspector" aria-label="Inspector" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
@@ -174,45 +153,12 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         </div>
         {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}
         <div className={`field ${zoneClass('model')}`}>
-          <label className="t-meta" htmlFor="insp-model">Model</label>
-          <select id="insp-model" className="input model-select" data-agent-field="model" value={parsedSelector.modelId} disabled={locked || modelOptionsLoading} onChange={(event) => {
-            // An effort belongs to one model: keep it only if the new model lists it too.
-            const kept = Boolean(askedEffort && selectableModelsById.get(event.target.value)?.thinkingEfforts.some((effort) => effort.id === askedEffort))
-            if (kept && !agent.thinkingEffort) onThinkingEffortChange?.(askedEffort)
-            else if (!kept && agent.thinkingEffort) onThinkingEffortChange?.(undefined)
-            onModelChange(event.target.value)
-          }} onBlur={() => onFieldBlur('model')}>
-            {!agent.model && <option value="" disabled>Select a model</option>}
-            {selectableModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-          </select>
-          <span className="hint t-meta">{runtime?.status === 'running' ? 'Used by the AI app for this run.' : selectedModel?.description ?? modelHint}{modelOptionsError && onRetryModelOptions && <> <button type="button" className="link model-retry" onClick={onRetryModelOptions}>Retry</button></>}</span>
+          <ModelPicker field="model" value={openRouterId(agent.model)} disabled={locked} onChange={(id) => { onModelChange(id); onFieldBlur('model') }} />
+          <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with. Its price is per million tokens, the way OpenRouter shows it.')}</span>
         </div>
-        <div className="field thinking-field">
-          <span className="thinking-label"><label className="t-meta" htmlFor="insp-thinking">Thinking effort</label><output className="t-body-m" htmlFor="insp-thinking">{selectedEffort?.name ?? askedOfUnknown ?? 'Model default'}</output></span>
-          {thinkingOptions.length > 0 && <input
-            id="insp-thinking"
-            className="thinking-slider"
-            type="range"
-            min={0}
-            max={thinkingOptions.length - 1}
-            step={1}
-            value={selectedEffortIndex}
-            disabled={locked || modelOptionsLoading || !onThinkingEffortChange}
-            aria-label="Thinking effort"
-            aria-valuetext={selectedEffort?.name}
-            onChange={(event) => {
-              const effort = thinkingOptions[Number(event.target.value)]
-              if (effort) onThinkingEffortChange?.(effort.id)
-            }}
-          />}
-          {thinkingOptions.length > 1 && <span className="thinking-scale t-micro"><span>{thinkingOptions[0].name}</span><span>{thinkingOptions[thinkingOptions.length - 1].name}</span></span>}
-          <span className="hint t-meta">{selectedEffort?.description ?? (modelOptionsLoading ? 'Loading effort choices…'
-            : askedOfUnknown ? <>Used only if this model has that setting, else it runs at its own default.{!locked && agent.thinkingEffort && onThinkingEffortChange && <> <button type="button" className="link" onClick={() => onThinkingEffortChange(undefined)}>Use its default</button></>}</>
-            : effortsUnknown ? 'Runs at the model’s own default effort.'
-            : thinkingOptions.length === 0 ? 'This model has no separate effort setting.'
-            : 'Controls how much reasoning the model uses.')}</span>
-        </div>
+        <EffortSlider model={openRouterId(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={locked} onChange={onThinkingEffortChange} />
         {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}
+        {onSpendChange && <AgentSpendGuard perRun={agent.spend?.perRun ?? null} readOnly={locked} onChange={onSpendChange} />}
       </div>
 
       <div className="zone">
@@ -231,7 +177,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         {onDeliverAsChange && briefCount > 0 && !connected && holdsTeamFile(agent) && (
           <button type="button" className={`check ${nativeFile ? '' : 'on'}`} disabled={readOnly} onClick={() => onDeliverAsChange(nativeFile ? 'packet-only' : 'native-file')} aria-pressed={!nativeFile}>
             <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
-            <span className="txt"><b className="t-body">Work in this folder</b><span className="t-meta">{nativeFile ? 'Off: it works in its own folder, where the Brief is kept in its AI app’s memory file for the whole session.' : 'On: it works in the folder above. In a long session its AI app may summarise the Brief away.'}</span></span>
+            <span className="txt"><b className="t-body">Work in this folder</b><span className="t-meta">{nativeFile ? 'Off: it works in its own folder, where the Brief is kept in AGENTS.md for the whole session.' : 'On: it works in the folder above. In a long session the Brief may be summarised away.'}</span></span>
           </button>
         )}
       </div>
@@ -242,7 +188,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
 
       {!readOnly && (
         <footer className="insp-foot">
-          <span className="t-meta" style={{ color: 'var(--color-ink-3)' }}>Edits are in memory until ⌘S</span>
+          <span className="t-meta" style={{ color: 'var(--color-ink-3)' }}>Edits are in memory until {keys('⌘S')}</span>
           <button type="button" className="btn btn-danger" style={{ border: 0 }} onClick={onDelete}>Delete</button>
         </footer>
       )}

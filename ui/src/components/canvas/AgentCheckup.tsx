@@ -1,5 +1,6 @@
 import { CircleAlert, History, Lightbulb, Wand2 } from 'lucide-react'
 
+import { keys } from '../../lib/platform'
 import type { CheckupFinding } from '../../lib/team-file/checkup'
 import { SectionHead } from '../ui/SectionHead'
 
@@ -9,7 +10,7 @@ export interface CheckupActions {
   onFix?: (finding: CheckupFinding) => void
   /** Hide it for this team: the operator knows better. */
   onDismiss?: (finding: CheckupFinding) => void
-  /** Ask LoomWatch for an edit only judgement can make; absent when no AI app can answer. */
+  /** Ask LoomWatch for an edit only judgement can make; absent when Ask can't answer (no OpenRouter key). */
   onAsk?: (prompt: string) => void
   /** Open the agent a finding is about. The agent's own panel leaves this out. */
   onOpenAgent?: (agentId: string) => void
@@ -64,7 +65,7 @@ export function AgentCheckup({ findings, readOnly = false, headClassName, ...act
   return (
     <div className="agent-context agent-checkup">
       <SectionHead title="Make it work better" className={headClassName} explain={<>
-        <div>LoomWatch reads this agent’s instructions, its place in the team and what it may do, and the team’s last few runs, and suggests what would make its work better. Nothing changes until you choose a fix, and ⌘Z undoes one.</div>
+        <div>LoomWatch reads this agent’s instructions, its place in the team and what it may do, and the team’s last few runs, and suggests what would make its work better. Nothing changes until you choose a fix, and {keys('⌘Z')} undoes one.</div>
         <div><b>Not needed</b> hides a suggestion for this team.</div>
       </>} />
       <ul className="checkup-list">

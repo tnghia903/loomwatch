@@ -61,7 +61,7 @@ describe('BuildHeading checkup', () => {
   it('says what a run of this team costs, from its own runs', () => {
     const usage = { runs: 3, perRun: 84_000, agents: [{ id: 'lead', name: 'Lead', perRun: 84_000, share: 1, opening: 29_000 }] }
     const { rerender } = render(<BuildHeading agentCount={1} isValid checking={false} saveState="saved" onRun={vi.fn()} usage={usage} />)
-    expect(screen.getByText('About 84k tokens a run')).toHaveAttribute('title', 'Average over the last 3 runs, as the AI apps reported it, cached tokens included.')
+    expect(screen.getByText('About 84k tokens a run')).toHaveAttribute('title', 'Average over the last 3 runs, as the model calls counted it, cached tokens included.')
     rerender(<BuildHeading agentCount={1} isValid checking={false} saveState="saved" onRun={vi.fn()} />)
     expect(screen.queryByText(/tokens a run/)).not.toBeInTheDocument()
   })

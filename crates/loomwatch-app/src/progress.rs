@@ -42,6 +42,10 @@ pub struct Record {
     waiting_on: Option<WaitingOn>,
     #[serde(default)]
     permission_requests: Vec<PermissionRequest>,
+    /// The run, or one of its agents, used what it may spend and waits for you to add more or
+    /// finish.
+    #[serde(default)]
+    spend_stops: Vec<SpendStop>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +69,16 @@ struct PermissionRequest {
     /// What the agent's app calls the action: "Web search", "Bash".
     #[serde(default)]
     title: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpendStop {
+    /// The agent whose own limit it is; absent for the team's.
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    limit_usd: f64,
 }
 
 /// One line of the menu, about one run, which opens that run.
@@ -263,6 +277,13 @@ pub fn progress(runs: &[Record], now: DateTime<Utc>) -> Progress {
                 request.name, request.title
             )));
         }
+        for stop in &run.spend_stops {
+            let limit = format!("${:.2}", stop.limit_usd);
+            progress.needs_you.push(line(match &stop.name {
+                Some(name) => format!("{name} used its {limit}: add more, or stop it"),
+                None => format!("used its {limit}: add more, or finish"),
+            }));
+        }
         if let Some(waiting) = run.waiting_on.as_ref().filter(|_| run.status == "running") {
             progress.needs_you.push(line(if waiting.kind == "question" {
                 format!("{} has a question for you", waiting.name)
@@ -272,7 +293,9 @@ pub fn progress(runs: &[Record], now: DateTime<Utc>) -> Progress {
                 "waiting for your review".to_owned()
             }));
         }
-        let asking = !run.permission_requests.is_empty() || run.waiting_on.is_some();
+        let asking = !run.permission_requests.is_empty()
+            || !run.spend_stops.is_empty()
+            || run.waiting_on.is_some();
         let since = run
             .started_at
             .as_deref()
@@ -576,6 +599,38 @@ mod tests {
                 .rows()
                 .iter()
                 .any(|row| row.text == "4 more in LoomWatch")
+        );
+    }
+
+    /// A run waiting at its spool (ADR 0068) waits on you, like a question: the face asks, and
+    /// the line says what it is waiting for.
+    #[test]
+    fn a_run_at_its_spool_waits_on_you() {
+        let progress = progress(
+            &runs(
+                json!([{"runId": "r1", "teamPath": "news.yaml", "status": "running",
+                          "createdAt": "2026-10-17T09:59:00.000Z",
+                          "spendStops": [{"limitUsd": 1.0},
+                                         {"name": "Scout", "limitUsd": 0.3}]}]),
+            ),
+            now(),
+        );
+        assert_eq!(progress.mood(), Mood::Asking);
+        let texts: Vec<&str> = progress
+            .needs_you
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "news: used its $1.00: add more, or finish",
+                "news: Scout used its $0.30: add more, or stop it"
+            ]
+        );
+        assert!(
+            progress.working.is_empty(),
+            "nobody is shown as working while it waits"
         );
     }
 }

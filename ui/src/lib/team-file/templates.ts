@@ -1,11 +1,10 @@
 import { stringify } from 'yaml'
 
-import { isHarnessRunnable, type DetectedHarness } from '../harnesses'
-import { modelForJob } from '../library/jobModel'
-import { ROLE_PRESETS } from '../library/roles'
-import type { ModelCatalog } from '../models/tiers'
+import { DEFAULT_MODEL } from '../ai/modelIds'
+import { modelForPreset, ROLE_PRESETS } from '../library/roles'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
+import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
 
 /**
  * Starter teams for the New team dialog.
@@ -16,7 +15,7 @@ import { slugifyTeamName } from './useTeamDocument'
  * type a request and press Enter. `blank` is the one exception — it has no agents, so it cannot be
  * saved yet and opens as an unsaved document instead.
  */
-export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'blank'
+export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research' | 'blank'
 
 export interface TeamTemplate {
   id: TeamTemplateId
@@ -69,28 +68,22 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     example: { title: 'Competitor summary', lines: ['Acme shipped a team canvas', 'Northwind cut prices by 20%', 'Globex is hiring for agents'], note: 'You approved the research before writing' },
   },
   {
+    // Open Deep Research's shape (MIT, credited on the Research lead job): a lead plans, the
+    // research runs in parallel, a writer reports with a citation on every claim.
+    id: 'research',
+    title: 'Research team',
+    description: 'A lead splits your question, researchers look into each part at the same time, and a writer turns what they found into a report that cites every source.',
+    steps: ['Lead', 'Researchers', 'Writer'],
+    perRun: 'Four to six agents work on each run: the lead, a researcher for each part of the question, and the writer. It costs the most, and suits a question that needs many sources.',
+    example: { title: 'Report: should we move to a four-day week?', lines: ['What the trials measured, and what changed [1][2]', 'Where the results disagree, and why [3]', 'Sources: 12, each cited beside its claim'], note: 'Three researchers worked on it at the same time' },
+  },
+  {
     id: 'blank',
     title: 'Empty team',
     description: 'Start with no agents, and choose its agents yourself.',
     steps: [],
   },
 ]
-
-/** Harnesses most people already have signed in, in the order a template should prefer them. */
-const PREFERRED_HARNESSES = ['claude', 'codex', 'opencode', 'gemini']
-
-/**
- * The runnable harnesses, best first. A template is built on the first one that answers, so an app
- * the daemon last saw fail to start is left out rather than tried again on the operator's time.
- */
-export function rankHarnesses(harnesses: readonly DetectedHarness[]): DetectedHarness[] {
-  const runnable = harnesses.filter(isHarnessRunnable)
-  const rank = (id: string) => {
-    const index = PREFERRED_HARNESSES.indexOf(id)
-    return index === -1 ? PREFERRED_HARNESSES.length : index
-  }
-  return [...runnable].sort((a, b) => rank(a.id) - rank(b.id))
-}
 
 /**
  * A file name for `name` that does not collide with `existing`.
@@ -114,28 +107,25 @@ const ROLES = {
 
 /**
  * A template's Researcher and Writer are the palette's jobs of the same name, so a starter team and
- * a team built by hand get the same instructions. Read at call time: `roles.ts` imports this module,
- * and reading its presets while this one is still loading would find them uninitialised.
+ * a team built by hand get the same instructions.
  */
-function jobRole(id: 'researcher' | 'writer' | 'checker'): string {
+function jobRole(id: 'lead' | 'researcher' | 'writer' | 'checker'): string {
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
   if (!preset) throw new Error(`no built-in job ${id}`)
   return preset.role
 }
 
-function agent(id: string, name: string, role: string, harness: DetectedHarness, model: string, catalog?: ModelCatalog): AgentConfig {
+function agent(id: string, name: string, role: string): AgentConfig {
   // The Researcher job's own switches (ADR 0037), so a template's researcher can search the web
-  // like one hired from the palette; each job's model tier, from the app's own list (ADR 0057),
-  // and its effort, as that model lists it (ADR 0062).
+  // like one hired from the palette; each job's model tier (ADR 0057) and effort (ADR 0062).
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
-  const choice = preset && catalog ? modelForJob(preset, catalog, model) : null
+  const choice = preset ? modelForPreset(preset) : { model: DEFAULT_MODEL }
   return {
     id,
     name,
     role,
-    spawn: { cmd: harness.spawn.cmd, args: [...harness.spawn.args], env: {}, cwd: '.' },
-    model: choice?.model ?? model,
-    ...(choice?.thinkingEffort ? { thinkingEffort: choice.thinkingEffort } : {}),
+    model: choice.model,
+    ...(choice.thinkingEffort ? { thinkingEffort: choice.thinkingEffort } : {}),
     ...(preset?.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
     ...(preset?.allow ? { allow: { ...preset.allow } } : {}),
   }
@@ -146,40 +136,45 @@ function sequence(from: string, to: string, ts: string): EdgeConfig {
 }
 
 /**
- * The team file for a non-blank template, as YAML text ready to save.
- *
- * `model` must be an id the harness itself advertised (its current model, normally): a harness
- * that advertises models rejects an id it does not know, which would fail the first run.
+ * The team file for a non-blank template, as YAML text ready to save. Each agent runs on its job's
+ * model. `id` should come from the file the team is saved as (`teamIdForPath`), so a second team
+ * with the same name does not share the first one's id, and with it the first one's Notebook.
  */
-/** `id` should come from the file the team is saved as (`teamIdForPath`), so a second team with
- * the same name does not share the first one's id, and with it the first one's Notebook.
- * `catalog` is the app's model list, which decides each job's model tier and effort; `model` is its
- * strong tier. Without it every agent runs on `model` at the app's default effort. */
-export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, harness: DetectedHarness, model: string, now = new Date(), id = slugifyTeamName(name), catalog?: ModelCatalog): string {
+export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, now = new Date(), id = slugifyTeamName(name)): string {
   const ts = now.toISOString()
   let agents: AgentConfig[]
   let edges: EdgeConfig[]
   if (template === 'single') {
-    agents = [agent('assistant', 'Assistant', ROLES.assistant, harness, model)]
+    agents = [agent('assistant', 'Assistant', ROLES.assistant)]
     edges = []
   } else if (template === 'research-write') {
-    agents = [agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog), agent('writer', 'Writer', jobRole('writer'), harness, model, catalog)]
+    agents = [agent('researcher', 'Researcher', jobRole('researcher')), agent('writer', 'Writer', jobRole('writer'))]
     edges = [sequence('researcher', 'writer', ts)]
   } else if (template === 'research-write-check') {
     agents = [
-      agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog),
-      agent('writer', 'Writer', jobRole('writer'), harness, model, catalog),
+      agent('researcher', 'Researcher', jobRole('researcher')),
+      agent('writer', 'Writer', jobRole('writer')),
       // The check step's answer is the writer's piece; its checks show beside it (ADR 0062).
-      { ...agent('checker', 'Checker', jobRole('checker'), harness, model, catalog), checks: 'writer' },
+      { ...agent('checker', 'Checker', jobRole('checker')), checks: 'writer' },
     ]
     edges = [sequence('researcher', 'writer', ts), sequence('writer', 'checker', ts)]
+  } else if (template === 'research') {
+    // No edges, so the lead is the entrypoint and its reply is the answer; it reaches the others
+    // through the Team Bus: `dispatch` to the Researcher once per sub-question, each its own
+    // session working in parallel, then `ask` to the Writer.
+    agents = [
+      agent('lead', 'Research lead', jobRole('lead')),
+      agent('researcher', 'Researcher', jobRole('researcher')),
+      agent('writer', 'Writer', jobRole('writer')),
+    ]
+    edges = []
   } else {
     agents = [
-      agent('researcher', 'Researcher', jobRole('researcher'), harness, model, catalog),
+      agent('researcher', 'Researcher', jobRole('researcher')),
       { id: 'review', kind: 'operator', name: 'You', role: ROLES.review },
-      agent('writer', 'Writer', jobRole('writer'), harness, model, catalog),
+      agent('writer', 'Writer', jobRole('writer')),
     ]
     edges = [sequence('researcher', 'review', ts), sequence('review', 'writer', ts)]
   }
-  return stringify({ schemaVersion: 1, id, name: name.trim(), entrypoint: agents[0].id, agents, edges }, { lineWidth: 0 })
+  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: agents[0].id, agents, edges }, { lineWidth: 0 })
 }

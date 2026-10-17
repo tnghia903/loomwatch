@@ -96,8 +96,8 @@ function skipFrom(index: number, context: TourContext) {
 }
 
 export interface GettingStartedProps {
-  readyApps: readonly string[]
-  appsLoading: boolean
+  keyReady: boolean
+  keyLoading: boolean
 }
 
 /**
@@ -108,14 +108,14 @@ export interface GettingStartedProps {
  * moves on when it sees that happen. It reads the page rather than being told, so the screens it
  * explains need nothing but `data-tour` names.
  */
-export function GettingStarted({ readyApps, appsLoading }: GettingStartedProps) {
+export function GettingStarted({ keyReady, keyLoading }: GettingStartedProps) {
   const state = useTourState()
   const index = state?.status === 'active' ? stepIndex(state.step) : -1
   const step = index >= 0 ? TOUR_STEPS[index] : null
   const runAtStepStart = state?.runAtStepStart ?? null
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const context = useRef<TourContext>({ readyApps, appsLoading })
-  useLayoutEffect(() => { context.current = { readyApps, appsLoading } }, [readyApps, appsLoading])
+  const context = useRef<TourContext>({ keyReady, keyLoading })
+  useLayoutEffect(() => { context.current = { keyReady, keyLoading } }, [keyReady, keyLoading])
 
   useEffect(() => {
     if (!step) return
@@ -202,7 +202,7 @@ export function GettingStarted({ readyApps, appsLoading }: GettingStartedProps) 
   const previous = TOUR_STEPS[index - 1]
   // Back only to a card that explains, on the same screen: going back to an action step would ask
   // the operator to do it again.
-  const canGoBack = view.advance === 'next' && previous !== undefined && previous.screen === step.screen && previous.view({ readyApps, appsLoading }).advance === 'next'
+  const canGoBack = view.advance === 'next' && previous !== undefined && previous.screen === step.screen && previous.view({ keyReady, keyLoading }).advance === 'next'
 
   let actions: ReactNode
   if (view.advance === 'start') {

@@ -7,17 +7,98 @@ version `1`; readers must reject a version they do not understand instead of gue
 The root document stores stable, user-authored configuration only: the team identity,
 entrypoint, optional responder, guard policy, agents, and configured pipeline edges. Observed edges,
 agent status, and run events are runtime records kept in the run archive (SQLite). Their shared wire
-shapes are defined as `$defs.Edge` and `$defs.RunEvent` in the same schema so Phase 02 and
-later can reference one contract.
+shapes are defined as `$defs.Edge` and `$defs.RunEvent` in the same schema, so every reader
+references one contract.
 
 See [`examples/research-team.yaml`](../examples/research-team.yaml) for a complete team.
+
+## Agents
+
+Every agent runs on LoomWatch's own agent, inside the `loomwatchd` daemon. Nothing else is
+started, and there is no other app to install or sign in to. Each agent is a session in the daemon.
+It calls its model through [OpenRouter](https://openrouter.ai) with your OpenRouter API key, and
+works with LoomWatch's own tools (see [Tools an agent has](#tools-an-agent-has)).
+
+An agent needs an `id`, a `name`, a `role` and a `model`:
+
+```yaml
+agents:
+  - id: researcher
+    name: Researcher
+    role: Research the question and report what you find, with a source for each finding
+    model: anthropic/claude-sonnet-5.5
+    thinkingEffort: medium # optional
+    allow:
+      web: true
+```
+
+- **The key.** You enter it in LoomWatch, with **Add your OpenRouter key** on Home or under
+  **AI models** in **Connections…**. LoomWatch checks a key with OpenRouter and keeps it only if
+  OpenRouter accepts it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`, and on
+  Windows in Windows Credential Manager. On Linux it is kept in `<state dir>/keys.json`, which only
+  your account can read. An `OPENROUTER_API_KEY`
+  in the environment is ignored. The key goes to OpenRouter and nowhere else: never to an agent, a
+  command an agent runs, a team file, the run archive or a log. Without a key, a run stops before
+  its first model call and says to add one.
+- **`model`** is an OpenRouter model id (`vendor/model`), such as `anthropic/claude-opus-5.5` (what
+  new agents get) or `openai/gpt-6.1-sol`. The model picker lists the OpenRouter models that can use
+  tools. `fake/offline` is the offline demo model: it answers with fixed text and calls no model,
+  so it needs no key.
+- **`thinkingEffort`** says how hard the model reasons. LoomWatch sends it to OpenRouter as
+  `reasoning.effort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, with `ultra`
+  read as `max`. If it is absent or set to `default`, the model decides. The older combined form
+  `model[effort]`, such as `openai/gpt-6.1-sol[high]`, still works, and `thinkingEffort` wins when
+  a file has both. LoomWatch's built-in jobs and starter teams set the effort by job: `low` for
+  tidying, `medium` for most work, `high` for checking, analysis and code.
+- **`spawn`** is optional, and only `spawn.cwd` is used: the agent's work folder. It may be absolute
+  or relative to the team file's folder, and the folder must exist. Without `spawn`, the agent works
+  in the team file's own folder. Write it only when the work folder matters:
+
+  ```yaml
+    - id: builder
+      name: Builder
+      role: Fix the failing test in this project
+      model: anthropic/claude-opus-5.5
+      spawn: { cwd: ../my-project }
+      allow: { edits: true, commands: true }
+  ```
+
+  An agent may still start in a folder LoomWatch prepares for it instead. See
+  [Where an agent starts](#where-an-agent-starts).
+
+### Older team files
+
+Team files written for an earlier LoomWatch, which started an AI app for each agent, still load
+as they are:
+
+- `spawn.cmd`, `spawn.args` and `spawn.env` are accepted and ignored, like the retired `budget`.
+  Nothing is started, and no variable in `env` reaches anything. Writers must not add them.
+- An old `model` name is read as an OpenRouter id, by the daemon and by the app alike:
+
+  | In the team file | Read as |
+  |---|---|
+  | `opus` or `best` | `anthropic/claude-opus-5.5` |
+  | `sonnet` | `anthropic/claude-sonnet-5.5` |
+  | `haiku` | `anthropic/claude-haiku-5.5` |
+  | `default`, or empty | the default model, `anthropic/claude-opus-5.5` |
+  | `claude-<name>-<version>`, such as `claude-sonnet-5-5` or `claude-haiku-4-5` | `anthropic/claude-sonnet-5.5`, `anthropic/claude-haiku-4.5`; a `[1m]` suffix is dropped |
+  | `claude-<name>` without a version | `anthropic/claude-<name>-5.5` |
+  | `gpt-…`, `o3…` or `o4…`, such as `gpt-5.5` | `openai/gpt-5.5` |
+  | `gemini-…`, such as `gemini-3.8-flash` | `google/gemini-3.8-flash` |
+  | `openrouter/<id>` or `openrouter:<id>` | `<id>`, such as `openai/gpt-6.1-sol` |
+  | any other `vendor/model`, `fake/offline` included | kept as written |
+  | anything else | the default model, `anthropic/claude-opus-5.5` |
+
+  Loading never changes the file. The model picker shows the id a name is read as, and choosing a
+  model writes that id.
 
 ## Semantic rules
 
 JSON Schema validates each value's shape. Loaders must additionally enforce the rules that
 depend on the document as a whole:
 
-- Agent IDs are unique, and `entrypoint` names an agent in `agents`.
+- Agent IDs are unique, and `entrypoint` names an agent in `agents`. An agent (`kind: harness`, the
+  default) without a `model` is refused.
 - Optional `responder` names the agent whose reply becomes the canonical team output. In pipeline
   mode it may name any agent in the configured pipeline; later stages still run, but their replies
   do not replace the selected output. In team mode it must equal `entrypoint`, because the entrypoint
@@ -46,32 +127,22 @@ depend on the document as a whole:
   `pipeline_order()`. A node with exactly one configured predecessor receives that
   predecessor's reply verbatim (so every linear chain, including
   [`examples/research-team.yaml`](../examples/research-team.yaml), is unaffected). A node
-  with more than one configured predecessor β€” a join in the DAG, e.g. a diamond `a→b`,
-  `a→c`, `b→d`, `c→d` β€” receives every predecessor's reply, each labeled with its agent ID
+  with more than one configured predecessor — a join in the DAG, e.g. a diamond `a→b`,
+  `a→c`, `b→d`, `c→d` — receives every predecessor's reply, each labeled with its agent ID
   and concatenated in the order those edges are declared in the team file, so a branch is
   never silently dropped. Only the entrypoint (`pipeline_order()`'s first node) receives the
   run's original prompt.
 - Every edge and run-event `ts` must parse as RFC 3339 or the loader rejects it. The schema
   `format` keyword is an annotation in Draft 2020-12 and must not be relied on for this;
   the companion `pattern` constrains shape only, so the loader still range-checks the
-  fields. RFC 3339 spells its literals case-insensitively, and `RunEvent.ts` is minted
-  upstream, so the lowercase `t` and `z` separators are accepted on read. LoomWatch emits
-  the uppercase form.
-- Child processes inherit the LoomWatch process environment, minus LoomWatch's own
-  variables (`DATABASE_URL`, `PGPASSWORD`, `POSTGRES_*`, `LOOMWATCH_*`). `spawn.env` entries
-  are applied on top as literal overrides; LoomWatch performs no shell expansion, and team
-  files must not contain credentials. A team file may not set a variable that changes which
-  code the app loads, where it connects or which settings it reads: `PATH`, `HOME`,
-  `NODE_OPTIONS`, `LD_*`, `DYLD_*`, proxies, `*_BASE_URL`, `*_HOME`, `XDG_*` and the like are
-  refused, naming the variable.
-- A team file is still a list of programs to run, so one that did not come from LoomWatch's
-  editor shows what it runs before its first run, and its schedule waits until the operator
-  trusts it.
-- `Agent.model` stores the harness model id. Optional `Agent.thinkingEffort` stores the
-  harness's reasoning-effort id separately; at session start LoomWatch applies both through
-  ACP configuration. Older combined selectors such as `gpt-6-astra[high]` remain readable.
-  LoomWatch's built-in jobs and starter teams set it by job (`low` for tidying, `medium` for
-  most work, `high` for checking, analysis and code), and only to an effort the model lists.
+  fields. RFC 3339 spells its literals case-insensitively, so the lowercase `t` and `z`
+  separators are accepted on read. LoomWatch emits the uppercase form.
+- Team files must not contain credentials. An agent needs none, and `spawn.env` is ignored.
+- A team file says which models its agents use and what they may read and do without asking. So a
+  file that did not come from LoomWatch's editor shows a review before its first run, and its
+  schedule waits until the operator trusts it. The review says, for each agent, "Researcher runs on
+  LoomWatch with anthropic/claude-sonnet-5.5", which switches it has on, and what it can read.
+  Approval covers the file's exact bytes, so a file changed outside the editor is reviewed again.
 - Optional `Agent.doneWhen` is up to five short statements (each at most 160 characters) that
   the finished result must satisfy. They are stated under the role as `## Done when`; the agent
   checks its result against them before it replies, fixes what it can, and lists any it could not
@@ -91,13 +162,29 @@ depend on the document as a whole:
   what it kept under `## Not changed`, which is set aside from the answer like `## Not met`. A verdict
   word in the `## Check` block is read as a whole word, so "Metrics …" is not "Met". Operator nodes
   may not set either field.
+- `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
+  means no limit; new teams and the starter teams are written with `1.00`. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
+  summaries, checkpoints and handovers. The daemon adds up the exact cost OpenRouter reports for
+  each call. Before each call, an agent whose run has used its figure waits, and the run shows a
+  stop: "Add $0.50 and carry on" grows this run's figure (the file is not changed), and "Finish
+  with what it has" ends the run as done, with the last words an agent wrote as its answer, stop
+  reason `spend_limit`, and its checkpoints kept. A scheduled run has nobody to ask: it fails with
+  code `spend_limit`, says so, keeps its checkpoints and delivers nothing. A call's cost is known
+  only after it is made, so the calls under way when the figure is reached, one for each agent at
+  work, can take a run a few cents past it.
+- `spend.perRun` on an agent is that agent's own guard, for an agent that runs away; there is
+  none unless set. At it, that agent waits, and "Stop it here" ends its turn with what it wrote
+  while the rest of the team carries on. Operator nodes spend nothing and may not set it. The
+  monthly cap, which also covers Ask LoomWatch and every schedule, is a limit on the OpenRouter
+  key itself, set at openrouter.ai.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
-  add it. LoomWatch neither tracks spend nor refuses a delegation because of it.
-- `usage` payloads are discriminated (`$defs.UsagePayload` in the schema): harness-reported
-  updates carry `sessionUpdate: "usage_update"` (or a bare `costUsd` delta) and are archived as
-  evidence only. Older runs may also hold LoomWatch's own
-  `phase: "budget_warning"` events; nothing writes them now.
+  add it. `spend` replaced it.
+- `usage` payloads are discriminated (`$defs.UsagePayload` in the schema). An agent's
+  `sessionUpdate: "usage_update"` carries how much of the model's context is in use and the cost
+  OpenRouter reported. Older runs may also hold a bare `costUsd` delta. Both are archived as a
+  record only. Older runs may also hold LoomWatch's own `phase: "budget_warning"` events; nothing
+  writes them now.
 - `guards.maxDispatchDepth` and `guards.maxConcurrentDispatches` both default to `8` when
   absent. The Team Bus refuses delegation beyond the depth limit and refuses a background
   `dispatch` or `handoff` while the configured number of those tasks is still running.
@@ -107,16 +194,17 @@ depend on the document as a whole:
   defaults to `true`; `false` forbids that agent from recruiting helpers within its own
   pipeline step.
 - `handoff` starts the target as a background task and marks the caller's roster status as
-  `stopped`, but it cannot cancel the caller's current ACP turn. The caller must return after
-  a successful handoff; provider spend can continue until that turn exits.
+  `stopped`, but it does not end the caller's current turn. The caller must return after a
+  successful handoff; its model calls go on until that turn ends.
 - What a `dispatch` or `handoff` agent replies comes back to the agent that started it: once all
   of its delegated work has finished, that agent gets one more turn with each reply (or why it
   failed), and its reply to that turn is its answer. Each result is also archived as a
   `session_meta` event with `phase: "delegated_result"`.
-- An agent answering an `ask` answers from what it has: it may not `ask` an agent that is not
-  kept alive, `dispatch` or `handoff`. An `ask` is withdrawn when the agent that asked ends its
-  turn before the answer comes back; the answering agent's turn is stopped (archived as
-  `turn_interrupted` with reason `ask_withdrawn`), or a helper started for it is ended.
+- An agent answering an `ask` answers from what it has: it may not start another agent with `ask`,
+  `dispatch` or `handoff`, though it may still `ask` an agent whose session is open. An `ask` is
+  withdrawn when the agent that asked ends its turn before the answer comes back; the answering
+  agent's turn is stopped (archived as `turn_interrupted` with reason `ask_withdrawn`), or a helper
+  started for it is ended.
 - `status` is a runtime annotation. Team-file writers must not persist it, and team-file
   readers must ignore it if an older or external document contains it.
 - Run-event IDs are unique. `RunEvent.agentId` names an agent in the team document. `seq`
@@ -126,21 +214,20 @@ depend on the document as a whole:
   update's `seq` is greater than the tool call's `seq`.
 
 Paths in `spawn.cwd` may be absolute or relative. A relative path is resolved against the
-directory containing the team file. `spawn.cmd` must be either a bare executable name
-resolved on LoomWatch's `PATH`, or an absolute path. Relative
-commands containing a path separator are rejected. The command is executed directly with
-`spawn.args`; it is never passed through a shell.
+directory containing the team file, and the folder must exist when the run starts.
 
 ## Capabilities
 
-`agents[].capabilities` lists what the daemon delivers to an agent before it runs. A skill or a
-tool is `{ kind, name }`, where `name` is the capability's name in the Library:
+`agents[].capabilities` lists what the daemon delivers to an agent before it runs. A skill is
+`{ kind: skill, name }`, where `name` is the skill's name in the Library:
 
 ```yaml
 capabilities:
-  - { kind: skill, name: claude-design } # copied into the workspace, required in the prompt
-  - { kind: tool, name: Agent Memory }    # your MCP server, handed to the harness
+  - { kind: skill, name: report-design } # copied into the agent's folder, required in its prompt
 ```
+
+See [`examples/capability-delivery.yaml`](../examples/capability-delivery.yaml) for a team that
+wires one.
 
 Team memory is not a capability: wire another team's memory or an imported pack through
 `memory.inherits` (see [Team memory](TEAM_MEMORY.md)).
@@ -158,12 +245,10 @@ capabilities:
 On the canvas every folder or file is one card, keyed by its `path`, with a line from each agent
 whose `capabilities` name that path. Drawing a line from another agent adds the same `path` to it
 under a label of its own; taking the last line away keeps the card in `<team>.layout.json` with its
-`path`. Skills and tools named in the team file get a card the same way, whether or not the layout
-file has one.
+`path`. Skills named in the team file get a card the same way, whether or not the layout file has
+one.
 
-Knowledge without a `path` fails the run and says to add it again. The Library used to list the
-project the teams live in and the folders OpenCode had worked in, and an entry could name one of
-those; it no longer does.
+Knowledge without a `path` fails the run and says to add it again: a name alone points at nothing.
 
 A **folder** is linked where it is: the agent gets its top-level listing and README, plus a read
 grant for the folder, so each run sees what is in it then. A **file** added in
@@ -195,110 +280,151 @@ be read, or Notion not being connected, fails the run before it starts and names
 
 **Knowledge** is supplied in the agent's opening prompt as the snapshot described above: a
 folder's top-level listing and README, or a file's text. It is framed as source material, never as
-instructions. A folder or file is also a read grant for it. For an agent that starts in the
-prepared folder on Claude Code, LoomWatch writes `permissions.additionalDirectories` and a
-`Read(//<folder>/**)` allow rule into that folder's `.claude/settings.json`. Every app also asks
-LoomWatch before reading outside its folder, and LoomWatch approves reads of connected folders and
-files. One agent's knowledge is capped at
-64 KiB, and a run over the cap fails rather than shortening it.
+instructions. A folder or file is also a read grant: the agent reads anything inside it without
+asking (see [Permissions](#permissions)). One agent's knowledge is capped at 64 KiB, and a run over
+the cap fails rather than shortening it.
 
-**Tools** are MCP servers you already configured for Claude Code (`~/.claude.json`,
-`~/.claude/settings.json`), Codex (`~/.codex/config.toml`) or OpenCode
-(`~/.config/opencode/opencode.json`). LoomWatch reads the definition, preferring the receiving
-agent's own app, and passes it to the harness in ACP `session/new` beside the Team Bus. That works
-on any ACP app: stdio servers always, HTTP and SSE servers only when the app advertises them.
-`${VAR}` (Claude Code), `{env:VAR}` (OpenCode) and Codex's `env_vars`, `bearer_token_env_var` and
-`env_http_headers` are resolved from the daemon's environment. Values reach only the harness
-process; the run record keeps names. On Claude Code, LoomWatch also writes an `mcp__<server>` allow
-rule. A server that is disabled, needs a variable the daemon lacks, or uses a setting ACP cannot
-carry (a Codex `cwd` or tool filter) fails the run with the reason.
+**Skills** live in LoomWatch's own skills folder, one folder per skill
+(`<state dir>/skills/<name>/`, each with its `SKILL.md`), and `<state dir>/skills.json` records
+where each one came from. The Skills page fills that folder: it brings skills in from the AI apps on
+this computer, installs them from GitHub, skills.sh or ClawHub, or you put a folder there by hand.
+The Library lists that folder plus the `.agents/skills` and `.claude/skills` folders of the project
+your teams live in, which travel with the team files.
 
-LoomWatch prepares `<team dir>/.loomwatch/<team>/<agent>/` for an agent that declares
-capabilities. It copies each wired skill's whole bundle from whichever harness or shared location
-supplied it into the target harness's project-local discovery directory: `.claude/skills/` for
-Claude Code and `.agents/skills/` for Codex and the other supported Agent Skills harnesses. Where
-the agent *starts* depends on its `spawn.cwd`:
+Every agent is offered skills. Its instructions list the name and description of each skill in its
+work folder's `.agents/skills` and `.claude/skills` and in LoomWatch's skills folder, and the agent
+reads a skill's `SKILL.md` itself when its task calls for it. A skill turned off for the agent on
+the canvas is left out of that list.
 
-- **The team's own folder** (`cwd: .`, or any folder that holds the team file): it starts in the
-  prepared folder instead, so it never reads or changes your other team files. The declared
-  folder's `.claude/settings.json` is carried across. The same happens to an agent allowed to edit
-  files, or one whose Brief is kept in its app's memory file.
-- **A folder you chose**: it starts there, however much is connected. Its skills and the full texts
-  of long files are read from the prepared folder by the full paths its prompt names, and LoomWatch
-  approves those reads. Nothing is written into your folder, so the Brief reaches the agent in its
-  prompt only.
+A **wired** skill (`kind: skill`) is required. Before the agent starts, LoomWatch copies the
+skill's whole folder into `.agents/skills/<name>/` in the agent's prepared folder. The opening
+prompt then carries a `## Required skill: <name>` section, which usually holds the skill's
+description and tells the agent to read that `SKILL.md` in full before it starts. Some skills
+depend on things the agent may not have: subagents, scripts, slash commands, or tools named for one
+app. Others set how the agent works, such as a review standard or a style. For these, the skill's
+instructions go into the prompt itself, followed by a short note (`## Reading <name> on LoomWatch`)
+that maps what the skill assumes onto what this agent has. Nothing in the skill's own files is
+changed. A skill that is not installed fails the run before the agent starts, and so do wired
+instructions over 128 KiB for one agent: they are never shortened to fit. The archive records where
+each skill came from, the fingerprint of the delivered file, how it was delivered, and a receipt
+once the prompt is sent. This verifies delivery, not whether every instruction was followed.
 
-An agent that declares nothing keeps its `spawn.cwd` exactly as before. Naming a capability grants nothing: the
-harness still authorises every use. A skill that is not installed, or a harness whose project
-skill directory LoomWatch does not know, fails the run before anything spawns rather than silently
-doing nothing.
+**Tools** (`kind: tool`) were MCP servers configured in another AI app's settings. They are no
+longer delivered: LoomWatch's agents don't take servers from other apps' settings. A team file that
+still wires one loads and runs. The agent is told it doesn't have that tool and asked to say in its
+reply what the tool would have let it do, and the run records the tool as unavailable.
 
-`agents[].allow` says what an agent may do without asking. LoomWatch puts each run agent's app in its
-ask-first mode (`default` on Claude Code and Gemini CLI, `read-only` on Codex) and answers every
-`session/request_permission` itself. It always approves the Team Bus, the agent's connected tools
-and reads of its connected folders and files, and it approves what a switch allows, by the kind the
-app gives the tool call. Anything else is put to the operator while the app waits: the
-run shows "Researcher wants to use the web" with **Allow**, **Allow for this run**, **Always allow**
-(which turns the switch on here) and **Deny**, and so does the Needs-you tray. It is declined when
-nobody answers within 10 minutes, and at once in a scheduled run, which has nobody watching:
+### Where an agent starts
+
+LoomWatch prepares `<team dir>/.loomwatch/<team>/<agent>/` for an agent that wires capabilities,
+gets the Brief as a file, or would otherwise start in the team's own folder. The prepared folder holds
+the agent's wired skills under `.agents/skills/`, the full texts of long added files under
+`knowledge/`, and `AGENTS.md` when the Brief is delivered that way. The skill and knowledge copies
+are rebuilt on every run, so one disconnected since does not linger. Where the agent *starts*
+depends on its `spawn.cwd`:
+
+- **The team's own folder** (`cwd: .`, no `spawn` at all, or any folder that holds the team file):
+  it starts in the prepared folder instead, whatever it is allowed, so what it writes and the
+  commands it runs stay out of your team files. A command's sandbox on a Mac lets it write only in
+  its working folder and temporary folders.
+- **A folder you chose**: it starts there, however much is connected. Its wired skills and the
+  full texts of long files are read from the prepared folder by the full paths its prompt names,
+  and it may read them without asking. Nothing is written into your folder, so the Brief reaches
+  the agent in its prompt only.
+
+An agent whose `spawn.cwd` is a folder you chose, with nothing wired and no Brief file, works in
+that folder exactly. Wiring a capability grants nothing beyond reading it: every other use still goes through
+the agent's permissions.
+
+### Tools an agent has
+
+Every agent in a run works with LoomWatch's own tools:
+
+- **Files** in its work folder: `list_files`, `read_file`, `search_files`, `write_file` and
+  `edit_file`.
+- **Commands**: `run_command` runs a shell command in the agent's work folder (with `cmd.exe` on
+  Windows) and stops it, and everything it started, after two minutes, or up to ten if the agent
+  asks. The command's environment has every provider key and
+  LoomWatch's own settings removed, so a script cannot read your key or LoomWatch's database
+  address. That means any variable ending in `_API_KEY`, `_API_TOKEN` or `_AUTH_TOKEN`, any starting
+  with `OPENROUTER_`, `ANTHROPIC_`, `OPENAI_`, `GEMINI_`, `GOOGLE_API`, `LOOMWATCH_` or `POSTGRES_`,
+  and `DATABASE_URL` and `PGPASSWORD`. On a Mac a command also runs in a sandbox: it can change
+  files only in the agent's folder and temporary folders, and it can reach the network only when the
+  agent is allowed the web. Windows and Linux have no such sandbox: there a command can change any
+  file you can, so asking before each one is the only check.
+- **The web**, only for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
+  OpenRouter runs them, and the run shows each search and each page read. An agent without the
+  switch has no web tools.
+- **Its plan**: `update_plan`, plus `read_tool_output` for reading the rest of a long output that
+  was set aside.
+- **The Team Bus**: `roster`, `ask`, `report` and `ask_user`. In team mode it also gets `dispatch`
+  and `handoff`. With a notebook it also gets `memory_search`, `memory_read`, `memory_write` and
+  `checkpoint`, and in a run started from the app it gets `earlier_work`. These are calls straight
+  into the daemon, made as that agent; the agent connects to no server for them.
+
+No agent has a tool for publishing, posting or sending anything outside the run. A team's answer
+leaves through its review and its delivery (`deliver:`). A command can do anything you can, which is
+why commands ask first unless switched on.
+
+### Permissions
+
+`agents[].allow` says what an agent may do without asking. LoomWatch's permission policy decides
+every tool call that goes beyond reading the agent's own folder. It always allows the Team Bus, and
+reads inside the agent's folder, its connected knowledge and its prepared folder. It never lets an
+agent read LoomWatch's own files (the key, the database, the approvals) without asking. Beyond
+that, it allows what the switches allow:
 
 ```yaml
 allow:
-  web: true       # `fetch`: search the web and read web pages
-  edits: false    # `edit`: change files inside the agent's own folder, never `.claude/`, `.git/` and the like
-  commands: false # `execute`: run commands in a terminal
+  web: true       # search the web and read web pages
+  edits: false    # create and change files inside the agent's own folder, never in .agents/, .claude/, .git/ or .loomwatch/
+  commands: false # run commands
 ```
 
-Every switch defaults to `false`, and an absent block means all off. An approval selects the app's
-one-time option, never "always". A decline selects the app's one-time rejection. When an app ends
-its turn on that rejection, as Codex does, LoomWatch asks the agent, in the same session, to carry
-on without what was declined, up to three times per turn. An agent allowed to edit whose declared `spawn.cwd` holds its own
-team file (`cwd: .`) runs in its managed folder instead. An operator node takes no `allow:`. An app
-that offers no ask-first mode, OpenCode among them, decides for itself, and the run records that.
+Every switch defaults to `false`, and an absent block means all off. `web` decides whether the
+agent has web tools at all. `edits` and `commands` decide whether a file change or a command runs
+without asking. An agent whose `spawn.cwd` holds its own team file (`cwd: .`) works in its
+prepared folder, so neither an edit nor a command reaches the team files. An operator node takes no
+`allow:`.
 
-A team in Auto mode lets its agents run, without asking, the commands that only read or download
-(ADR 0061). It is the "Commands · Ask me / Auto" switch beside the team chat's message box:
+Anything else is put to the operator while the agent waits. The run shows, for example,
+"Researcher wants to run a command", with these answers:
+
+- **Allow** lets this one call run.
+- **Allow for this run** lets every call of this kind from this agent run until the run ends.
+- **Allow for the whole team**, shown when the run has more than one agent, lets the same thing run
+  for every agent until the run ends.
+- **Always allow** also turns the switch on in the team file, so later runs do not ask.
+- **Deny** declines the call.
+- **Edit, then allow** runs the call once with the command line as you changed it.
+- **Answer instead** runs nothing and gives the agent your words as the tool's result.
+
+The Needs-you tray offers **Allow**, **Allow for this run** and **Deny**, plus **Allow for the
+whole team** when the run has more than one agent. A request is declined if nobody answers within 10 minutes, and at once in a scheduled run,
+which has nobody watching. The agent is told the call was declined and carries on without it.
+
+A team in Auto mode lets its agents run, without asking, the commands that only read or download.
+It is the "Commands · Ask me / Auto" switch beside the team chat's message box:
 
 ```yaml
 permissions:
   mode: auto # `ask` (the default) puts every command a switch leaves open to the operator
 ```
 
-After the switches and an earlier **Allow for this run**, a command (`kind: execute`, never an MCP
-tool) runs without asking when every part of it is a reading program (`ls`, `cat`, `grep`, `wc`,
-`sort`, `jq`, …), `find` without actions, `sed` that only prints or substitutes, or read-only `git`,
-on paths inside the agent's folder, its knowledge or the temporary folder; or a plain `curl`/`wget`
-GET of an `http(s)` address for an agent allowed the web. Output may go to the temporary folder, or
-into the agent's folder when it may edit files. A fixed list always asks: administrator commands,
-deleting, `git push`/`reset --hard`/`clean -f`, publishing, deploying, stopping programs, system
-settings, credential paths, and anything built from text — `$(…)`, `eval`, `xargs`, a shell, or an
-interpreter given `-c`, a here-document or its script on stdin. Everything else asks as above, and
-the card says why Auto mode left it to you. The decision is made on this computer from the command
-line alone; `permission_answered` records `outcome: auto_approved` for what ran.
+Auto mode applies after the switches and after an earlier **Allow for this run**. A command
+(`kind: execute`) then runs without asking in two cases. The first is when every part of it is a
+reading program (`ls`, `cat`, `grep`, `wc`, `sort`, `jq`, …), `find` without actions, `sed` that
+only prints or substitutes, or read-only `git`, on paths inside the agent's folder, its knowledge
+or the temporary folder. The second is a plain `curl`/`wget` GET of an `http(s)` address, for an
+agent allowed the web. Output may go to the temporary folder, or into the agent's folder when it may
+edit files.
 
-No switch lets a run agent publish, post or send outside the run. Claude Code would publish an
-artifact to the operator's claude.ai account without asking, even in its ask-first mode. So each
-run agent's session starts without Claude Code's `Artifact`, `ArtifactComments`, `ArtifactData`,
-`ArtifactCheck`, `DesignSync`, `RemoteTrigger`, `CronCreate`, `CronDelete`, `CronList`,
-`ScheduleWakeup`, `PushNotification`, `SendMessage` and `ListAgents` tools. They are sent as
-`_meta.claudeCode.options.disallowedTools` on `session/new` and `session/load`, and other apps
-ignore that key. A team's answer leaves through its review and its delivery (`deliver:`). If one of
-these tools still runs, the receipt flags it.
-
-Codex runs an MCP tool that declares itself read-only without asking, even in its `read-only` mode.
-Its plugins and the operator's ChatGPT apps bring such tools, among them the ChatGPT app's
-`cua_repl`, which drives the operator's browser and apps. So a Codex run agent is spawned with
-`CODEX_CONFIG` setting `features.plugins` and `features.apps` to `false`, merged into any
-`CODEX_CONFIG` the team file's `spawn.env` sets. That must be a JSON object, or the agent does not
-start. The Team Bus and connected tools still go out on `session/new`, so they stay. MCP servers in
-the operator's own `~/.codex/config.toml` still load. The receipt flags a call, made without asking,
-to any MCP server LoomWatch did not connect to that agent, on any app.
-
-Connected skills are required: their complete copied `SKILL.md` instructions are also supplied in
-the agent's opening prompt. Preparation fails if the instructions cannot be read or exceed the
-128 KiB aggregate limit for that agent. The archive records the source, receiving harness, exact
-instruction fingerprint, and a receipt after the prompt is sent. This verifies instruction delivery,
-not whether every instruction was followed.
+A fixed list always asks: administrator commands, deleting, `git push`/`reset --hard`/`clean -f`,
+publishing, deploying, stopping programs, system settings, credential paths, and anything built
+from text — `$(…)`, `eval`, `xargs`, a shell, or an interpreter given `-c`, a here-document or its
+script on stdin. Everything else asks as above, and the card says why Auto mode left it to you.
+The decision is made on this computer from the command line alone; `permission_answered` records
+`outcome: auto_approved` for what ran.
 
 ## Conversation
 
@@ -315,9 +441,9 @@ conversation:
 
 A stage does not receive its predecessor's transcript. When its own work is done, each non-final
 stage is asked — in the session it already built — to write a handover under fixed headings, and
-that is what the next stage reads. The predecessor then stays alive while its successor runs, so
-anything the brief left out can be pulled with the Team Bus `ask` tool and answered from the
-context that produced it. `allowRecruiting: false` does not block such a question: that flag
+that is what the next stage reads. The predecessor's session then stays open while its successor
+runs, so anything the brief left out can be pulled with the Team Bus `ask` tool and answered from
+the context that produced it. `allowRecruiting: false` does not block such a question: that flag
 governs recruiting a helper, not talking to the stage before you.
 
 Every field is optional and the defaults above apply. Raise them for a stage whose output genuinely
@@ -357,16 +483,19 @@ Loader rules beyond the schema:
   file's own directory. An absolute path or an escape is refused, naming the entry.
 - A Brief file that is missing, unreadable, or not valid UTF-8 refuses the run rather than being
   skipped.
-- The whole Brief is read once, at run acceptance, before any harness spawns. Every stage and
+- The whole Brief is read once, at run acceptance, before any agent starts. Every stage and
   every delegated helper in one run is supplied the same bytes.
 - Pinned content exceeding `packet.maxChars` for any agent refuses the run, naming the entries and
   the overage — the same contract an undeliverable capability has.
-- `deliverAs: native-file` (the default) also writes the Brief as the harness's own project memory
-  file in `<team dir>/.loomwatch/<team>/<agent>/`, so the agent runs there instead of its declared
-  `spawn.cwd` — exactly as declaring a capability already does. `packet-only` on an agent keeps
-  its `cwd` and costs it the one delivery channel that survives a harness-side compaction.
-- A harness LoomWatch does not recognise gets no native memory file at all, and reaches the Brief
-  through the context packet alone.
+- `deliverAs: native-file` (the default) also writes the Brief as `AGENTS.md` in the agent's
+  prepared folder, `<team dir>/.loomwatch/<team>/<agent>/`. The agent reads it into its standing
+  instructions at the start of every session, so it runs there instead of its declared
+  `spawn.cwd`, as wiring a capability does. This happens only when the declared folder holds the
+  team file. An agent working in a folder you chose gets the Brief through the context packet
+  alone, so nothing is written into your project.
+- `packet-only` on an agent keeps its `cwd`, but costs it a channel that lasts: when a long
+  conversation is summarised to make room, the standing instructions are kept and the opening
+  prompt may not be.
 
 Inheritance rules:
 
@@ -390,8 +519,8 @@ Inheritance rules:
 Notebook rules:
 
 - `notebook.enabled: false` withdraws `memory_search`, `memory_read`, `memory_write` and
-  `checkpoint` from `tools/list` **and** refuses a call, so a harness holding a cached list cannot
-  write. A team with no `memory:` block has no notebook and no memory tools at all.
+  `checkpoint` from the tools the agent is offered **and** refuses a call that names one anyway. A
+  team with no `memory:` block has no notebook and no memory tools at all.
 - Only a team with a notebook is asked, as each pipeline stage's last turn, where its work stands.
   A team without one skips that turn; a stage that parks on a question still checkpoints first,
   and a failed or cancelled run still gets a checkpoint per stage from the archive.
@@ -418,25 +547,38 @@ Schema-aware consumers can validate runtime values directly with these reference
 - `schemas/team.schema.yaml#/$defs/RunEvent`
 
 The `RunEvent.payload` shape is selected by `kind`. Message and thought events retain a
-role, optional upstream message ID, and structured ACP content block. Tool calls and tool
-updates project the call ID, title, kind, status, input/output, content, and locations when
-present. Plan, permission, session-metadata, usage, turn-end, and process events cover the
-rest of the ACP and supervisor lifecycle. Every harness-originated event also stores the
-complete JSON-RPC frame in top-level `raw`, because ACP presentation and status metadata
-cannot be reconstructed safely from the normalized projection.
+role, optional message ID, and structured content block. Tool calls and tool updates project the
+call ID, title, kind, status, input/output, content, and locations when present. Plan, permission,
+session-metadata, usage, turn-end, and process events cover the rest of a session's lifecycle.
 
+An agent's updates are recorded in the shapes of ACP's `session/update` notifications, which the
+archive has always stored. So a run recorded when LoomWatch still started AI apps replays the same
+way as one recorded now. Every event an agent's session produces also keeps, in top-level `raw`,
+the frame it was recorded from.
 
 ## Operator review stops and questions
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
-(default `You`). It must omit `spawn`, `model`, `thinkingEffort`, `doneWhen`, `checks` and `sendBackOnce`. Operator nodes
-cannot be the entrypoint or appear in team mode; consecutive stops are allowed. The app must
-start a pipeline containing stops, so answers have a loopback operator endpoint.
+(default `You`). It must omit `spawn`, `model`, `thinkingEffort`, `allow`, `turnedOff`,
+`doneWhen`, `checks` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
+mode; consecutive stops are allowed. A pipeline with stops must be started from the app, so that
+someone can answer: `loomwatchd run` on the command line has nobody to ask, so its run fails when
+it reaches a stop.
 
-`conversation.stop.keepAliveMinutes` defaults to 15 (minimum 1). A harness advertising
-`agentCapabilities.loadSession` is closed and reloaded on demand. Other harnesses are kept alive
-until this window expires, then released with a coordinator checkpoint. No model call is made
-just because the timer expired. `ask_user` is available in either mode when the run has an operator
-desk; it records a question and instructs the agent to end its turn immediately.
+No process stays running while an agent waits. At a review stop, the agent before the stop is
+parked; on an `ask_user` question, the agent that asked is parked, after writing a checkpoint of
+where its work stands. A parked agent is a snapshot of its conversation kept in LoomWatch's
+database. When you answer or send a note back, it is reopened in the same conversation, however
+long you took. No model call is made while it waits. A restart of LoomWatch ends a run that was
+waiting, as it ends any run in progress: the parked agent is let go, and its checkpoint is where a
+new run picks the work up.
 
-See [operator-stop.yaml](../examples/operator-stop.yaml) for an offline example.
+`conversation.stop.keepAliveMinutes` (default 15, minimum 1) is still accepted, but it no longer
+limits a wait. It bounded how long a session could be kept running while the operator decided, and
+a parked agent has nothing running. Older team files may keep it.
+
+`ask_user` is available in either mode in a run started from the app. It records a question and
+tells the agent to end its turn at once; the answer arrives as the agent's next turn.
+
+See [operator-stop.yaml](../examples/operator-stop.yaml) for an example that runs offline, on
+`fake/offline`, with no key.

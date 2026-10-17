@@ -45,14 +45,7 @@ agents:
       - Find and read pages with web search only. Commands are off for this team, so don't run curl or any other command.
 
       Reply with one bullet per story: the claim in one sentence, then each trusted source that reports it, as a link with its time. Your handover's Findings carry the same bullets, one story each.
-    spawn:
-      cmd: npx
-      args:
-        - -y
-        - "@agentclientprotocol/codex-acp@2.1.1"
-      env: {}
-      cwd: .
-    model: gpt-6-luna
+    model: anthropic/claude-sonnet-5.5
     allow:
       web: true
 
@@ -68,14 +61,7 @@ agents:
       - Follow anything the team has kept about this reader.
 
       Reply with the kept stories, most important first, at most eight: what happened, the detail that matters, any disagreement between sources, and every source as a link. Then a list headed "Dropped": each story you left out, and why (one source, rumour, older than a day, or the Brief says skip). Your handover's Findings carry the kept stories, one per bullet, with their links.
-    spawn:
-      cmd: npx
-      args:
-        - -y
-        - "@agentclientprotocol/claude-agent-acp@0.85.1"
-      env: {}
-      cwd: .
-    model: sonnet
+    model: anthropic/claude-sonnet-5.5
     allow:
       web: true
 
@@ -89,14 +75,7 @@ agents:
       - One line: the day in a sentence.
       - The stories, grouped under short theme headings such as AI, Chips, Security or Policy. Each story: a bold one-line headline, two or three sentences on what happened and why it matters to the reader in the Brief, then its sources as links.
       - Last, one line saying how many stories were read and how many were kept, from the Reader's handover.
-    spawn:
-      cmd: npx
-      args:
-        - -y
-        - "@agentclientprotocol/claude-agent-acp@0.85.1"
-      env: {}
-      cwd: .
-    model: sonnet
+    model: anthropic/claude-sonnet-5.5
 
 edges:
   - { from: gatherer, to: reader, layer: configured, kind: sequence, ts: "2026-10-03T00:00:00Z" }

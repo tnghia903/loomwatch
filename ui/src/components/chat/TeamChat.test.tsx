@@ -427,7 +427,7 @@ describe('who has the work', () => {
   it('puts whoever waits on you first, in gold and without the typing dots', async () => {
     fold()
     said.messages = [talk({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', state: 'pending' })]
-    page = working({ waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', context: null, handoverFrom: null, park: 'kept_alive', parkNote: '', sendBackAvailable: false } })
+    page = working({ waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', context: null, handoverFrom: null, park: 'reloadable', parkNote: '', sendBackAvailable: false } })
     renderChat()
     await waitFor(() => expect(pill()).toHaveTextContent('needs you'))
     expect(pill()).toHaveClass('waiting')
@@ -563,13 +563,13 @@ describe("an agent's face", () => {
   const described: TeamView = {
     ...team,
     configs: new Map([
-      ['researcher', { id: 'researcher', name: 'Researcher', role: 'Finds the three stories that matter today, with a source for each.', model: 'claude-opus-4-5', capabilities: [{ kind: 'skill', name: 'eli5' }, { kind: 'tool', name: 'notion' }, { kind: 'knowledge', name: 'Notes', path: 'notes' }, { kind: 'knowledge', name: 'Brief', path: 'brief.md' }] }],
+      ['researcher', { id: 'researcher', name: 'Researcher', role: 'Finds the three stories that matter today, with a source for each.', model: 'anthropic/claude-opus-5.5', capabilities: [{ kind: 'skill', name: 'eli5' }, { kind: 'tool', name: 'notion' }, { kind: 'knowledge', name: 'Notes', path: 'notes' }, { kind: 'knowledge', name: 'Brief', path: 'brief.md' }] }],
       ['writer', { id: 'writer', name: 'Writer', role: 'Writes the digest.' }],
     ]),
-    apps: new Map([['researcher', 'Claude'], ['writer', 'Codex']]),
+    models: new Map([['researcher', 'Claude Opus 5.5'], ['writer', 'Claude Sonnet 5.5']]),
   }
 
-  it('shows rough details on hover: what it is doing, its app and model, its job and what it works with', async () => {
+  it('shows rough details on hover: what it is doing, its model, its job and what it works with', async () => {
     renderChat({ team: described })
     const face = within(screen.getByRole('list', { name: 'Who is on the team' })).getByRole('button', { name: 'Researcher: mention in your message' })
     fireEvent.pointerEnter(face, { pointerType: 'mouse' })
@@ -577,7 +577,7 @@ describe("an agent's face", () => {
     expect(face).toHaveAttribute('aria-describedby', card.id)
     expect(card).toHaveTextContent('Researcher')
     expect(card).toHaveTextContent('ready · step 1 of 3')
-    expect(card).toHaveTextContent('Claude · claude-opus-4-5')
+    expect(card).toHaveTextContent('Claude Opus 5.5')
     expect(card).toHaveTextContent('Finds the three stories that matter today')
     expect(card).toHaveTextContent('1 skill · 1 tool · 2 sources')
     expect(card).toHaveTextContent('Click to mention Researcher')
@@ -613,7 +613,7 @@ describe("an agent's face", () => {
     const face = screen.getByRole('button', { name: 'Researcher: mention in your message' })
     face.focus()
     fireEvent.focus(face)
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Claude · claude-opus-4-5')
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Claude Opus 5.5')
     fireEvent.keyDown(face, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
     fireEvent.click(face)
@@ -625,7 +625,7 @@ describe("an agent's face", () => {
 
 describe('a piece of work', () => {
   it('asks for your review with buttons: Approve needs no words, Send back needs them', async () => {
-    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: '## Summary\nThree stories', handoverFrom: 'researcher', park: 'kept_alive', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: '## Summary\nThree stories', handoverFrom: 'researcher', park: 'reloadable', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
     answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
     renderChat()
     expect(await screen.findByText(/handed over its work for your review/)).toBeInTheDocument()
@@ -641,7 +641,7 @@ describe('a piece of work', () => {
       id: 'h-1', kind: 'handover', from: null, handedBy: { from: ['researcher'], via: [] }, to: 'review', text: 'Three stories, sourced.', context: null,
       eventId: 'e0', evidenceId: null, seq: 0, ts: '2026-10-06T02:01:00.000Z', offsetMs: 60_000, state: 'pending', error: null, reply: null, carried: false,
     }]
-    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: 'Three stories, sourced.', handoverFrom: 'researcher', park: 'kept_alive', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: 'Three stories, sourced.', handoverFrom: 'researcher', park: 'reloadable', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
     answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
     renderChat()
     const talk = await screen.findByRole('region', { name: 'What the agents said' })

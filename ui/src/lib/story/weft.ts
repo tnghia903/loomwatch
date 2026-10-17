@@ -1,4 +1,5 @@
 import type { Evidence, RunProjection } from '../watch/events'
+import { baseName } from '../files/paths'
 import { commandName } from './commands'
 import { failuresOf, mendOf, skillName, workCount, type MendHow, type WorkCount } from './reads'
 
@@ -94,13 +95,13 @@ export function shortName(name: string): string {
   if (url) {
     try { return new URL(url).hostname.replace(/^www\./, '') } catch { /* not a URL after all */ }
   }
-  const path = text.match(/(?:^|\s|['"])(\/[^\s'"]+)/)?.[1]
-  const label = path ? path.split('/').filter(Boolean).at(-1) ?? text : text
+  const path = text.match(/(?:^|\s|['"])(\/[^\s'"]+|[A-Za-z]:[\\/][^\s'"]+)/)?.[1]
+  const label = path ? baseName(path) : text
   return label.length > 64 ? `${label.slice(0, 61)}…` : label
 }
 
 /** One recorded call as a sentence, in the words a person would use for that kind of call. */
-export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'> & Partial<Pick<Evidence, 'rawInput'>>): string {
+export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'> & Partial<Pick<Evidence, 'rawInput' | 'declined'>>): string {
   const what = shortName(item.name)
   const failed = item.status === 'failed' || item.status === 'rejected'
   const quoted = what ? `“${what}”` : 'something'
@@ -119,6 +120,10 @@ export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'r
       // is "python3 build.py", where the first path in it would make every command there "build".
       const named = commandName(item.name)
       const command = named ? `“${named}”` : quoted
+      if (item.declined === 'answered') return `${agent} didn’t run ${command}: you answered instead.`
+      if (item.declined === 'denied') return `${agent} wasn’t allowed to run ${command}.`
+      // Asked about, or still going: it hasn't run yet.
+      if (item.status === 'pending' || item.status === 'running') return `${agent} is running ${command}.`
       return failed ? `${agent}’s command ${command} failed.` : `${agent} ran ${command}.`
     }
     case 'skill': {

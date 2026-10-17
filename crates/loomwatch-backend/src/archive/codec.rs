@@ -43,7 +43,7 @@ const WHOLE: [(&str, &str); 3] = [
     ("result", "/result"),
 ];
 
-/// Names the tool projection gives keys of `params.update` (`acp::project_tool`).
+/// Names the tool projection gives keys of `params.update` (`engine/recorder.rs`, `project_tool`).
 fn renamed(key: &str) -> Option<&'static str> {
     match key {
         "toolCallId" => Some("callId"),

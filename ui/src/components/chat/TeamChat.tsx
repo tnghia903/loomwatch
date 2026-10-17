@@ -22,6 +22,7 @@ import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
 import type { AutoModeControl } from './AutoModeSwitch'
+import type { SpendLimitControl } from './SpendLimitChip'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { WorkPiece, type TeamView } from './WorkPiece'
 
@@ -55,6 +56,8 @@ interface TeamChatProps {
   onAlwaysAllow?: (agentId: string, key: AllowSwitch) => void
   /** Who decides the commands agents ask to run, the switch beside the message box (ADR 0061). */
   autoMode?: AutoModeControl
+  /** What one run of the team may spend (ADR 0068): the chip beside Auto mode. */
+  spendLimit?: SpendLimitControl
   announce: (text: string) => void
   /** The newest piece of work in the chat, whenever it changes: what Details follows. */
   onNewest?: (runId: string | null) => void
@@ -88,7 +91,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, onNewestRun, startTeam = false, onStartTeamTaken }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, spendLimit, onNewestRun, startTeam = false, onStartTeamTaken }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Run team means start the team. Without an @, what is written is a note that starts nothing,
   // which is not what someone who pressed Run team expects, so the box it opens starts with @team.
@@ -309,7 +312,11 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const unreachable = chat.error && /reach the LoomWatch server/i.test(chat.error)
   // An agent that asked you something, or asked your permission, is still in its turn, but it is
   // you it waits on.
-  const asking = new Set(live.flatMap((run) => (run.permissionRequests ?? []).map((request) => request.agent)))
+  const asking = new Set(live.flatMap((run) => [
+    ...(run.permissionRequests ?? []).map((request) => request.agent),
+    // At the run's spool every agent at work waits; at an agent's own guard, that agent (ADR 0068).
+    ...(run.spendStops ?? []).flatMap((stop) => (stop.agent ? [stop.agent] : run.working ?? [])),
+  ]))
   const failed = failedNow(runs.values())
   const presence = members.map((agent) => ({ agent, state: (unreachable ? 'away' : waitingFor === agent.id || asking.has(agent.id) ? 'waiting' : workingNow.has(agent.id) ? 'working' : failed.has(agent.id) ? 'failed' : 'idle') as Presence }))
   // Each face can say who its agent is, and puts `@name` in the message box when clicked. A box
@@ -350,8 +357,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         hue: team.hues.get(id) ?? 1,
         state,
         stateWords: STATE_WORDS[state],
-        app: team.apps?.get(id) ?? null,
-        model: config?.model?.trim() || null,
+        model: team.models?.get(id) ?? (config?.model?.trim() || null),
         role: config?.role?.trim() || null,
         step: step >= 0 && team.order.length > 1 ? { at: step + 1, of: team.order.length } : null,
         skills: capabilities.filter((capability) => capability.kind === 'skill').length,
@@ -533,6 +539,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         decision={decision}
         disabled={blocked}
         autoMode={autoMode}
+        spendLimit={spendLimit}
         value={draft}
         onChange={setDraft}
         onSend={(text, to, now) => send(text, to, now)}

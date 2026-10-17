@@ -1,8 +1,8 @@
 import { ShieldQuestionMark } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 
 import { useRevealOnArrival } from '../../lib/chat/follow'
-import { answerPermission, type PermissionDecision, type PermissionRequest, type RunRecord } from '../../lib/runs/client'
+import { answerPermission, MAX_PERMISSION_TEXT, type PermissionDecision, type PermissionRequest, type RunRecord } from '../../lib/runs/client'
 import { autoNote, permissionDeadline, permissionSentence, permissionWhat } from '../../lib/runs/permissionRequests'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { useNow } from '../../lib/useNow'
@@ -32,6 +32,9 @@ const SWITCH_LABEL: Record<AllowSwitch, string> = { web: 'web', commands: 'comma
  * What an agent is waiting on you for, while its app waits (ADR 0040). The run used to refuse
  * these on the spot and the agent carried on without — a web search that "failed" because nobody
  * was asked. Now the app holds, this card asks, and whatever you choose is the answer it gets.
+ *
+ * Besides yes and no, you can change a command before it runs ("Edit, then allow"), or answer in
+ * its place ("Answer instead"): the agent reads your words as what the tool returned.
  */
 export function PermissionPrompt({ run, onAlwaysAllow, inline = false, team = false, onDecide }: PermissionPromptProps) {
   // Answered here, before the next poll of the run takes them off the record.
@@ -96,13 +99,17 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
   const now = useNow(true)
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState<{ failure: string | null } | null>(null)
+  // Writing a changed command, or an answer in its place, before sending it.
+  const [writing, setWriting] = useState<'edit' | 'answer' | null>(null)
+  const [text, setText] = useState('')
+  const fieldId = useId()
 
-  const answer = async (decision: PermissionDecision) => {
+  const answer = async (decision: PermissionDecision, words?: string) => {
     onDecide?.()
     setBusy(true)
     let failure: string | null = null
     try {
-      await answerPermission(runId, request.id, decision)
+      await answerPermission(runId, request.id, decision, words)
     } catch (caught) {
       failure = caught instanceof Error ? caught.message : String(caught)
     }
@@ -116,7 +123,33 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
     void answer('allow_run')
   }
 
+  const write = (kind: 'edit' | 'answer') => {
+    setText(kind === 'edit' ? request.edit?.value ?? '' : '')
+    setWriting(kind)
+  }
+
   if (sent) return sent.failure && !onAnswered ? <p className="permission-error" role="alert">{sent.failure}</p> : null
+  if (writing) {
+    const changing = writing === 'edit'
+    const what = request.edit?.field === 'url' ? 'address' : 'command'
+    return (
+      <form className="permission-write" onSubmit={(event) => { event.preventDefault(); if (text.trim()) void answer(writing, text.trim()) }}>
+        <div className="field">
+          <label className="t-meta" htmlFor={fieldId}>{changing ? `The ${what} to allow instead` : `Your answer to ${request.name}, in place of what it asked to do`}</label>
+          {changing
+            ? <input id={fieldId} className="input mono" value={text} maxLength={MAX_PERMISSION_TEXT} spellCheck={false} autoFocus onChange={(event) => setText(event.target.value)} />
+            : <textarea id={fieldId} className="input" rows={3} value={text} maxLength={MAX_PERMISSION_TEXT} autoFocus placeholder="For example: use the copy in notes.md instead" onChange={(event) => setText(event.target.value)} />}
+          <span className="hint t-meta">{changing
+            ? `${request.name} runs it as you wrote it, this once.`
+            : `Nothing runs. ${request.name} reads your answer and carries on.`}</span>
+        </div>
+        <div className="permission-acts">
+          <button type="submit" className="btn btn-primary" disabled={busy || !text.trim()}>{changing ? 'Allow it changed' : 'Send answer'}</button>
+          <button type="button" className="btn" disabled={busy} onClick={() => setWriting(null)}>Back</button>
+        </div>
+      </form>
+    )
+  }
   return (
     <>
       <p className="permission-note">{request.name} is paused until you answer. {permissionDeadline(request.expiresAt, now)}</p>
@@ -131,6 +164,10 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
         )}
         <button type="button" className="btn permission-deny" disabled={busy} onClick={() => void answer('deny')}>Deny</button>
       </div>
+      <p className="permission-more">
+        {request.edit && <><button type="button" className="link" disabled={busy} onClick={() => write('edit')}>Edit, then allow</button><span aria-hidden="true"> · </span></>}
+        <button type="button" className="link" disabled={busy} onClick={() => write('answer')}>Answer instead</button>
+      </p>
     </>
   )
 }

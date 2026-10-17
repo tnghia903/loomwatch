@@ -18,13 +18,15 @@ function run(teamPath: string, status: RunRecord['status']): Partial<RunRecord> 
 let fetchMock: ReturnType<typeof vi.fn>
 let runs: Partial<RunRecord>[]
 let deleteAnswer: () => Promise<Response>
+let teamsRoot: string
 
 beforeEach(() => {
   runs = []
+  teamsRoot = '/teams/'
   deleteAnswer = () => respond(trashed)
   fetchMock = vi.fn((url: string, init?: RequestInit) => {
     if (url === '/api/runs?preview=true') return respond(runs)
-    if (url === '/api/teams') return respond({ root: '/teams/', files: [] })
+    if (url === '/api/teams') return respond({ root: teamsRoot, files: [] })
     if (url.startsWith('/api/team?') && init?.method === 'DELETE') return deleteAnswer()
     return respond({ error: 'unexpected' }, 404)
   })
@@ -80,6 +82,15 @@ describe('DeleteTeamDialog', () => {
   it('knows the open team is running when the switcher names it absolutely', async () => {
     runs = [run('trip.yaml', 'running')]
     renderDialog('/teams/trip.yaml')
+    expect(await screen.findByRole('alert')).toHaveTextContent('is running right now')
+    expect(screen.getByRole('button', { name: 'Delete team' })).toBeDisabled()
+  })
+
+  // On Windows the daemon names the open team `C:\Users\…`, which never starts with `/`.
+  it('knows the open team is running when a Windows path names it', async () => {
+    runs = [run('trip.yaml', 'running')]
+    teamsRoot = 'C:\\Users\\ana\\LoomWatch\\teams'
+    renderDialog('C:\\Users\\ana\\LoomWatch\\teams\\trip.yaml')
     expect(await screen.findByRole('alert')).toHaveTextContent('is running right now')
     expect(screen.getByRole('button', { name: 'Delete team' })).toBeDisabled()
   })

@@ -59,10 +59,16 @@ export interface PermissionRequest {
   expiresAt: string
   /** Why Auto mode left this command to you, when the team is in Auto mode (ADR 0061). */
   auto?: string | null
+  /** What you may change before allowing it: the command line or the address, whole. */
+  edit?: { field: 'command' | 'url'; value: string } | null
 }
 
 /** `allow_team`: every agent in the run, for the same thing, until the run ends. */
-export type PermissionDecision = 'allow_once' | 'allow_run' | 'allow_team' | 'deny'
+/** `edit` allows it changed, and `answer` sends words in its place: both carry text. */
+export type PermissionDecision = 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'edit' | 'answer'
+
+/** The longest changed command or answer the daemon takes (`permissions::MAX_ANSWER_CHARS`). */
+export const MAX_PERMISSION_TEXT = 4000
 
 export interface WaitingOn {
   node: string
@@ -72,14 +78,52 @@ export interface WaitingOn {
   question: string
   context?: string | null
   handoverFrom?: string | null
-  park: 'reloadable' | 'kept_alive' | 'released' | 'none'
+  /** `reloadable`: the agent is parked in the database. `none`: no session is held behind the stop. */
+  park: 'reloadable' | 'none'
   parkNote: string
   sendBackAvailable: boolean
   questionId?: string | null
 }
 
+/**
+ * What a run has spent and may spend on model calls, in US dollars (ADR 0068). `limitUsd` is the
+ * team's `spend.perRun` plus whatever was added this run; absent means no limit. `spentUsd` adds up
+ * the exact cost OpenRouter reported for every call of the run.
+ */
+export interface RunSpend {
+  limitUsd?: number | null
+  spentUsd: number
+  agents?: Record<string, { spentUsd: number; limitUsd?: number | null; stopped?: boolean }>
+  added?: { agent?: string | null; atUsd: number; addUsd: number }[]
+  /** `finished`: you finished the run at its limit. `nobody_to_ask`: a scheduled run stopped there. */
+  stopped?: 'finished' | 'nobody_to_ask' | null
+}
+
+/**
+ * A limit the run waits at until you answer (ADR 0068): the team's spool, or one agent's own guard
+ * when `agent` is set. Every agent that reaches it waits at the same stop, and nothing is spent
+ * while it waits.
+ */
+export interface SpendStop {
+  id: string
+  agent?: string | null
+  name?: string | null
+  limitUsd: number
+  spentUsd: number
+  /** What "Add and carry on" adds. */
+  addUsd: number
+  since: string
+}
+
+/** `add` grows this run's limit and carries on; `finish` ends the run with what it has (or stops that agent). */
+export type SpendDecision = 'add' | 'finish'
+
 export interface RunRecord {
   replyableAgents?: string[]
+  /** What the run spent and may spend (ADR 0068); absent on runs recorded before spend limits. */
+  spend?: RunSpend | null
+  /** Limits the run waits at until you answer (ADR 0068); absent when there are none. */
+  spendStops?: SpendStop[]
   waitingOn?: WaitingOn | null
   /** Requests an agent is blocked on until you answer (ADR 0040); absent when there are none. */
   permissionRequests?: PermissionRequest[]
@@ -309,10 +353,19 @@ export async function answerRun(runId: string, node: string, text: string, sendB
 }
 
 /** Your answer to one permission request (ADR 0040). Resolves with the run once the agent has it. */
-export async function answerPermission(runId: string, requestId: string, decision: PermissionDecision): Promise<RunRecord> {
+/** Your answer to a request an agent waits on; `text` is the changed command, or your answer. */
+export async function answerPermission(runId: string, requestId: string, decision: PermissionDecision, text?: string): Promise<RunRecord> {
   return readRun<RunRecord>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/permissions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requestId, decision }), cache: 'no-store',
+    body: JSON.stringify({ requestId, decision, ...(text === undefined ? {} : { text }) }), cache: 'no-store',
+  }))
+}
+
+/** Your answer at a spend stop (ADR 0068). Resolves with the run once the waiting agents have it. */
+export async function answerSpend(runId: string, stopId: string, decision: SpendDecision, addUsd?: number): Promise<RunRecord> {
+  return readRun<RunRecord>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/spend`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stopId, decision, ...(addUsd === undefined ? {} : { addUsd }) }), cache: 'no-store',
   }))
 }
 

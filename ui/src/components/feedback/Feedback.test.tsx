@@ -1,22 +1,21 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DetectedHarness } from '../../lib/harnesses'
+import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { openFeedback, type AboutLoomWatch } from '../../lib/feedback/report'
 import { Feedback } from './Feedback'
 
 const about: AboutLoomWatch = { version: '0.1.0', commit: 'b4e3373', os: 'macos', osVersion: '26.0', arch: 'aarch64' }
-const harnesses: DetectedHarness[] = [
-  { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/Users/someone/.local/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: [] } },
-  { id: 'gemini', name: 'Gemini', command: 'gemini', executablePath: '/Users/someone/.local/bin/gemini', acpAvailable: true, health: 'error', healthReason: 'This client is no longer supported.', spawn: { cmd: 'gemini', args: ['--acp'] } },
-]
 
 let aboutAnswer: () => Promise<Response>
 let writeText: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   aboutAnswer = () => Promise.resolve(new Response(JSON.stringify(about), { status: 200, headers: { 'content-type': 'application/json' } }))
-  vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/about' ? aboutAnswer() : Promise.reject(new Error(`unexpected ${url}`)))))
+  forgetKeyStatus()
+  vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/about' ? aboutAnswer()
+    : url === '/api/ai' ? Promise.resolve(new Response(JSON.stringify({ openrouter: { connected: true, label: 'sk-or-v1-abc...xyz' } }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      : Promise.reject(new Error(`unexpected ${url}`)))))
   writeText = vi.fn(() => Promise.resolve())
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
 })
@@ -32,22 +31,22 @@ function githubLink(): URL {
 
 describe('Send feedback', () => {
   it('opens from anywhere and shows exactly what the report will carry', async () => {
-    render(<Feedback harnesses={harnesses} />)
+    render(<Feedback />)
     expect(screen.queryByRole('dialog')).toBeNull()
     act(() => openFeedback({ screen: 'run' }))
     expect(screen.getByRole('dialog', { name: 'Send feedback' })).toBeInTheDocument()
     await waitFor(() => expect(details()).toContain('LoomWatch: 0.1.0 (b4e3373)'))
     expect(details()).toContain('System: macOS 26.0 (aarch64)')
     expect(details()).toContain('Screen: Run (watching a run)')
-    expect(details()).toContain("Gemini (can't start: This client is no longer supported.)")
-    // Where an app is installed names the operator's account; it never goes in.
-    expect(details()).not.toContain('someone')
+    await waitFor(() => expect(details()).toContain('OpenRouter key: added'))
+    // What the key is never goes in, only whether there is one.
+    expect(details()).not.toContain('sk-or')
     // The link carries the same text the dialog shows.
     expect(githubLink().searchParams.get('details')).toBe(details())
   })
 
   it('opens the form that matches what is being sent, in a new tab', async () => {
-    render(<Feedback harnesses={harnesses} />)
+    render(<Feedback />)
     act(() => openFeedback())
     await waitFor(() => expect(details()).toContain('b4e3373'))
     const link = screen.getByRole('link', { name: /Continue on GitHub/ })
@@ -60,15 +59,15 @@ describe('Send feedback', () => {
 
   it('still offers a report when the server does not answer', async () => {
     aboutAnswer = () => Promise.reject(new TypeError('Failed to fetch'))
-    render(<Feedback harnesses={[]} />)
+    render(<Feedback />)
     act(() => openFeedback())
     await waitFor(() => expect(screen.getByText(/^LoomWatch:/).getAttribute('aria-busy')).toBe('false'))
     expect(details()).toContain('LoomWatch: unknown (the LoomWatch server did not answer)')
-    expect(details()).toContain('AI apps: none found')
+    expect(details()).not.toContain('AI apps')
   })
 
   it('copies the details for someone without a GitHub account', async () => {
-    render(<Feedback harnesses={harnesses} />)
+    render(<Feedback />)
     act(() => openFeedback())
     await waitFor(() => expect(details()).toContain('b4e3373'))
     // The repository is public: anyone with a free account can post, and nobody "invited" them.
@@ -81,7 +80,7 @@ describe('Send feedback', () => {
 
   it('closes with Escape, Cancel, or after handing over to GitHub', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    render(<Feedback harnesses={harnesses} />)
+    render(<Feedback />)
     act(() => openFeedback())
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()

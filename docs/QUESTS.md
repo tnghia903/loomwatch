@@ -33,7 +33,7 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
 | Item | Part | Practice | Earned when |
 |---|---|---|---|
 | Tailor’s chalk | Prompt | Clear success criteria | A check step’s first look at an agent’s work gives a verdict on every item of its Done when, every one is Met, and no check sends the work back. What the agent says about its own work never counts. |
-| Crew vest (clothes) | Prompt | Ask, don’t guess | An agent asks you a question (`ask_user`), and your answer comes back. A permission request is its app asking, so it doesn’t count. |
+| Crew vest (clothes) | Prompt | Ask, don’t guess | An agent asks you a question (`ask_user`), and your answer comes back. A permission request asks whether a tool may run, not a question about the work, so it doesn’t count. |
 | Tailor’s tape | Context | Scoped context | An agent is given at least one folder, and reads from every folder it was given. |
 | Maker’s apron (clothes) | Context | Reusable skills | An agent opens a skill it was given: the daemon’s `skill_opened` record. A skill only loaded into its prompt, or named in a tool’s title, doesn’t count. |
 | Safety-pin clip | Harness | Least privilege | A scheduled run never asks for a permission, and every key its agents hold (web, files, commands) was used. |

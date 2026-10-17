@@ -38,15 +38,14 @@
 
   /* ================================================================ Catalog and state */
 
-  // Gemini CLI is left out: Google refuses it with a personal sign-in (see the README's note).
-  const APPS = [
-    { id: 'claude', name: 'Claude Code', mono: 'C', spawn: 'claude-agent-acp' },
-    { id: 'codex', name: 'Codex', mono: 'Cx', spawn: 'codex-acp' },
-    { id: 'opencode', name: 'OpenCode', mono: 'Oc', spawn: 'opencode', args: ['acp'] },
-    { id: 'hermes', name: 'Hermes', mono: 'H', spawn: 'hermes-acp' },
-    { id: 'openclaw', name: 'OpenClaw', mono: 'Ow', spawn: 'openclaw', args: ['acp'] },
+  // The models an agent can think with, a few of the many on OpenRouter, as the app's model picker
+  // recommends them: one key reaches all of them.
+  const MODELS = [
+    { id: 'sonnet', name: 'Claude Sonnet 5.5', openrouter: 'anthropic/claude-sonnet-5.5' },
+    { id: 'opus', name: 'Claude Opus 5.5', openrouter: 'anthropic/claude-opus-5.5' },
+    { id: 'gpt', name: 'GPT-6.1 Sol', openrouter: 'openai/gpt-6.1-sol' },
   ]
-  const app = (id) => APPS.find((a) => a.id === id) || APPS[0]
+  const modelOf = (id) => MODELS.find((m) => m.id === id) || MODELS[0]
 
   const REQUESTS = [
     {
@@ -119,12 +118,12 @@
   const preset = (id) => REQUESTS.find((r) => r.id === id) || REQUESTS[0]
 
   // What can be handed to an agent (03 · Give): a folder linked where it is, a file copied beside
-  // the team, a skill and a tool from this computer. One card can thread to several agents.
+  // the team, a skill and a Notion page. One card can thread to several agents.
   const SOURCES = [
     { id: 'reports', kind: 'folder', name: 'market-reports/', meta: 'Linked folder', arrives: 'its listing and README', path: '~/Documents/market-reports', reads: 'read · market-reports/README.md' },
     { id: 'brand', kind: 'file', name: 'brand-guide.pdf', meta: 'Added file', arrives: 'its text, all 12 pages', path: 'research-and-write.files/brand-guide.pdf', reads: 'read · brand-guide.pdf' },
-    { id: 'style', kind: 'skill', name: 'house-style', meta: 'Skill · from Claude Code', arrives: 'its instructions, required', reads: 'skill · house-style/SKILL.md' },
-    { id: 'notes', kind: 'tool', name: 'team-notes', meta: 'Tool · your MCP server', arrives: 'its tools, for this run', reads: 'team-notes · search' },
+    { id: 'style', kind: 'skill', name: 'house-style', meta: 'Skill · from skills.sh', arrives: 'its instructions, required', reads: 'skill · house-style/SKILL.md' },
+    { id: 'notes', kind: 'notion', name: 'Team notes', meta: 'Notion page', arrives: 'its text, read at the start', page: '1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6', reads: 'notion · Team notes' },
   ]
   const source = (id) => SOURCES.find((x) => x.id === id)
   const GIVEN_TO = ['researcher', 'writer']
@@ -135,8 +134,8 @@
   ]
 
   const state = {
-    apps: ['claude', 'codex', 'opencode'],
-    team: { researcher: 'claude', writer: 'codex', review: true },
+    models: ['sonnet', 'opus', 'gpt'],
+    team: { researcher: 'sonnet', writer: 'opus', review: true },
     request: 'digest',
     give: { researcher: ['reports'], writer: ['brand', 'style'] },
     allow: { researcher: { web: true, edits: false, commands: false }, writer: { web: false, edits: true, commands: false } },
@@ -759,7 +758,7 @@
     { id: 'check', label: 'Check the facts', does: 'Checks each claim', instructions: 'Check every claim in the draft against its source. Reply with what holds and what does not.', skills: ['fact-check', 'web-research'], needs: 'web', tool: 'checking 3 sources', ask: 'open the 3 sources the draft links to',
       reply: 'Two claims hold. One quotes the wrong benchmark: the model card says 61%, not 67%.', without: 'Without opening the sources, I can only say which claims have a link, not whether they hold.' },
   ]
-  const agent = { name: 'Scout', kind: 'pincushion', color: 'rose', app: 'claude', job: 'sources', keys: { web: false, edits: false, commands: false } }
+  const agent = { name: 'Scout', kind: 'pincushion', color: 'rose', model: 'sonnet', job: 'sources', keys: { web: false, edits: false, commands: false } }
   const shelf = [] // { name, version, job, kind, color }
   let trial = 0 // the test run in flight, or 0; a newer one or an edit ends it
   let trials = 0
@@ -773,7 +772,7 @@
 
   const jobOf = () => JOBS.find((j) => j.id === agent.job)
   const agentName = () => agent.name.trim() || 'Your agent'
-  const agentJob = () => `${agent.app}|${agent.job}|${KEYS.filter((k) => agent.keys[k.key]).map((k) => k.key).join(',')}`
+  const agentJob = () => `${agent.model}|${agent.job}|${KEYS.filter((k) => agent.keys[k.key]).map((k) => k.key).join(',')}`
   const shelved = () => shelf.find((s) => s.name.toLowerCase() === agentName().toLowerCase())
   const looksLike = () => {
     const kind = KINDS.find((k) => k.id === agent.kind).name
@@ -807,11 +806,11 @@
   function benchView() {
     const job = jobOf()
     return {
-      look: { name: agentName(), instructions: job.instructions, app: agent.app, model: '', skills: job.skills, allow: { ...agent.keys } },
+      look: { name: agentName(), instructions: job.instructions, model: modelOf(agent.model).openrouter, skills: job.skills, allow: { ...agent.keys } },
       figure: { kind: agent.kind, color: agent.color },
       pattern: benchPattern(agentName()),
       does: job.does,
-      appName: app(agent.app).name,
+      modelName: modelOf(agent.model).name,
       hasReply: replied,
       mood, events, asked, open: null, dropping: false,
     }
@@ -838,7 +837,7 @@
   let facesSay = ''
   function paintFaces() {
     const job = jobOf()
-    const say = [agentName(), job.does, job.instructions, app(agent.app).name]
+    const say = [agentName(), job.does, job.instructions, modelOf(agent.model).name]
     if (say.join('\n') === facesSay) return
     facesSay = say.join('\n')
     faceEls.name.replaceChildren(el('p', {}, el('b', { text: say[0] }), say[1] ? el('span', { text: say[1] }) : null))
@@ -918,11 +917,11 @@
   // ---------------------------------------------------------------- the blocks
 
   function renderAgent() {
-    if (!state.apps.includes(agent.app)) agent.app = state.apps[0]
+    if (!state.models.includes(agent.model)) agent.model = state.models[0]
     paintStill()
     $('#ag-plate-name').textContent = agentName()
     $('#ag-plate-what').textContent = looksLike()
-    radios($('#ag-apps'), state.apps.map((id) => ({ id, label: app(id).name, kids: [app(id).name] })), agent.app, (id) => { agent.app = id; edited() })
+    radios($('#ag-apps'), state.models.map((id) => ({ id, label: modelOf(id).name, kids: [modelOf(id).name] })), agent.model, (id) => { agent.model = id; edited() })
     radios($('#ag-jobs'), JOBS.map((j) => ({ id: j.id, label: j.label, kids: [j.label] })), agent.job, (id) => { agent.job = id; edited() })
     radios($('#ag-kinds'), KINDS.map((k) => ({
       id: k.id, label: k.name[0].toUpperCase() + k.name.slice(1),
@@ -939,7 +938,7 @@
     // The blocks add up to one sentence, so the visitor reads what the agent will do, not settings.
     const free = KEYS.filter((k) => agent.keys[k.key]).map((k) => k.may)
     const asks = KEYS.filter((k) => !agent.keys[k.key]).map((k) => k.asks)
-    $('#ag-says').replaceChildren(el('b', { text: agentName() }), ` ${jobOf().does.toLowerCase()}, on ${app(agent.app).name}. `,
+    $('#ag-says').replaceChildren(el('b', { text: agentName() }), ` ${jobOf().does.toLowerCase()}, on ${modelOf(agent.model).name}. `,
       free.length ? `It may ${listText(free)} on its own` : 'It only reads and replies on its own',
       asks.length ? `, and asks you before it ${orText(asks)}.` : ', and never stops to ask you.')
     paintSaved()
@@ -1086,15 +1085,15 @@
   /* ================================================================ 03 · Team */
 
   const sentence = $('#sentence')
-  function appSelect(who) {
-    const select = el('select', { 'aria-label': `${LANE[who]}'s AI app` })
-    for (const id of state.apps) select.append(el('option', { value: id, text: `on ${app(id).name}` }))
+  function modelSelect(who) {
+    const select = el('select', { 'aria-label': `${LANE[who]}'s model` })
+    for (const id of state.models) select.append(el('option', { value: id, text: `on ${modelOf(id).name}` }))
     select.value = state.team[who]
     select.addEventListener('change', () => { state.team[who] = select.value; renderTeamViews([who]) })
     return select
   }
   function agentChip(who) {
-    return el('span', { class: 'chip' }, el('span', { class: `face m-${who}`, 'aria-hidden': 'true' }), el('span', { text: LANE[who] }), appSelect(who))
+    return el('span', { class: 'chip' }, el('span', { class: `face m-${who}`, 'aria-hidden': 'true' }), el('span', { text: LANE[who] }), modelSelect(who))
   }
   function renderSentence() {
     const t = state.team
@@ -1126,7 +1125,7 @@
         el('div', { class: 'kind' }, el('span', { text: you ? 'Review step' : who === 'researcher' ? 'Researcher' : 'Writer' }), step === 1 ? el('span', { class: 'start', text: 'Start' }) : null),
         el('div', { class: 'nm' }, you ? null : el('span', { class: `face m-${who}`, 'aria-hidden': 'true' }), LANE[who]),
         el('div', { class: 'ln', text: you ? 'Approve, or send it back' : who === 'researcher' ? 'Finds what is true, with sources' : 'Writes the answer' }),
-        you ? null : el('div', { class: 'ap', text: `on ${app(t[who]).name}` }),
+        you ? null : el('div', { class: 'ap', text: `on ${modelOf(t[who]).name}` }),
         you || !state.give[who].length ? null : el('a', { class: 'gv', href: '#give', text: `${state.give[who].length} handed over` }))
     }
     const order = seq(t)
@@ -1141,7 +1140,7 @@
   let yamlBefore = null
   function teamYaml() {
     const t = state.team
-    const spawn = (id, who) => { const a = app(id); return `{ cmd: ${a.spawn}${a.args ? `, args: [${a.args.join(', ')}]` : ''}, cwd: ${state.cwd[who]} }` }
+    const folder = (who) => `{ cwd: ${state.cwd[who]} }`
     const given = (who) => {
       const lines = []
       if (state.give[who].length) {
@@ -1150,7 +1149,9 @@
           const x = source(id)
           lines.push(x.kind === 'folder' || x.kind === 'file'
             ? `      - { kind: knowledge, name: ${x.name.replace(/\/$/, '')}, path: ${x.path} }`
-            : `      - { kind: ${x.kind}, name: ${x.name} }`)
+            : x.kind === 'notion'
+              ? `      - { kind: knowledge, name: ${x.name}, notion: { page: ${x.page} } }`
+              : `      - { kind: ${x.kind}, name: ${x.name} }`)
         }
       }
       const on = ALLOW.filter((a) => state.allow[who][a.key]).map((a) => `${a.key}: true`)
@@ -1167,7 +1168,8 @@
       '  - id: researcher',
       '    name: Researcher',
       '    role: Find out what is true, with a source for every claim.',
-      `    spawn: ${spawn(t.researcher, 'researcher')}`,
+      `    model: ${modelOf(t.researcher).openrouter}`,
+      `    spawn: ${folder('researcher')}`,
       ...given('researcher'),
     ]
     if (t.review) lines.push(
@@ -1179,7 +1181,8 @@
       '  - id: writer',
       '    name: Writer',
       '    role: Write the answer from the findings.',
-      `    spawn: ${spawn(t.writer, 'writer')}`,
+      `    model: ${modelOf(t.writer).openrouter}`,
+      `    spawn: ${folder('writer')}`,
       ...given('writer'),
       'edges:')
     if (t.review) lines.push('  - { from: researcher, to: review, layer: configured, kind: sequence }', '  - { from: review, to: writer, layer: configured, kind: sequence }')
@@ -1211,17 +1214,15 @@
     if (!run) renderChatUI()
   }
 
-  // Ask LoomWatch: one of your own apps proposes the team, and nothing changes until Apply.
+  // Ask LoomWatch proposes the team, and nothing changes until Apply.
   const proposeBox = $('#propose')
   const describe = $('#describe')
   let proposing = 0
   describe.addEventListener('click', async () => {
     const mine = ++proposing
-    const pool = state.apps
-    const pick = (avoid, prefer) => prefer.find((id) => pool.includes(id) && id !== avoid) || pool.find((id) => id !== avoid) || pool[0]
-    const researcher = pick(state.team.researcher, ['opencode', 'claude', 'codex', 'hermes', 'openclaw'])
-    const writer = pick(researcher, ['claude', 'codex', 'opencode', 'hermes', 'openclaw'])
-    const words = `A researcher on ${app(researcher).name}, then me to check its work, then a writer on ${app(writer).name}.`
+    const researcher = 'sonnet'
+    const writer = 'opus'
+    const words = `A researcher on ${modelOf(researcher).name}, then me to check its work, then a writer on ${modelOf(writer).name}.`
     const said = el('div', { class: 'said' })
     proposeBox.hidden = false
     proposeBox.replaceChildren(said)
@@ -1237,7 +1238,7 @@
     const close = () => { proposeBox.hidden = true; describe.disabled = false }
     proposeBox.append(el('div', { class: 'what' },
       el('span', { class: 'micro', text: 'Ask LoomWatch proposes' }),
-      el('span', { text: `Researcher on ${app(researcher).name} · You · Writer on ${app(writer).name}` }),
+      el('span', { text: `Researcher on ${modelOf(researcher).name} · You · Writer on ${modelOf(writer).name}` }),
       el('span', { class: 'acts' },
         el('button', { type: 'button', class: 'btn', text: 'Discard', onclick: close }),
         el('button', { type: 'button', class: 'btn btn-primary', text: 'Apply', onclick: () => {
@@ -1269,14 +1270,14 @@
     folder: ['M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'],
     file: ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4', 'M16 13H8M16 17H8M10 9H8'],
     skill: ['M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z'],
-    tool: ['M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'],
+    notion: ['M5 3h11l3 3v15H5z', 'M9 16V8l6 8V8'],
   }
   function icon(kind) {
     const svg = el('svg:svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })
     for (const d of ICONS[kind]) svg.append(el('svg:path', { d }))
     return svg
   }
-  const readOnly = (x) => x.kind === 'folder' || x.kind === 'file'
+  const readOnly = (x) => x.kind === 'folder' || x.kind === 'file' || x.kind === 'notion'
   const readersOf = (id) => GIVEN_TO.filter((who) => state.give[who].includes(id))
   function say(text) {
     giveHint.textContent = text
@@ -1289,12 +1290,12 @@
       const takes = picked && !state.give[who].includes(picked)
       return el('button', {
         type: 'button', class: `g-agent${who === giveFor ? ' on' : ''}${takes ? ' takes' : ''}`, 'data-who': who, 'aria-pressed': String(who === giveFor),
-        'aria-label': picked ? `Hand ${source(picked).name} to ${LANE[who]}` : `${LANE[who]}, on ${app(state.team[who]).name}, ${state.give[who].length} handed over. Show what it is given.`,
+        'aria-label': picked ? `Hand ${source(picked).name} to ${LANE[who]}` : `${LANE[who]}, on ${modelOf(state.team[who]).name}, ${state.give[who].length} handed over. Show what it is given.`,
         onclick: () => { if (picked) handOverSource(picked, who); else { giveFor = who; renderGive() } },
       },
       el('span', { class: 'kind', text: 'Agent' }),
       el('span', { class: 'nm', text: LANE[who] }),
-      el('span', { class: 'ap', text: `on ${app(state.team[who]).name}` }),
+      el('span', { class: 'ap', text: `on ${modelOf(state.team[who]).name}` }),
       el('span', { class: 'wk', title: 'Works in' }, icon('folder'), el('span', { text: state.cwd[who] })))
     }))
     giveShelf.replaceChildren(...SOURCES.map((x) => {
@@ -1439,15 +1440,13 @@
   function renderPacket() {
     const who = giveFor
     const items = state.give[who].map(source)
-    // OpenCode doesn't ask before it acts, so for it the switches below promise nothing.
-    const asksFirst = state.team[who] !== 'opencode'
     packetBox.replaceChildren(
       el('div', { class: 'pk-head' },
         el('span', { class: 'micro', text: 'What it gets, every run' }),
-        el('b', { text: `${LANE[who]}, on ${app(state.team[who]).name}` })),
+        el('b', { text: `${LANE[who]}, on ${modelOf(state.team[who]).name}` })),
       el('dl', { class: 'pk' },
         el('div', {}, el('dt', { text: 'Works in' }), el('dd', {}, el('code', { text: state.cwd[who] }),
-          el('span', { class: 'pk-note', text: state.allow[who].edits ? ' Its project. It may change files here.' : asksFirst ? ' Its project. It reads here, and asks before it changes a file.' : ' Its project. OpenCode can change files here without asking.' }))),
+          el('span', { class: 'pk-note', text: state.allow[who].edits ? ' Its project. It may change files here.' : ' Its project. It reads here, and asks before it changes a file.' }))),
         el('div', {}, el('dt', { text: 'Handed over' }), el('dd', {}, items.length
           ? el('ul', { class: 'pk-list' }, items.map((x) => el('li', {}, icon(x.kind), el('span', {}, el('b', { text: x.name }), el('small', { text: `${x.arrives}${readOnly(x) ? ', read only' : ''}` })))))
           : el('span', { class: 'pk-note', text: `Nothing yet. Drag a card onto ${LANE[who]}.` }))),
@@ -1455,7 +1454,7 @@
           type: 'button', role: 'switch', class: 'sw', 'aria-checked': String(state.allow[who][a.key]),
           onclick: () => { state.allow[who][a.key] = !state.allow[who][a.key]; renderYaml(); renderPacket() },
         }, el('i', { 'aria-hidden': 'true' }), a.label))))),
-      el('p', { class: 'pk-foot', text: asksFirst ? 'Anything else it asks for waits for your answer during the run.' : "OpenCode doesn't ask before it acts, so these switches can't hold it back." }))
+      el('p', { class: 'pk-foot', text: 'Anything else it asks for waits for your answer during the run.' }))
   }
 
   /* ================================================================ Act II · Workflow tabs */
@@ -1761,7 +1760,7 @@
     for (const list of $$('[data-members]')) {
       list.replaceChildren(...['researcher', 'writer'].map((who) => {
         const value = memberState(who)
-        return el('li', { class: `mem ${value}`, title: `${LANE[who]} on ${app(team[who]).name} · ${MEMBER_WORD[value]}` },
+        return el('li', { class: `mem ${value}`, title: `${LANE[who]} on ${modelOf(team[who]).name} · ${MEMBER_WORD[value]}` },
           avatar(who), el('span', { text: LANE[who] }), el('em', { text: MEMBER_WORD[value] }))
       }))
     }
@@ -1956,7 +1955,7 @@
 
   async function researcherPass() {
     const r = run
-    const name = app(r.team.researcher).name
+    const name = modelOf(r.team.researcher).name
     r.pass += 1
     r.working = 'researcher'
     setStage('researcher', 'running')
@@ -1970,9 +1969,7 @@
         log('researcher', 'Researcher', { tool: source(id).reads, say: `Researcher opened ${source(id).name}, which you handed it.` })
       }
       const web = r.preset.reads === 'the web'
-      // OpenCode doesn't ask before it acts, so its switch being off doesn't stop it.
-      if (web && !r.allow.researcher.web && r.team.researcher === 'opencode') log('researcher', 'Researcher searched the web without asking', { say: "Researcher's web switch is off, but OpenCode doesn't ask before it acts, so it searched anyway." })
-      else if (web && !r.allow.researcher.web && !(await askPermission('researcher', r.preset.tools[0]))) r.deniedWeb = true
+      if (web && !r.allow.researcher.web && !(await askPermission('researcher', r.preset.tools[0]))) r.deniedWeb = true
       for (const tool of r.deniedWeb ? r.preset.tools.filter((t) => !/^(web search|fetch)/.test(t)) : r.preset.tools) {
         await step('researcher', 1.7)
         r.tools.researcher += 1
@@ -2056,7 +2053,7 @@
 
   async function writerPass() {
     const r = run
-    const name = app(r.team.writer).name
+    const name = modelOf(r.team.writer).name
     r.working = 'writer'
     setStage('writer', 'running')
     segStart('writer')
@@ -2070,8 +2067,8 @@
     await step('writer', 1.4)
     r.tools.writer += 1
     log('writer', 'Writer', { tool: 'read · findings.md', say: 'Writer is reading the findings.' })
-    // A question back to an earlier step goes through the Team Bus, which OpenClaw can't reach.
-    if (r.team.writer !== 'openclaw') {
+    // A question back to an earlier step goes through the Team Bus.
+    {
       await step('writer', 1.2)
       const asked = post({ kind: 'question', from: 'writer', to: 'researcher', text: r.preset.ask.q })
       handOver('writer', 'researcher')
@@ -2104,7 +2101,7 @@
 
   async function writerAgain() {
     const r = run
-    const name = app(r.team.writer).name
+    const name = modelOf(r.team.writer).name
     r.working = 'writer'
     setStage('writer', 'running')
     segStart('writer')
@@ -2525,14 +2522,14 @@
     const flagged = r.findings.map((f, i) => ({ ...f, i })).filter((f) => !f.src && !f.dropped && kept.some((k) => k.text === f.text))
     const rows = []
     if (r.only) {
-      rows.push(['Asked', `“${FOLLOW.text}”`], ['Team', 'Writer only'], ['Ran on', `${app(r.team.writer).name} · your own account`], ['Took', clockText(r.clock)],
+      rows.push(['Asked', `“${FOLLOW.text}”`], ['Team', 'Writer only'], ['Ran on', `${modelOf(r.team.writer).name} · your OpenRouter key`], ['Took', clockText(r.clock)], ['Cost', costText(r)],
         ['Read first', `the conversation so far: your request, ${r.team.review ? 'the findings you approved' : "Researcher's findings"}, and its last answer`],
         ['Kept', "Researcher's findings, as they were"])
     } else {
-      const apps = [...new Set(['researcher', 'writer'].map((w) => app(r.team[w]).name))]
+      const models = [...new Set(['researcher', 'writer'].map((w) => modelOf(r.team[w]).name))]
       const call = !r.team.review ? 'No review step on this team'
         : r.sendBacks ? `Sent back ${r.sendBacks === 1 ? 'once' : `${r.sendBacks} times`}, then approved` : r.notes.length ? 'Approved, with a note' : 'Approved'
-      rows.push(['Asked', `“${r.preset.short}”`], ['Team', seq(r.team).map((w) => LANE[w]).join(' → ')], ['Ran on', `${listText(apps)} · your own accounts`], ['Took', clockText(r.clock)])
+      rows.push(['Asked', `“${r.preset.short}”`], ['Team', seq(r.team).map((w) => LANE[w]).join(' → ')], ['Ran on', `${listText(models)} · your OpenRouter key`], ['Took', clockText(r.clock)], ['Cost', costText(r)])
       const handed = GIVEN_TO.filter((w) => r.give[w].length).map((w) => `${LANE[w]}: ${r.give[w].map((id) => source(id).name).join(', ')}`)
       rows.push(['Handed over', handed.length ? handed.join(' · ') : 'nothing'])
       if (r.permission) rows.push(['Asked you', `Researcher wanted the web · ${r.permission === 'deny' ? 'you said no' : r.permission === 'always' ? 'allowed from now on' : 'allowed once'}`])
@@ -2548,6 +2545,12 @@
       ...(!r.only && r.deniedWeb ? ['Researcher wasn’t allowed to search the web, so check where its claims came from.'] : []),
     ]
     return { rows, flagged, worth }
+  }
+  // What the run cost, as OpenRouter reports it in the app: a plausible figure for this sketch,
+  // larger with every tool call and pass.
+  function costText(r) {
+    const dollars = 0.004 + 0.003 * r.tools.researcher + 0.005 * r.tools.writer + 0.002 * r.pass
+    return `$${dollars.toFixed(3)}`
   }
   function receiptMarkdown(r) {
     const { rows, worth } = receiptRows(r)
@@ -2667,9 +2670,9 @@
 
   const SCREENS = {
     home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
-    agents: { w: 2880, h: 1600, alt: "LoomWatch's agent workbench for Writer, version 1: a sentence saying what Writer thinks with, works in and may do, a mint-green figure at its desk with labels for its keys, its skills, the model it thinks with, its job and its tray, and on the right the blocks that make it: Name, Instructions with a check of what good instructions say, and App.", cap: 'An agent on its workbench: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
-    workflow: { w: 2880, h: 1600, alt: 'LoomWatch Workflow for a daily tech digest: the team as one sentence, When you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer, each with its figure; on the left your saved agents ready to add; on the canvas a schedule trigger at 9 AM wired to Gatherer, Reader and Writer, and the team response.', cap: 'Workflow: your agents wired in order, read back as one sentence, with your saved agents one click away on the left.' },
-    chat: { w: 2880, h: 1600, alt: "LoomWatch Chat: Researcher answers Writer's question with two sources, Writer hands a draft to you, and you approve it; each agent's name and avatar wear its figure's colour. On the right, Details shows the run live on a timeline you can drag back to replay, and the team's handovers step by step.", cap: "Chat: who said what, in each agent's own colour, and Details beside it with every step on a timeline you can replay." },
+    agents: { w: 2880, h: 1600, alt: "LoomWatch's agent workbench for Writer, version 1: a sentence saying Writer thinks with Claude Opus 5.5, has one skill and asks before it may act, a mint-green figure at its desk with labels for its keys, its skills, the model it thinks with, its job and its tray, and on the right the blocks that make it, starting with Name and Instructions with a check of what good instructions say.", cap: 'An agent on its workbench: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
+    workflow: { w: 2880, h: 1600, alt: 'LoomWatch Workflow for a daily tech digest: the team as one sentence, Every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer, each with its figure; on the left your saved agents ready to add; on the canvas a schedule trigger at 9 AM wired to Gatherer, Reader and Writer, and the team response.', cap: 'Workflow: your agents wired in order, read back as one sentence, with your saved agents one click away on the left.' },
+    chat: { w: 2880, h: 1600, alt: "LoomWatch Chat: you ask the team for a short getting-started guide, Researcher hands its findings to you, and Approve waits under them; each agent's name and avatar wear its figure's colour. On the right, Details shows the run live on a timeline you can drag back to replay, and the team's handovers step by step.", cap: "Chat: who said what, in each agent's own colour, and Details beside it with every step on a timeline you can replay." },
   }
   const realImg = $('#real-img')
   function showScreen(name, focus = false) {

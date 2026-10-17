@@ -83,7 +83,7 @@ export function proposalChanges(currentYaml: string | null, proposedYaml: string
       const what: string[] = []
       if ((previous.name || '') !== (agent.name || '')) what.push('name')
       if ((previous.role || '') !== (agent.role || '')) what.push(agent.kind === 'operator' ? 'question' : 'job')
-      if (!same(previous.spawn, agent.spawn)) what.push('AI app')
+      if ((previous.spawn?.cwd ?? '.') !== (agent.spawn?.cwd ?? '.')) what.push('work folder')
       if ((previous.model || '') !== (agent.model || '')) what.push('model')
       if ((previous.kind || 'harness') !== (agent.kind || 'harness')) what.push('kind')
       if (what.length > 0) {

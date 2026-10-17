@@ -1,6 +1,5 @@
 import { useState } from 'react'
 
-import type { DetectedHarness } from '../../lib/harnesses'
 import { teamDisplayName } from '../../lib/team-file/client'
 import { openTeam, useTeamList } from '../../lib/team-file/useTeamList'
 import { NewTeamDialog } from '../home/NewTeamDialog'
@@ -78,7 +77,7 @@ export function SaveCopySheet({ onClose, onSave, error }: { onClose: () => void;
   )
 }
 
-export function NewTeamSheet({ harnesses, openTeamUnsaved, onClose, onCreateBlank }: { harnesses: DetectedHarness[]; openTeamUnsaved: boolean; onClose: () => void; onCreateBlank: (name: string, path: string) => void }) {
+export function NewTeamSheet({ openTeamUnsaved, onClose, onCreateBlank }: { openTeamUnsaved: boolean; onClose: () => void; onCreateBlank: (name: string, path: string) => void }) {
   const { teams, trashed } = useTeamList()
-  return <NewTeamDialog harnesses={harnesses} existingPaths={[...(teams?.map((team) => team.path) ?? []), ...trashed]} openTeamUnsaved={openTeamUnsaved} onCreateBlank={onCreateBlank} onClose={onClose} />
+  return <NewTeamDialog existingPaths={[...(teams?.map((team) => team.path) ?? []), ...trashed]} openTeamUnsaved={openTeamUnsaved} onCreateBlank={onCreateBlank} onClose={onClose} />
 }

@@ -12,8 +12,7 @@
 import type { RunRecord } from '../runs/client'
 import type { RunEvent, RunProjection } from '../watch/events'
 import type { TeamMessage } from '../watch/messages'
-import { actsWithoutAsking } from './allow'
-import { bySeverity, canUseTeamBus, mentions, type CheckupFinding, type CheckupInput } from './checkup'
+import { bySeverity, mentions, type CheckupFinding, type CheckupInput } from './checkup'
 import type { AgentConfig, AllowSwitch } from './types'
 
 /** One finished run, reduced to what the lessons read. */
@@ -28,15 +27,18 @@ export interface LessonRun {
   messages: readonly Pick<TeamMessage, 'kind' | 'from' | 'to' | 'text' | 'carried' | 'permission'>[]
   /** Agents whose part ended in failure, with why when the record says. */
   failed: ReadonlyMap<string, string | null>
-  /** What each agent's app reported: tokens over all its turns (LoomWatch's handover and
+  /** What each agent's model calls counted: tokens over all its turns (LoomWatch's handover and
       checkpoint turns included), and how full its context was after its first step, which is the
-      opening cost its app pays before the work. Absent for an agent that reported nothing. */
+      opening cost it pays before the work. Absent for an agent that reported nothing. */
   usage: ReadonlyMap<string, AgentRunUsage>
 }
 
 export interface AgentRunUsage {
   tokens: number | null
   opening: number | null
+  /** What its model calls cost in dollars, from the run's own record (ADR 0068); `null` for a run
+      recorded before spend was kept. Absent: not known either. */
+  costUsd?: number | null
 }
 
 /** How many recent runs a lesson reads: enough to see a habit, few enough to still be this team. */
@@ -51,20 +53,22 @@ const PERMISSION_WORDS: Record<AllowSwitch, string> = { web: 'search the web', e
 const ALLOW_LABEL: Record<AllowSwitch, string> = { web: 'Allow web search', edits: 'Allow file changes', commands: 'Allow commands' }
 
 /** Reduce a run, its projection and its events to what the lessons read. */
-export function lessonRun(record: Pick<RunRecord, 'runId' | 'status' | 'mode' | 'entrypoint' | 'agentIds'>, projection: Pick<RunProjection, 'messages' | 'agents'>, events: readonly Pick<RunEvent, 'agentId' | 'kind' | 'payload'>[] = []): LessonRun {
+export function lessonRun(record: Pick<RunRecord, 'runId' | 'status' | 'mode' | 'entrypoint' | 'agentIds'> & Partial<Pick<RunRecord, 'spend'>>, projection: Pick<RunProjection, 'messages' | 'agents'>, events: readonly Pick<RunEvent, 'agentId' | 'kind' | 'payload'>[] = []): LessonRun {
   const failed = new Map<string, string | null>()
   for (const agent of projection.agents) {
     if (agent.status !== 'failed') continue
-    // What its app said beats its stop reason: a turn Codex refused still ended `end_turn`.
-    failed.set(agent.id, agent.error ?? agent.stopReason ?? (agent.exitCode !== null ? `its app exited with code ${agent.exitCode}` : null))
+    // What went wrong beats its stop reason: a refused turn can still end `end_turn`.
+    failed.set(agent.id, agent.error ?? agent.stopReason ?? (agent.exitCode !== null ? `it stopped with exit code ${agent.exitCode}` : null))
   }
   const opening = new Map<string, number>()
   for (const event of events) {
     if (event.kind === 'usage' && typeof event.payload.used === 'number' && !opening.has(event.agentId)) opening.set(event.agentId, event.payload.used)
   }
   const usage = new Map<string, AgentRunUsage>()
+  // The daemon added up what each agent's calls cost (ADR 0068): exact, where tokens are counted.
+  const cost = (id: string) => (record.spend ? record.spend.agents?.[id]?.spentUsd ?? 0 : null)
   for (const agent of projection.agents) {
-    if (agent.tokens !== null || opening.has(agent.id)) usage.set(agent.id, { tokens: agent.tokens, opening: opening.get(agent.id) ?? null })
+    if (agent.tokens !== null || opening.has(agent.id)) usage.set(agent.id, { tokens: agent.tokens, opening: opening.get(agent.id) ?? null, costUsd: cost(agent.id) })
   }
   return { runId: record.runId, succeeded: record.status === 'succeeded', mode: record.mode, entrypoint: record.entrypoint, agentIds: record.agentIds, messages: projection.messages, failed, usage }
 }
@@ -76,8 +80,10 @@ export interface AgentUsage {
   perRun: number
   /** Its part of everything the team's agents reported. */
   share: number
-  /** Typical context after its first step: what its app costs before the work. */
+  /** Typical context after its first step: what it costs before the work. */
   opening: number | null
+  /** Average dollars per team run, over the runs whose record kept spend; absent when none did. */
+  costPerRun?: number | null
 }
 
 export interface TeamUsage {
@@ -90,7 +96,7 @@ export interface TeamUsage {
 
 const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) / 2)]
 
-/** Where the team's tokens went over its recent runs, by agent, as its apps reported them. */
+/** Where the team's tokens went over its recent runs, by agent, as their model calls counted them. */
 export function teamUsage(runs: readonly LessonRun[], agents: readonly AgentConfig[]): TeamUsage | null {
   const reported = runs.slice(0, LESSON_RUNS).filter((run) => [...run.usage.values()].some((usage) => usage.tokens !== null))
   if (reported.length === 0) return null
@@ -98,7 +104,11 @@ export function teamUsage(runs: readonly LessonRun[], agents: readonly AgentConf
     const samples = reported.flatMap((run) => run.usage.get(agent.id) ?? [])
     const total = samples.reduce((sum, usage) => sum + (usage.tokens ?? 0), 0)
     const openings = samples.flatMap((usage) => usage.opening ?? [])
-    return { id: agent.id, name: agent.name, total, opening: openings.length ? median(openings) : null }
+    // Over the runs that kept what they spent; a run it took no part in costs it nothing.
+    const priced = reported.filter((run) => [...run.usage.values()].some((usage) => usage.costUsd != null))
+    const spent = priced.reduce((sum, run) => sum + (run.usage.get(agent.id)?.costUsd ?? 0), 0)
+    const costPerRun = priced.length ? spent / priced.length : null
+    return { id: agent.id, name: agent.name, total, opening: openings.length ? median(openings) : null, costPerRun }
   }).filter((row) => row.total > 0 || row.opening !== null)
   const teamTotal = rows.reduce((sum, row) => sum + row.total, 0)
   return {
@@ -124,7 +134,7 @@ export function runLessons(runs: readonly LessonRun[], { agents, edges, entrypoi
   const work = (message: LessonRun['messages'][number]) => !message.carried && (message.kind === 'dispatch' || message.kind === 'ask' || message.kind === 'handoff')
 
   // ── A lead that never hands a teammate anything. Only today's team mode with today's lead. ──
-  if (edges.length === 0 && lead && lead.kind !== 'operator' && canUseTeamBus(lead)) {
+  if (edges.length === 0 && lead && lead.kind !== 'operator') {
     for (const teammate of agents) {
       if (teammate.id === lead.id || teammate.kind === 'operator' || mentions(lead.role, teammate.name)) continue
       const runsTogether = recent.filter((run) => run.succeeded && run.mode === 'team' && run.entrypoint === lead.id && run.agentIds.includes(teammate.id))
@@ -176,7 +186,7 @@ export function runLessons(runs: readonly LessonRun[], { agents, edges, entrypoi
 
   // ── The same permission, asked for run after run. Same id as checkup.ts's guess: it replaces it. ──
   for (const agent of agents) {
-    if (agent.kind === 'operator' || actsWithoutAsking(agent)) continue
+    if (agent.kind === 'operator') continue
     const runs = ranIn(agent.id)
     for (const key of ['web', 'edits', 'commands'] as AllowSwitch[]) {
       if (agent.allow?.[key]) continue
@@ -219,7 +229,7 @@ export function runLessons(runs: readonly LessonRun[], { agents, edges, entrypoi
     findings.push({
       id: `keeps-failing:${agent.id}`, rule: 'keeps-failing', severity: 'fix', agentId: agent.id, agentIds: [agent.id], learned: runs.length,
       title: `${agent.name} failed in ${failures.length} of ${runs.length} runs`,
-      why: `${why ? `Last time: ${firstLine(why, 140)}. ` : ''}Check its AI app and model first, then its instructions.`,
+      why: `${why ? `Last time: ${firstLine(why, 140)}. ` : ''}Check its model first, then its instructions.`,
     })
   }
 

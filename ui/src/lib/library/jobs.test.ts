@@ -1,18 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { DetectedHarness } from '../harnesses'
+import { DEFAULT_MODEL } from '../ai/modelIds'
 import type { AgentConfig } from '../team-file/types'
 import { buildAgentFromSource } from './createAgent'
 import { fetchJobs, guessIcon, JobApiError, jobFromAgent, jobIdFor, JOBS_CHANGED_EVENT, removeJob, saveJob, savedJobPreset, type SavedJob } from './jobs'
 import { ROLE_PRESETS, roleSource } from './roles'
 
-const harness = (id: string, name: string): DetectedHarness => ({ id, name, command: id, executablePath: `/bin/${id}`, spawn: { cmd: id, args: ['acp'] }, acpAvailable: true })
-const claude = harness('claude', 'Claude')
-const codex = harness('codex', 'Codex')
-
 const agent: AgentConfig = {
-  id: 'notes', name: 'Release notes', role: 'Write release notes from the merged changes.', model: 'gpt-5.6',
-  spawn: { cmd: 'codex', args: ['acp'], env: {}, cwd: '.' }, capabilities: [{ kind: 'skill', name: 'release-style' }],
+  id: 'notes', name: 'Release notes', role: 'Write release notes from the merged changes.', model: 'openai/gpt-6.1-sol',
+  capabilities: [{ kind: 'skill', name: 'release-style' }],
 }
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -29,16 +25,15 @@ describe('built-in jobs', () => {
 })
 
 describe('saving an agent as a job', () => {
-  it('keeps its instructions, app, model and skills', () => {
-    expect(jobFromAgent(agent, { name: ' Release notes ', does: 'Drafts release notes', appId: 'codex' })).toEqual({
-      name: 'Release notes', does: 'Drafts release notes', instructions: agent.role, icon: 'write', apps: ['codex'], model: 'gpt-5.6', skills: ['release-style'],
+  it('keeps its instructions, model and skills', () => {
+    expect(jobFromAgent(agent, { name: ' Release notes ', does: 'Drafts release notes' })).toEqual({
+      name: 'Release notes', does: 'Drafts release notes', instructions: agent.role, icon: 'write', model: 'openai/gpt-6.1-sol', skills: ['release-style'],
     })
   })
 
-  it('keeps no model without an app, because a model id belongs to one app', () => {
-    const spec = jobFromAgent(agent, { name: 'Notes' })
-    expect(spec.apps).toBeUndefined()
-    expect(spec.model).toBeUndefined()
+  it('keeps a model written for an AI app as the OpenRouter model it reads as', () => {
+    expect(jobFromAgent({ ...agent, model: 'sonnet', thinkingEffort: 'high' }, { name: 'Notes' })).toMatchObject({ model: 'anthropic/claude-sonnet-5.5', thinkingEffort: 'high' })
+    expect(jobFromAgent({ ...agent, model: undefined }, { name: 'Notes' })).not.toHaveProperty('model')
   })
 
   it('names the file from the job name', () => {
@@ -55,29 +50,29 @@ describe('saving an agent as a job', () => {
 })
 
 describe('placing a saved job', () => {
-  const saved: SavedJob = { id: 'release-notes', name: 'Release notes', instructions: agent.role, apps: ['codex'], model: 'gpt-5.6', skills: ['release-style'], file: '.jobs/release-notes.yaml' }
+  const saved: SavedJob = { id: 'release-notes', name: 'Release notes', instructions: agent.role, model: 'openai/gpt-6.1-sol', skills: ['release-style'], file: '.jobs/release-notes.yaml' }
 
-  it('places the agent it was saved from: instructions, app, model and skills', () => {
-    const source = roleSource(savedJobPreset(saved), [claude, codex])
-    expect(source).toMatchObject({ label: 'Release notes', role: agent.role, model: 'gpt-5.6', spawn: { cmd: 'codex' }, capabilities: [{ kind: 'skill', name: 'release-style' }] })
-    const placed = buildAgentFromSource(source!, [])
+  it('places the agent it was saved from: instructions, model and skills', () => {
+    const source = roleSource(savedJobPreset(saved))
+    expect(source).toMatchObject({ label: 'Release notes', role: agent.role, model: 'openai/gpt-6.1-sol', capabilities: [{ kind: 'skill', name: 'release-style' }] })
+    expect(source).not.toHaveProperty('spawn')
+    const placed = buildAgentFromSource(source, [])
     expect(placed.capabilities).toEqual([{ kind: 'skill', name: 'release-style' }])
-    expect(placed.model).toBe('gpt-5.6')
+    expect(placed.model).toBe('openai/gpt-6.1-sol')
   })
 
   it('keeps its tools, and places them as tools a team’s canvas draws wired to it', () => {
     const tooled: AgentConfig = { ...agent, capabilities: [...(agent.capabilities ?? []), { kind: 'tool', name: 'github' }, { kind: 'tool', name: 'github' }] }
-    expect(jobFromAgent(tooled, { name: 'Release notes', appId: 'codex' }).tools).toEqual(['github'])
-    const source = roleSource(savedJobPreset({ ...saved, tools: ['github'] }), [claude, codex])
-    const placed = buildAgentFromSource(source!, [])
+    expect(jobFromAgent(tooled, { name: 'Release notes' }).tools).toEqual(['github'])
+    const source = roleSource(savedJobPreset({ ...saved, tools: ['github'] }))
+    const placed = buildAgentFromSource(source, [])
     expect(placed.capabilities).toEqual([{ kind: 'skill', name: 'release-style' }, { kind: 'tool', name: 'github' }])
   })
 
-  it('runs on the best app there is when its own is missing, without the other app’s model', () => {
-    const source = roleSource(savedJobPreset(saved), [claude])
-    expect(source?.spawn.cmd).toBe('claude')
-    expect(source?.model).toBeUndefined()
-    expect(source?.capabilities).toEqual([{ kind: 'skill', name: 'release-style' }])
+  it('runs on the default model when it was saved without one', () => {
+    const source = roleSource(savedJobPreset({ ...saved, model: undefined }))
+    expect(source.model).toBe(DEFAULT_MODEL)
+    expect(source.capabilities).toEqual([{ kind: 'skill', name: 'release-style' }])
   })
 
   it('describes a job saved without a line of its own by its first sentence', () => {

@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react'
 
 import { cronFor, normalizeSchedule, scheduleParts, unsupportedScheduleKeys, type ScheduleFrequency } from '../../lib/team-file/schedule'
 import type { ScheduleConfig } from '../../lib/team-file/types'
+import { keys } from '../../lib/platform'
 
 const TIMEZONES = ['Asia/Singapore', 'UTC', 'America/New_York', 'Europe/London']
 
@@ -129,7 +130,7 @@ export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile
                   : savedInEditor ? 'Schedule saved to the team file.' : 'This schedule matches the team file on disk.'}
         </div>
         {dirty && problems.length === 0 && !dirtyDraft && (
-          <button type="button" className="btn schedule-save-file" onClick={onSaveFile} disabled={!canSaveFile}><Save size={15} aria-hidden="true" /> Save team file <kbd className="t-mono-sm">⌘S</kbd></button>
+          <button type="button" className="btn schedule-save-file" onClick={onSaveFile} disabled={!canSaveFile}><Save size={15} aria-hidden="true" /> Save team file <kbd className="t-mono-sm">{keys('⌘S')}</kbd></button>
         )}
 
         <footer><button type="button" className="link" onClick={onAdvanced}>Advanced YAML <ChevronRight size={14} aria-hidden="true" /></button>{onRemove && <button type="button" className="link muted" onClick={onRemove}>Remove schedule</button>}<button type="button" className="link muted" onClick={onClose}>Close</button></footer>

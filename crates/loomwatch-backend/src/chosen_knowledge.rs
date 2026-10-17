@@ -1,7 +1,6 @@
 //! Knowledge the operator chose, rather than knowledge the Library found (ADR 0035).
 //!
-//! The Library lists knowledge it discovers: the project folder, the folders `OpenCode` ran in,
-//! team memory. An operator also wants to hand an agent a folder of their own, or one document
+//! The one kind of knowledge the Library finds is team memory (ADR 0036). An operator also wants to hand an agent a folder of their own, or one document
 //! such as a PDF, and the Library cannot discover those. Here a knowledge capability with a `path`
 //! is read straight from that path. There are two shapes:
 //!
@@ -59,9 +58,9 @@ pub fn files_folder(team_file: &Path) -> PathBuf {
 #[must_use]
 pub fn resolve(team_dir: &Path, path: &Path) -> PathBuf {
     if let Ok(rest) = path.strip_prefix("~")
-        && let Some(home) = std::env::var_os("HOME")
+        && let Some(home) = crate::platform::home_dir()
     {
-        return PathBuf::from(home).join(rest);
+        return home.join(rest);
     }
     if path.is_absolute() {
         path.to_path_buf()
@@ -77,7 +76,7 @@ pub fn resolve(team_dir: &Path, path: &Path) -> PathBuf {
 /// Returns the reason, in a sentence fragment, when the path does not exist or cannot be read.
 pub fn snapshot(team_dir: &Path, path: &Path) -> Result<KnowledgeSnapshot, String> {
     let resolved = resolve(team_dir, path);
-    let canonical = fs::canonicalize(&resolved)
+    let canonical = crate::platform::canonicalize(&resolved)
         .map_err(|_| format!("{} does not exist on this computer", resolved.display()))?;
     if canonical.is_dir() {
         let contents = folder_contents(&canonical, "Linked");
@@ -257,45 +256,58 @@ fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child = spawn_when_not_busy(&mut command)?;
+    // Whatever it starts goes with it: on Windows a `pdftotext.cmd` is cmd.exe running the real
+    // program, which would otherwise keep writing into the pipe after cmd.exe is stopped.
+    let mut tree = Some(crate::platform::ProcessTree::adopt_std(&child));
     let stdout = child.stdout.take()?;
     let full = Arc::new(AtomicBool::new(false));
     let reader = {
         let full = Arc::clone(&full);
         std::thread::spawn(move || {
             let mut text = Vec::new();
-            let _ = stdout
-                .take(u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1))
-                .read_to_end(&mut text);
+            // The pipe stays open until the limit is recorded: closing it stops the program, and
+            // its exit must not be seen before we know it was stopped for having said enough.
+            let mut pipe = stdout.take(u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1));
+            let _ = pipe.read_to_end(&mut text);
             if text.len() > limit {
                 text.truncate(limit);
                 full.store(true, Ordering::Release);
             }
+            drop(pipe);
             text
         })
     };
     let stop_by = Instant::now() + deadline;
-    let finished = loop {
+    let exited_well = loop {
         match child.try_wait() {
-            // A program stopped by the pipe closing behind the text limit still gave enough text.
-            Ok(Some(status)) => break status.success() || full.load(Ordering::Acquire),
+            Ok(Some(status)) => break Some(status.success()),
             // Enough text: the rest is never read, so the program is stopped rather than left
             // blocked on a full pipe.
             Ok(None) if full.load(Ordering::Acquire) => {
+                if let Some(tree) = tree.take() {
+                    tree.end();
+                }
                 let _ = child.kill();
                 let _ = child.wait();
-                break true;
+                break Some(true);
             }
             Ok(None) if Instant::now() < stop_by => {
                 std::thread::sleep(Duration::from_millis(20));
             }
             _ => {
+                if let Some(tree) = tree.take() {
+                    tree.end();
+                }
                 let _ = child.kill();
                 let _ = child.wait();
-                break false;
+                break None;
             }
         }
     };
     let text = reader.join().ok()?;
+    // Asked once the reader is done: a program stopped by the pipe closing behind the text limit
+    // still gave enough text, though it may exit before the reader has said so.
+    let finished = exited_well.is_some_and(|well| well || full.load(Ordering::Acquire));
     finished.then(|| String::from_utf8_lossy(&text).into_owned())
 }
 
@@ -357,7 +369,7 @@ pub fn list_folder(requested: Option<&Path>, home: Option<&Path>) -> Result<Fold
     if !start.is_absolute() {
         return Err(format!("{} is not a full path", start.display()));
     }
-    let folder = fs::canonicalize(&start)
+    let folder = crate::platform::canonicalize(&start)
         .map_err(|_| format!("{} does not exist on this computer", start.display()))?;
     if !folder.is_dir() {
         return Err(format!("{} is not a folder", folder.display()));
@@ -400,6 +412,7 @@ pub fn list_folder(requested: Option<&Path>, home: Option<&Path>) -> Result<Fold
             name: name.to_owned(),
             path: path.to_string_lossy().into_owned(),
         })
+        .chain(drives())
         .collect();
     Ok(FolderListing {
         name: folder.file_name().map_or_else(
@@ -415,6 +428,24 @@ pub fn list_folder(requested: Option<&Path>, home: Option<&Path>) -> Result<Fold
         more_files,
         places,
     })
+}
+
+/// Each drive on a Windows computer, `C:` first: a folder on `D:\` is under no other place, and
+/// going up from one stops at its drive. None elsewhere, where everything is under `/`.
+fn drives() -> Vec<FolderEntry> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    // A and B are floppy drives, which a computer of today doesn't have but may still answer for
+    // slowly.
+    (b'C'..=b'Z')
+        .map(|letter| format!("{}:\\", char::from(letter)))
+        .filter(|root| Path::new(root).is_dir())
+        .map(|root| FolderEntry {
+            name: root.trim_end_matches('\\').to_owned(),
+            path: root,
+        })
+        .collect()
 }
 
 /// A file the panel added to a team, and what an agent will be handed from it.
@@ -472,8 +503,8 @@ pub fn store_file(
         .map_err(|error| format!("{} could not be created ({error})", folder.display()))?;
     // Re-checked after creating: a symlinked folder already on the way would put the file outside
     // the team.
-    let resolved = fs::canonicalize(&folder).map_err(|error| error.to_string())?;
-    let team_dir = fs::canonicalize(&team_dir).map_err(|error| error.to_string())?;
+    let resolved = crate::platform::canonicalize(&folder).map_err(|error| error.to_string())?;
+    let team_dir = crate::platform::canonicalize(&team_dir).map_err(|error| error.to_string())?;
     if !resolved.starts_with(&team_dir) {
         return Err(format!(
             "{folder_name} resolves outside the team's own folder"
@@ -561,7 +592,7 @@ mod tests {
                 let path =
                     std::env::temp_dir().join(format!("loomwatch-chosen-{}", uuid::Uuid::new_v4()));
                 std::fs::create_dir_all(&path).expect("scratch dir");
-                Self(std::fs::canonicalize(path).expect("canonical scratch dir"))
+                Self(crate::platform::canonicalize(path).expect("canonical scratch dir"))
             }
 
             pub fn path(&self) -> &Path {
@@ -680,14 +711,10 @@ mod tests {
     }
 
     fn fake_pdftotext(dir: &Path, body: &str) -> PathBuf {
-        let path = dir.join("fake-pdftotext");
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        path
+        crate::test_support::fake_program(
+            &dir.join("fake-pdftotext"),
+            &format!("#!/bin/sh\n{body}\n"),
+        )
     }
 
     /// ADR 0048: a PDF that keeps `pdftotext` busy, or makes it write without end, costs a bounded
@@ -714,6 +741,14 @@ mod tests {
         let text = extract_text(&endless, &file, Duration::from_secs(10), 1000).expect("text");
         assert_eq!(text.len(), 1000);
         assert!(text.starts_with("loomwatch\nloomwatch\n"));
+
+        // More text than the limit, then a failing exit: the text read is still kept, however the
+        // exit and the reader's "enough" are ordered.
+        let then_fails = fake_pdftotext(dir.path(), "head -c 4000 /dev/zero | tr '\\0' x; exit 1");
+        for _ in 0..20 {
+            let text = extract_text(&then_fails, &file, Duration::from_secs(10), 1000);
+            assert_eq!(text.map(|text| text.len()), Some(1000));
+        }
 
         let quick = fake_pdftotext(dir.path(), "printf 'Quarterly revenue rose'");
         assert_eq!(
@@ -767,6 +802,11 @@ mod tests {
         );
         assert_eq!(listing.files, ["readme.txt"]);
         assert_eq!(listing.places[0].name, "Home");
+        // Windows lists its drives too, so a folder on another drive can be reached.
+        assert_eq!(
+            listing.places.iter().any(|place| place.path == "C:\\"),
+            cfg!(windows)
+        );
         assert!(list_folder(Some(Path::new("relative")), None).is_err());
     }
 

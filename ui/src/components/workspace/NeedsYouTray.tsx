@@ -1,7 +1,7 @@
 import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 
-import type { PermissionDecision } from '../../lib/runs/client'
+import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 
@@ -12,15 +12,17 @@ interface NeedsYouTrayProps {
   onAnswer: (ticket: Ticket, text: string, sendBack?: string) => Promise<void>
   /** A permission ticket's answer (ADR 0040). Absent: permission tickets only open their run. */
   onPermission?: (ticket: Ticket, decision: PermissionDecision) => Promise<void>
+  /** A spend ticket's answer (ADR 0068). Absent: spend tickets only open their run. */
+  onSpend?: (ticket: Ticket, decision: SpendDecision) => Promise<void>
   onDismiss: (runId: string) => void
   /** The run the screen shows, whose own answer box and permission card already ask (ADR 0043). */
   onScreenRunId?: string | null
   className?: string
 }
 
-const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', failed: 'Stopped' }
+const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: 'Stopped' }
 
-const PERMISSION_SAID: Record<PermissionDecision, string> = { allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
+const PERMISSION_SAID: Record<PermissionDecision, string> = { edit: 'Allowed as you changed it.', answer: 'Your answer was sent.', allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
 
 /**
  * Every place a team is waiting on the operator, across all teams, as one-question tickets.
@@ -28,7 +30,7 @@ const PERMISSION_SAID: Record<PermissionDecision, string> = { allow_once: 'Allow
  * Newcomers get notification-style cards with the obvious answers; experts triage from the keyboard
  * (J/K move, A approve, R reply, O open the run), and every ticket opens the exact run it came from.
  */
-export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismiss, onScreenRunId = null, className = '' }: NeedsYouTrayProps) {
+export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend, onDismiss, onScreenRunId = null, className = '' }: NeedsYouTrayProps) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const [replying, setReplying] = useState<string | null>(null)
@@ -76,6 +78,19 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
     try {
       await onPermission(ticket, decision)
       setSaid(`${ticket.asker}: ${PERMISSION_SAID[decision]}`)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const spend = async (ticket: Ticket, decision: SpendDecision) => {
+    if (!onSpend) return
+    setBusy(ticket.id)
+    setError(null)
+    try {
+      await onSpend(ticket, decision)
+      setSaid(decision === 'add' ? `${ticket.asker}: money added, carrying on.` : `${ticket.asker}: ${ticket.spendActions?.finish ?? 'finished'}.`)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -137,7 +152,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
                   <span className="ticket-where">{ticket.teamName} · {ago(ticket.since)}</span>
                 </div>
                 <p className="ticket-text">
-                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
+                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={ticket.context}>{ticket.context}</blockquote>}
                 {onScreen(ticket) ? (
@@ -159,6 +174,10 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onDismi
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>
                       {ticket.team && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
+                    </>}
+                    {ticket.kind === 'spend' && onSpend && ticket.spendActions && <>
+                      <button type="button" className="btn btn-primary" disabled={busy === ticket.id} onClick={() => void spend(ticket, 'add')}>{ticket.spendActions.add}</button>
+                      <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void spend(ticket, 'finish')}>{ticket.spendActions.finish}</button>
                     </>}
                     {ticket.runId !== onScreenRunId && <button type="button" className="btn" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>}
                     {ticket.kind === 'failed' && <button type="button" className="btn" onClick={() => onDismiss(ticket.runId)}>Dismiss</button>}

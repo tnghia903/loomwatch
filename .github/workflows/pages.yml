@@ -1,7 +1,7 @@
 name: Pages
 
-# Publishes the landing page in site/ to https://loomwatch.github.io, together with the installer
-# (scripts/install.sh, served as /install.sh). The built page is pushed to the
+# Publishes the landing page in site/ to https://loomwatch.github.io, together with the installers
+# (scripts/install.sh and scripts/install.ps1, served as /install.sh and /install.ps1). The built page is pushed to the
 # loomwatch/loomwatch.github.io repository, and GitHub Pages serves that repository's main branch.
 # It runs when the page, the installer, the screenshots it borrows from docs/assets/readme, the
 # agent figures and live-figure code it borrows from ui/, the design-system fonts or this workflow
@@ -15,6 +15,7 @@ on:
     paths:
       - site/**
       - scripts/install.sh
+      - scripts/install.ps1
       - docs/assets/readme/**
       - ui/public/fonts/**
       - ui/public/agent/**

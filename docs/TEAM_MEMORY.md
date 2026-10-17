@@ -15,7 +15,7 @@ Four losses, each a line in the tree rather than a hypothesis.
 | Delegated helpers start blind | `team_bus.rs::run_agent_inner` | Its `role`, its wired skills, and the one string its caller typed into `dispatch`/`ask`. No goal, no constraints, no findings so far. It also skipped `workspace::materialise`, so it got no delivered capabilities either. |
 | Pipeline stages only see one hop back | `lib.rs::run_pipeline_nodes` | The original prompt plus the handover its direct predecessor wrote. Stage 3 never sees what stage 1 decided unless stage 2 restated it. |
 | Nothing survives the run | `migrations/`, `runs.rs` | The only table was append-only `run_events`; the run registry is in memory. |
-| Long sessions compact invisibly | `acp.rs::record_frame` | The harness compacts its own window; ACP reports nothing LoomWatch can act on. |
+| Long sessions are summarised | `agent/session.rs::compact` | Near the model's context limit, the agent's conversation is replaced by a summary the model writes. Only its instructions and its current task are kept word for word. |
 
 Two existing mechanisms point the way and are reused rather than duplicated. Pipelines stopped
 pasting transcripts between stages and instead asks the producing stage, in its still-warm
@@ -31,8 +31,8 @@ who writes them and how long they last.
 
 | Entry | Written by | Lives | Reaches an agent | Example |
 |---|---|---|---|---|
-| **Brief** | The operator | With the team, across runs. Markdown beside the team YAML. | Always, at every start, within a budget. If it does not fit, the run refuses to start and says why. | "We ship on ACP v1 only. British spelling. Never touch `main`." |
-| **Notebook** | Agents, during a run | With the run. Any entry can be **kept** so the next run sees it. | Selected at start by lineage and kind; searchable mid-turn through Team Bus tools. | "Decision · Researcher: the Hermes adapter is out of scope, its auth is broken on this machine." |
+| **Brief** | The operator | With the team, across runs. Markdown beside the team YAML. | Always, at every start, within a budget. If it does not fit, the run refuses to start and says why. | "Primary sources only. British spelling. Never touch `main`." |
+| **Notebook** | Agents, during a run | With the run. Any entry can be **kept** so the next run sees it. | Selected at start by lineage and kind; searchable mid-turn through Team Bus tools. | "Decision · Researcher: the 2019 survey is out of scope, its sample is too small." |
 | **Checkpoint** | Each agent, at boundaries | With the run, one per agent per boundary. | Only when continuing work that stopped. | "Done: sections 1–3 drafted. Next: section 4. Blocked on: pricing table." |
 
 **Two verbs, kept separate.** **Pin** means "always include this in future packets, within the
@@ -47,7 +47,7 @@ map of what each stage handed forward is `handovers`, never `briefs`.
 
 Four channels, and the design is explicit about which one carries what.
 
-### Channel 1 — the context packet (session start, every harness)
+### Channel 1 — the context packet (session start, every agent)
 
 A section, `## What the team knows`, rendered into the prompt after the role and before the task.
 Brief first, then selected Notebook entries, then a checkpoint if continuing. **The exact rendered
@@ -55,35 +55,29 @@ text is stored before it is sent**, so the UI shows what was supplied rather tha
 prompt.
 
 Deterministic, and it reaches all three call sites (team mode, every pipeline stage, every
-delegated helper). Its one weakness: it is not visible after the harness compacts.
+delegated helper). Its one weakness: once a long conversation is summarised, the packet survives
+only as far as the summary carries it.
 
-### Channel 2 — the harness's own memory file (session start, managed workspaces)
+### Channel 2 — the project notes file (session start, managed workspaces)
 
-Every supported harness reads a project memory file from its working directory: `CLAUDE.md`,
-`AGENTS.md`, `GEMINI.md`. `workspace::materialise` already builds a per-agent directory, so
-writing the Brief there as the harness-native file means the harness reloads it into its own
-system prompt — the one place a compaction does not reach, with zero protocol work.
+LoomWatch's agent reads `AGENTS.md` from its work folder at the start of every session and puts it
+in its instructions, under "Project notes". `workspace::materialise` already builds a per-agent
+directory, so writing the Brief there as `AGENTS.md` puts it in the agent's instructions — the one
+place a summary does not reach.
 
 The cost: it only applies when the agent runs in the managed workspace. `deliverAs: native-file`
 is the default and moves the agent there, exactly as wiring a skill already does. An agent that
 must run inside a repository declares `deliverAs: packet-only`, keeps its `cwd`, and the panel
-says its Brief will not survive compaction.
+says its Brief will not survive a summary. An agent whose folder is one the operator chose also
+gets its Brief through the packet alone: writing `AGENTS.md` there would change their project.
 
-Which file each harness reads (verified against each harness):
+### Channel 3 — Team Bus memory tools (mid-turn, every agent in a run)
 
-| Harness | File |
-|---|---|
-| Claude (`claude-agent-acp`) | `CLAUDE.md` |
-| Gemini (`gemini --acp`) | `GEMINI.md` |
-| Codex, OpenCode, OpenClaw, Hermes, pi | `AGENTS.md` |
-| anything LoomWatch does not recognise | none — packet only |
-
-### Channel 3 — Team Bus memory tools (mid-turn, any harness with HTTP MCP)
-
-`memory_search`, `memory_read`, `memory_write` and `checkpoint` join the delegation tools already
-injected through `session/new`. The bearer token identifies the author and bounds what it can see;
-the agent never names itself. Every call archives as the existing `tool_call`/`tool_update` pair,
-so memory writes appear as evidence in the run story for free.
+`memory_search`, `memory_read`, `memory_write` and `checkpoint` join the delegation tools every
+agent in a run is given. They are direct calls into the daemon: each agent's connection to the bus
+carries the token that identifies the author and bounds what it can see; the agent never names
+itself. Every call archives as the existing `tool_call`/`tool_update` pair, so memory writes
+appear as evidence in the run story for free.
 
 Works during a long turn and needs no new event kinds. Depends on the model choosing to call.
 
@@ -125,8 +119,8 @@ and content hash it came from. It reads the stored record, not the prose.
   "remembers", or "has read".
 - Every agent-written entry carries author, time and source. Corrections say who corrected and
   when. Nothing is silently overwritten.
-- Budget copy names **characters**, matching `conversation.brief.summaryChars`. No invented
-  "context 63% full" meter: adapters do not report live occupancy.
+- Budget copy names **characters**, matching `conversation.brief.summaryChars`, never a share of
+  the model's context: the budget is memory's own, whatever the model holds.
 - Narrow screens: the panel becomes a full-height sheet, the same treatment the Library has.
 
 ## 5. Configuration
@@ -160,7 +154,7 @@ Rules the loader enforces beyond the schema:
   team file's own directory. Absolute paths and escapes are refused, naming the entry.
 - A Brief file that is missing, unreadable, or not valid UTF-8 refuses the run. It is never
   skipped: a Brief that silently did not load is worse than one that fails loudly.
-- The whole Brief is read **once**, at run acceptance, before anything spawns. Every stage and
+- The whole Brief is read **once**, at run acceptance, before any agent starts. Every stage and
   every delegated helper in one run is supplied the same bytes even if the operator saves a file
   mid-run — which is what lets the panel say truthfully who still holds the old revision.
 - Pinned content exceeding `packet.maxChars` for any agent refuses the run, naming the entries and
@@ -172,11 +166,12 @@ Rules the loader enforces beyond the schema:
 
 | Table | Holds | Notes |
 |---|---|---|
-| `context_packets` | run id, agent id, invocation, rendered text, sections with rationale, Brief paths and hashes, budget used | Stored before `session/prompt`. Replay and follow-ups read this, never a fresh search against today's memory. |
+| `context_packets` | run id, agent id, invocation, rendered text, sections with rationale, Brief paths and hashes, budget used | Stored before the opening prompt is sent. Replay and follow-ups read this, never a fresh search against today's memory. |
 | `memory_notes` | team id, run id (null once kept), author agent, kind, title, body, sources, state, revision, supersedes | Immutable revisions; a correction inserts a new revision superseding the old. Optimistic concurrency on `revision`; idempotency key on tool writes. |
-| `checkpoints` | run id, agent id, invocation, done, next, blockers, artifact paths and hashes, archive `seq` high-water mark | Written at stage end (teams with a notebook), on park, by the `checkpoint` tool, and from the archive when a run fails or is cancelled. |
-| `runs` | everything `RunRecord` holds in memory, plus `followsRunId`, `startAt`, `waitingOn` | Its own ADR. Run lineage, follow-ups and parked questions must survive a restart. |
+| `checkpoints` | run id, agent id, invocation, done, next, blockers, artifact paths and hashes, archive `seq` high-water mark | Written at stage end (teams with a notebook), on park, by the `checkpoint` tool, and from the archive when a run fails, is cancelled or is ended by a restart. |
+| `runs` | everything `RunRecord` holds in memory, plus `followsRunId`, `startAt`, `waitingOn` | Run lineage, follow-ups and parked questions must survive a restart. |
 | `operator_questions` | run id, node or agent id, question, asked at, answered at, answer event id | The queue behind "waiting for you". One open question per agent at a time. |
+| `agent_sessions` | session id, run id, agent id, the agent's conversation (compressed), updated at | A parked agent while it waits. Taken out when it is reopened; removed when its stop or its run ends. |
 
 `run_events` is untouched. Memory tool calls archive as the bus's existing `tool_call`/`tool_update`
 events; operator answers archive as user `message` events from the operator node's id. Packet
@@ -227,9 +222,11 @@ metadata and questions travel over REST, so the live WebSocket messages do not c
 ## 10. What keeps it fast
 
 - **Bounded prompts.** A fixed character budget, so opening prompts do not grow with the age of
-  the team. Pinned overflow fails before a harness spawns.
-- **No idle processes.** Parked agents reload with `session/load` wherever the harness allows it;
-  kept-alive sessions have a short bound everywhere else.
+  the team. Pinned overflow fails before any agent starts.
+- **No idle processes.** A parked agent is its conversation, kept in the database while it waits,
+  not a running process or anything held in memory; answering reopens the same conversation. A
+  daemon restart ends the run it was parked in, as it ends every unfinished run, and lets it go;
+  its checkpoint is where a new run can start from.
 - **No re-execution.** Follow-ups replay stored handovers and packets; only stages after `startAt`
   run. Retry stays the explicit "from zero" action.
 - **Local text search.** SQLite full-text search over a few thousand notes answers in

@@ -293,6 +293,18 @@
 .tc-piece.live .tc-talk-line b { color: var(--color-ok); }
 .tc-piece.live .tc-talk-line b.tc-wait { color: var(--color-accent); }
 .tc-talk-acts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; }
+/* What the run spent (ADR 0068): a bobbin that unwinds as the agents spend, the thread run off it
+   in each agent's colour, and the figure. Gold once the run has used its limit. */
+.tc-spool { display: inline-flex; align-items: center; gap: 6px; color: var(--color-ink-3); font: 500 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tc-spool-bobbin { flex: none; overflow: visible; }
+.tc-spool-flange { fill: var(--color-ink-3); }
+.tc-spool-wound { fill: color-mix(in srgb, var(--color-ink-3) 45%, transparent); transform-box: fill-box; transform-origin: center; transition: transform var(--t-quick, .2s) var(--ease-out, ease-out); }
+.tc-spool-track { display: inline-flex; width: 44px; height: 3px; border-radius: 2px; overflow: hidden; background: var(--color-hairline); }
+.tc-spool-track i { display: block; height: 100%; background: var(--hue); transition: width var(--t-quick, .2s) var(--ease-out, ease-out); }
+.tc-spool-track i + i { box-shadow: -1px 0 0 var(--color-panel-solid); }
+.tc-spool.full, .tc-spool.full .tc-spool-words { color: var(--color-accent); }
+.tc-spool.full .tc-spool-flange { fill: var(--color-accent); }
+@media (prefers-reduced-motion: reduce) { .tc-spool-wound, .tc-spool-track i { transition: none; } }
 .tc-link {
   display: inline-flex;
   align-items: center;
@@ -761,8 +773,10 @@
 .delivery-heading h1 .delivery-took { margin-left: 10px; font-size: .55em; font-weight: 400; color: var(--color-ink-3); }
 
 /* ---------- Auto mode (ADR 0061): who decides the agents' commands, beside the message box ---------- */
-.tc-composer-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.tc-composer-top > .tc-where { flex: 1; min-width: 0; }
+/* The hint keeps a readable width; in a narrow chat the chips beside it (what a run may spend,
+   Auto mode) move to a line of their own rather than squeezing it into a column. */
+.tc-composer-top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.tc-composer-top > .tc-where { flex: 1 1 15em; min-width: 0; }
 .tc-mode { position: relative; flex: none; }
 .tc-mode-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid var(--color-hairline); border-radius: 999px; background: none; font: 400 12px/1.5 var(--font-sans); color: var(--color-ink-3); cursor: pointer; white-space: nowrap; }
 .tc-mode-chip b { font-weight: 600; color: var(--color-ink-2); }
@@ -791,6 +805,12 @@
 .tc-mode-name { font-size: 13px; font-weight: 600; color: var(--color-ink); }
 .tc-mode-says { grid-column: 2 / -1; font-size: 12px; line-height: 1.4; color: var(--color-ink-3); }
 .tc-mode-foot { margin: 4px 8px 2px; font-size: 11.5px; line-height: 1.45; color: var(--color-ink-3); }
+/* What one run may spend (ADR 0068): set, it reads like Auto mode on; with no limit, quiet. */
+.tc-mode-chip.mode-spend b { color: var(--color-ink); }
+.tc-spend-menu { display: grid; gap: 6px; padding: 10px; }
+.tc-spend-field { display: inline-flex; align-items: center; gap: 6px; margin: 0 6px; font: 500 13px/1 var(--font-mono); color: var(--color-ink-2); }
+.tc-spend-field .input { width: 7em; font-variant-numeric: tabular-nums; }
+.tc-spend-acts { display: flex; gap: 8px; margin: 2px 6px 0; }
 @media (prefers-reduced-motion: no-preference) {
   .tc-mode-menu { animation: tc-pop var(--t-quick) var(--ease-out) both; transform-origin: bottom right; }
 }

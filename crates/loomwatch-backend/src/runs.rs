@@ -49,10 +49,13 @@ const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MISSING_CANONICAL_RESPONSE: &str = "missing_canonical_response";
 const PROCESS_CRASHED: &str = "process_crashed";
 const PROTOCOL_FAILURE: &str = "protocol_failure";
-/// The app ended a turn normally but reported it as failed (`acp::AppReportedError`), such as
-/// Codex refusing a model the signed-in account cannot use.
+/// A turn that could not finish, said in the operator's words (`engine::AppReportedError`): the
+/// `OpenRouter` key was refused, the account is out of credits, or no key is set.
 const APP_ERROR: &str = "app_error";
 const SPAWN_FAILED: &str = "spawn_failed";
+/// The run stopped at its spool (ADR 0068): as a failure's code when a scheduled run had nobody to
+/// ask, and as the stop reason whenever a run ended there.
+const SPEND_LIMIT: &str = "spend_limit";
 /// Stable pre-acceptance codes from `RUN_PROVENANCE_CONTRACT` §11.
 const STALE_TEAM_REVISION: &str = "stale_team_revision";
 /// A run refused until the operator reviews what the team file starts (ADR 0048).
@@ -64,7 +67,8 @@ const WHOLE_TEAM: &str = "*";
 /// What a record left non-terminal by a previous process is failed with at boot. Operator-facing
 /// prose, not a code: the contract defines no code for a supervisor that went away, and the UI
 /// already renders a `failed` record with its error verbatim.
-pub const INTERRUPTED_BY_RESTART: &str = "interrupted by daemon restart";
+pub const INTERRUPTED_BY_RESTART: &str = "LoomWatch restarted while this run was going, so it stopped. Run it again, or carry on from \
+     where it stopped if the team offers that.";
 
 /// Lifecycle of one run. Transitions only move forward; terminal states never change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -260,6 +264,15 @@ pub struct RunRecord {
     /// client can say who [`Self::working`] is without reading the team file.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub agent_names: BTreeMap<String, String>,
+    /// What the run has spent and may spend (ADR 0068): its spool, each agent's share and guard,
+    /// what the operator added. Fixed at launch from the team file, counted as the agents work,
+    /// and stored, so a finished run still shows it. `None` for runs recorded before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spend: Option<crate::spend::RunSpend>,
+    /// Spend stops waiting for the operator: the run, or one agent, used what it may spend (ADR
+    /// 0068). Live only, like `permission_requests`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spend_stops: Vec<crate::spend::SpendStop>,
 }
 
 /// A note sent to an agent at work, waiting for its current turn to end (ADR 0051).
@@ -398,6 +411,8 @@ impl RunRecord {
                     (agent.id.clone(), name.to_owned())
                 })
                 .collect(),
+            spend: Some(crate::spend::RunSpend::for_team(team)),
+            spend_stops: Vec::new(),
         })
     }
 }
@@ -443,13 +458,16 @@ struct RegistryInner {
     live: BTreeMap<String, mpsc::Sender<crate::operator::LiveTurn>>,
     /// The other half of each open permission request (ADR 0040), keyed by request id: the
     /// channel `POST /api/runs/{id}/permissions` hands the operator's decision to.
-    asking: BTreeMap<String, oneshot::Sender<crate::permissions::PermissionDecision>>,
+    asking: BTreeMap<String, oneshot::Sender<crate::permissions::PermissionReply>>,
     /// What the operator allowed for the rest of a run, keyed `run_id\0agent_id\0scope`, where the
     /// scope is a tool kind or one MCP tool (`permissions::grant_scope`).
     allowed_for_run: BTreeSet<String>,
     /// What "Send now" pulls for each agent at work, keyed `run_id\0agent_id` (ADR 0051). An agent
     /// is shown as working exactly while it has an entry here.
     interrupts: BTreeMap<String, Arc<Interrupt>>,
+    /// The other half of each open spend stop (ADR 0068), keyed by stop id: every agent waiting at
+    /// the stop watches it, and `POST /api/runs/{id}/spend` sends the operator's answer down it.
+    spending: BTreeMap<String, tokio::sync::watch::Sender<Option<crate::spend::SpendAnswer>>>,
 }
 
 /// One run parked on the operator.
@@ -522,15 +540,19 @@ impl RunStore {
         let agent_names = (!record.agent_names.is_empty())
             .then(|| serde_json::to_value(&record.agent_names).ok())
             .flatten();
+        let spend = record
+            .spend
+            .as_ref()
+            .and_then(|spend| serde_json::to_value(spend).ok());
         sqlx::query(
             "INSERT INTO runs
              (run_id, session_id, team_path, prompt, status, mode, entrypoint, responder,
               agent_ids, created_at, started_at, finished_at, error, exit_code, error_code,
               stop_reason, event_count, reply, trigger, delivery, follows_run_id, start_at,
               retry_of_run_id, waiting_on, start_key, start_fingerprint, team_key, only_agent,
-              team_revision, team_name, agent_names)
+              team_revision, team_name, agent_names, spend)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+                     $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
              ON CONFLICT (run_id) DO UPDATE SET
                status = EXCLUDED.status,
                started_at = EXCLUDED.started_at,
@@ -546,6 +568,7 @@ impl RunStore {
                start_at = EXCLUDED.start_at,
                retry_of_run_id = EXCLUDED.retry_of_run_id,
                waiting_on = EXCLUDED.waiting_on,
+               spend = EXCLUDED.spend,
                -- Never cleared by a later write: the key binds for the lifetime of the run, and a
                -- transition that carries no key must not unbind it.
                start_key = COALESCE(EXCLUDED.start_key, runs.start_key),
@@ -590,6 +613,7 @@ impl RunStore {
         .bind(&record.team_revision)
         .bind(&record.team_name)
         .bind(&agent_names)
+        .bind(&spend)
         .execute(self.db.writer())
         .await?;
         Ok(())
@@ -696,6 +720,10 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
                 .try_get::<Option<Value>, _>("agent_names")?
                 .and_then(|names| serde_json::from_value(names).ok())
                 .unwrap_or_default(),
+            spend: row
+                .try_get::<Option<Value>, _>("spend")?
+                .and_then(|spend| serde_json::from_value(spend).ok()),
+            spend_stops: Vec::new(),
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -817,16 +845,45 @@ impl RunRegistry {
 
     /// Fill a cold cache from the `runs` table. Returns how many records were recovered.
     ///
-    /// Called once at boot. A recovered run is a *record*, never a live task: its
-    /// [`RunEntry::handle`] is `None`, so cancelling it changes the record and aborts nothing,
+    /// [`Self::recover`] calls it once at boot. A recovered run is a *record*, never a live task:
+    /// its [`RunEntry::handle`] is `None`, so cancelling it changes the record and aborts nothing,
     /// which is the truth after a restart.
     ///
     /// # Errors
     ///
     /// Returns an error when the database fails or a row cannot be decoded.
     pub async fn reload(&self) -> Result<usize, sqlx::Error> {
+        self.reload_records()
+            .await
+            .map(|(recovered, _interrupted)| recovered)
+    }
+
+    /// [`Self::reload`], then settle every run a previous process left unfinished as a cancel
+    /// would: what it was doing becomes a checkpoint to start a new run from, and the agents it had
+    /// parked are let go.
+    ///
+    /// A parked agent's conversation is in the database and would come back as it was, but the
+    /// run that parked it is gone: the code that was waiting on the stop, holding the stages'
+    /// handovers and ready to take the answer, was this process's task and did not survive it. So
+    /// a run waiting at a stop when the daemon stopped is `failed` like any other, and its
+    /// checkpoint is where the operator picks the work up.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database fails or a row cannot be decoded.
+    pub async fn recover(&self, archive: &EventArchive) -> Result<usize, sqlx::Error> {
+        let (recovered, interrupted) = self.reload_records().await?;
+        for run_id in &interrupted {
+            record_abandoned_checkpoints(archive, run_id, &crate::RunLineage::default()).await;
+            forget_parked_agents(archive, run_id).await;
+        }
+        Ok(recovered)
+    }
+
+    /// How many records were recovered, and the runs among them a restart interrupted.
+    async fn reload_records(&self) -> Result<(usize, Vec<String>), sqlx::Error> {
         let Some(store) = &self.store else {
-            return Ok(0);
+            return Ok((0, Vec::new()));
         };
         let stored = store.recent().await?;
         let interrupted = {
@@ -861,6 +918,9 @@ impl RunRegistry {
                     record.status = RunStatus::Failed;
                     record.finished_at = Some(now());
                     record.error = Some(INTERRUPTED_BY_RESTART.to_owned());
+                    // As on every other way to an end: a run that is over cannot still be waiting
+                    // for an answer, and nothing is left here to take one.
+                    record.waiting_on = None;
                     interrupted.push(run_id.clone());
                 }
                 inner.runs.insert(
@@ -888,7 +948,7 @@ impl RunRegistry {
                 if interrupted.len() == 1 { "" } else { "s" }
             );
         }
-        Ok(recovered)
+        Ok((recovered, interrupted))
     }
 
     /// Register a new run. Its `run_id` must be unique.
@@ -1067,7 +1127,7 @@ impl RunRegistry {
         &self,
         run_id: &str,
         request: crate::permissions::PermissionRequest,
-    ) -> Option<oneshot::Receiver<crate::permissions::PermissionDecision>> {
+    ) -> Option<oneshot::Receiver<crate::permissions::PermissionReply>> {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         let entry = inner.runs.get_mut(run_id)?;
         if entry.record.status.is_terminal() || entry.record.trigger == RunTrigger::Schedule {
@@ -1102,19 +1162,148 @@ impl RunRegistry {
         })
     }
 
+    /// What `agent`'s next model call in `run_id` meets (ADR 0068): go ahead, stop, or wait at a
+    /// spend stop for the operator. A run the registry doesn't know has no spool (the CLI's); one
+    /// that has finished spends nothing more. A scheduled run has nobody to ask, so it stops.
+    pub(crate) fn spend_gate(&self, run_id: &str, agent: &str, name: &str) -> crate::spend::Gate {
+        use crate::spend::{Check, Gate};
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let RegistryInner { runs, spending, .. } = &mut *inner;
+        let Some(entry) = runs.get_mut(run_id) else {
+            return Gate::Ahead;
+        };
+        if entry.record.status.is_terminal() {
+            return Gate::Stop { first: None };
+        }
+        let can_ask = entry.record.trigger != RunTrigger::Schedule;
+        let RunRecord {
+            spend, spend_stops, ..
+        } = &mut entry.record;
+        let Some(spend) = spend.as_mut() else {
+            return Gate::Ahead;
+        };
+        match crate::spend::check(spend, spend_stops, agent, name, can_ask, &now()) {
+            Check::Ahead => Gate::Ahead,
+            Check::Stop { first } => Gate::Stop { first },
+            Check::Wait { stop, opened } => {
+                let answer = spending
+                    .entry(stop.id.clone())
+                    .or_insert_with(|| tokio::sync::watch::channel(None).0)
+                    .subscribe();
+                Gate::Wait {
+                    stop,
+                    opened,
+                    answer,
+                }
+            }
+        }
+    }
+
+    /// Adds what one model call of `agent` cost to its run's spool.
+    pub(crate) fn count_spend(&self, run_id: &str, agent: &str, usd: f64) {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(spend) = inner
+            .runs
+            .get_mut(run_id)
+            .and_then(|entry| entry.record.spend.as_mut())
+        {
+            spend.count(agent, usd);
+        }
+    }
+
+    /// Why `run_id` may make no more model calls at all, once it may not: the operator finished it
+    /// at its spool, or a scheduled run had nobody to ask.
+    pub(crate) fn spend_stopped(&self, run_id: &str) -> Option<crate::spend::SpendStopped> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let spend = inner.runs.get(run_id)?.record.spend.as_ref()?;
+        Some(crate::spend::SpendStopped {
+            cause: spend.stopped?,
+            limit_usd: spend.limit_usd.unwrap_or_default(),
+        })
+    }
+
+    /// `agent`'s own guard in `run_id`, once the operator stopped it there (ADR 0068): it makes no
+    /// more model calls in this run.
+    pub(crate) fn guard_stopped(&self, run_id: &str, agent: &str) -> Option<f64> {
+        let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        let share = inner
+            .runs
+            .get(run_id)?
+            .record
+            .spend
+            .as_ref()?
+            .agents
+            .get(agent)?;
+        share.stopped.then_some(share.limit_usd).flatten()
+    }
+
+    /// The operator's answer at one spend stop (ADR 0068), handed to every agent waiting there:
+    /// add to the spool (or the agent's guard) and carry on, or finish. Finishing the team's spool
+    /// also releases every other stop of the run, since nothing more will be spent.
+    ///
+    /// # Errors
+    ///
+    /// Not found when the run or the stop is unknown: already answered, or the run ended. A
+    /// conflict when what is to be added isn't a sensible sum; the stop stays open.
+    pub fn answer_spend(
+        &self,
+        run_id: &str,
+        stop_id: &str,
+        decision: crate::spend::SpendDecision,
+        add_usd: Option<f64>,
+    ) -> Result<RunRecord, OperatorError> {
+        use crate::spend::{AnswerError, MAX_TOP_UP_USD, SpendDecision};
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let RegistryInner { runs, spending, .. } = &mut *inner;
+        let Some(entry) = runs.get_mut(run_id) else {
+            return Err(OperatorError::not_found(format!(
+                "run {run_id} does not exist"
+            )));
+        };
+        let RunRecord {
+            spend, spend_stops, ..
+        } = &mut entry.record;
+        let spend = spend.get_or_insert_with(crate::spend::RunSpend::default);
+        let (stop, answer) = crate::spend::answer(spend, spend_stops, stop_id, decision, add_usd)
+            .map_err(|error| match error {
+            AnswerError::NotOpen => OperatorError::not_found(
+                "That stop is no longer waiting: it was answered, or the run ended.",
+            ),
+            AnswerError::Amount => OperatorError::conflict(format!(
+                "Add an amount of money above $0.00 and at most {}.",
+                crate::spend::usd(MAX_TOP_UP_USD)
+            )),
+        })?;
+        let mut released = vec![stop.id];
+        if decision == SpendDecision::Finish && stop.agent.is_none() {
+            released.extend(spend_stops.drain(..).map(|other| other.id));
+        }
+        for id in released {
+            if let Some(sender) = spending.remove(&id) {
+                sender.send_replace(Some(answer));
+            }
+        }
+        Ok(entry.record.clone())
+    }
+
     /// The operator's answer to one open permission request, handed to the agent waiting on it.
-    /// Answers the run as it is once the request is closed.
+    /// Answers the run as it is once the request is closed. `text` is the changed command or
+    /// address for an edit, and the words for an answer in the agent's place.
     ///
     /// # Errors
     ///
     /// Not found when the run or the request is unknown — already answered, declined after the
-    /// wait, or the run ended.
+    /// wait, or the run ended. A conflict when an edit or an answer has no text, or too much, or
+    /// the request has nothing that may be changed; the request stays open for another answer.
     pub fn answer_permission(
         &self,
         run_id: &str,
         request_id: &str,
         decision: crate::permissions::PermissionDecision,
+        text: Option<&str>,
     ) -> Result<RunRecord, OperatorError> {
+        use crate::permissions::{MAX_ANSWER_CHARS, PermissionDecision};
+        let text = text.map(str::trim).filter(|text| !text.is_empty());
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         let Some(entry) = inner.runs.get_mut(run_id) else {
             return Err(OperatorError::not_found(format!(
@@ -1131,6 +1320,37 @@ impl RunRegistry {
                 "That request is no longer waiting: it was answered, or declined when nobody \
                  answered in time.",
             ));
+        };
+        let worded = matches!(
+            decision,
+            PermissionDecision::Edit | PermissionDecision::Answer
+        );
+        if decision == PermissionDecision::Edit
+            && entry.record.permission_requests[position].edit.is_none()
+        {
+            return Err(OperatorError::conflict(
+                "Only a command can be changed before it is allowed. Allow it, deny it, or answer \
+                 in its place.",
+            ));
+        }
+        if worded && text.is_none() {
+            return Err(OperatorError::conflict(
+                if decision == PermissionDecision::Edit {
+                    "Write the command to run instead, or choose another answer."
+                } else {
+                    "Write your answer first, or choose another answer."
+                },
+            ));
+        }
+        if text.is_some_and(|text| text.chars().count() > MAX_ANSWER_CHARS) {
+            return Err(OperatorError::conflict(format!(
+                "That is longer than {MAX_ANSWER_CHARS} characters. Shorten it and send it again."
+            )));
+        }
+        let text = if worded {
+            text.map(str::to_owned)
+        } else {
+            None
         };
         let request = entry.record.permission_requests.remove(position);
         // "Allow for the whole team" also answers every other agent already waiting on the same
@@ -1158,7 +1378,10 @@ impl RunRegistry {
         }
         for id in answered {
             if let Some(sender) = inner.asking.remove(&id) {
-                let _delivered = sender.send(decision);
+                let _delivered = sender.send(crate::permissions::PermissionReply {
+                    decision,
+                    text: text.clone(),
+                });
             }
         }
         Ok(record)
@@ -1179,7 +1402,7 @@ impl RunRegistry {
     }
 
     /// Abort a live run's task and mark it `cancelled`. Dropping the task drops its
-    /// [`crate::acp::AcpProcess`], whose child was spawned with `kill_on_drop`, and its
+    /// [`crate::engine::AgentRun`], whose child was spawned with `kill_on_drop`, and its
     /// Team Bus teardown guard, which aborts delegated helpers the same way.
     pub fn cancel(&self, run_id: &str) -> CancelOutcome {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
@@ -1368,9 +1591,15 @@ impl RunRegistry {
             entry.record.waiting_on = None;
             entry.handle = None;
             let open = std::mem::take(&mut entry.record.permission_requests);
+            let stops = std::mem::take(&mut entry.record.spend_stops);
             entry.record.working.clear();
             entry.record.queued_notes.clear();
             forget_permissions(&mut inner, run_id, &open);
+            // Dropping a stop's sender is what tells an agent still waiting at it that the run is
+            // over: it looks again, finds the run finished, and spends nothing more.
+            for stop in stops {
+                inner.spending.remove(&stop.id);
+            }
         }
         true
     }
@@ -1514,7 +1743,7 @@ struct RunsState {
 /// editor uses (`main` canonicalises once and hands it to both); a non-canonical path is
 /// canonicalised here as a fallback. Every route is loopback-only and never cached.
 pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunRegistry) -> Router {
-    let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/runs", post(start_run).get(list_runs))
         .route("/api/runs/{id}", get(get_run))
@@ -1526,6 +1755,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/cancel", post(cancel_run))
         .route("/api/runs/{id}/deliver", post(deliver_run))
         .route("/api/runs/{id}/permissions", post(answer_permission))
+        .route("/api/runs/{id}/spend", post(answer_spend))
         .route("/api/team/approve", post(approve_team))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(RunsState {
@@ -2879,22 +3109,35 @@ async fn execute(
         &lineage,
     );
     tokio::pin!(run);
-    let mut ticker = tokio::time::interval(SPAWN_POLL_INTERVAL);
-    let mut spawned = false;
-    let result = loop {
-        tokio::select! {
-            result = &mut run => break result,
-            _ = ticker.tick(), if !spawned => {
-                if first_process_spawned(&archive, &run_id).await {
-                    spawned = true;
-                    // A cancel can race any of these transitions; the registry keeps
-                    // terminal states frozen, so a refused transition needs no handling.
-                    let _applied = registry.mark_running(&run_id);
-                    persist_or_log(&registry, &run_id).await;
-                }
+    // Polled beside the run, never instead of it: the run may be holding the database's one
+    // writing connection while this reads. And told to stop rather than dropped, so it is never
+    // cut off part way through a query.
+    let (run_over, mut over) = tokio::sync::watch::channel(false);
+    let watch_spawn = async {
+        let mut ticker = tokio::time::interval(SPAWN_POLL_INTERVAL);
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {}
+                _ = over.changed() => return,
+            }
+            if first_process_spawned(&archive, &run_id).await {
+                // A cancel can race any of these transitions; the registry keeps terminal
+                // states frozen, so a refused transition needs no handling.
+                let _applied = registry.mark_running(&run_id);
+                persist_or_log(&registry, &run_id).await;
+                return;
             }
         }
     };
+    let finish = async {
+        let result = run.await;
+        let _ = run_over.send(true);
+        result
+    };
+    let (result, ()) = tokio::join!(finish, watch_spawn);
+    // The run is over, however it ended. An agent it still has parked (a run that failed while a
+    // stage waited behind a stop leaves one) has nothing left to reopen it.
+    forget_parked_agents(&archive, &run_id).await;
     let responder = registry.get(&run_id).map(|record| record.responder);
     let _applied = match result {
         // CONTRACT §4: a normal turn with no response is `failed`
@@ -2915,6 +3158,18 @@ async fn execute(
             let (_, _, stop_reason) = archived_exit(&archive, &run_id, responder.as_deref()).await;
             registry.mark_succeeded(&run_id, &outcome, stop_reason)
         }
+        Err(error) if crate::spend::SpendStopped::of(&error).is_some() => {
+            let stopped = crate::spend::SpendStopped::of(&error).expect("checked by the guard");
+            settle_at_spool(
+                &registry,
+                &archive,
+                &run_id,
+                &lineage,
+                responder.as_deref(),
+                stopped,
+            )
+            .await
+        }
         Err(error) => {
             let (exit_code, event_count, stop_reason) =
                 archived_exit(&archive, &run_id, responder.as_deref()).await;
@@ -2934,6 +3189,135 @@ async fn execute(
         }
     };
     persist_or_log(&registry, &run_id).await;
+}
+
+/// End a run that stopped at its spool (ADR 0068). Its checkpoints are kept either way, so it can
+/// be carried on from where it stopped.
+///
+/// - The operator chose "Finish with what it has": the run is done, and its answer is the
+///   responder's last words, or failing that the last words any agent wrote. With none at all
+///   there is nothing to finish with, and it fails.
+/// - A scheduled run had nobody to ask: it fails, saying so, and delivers nothing.
+async fn settle_at_spool(
+    registry: &RunRegistry,
+    archive: &EventArchive,
+    run_id: &str,
+    lineage: &crate::RunLineage,
+    responder: Option<&str>,
+    stopped: crate::spend::SpendStopped,
+) -> bool {
+    let (exit_code, event_count, _) = archived_exit(archive, run_id, responder).await;
+    record_abandoned_checkpoints(archive, run_id, lineage).await;
+    let stop_reason = Some(SPEND_LIMIT.to_owned());
+    let words = match stopped.cause {
+        crate::spend::Stopped::Finished => last_words(archive, run_id, responder).await,
+        crate::spend::Stopped::NobodyToAsk => None,
+    };
+    if let Some(reply) = words {
+        let outcome = SessionOutcome {
+            session_id: run_id.to_owned(),
+            event_count: event_count.unwrap_or_default(),
+            exit_code: 0,
+            reply,
+        };
+        return registry.mark_succeeded(run_id, &outcome, stop_reason);
+    }
+    let error = match stopped.cause {
+        crate::spend::Stopped::Finished => format!(
+            "The team used its {} before any agent wrote anything, so there was nothing to finish \
+             with.",
+            crate::spend::usd(stopped.limit_usd)
+        ),
+        crate::spend::Stopped::NobodyToAsk => stopped.to_string(),
+    };
+    registry.mark_failed(
+        run_id,
+        Some(error),
+        Some(SPEND_LIMIT.to_owned()),
+        stop_reason,
+        exit_code,
+        event_count,
+    )
+}
+
+/// What a run that stopped part way had to say for itself: the responder's last turn of work, or
+/// failing that the last turn of work any agent wrote in. Checkpoints and handovers are the
+/// coordinator's bookkeeping, never an answer, so their turns are skipped.
+///
+/// One agent can work in several sessions at once (a lead's dispatches to the Researcher), and
+/// their words reach the record interleaved, so each session's turn is kept apart by the session
+/// its prompt, words and tool calls name.
+async fn last_words(
+    archive: &EventArchive,
+    run_id: &str,
+    responder: Option<&str>,
+) -> Option<String> {
+    let events = archive.load_session(run_id).await.ok()?;
+    let mut bookkeeping: BTreeSet<String> = BTreeSet::new();
+    // Keyed by agent and session; an event that names no session is the agent's latest one's.
+    let mut turns: BTreeMap<(String, String), crate::engine::ReplyText> = BTreeMap::new();
+    let mut sessions: BTreeMap<String, String> = BTreeMap::new();
+    let mut latest: Option<(String, String)> = None;
+    for event in &events {
+        if event.agent_id.is_empty() {
+            continue;
+        }
+        let agent = &event.agent_id;
+        if let Some(session) = event
+            .raw
+            .as_ref()
+            .and_then(|raw| raw.pointer("/params/sessionId"))
+            .and_then(Value::as_str)
+        {
+            sessions.insert(agent.clone(), session.to_owned());
+        }
+        let key = (
+            agent.clone(),
+            sessions.get(agent).cloned().unwrap_or_default(),
+        );
+        let turn = turns.entry(key.clone()).or_default();
+        match event.kind {
+            EventKind::SessionMeta if event.payload["phase"] == "turn_purpose" => {
+                if event.payload["purpose"] == "work" {
+                    bookkeeping.remove(agent);
+                } else {
+                    bookkeeping.insert(agent.clone());
+                }
+            }
+            _ if bookkeeping.contains(agent) => {}
+            EventKind::Message if event.payload["role"] == "user" => turn.clear(),
+            EventKind::Message if event.payload["role"] == "agent" => {
+                if let Some(text) = event
+                    .payload
+                    .pointer("/content/text")
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.trim().is_empty())
+                {
+                    turn.push(text, event.payload["messageId"].as_str());
+                    latest = Some(key);
+                }
+            }
+            EventKind::ToolCall
+            | EventKind::ToolUpdate
+            | EventKind::Plan
+            | EventKind::Permission => turn.note_activity(),
+            _ => {}
+        }
+    }
+    let said = |key: (String, String)| {
+        turns
+            .get(&key)
+            .map(|turn| turn.as_str().trim().to_owned())
+            .filter(|text| !text.is_empty())
+    };
+    responder
+        .and_then(|agent| {
+            said((
+                agent.to_owned(),
+                sessions.get(agent).cloned().unwrap_or_default(),
+            ))
+        })
+        .or_else(|| latest.and_then(said))
 }
 
 /// Leave a `coordinator` checkpoint for every agent of a dead run that did not write one itself.
@@ -2968,7 +3352,7 @@ async fn record_abandoned_checkpoints(
     // land as `Message` events with `role: "agent"`; the last one is the closest thing to "what
     // this stage had produced when the run died". They are joined by the live reply's rule, so
     // separate messages and turns stay separate paragraphs.
-    let mut last_reply: BTreeMap<String, crate::acp::ReplyText> = BTreeMap::new();
+    let mut last_reply: BTreeMap<String, crate::engine::ReplyText> = BTreeMap::new();
     let mut seen: Vec<String> = Vec::new();
     for event in &events {
         if event.agent_id.is_empty() {
@@ -3007,7 +3391,7 @@ async fn record_abandoned_checkpoints(
             agent_id: agent_id.clone(),
             done: last_reply
                 .get_mut(&agent_id)
-                .map(crate::acp::ReplyText::take)
+                .map(crate::engine::ReplyText::take)
                 .unwrap_or_default(),
             // Deliberately empty. The run ended abnormally, so nothing said what came next, and
             // a sentence here would be the daemon's guess wearing a stage's voice.
@@ -3133,7 +3517,7 @@ fn classify_failure_code(
     }
     if error
         .chain()
-        .any(<dyn std::error::Error>::is::<crate::acp::AppReportedError>)
+        .any(<dyn std::error::Error>::is::<crate::engine::AppReportedError>)
     {
         return APP_ERROR;
     }
@@ -3381,13 +3765,6 @@ async fn answer_run(
             ),
         ));
     }
-    let continuation = if waiting.kind == crate::operator::StopKind::Question
-        && waiting.park == crate::operator::ParkTier::Released
-    {
-        Some(continue_released_question(&state, &run_id, &waiting, &request).await?)
-    } else {
-        None
-    };
     desk.deliver(
         &run_id,
         &request.node,
@@ -3395,83 +3772,12 @@ async fn answer_run(
             text: request.text,
             send_back: request.send_back,
             // The id of the `message` event the run is about to archive the answer as.
-            answer_event_id: crate::acp::new_event_id(),
+            answer_event_id: crate::engine::new_event_id(),
         },
     )
     .await
-    .map(|record| {
-        let mut response =
-            (StatusCode::ACCEPTED, Json(continuation.unwrap_or(record))).into_response();
-        if waiting.park == crate::operator::ParkTier::Released
-            && waiting.kind == crate::operator::StopKind::Question
-        {
-            response.headers_mut().insert(
-                "x-loomwatch-continuation-of",
-                run_id.parse().expect("run ids are valid header values"),
-            );
-        }
-        response
-    })
+    .map(|record| (StatusCode::ACCEPTED, Json(record)).into_response())
     .map_err(operator_status)
-}
-
-/// A released question becomes a new checkpoint continuation, explicitly identified in the response.
-async fn continue_released_question(
-    state: &RunsState,
-    run_id: &str,
-    waiting: &crate::operator::WaitingOn,
-    request: &AnswerRequest,
-) -> Result<RunRecord, ApiError> {
-    let previous = state.registry.get(run_id).ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            format!("Run {run_id} does not exist."),
-        )
-    })?;
-    let checkpoint = latest_checkpoint_id(state.archive.as_ref(), run_id, &request.node)
-        .await
-        .ok_or_else(|| {
-            ApiError::new(
-                StatusCode::CONFLICT,
-                "This session was released without a checkpoint. Start a new run with your answer."
-                    .to_owned(),
-            )
-        })?;
-    let start = StartRunRequest {
-        team_path: previous.team_path,
-        prompt: format!(
-            "{}\n\n## Direction from you\nThe answer to your question ({}) is:\n{}",
-            previous.prompt, waiting.question, request.text
-        ),
-        expected_revision: None,
-        start_key: Some(format!(
-            "answer:{run_id}:{}",
-            waiting.question_id.as_deref().unwrap_or(&waiting.since)
-        )),
-        follows_run_id: None,
-        start_at: None,
-        from_checkpoint_id: Some(checkpoint),
-        retry_of_run_id: None,
-        only_agent: None,
-    };
-    match launch_manual(
-        &state.registry,
-        state.archive.clone(),
-        &state.teams_root,
-        &start,
-    )
-    .await
-    .map_err(LaunchError::into_api_error)?
-    {
-        StartRunOutcome::Accepted(record) | StartRunOutcome::Duplicate(record) => {
-            persist_or_log(&state.registry, &record.run_id).await;
-            Ok(record)
-        }
-        StartRunOutcome::IdempotencyConflict { .. } => Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "This question already started a continuation with a different answer.".to_owned(),
-        )),
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -3569,6 +3875,9 @@ async fn get_run_questions(
 struct PermissionAnswer {
     request_id: String,
     decision: crate::permissions::PermissionDecision,
+    /// The changed command for `edit`, and the words for `answer`.
+    #[serde(default)]
+    text: Option<String>,
 }
 
 /// `POST /api/runs/{id}/permissions` (ADR 0040): the operator's answer to one request an agent's
@@ -3587,8 +3896,45 @@ async fn answer_permission(
     })?;
     let record = state
         .registry
-        .answer_permission(&run_id, &answer.request_id, answer.decision)
+        .answer_permission(
+            &run_id,
+            &answer.request_id,
+            answer.decision,
+            answer.text.as_deref(),
+        )
         .map_err(operator_status)?;
+    Ok((StatusCode::OK, Json(record)).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SpendAnswerBody {
+    stop_id: String,
+    decision: crate::spend::SpendDecision,
+    /// What to add, for `add`. The stop's own offer when absent.
+    #[serde(default)]
+    add_usd: Option<f64>,
+}
+
+/// `POST /api/runs/{id}/spend` (ADR 0068): the operator's answer at a spend stop. `200` with the
+/// run once the agents waiting there have it; 404 when that stop is no longer waiting.
+async fn answer_spend(
+    State(state): State<RunsState>,
+    RoutePath(run_id): RoutePath<String>,
+    body: Result<Json<SpendAnswerBody>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(answer) = body.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid spend answer: {}", rejection.body_text()),
+        )
+    })?;
+    let record = state
+        .registry
+        .answer_spend(&run_id, &answer.stop_id, answer.decision, answer.add_usd)
+        .map_err(operator_status)?;
+    // The spool changed, so the stored record follows, as a transition's would.
+    state.registry.persist_quietly(&run_id).await;
     Ok((StatusCode::OK, Json(record)).into_response())
 }
 
@@ -3636,6 +3982,17 @@ async fn settle_cancelled(registry: &RunRegistry, archive: Option<&EventArchive>
             ..crate::RunLineage::default()
         };
         record_abandoned_checkpoints(archive, run_id, &lineage).await;
+        forget_parked_agents(archive, run_id).await;
+    }
+}
+
+/// Let go of every agent `run_id` left parked: the run is over, and nothing will reopen them.
+///
+/// Logged, never propagated, like the checkpoints beside it: a row left behind costs disk, while
+/// failing here would change what the operator is told about the run.
+async fn forget_parked_agents(archive: &EventArchive, run_id: &str) {
+    if let Err(error) = archive.parked_agents().forget_run(run_id).await {
+        eprintln!("warning: could not forget run {run_id}'s parked agents: {error:#}");
     }
 }
 
@@ -3660,7 +4017,6 @@ pub async fn cancel_live_runs(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::io::Write;
 
     use axum::body::Body;
     use axum::http::{Request, header};
@@ -3669,49 +4025,43 @@ pub(crate) mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::test_support::process_is_alive;
+    use crate::agent::{Completion, Demo, Hold};
+    use crate::engine::demo_model;
 
-    /// A fake ACP harness that answers `initialize`, `session/new`, `session/prompt` (with
-    /// one agent chunk `done`) and `session/close`, then exits 0.
-    pub(crate) const COMPLETING_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"harness-session","configOptions":[]}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"harness-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
-printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-"#;
+    /// The model of an agent that answers every turn with `done`.
+    pub(crate) fn completing() -> String {
+        demo_model(Demo::responder(|_| Some(Completion::text("done"))))
+    }
 
-    /// A fake harness that negotiates a session and then hangs inside `session/prompt`.
-    /// `exec` makes the recorded pid the sleeping process itself, so "is the harness gone"
-    /// is a question about exactly the process `kill_on_drop` must have killed.
-    pub(crate) const SLEEPING_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sleepy","configOptions":[]}}'
-IFS= read -r _
-exec sleep 60
-"#;
+    /// The model of an agent still thinking until its turn is stopped, and the hold that counts it.
+    pub(crate) fn sleeping() -> (String, Arc<Hold>) {
+        let (demo, hold) = Demo::held(Vec::new());
+        (demo_model(demo), hold)
+    }
 
-    /// A fake harness that completes the protocol cleanly — normal `end_turn`, clean
-    /// exit — but emits no agent text: CONTRACT §4's normal turn with no response.
-    const EMPTY_REPLY_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"quiet","configOptions":[]}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-"#;
+    /// The model of an agent whose turn ends normally with no text: CONTRACT §4's normal turn
+    /// with no response.
+    fn empty_reply() -> String {
+        demo_model(Demo::responder(|_| Some(Completion::text(""))))
+    }
+
+    /// A stage that answers its work turn with `reply`, a handover request with `{reply}
+    /// handover`, and the checkpoint request with where it stands, however many runs ask it.
+    fn stage(reply: &str) -> String {
+        let reply = reply.to_owned();
+        demo_model(Demo::responder(move |request| {
+            let prompt = request.prompt();
+            Some(Completion::text(
+                &if prompt.contains("Record where this work stands") {
+                    format!("## Done\n{reply}\n\n## Next\nnothing")
+                } else if prompt.contains("## Summary") {
+                    format!("{reply} handover")
+                } else {
+                    reply.clone()
+                },
+            ))
+        }))
+    }
 
     pub(crate) struct TeamsDir(pub(crate) PathBuf);
 
@@ -3719,59 +4069,27 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         pub(crate) fn new() -> Self {
             let path = std::env::temp_dir().join(format!("loomwatch-runs-{}", Uuid::new_v4()));
             fs::create_dir(&path).expect("create temporary teams root");
-            Self(fs::canonicalize(&path).expect("canonical teams root"))
-        }
-
-        pub(crate) fn write_harness(&self, name: &str, script: &str) -> PathBuf {
-            let path = self.0.join(name);
-            let mut file = fs::File::create(&path).expect("create harness script");
-            file.write_all(script.as_bytes()).expect("write harness");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
-                    .expect("mark harness executable");
-            }
-            path
+            Self(crate::platform::canonicalize(&path).expect("canonical teams root"))
         }
 
         /// A two-stage pipeline with a notebook, whose stages answer the full ADR 0013 +
         /// memory-phase-3 turn sequence: work, handover (first stage only), checkpoint, close. A
         /// team with no notebook is asked for no checkpoint (ADR 0016 amendment).
         pub(crate) fn write_pipeline_team(&self, name: &str) -> PathBuf {
-            let stage = |session: &str, reply: &str, handover: bool| {
-                let (handover_turn, checkpoint_id, close_id) = if handover {
-                    (
-                        format!(
-                            "IFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{reply} handover\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n"
-                        ),
-                        5,
-                        6,
-                    )
-                } else {
-                    (String::new(), 4, 5)
-                };
-                let script = format!(
-                    "#!/bin/sh\nset -eu\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocolVersion\":1}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{\"sessionId\":\"{session}\",\"configOptions\":[]}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"{reply}\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{\"stopReason\":\"end_turn\"}}}}'\n{handover_turn}IFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{session}\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"\\n## Done\\n{reply}\\n\\n## Next\\nnothing\"}}}}}}}}'\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{checkpoint_id},\"result\":{{\"stopReason\":\"end_turn\"}}}}'\nIFS= read -r _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{close_id},\"result\":{{}}}}'\n"
-                );
-                self.write_harness(&format!("{session}.sh"), &script)
-            };
-            let first = stage("stage-a", "a done", true);
-            let second = stage("stage-b", "b done", false);
             let yaml = format!(
-                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\nagents:\n  - id: a\n    name: A\n    role: first\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: b\n    name: B\n    role: second\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
-                first.display(),
-                second.display()
+                "schemaVersion: 1\nid: chain\nname: Two-stage chain\nentrypoint: a\nmemory:\n  notebook:\n    enabled: true\nagents:\n  - id: a\n    name: A\n    role: first\n    model: {}\n  - id: b\n    name: B\n    role: second\n    model: {}\nedges:\n  - from: a\n    to: b\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
+                stage("a done"),
+                stage("b done")
             );
             let path = self.0.join(name);
             fs::write(&path, yaml).expect("write pipeline team file");
             path
         }
 
-        fn write_team(&self, name: &str, harness: &Path) -> PathBuf {
+        /// A one-agent team whose agent runs on `model`.
+        fn write_team(&self, name: &str, model: &str) -> PathBuf {
             let yaml = format!(
-                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
-                harness.display()
+                "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    model: {model}\n"
             );
             let path = self.0.join(name);
             fs::write(&path, yaml).expect("write team file");
@@ -3824,7 +4142,12 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             }
         })
         .await
-        .expect("run reached the awaited state in time")
+        .unwrap_or_else(|_| {
+            panic!(
+                "the run never reached the awaited state: {:#?}",
+                registry.get(run_id)
+            )
+        })
     }
 
     fn permission_request(id: &str, kind: &str) -> crate::permissions::PermissionRequest {
@@ -3839,6 +4162,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             since: now(),
             expires_at: now(),
             auto: None,
+            edit: None,
             scope: kind.to_owned(),
         }
     }
@@ -3882,10 +4206,10 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         assert_eq!(wire["permissionRequests"][0]["switch"], "web");
         assert!(!registry.allowed_for_run(&manual_id, "a", "fetch"));
         let record = registry
-            .answer_permission(&manual_id, "p1", PermissionDecision::AllowRun)
+            .answer_permission(&manual_id, "p1", PermissionDecision::AllowRun, None)
             .expect("open");
         assert!(record.permission_requests.is_empty());
-        assert_eq!(answer.await.unwrap(), PermissionDecision::AllowRun);
+        assert_eq!(answer.await.unwrap().decision, PermissionDecision::AllowRun);
         assert!(registry.allowed_for_run(&manual_id, "a", "fetch"));
         assert!(!registry.allowed_for_run(&manual_id, "a", "execute"));
         // An MCP tool the app calls `execute` is granted as that tool, never as every command.
@@ -3895,13 +4219,16 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             .open_permission_request(&manual_id, tool)
             .expect("open");
         registry
-            .answer_permission(&manual_id, "p-tool", PermissionDecision::AllowRun)
+            .answer_permission(&manual_id, "p-tool", PermissionDecision::AllowRun, None)
             .expect("open");
-        assert_eq!(tool_answer.await.unwrap(), PermissionDecision::AllowRun);
+        assert_eq!(
+            tool_answer.await.unwrap().decision,
+            PermissionDecision::AllowRun
+        );
         assert!(registry.allowed_for_run(&manual_id, "a", "mcp:notion.search"));
         assert!(!registry.allowed_for_run(&manual_id, "a", "execute"));
         assert!(!registry.allowed_for_run(&manual_id, "b", "fetch"));
-        let again = registry.answer_permission(&manual_id, "p1", PermissionDecision::Deny);
+        let again = registry.answer_permission(&manual_id, "p1", PermissionDecision::Deny, None);
         assert!(
             again.is_err(),
             "an answered request cannot be answered twice"
@@ -3955,10 +4282,13 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         let waiting = ask("t2", "c", "mcp:notion.fetch");
         let other = ask("t3", "c", "mcp:notion.search");
         let record = registry
-            .answer_permission(&manual_id, "t1", PermissionDecision::AllowTeam)
+            .answer_permission(&manual_id, "t1", PermissionDecision::AllowTeam, None)
             .expect("open");
-        assert_eq!(first.await.unwrap(), PermissionDecision::AllowTeam);
-        assert_eq!(waiting.await.unwrap(), PermissionDecision::AllowTeam);
+        assert_eq!(first.await.unwrap().decision, PermissionDecision::AllowTeam);
+        assert_eq!(
+            waiting.await.unwrap().decision,
+            PermissionDecision::AllowTeam
+        );
         assert_eq!(
             record
                 .permission_requests
@@ -3971,9 +4301,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         assert!(registry.allowed_for_run(&manual_id, "d", "mcp:notion.fetch"));
         assert!(!registry.allowed_for_run(&manual_id, "d", "mcp:notion.search"));
         registry
-            .answer_permission(&manual_id, "t3", PermissionDecision::Deny)
+            .answer_permission(&manual_id, "t3", PermissionDecision::Deny, None)
             .expect("open");
-        assert_eq!(other.await.unwrap(), PermissionDecision::Deny);
+        assert_eq!(other.await.unwrap().decision, PermissionDecision::Deny);
         assert!(matches!(
             registry.cancel(&manual_id),
             CancelOutcome::Cancelled(_)
@@ -3982,6 +4312,105 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
             !registry.allowed_for_run(&manual_id, "d", "mcp:notion.fetch"),
             "the grant ends with the run"
         );
+    }
+
+    /// "Edit, then allow" changes only a command, and needs the changed command; "Answer instead"
+    /// needs its words. A refused answer leaves the request open, and an answer carries its text.
+    #[tokio::test]
+    async fn an_edit_or_an_answer_carries_its_text_and_is_refused_without_it() {
+        use crate::permissions::{MAX_ANSWER_CHARS, PermissionDecision, PermissionEdit};
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let record =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+
+        let file = registry
+            .open_permission_request(&run_id, permission_request("w1", "edit"))
+            .expect("open");
+        let refused = registry
+            .answer_permission(&run_id, "w1", PermissionDecision::Edit, Some("x"))
+            .unwrap_err();
+        assert!(
+            refused.conflict && refused.message.contains("Only a command"),
+            "{refused:?}"
+        );
+        let blank = registry
+            .answer_permission(&run_id, "w1", PermissionDecision::Answer, Some("   "))
+            .unwrap_err();
+        assert!(blank.message.contains("Write your answer"), "{blank:?}");
+        let long = "x".repeat(MAX_ANSWER_CHARS + 1);
+        assert!(
+            registry
+                .answer_permission(&run_id, "w1", PermissionDecision::Answer, Some(&long))
+                .is_err()
+        );
+        assert_eq!(
+            registry.get(&run_id).unwrap().permission_requests.len(),
+            1,
+            "a refused answer leaves the request waiting"
+        );
+        registry
+            .answer_permission(
+                &run_id,
+                "w1",
+                PermissionDecision::Answer,
+                Some(" Not now. "),
+            )
+            .unwrap();
+        let reply = file.await.unwrap();
+        assert_eq!(reply.decision, PermissionDecision::Answer);
+        assert_eq!(reply.text.as_deref(), Some("Not now."));
+
+        let mut command = permission_request("c1", "execute");
+        command.edit = Some(PermissionEdit {
+            field: "command".to_owned(),
+            value: "rm -rf build".to_owned(),
+        });
+        let waiting = registry
+            .open_permission_request(&run_id, command)
+            .expect("open");
+        assert!(
+            registry
+                .answer_permission(&run_id, "c1", PermissionDecision::Edit, None)
+                .unwrap_err()
+                .message
+                .contains("Write the command")
+        );
+        registry
+            .answer_permission(
+                &run_id,
+                "c1",
+                PermissionDecision::Edit,
+                Some("rm -rf build/tmp"),
+            )
+            .unwrap();
+        assert_eq!(
+            waiting.await.unwrap().text.as_deref(),
+            Some("rm -rf build/tmp")
+        );
+        assert!(
+            !registry.allowed_for_run(&run_id, "a", "execute"),
+            "an edit allows that one command, not every command"
+        );
+
+        // Text sent with a plain answer is not passed on.
+        let plain = registry
+            .open_permission_request(&run_id, permission_request("p1", "fetch"))
+            .expect("open");
+        registry
+            .answer_permission(
+                &run_id,
+                "p1",
+                PermissionDecision::AllowOnce,
+                Some("ignored"),
+            )
+            .unwrap();
+        assert_eq!(plain.await.unwrap().text, None);
     }
 
     /// `POST /api/runs/{id}/permissions`: the answer reaches the waiting agent and the run comes
@@ -4015,7 +4444,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["permissionRequests"], Value::Null, "{body}");
         assert_eq!(
-            waiting.await.unwrap(),
+            waiting.await.unwrap().decision,
             crate::permissions::PermissionDecision::AllowOnce
         );
         let (status, body) = answer(json!({"requestId": "p1", "decision": "deny"})).await;
@@ -4028,6 +4457,21 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
         );
         let (status, _) = answer(json!({"requestId": "p1", "decision": "maybe"})).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // An answer in the agent's place carries its words; one without them is refused, and the
+        // request still waits.
+        let waiting = registry
+            .open_permission_request(&run_id, permission_request("p2", "fetch"))
+            .expect("open");
+        let (status, body) = answer(json!({"requestId": "p2", "decision": "answer"})).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        let (status, body) =
+            answer(json!({"requestId": "p2", "decision": "answer", "text": "Use notes.md."})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            waiting.await.unwrap().text.as_deref(),
+            Some("Use notes.md.")
+        );
     }
 
     #[test]
@@ -4292,7 +4736,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     async fn a_hand_started_run_delivers_when_the_team_does_and_on_request_otherwise() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let plain = dir.write_team("plain.yaml", &harness);
         let delivering = fs::read_to_string(&plain).unwrap().replace(
             "entrypoint: solo\n",
@@ -4396,7 +4840,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     async fn a_follow_up_is_refused_before_it_starts_when_it_cannot_be_honoured() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         // `write_team` writes a single-agent team with no edges, so this team runs in team mode.
         dir.write_team("team.yaml", &harness);
         dir.write_team("other.yaml", &harness);
@@ -4766,26 +5210,17 @@ printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
     /// A run that dies mid-turn leaves a **coordinator** checkpoint assembled from the archive, and
     /// the next run started from it opens with it.
     ///
-    /// The harness streams one chunk and then exits without answering `session/prompt`, which is
-    /// the same shape as a turn killed by the ten-minute ACP request timeout — the stage never
-    /// reaches its boundary and never answers the checkpoint request — and reaches it in
-    /// milliseconds instead of ten minutes.
+    /// The agent streams one chunk and then its turn fails — the stage never reaches its boundary
+    /// and never answers the checkpoint request.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_run_that_died_mid_turn_leaves_a_coordinator_checkpoint_the_next_run_opens_with() {
-        const DYING_HARNESS: &str = r#"#!/bin/sh
-set -eu
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"dying","configOptions":[]}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"dying","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"half of section three"}}}}'
-exit 7
-"#;
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let dying = dir.write_harness("dying.sh", DYING_HARNESS);
+        let dying = demo_model(Demo::dying(
+            "half of section three",
+            "the connection was lost",
+        ));
         dir.write_team("dying.yaml", &dying);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -4841,7 +5276,7 @@ exit 7
         assert_eq!(served[0]["source"], "coordinator");
 
         // "Start a new run from this checkpoint": a new run, whose packet opens with it.
-        let working = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let working = completing();
         dir.write_team("dying.yaml", &working);
         let continued: RunRecord = serde_json::from_value(
             json_body(
@@ -5095,7 +5530,7 @@ exit 7
 
         // An app that reported its turn failed is neither: the process was fine, and so was the
         // protocol. The crash marker a one-shot session writes for it changes nothing.
-        let refused = anyhow::Error::new(crate::acp::AppReportedError {
+        let refused = anyhow::Error::new(crate::engine::AppReportedError {
             message: "The model is not supported.".to_owned(),
         })
         .context("pipeline node gatherer failed");
@@ -5275,7 +5710,7 @@ exit 7
     #[tokio::test]
     async fn start_rejects_malformed_prompts_and_bodies() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         let app = router(None, dir.0.clone(), RunRegistry::default());
         for (body, expected) in [
@@ -5313,7 +5748,7 @@ exit 7
         registry.set_approvals(Arc::new(
             TeamApprovals::open(&approvals_home.0, &dir.0).expect("open approvals"),
         ));
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let team_path = dir.write_team("downloaded.yaml", &harness);
         let revision = team_revision(&fs::read(&team_path).unwrap());
         let app = router(None, dir.0.clone(), registry.clone());
@@ -5331,15 +5766,12 @@ exit 7
         assert_eq!(body["teamRevision"], revision);
         assert_eq!(body["teamName"], "Fake harness team");
         let first = &body["review"][0];
-        assert_eq!(
-            first["warn"], true,
-            "a /bin/sh harness is not an app LoomWatch knows"
-        );
         assert!(
             first["text"]
                 .as_str()
                 .unwrap()
-                .starts_with("Solo runs `/bin/sh ")
+                .starts_with("Solo runs on LoomWatch with "),
+            "{first}"
         );
         assert!(registry.list().is_empty(), "a refused team starts no run");
 
@@ -5387,7 +5819,7 @@ exit 7
     async fn teams_that_were_already_there_run_and_launch_refuses_new_ones() {
         let dir = TeamsDir::new();
         let approvals_home = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("mine.yaml", &harness);
         let registry = RunRegistry::default();
         registry.set_approvals(Arc::new(
@@ -5425,7 +5857,7 @@ exit 7
     #[tokio::test]
     async fn expected_revision_conflict_returns_a_stable_code_and_creates_no_run() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let team_path = dir.write_team("team.yaml", &harness);
         let current = team_revision(&fs::read(team_path).unwrap());
         let registry = RunRegistry::default();
@@ -5478,7 +5910,7 @@ exit 7
     async fn a_run_keeps_the_revision_of_the_team_file_it_ran() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let team_path = dir.write_team("team.yaml", &harness);
         let ran = team_revision(&fs::read(&team_path).unwrap());
         let archive = EventArchive::new(pool);
@@ -5592,7 +6024,7 @@ exit 7
         let dir = TeamsDir::new();
         let teams_root = dir.0.join("teams");
         fs::create_dir(&teams_root).unwrap();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let outside = dir.write_team("outside.yaml", &harness);
         fs::create_dir(teams_root.join("folder")).unwrap();
         let app = router(None, teams_root, RunRegistry::default());
@@ -5618,7 +6050,7 @@ exit 7
     #[tokio::test]
     async fn start_reports_an_invalid_team_and_a_missing_archive() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         fs::write(
             dir.0.join("broken.yaml"),
@@ -5690,7 +6122,7 @@ exit 7
     async fn run_end_to_end_archives_under_the_pre_minted_id() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -5744,10 +6176,10 @@ exit 7
             .iter()
             .find(|event| event.payload["phase"] == "session_new")
             .unwrap();
-        assert_eq!(
-            session_new.raw.as_ref().unwrap()["result"]["sessionId"],
-            "harness-session",
-            "raw frames keep the harness's own ACP session id"
+        assert!(
+            session_new.payload["result"]["sessionId"].is_string(),
+            "the agent's own session id is recorded: {}",
+            session_new.payload
         );
 
         let listed = json_body(app.clone().oneshot(get_local("/api/runs")).await.unwrap()).await;
@@ -5791,7 +6223,7 @@ exit 7
     async fn a_normal_turn_with_no_response_fails_as_missing_canonical_response() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("quiet.sh", EMPTY_REPLY_HARNESS);
+        let harness = empty_reply();
         dir.write_team("team.yaml", &harness);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -5831,11 +6263,12 @@ exit 7
         assert!(fetched["error"].is_null());
     }
 
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
-    async fn cancel_aborts_the_run_and_kills_the_harness() {
+    async fn cancel_aborts_the_run_and_stops_the_agent() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("sleepy.sh", SLEEPING_HARNESS);
+        let (harness, hold) = sleeping();
         dir.write_team("team.yaml", &harness);
         let archive = EventArchive::new(pool);
         let registry = RunRegistry::default();
@@ -5857,10 +6290,31 @@ exit 7
         })
         .await;
         assert!(running.started_at.is_some());
-        let spawned = archive.event_page(&accepted.run_id, -1, 1).await.unwrap();
-        assert_eq!(spawned[0].payload["phase"], "spawned");
-        let pid = u32::try_from(spawned[0].payload["pid"].as_u64().unwrap()).unwrap();
-        assert!(process_is_alive(pid), "harness {pid} should be sleeping");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the agent should be thinking");
+        // As if an earlier stage of this run were parked behind a stop.
+        let parked = archive.parked_agents();
+        parked
+            .save(
+                &accepted.run_id,
+                "earlier",
+                &crate::agent::Snapshot {
+                    session_id: "earlier-session".to_owned(),
+                    model: "m".to_owned(),
+                    effort: None,
+                    history: Vec::new(),
+                    outputs: BTreeMap::new(),
+                    usage: crate::agent::Usage::default(),
+                    messages_written: 0,
+                },
+            )
+            .await
+            .unwrap();
 
         let response = app
             .clone()
@@ -5874,6 +6328,10 @@ exit 7
         let cancelled: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
         assert_eq!(cancelled.status, RunStatus::Cancelled);
         assert!(cancelled.finished_at.is_some());
+        assert!(
+            parked.load("earlier-session").await.unwrap().is_none(),
+            "a cancelled run lets go of the agents it parked"
+        );
         let checkpoints = archive
             .notebook()
             .checkpoints(&accepted.run_id, Some("solo"))
@@ -5902,12 +6360,12 @@ exit 7
         );
 
         tokio::time::timeout(Duration::from_secs(10), async {
-            while process_is_alive(pid) {
+            while hold.waiting() > 0 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await
-        .expect("aborting the run task must kill the harness through kill_on_drop");
+        .expect("aborting the run task must stop the agent's turn");
 
         let response = app
             .clone()
@@ -5938,7 +6396,7 @@ exit 7
         use crate::operator::{ParkTier, StopKind, WaitingOn};
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         dir.write_team("team.yaml", &harness);
         let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
         let archive = EventArchive::new(pool);
@@ -5958,8 +6416,9 @@ exit 7
             question: "Which budget?".into(),
             context: None,
             handover_from: None,
-            park: ParkTier::KeptAlive,
-            park_note: "kept alive".into(),
+            // As `ask_user` records it, before the turn has ended and the agent is parked.
+            park: ParkTier::None,
+            park_note: "The turn is still finishing.".into(),
             send_back_available: false,
             question_id: None,
         };
@@ -5972,9 +6431,14 @@ exit 7
                 .conflict
         );
         let second = desk.park(&run_id, waiting("helper")).await.unwrap();
+        // The question behind the visible one is parked; the visible one is still the first.
         let mut update = waiting("helper");
-        update.park = ParkTier::Released;
+        update.park = ParkTier::Reloadable;
         desk.repark(&run_id, &update).await;
+        assert_eq!(
+            desk.waiting_for(&run_id, "helper").unwrap().park,
+            ParkTier::Reloadable
+        );
         assert_eq!(desk.waiting(&run_id).unwrap().node, "solo");
         let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
         let endpoint = format!("/api/runs/{run_id}/answers");
@@ -6076,112 +6540,18 @@ exit 7
     }
 
     #[tokio::test]
-    async fn a_released_question_starts_a_checkpoint_continuation_and_identifies_it() {
-        use crate::memory::{CheckpointSource, CheckpointWrite};
-        use crate::operator::{ParkTier, StopKind, WaitingOn};
-        let pool = crate::db::Db::temp().await;
-        let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
-        dir.write_team("team.yaml", &harness);
-        let team = TeamConfig::load(&dir.0.join("team.yaml")).unwrap();
-        let archive = EventArchive::new(pool);
-        let registry = RunRegistry::durable(archive.run_store());
-        let record = RunRecord::queued(
-            "team.yaml".into(),
-            "Finish the report".into(),
-            &team,
-            RunTrigger::Manual,
-        )
-        .unwrap();
-        let run_id = record.run_id.clone();
-        registry.insert(record);
-        assert!(registry.mark_starting(&run_id));
-        assert!(registry.mark_running(&run_id));
-        archive
-            .notebook()
-            .write_checkpoint(&CheckpointWrite {
-                run_id: run_id.clone(),
-                agent_id: "solo".into(),
-                done: "First draft prepared".into(),
-                next: String::new(),
-                blockers: None,
-                artifacts: vec![],
-                seq_high_water: Some(0),
-                source: CheckpointSource::Coordinator,
-                team_revision: None,
-            })
-            .await
-            .unwrap();
-        let desk = registry.operator_desk(Some(&archive));
-        let receiver = desk
-            .park(
-                &run_id,
-                WaitingOn {
-                    node: "solo".into(),
-                    name: "Solo".into(),
-                    kind: StopKind::Question,
-                    since: now(),
-                    question: "Which audience?".into(),
-                    context: None,
-                    handover_from: None,
-                    park: ParkTier::Released,
-                    park_note: "released".into(),
-                    send_back_available: false,
-                    question_id: None,
-                },
-            )
-            .await
-            .unwrap();
-        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
-        let response = app
-            .clone()
-            .oneshot(post_json(
-                &format!("/api/runs/{run_id}/answers"),
-                &json!({"node":"solo", "text":"Write for new users"}),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        assert_eq!(response.headers()["x-loomwatch-continuation-of"], run_id);
-        let next: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
-        assert_ne!(next.run_id, run_id);
-        assert_eq!(next.follows_run_id.as_deref(), Some(run_id.as_str()));
-        assert_eq!(receiver.answer().await.unwrap().text, "Write for new users");
-        let done = wait_for(&registry, &next.run_id, |record| {
-            record.status.is_terminal()
-        })
-        .await;
-        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
-        let packets = archive
-            .context_packets(&next.run_id, Some("solo"))
-            .await
-            .unwrap();
-        assert!(format!("{packets:?}").contains("First draft prepared"));
-        let events = archive.load_session(&next.run_id).await.unwrap();
-        assert!(events.iter().any(|event| {
-            event.kind == EventKind::Message
-                && event.payload["role"] == "user"
-                && event.payload["content"]["text"]
-                    .as_str()
-                    .is_some_and(|text| {
-                        text.contains("Write for new users")
-                            && text.contains("## Direction from you")
-                    })
-        }));
-    }
-
-    #[tokio::test]
     async fn team_mode_checkpoints_without_replacing_its_answer() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let script = COMPLETING_HARNESS.replace(
-            "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{}}'",
-            r###"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"harness-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"## Done\nDraft ready\n\n## Next\nReview it"}}}}'
-printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-IFS= read -r _
-printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'"###
-        );
-        let harness = dir.write_harness("memory.sh", &script);
+        let harness = demo_model(Demo::responder(|request| {
+            Some(Completion::text(
+                if request.prompt().contains("Record where this work stands") {
+                    "## Done\nDraft ready\n\n## Next\nReview it"
+                } else {
+                    "done"
+                },
+            ))
+        }));
         let path = dir.write_team("team.yaml", &harness);
         let yaml = fs::read_to_string(&path).unwrap();
         fs::write(
@@ -6221,5 +6591,389 @@ printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'"###
                     && event.payload["phase"] == "turn_purpose"
                     && event.payload["purpose"] == "checkpoint")
         );
+    }
+
+    /// A model that plans twice and then answers `done`, each call costing `cost`: three calls in
+    /// all, so a spool smaller than two of them stops it before its answer.
+    fn costly(cost: f64) -> String {
+        use crate::agent::{ToolCall, Usage};
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        demo_model(Demo::responder(move |_| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            let completion = if call < 2 {
+                Completion::calls(
+                    "Planning.",
+                    vec![ToolCall {
+                        id: format!("plan-{call}"),
+                        name: "update_plan".into(),
+                        arguments: r#"{"steps":[{"step":"look","status":"in_progress"}]}"#.into(),
+                    }],
+                )
+            } else {
+                Completion::text("done")
+            };
+            Some(Completion {
+                usage: Usage {
+                    input_tokens: 1000,
+                    output_tokens: 50,
+                    cost_usd: cost,
+                    ..Usage::default()
+                },
+                ..completion
+            })
+        }))
+    }
+
+    fn write_spool_team(dir: &TeamsDir, name: &str, model: &str, per_run: f64) {
+        let yaml = format!(
+            "schemaVersion: 1\nid: spool\nname: Spool\nentrypoint: solo\nspend:\n  perRun: {per_run}\nagents:\n  - id: solo\n    name: Solo\n    role: answer\n    model: {model}\n"
+        );
+        fs::write(dir.0.join(name), yaml).expect("write team file");
+    }
+
+    async fn start(app: &Router, team: &str) -> RunRecord {
+        serde_json::from_value(
+            json_body(
+                app.clone()
+                    .oneshot(post_json(
+                        "/api/runs",
+                        &json!({"teamPath": team, "prompt": "go"}),
+                    ))
+                    .await
+                    .unwrap(),
+            )
+            .await,
+        )
+        .unwrap()
+    }
+
+    /// ADR 0068: a run that has used its spool waits at a stop instead of failing, nothing is
+    /// spent while it waits, and "Add and carry on" grows this run's spool and lets it finish.
+    #[tokio::test]
+    async fn a_run_waits_at_its_spool_and_carries_on_once_money_is_added() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_spool_team(&dir, "spool.yaml", &costly(0.04), 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let run = start(&app, "spool.yaml").await;
+        assert_eq!(
+            run.spend.as_ref().and_then(|spend| spend.limit_usd),
+            Some(0.05)
+        );
+
+        // Marked running once a poll sees its first agent start, which can come after the stop.
+        let waiting = wait_for(&registry, &run.run_id, |r| {
+            !r.spend_stops.is_empty() && r.status == RunStatus::Running
+        })
+        .await;
+        let stop = waiting.spend_stops[0].clone();
+        assert_eq!(stop.agent, None, "the team's spool, not an agent's guard");
+        assert!((stop.limit_usd - 0.05).abs() < 1e-9, "{stop:?}");
+        assert!(
+            (stop.spent_usd - 0.08).abs() < 1e-9,
+            "one call went over: {stop:?}"
+        );
+        assert!((stop.add_usd - 0.10).abs() < 1e-9, "{stop:?}");
+        assert_eq!(waiting.status, RunStatus::Running);
+        // Nothing is spent while it waits.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let still = registry.get(&run.run_id).unwrap();
+        assert!((still.spend.unwrap().spent_usd - 0.08).abs() < 1e-9);
+
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": stop.id, "decision": "add"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("Planning.\n\nPlanning.\n\ndone"),
+            "the turn carried on to its answer"
+        );
+        let spend = done.spend.expect("kept on the record");
+        assert_eq!(spend.limit_usd, Some(0.15));
+        assert!((spend.spent_usd - 0.12).abs() < 1e-9, "{spend:?}");
+        assert_eq!(spend.added.len(), 1);
+        assert!(done.spend_stops.is_empty());
+
+        // The stop and its answer are in the record of the run, for the chat and the receipt.
+        let events = archive.load_session(&run.run_id).await.unwrap();
+        let phases: Vec<&str> = events
+            .iter()
+            .filter_map(|event| event.payload["phase"].as_str())
+            .filter(|phase| phase.contains("spend"))
+            .collect();
+        assert_eq!(phases, ["awaiting_spend", "spend_answered"]);
+
+        // A second answer finds nothing waiting.
+        let again = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": stop.id, "decision": "add"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(again.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// "Finish with what it has": no more calls, and the run is done with the last words an agent
+    /// wrote, stopped at its spool, with its checkpoint kept.
+    #[tokio::test]
+    async fn finishing_at_the_spool_ends_the_run_with_what_it_has() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_spool_team(&dir, "spool.yaml", &costly(0.04), 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let run = start(&app, "spool.yaml").await;
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": waiting.spend_stops[0].id, "decision": "finish"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(done.stop_reason.as_deref(), Some(SPEND_LIMIT));
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("Planning.\n\nPlanning."),
+            "the last words written: each message a paragraph"
+        );
+        assert_eq!(
+            done.spend.as_ref().and_then(|spend| spend.stopped),
+            Some(crate::spend::Stopped::Finished)
+        );
+        let checkpoints = archive
+            .notebook()
+            .checkpoints(&run.run_id, None)
+            .await
+            .unwrap();
+        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+    }
+
+    /// "Finish with what it has" when no agent has written a word yet: there is nothing to finish
+    /// with, and the run says so in one plain sentence.
+    #[tokio::test]
+    async fn finishing_before_any_agent_wrote_anything_says_so_plainly() {
+        use crate::agent::{ToolCall, Usage};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        // Plans without a word, three times; each call costs $0.04.
+        let silent = demo_model(Demo::responder(|_| {
+            Some(Completion {
+                usage: Usage {
+                    input_tokens: 1000,
+                    output_tokens: 50,
+                    cost_usd: 0.04,
+                    ..Usage::default()
+                },
+                ..Completion::calls(
+                    "",
+                    vec![ToolCall {
+                        id: "plan".into(),
+                        name: "update_plan".into(),
+                        arguments: r#"{"steps":[{"step":"look","status":"in_progress"}]}"#.into(),
+                    }],
+                )
+            })
+        }));
+        write_spool_team(&dir, "spool.yaml", &silent, 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive), dir.0.clone(), registry.clone());
+        let run = start(&app, "spool.yaml").await;
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": waiting.spend_stops[0].id, "decision": "finish"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Failed, "{done:?}");
+        assert_eq!(done.error_code.as_deref(), Some(SPEND_LIMIT));
+        assert_eq!(
+            done.error.as_deref(),
+            Some(
+                "The team used its $0.05 before any agent wrote anything, so there was nothing \
+                 to finish with."
+            )
+        );
+    }
+
+    /// A lead's two dispatches to the Researcher work side by side, so their words reach the
+    /// record interleaved, chunk by chunk. Finishing at the spool answers with the words of one
+    /// of them, whole, never the two woven together.
+    #[tokio::test]
+    async fn the_last_words_of_two_sessions_of_one_agent_are_not_woven_together() {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let log = crate::EventLog::new(archive.clone(), "parallel".into());
+        let update = |session: &str| json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session}});
+        for session in ["first", "second"] {
+            log.append(
+                "researcher",
+                EventKind::Message,
+                json!({"role": "user", "messageId": null, "content": {"type": "text", "text": "Look into it."}}),
+                Some(json!({"jsonrpc": "2.0", "method": "session/prompt", "params": {"sessionId": session}})),
+            )
+            .await
+            .unwrap();
+        }
+        for (first, second) in [
+            ("## Summary\nShort guides ", "## Summary\nScreenshots "),
+            ("are finished more often.", "help newcomers."),
+        ] {
+            for (session, text) in [("first", first), ("second", second)] {
+                log.append(
+                    "researcher",
+                    EventKind::Message,
+                    json!({"role": "agent", "messageId": format!("{session}-1"), "content": {"type": "text", "text": text}}),
+                    Some(update(session)),
+                )
+                .await
+                .unwrap();
+            }
+        }
+        // The lead, the responder, had nothing more to say in the turn that was stopped.
+        log.append(
+            "lead",
+            EventKind::Message,
+            json!({"role": "user", "messageId": null, "content": {"type": "text", "text": "Here is what came back."}}),
+            Some(json!({"jsonrpc": "2.0", "method": "session/prompt", "params": {"sessionId": "lead"}})),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            last_words(&archive, "parallel", Some("lead"))
+                .await
+                .as_deref(),
+            Some("## Summary\nScreenshots help newcomers."),
+            "the session that wrote last, whole"
+        );
+    }
+
+    /// A scheduled run has nobody to ask: at its spool it stops, says so, and keeps its
+    /// checkpoint.
+    #[tokio::test]
+    async fn a_scheduled_run_stops_at_its_spool_and_says_so() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_spool_team(&dir, "spool.yaml", &costly(0.04), 0.05);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let run = launch(
+            &registry,
+            Some(archive.clone()),
+            &dir.0,
+            Path::new("spool.yaml"),
+            "go",
+            RunTrigger::Schedule,
+        )
+        .expect("launched");
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Failed, "{done:?}");
+        assert_eq!(done.error_code.as_deref(), Some(SPEND_LIMIT));
+        let error = done.error.clone().unwrap_or_default();
+        assert!(
+            error.contains("$0.05") && error.contains("Nobody was there"),
+            "{error}"
+        );
+        assert_eq!(
+            done.spend.as_ref().and_then(|spend| spend.stopped),
+            Some(crate::spend::Stopped::NobodyToAsk)
+        );
+        assert!(done.spend_stops.is_empty(), "nobody was asked");
+        let events = archive.load_session(&run.run_id).await.unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.payload["phase"] == "spend_stopped"),
+            "the stop is in the record"
+        );
+        let checkpoints = archive
+            .notebook()
+            .checkpoints(&run.run_id, None)
+            .await
+            .unwrap();
+        assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+    }
+
+    /// An agent's own guard (ADR 0068) stops only that agent: "Stop A here" ends its turn with what
+    /// it wrote, and the rest of the team carries on from there.
+    #[tokio::test]
+    async fn an_agents_guard_stops_that_agent_and_the_team_carries_on() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = format!(
+            "schemaVersion: 1\nid: guard\nname: Guard\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: first\n    model: {}\n    spend:\n      perRun: 0.05\n  - id: b\n    name: B\n    role: second\n    model: {}\nedges:\n  - {{from: a, to: b, layer: configured, kind: sequence, ts: 2026-09-13T00:00:00Z}}\n",
+            costly(0.04),
+            completing()
+        );
+        fs::write(dir.0.join("guard.yaml"), yaml).unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let run = start(&app, "guard.yaml").await;
+
+        let waiting = wait_for(&registry, &run.run_id, |r| !r.spend_stops.is_empty()).await;
+        let stop = waiting.spend_stops[0].clone();
+        assert_eq!(stop.agent.as_deref(), Some("a"));
+        assert_eq!(stop.name.as_deref(), Some("A"));
+        let answered = app
+            .clone()
+            .oneshot(post_json(
+                &format!("/api/runs/{}/spend", run.run_id),
+                &json!({"stopId": stop.id, "decision": "finish"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(done.reply.as_deref(), Some("done"), "B answered");
+        let spend = done.spend.expect("kept");
+        assert!(spend.agents["a"].stopped);
+        assert_eq!(spend.stopped, None, "the team's spool stayed open");
+    }
+
+    /// The spool is stored with the run, so a run read back after a restart still shows it.
+    #[tokio::test]
+    async fn the_spool_is_stored_with_the_run() {
+        let db = crate::db::Db::temp().await;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 2.5\nagents:\n  - id: a\n    model: m\n    spend:\n      perRun: 0.3\n",
+        )
+        .unwrap();
+        let mut record =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        record.spend.as_mut().unwrap().count("a", 0.25);
+        let store = RunStore::new(db.clone());
+        store.upsert(&record, None, None).await.unwrap();
+        let back = store.recent().await.unwrap();
+        let spend = back[0].record.spend.clone().expect("stored");
+        assert_eq!(spend.limit_usd, Some(2.5));
+        assert_eq!(spend.agents["a"].limit_usd, Some(0.3));
+        assert!((spend.agents["a"].spent_usd - 0.25).abs() < 1e-9);
     }
 }

@@ -54,7 +54,7 @@ describe('MemoryPanel', () => {
 
   it('says what packet-only costs rather than leaving it unexplained', () => {
     render(panel({ view: { ...view, deliverAs: 'packet-only' } }))
-    expect(screen.getByText(/context compaction can summarise it away/)).toBeInTheDocument()
+    expect(screen.getByText(/a long session can summarise it away/)).toBeInTheDocument()
   })
 
   it('writes a note and reports a write failure without losing the text', async () => {

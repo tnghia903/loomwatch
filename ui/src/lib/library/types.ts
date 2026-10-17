@@ -1,7 +1,6 @@
-import type { HarnessSpawn } from '../harnesses'
 import type { AgentAllow, AgentLink, CapabilityRef } from '../team-file/types'
 
-export type LibraryGroup = 'detected' | 'endpoints' | 'presets'
+export type LibraryGroup = 'agents' | 'presets'
 
 /**
  * A drag source row in the Library (docs/CANVAS_SPEC.md §4). This is the payload placed on
@@ -11,21 +10,19 @@ export type LibraryGroup = 'detected' | 'endpoints' | 'presets'
 export interface LibrarySource {
   group: LibraryGroup
   kind?: 'operator'
-  unavailableReason?: string
   /** Stable id within its group; not the future agent id (that is slugified from `label`). */
   id: string
   /** Becomes the new agent's `name`. */
   label: string
-  /** Copied verbatim into the new agent's `spawn` (cmd, args), plus `env: {}`, `cwd: "."`. */
-  spawn: HarnessSpawn
-  /** Only presets pre-fill these — §4.5: "From a preset, both are already filled". */
+  /** Only presets pre-fill the role — §4.5: "From a preset, both are already filled". */
   role?: string
+  /** The OpenRouter model it runs on; absent is the default model. */
   model?: string
   /** How hard that model thinks; it goes with the model. */
   thinkingEffort?: string
   /** What the finished result must satisfy (ADR 0062); a job brings its own. */
   doneWhen?: string[]
-  /** Skills a job brings with it (ADR 0030/0031); delivered on whatever app the agent runs. */
+  /** Skills a job brings with it (ADR 0030/0031). */
   capabilities?: CapabilityRef[]
   /** What the agent it places may do without asking (ADR 0037). */
   allow?: AgentAllow

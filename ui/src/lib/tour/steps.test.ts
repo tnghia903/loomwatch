@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { TOUR_STEPS, type TourStep } from './steps'
 
 const step = (id: TourStep['id']) => TOUR_STEPS.find((candidate) => candidate.id === id)!
-const ready = { readyApps: ['Claude', 'Codex'], appsLoading: false }
+const ready = { keyReady: true, keyLoading: false }
 
 afterEach(() => { document.body.innerHTML = '' })
 
@@ -19,11 +19,10 @@ describe('getting-started guide steps', () => {
     expect(order('workflow')).toBeLessThan(order('ask'))
   })
 
-  it('names the AI apps it found, or asks for one before the first agent', () => {
+  it('asks for an OpenRouter key before the first agent', () => {
     expect(step('build-agent').view(ready)).toMatchObject({ title: 'Build your first agent', target: ['[data-tour="build-agent"]'] })
-    expect(step('build-agent').view(ready).body).toContain('LoomWatch found Claude and Codex')
-    expect(step('build-agent').view({ readyApps: [], appsLoading: true }).title).toBe('Build your first agent')
-    expect(step('build-agent').view({ readyApps: [], appsLoading: false })).toMatchObject({ title: 'Set up an AI app first', target: ['[data-tour="app-setup"]', '[data-tour="apps"]'] })
+    expect(step('build-agent').view({ keyReady: false, keyLoading: true }).title).toBe('Build your first agent')
+    expect(step('build-agent').view({ keyReady: false, keyLoading: false })).toMatchObject({ title: 'Add your OpenRouter key first', target: ['[data-tour="key"]'] })
   })
 
   it('says what is on screen: a builder or the list, a dialog or its button', () => {

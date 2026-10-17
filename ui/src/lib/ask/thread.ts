@@ -44,7 +44,6 @@ export interface RunRequestCard {
   file: string
   name: string
   request: string
-  apps: string[]
   steps: number
   decision: 'started' | 'declined' | null
   runId: string | null
@@ -97,7 +96,7 @@ export interface AskThread {
   appName: string | null
   /** The app's id, to tell whether the conversation still matches the person's choice. */
   appId: string | null
-  /** The model the person chose for this conversation; null is the app's own default. */
+  /** The model this conversation runs on. */
   model: string | null
 }
 
@@ -107,7 +106,7 @@ export const EMPTY_THREAD: AskThread = { items: [], state: null, error: null, ap
 const STEP_WORDS: Record<string, { running: string; done: string; failed: string; fixed?: string }> = {
   list_teams: { running: 'Looking at your teams', done: 'Looked at your teams', failed: 'Couldn’t list your teams' },
   read_team: { running: 'Reading the team', done: 'Read the team', failed: 'Couldn’t read the team' },
-  list_apps: { running: 'Checking your AI apps', done: 'Checked your AI apps', failed: 'Couldn’t check your AI apps' },
+  list_models: { running: 'Checking the models', done: 'Checked the models', failed: 'Couldn’t list the models' },
   propose_team: { running: 'Drafting the team', done: 'Drafted the team', failed: 'Found a problem in the draft', fixed: 'Fixed a problem in its draft' },
   start_run: { running: 'Getting the run ready', done: 'Got the run ready', failed: 'Couldn’t start the run' },
   get_run: { running: 'Checking the run', done: 'Checked the run', failed: 'Couldn’t read the run' },
@@ -116,9 +115,9 @@ const STEP_WORDS: Record<string, { running: string; done: string; failed: string
 const TOOL_NAME = new RegExp(`(?:^|[^a-z0-9])(${Object.keys(STEP_WORDS).join('|')})(?![a-z0-9_])`)
 
 /**
- * The LoomWatch tool a reported call used. Apps spell the call differently — Claude Code as
- * `mcp__loomwatch__list_teams`, Codex as `loomwatch.list_teams`, OpenCode with the server in
- * brackets — and the tool's own name is the part they share.
+ * The LoomWatch tool a reported call used. Conversations recorded by an AI app spelled the call
+ * their own way (`mcp__loomwatch__list_teams`, `loomwatch.list_teams`), and the tool's own name is
+ * the part they share.
  */
 export function toolOf(title: string, name: string | null = null): string | null {
   for (const candidate of [name, title]) {
@@ -222,7 +221,7 @@ export function projectAskThread(events: readonly RunEvent[]): AskThread {
         } else if (phase === 'ask_run_request') {
           const card: RunRequestCard = {
             kind: 'run-request', id: text(payload.requestId), file: text(payload.file), name: text(payload.name) || text(payload.file),
-            request: text(payload.request), apps: Array.isArray(payload.apps) ? payload.apps.filter((app): app is string => typeof app === 'string') : [],
+            request: text(payload.request),
             steps: typeof payload.steps === 'number' ? payload.steps : 0, decision: null, runId: null,
           }
           requests.set(card.id, card)

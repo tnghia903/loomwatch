@@ -63,6 +63,11 @@ export interface MessageReply {
   source: 'open' | 'fresh' | null
   /** Your answer at a review step that sent the work back: the stage it went back to. */
   sentBackTo: string | null
+  /**
+   * For an `ask`: the asked agent stopped at the run's spending limit, or its own, before it
+   * answered (ADR 0068). `text` says why; it is not an answer to the question.
+   */
+  stopped?: true
 }
 
 /** Who a handover or a direction came from, as the prompt record names them. */
@@ -74,9 +79,9 @@ export interface HandedBy {
 }
 
 /** How a permission request was settled, as the daemon recorded it (`permission_answered`). */
-export type PermissionOutcome = 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'timed_out'
+export type PermissionOutcome = 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'edited' | 'answered' | 'timed_out'
 
-const OUTCOMES: ReadonlySet<string> = new Set<PermissionOutcome>(['allow_once', 'allow_run', 'allow_team', 'deny', 'timed_out'])
+const OUTCOMES: ReadonlySet<string> = new Set<PermissionOutcome>(['allow_once', 'allow_run', 'allow_team', 'deny', 'edited', 'answered', 'timed_out'])
 const isOutcome = (value: unknown): value is PermissionOutcome => typeof value === 'string' && OUTCOMES.has(value)
 
 /** What a `permission` message asked, from the daemon's `awaiting_permission` record. */
@@ -91,6 +96,8 @@ export interface PermissionAsk {
   auto?: string | null
   /** How it was settled; `null` while it waits, or when the run ended first. */
   outcome: PermissionOutcome | null
+  /** What you wrote: the command as you changed it (`edited`), or your answer (`answered`). */
+  written?: string | null
   /** When it was settled. */
   settled: { eventId: string; seq: number; ts: string; offsetMs: number } | null
 }
@@ -236,6 +243,7 @@ export class Correspondence {
       ...this.at(event),
       source: output.live === true ? 'open' : typeof output.sessionId === 'string' ? 'fresh' : null,
       sentBackTo: null,
+      ...(output.stopped === 'spend_limit' ? { stopped: true as const } : {}),
     }
   }
 
@@ -266,9 +274,10 @@ export class Correspondence {
     if (!message?.permission || !isOutcome(outcome)) return
     message.permission.outcome = outcome
     message.permission.settled = this.at(event)
+    message.permission.written = outcome === 'edited' ? words(event.payload.edited) : outcome === 'answered' ? words(event.payload.answer) : null
     if (outcome === 'timed_out') { message.state = 'delivered'; return }
     message.state = 'answered'
-    message.reply = { from: OPERATOR_ID, text: '', ...this.at(event), source: null, sentBackTo: null }
+    message.reply = { from: OPERATOR_ID, text: message.permission.written ?? '', ...this.at(event), source: null, sentBackTo: null }
   }
 
   /** `awaiting_operator`: an agent's question for you, or a review step starting to read its handover. */

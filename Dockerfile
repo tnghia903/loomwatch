@@ -25,7 +25,7 @@ RUN apt-get update \
 
 COPY --from=backend-builder /source/target/release/loomwatchd /usr/local/bin/loomwatchd
 
-RUN mkdir -p /data/teams /workspaces /opt/loomwatch/capabilities \
+RUN mkdir -p /data/teams /workspaces \
     && chown -R node:node /data /workspaces /home/node
 
 USER node

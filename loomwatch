@@ -28,6 +28,14 @@
 # Written for the bash 3.2 that ships with macOS: no associative arrays, no empty-array expansion.
 set -euo pipefail
 
+# Windows has its own launcher, loomwatch.cmd; this one needs lsof, ps and signals Git Bash lacks.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    printf '%s\n' "On Windows, start LoomWatch with loomwatch.cmd from PowerShell or Command Prompt (.\\loomwatch.cmd in this folder)." >&2
+    exit 1
+    ;;
+esac
+
 # Resolve symlinks so the script still finds its checkout when linked into a folder on PATH.
 script=${BASH_SOURCE[0]}
 while [ -L "$script" ]; do
@@ -117,7 +125,9 @@ launcher_pid_file=$state_dir/launcher.pid
 # The run history is one file. The ready-built copy in the usual folder keeps it where the program
 # keeps it by default, in LoomWatch's state folder, so it outlives reinstalling the app. Every other
 # copy, a copy of the source or a release being tried, keeps its own in its folder: two copies never
-# share one, as they once shared a database by accident.
+# share one, as they once shared a database by accident. The state folder and the Keychain items stay
+# shared, so a copy of the source uses the key you gave LoomWatch. A release being tried sets
+# LOOMWATCH_STATE_DIR and LOOMWATCH_KEY_STORE=file, which reach loomwatchd unchanged (docs/CI.md).
 usual_app=
 if [ -d "$HOME/LoomWatch/app" ]; then usual_app=$(cd "$HOME/LoomWatch/app" && pwd -P); fi
 if [ -z "${LOOMWATCH_DATABASE:-}" ] && { [ "$prebuilt" = 0 ] || [ "$repo_root" != "$usual_app" ]; }; then
@@ -246,20 +256,12 @@ check_prerequisites() {
     say "When they are installed, open a new terminal window and run $self again." >&2
     exit 1
   fi
-
-  if ! command -v python3 >/dev/null 2>&1; then
-    if is_macos; then
-      say "Note: the offline demo team needs Python 3. Install it with: xcode-select --install"
-    else
-      say "Note: the offline demo team needs Python 3."
-    fi
-  fi
 }
 
 ensure_teams_root() {
   [ -d "$teams_root" ] && return 0
   mkdir -p "$teams_root"
-  cp examples/operator-stop.yaml examples/operator-stop-harness.py "$teams_root/"
+  cp examples/operator-stop.yaml "$teams_root/"
   say "Created your teams folder at $(pretty_path "$teams_root"), with an offline demo team in it."
 }
 
@@ -451,11 +453,9 @@ start() {
   # The first start after updating from a version that kept the history in Docker.
   if [ ! -e "$database" ]; then import_earlier_history auto; fi
 
-  # Compose-mode settings in the operator's own shell would point this native daemon at a
-  # container runner or a container-only capability folder. The update hand-over is supervise's to
-  # set: a daemon told about one that nothing is running would stop and stay stopped.
-  unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN \
-    LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST LOOMWATCH_UPDATE_FAILED LOOMWATCH_IMPORT_FROM
+  # The update hand-over is supervise's to set: a daemon told about one that nothing is running
+  # would stop and stay stopped.
+  unset LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST LOOMWATCH_UPDATE_FAILED LOOMWATCH_IMPORT_FROM
   # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits. A
   # ready-built copy names the commit its release was built from, in VERSION.
   if [ "$prebuilt" = 1 ]; then

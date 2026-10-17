@@ -101,11 +101,9 @@ impl Paths {
         }
         std::fs::create_dir_all(&self.teams)?;
         if let Some(examples) = &self.examples {
-            for name in ["operator-stop.yaml", "operator-stop-harness.py"] {
-                let from = examples.join(name);
-                if from.is_file() {
-                    std::fs::copy(&from, self.teams.join(name))?;
-                }
+            let from = examples.join("operator-stop.yaml");
+            if from.is_file() {
+                std::fs::copy(&from, self.teams.join("operator-stop.yaml"))?;
             }
         }
         Ok(())

@@ -20,7 +20,7 @@ type Step =
  * first: saving under it makes that agent's next version, and teams using it change only when
  * someone chooses Update there.
  */
-export function SaveAsJob({ agent, appId, onLinked }: { agent: AgentConfig; appId?: string; onLinked?: (link: AgentLink) => void }) {
+export function SaveAsJob({ agent, onLinked }: { agent: AgentConfig; onLinked?: (link: AgentLink) => void }) {
   const [step, setStep] = useState<Step>({ kind: 'closed' })
   const [name, setName] = useState(agent.name)
   const [does, setDoes] = useState('')
@@ -38,7 +38,7 @@ export function SaveAsJob({ agent, appId, onLinked }: { agent: AgentConfig; appI
     </div>
   }
 
-  const spec = () => jobFromAgent(agent, { name, does, appId })
+  const spec = () => jobFromAgent(agent, { name, does })
   const save = async (replace: boolean) => {
     const id = jobIdFor(name)
     setError(null)
@@ -64,7 +64,7 @@ export function SaveAsJob({ agent, appId, onLinked }: { agent: AgentConfig; appI
   return <form ref={form} className="save-job-form" aria-label="Add to Your agents" onSubmit={(event) => { event.preventDefault(); if (name.trim()) void save(false) }}>
     <label>Name in Your agents<input value={name} autoFocus onChange={(event) => { setName(event.target.value); if (step.kind === 'replace') setStep({ kind: 'naming' }) }} maxLength={80} /></label>
     <label><span>What it does <span className="optional">optional</span></span><input value={does} onChange={(event) => setDoes(event.target.value)} placeholder="e.g. Drafts release notes" maxLength={120} /></label>
-    <p className="save-job-note">Keeps its instructions{appId ? ', app and model' : ''}{skills.length ? `, ${skills.length === 1 ? 'its skill' : `${skills.length} skills`}` : ''}{allowed ? ' and what it may do without asking' : ''}. You can build on it in Your agents and add it to any team.</p>
+    <p className="save-job-note">Keeps its instructions{agent.model ? ', model' : ''}{skills.length ? `, ${skills.length === 1 ? 'its skill' : `${skills.length} skills`}` : ''}{allowed ? ' and what it may do without asking' : ''}. You can build on it in Your agents and add it to any team.</p>
     {error && <p role="alert">{error}</p>}
     {step.kind === 'replace'
       ? <div className="save-job-actions"><p role="alert">You already have an agent called “{name.trim()}”. Save this as its next version? Teams using it change only when you choose Update in them.</p><button type="button" className="btn btn-primary" onClick={() => void save(true)}>Save as next version</button><button type="button" className="btn" onClick={() => setStep({ kind: 'naming' })}>Keep both — rename</button></div>

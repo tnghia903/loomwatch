@@ -1,3 +1,5 @@
+import { DEFAULT_MODEL } from '../ai/modelIds'
+import { safeFileStem } from '../files/paths'
 import type { AgentConfig } from '../team-file/types'
 import type { LibrarySource } from './types'
 
@@ -8,7 +10,7 @@ function slugify(label: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return slug.length > 0 ? slug : 'agent'
+  return safeFileStem(slug.length > 0 ? slug : 'agent')
 }
 
 function uniqueId(base: string, existingIds: ReadonlySet<string>): string {
@@ -32,10 +34,9 @@ export const DEFAULT_AGENT_ROLE = 'Complete the request you are given. Work care
 /**
  * Builds the agent a drop creates (docs/CANVAS_SPEC.md §4.5 step 4).
  *
- * `model` stays empty for a bare harness/endpoint source because GET /api/harnesses advertises no
- * models; the workspace fills it with the harness's own default once that harness's catalog loads.
- * `role` starts as [`DEFAULT_AGENT_ROLE`]. A preset source pre-fills both, "the entire argument for
- * presets."
+ * A blank agent starts on the default model with [`DEFAULT_AGENT_ROLE`]; a preset source pre-fills
+ * both, "the entire argument for presets." It works in the team file's own folder, so it has no
+ * `spawn` until a work folder is chosen.
  */
 export function buildAgentFromSource(
   source: LibrarySource,
@@ -48,14 +49,8 @@ export function buildAgentFromSource(
     id,
     name: source.label,
     role: source.role ?? DEFAULT_AGENT_ROLE,
-    model: source.model ?? '',
+    model: source.model || DEFAULT_MODEL,
     ...(source.thinkingEffort ? { thinkingEffort: source.thinkingEffort } : {}),
-    spawn: {
-      cmd: source.spawn.cmd,
-      args: [...source.spawn.args],
-      env: {},
-      cwd: '.',
-    },
     allowRecruiting: true,
     ...(source.capabilities?.length ? { capabilities: source.capabilities.map((capability) => ({ ...capability })) } : {}),
     ...(source.doneWhen?.length ? { doneWhen: [...source.doneWhen] } : {}),

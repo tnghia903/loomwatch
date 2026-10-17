@@ -27,8 +27,9 @@ struct DatabaseArgs {
     #[arg(long, env = "LOOMWATCH_DATABASE", value_name = "PATH")]
     database: Option<PathBuf>,
     /// Where `LoomWatch` keeps its own state, such as which team files you approved to run.
-    /// Defaults to `~/Library/Application Support/LoomWatch` on macOS and
-    /// `$XDG_STATE_HOME/loomwatch` (or `~/.local/state/loomwatch`) elsewhere.
+    /// Defaults to `~/Library/Application Support/LoomWatch` on macOS,
+    /// `%LOCALAPPDATA%\LoomWatch` on Windows, and `$XDG_STATE_HOME/loomwatch` (or
+    /// `~/.local/state/loomwatch`) elsewhere.
     #[arg(long, env = "LOOMWATCH_STATE_DIR")]
     state_dir: Option<PathBuf>,
 }
@@ -71,7 +72,7 @@ enum Commands {
         )]
         allow_container_listener: bool,
     },
-    /// Run one turn through the configured entrypoint ACP harness.
+    /// Run one turn of a team's entrypoint agent.
     Run {
         #[arg(long)]
         team: PathBuf,
@@ -120,38 +121,16 @@ enum Commands {
         #[command(flatten)]
         database: DatabaseArgs,
     },
-    /// Expose this machine's native ACP harnesses to an authenticated `LoomWatch` container.
-    HostRunner {
-        #[arg(long, default_value = "0.0.0.0:3031")]
-        listen: SocketAddr,
-        #[arg(long, env = "LOOMWATCH_HOST_RUNNER_TOKEN", hide_env_values = true)]
-        token: String,
-        /// Translate one container working-directory root to its host bind-mount source.
-        #[arg(long = "map", value_name = "CONTAINER=HOST", required = true)]
-        mappings: Vec<String>,
-    },
-    /// Internal stdio proxy used by agents selected from a configured host runner.
-    #[command(hide = true)]
-    HarnessClient {
-        #[arg(long)]
-        harness: String,
-    },
-    /// Serve the `LoomWatch` Control tools over stdio, for an AI app connected from the
-    /// Connections page. Reads its token from `LOOMWATCH_CONTROL_TOKEN`.
-    Mcp {
-        /// The daemon's tool server, e.g. `http://127.0.0.1:3000/api/control/mcp`.
-        #[arg(long, default_value = "http://127.0.0.1:3000/api/control/mcp")]
-        url: String,
-    },
 }
 
-/// A durable registry with its cache already filled from the `runs` table.
+/// A durable registry with its cache already filled from the `runs` table, and every run the last
+/// process left unfinished settled.
 ///
 /// A recovery that fails warns and continues: the daemon starting is worth more than its history
 /// list being complete, and the failure must not be silent.
 async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
     let registry = RunRegistry::durable(archive.run_store());
-    match registry.reload().await {
+    match registry.recover(archive).await {
         Ok(0) => {}
         Ok(recovered) => println!("recovered {recovered} run records"),
         Err(error) => eprintln!("warning: could not recover run records: {error}"),
@@ -163,7 +142,30 @@ async fn recovered_registry(archive: &EventArchive) -> RunRegistry {
 /// force-quit app never leaves `LoomWatch` running where nobody can see or stop it. An orphaned
 /// process is adopted by launchd (or init), whose pid is 1. As on a signal, the archive writes
 /// what it holds first.
+///
+/// On Windows, which has neither, `LoomWatch.exe` holds the other end of this process's standard
+/// input: it closes when the app quits (its way of asking this to stop, as a signal does on a Mac)
+/// or ends any other way.
 fn exit_with_parent(archive: EventArchive) {
+    #[cfg(windows)]
+    if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
+        let (gone, app_gone) = tokio::sync::oneshot::channel::<()>();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut stdin = std::io::stdin();
+            let mut buffer = [0_u8; 256];
+            while matches!(stdin.read(&mut buffer), Ok(read) if read > 0) {}
+            let _ = gone.send(());
+        });
+        tokio::spawn(async move {
+            if app_gone.await.is_ok() {
+                eprintln!("LoomWatch quit, so loomwatchd is stopping too");
+                let _ = tokio::time::timeout(Duration::from_secs(5), archive.flush()).await;
+                std::process::exit(0);
+            }
+        });
+        return;
+    }
     #[cfg(unix)]
     if std::env::var_os("LOOMWATCH_EXIT_WITH_PARENT").is_some_and(|value| value == "1") {
         tokio::spawn(async move {
@@ -178,15 +180,20 @@ fn exit_with_parent(archive: EventArchive) {
         });
     }
     #[cfg(not(unix))]
-    let _ = archive;
+    drop(archive);
 }
 
-/// `~/Library/Application Support/LoomWatch` on macOS, `$XDG_STATE_HOME/loomwatch` or
-/// `~/.local/state/loomwatch` elsewhere.
+/// `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows,
+/// `$XDG_STATE_HOME/loomwatch` or `~/.local/state/loomwatch` elsewhere.
 fn default_state_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|home| home.is_absolute())?;
+    if cfg!(windows)
+        && let Some(local) = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|local| local.is_absolute())
+    {
+        return Some(local.join("LoomWatch"));
+    }
+    let home = loomwatch_backend::platform::home_dir().filter(|home| home.is_absolute())?;
     if cfg!(target_os = "macos") {
         return Some(home.join("Library/Application Support/LoomWatch"));
     }
@@ -221,7 +228,28 @@ async fn stop_signal() -> i32 {
     }
 }
 
-#[cfg(not(unix))]
+/// Ctrl+C or Ctrl+Break, or the console window closing, or Windows signing out or shutting down.
+/// After the last three Windows ends the process a few seconds later anyway, which is enough for
+/// the archive's last batch.
+#[cfg(windows)]
+async fn stop_signal() -> i32 {
+    use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_logoff, ctrl_shutdown};
+    let (Ok(mut close), Ok(mut brk), Ok(mut logoff), Ok(mut shutdown)) =
+        (ctrl_close(), ctrl_break(), ctrl_logoff(), ctrl_shutdown())
+    else {
+        let _ = tokio::signal::ctrl_c().await;
+        return 130;
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => 130,
+        _ = brk.recv() => 130,
+        _ = close.recv() => 143,
+        _ = logoff.recv() => 143,
+        _ = shutdown.recv() => 143,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 async fn stop_signal() -> i32 {
     let _ = tokio::signal::ctrl_c().await;
     130
@@ -267,15 +295,20 @@ async fn main() -> Result<()> {
             let archive = Some(opened.clone());
             // One canonical root for both the team editor and run control, so a team the
             // editor can open is exactly a team a run may start, and vice versa.
-            let teams_root = std::fs::canonicalize(&teams_root).with_context(|| {
-                format!("failed to resolve teams root {}", teams_root.display())
-            })?;
+            let teams_root =
+                loomwatch_backend::platform::canonicalize(&teams_root).with_context(|| {
+                    format!("failed to resolve teams root {}", teams_root.display())
+                })?;
+            // The OpenRouter key and model list every run's agents use. Installed before anything
+            // can start a run. Nothing is read or fetched here: the key is read when the first
+            // agent starts, and the model list when it is first asked for.
+            let ai = loomwatch_backend::ai::Ai::new(&state_dir);
+            loomwatch_backend::ai::install(ai.clone());
+            // Where the Notion connection is kept, chosen the same way as the key's store. Also
+            // before anything can start a run, since a run reads the pages its agents are given.
+            loomwatch_backend::notion::install(&state_dir);
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
-            // Claude's and Codex's bridges, installed once and started directly instead of
-            // through npx; installing the ones this computer's apps need starts now, in the
-            // background.
-            loomwatch_backend::connectors::init(&state_dir).prepare_detected();
             let approvals =
                 loomwatch_backend::approvals::TeamApprovals::open(&state_dir, &teams_root)
                     .with_context(|| {
@@ -329,18 +362,16 @@ async fn main() -> Result<()> {
                 archive.clone(),
                 teams_root.clone(),
             );
-            // Ask LoomWatch (ADR 0033): the tool server and the Ask panel's endpoints. It shares the
-            // registry so a run it starts is an ordinary run, and the listener so its URL is the
-            // daemon's own.
+            // Ask LoomWatch (ADR 0033): the Ask panel's endpoints and the tools its agent calls. It
+            // shares the registry so a run it starts is an ordinary run, and the listener so the
+            // links it gives are the daemon's own.
             let control = loomwatch_backend::control::Control::new(
                 loomwatch_backend::control::ControlOptions {
                     archive: archive.clone(),
                     teams_root: teams_root.clone(),
                     registry: registry.clone(),
                     listen: address,
-                    ask_command: std::env::var("LOOMWATCH_ASK_COMMAND")
-                        .ok()
-                        .map(|command| command.split_whitespace().map(str::to_owned).collect()),
+                    ask_model: std::env::var("LOOMWATCH_ASK_MODEL").ok(),
                 },
             );
             // ADR 0052: says when a newer LoomWatch is out and how to install it. The check runs
@@ -367,6 +398,15 @@ async fn main() -> Result<()> {
                 ));
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
+                // The OpenRouter key and the model list. Like Notion's connection, only on this
+                // computer's own address.
+                app = app.merge(loomwatch_backend::ai::router(ai.clone()));
+                // LoomWatch's skills folder, bringing skills in from apps on request, and installing
+                // from GitHub, skills.sh and ClawHub. Building it scans and fetches nothing.
+                app = app.merge(loomwatch_backend::skills_api::router(
+                    state_dir.clone(),
+                    loomwatch_backend::platform::home_dir().unwrap_or_default(),
+                ));
             }
             // After "Update and restart": stop taking requests, give the open ones a moment (the
             // app's live streams never end by themselves), then exit with the status that has the
@@ -435,22 +475,6 @@ async fn main() -> Result<()> {
                 println!("{layout}");
             }
         }
-        Commands::HostRunner {
-            listen,
-            token,
-            mappings,
-        } => {
-            let mappings = mappings
-                .iter()
-                .map(|value| loomwatch_backend::host_runner::PathMapping::parse(value))
-                .collect::<Result<Vec<_>>>()?;
-            loomwatch_backend::host_runner::serve(listen, token, mappings).await?;
-        }
-        Commands::HarnessClient { harness } => {
-            let code = loomwatch_backend::host_runner::client(harness).await?;
-            std::process::exit(code);
-        }
-        Commands::Mcp { url } => loomwatch_backend::control::bridge(&url).await?,
     }
     Ok(())
 }

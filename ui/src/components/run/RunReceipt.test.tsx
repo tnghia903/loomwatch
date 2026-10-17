@@ -14,7 +14,7 @@ const receipt = (allowed: boolean): Receipt => ({
   asked: 'Find the news',
   took: '1m',
   team: '1 helper',
-  ranOn: 'Claude Code',
+  ranOn: 'Claude Opus 5.5',
   tokens: null,
   lines: [{ tone: 'bad', text: 'Researcher wasn’t allowed to search the web, and carried on without it', agentId: 'researcher', evidenceId: 'p1', allow: 'web', allowed }],
   checks: [],
@@ -24,7 +24,8 @@ const tokens: ReceiptTokens = {
   label: 'Tokens', value: '~2.63M', exact: '2,628,961 tokens', cached: '89% cached',
   agents: [{ label: 'Gatherer', value: '~2.25M', exact: '2,245,301 tokens' }, { label: 'Reader', value: '313k', exact: '313,161 tokens' }],
   purposes: [{ label: 'The work', value: '~2.16M', exact: '2,156,068 tokens' }, { label: 'Handovers', value: '219k', exact: '219,035 tokens' }],
-  estimate: '~ Codex reports only the last model call of each turn, so LoomWatch adds up every call it reported.',
+  estimate: '~ A turn stopped before it ended, so it counts what was seen until then.',
+  cost: '$0.42',
 }
 
 describe('RunReceipt', () => {
@@ -77,11 +78,12 @@ describe('RunReceipt', () => {
   })
 
   // Tokens stay one quiet line; who spent them and on what is a click away, never on by default.
-  it('reads the run’s tokens as one line, folded, and opens who spent them and on what', () => {
+  it('reads the run’s tokens as one line, folded, with what it cost, and opens who spent them and on what', () => {
     render(<RunReceipt receipt={{ ...receipt(true), tokens }} onInspectEvidence={vi.fn()} />)
     const line = screen.getByRole('button', { name: '~2.63M · 89% cached' })
     expect(line).toHaveAttribute('aria-expanded', 'false')
     expect(line).toHaveAttribute('title', '2,628,961 tokens')
+    expect(screen.getByText('$0.42')).toHaveAttribute('title', 'What OpenRouter charged for this run’s model calls')
     expect(screen.queryByRole('group', { name: 'Tokens by agent and by kind of turn' })).toBeNull()
 
     fireEvent.click(line)
@@ -90,7 +92,7 @@ describe('RunReceipt', () => {
     expect(line).toHaveAttribute('aria-controls', breakdown.id)
     expect([...breakdown.querySelectorAll('dl > div')].map((row) => row.textContent)).toEqual(['Gatherer~2.25M', 'Reader313k', 'The work~2.16M', 'Handovers219k'])
     expect(breakdown.querySelector('dd[title="2,245,301 tokens"]')).toHaveTextContent('~2.25M')
-    expect(breakdown).toHaveTextContent('Codex reports only the last model call of each turn')
+    expect(breakdown).toHaveTextContent('A turn stopped before it ended')
 
     fireEvent.click(line)
     expect(screen.queryByRole('group', { name: 'Tokens by agent and by kind of turn' })).toBeNull()

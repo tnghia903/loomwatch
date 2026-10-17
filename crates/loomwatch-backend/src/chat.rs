@@ -841,7 +841,7 @@ struct ChatState {
 
 /// The chat's routes. Loopback-only and never cached, like run control.
 pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunRegistry) -> Router {
-    let teams_root = std::fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/chat", get(chat_page))
         .route("/api/chat/messages", post(send_message))
@@ -1660,60 +1660,80 @@ mod tests {
     use crate::runs::RunStore;
     use crate::runs::tests::TeamsDir;
 
-    /// A fake ACP agent that answers every request for as many turns as it is given, so a test can
-    /// drive handovers, checkpoints and notes without scripting each one.
-    ///
-    /// `gate`: the first work turn waits for this file, which keeps the agent working while the
-    /// test sends it a note. `cancellable`: the first work turn waits for `session/cancel` and
-    /// ends `cancelled`, which is how an app answers "Send now".
-    fn agent_script(name: &str, gate: Option<&Path>, cancellable: bool) -> String {
-        let hold = match (gate, cancellable) {
-            (Some(gate), _) => format!(
-                "if [ \"$work\" = 1 ]; then while [ ! -f '{}' ]; do sleep 0.05; done; fi\n",
-                gate.display()
-            ),
-            (None, true) => "if [ \"$work\" = 1 ] && [ -z \"$held\" ]; then\n  held=1\n  printf '%s\\n' \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"session/update\\\",\\\"params\\\":{\\\"sessionId\\\":\\\"s\\\",\\\"update\\\":{\\\"sessionUpdate\\\":\\\"agent_message_chunk\\\",\\\"content\\\":{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"partial\\\"}}}}\"\n  while IFS= read -r stop; do case \"$stop\" in *session/cancel*) break ;; esac; done\n  printf '%s\\n' \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":$id,\\\"result\\\":{\\\"stopReason\\\":\\\"cancelled\\\"}}\"\n  continue\nfi\n".to_owned(),
-            (None, false) => String::new(),
-        };
-        format!(
-            r#"#!/bin/sh
-work=0
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/^[^{{]*{{[^{{]*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"initialize"'*)
-      printf '%s\n' "{{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{{\"protocolVersion\":1}}}}" ;;
-    *'"method":"session/new"'*)
-      printf '%s\n' "{{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{{\"sessionId\":\"{name}-session\",\"configOptions\":[]}}}}" ;;
-    *'"method":"session/close"'*)
-      printf '%s\n' "{{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{{}}}}" ;;
-    *'"method":"session/prompt"'*)
-      case "$line" in
-        *'Write the handover'*) reply="{name} handover" ;;
-        *'Record where this work stands'*) reply='## Done\nwork\n\n## Next\nnothing' ;;
-        *'A note from you'*) reply="{name} revised after the note" ;;
-        *) work=$((work+1)); reply="{name} work $work" ;;
-      esac
-{hold}      printf '%s\n' "{{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{{\"sessionId\":\"{name}-session\",\"update\":{{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{{\"type\":\"text\",\"text\":\"$reply\"}}}}}}}}"
-      printf '%s\n' "{{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{{\"stopReason\":\"end_turn\"}}}}" ;;
-  esac
-done
-"#
-        )
+    /// How an agent's first work turn goes.
+    #[derive(Clone, Copy)]
+    enum FirstTurn {
+        Answered,
+        /// It waits until the test releases it.
+        Waits,
+        /// It writes `partial`, then waits until its turn is stopped.
+        Stopped,
     }
 
-    /// A two-step News desk: Researcher hands over to Writer, and Writer answers.
-    fn write_news_desk(dir: &TeamsDir, researcher: &str) -> PathBuf {
-        let researcher = dir.write_harness("researcher.sh", researcher);
-        let writer = dir.write_harness("writer.sh", &agent_script("writer", None, false));
+    /// A stand-in agent: it answers a handover request with `<name> handover`, a checkpoint
+    /// request with where it stands, a note with `<name> revised after the note`, and its `n`th
+    /// work turn in a session with `<name> work <n>`. The hold is where its first work turn waits.
+    fn agent(name: &str, first: FirstTurn) -> (String, std::sync::Arc<crate::agent::Hold>) {
+        let name = name.to_owned();
+        let worked = move |request: &crate::agent::SeenRequest, name: &str| {
+            request
+                .messages
+                .iter()
+                .filter(|message| {
+                    matches!(message, crate::agent::Message::Assistant { content, .. }
+                        if content.starts_with(&format!("{name} work ")))
+                })
+                .count()
+        };
+        let is_work = |prompt: &str| {
+            !prompt.contains("Write the handover")
+                && !prompt.contains("Record where this work stands")
+                && !prompt.contains("A note from you")
+        };
+        let respond = {
+            let name = name.clone();
+            move |request: &crate::agent::SeenRequest| {
+                let prompt = request.prompt();
+                Some(crate::agent::Completion::text(
+                    &if prompt.contains("Write the handover") {
+                        format!("{name} handover")
+                    } else if prompt.contains("Record where this work stands") {
+                        "## Done\nwork\n\n## Next\nnothing".to_owned()
+                    } else if prompt.contains("A note from you") {
+                        format!("{name} revised after the note")
+                    } else {
+                        format!("{name} work {}", worked(request, &name) + 1)
+                    },
+                ))
+            }
+        };
+        let holds = !matches!(first, FirstTurn::Answered);
+        let (demo, hold) = crate::agent::Demo::responder_holding(
+            respond,
+            move |request| holds && is_work(request.prompt()) && worked(request, &name) == 0,
+            if matches!(first, FirstTurn::Stopped) {
+                "partial"
+            } else {
+                ""
+            },
+        );
+        (crate::engine::demo_model(demo), hold)
+    }
+
+    /// A two-step News desk: Researcher hands over to Writer, and Writer answers. The hold is
+    /// where Researcher's first work turn waits.
+    fn write_news_desk(
+        dir: &TeamsDir,
+        first: FirstTurn,
+    ) -> (PathBuf, std::sync::Arc<crate::agent::Hold>) {
+        let (researcher, hold) = agent("researcher", first);
+        let (writer, _) = agent("writer", FirstTurn::Answered);
         let yaml = format!(
-            "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: writer\n    name: Writer\n    role: write the digest\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
-            researcher.display(),
-            writer.display()
+            "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    model: {researcher}\n  - id: writer\n    name: Writer\n    role: write the digest\n    model: {writer}\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n"
         );
         let path = dir.0.join("news.yaml");
         std::fs::write(&path, yaml).unwrap();
-        path
+        (path, hold)
     }
 
     struct Rig {
@@ -1837,8 +1857,7 @@ done
     async fn a_team_note_waits_for_the_next_work_and_a_note_joins_the_working_agents_session() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let gate = dir.0.join("gate");
-        write_news_desk(&dir, &agent_script("researcher", Some(&gate), false));
+        let (_, gate) = write_news_desk(&dir, FirstTurn::Waits);
         let rig = rig(pool, &dir);
 
         // No @ and nobody working: a team note, which starts nothing.
@@ -1877,7 +1896,7 @@ done
         assert_eq!(queued["message"]["agentId"], "researcher");
         assert_eq!(queued["run"]["queuedNotes"][0]["text"], "and keep it short");
 
-        std::fs::write(&gate, "go").unwrap();
+        gate.release(1);
         let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
         assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
         assert!(done.working.is_empty() && done.queued_notes.is_empty());
@@ -1948,7 +1967,7 @@ done
     async fn send_now_stops_the_agents_turn_and_hands_it_the_note_at_once() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        write_news_desk(&dir, &agent_script("researcher", None, true));
+        write_news_desk(&dir, FirstTurn::Stopped);
         let rig = rig(pool, &dir);
         let (_, started) = send(
             &rig.app,
@@ -1988,7 +2007,7 @@ done
     async fn an_at_agent_runs_only_it_and_continue_hands_its_new_handover_on() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        write_news_desk(&dir, &agent_script("researcher", None, false));
+        write_news_desk(&dir, FirstTurn::Answered);
         let rig = rig(pool, &dir);
         let (_, first) = send(
             &rig.app,
@@ -2085,12 +2104,10 @@ done
     async fn a_team_with_no_fixed_order_carries_the_conversation_and_runs_an_at_agent_alone() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let lead = dir.write_harness("lead.sh", &agent_script("lead", None, false));
-        let helper = dir.write_harness("helper.sh", &agent_script("helper", None, false));
+        let (lead, _) = agent("lead", FirstTurn::Answered);
+        let (helper, _) = agent("helper", FirstTurn::Answered);
         let yaml = format!(
-            "schemaVersion: 1\nid: studio\nname: Studio\nentrypoint: lead\nagents:\n  - id: lead\n    name: Lead\n    role: run the studio\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n  - id: helper\n    name: Helper\n    role: help\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\nedges: []\n",
-            lead.display(),
-            helper.display()
+            "schemaVersion: 1\nid: studio\nname: Studio\nentrypoint: lead\nagents:\n  - id: lead\n    name: Lead\n    role: run the studio\n    model: {lead}\n  - id: helper\n    name: Helper\n    role: help\n    model: {helper}\nedges: []\n"
         );
         std::fs::write(dir.0.join("news.yaml"), yaml).unwrap();
         let rig = rig(pool, &dir);

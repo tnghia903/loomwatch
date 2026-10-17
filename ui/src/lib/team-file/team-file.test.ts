@@ -86,6 +86,23 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(model.toYaml()).toBe(source)
   })
 
+  // ADR 0068: what one run may spend. No block means no limit, so taking it off removes the block.
+  it('sets what one run may spend and takes the limit off without touching any other line', () => {
+    const source = readExample('operator-stop.yaml')
+    const model = TeamFileModel.parse(source)
+    expect(model.snapshot().spend).toEqual({ perRun: 1 })
+    model.setSpend(2.5)
+    expect(model.snapshot().spend).toEqual({ perRun: 2.5 })
+    expect(isOrderedSubsequence(source.split('\n').filter((line) => !line.includes('perRun')), model.toYaml().split('\n'))).toBe(true)
+    model.setSpend(null)
+    expect(model.snapshot().spend).toBeUndefined()
+    expect(model.toYaml()).not.toMatch(/^spend:/m)
+  })
+
+  it('writes a new team with $1.00 a run (ADR 0068)', () => {
+    expect(TeamFileModel.create('blog', 'Blog').snapshot().spend).toEqual({ perRun: 1 })
+  })
+
   it('adds and removes a schedule without touching any other line', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)
@@ -101,21 +118,21 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
   it('changes exactly one line when editing a scalar agent field', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)
-    model.setAgentField('reviewer', 'model', 'claude-opus-6')
+    model.setAgentField('reviewer', 'model', 'openai/gpt-6.1-sol')
     const result = model.toYaml()
 
     const before = source.split('\n')
     const after = result.split('\n')
     expect(after).toHaveLength(before.length)
     const changed = before.flatMap((line, index) => (line === after[index] ? [] : [index]))
-    expect(changed).toEqual([before.findIndex((line) => line.includes('model: claude-opus-5'))])
-    expect(after[changed[0]]).toBe('    model: claude-opus-6')
+    expect(changed).toEqual([before.findIndex((line) => line.includes('model: anthropic/claude-opus-5.5'))])
+    expect(after[changed[0]]).toBe('    model: openai/gpt-6.1-sol')
   })
 
   it('replacing a nested block touches only that agent, not the other one', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)
-    model.setAgentField('reviewer', 'spawn', { cmd: 'claude-agent-acp', args: [], env: {}, cwd: 'review' })
+    model.setAgentField('reviewer', 'allow', { web: false })
     const result = model.toYaml()
 
     const before = source.split('\n')
@@ -124,7 +141,7 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     const changed = before.flatMap((line, index) => (line === after[index] ? [] : [index]))
     expect(changed).toHaveLength(1)
     expect(changed[0]).toBeGreaterThan(before.findIndex((line) => line.includes('id: reviewer')))
-    expect(after[changed[0]]).toBe('      cwd: review')
+    expect(after[changed[0]]).toBe('      web: false')
   })
 
   it('renaming the team leaves every other line byte-identical', () => {
@@ -135,9 +152,11 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
 
     const before = source.split('\n')
     const after = result.split('\n')
-    expect(after[2]).toBe('name: Research and review, revised')
-    expect(after.slice(3)).toEqual(before.slice(3))
-    expect(after.slice(0, 2)).toEqual(before.slice(0, 2))
+    const at = before.indexOf('name: Research and review')
+    expect(at).toBeGreaterThan(0)
+    expect(after[at]).toBe('name: Research and review, revised')
+    expect(after.slice(at + 1)).toEqual(before.slice(at + 1))
+    expect(after.slice(0, at)).toEqual(before.slice(0, at))
   })
 
   it('clearing the entrypoint removes the key rather than leaving a dangling reference', () => {

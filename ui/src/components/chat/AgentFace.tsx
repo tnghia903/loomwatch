@@ -134,7 +134,7 @@ export function AgentCard({ facts }: { facts: AgentFacts }) {
           <span className={`tc-agent-card-state ${facts.state}`}>{facts.stateWords}{facts.step && ` · step ${facts.step.at} of ${facts.step.of}`}</span>
         </span>
       </div>
-      {(facts.app || facts.model) && <p className="tc-agent-card-app">{[facts.app, facts.model].filter(Boolean).join(' · ')}</p>}
+      {facts.model && <p className="tc-agent-card-app">{facts.model}</p>}
       {facts.role && <p className="tc-agent-card-role">{facts.role}</p>}
       {works && <p className="tc-agent-card-works">{works}</p>}
       <p className="tc-agent-card-hint"><AtSign size={12} aria-hidden="true" />Click to mention {facts.name}</p>

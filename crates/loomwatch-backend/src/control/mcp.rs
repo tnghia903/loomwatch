@@ -1,48 +1,74 @@
-//! The `LoomWatch` Control tools, served over MCP's HTTP transport (ADR 0033).
+//! The `LoomWatch` Control tools (ADR 0033), as Ask's agent calls them: directly, in the daemon.
 //!
-//! Same wire shape as the Team Bus: one `POST`, a JSON-RPC body, a JSON body back, a bearer token
-//! naming the caller. The tools read and propose; none writes a team file or answers a review stop.
+//! The tools read and propose; none writes a team file or answers a review stop.
 
-use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::OnceLock;
 
-use axum::Json;
-use axum::extract::State;
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use serde::Serialize;
+use axum::http::StatusCode;
 use serde_json::{Value, json};
 
 use super::{Caller, Control, Proposal, RunRequest, lock, now};
+use crate::agent::{BoxFuture, HostTools, ToolSpec};
 use crate::config::{AgentKind, TeamConfig};
 
-const PROTOCOL_VERSION: &str = "2025-03-26";
-const MODEL_CACHE: Duration = Duration::from_mins(10);
-const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(25);
 const MAX_REQUEST_CHARS: usize = 4_000;
 const MAX_REPLY_CHARS: usize = 4_000;
 
-/// What the app is told once, at the top of its first turn.
-pub(super) const INSTRUCTIONS: &str = r#"You are Ask LoomWatch, the assistant built into LoomWatch. LoomWatch runs teams of AI agents on this person's computer: each agent is one of their AI apps (Claude Code, Codex, Gemini CLI, OpenCode), and the agents work through a pipeline, handing work from one to the next. A "You" step is a review stop where the team waits for the person.
+/// The Control tools, for one conversation's agent.
+pub(super) struct ControlTools {
+    control: Control,
+    caller: Caller,
+    specs: Vec<ToolSpec>,
+}
 
-You help by reading their teams and runs and by proposing changes, using the `loomwatch` tools. Rules:
+impl ControlTools {
+    pub(super) fn new(control: Control, caller: Caller) -> Self {
+        let specs = definitions()
+            .iter()
+            .filter_map(crate::engine::tool_spec)
+            .collect();
+        Self {
+            control,
+            caller,
+            specs,
+        }
+    }
+}
+
+impl HostTools for ControlTools {
+    fn specs(&self) -> Vec<ToolSpec> {
+        self.specs.clone()
+    }
+
+    fn call<'a>(&'a self, name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)> {
+        Box::pin(async move {
+            match call(&self.control, &self.caller, name, &input).await {
+                Ok(value) => (serde_json::to_string(&value).unwrap_or_default(), false),
+                Err(message) => (message, true),
+            }
+        })
+    }
+}
+
+/// What the assistant is told once, at the top of its first turn.
+pub(super) const INSTRUCTIONS: &str = r#"You are Ask LoomWatch, the assistant built into LoomWatch. LoomWatch runs teams of AI agents on this person's computer: each agent runs on an AI model through OpenRouter, and the agents work through a pipeline, handing work from one to the next. A "You" step is a review stop where the team waits for the person.
+
+You help by reading their teams and runs and by proposing changes, using your tools. Rules:
 - You cannot save files or start runs yourself. `propose_team` shows the person a proposal on the canvas; nothing is saved until they press Apply. `start_run` asks them to start the run, unless they have allowed you to start runs directly; its result tells you which. Never say something was saved, applied or started unless a tool result says so.
 - Review stops belong to the person. You may explain what a team is waiting for and use `draft_review_note` to suggest a note; only they approve or send work back.
-- Use only the AI apps `list_apps` reports as available, with the `spawn` block and a model it lists. Never invent a model id.
+- Give each agent a model from `list_models`: its recommended models, or another OpenRouter model id the person names. Never invent a model id.
 - Reply in plain words, in one to three short sentences. Don't paste team files into the chat: the proposal card shows the changes. Don't use tables.
-- Don't use any tool besides the `loomwatch` ones. Don't read, write or run anything on the computer.
 
 Set agents up the way that works best, every time, without being asked; the person won't know to ask:
-- Use the fewest agents that do the job. One agent is right for most requests. Add one only for work that needs a different job, a different AI app, or the person's review in between: each agent opens a session of its own, which costs time and tokens, and each handover loses detail. More than four is rarely worth it.
+- Use the fewest agents that do the job. One agent is right for most requests. Add one only for work that needs a different job, a different model, or the person's review in between: each agent opens a session of its own, which costs time and money, and each handover loses detail. More than four is rarely worth it.
 - Write each `role` in three parts: what the agent does and what it leaves to others; how to work, as a few short bullets ending with how it checks its work before it replies; and exactly what it replies with. A later stage receives the earlier stage's reply, so say what to hand on. The last stage's reply is the team's answer, so it delivers the finished piece, not a review of it.
 - Make every line specific to this request (its audience, sources, length, format), and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
 - An agent that must search the web gets `allow: {web: true}`; leave `edits` and `commands` off unless the work is changing files or running commands.
 - Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five.
 - When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBackOnce: true` only if the person wants missed checks fixed before they see the answer. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
-- Set `thinkingEffort` by how hard the job is: `low` for tidying, formatting or simple lookups, `medium` for most work, `high` for checking, analysis and code. Use only an effort `list_apps` lists for that model, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink.
+- Set `thinkingEffort` by how hard the job is: `low` for tidying, formatting or simple lookups, `medium` for most work, `high` for checking, analysis and code. Only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink.
+- Choose each agent's model by its job: the default for hard work, a cheaper recommended model for simple lookups and formatting. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
 
 A team file is YAML. A complete pipeline with a review stop:
 
@@ -59,13 +85,12 @@ agents:
       - Use primary sources (company posts, papers, filings) from the last 24 hours.
       - Before you reply, open each link again and check it says what you claim.
       Reply with up to eight stories: a one-line headline, two sentences on why it matters, and its link.
-    spawn: {"cmd": "claude-agent-acp", "args": [], "env": {}, "cwd": "."}   # copy the spawn block from list_apps
-    model: claude-sonnet-5-5                          # a model list_apps lists for that app
-    thinkingEffort: medium                            # an effort list_apps lists for that model
+    model: anthropic/claude-sonnet-5.5               # a model from list_models
+    thinkingEffort: medium
     doneWhen: ["Every story links to a source you opened", "No story is older than 24 hours"]
     allow: {web: true}
   - id: review
-    kind: operator           # a review stop: no spawn, no model
+    kind: operator           # a review stop: no model
     name: You
     role: Researcher is done. Approve the findings, or say what to change.
   - id: writer
@@ -76,8 +101,7 @@ agents:
       - Keep the five that matter most to someone building AI products.
       - Before you reply, check every claim and link against the approved stories.
       Reply with the brief only: five bullets, each one sentence with its link, and no preamble.
-    spawn: {"cmd": "codex-acp", "args": [], "env": {}, "cwd": "."}
-    model: gpt-5.5
+    model: anthropic/claude-opus-5.5
     thinkingEffort: medium
     doneWhen: ["Exactly five bullets, each with its link", "Uses only the approved stories"]
 edges:                       # the order work is handed along
@@ -90,109 +114,6 @@ and, to send each scheduled answer to Notion, `deliver: {notion: {title: "Brief 
 To send every answer to Notion, whoever starts the run, add a top-level `deliver: {notion: {}}` (title placeholders: {{team}}, {{date}}, {{time}}, {{weekday}}). Pages go under the destination the person chose in Connections.
 
 When you change an existing team, call `read_team` first and propose the whole edited file, keeping everything you were not asked to change. A review stop can't be the first stage. If `propose_team` reports a problem, fix the file and propose it again before you answer."#;
-
-/// What `list_apps` reports for one app's models.
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct AppModels {
-    default_model: Option<String>,
-    models: Vec<String>,
-    /// The thinking efforts the default model lists, so a proposed `thinkingEffort` is one the app
-    /// accepts (ADR 0062): an effort it does not list fails the run.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    default_model_efforts: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    problem: Option<String>,
-}
-
-pub(super) async fn post(
-    State(control): State<Control>,
-    headers: HeaderMap,
-    body: Option<Json<Value>>,
-) -> Response {
-    let Some(token) = headers
-        .get(AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-    else {
-        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
-    };
-    let Some(caller) = control.caller(token).await else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            "this LoomWatch connection has ended or was removed",
-        )
-            .into_response();
-    };
-    let Some(Json(request)) = body else {
-        return (StatusCode::BAD_REQUEST, "send a JSON-RPC request").into_response();
-    };
-    let Some(id) = request.get("id").cloned() else {
-        return StatusCode::ACCEPTED.into_response();
-    };
-    let response = match request.get("method").and_then(Value::as_str) {
-        Some("initialize") => rpc_result(
-            &id,
-            &json!({
-                "protocolVersion": request
-                    .pointer("/params/protocolVersion")
-                    .and_then(Value::as_str)
-                    .filter(|version| SUPPORTED_VERSIONS.contains(version))
-                    .unwrap_or(PROTOCOL_VERSION),
-                "capabilities": {"tools": {"listChanged": false}},
-                "serverInfo": {"name": super::SERVER_NAME, "title": "LoomWatch", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "Read and propose changes to the person's LoomWatch teams and runs. Nothing is saved or run without them."
-            }),
-        ),
-        Some("ping") => rpc_result(&id, &json!({})),
-        Some("tools/list") => rpc_result(&id, &json!({"tools": definitions()})),
-        Some("tools/call") => {
-            let name = request
-                .pointer("/params/name")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let arguments = request
-                .pointer("/params/arguments")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
-            let result = match call(&control, &caller, name, &arguments).await {
-                Ok(value) => tool_success(&value),
-                Err(message) => tool_error(&message),
-            };
-            rpc_result(&id, &result)
-        }
-        Some(method) => rpc_error(&id, -32601, &format!("unsupported method {method}")),
-        None => rpc_error(&id, -32600, "request omitted method"),
-    };
-    (
-        StatusCode::OK,
-        [(CONTENT_TYPE, "application/json")],
-        Json(response),
-    )
-        .into_response()
-}
-
-const SUPPORTED_VERSIONS: [&str; 3] = ["2025-03-26", "2025-06-18", "2025-11-25"];
-
-fn rpc_result(id: &Value, result: &Value) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "result": result})
-}
-
-fn rpc_error(id: &Value, code: i64, message: &str) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
-}
-
-fn tool_success(value: &Value) -> Value {
-    json!({
-        "content": [{"type": "text", "text": serde_json::to_string(value).unwrap_or_default()}],
-        "structuredContent": value,
-        "isError": false
-    })
-}
-
-fn tool_error(message: &str) -> Value {
-    json!({"content": [{"type": "text", "text": message}], "isError": true})
-}
 
 fn definitions() -> Vec<Value> {
     let string = |description: &str| json!({"type": "string", "description": description});
@@ -214,9 +135,9 @@ fn definitions() -> Vec<Value> {
             "annotations": read_only,
         }),
         json!({
-            "name": "list_apps",
-            "title": "List AI apps",
-            "description": "The AI apps found on this computer: whether each can run agents, the spawn block to copy into an agent, its default model and the models it offers.",
+            "name": "list_models",
+            "title": "List models",
+            "description": "The default model and the recommended models agents can run on, with what each costs per million tokens and whether it takes a thinking effort.",
             "inputSchema": object(json!({}), &[]),
             "annotations": read_only,
         }),
@@ -270,7 +191,7 @@ async fn call(
     match name {
         "list_teams" => list_teams(control).await,
         "read_team" => read_team(control, arguments),
-        "list_apps" => list_apps(control).await,
+        "list_models" => list_models().await,
         "propose_team" => propose_team(control, caller, arguments).await,
         "start_run" => start_run(control, caller, arguments).await,
         "get_run" => get_run(control, caller, arguments).await,
@@ -321,154 +242,45 @@ fn read_team(control: &Control, arguments: &Value) -> Result<Value, String> {
     Ok(json!({"file": file, "yaml": yaml, "revision": crate::api::revision(yaml.as_bytes())}))
 }
 
-async fn list_apps(control: &Control) -> Result<Value, String> {
-    let apps = crate::api::detect_harnesses(control.inner.search_path.as_deref());
-    let mut discovered = BTreeMap::new();
-    let pending = apps
-        .iter()
-        .filter(|app| app.acp_available)
-        .map(|app| {
-            let control = control.clone();
-            let app = app.clone();
-            async move { (app.id.clone(), models_for(&control, &app).await) }
-        })
-        .collect::<Vec<_>>();
-    for (id, models) in futures_join(pending).await {
-        discovered.insert(id, models);
-    }
+/// The default model and the recommended ones, with their prices and whether they reason. Not the
+/// whole catalog: hundreds of models would crowd out the conversation, and any `OpenRouter` id the
+/// person names still works.
+async fn list_models() -> Result<Value, String> {
+    let ai = crate::ai::installed()
+        .ok_or("The model list isn't available in this copy of LoomWatch.")?;
+    let catalog = ai
+        .models()
+        .catalog()
+        .await
+        .map_err(|error| format!("The model list isn't available right now: {error:#}"))?;
     Ok(json!({
-        "apps": apps.iter().map(|app| {
-            let models = discovered.get(&app.id).cloned().unwrap_or_default();
-            json!({
-                "id": app.id,
-                "name": app.name,
-                "available": app.acp_available && models.problem.is_none(),
-                "reason": app.unavailable_reason.clone().or(models.problem.clone()),
-                // A complete spawn block: `cwd` "." is the team file's own folder.
-                "spawn": {"cmd": app.spawn.cmd, "args": app.spawn.args, "env": {}, "cwd": "."},
-                "defaultModel": models.default_model,
-                "models": models.models,
-            })
-        }).collect::<Vec<_>>()
+        "defaultModel": catalog.default_model,
+        "recommended": catalog.recommended.iter().map(|model| json!({
+            "id": model.id,
+            "name": model.name,
+            "why": model.note,
+            "free": model.free,
+            "reasoning": model.reasoning,
+            "dollarsPerMillionInput": model.input_price,
+            "dollarsPerMillionOutput": model.output_price,
+        })).collect::<Vec<_>>(),
+        "otherModels": "Any other OpenRouter model id that can use tools works too, if the person names one.",
     }))
 }
 
-/// Run futures concurrently without pulling in a futures crate: each becomes a task.
-async fn futures_join<F, T>(futures: Vec<F>) -> Vec<T>
-where
-    F: std::future::Future<Output = T> + Send + 'static,
-    T: Send + 'static,
-{
-    let handles = futures.into_iter().map(tokio::spawn).collect::<Vec<_>>();
-    let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
-        if let Ok(result) = handle.await {
-            results.push(result);
+/// The models a team's agents run on, for the "Start this run?" card.
+fn models_used(team: &TeamConfig) -> Vec<String> {
+    let mut models = Vec::new();
+    for agent in team
+        .agents
+        .iter()
+        .filter(|agent| agent.kind != AgentKind::Operator)
+    {
+        let model = crate::ai::openrouter_id(&agent.model);
+        if !models.contains(&model) {
+            models.push(model);
         }
     }
-    results
-}
-
-/// Find every app's models ahead of the first `list_apps`, so proposing a team does not wait on
-/// starting each app.
-pub(super) async fn warm_models(control: &Control) {
-    let _ = list_apps(control).await;
-}
-
-async fn cached_models(control: &Control, app: &str) -> Option<AppModels> {
-    control
-        .inner
-        .models
-        .lock()
-        .await
-        .get(app)
-        .filter(|(at, _)| at.elapsed() < MODEL_CACHE)
-        .map(|(_, models)| models.clone())
-}
-
-async fn models_for(control: &Control, app: &crate::api::DetectedHarness) -> AppModels {
-    if let Some(models) = cached_models(control, &app.id).await {
-        return models;
-    }
-    let discovering = Arc::clone(
-        super::lock(&control.inner.discovering)
-            .entry(app.id.clone())
-            .or_default(),
-    );
-    let _discovering = discovering.lock().await;
-    // Whoever held the lock may have just found them.
-    if let Some(models) = cached_models(control, &app.id).await {
-        return models;
-    }
-    let command = control
-        .inner
-        .search_path
-        .as_deref()
-        .and_then(|path| crate::api::find_executable(path, &app.spawn.cmd))
-        .map_or_else(
-            || app.spawn.cmd.clone(),
-            |path| path.to_string_lossy().into_owned(),
-        );
-    let spec = crate::acp::ProcessSpec {
-        cmd: command,
-        args: app.spawn.args.clone(),
-        env: BTreeMap::new(),
-        cwd: control.inner.teams_root.clone(),
-        tools: Vec::new(),
-        permissions: None,
-        asker: None,
-    };
-    let models =
-        match tokio::time::timeout(DISCOVERY_TIMEOUT, crate::acp::discover_models(&spec)).await {
-            Ok(Ok(catalog)) => {
-                let ids = catalog
-                    .models
-                    .iter()
-                    .map(|model| model.id.clone())
-                    .take(12)
-                    .collect::<Vec<_>>();
-                let default_model = catalog
-                    .current_model_id
-                    .clone()
-                    .or_else(|| ids.first().cloned());
-                let default_model_efforts = catalog
-                    .models
-                    .iter()
-                    .find(|model| Some(&model.id) == default_model.as_ref())
-                    .map(|model| {
-                        model
-                            .thinking_efforts
-                            .iter()
-                            .map(|effort| effort.id.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                AppModels {
-                    default_model,
-                    models: ids,
-                    default_model_efforts,
-                    problem: None,
-                }
-            }
-            Ok(Err(error)) => AppModels {
-                problem: Some(format!(
-                    "{} didn't start: {}",
-                    app.name,
-                    super::first_line(&format!("{error:#}"))
-                )),
-                ..AppModels::default()
-            },
-            Err(_) => AppModels {
-                problem: Some(format!("{} took too long to start.", app.name)),
-                ..AppModels::default()
-            },
-        };
-    control
-        .inner
-        .models
-        .lock()
-        .await
-        .insert(app.id.clone(), (Instant::now(), models.clone()));
     models
 }
 
@@ -524,7 +336,11 @@ async fn propose_team(
     caller: &Caller,
     arguments: &Value,
 ) -> Result<Value, String> {
-    let file = text(arguments, "file")?;
+    let mut file = text(arguments, "file")?;
+    // The canvas names team files with `/`, and an app on Windows may write `sub\a.yaml`.
+    if cfg!(windows) {
+        file = file.replace('\\', "/");
+    }
     let yaml = arguments
         .get("yaml")
         .and_then(Value::as_str)
@@ -545,10 +361,7 @@ async fn propose_team(
     }
     let existing = std::fs::read(&path).ok();
     let id = format!("proposal-{}", uuid::Uuid::new_v4());
-    let source = match caller {
-        Caller::Conversation(id) => id.clone(),
-        Caller::Connection(app) => format!("connection:{app}"),
-    };
+    let Caller::Conversation(source) = caller.clone();
     let proposal = Proposal {
         id: id.clone(),
         source,
@@ -585,17 +398,9 @@ async fn propose_team(
         .write()
         .await
         .insert(id.clone(), proposal.clone());
-    // Said to the app, which says it to the person: where to look, and that nothing changed yet.
-    let message = match caller {
-        Caller::Conversation(_) => {
-            "Shown to the person as a proposal on the canvas. Nothing is saved until they press \
-             Apply."
-        }
-        Caller::Connection(_) => {
-            "Waiting for the person in LoomWatch: it is listed in the Ask panel there, under \
-             \"From your connected apps\". Nothing is saved until they press Apply."
-        }
-    };
+    // Said to the assistant, which says it to the person: where to look, and that nothing changed.
+    let message =
+        "Shown to the person as a proposal on the canvas. Nothing is saved until they press Apply.";
     Ok(json!({
         "proposalId": id,
         "file": file,
@@ -603,30 +408,6 @@ async fn propose_team(
         "status": "waiting_for_the_person",
         "message": message,
     }))
-}
-
-/// The names of the apps a team's agents use, for the "Start this run?" card.
-fn apps_used(team: &TeamConfig) -> Vec<String> {
-    let mut names = Vec::new();
-    for agent in &team.agents {
-        if agent.kind == AgentKind::Operator {
-            continue;
-        }
-        let name = match crate::workspace::Harness::of(agent).id() {
-            Some("claude") => "Claude",
-            Some("codex") => "Codex",
-            Some("gemini") => "Gemini",
-            Some("opencode") => "OpenCode",
-            Some("hermes") => "Hermes",
-            Some("openclaw") => "OpenClaw",
-            _ => "a custom command",
-        }
-        .to_owned();
-        if !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
 }
 
 async fn start_run(control: &Control, caller: &Caller, arguments: &Value) -> Result<Value, String> {
@@ -650,19 +431,14 @@ async fn start_run(control: &Control, caller: &Caller, arguments: &Value) -> Res
         })?;
     let yaml = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let team = TeamConfig::parse(&yaml).map_err(|error| format!("{file} can't run: {error:#}"))?;
-    let ask_first = match caller {
-        Caller::Conversation(id) => control
-            .conversation(id)
-            .await
-            .is_none_or(|conversation| lock(&conversation.status).ask_before_run),
-        // A connected app asked the person itself before calling a tool that acts.
-        Caller::Connection(_) => false,
-    };
+    let Caller::Conversation(id) = caller;
+    let ask_first = control
+        .conversation(id)
+        .await
+        .is_none_or(|conversation| lock(&conversation.status).ask_before_run);
     if ask_first {
         let request_id = format!("run-request-{}", uuid::Uuid::new_v4());
-        if let Caller::Conversation(id) = caller
-            && let Some(conversation) = control.conversation(id).await
-        {
+        if let Some(conversation) = control.conversation(id).await {
             lock(&conversation.status).run_requests.insert(
                 request_id.clone(),
                 RunRequest {
@@ -680,7 +456,7 @@ async fn start_run(control: &Control, caller: &Caller, arguments: &Value) -> Res
                     "file": file,
                     "name": if team.name.is_empty() { file.clone() } else { team.name.clone() },
                     "request": request,
-                    "apps": apps_used(&team),
+                    "models": models_used(&team),
                     "steps": team.agents.len(),
                 }),
             )
@@ -701,9 +477,7 @@ async fn start_run(control: &Control, caller: &Caller, arguments: &Value) -> Res
     )
     .map_err(|error| error.message)?;
     control.inner.registry.persist_quietly(&record.run_id).await;
-    if let Caller::Conversation(id) = caller
-        && let Some(conversation) = control.conversation(id).await
-    {
+    if let Some(conversation) = control.conversation(id).await {
         lock(&conversation.status).last_run = Some(record.run_id.clone());
     }
     control
@@ -734,13 +508,11 @@ async fn resolve_run(
     let run_id = if let Some(id) = requested {
         id
     } else {
-        let latest = match caller {
-            Caller::Conversation(id) => control
-                .conversation(id)
-                .await
-                .and_then(|conversation| lock(&conversation.status).last_run.clone()),
-            Caller::Connection(_) => None,
-        };
+        let Caller::Conversation(id) = caller;
+        let latest = control
+            .conversation(id)
+            .await
+            .and_then(|conversation| lock(&conversation.status).last_run.clone());
         latest.ok_or("No run was started from here yet. Give a runId.")?
     };
     control

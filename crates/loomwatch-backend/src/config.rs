@@ -69,6 +69,9 @@ pub struct TeamConfig {
     /// (ADR 0061). Absent asks the operator, as before Auto mode existed.
     #[serde(default)]
     pub permissions: TeamPermissions,
+    /// What one run may spend (ADR 0068). Absent: no limit, though spend is still counted.
+    #[serde(default)]
+    pub spend: crate::spend::SpendConfig,
 }
 
 /// The `permissions:` block (ADR 0061).
@@ -293,26 +296,24 @@ impl Default for AgentMemoryConfig {
 pub struct ConversationConfig {
     pub brief: BriefConfig,
     pub ask: AskConfig,
-    /// How long a session may idle while the person at the keyboard decides.
+    /// Bounds on a review stop or a parked `ask_user`, kept so older team files still load.
     pub stop: StopConfig,
 }
 
-/// Bounds on a review stop or a parked `ask_user` (`docs/TEAM_MEMORY.md`, "Rules that keep this
-/// safe"). Only the second tier of decision 7 reads this: a harness that advertises
-/// `loadSession` is closed while the operator thinks and costs no process at all, so no window
-/// applies to it.
+/// Bounds on a review stop or a parked `ask_user`. Kept so older team files still load, and read
+/// by nothing: an agent waiting for the operator is parked in the database with nothing running,
+/// so no window applies to it (`docs/TEAM_CONFIG.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct StopConfig {
-    /// Minutes a kept-alive session idles before `LoomWatch` asks it for a checkpoint and releases
-    /// it. A live process at zero token cost is still a live process.
+    /// Minutes a third-party app's session could idle before it was checkpointed and let go.
+    /// Accepted, and no longer limits a wait.
     pub keep_alive_minutes: u32,
 }
 
 impl Default for StopConfig {
     fn default() -> Self {
-        // Decision 7 settled on 15, down from 30: long enough to answer a question you meant to
-        // answer, short enough that a stop you walked away from does not hold a harness all day.
+        // The default the schema documents.
         Self {
             keep_alive_minutes: 15,
         }
@@ -414,13 +415,14 @@ pub const DEFAULT_RUN_NOTION_TITLE: &str = "{{team}} — {{date}} {{time}}";
 ///
 /// `operator` is the person at the keyboard standing in the pipeline (`docs/TEAM_MEMORY.md`, "The
 /// operator is a node"): it has an id, it sits on edges, it takes part in the topological order,
-/// and instead of a harness it has a **question** — its `role` — which is what the panel shows
+/// and instead of a model it has a **question** — its `role` — which is what the panel shows
 /// when the pipeline reaches it. `spawn` and `model` are absent for this kind, because there is
-/// nothing to spawn and no model to select.
+/// no folder to work in and no model to select.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
-    /// An ACP harness. The default, and what every team file written before Canvas C is.
+    /// An agent `LoomWatch` runs on a model. The default, and what every team file written before
+    /// Canvas C is.
     #[default]
     Harness,
     /// A review stop: the operator as a stage.
@@ -468,8 +470,8 @@ pub struct AgentConfig {
     pub role: String,
     /// `harness` unless the entry says otherwise. See [`AgentKind`].
     pub kind: AgentKind,
-    /// Empty `cmd` for an operator node, which spawns nothing. Every read of this is behind a
-    /// `kind` check or behind the loader's refusal of a harness agent that declared none.
+    /// Where the agent works. The team file's own folder when the entry names none, and always for
+    /// an operator node, which works nowhere.
     pub spawn: SpawnConfig,
     pub model: String,
     pub thinking_effort: Option<String>,
@@ -492,6 +494,8 @@ pub struct AgentConfig {
     /// A check step may send the work back once when a check is not met: the findings go to the
     /// checked agent's still-open session, and the checks run once more. Off unless set.
     pub send_back_once: bool,
+    /// The agent's own guard on what one run may spend on it (ADR 0068). No guard unless set.
+    pub spend: crate::spend::SpendConfig,
 }
 
 /// At most this many `doneWhen` items, each at most [`DONE_WHEN_CHARS`] characters: the schema's
@@ -553,6 +557,8 @@ struct RawAgent {
     checks: Option<String>,
     #[serde(default)]
     send_back_once: bool,
+    #[serde(default)]
+    spend: Option<crate::spend::SpendConfig>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
     #[serde(default, rename = "status")]
@@ -576,6 +582,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("doneWhen", !raw.done_when.is_empty()),
                     ("checks", raw.checks.is_some()),
                     ("sendBackOnce", raw.send_back_once),
+                    ("spend", raw.spend.is_some()),
                 ] {
                     if present {
                         return Err(format!(
@@ -613,14 +620,13 @@ impl TryFrom<RawAgent> for AgentConfig {
                     done_when: Vec::new(),
                     checks: None,
                     send_back_once: false,
+                    spend: crate::spend::SpendConfig::default(),
                 })
             }
             AgentKind::Harness => {
-                let spawn = raw.spawn.ok_or_else(|| {
-                    format!("agent {id:?} is missing `spawn`, which says how to start its harness.")
-                })?;
+                let spawn = raw.spawn.unwrap_or_default();
                 let model = raw.model.ok_or_else(|| {
-                    format!("agent {id:?} is missing `model`, the harness's model selector.")
+                    format!("agent {id:?} is missing `model`, the model it runs on.")
                 })?;
                 for entry in &raw.turned_off {
                     check_turned_off(&id, entry)?;
@@ -645,6 +651,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                         .map(|checked| checked.trim().to_owned())
                         .filter(|checked| !checked.is_empty()),
                     send_back_once: raw.send_back_once,
+                    spend: raw.spend.unwrap_or_default(),
                 })
             }
         }
@@ -845,109 +852,46 @@ impl AgentConfig {
 fn split_known_effort(model: &str) -> Option<&str> {
     let (base, suffix) = model.rsplit_once('[')?;
     let effort = suffix.strip_suffix(']')?;
+    is_known_effort(effort).then_some(base)
+}
+
+/// Whether `effort` is a reasoning effort a team file may name.
+pub(crate) fn is_known_effort(effort: &str) -> bool {
     matches!(
         effort,
-        "default" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+        "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
     )
-    .then_some(base)
 }
 
-/// Why a team file may not set `key` in an agent's `spawn.env`, or `None` when it may.
+/// An agent's `spawn`: the folder it works in, relative to the team file.
 ///
-/// The app still inherits the operator's own environment (their proxy, their API keys); this
-/// only stops a team file — which can come from anyone — from changing which code the app loads,
-/// where its traffic and the sign-in it carries go, which settings it reads, or `LoomWatch`'s own
-/// variables. Names are compared case-insensitively, because `http_proxy` works as well as
-/// `HTTP_PROXY`. `CODEX_CONFIG` stays allowed: `LoomWatch` merges its own settings over it.
-#[must_use]
-pub fn forbidden_spawn_env(key: &str) -> Option<&'static str> {
-    const LOADS_CODE: &str = "changes which code the app loads";
-    const REDIRECTS: &str = "can send the app's traffic, and your sign-in, somewhere else";
-    const SETTINGS: &str = "points the app at other settings";
-    const OWN: &str = "belongs to LoomWatch itself";
-    let key = key.trim().to_ascii_uppercase();
-    let exact = |names: &[&str]| names.contains(&key.as_str());
-    let prefix = |prefixes: &[&str]| prefixes.iter().any(|prefix| key.starts_with(prefix));
-    let suffix = |suffixes: &[&str]| suffixes.iter().any(|suffix| key.ends_with(suffix));
-    if exact(&[
-        "PATH",
-        "HOME",
-        "SHELL",
-        "BASH_ENV",
-        "ENV",
-        "ZDOTDIR",
-        "IFS",
-        "PROMPT_COMMAND",
-        "NODE_OPTIONS",
-        "NODE_PATH",
-        "PYTHONPATH",
-        "PYTHONHOME",
-        "PYTHONSTARTUP",
-        "PYTHONUSERBASE",
-        "PERL5LIB",
-        "PERL5OPT",
-        "PERLLIB",
-        "RUBYLIB",
-        "RUBYOPT",
-        "CLASSPATH",
-        "JAVA_TOOL_OPTIONS",
-        "_JAVA_OPTIONS",
-        "EDITOR",
-        "VISUAL",
-        "PAGER",
-        "BROWSER",
-    ]) || prefix(&["LD_", "DYLD_"])
-    {
-        return Some(LOADS_CODE);
-    }
-    if exact(&[
-        "NODE_EXTRA_CA_CERTS",
-        "NODE_TLS_REJECT_UNAUTHORIZED",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "REQUESTS_CA_BUNDLE",
-        "CURL_CA_BUNDLE",
-    ]) || suffix(&["_PROXY", "_BASE_URL", "_API_BASE", "_API_URL", "_ENDPOINT"])
-    {
-        return Some(REDIRECTS);
-    }
-    if prefix(&[
-        "XDG_",
-        "NPM_CONFIG_",
-        "YARN_",
-        "PNPM_",
-        "GIT_",
-        "OPENCODE_CONFIG",
-    ]) || suffix(&["_HOME", "_CONFIG_DIR", "_CONFIG_FILE"])
-    {
-        return Some(SETTINGS);
-    }
-    if exact(&["DATABASE_URL", "PGPASSWORD"]) || prefix(&["POSTGRES_", "LOOMWATCH_"]) {
-        return Some(OWN);
-    }
-    None
-}
-
+/// `cmd`, `args` and `env` named the AI app an earlier `LoomWatch` started for the agent. Files
+/// written then still have them, so they are read and ignored: every agent runs on `LoomWatch`'s
+/// own engine now.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SpawnConfig {
+    #[serde(default)]
     pub cmd: String,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    #[serde(default = "team_folder")]
     pub cwd: PathBuf,
 }
 
+fn team_folder() -> PathBuf {
+    PathBuf::from(".")
+}
+
 impl Default for SpawnConfig {
-    /// What an operator node carries: nothing to run, and the team file's own directory. Only
-    /// reachable through [`AgentConfig`]'s `kind: operator` branch — a harness agent that omits
-    /// `spawn` is refused rather than defaulted.
+    /// The team file's own folder.
     fn default() -> Self {
         Self {
             cmd: String::new(),
             args: Vec::new(),
             env: BTreeMap::new(),
-            cwd: PathBuf::from("."),
+            cwd: team_folder(),
         }
     }
 }
@@ -1298,17 +1242,6 @@ impl TeamConfig {
         for agent in &team.agents {
             if !is_identifier(&agent.id) {
                 bail!("agent id {:?} {IDENTIFIER_RULE}", agent.id);
-            }
-            // A team file can come from anyone, and an app shown as "Claude" whose settings load
-            // other code or send its traffic elsewhere is not the app it looks like (ADR 0048).
-            for key in agent.spawn.env.keys() {
-                if let Some(reason) = forbidden_spawn_env(key) {
-                    bail!(
-                        "agent {:?} sets {key} in spawn.env, which LoomWatch doesn't allow because \
-                         it {reason}. Remove it from the team file.",
-                        agent.id
-                    );
-                }
             }
         }
         team.entrypoint_agent()?;
@@ -1757,47 +1690,33 @@ mod tests {
         assert!(mismatch.to_string().contains("must match entrypoint"));
     }
 
-    /// A shared team file must not make an app it shows as "Claude" load other code or send its
-    /// traffic elsewhere (ADR 0048), while the settings a team legitimately passes still load.
+    /// Files written for an earlier `LoomWatch` named the AI app each agent ran in. They still load:
+    /// the app is ignored, and an agent with no `spawn` at all works in the team file's folder.
     #[test]
-    fn rejects_spawn_env_that_changes_what_the_app_loads_or_where_it_connects() {
-        let team = |key: &str| {
-            TeamConfig::parse(&format!(
-                "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: claude-agent-acp\n      env:\n        {key}: x\n      cwd: .\n    model: test/model\n",
-            ))
-        };
-        for bad in [
-            "NODE_OPTIONS",
-            "node_options",
-            "PATH",
-            "HOME",
-            "DYLD_INSERT_LIBRARIES",
-            "LD_PRELOAD",
-            "https_proxy",
-            "ANTHROPIC_BASE_URL",
-            "OPENAI_BASE_URL",
-            "NODE_EXTRA_CA_CERTS",
-            "CLAUDE_CONFIG_DIR",
-            "CODEX_HOME",
-            "XDG_CONFIG_HOME",
-            "NPM_CONFIG_REGISTRY",
-            "OPENCODE_CONFIG_CONTENT",
-            "GIT_SSH_COMMAND",
-            "DATABASE_URL",
-            "LOOMWATCH_HOST_RUNNER_TOKEN",
-        ] {
-            let error = format!("{:#}", team(bad).expect_err(bad));
-            assert!(error.contains("LoomWatch doesn't allow"), "{bad}: {error}");
-            assert!(error.contains(bad), "{bad}: {error}");
-        }
-        for fine in [
-            "HERMES_ACCEPT_HOOKS",
-            "CODEX_CONFIG",
-            "ANTHROPIC_MODEL",
-            "MY_SETTING",
-        ] {
-            team(fine).unwrap_or_else(|error| panic!("{fine}: {error:#}"));
-        }
+    fn old_app_fields_are_ignored_and_spawn_may_be_left_out() {
+        let old = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: claude-agent-acp\n      args: [--x]\n      env:\n        NODE_OPTIONS: --require evil.js\n      cwd: work\n    model: sonnet\n",
+        )
+        .expect("an old file still loads");
+        assert_eq!(old.agents[0].spawn.cwd, PathBuf::from("work"));
+        let new = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    name: Writer\n    model: anthropic/claude-sonnet-5.5\n",
+        )
+        .expect("an agent needs only a name and a model");
+        assert_eq!(new.agents[0].spawn.cwd, PathBuf::from("."));
+        assert!(new.agents[0].spawn.cmd.is_empty());
+        let only_cwd = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn: {cwd: notes}\n    model: x/y\n",
+        )
+        .expect("spawn may name only the folder");
+        assert_eq!(only_cwd.agents[0].spawn.cwd, PathBuf::from("notes"));
+        let no_model =
+            TeamConfig::parse("schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    name: A\n")
+                .expect_err("an agent without a model");
+        assert!(
+            format!("{no_model:#}").contains("missing `model`"),
+            "{no_model:#}"
+        );
     }
 
     /// Ids name folders under `.loomwatch/`, and `materialise` clears `.claude/skills` and
@@ -1858,6 +1777,35 @@ mod tests {
         legacy.model = "vendor/deep[low]".into();
         legacy.thinking_effort = Some("xhigh".into());
         assert_eq!(legacy.model_selector(), "vendor/deep[xhigh]");
+    }
+
+    /// ADR 0068: `spend.perRun` on the team and on an agent. A team that says nothing has no limit
+    /// and its agents no guard; an operator node spends nothing, so it may not say.
+    #[test]
+    fn spend_limits_load_at_team_and_agent_level() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 2.5\nagents:\n  - id: a\n    model: m\n    spend:\n      perRun: 0.3\n  - id: b\n    model: m\n",
+        )
+        .expect("valid config");
+        assert_eq!(team.spend.per_run, Some(2.5));
+        assert_eq!(team.agents[0].spend.per_run, Some(0.3));
+        assert_eq!(team.agents[1].spend.per_run, None);
+        let spool = crate::spend::RunSpend::for_team(&team);
+        assert_eq!(spool.limit_usd, Some(2.5));
+        assert_eq!(spool.agents["a"].limit_usd, Some(0.3));
+        assert!(!spool.agents.contains_key("b"));
+
+        let silent = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .expect("valid config");
+        assert_eq!(crate::spend::RunSpend::for_team(&silent).limit_usd, None);
+
+        let error = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n  - id: stop\n    kind: operator\n    role: Approve.\n    spend:\n      perRun: 1\n",
+        )
+        .expect_err("an operator node spends nothing");
+        assert!(format!("{error:#}").contains("no spend"), "{error:#}");
     }
 
     /// Budgets were retired by ADR 0027. A team file written before then still says `budget:` at

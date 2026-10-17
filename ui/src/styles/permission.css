@@ -43,8 +43,14 @@
 .permission-acts .btn { font-size: 12.5px; padding: 6px 12px; }
 .permission-acts .permission-deny { margin-left: auto; border-color: transparent; color: var(--color-ink-2); }
 .permission-error { margin: 0; font-size: 12px; color: var(--color-alert); }
+/* The quieter answers: change the command first, or answer in its place. */
+.permission-more { margin: 0; font-size: 12px; color: var(--color-ink-3); }
+.permission-more .link { font-size: 12px; }
+.permission-write { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.permission-write .field { display: flex; flex-direction: column; gap: 4px; }
+.permission-write .input { font-size: 12.5px; }
 
-.ticket-tag.kind-permission { background: var(--color-accent-tint); color: var(--color-accent); }
+.ticket-tag.kind-permission, .ticket-tag.kind-spend { background: var(--color-accent-tint); color: var(--color-accent); }
 
 @media (prefers-reduced-motion: reduce) { .permission-prompt { animation: none; } }
 

@@ -145,7 +145,8 @@ export function connectedServersByAgent(agents: readonly { id: string; connected
   return new Map(agents.map((agent) => [agent.id, agent.connectedServers ?? []]))
 }
 
-/** Claude Code's own tools, by the name its adapter records, in the words Build uses. */
+/** Claude Code's own tools, by the name its adapter recorded, in the words Build uses: for runs
+    recorded while LoomWatch drove AI apps. */
 const APP_TOOLS: Readonly<Record<string, { name: string; allow?: AllowSwitch }>> = {
   WebSearch: { name: 'Web search', allow: 'web' },
   WebFetch: { name: 'Web fetch', allow: 'web' },
@@ -164,7 +165,7 @@ const APP_TOOLS: Readonly<Record<string, { name: string; allow?: AllowSwitch }>>
   TodoWrite: { name: 'To-do list' },
 }
 
-/** The same tools from an app that records no name, only an ACP kind and a title (Codex, Gemini). */
+/** LoomWatch's own tools, which record no name, only an ACP kind and a title. */
 function byKind(toolKind: string | null, title: string): { name: string; allow?: AllowSwitch } {
   if (/^web search\b/i.test(title) || /^search\s+["“]/i.test(title)) return { name: 'Web search', allow: 'web' }
   switch (toolKind) {

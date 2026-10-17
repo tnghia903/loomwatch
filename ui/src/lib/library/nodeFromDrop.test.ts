@@ -6,10 +6,9 @@ import { DEFAULT_AGENT_ROLE } from './createAgent'
 import type { LibrarySource } from './types'
 
 const harnessSource: LibrarySource = {
-  group: 'detected',
+  group: 'agents',
   id: 'opencode',
   label: 'OpenCode',
-  spawn: { cmd: 'opencode', args: ['acp'] },
 }
 
 describe('nodeFromDrop', () => {
@@ -35,8 +34,7 @@ describe('nodeFromDrop', () => {
             id: 'opencode',
             name: 'OpenCode',
             role: '',
-            model: '',
-            spawn: { cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' },
+            model: 'anthropic/claude-opus-5.5',
             allowRecruiting: true,
           },
         },

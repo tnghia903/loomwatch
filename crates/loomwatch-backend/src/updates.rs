@@ -276,7 +276,8 @@ pub enum Install {
     Release,
     /// A copy of the source code: `./loomwatch update` pulls it with Git and builds it.
     Source,
-    /// `LoomWatch.app`, opened from Applications: the next one is the release's `.dmg`.
+    /// `LoomWatch.app`, opened from Applications, or `LoomWatch.exe` from the Start menu: the next
+    /// one is the release's `.dmg`, or its `LoomWatch-windows-setup.exe`.
     App,
     /// Started some other way, such as in a container: the releases page says what changed.
     Other,

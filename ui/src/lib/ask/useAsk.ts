@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { DEFAULT_MODEL } from '../ai/modelIds'
+import { useKeyStatus } from '../ai/useKeyStatus'
 import { useSessionEvents } from '../watch/useSessionEvents'
 import {
-  AskApiError, fetchAskApps, fetchConversation, fetchInbox, sendAskMessage, setAskBeforeRun as saveAskBeforeRun,
-  startConversation, endConversation, type AskApp, type AskApps, type AskContext, type InboxItem,
+  AskApiError, fetchConversation, sendAskMessage, setAskBeforeRun as saveAskBeforeRun,
+  startConversation, endConversation, type AskContext,
 } from './client'
 import { currentActivity, EMPTY_THREAD, projectAskThread, type AskThread } from './thread'
 
@@ -13,11 +15,7 @@ import { currentActivity, EMPTY_THREAD, projectAskThread, type AskThread } from 
 const CONVERSATION_KEY = 'loomwatch:ask:conversation'
 const OPEN_KEY = 'loomwatch:ask:open'
 const ASK_FIRST_KEY = 'loomwatch:ask:ask-before-run'
-const INBOX_SEEN_KEY = 'loomwatch:ask:inbox-seen'
-const CHOICE_KEY = 'loomwatch:ask:app'
-const INBOX_POLL_MS = 20_000
-/** A day is long enough to come back to something a connected app did; after that it is history. */
-const INBOX_WINDOW_MS = 24 * 60 * 60 * 1000
+const MODEL_KEY = 'loomwatch:ask:model'
 
 function readStore(store: () => Storage, key: string): string | null {
   try { return store().getItem(key) } catch { return null }
@@ -33,47 +31,16 @@ function writeStore(store: () => Storage, key: string, value: string | null) {
 const session = () => window.sessionStorage
 const local = () => window.localStorage
 
-/** A model of the chosen app, by the id the app takes and the name it lists it under. */
-export interface AskModel {
-  id: string
-  name: string
-}
-
-/** The app and model the person chose for Ask, kept for the browser like "ask me before a run". */
-interface AskChoice {
-  app: string
-  /** Null is the app's own default model. */
-  model: AskModel | null
-}
-
-function readChoice(): AskChoice | null {
-  const raw = readStore(local, CHOICE_KEY)
-  if (!raw) return null
-  try {
-    const value = JSON.parse(raw) as { app?: unknown; model?: { id?: unknown; name?: unknown } | null }
-    if (typeof value.app !== 'string' || !value.app) return null
-    const model = value.model && typeof value.model.id === 'string' && value.model.id
-      ? { id: value.model.id, name: typeof value.model.name === 'string' && value.model.name ? value.model.name : value.model.id }
-      : null
-    return { app: value.app, model }
-  } catch {
-    // Anything else in the key is no choice at all: Ask uses the first app it finds.
-    return null
-  }
-}
-
 export interface AskController {
   open: boolean
   setOpen: (open: boolean) => void
-  apps: AskApps | null
-  /** The app the next conversation starts with: the person's choice while it can run, else the
-      first app found. */
-  selectedApp: AskApp | null
-  /** The model the next conversation asks for; null is the app's own default. */
-  selectedModel: AskModel | null
-  /** Use this app and model from now on. A conversation with a different one is ended, because a
-      conversation is one session of one app. */
-  chooseApp: (app: string, model: AskModel | null) => void
+  /** The OpenRouter model the next conversation runs on: the person's choice, else the default. */
+  selectedModel: string
+  /** Use this model from now on. A conversation on a different one is ended, because a
+      conversation is one session on one model. */
+  chooseModel: (model: string) => void
+  /** No OpenRouter key is set, so Ask can't answer until one is added. */
+  needsKey: boolean
   conversationId: string | null
   /** Why Ask can't be used here, in plain words, or null when it can. */
   unavailable: string | null
@@ -99,17 +66,12 @@ export interface AskController {
   ask: (text?: string) => void
   send: (text: string) => Promise<boolean>
   startOver: () => void
-  inbox: InboxItem[]
-  inboxUnseen: number
-  markInboxSeen: () => void
 }
 
 export function useAsk(context: AskContext): AskController {
   const [open, setOpenState] = useState(() => readStore(session, OPEN_KEY) === '1')
   const [conversationId, setConversationId] = useState<string | null>(() => readStore(session, CONVERSATION_KEY))
   const [ended, setEnded] = useState(false)
-  const [apps, setApps] = useState<AskApps | null>(null)
-  const [appsError, setAppsError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [pending, setPending] = useState<{ text: string; after: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -117,11 +79,10 @@ export function useAsk(context: AskContext): AskController {
   const [askBeforeRun, setAskBeforeRunState] = useState(() => readStore(local, ASK_FIRST_KEY) !== '0')
   const [draft, setDraft] = useState('')
   const [focusRequest, setFocusRequest] = useState(0)
-  const [inbox, setInbox] = useState<InboxItem[]>([])
-  const [inboxSeen, setInboxSeen] = useState(() => readStore(local, INBOX_SEEN_KEY) ?? '')
-  const [choice, setChoice] = useState<AskChoice | null>(readChoice)
-  /** The app and model the live conversation was started with, as the daemon reported them. */
-  const [conversationApp, setConversationApp] = useState<{ app: string; model: string | null } | null>(null)
+  const [choice, setChoice] = useState<string | null>(() => readStore(local, MODEL_KEY))
+  /** The model the live conversation was started with, as the daemon reported it. */
+  const [conversationModel, setConversationModel] = useState<string | null>(null)
+  const key = useKeyStatus()
   // Read when a message is sent, so a send always carries where the person is at that moment.
   const contextRef = useRef(context)
   useEffect(() => { contextRef.current = context })
@@ -139,19 +100,6 @@ export function useAsk(context: AskContext): AskController {
     if (next) setFocusRequest((count) => count + 1)
   }, [])
 
-  // Which apps can host the assistant: asked once, so the Home box and the panel can say up front
-  // when there is none instead of failing on the first message.
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchAskApps(controller.signal)
-      .then((value) => setApps(value))
-      .catch((caught: unknown) => {
-        if (controller.signal.aborted) return
-        setAppsError(caught instanceof Error ? caught.message : String(caught))
-      })
-    return () => controller.abort()
-  }, [])
-
   // A conversation kept from an earlier page may have ended since: idle for twenty minutes, or a
   // daemon restart. Its transcript still reads from the archive; only sending needs a new one.
   useEffect(() => {
@@ -160,41 +108,22 @@ export function useAsk(context: AskContext): AskController {
     fetchConversation(conversationId, controller.signal)
       .then((info) => {
         if (!info) setEnded(true)
-        else if (info.app) setConversationApp({ app: info.app, model: info.model ?? null })
+        else if (info.model) setConversationModel(info.model)
       })
       .catch(() => {})
     return () => controller.abort()
   }, [conversationId])
 
-  // What connected apps did with LoomWatch's tools, so a proposal made from Claude Code or Codex
-  // has somewhere to be applied.
-  useEffect(() => {
-    const controller = new AbortController()
-    const poll = () => {
-      fetchInbox(controller.signal)
-        .then((items) => { const since = Date.now() - INBOX_WINDOW_MS; setInbox(items.filter((item) => Date.parse(item.at) >= since)) })
-        .catch(() => {})
-    }
-    const first = window.setTimeout(poll, 1500)
-    const timer = window.setInterval(poll, INBOX_POLL_MS)
-    return () => { controller.abort(); window.clearTimeout(first); window.clearInterval(timer) }
-  }, [])
-
-  // A chosen app that is no longer here, or can't run now, gives way to the first one that can.
-  // Before the list arrives the choice is sent as it is, and the daemon says if it can't be used.
-  const chosenApp = choice ? apps?.apps.find((app) => app.id === choice.app) : undefined
-  const choiceHolds = Boolean(choice && (apps === null || chosenApp?.available))
-  const selectedApp = (choiceHolds ? chosenApp : undefined) ?? apps?.apps.find((app) => app.id === apps.defaultApp) ?? null
-  const selectedModel = choiceHolds ? choice?.model ?? null : null
+  const selectedModel = choice || DEFAULT_MODEL
 
   const begin = useCallback(async (): Promise<string> => {
-    const info = await startConversation(askBeforeRun, choiceHolds ? choice?.app : null, choiceHolds ? choice?.model?.id : null)
-    setConversationApp({ app: info.app, model: info.model ?? null })
+    const info = await startConversation(askBeforeRun, selectedModel)
+    setConversationModel(info.model ?? selectedModel)
     setConversationId(info.id)
     writeStore(session, CONVERSATION_KEY, info.id)
     setEnded(false)
     return info.id
-  }, [askBeforeRun, choiceHolds, choice])
+  }, [askBeforeRun, selectedModel])
 
   const finished = ended || thread.state === 'ended' || thread.state === 'failed'
   const send = useCallback(async (text: string): Promise<boolean> => {
@@ -233,7 +162,7 @@ export function useAsk(context: AskContext): AskController {
   const startOver = useCallback(() => {
     if (conversationId && !finished) void endConversation(conversationId).catch(() => {})
     setConversationId(null)
-    setConversationApp(null)
+    setConversationModel(null)
     writeStore(session, CONVERSATION_KEY, null)
     setEnded(false)
     setPending(null)
@@ -241,14 +170,13 @@ export function useAsk(context: AskContext): AskController {
     setFocusRequest((count) => count + 1)
   }, [conversationId, finished])
 
-  const chooseApp = useCallback((app: string, model: AskModel | null) => {
-    const next: AskChoice = { app, model }
-    setChoice(next)
-    writeStore(local, CHOICE_KEY, JSON.stringify(next))
+  const chooseModel = useCallback((model: string) => {
+    setChoice(model)
+    writeStore(local, MODEL_KEY, model)
     if (!conversationId) return
-    const live = conversationApp ?? (thread.appId ? { app: thread.appId, model: thread.model } : null)
-    if (!live || live.app !== app || live.model !== (model?.id ?? null)) startOver()
-  }, [conversationId, conversationApp, thread.appId, thread.model, startOver])
+    const live = conversationModel ?? thread.model
+    if (live !== model) startOver()
+  }, [conversationId, conversationModel, thread.model, startOver])
 
   const setAskBeforeRun = useCallback((value: boolean) => {
     setAskBeforeRunState(value)
@@ -256,26 +184,15 @@ export function useAsk(context: AskContext): AskController {
     if (conversationId && !finished) void saveAskBeforeRun(conversationId, value).catch(() => {})
   }, [conversationId, finished])
 
-  const inboxUnseen = inbox.filter((item) => item.at > inboxSeen && item.phase !== 'ask_proposal_outcome').length
-  const markInboxSeen = useCallback(() => {
-    const latest = inbox.at(-1)?.at
-    if (!latest) return
-    setInboxSeen(latest)
-    writeStore(local, INBOX_SEEN_KEY, latest)
-  }, [inbox])
-
-  const noApp = apps && !apps.defaultApp
-  const unavailable = appsError
-    ? `Ask isn’t available: ${appsError}`
-    : noApp
-      ? 'Ask needs Claude Code, Codex, Gemini CLI or OpenCode on this computer. Install one, sign in, then start LoomWatch again.'
-      : null
+  // No key, no Ask: the panel shows the key card in its place. Until the daemon has said, Ask is
+  // usable, and a message sent without a key is refused with the daemon's own words.
+  const needsKey = key !== null && !key.connected
+  const unavailable = needsKey ? 'Ask runs on your OpenRouter key. Add it to start.' : null
 
   return {
-    open, setOpen, apps, selectedApp, selectedModel, chooseApp, conversationId, unavailable, thread,
+    open, setOpen, selectedModel, chooseModel, needsKey, conversationId, unavailable, thread,
     activity: currentActivity(thread) ?? (shownPending ? 'Sending' : null),
     pending: shownPending, ended: ended && !sending, sending, sentAt, error, dismissError: () => setError(null),
     askBeforeRun, setAskBeforeRun, draft, setDraft, focusRequest, ask, send, startOver,
-    inbox, inboxUnseen, markInboxSeen,
   }
 }

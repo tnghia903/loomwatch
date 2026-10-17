@@ -1,10 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DetectedHarness } from '../../lib/harnesses'
 import { Home } from './Home'
-
-const claude: DetectedHarness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] } }
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -20,7 +17,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function renderHome(onCreateBlank = vi.fn()) {
-  render(<Home harnesses={[claude]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
+  render(<Home onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
   return { onCreateBlank }
 }
 

@@ -1,6 +1,7 @@
 import { FilePlus2, PackageOpen, PencilLine, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import { isAbsolutePath } from '../../lib/files/paths'
 import type { MemoryEntry, MemoryView, Note, NotebookView } from '../../lib/memory/client'
 import { NotebookTab } from './NotebookTab'
 
@@ -232,8 +233,8 @@ export function MemoryPanel({
         <p className="hint t-meta" style={{ margin: 0 }}>
           Saved beside {teamPath}. Supplied to each agent at the start of its session
           {view?.deliverAs === 'native-file'
-            ? ", and written into its workspace as the harness's own memory file."
-            : '. This team is packet-only, so the Brief is not in the harness’s own memory file and a context compaction can summarise it away.'}
+            ? ', and written into its folder as AGENTS.md, which stays in its instructions all session.'
+            : '. This team is packet-only, so the Brief is not written to AGENTS.md, and a long session can summarise it away.'}
         </p>
       )}
 
@@ -353,7 +354,8 @@ function briefCount(own: number, inherited: number): string {
 
 function draftReady(draft: NonNullable<Draft>): boolean {
   if (draft.kind === 'note' || draft.kind === 'edit') return draft.body.trim().length > 0
-  return /^[^/].*\.md$/.test(draft.path.trim())
+  const path = draft.path.trim()
+  return !isAbsolutePath(path) && /\.md$/i.test(path)
 }
 
 function BriefRow({ title, meta, body, editable, onRemove, onEdit }: { title: string; meta: string; body: string; editable: boolean; onRemove: () => void; onEdit?: () => void }) {

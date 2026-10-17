@@ -1,9 +1,10 @@
 # Connect your own Notion workspace
 
-Open **Connections** from the workspace menu (the **LW** button, top right of the canvas) or
+Open **Connections** from the workspace menu (the ☰ button, top right of the canvas) or
 at `/connections` on the same local daemon as the editor. The menu is the discoverable
 route; `⌘K → Connections…` and the URL reach the same surface. Like the rest of that menu
-it is hidden below 768px, so connecting is a desktop task.
+it is hidden below 768px, so connecting is a desktop task. The same page holds your OpenRouter
+key, under **AI models**. The two are kept apart, and agents never get either.
 
 ## Connect with your Notion account
 
@@ -32,13 +33,13 @@ destination you chose. It holds the sign-in itself; agents never receive it.
 Notion ends it after 30 days without use, or after 180 days in all; then Connections and every
 delivery say to connect again. Connecting again to the same workspace keeps the destination page.
 
-**Disconnect** removes the sign-in from this Mac and asks Notion to revoke it. You can also remove
+**Disconnect** removes the sign-in from this computer and asks Notion to revoke it. You can also remove
 LoomWatch in Notion's settings, under its connections.
 
 ## Advanced: connect with an integration token
 
-For workspaces where an admin only lets approved AI apps connect. Open **Advanced: connect with an
-integration token** under **Connect Notion**:
+For workspaces where an admin lets only approved AI tools connect to Notion. Open **Advanced:
+connect with an integration token** under **Connect Notion**:
 
 1. Create an internal integration for your workspace in Notion's developer portal. Enable
    Read, Insert and Update content. A workspace owner may need to do this.
@@ -77,11 +78,19 @@ pages, so the approval it asks for lists every Notion page it reads.
 
 ## Where it is kept
 
-Either kind of connection, and the destination, are stored in macOS Keychain under
-`LoomWatch.Notion`, not in YAML, localStorage or the event archive. Connecting replaces the prior
-connection. Only one workspace connection is supported per local OS user. Missing or locked
-Keychain access is an error; there is no plaintext fallback. Windows/Linux storage is not yet
-implemented.
+Either kind of connection, and the destination, are stored in macOS Keychain, or on Windows in
+Windows Credential Manager, under `LoomWatch.Notion`, not in YAML, localStorage or the event archive.
+Credential Manager keeps at most 2,560 bytes in one credential, so a longer connection is split
+across `local-workspace`, `local-workspace#2`, and so on. Connecting replaces the prior connection.
+Only one workspace connection is supported per local OS user. Missing or locked credential storage
+is an error; there is no plaintext fallback. Linux storage is not yet implemented.
+
+A trial copy is different. When `loomwatchd` starts with `LOOMWATCH_KEY_STORE=file`, the setting
+that keeps the OpenRouter key in `keys.json`, the connection goes in `notion-credentials.json` in
+that copy's state folder instead. Only your account can read that file. That copy never reads or
+writes the Keychain item (or, on Windows, the Credential Manager one), so a scratch
+`LOOMWATCH_STATE_DIR` starts with Notion not connected, whatever the installed app has. Without the
+setting, LoomWatch uses only the Keychain or Credential Manager.
 
 What Connections shows of it is also kept, with no token, in `notion-connection.json` in
 LoomWatch's state folder (`~/Library/Application Support/LoomWatch`, or `LOOMWATCH_STATE_DIR`):

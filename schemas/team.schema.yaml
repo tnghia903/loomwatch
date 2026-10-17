@@ -24,6 +24,15 @@ properties:
     minLength: 1
   budget:
     $ref: "#/$defs/RetiredBudget"
+  spend:
+    description: >-
+      What one run of this team may spend on model calls, in US dollars (ADR 0068). Every agent of
+      the run draws on it: stages, the lead, Team Bus helpers, summaries and checkpoints. Once a
+      run has used it, the agents wait and the operator chooses to add money and carry on, or to
+      finish with what the team has. A scheduled run has nobody to ask, so it stops and keeps its
+      checkpoints. Absent means no limit; new teams are written with 1.00. A call's cost is known
+      only after it is made, so one call can take a run a few cents past its figure.
+    $ref: "#/$defs/Spend"
   guards:
     description: Server-enforced limits for delegation through the Team Bus.
     $ref: "#/$defs/Guards"
@@ -109,16 +118,17 @@ $defs:
 
   Stop:
     description: >-
-      Bounds on a review stop or a parked `ask_user`. Only harnesses that do **not** advertise
-      `loadSession` read this: one that does is closed while the operator thinks and reopened with
-      `session/load` when they answer, so it costs no process and no window applies to it.
+      Bounds on a review stop or a parked `ask_user`. Kept so older team files still load: an
+      agent waiting for the operator is parked as data, with nothing running, so no window applies
+      to it.
     type: object
     additionalProperties: false
     properties:
       keepAliveMinutes:
         description: >-
-          Minutes a kept-alive session idles before LoomWatch asks it for a checkpoint and releases
-          it. A live process at zero token cost is still a live process.
+          Accepted so older team files still load, and read by nothing. It bounded how long a
+          third-party app's session could idle while you decided; a parked agent has nothing
+          running, so it no longer limits a wait.
         type: integer
         minimum: 1
         default: 15
@@ -145,7 +155,7 @@ $defs:
   Memory:
     description: >-
       The `memory:` block. This is executable configuration in ADR 0012's sense — it changes what
-      the daemon sends to a harness — so it lives here rather than in the layout sidecar.
+      the daemon sends to an agent — so it lives here rather than in the layout sidecar.
     type: object
     additionalProperties: false
     properties:
@@ -178,11 +188,10 @@ $defs:
         $ref: "#/$defs/Packet"
       deliverAs:
         description: >-
-          How the Brief reaches a harness. `native-file` also writes it as the harness's own
-          project memory file (CLAUDE.md, AGENTS.md, GEMINI.md) in a managed workspace under
-          `.loomwatch/<team>/<agent>/`, which is the one channel a harness-side context
-          compaction does not reach; it therefore moves the agent out of its declared `cwd`, as
-          wiring a skill already does. An agent that must run inside a repository opts out with
+          How the Brief reaches an agent. `native-file` also writes it as `AGENTS.md` in a
+          managed workspace under `.loomwatch/<team>/<agent>/`, which the agent reads into its
+          standing instructions every session, so a context compaction does not reach it; it
+          therefore moves the agent out of its declared `cwd`, as wiring a skill already does. An agent that must run inside a repository opts out with
           `packet-only` on the agent itself.
         type: string
         enum:
@@ -274,7 +283,7 @@ $defs:
         description: >-
           Whether the four memory tools (`memory_search`, `memory_read`, `memory_write`,
           `checkpoint`) are offered on the Team Bus. `false` withdraws them from `tools/list` and
-          also refuses a call, so a harness that cached the list cannot write.
+          also refuses a call, so an agent that kept an earlier list cannot write.
         type: boolean
         default: true
       keep:
@@ -295,9 +304,9 @@ $defs:
     properties:
       maxChars:
         description: >-
-          Memory's share of an opening prompt, in characters — adapters do not report live context
-          occupancy, so characters are the only figure LoomWatch can state honestly. Pinned Brief
-          content that does not fit refuses the run before a harness spawns, naming the entries.
+          Memory's share of an opening prompt, in characters, the one figure LoomWatch can state
+          before the model counts tokens. Pinned Brief content that does not fit refuses the run
+          before an agent starts, naming the entries.
         type: integer
         minimum: 1
         default: 8000
@@ -396,36 +405,45 @@ $defs:
     maxLength: 512
 
   Spawn:
+    description: >-
+      Where the agent works. Absent means the team file's own folder.
     type: object
     additionalProperties: false
     required:
-      - cmd
-      - args
-      - env
       - cwd
     properties:
       cmd:
         description: >-
-          Bare executable name resolved on PATH, or an absolute path. It is never
-          interpreted by a shell.
+          Retired: the AI app an earlier LoomWatch started for the agent. Every agent runs on
+          LoomWatch's own engine now. Accepted and ignored, so team files written before then
+          still load. Writers must not add it.
+        deprecated: true
         type: string
-        minLength: 1
-        pattern: '^(/[^\x00]*|[A-Za-z0-9._-]+)$'
       args:
+        description: Retired with `cmd`. Accepted and ignored.
+        deprecated: true
         type: array
         items:
           type: string
       env:
-        description: Environment additions passed to the child process; no secrets are stored here.
+        description: Retired with `cmd`. Accepted and ignored.
+        deprecated: true
         type: object
-        propertyNames:
-          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
         additionalProperties:
           type: string
       cwd:
         description: Absolute path or path relative to the team file.
         type: string
         minLength: 1
+
+  Spend:
+    type: object
+    additionalProperties: false
+    properties:
+      perRun:
+        description: The most one run may spend, in US dollars.
+        type: number
+        exclusiveMinimum: 0
 
   RetiredBudget:
     description: >-
@@ -451,9 +469,11 @@ $defs:
 
   Agent:
     description: >-
-      One node of the team. A `harness` node runs an ACP harness and must say how (spawn and
-      model). An `operator` node is the person at the keyboard standing in the pipeline: it has an
-      id, sits on edges and takes part in the topological order, and instead of a harness it has a
+      One node of the team. A `harness` node (the name is historical) is an agent LoomWatch runs on
+      a model, so it must name the model: an OpenRouter model id such as
+      `anthropic/claude-opus-5.5`, or `fake/offline` for the offline demo. Older names written for
+      an AI app, such as `sonnet` or `gpt-5.5`, are read as the OpenRouter model they name. An `operator` node is the person at the keyboard standing in the pipeline: it has
+      an id, sits on edges and takes part in the topological order, and instead of a model it has a
       question — its `role` — which is what the panel shows when the pipeline reaches it. See
       docs/TEAM_MEMORY.md, "The operator is a node".
     type: object
@@ -463,19 +483,18 @@ $defs:
       - role
     oneOf:
       - title: Harness node
-        description: Runs an ACP harness, so it must say how to start it and which model to select.
+        description: An agent, so it must say which model it runs on.
         properties:
           kind:
             const: harness
         required:
           - name
-          - spawn
           - model
       - title: Operator node
         description: >-
           A review stop. `spawn`, `model` and `thinkingEffort` are not merely optional here but
-          refused: an operator node spawns nothing and selects no model, so declaring one would
-          make the file say something the daemon does not do. `name` defaults to "You".
+          refused: an operator node works in no folder and selects no model, so declaring one
+          would make the file say something the daemon does not do. `name` defaults to "You".
         properties:
           kind:
             const: operator
@@ -491,6 +510,7 @@ $defs:
             - required: [sendBackOnce]
             - required: [allow]
             - required: [turnedOff]
+            - required: [spend]
             - required: [from]
     properties:
       id:
@@ -518,11 +538,16 @@ $defs:
       spawn:
         $ref: "#/$defs/Spawn"
       model:
-        description: Harness-specific model selector.
+        description: >-
+          The OpenRouter model id the agent runs on, such as `anthropic/claude-opus-5.5`. Names an
+          earlier LoomWatch wrote for an AI app (`sonnet`, `gpt-5.5`) are read as the matching
+          OpenRouter model.
         type: string
         minLength: 1
       thinkingEffort:
-        description: Optional harness-specific reasoning effort selected independently of the model.
+        description: >-
+          How hard the model reasons: none, minimal, low, medium, high, xhigh or max. Absent uses
+          the model's own default.
         type: string
         minLength: 1
       doneWhen:
@@ -553,6 +578,13 @@ $defs:
         default: false
       budget:
         $ref: "#/$defs/RetiredBudget"
+      spend:
+        description: >-
+          This agent's own guard on what one run may spend on it, in US dollars (ADR 0068): it
+          stops an agent that runs away, as the team's figure stops the run. When the agent
+          reaches it, it waits and the operator chooses to add money or to stop this agent; the
+          rest of the team carries on. No guard unless set.
+        $ref: "#/$defs/Spend"
       allowRecruiting:
         description: Whether this agent may recruit helpers while executing its own step.
         type: boolean
@@ -560,11 +592,11 @@ $defs:
       capabilities:
         description: >-
           Capabilities this agent may use. Before the run the daemon delivers each one: a skill
-          into the agent's workspace in the harness's own format, a knowledge source into the
-          prompt, and a tool as an MCP server on the session. Where LoomWatch knows the harness's
-          per-workspace permission file (Claude Code), wiring a knowledge folder or a tool writes
-          an allow rule for exactly that; elsewhere the harness still authorises every use. A
-          capability the daemon cannot deliver fails the run rather than silently doing nothing.
+          into the agent's workspace as required reading, and a knowledge source into the prompt
+          with a read grant for its folder or file. A `tool` from an AI app's own settings is not
+          delivered: the agent is told it is unavailable and the run carries on. A skill or
+          knowledge source the daemon cannot deliver fails the run rather than silently doing
+          nothing.
         type: array
         default: []
         items:
@@ -575,11 +607,10 @@ $defs:
         $ref: "#/$defs/AgentMemory"
       allow:
         description: >-
-          What this agent may do without asking (ADR 0037). LoomWatch cannot ask the operator in
-          the middle of a run, so it puts each app in its ask-first mode where it has one and
-          answers every permission request itself: it approves the Team Bus, the tools and
-          knowledge connected to this agent, and what is switched on here, and declines the rest.
-          Absent means everything here is off.
+          What this agent may do without asking (ADR 0037). LoomWatch answers every permission
+          request itself: it approves the Team Bus, the knowledge connected to this agent, and what
+          is switched on here. Anything else waits for the operator's answer on a card (ADR
+          0040), or is declined in a scheduled run. Absent means everything here is off.
         type: object
         additionalProperties: false
         properties:
@@ -589,9 +620,9 @@ $defs:
             default: false
           edits:
             description: >-
-              Create and change files inside the agent's own working folder, never its app's
-              settings folders. An agent whose folder holds its team file is given a folder of
-              its own first.
+              Create and change files inside the agent's own working folder, never in its
+              `.agents`, `.claude`, `.git` or `.loomwatch` folders. An agent whose folder holds its
+              team file always works in a folder of its own, allowed or not.
             type: boolean
             default: false
           commands:
@@ -669,8 +700,8 @@ $defs:
           0021). `knowledge` is a folder or file the operator chose, named by `path`: its contents
           are supplied in the prompt as source material and it is a read grant for that folder or
           file (ADR 0029, 0035, 0036), or, with `notion`, a Notion page read at run start (ADR
-          0050). `tool` passes the operator's own MCP server definition to the harness in ACP
-          `session/new` (ADR 0029). Team memory is wired through `memory.inherits`, never as
+          0050). `tool` named an MCP server from an AI app's settings (ADR 0029); it is kept so
+          older team files load, and the agent is told it is unavailable. Team memory is wired through `memory.inherits`, never as
           `knowledge`.
         type: string
         enum:
@@ -1045,6 +1076,7 @@ $defs:
           - max_turn_requests
           - refusal
           - cancelled
+          - spend_limit
       usage:
         type: object
 

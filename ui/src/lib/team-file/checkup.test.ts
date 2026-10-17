@@ -1,26 +1,21 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
-import type { DetectedHarness } from '../harnesses'
-import { modelForRole } from '../library/jobModel'
-import { ROLE_PRESETS } from '../library/roles'
-import claude from '../models/fixtures/claude.json'
-import { claudeOn } from '../models/fixtures/claudeOn'
-import codex from '../models/fixtures/codex.json'
-import hermes from '../models/fixtures/hermes.json'
-import opencode from '../models/fixtures/opencode.json'
-import type { ModelCatalog } from '../models/tiers'
-import { appendToRole, canUseTeamBus, checkup, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
+import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { modelForPreset, ROLE_PRESETS } from '../library/roles'
+import { appendToRole, checkup, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
 import { templateTeamYaml } from './templates'
 import type { AgentConfig, TeamDocument } from './types'
 
-const CLAUDE = { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }
 const preset = (id: string) => ROLE_PRESETS.find((candidate) => candidate.id === id)?.role ?? ''
 
-/** An agent as the palette places it: a built-in job's instructions come with its switches. */
+/** An agent as the palette places it: a built-in job's instructions come with its switches and its model. */
 function agent(id: string, role: string, extra: Partial<AgentConfig> = {}): AgentConfig {
-  const allow = ROLE_PRESETS.find((candidate) => candidate.role === role)?.allow
-  return { id, name: id.charAt(0).toUpperCase() + id.slice(1), role, spawn: CLAUDE, model: 'm', ...(allow ? { allow } : {}), ...extra }
+  const job = ROLE_PRESETS.find((candidate) => candidate.role === role)
+  return { id, name: id.charAt(0).toUpperCase() + id.slice(1), role, model: job ? modelForPreset(job).model : DEFAULT_MODEL, ...(job?.allow ? { allow: job.allow } : {}), ...extra }
 }
 
 function run(input: Partial<CheckupInput> & Pick<CheckupInput, 'agents'>) {
@@ -32,69 +27,53 @@ function run(input: Partial<CheckupInput> & Pick<CheckupInput, 'agents'>) {
 
 const rules = (findings: ReturnType<typeof checkup>) => findings.map((finding) => `${finding.rule}:${finding.agentIds.join('+')}`)
 
-// As the apps listed their models on 2026-10-15 (lib/models/fixtures).
-const CATALOGS: Record<string, ModelCatalog> = { claude, codex, opencode, hermes }
-
 describe('checkup', () => {
-  it('finds nothing to improve in the starter teams, on every app’s own model list', () => {
-    const harness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/x', spawn: { cmd: 'claude-agent-acp', args: [] } } as DetectedHarness
-    for (const template of ['single', 'research-write', 'research-write-check', 'research-review-write'] as const) {
-      const doc = parse(templateTeamYaml(template, 'Starter', harness, 'm')) as TeamDocument
+  it('finds nothing to improve in the starter teams', () => {
+    for (const template of ['single', 'research-write', 'research-write-check', 'research-review-write', 'research'] as const) {
+      const doc = parse(templateTeamYaml(template, 'Starter')) as TeamDocument
       const edges = doc.edges.map((edge) => ({ from: edge.from, to: edge.to }))
       // A pipeline that ends on a check step answers with the work it checks (answeringAgent).
       const terminal = edges.length ? edges.find((edge) => !edges.some((other) => other.from === edge.to))?.to ?? null : doc.entrypoint
       const responder = doc.agents.find((agent) => agent.id === terminal)?.checks ?? terminal
       expect(rules(run({ agents: doc.agents, edges, entrypoint: doc.entrypoint, responder })), template).toEqual([])
-      for (const [app, catalog] of Object.entries(CATALOGS)) {
-        const tiered = parse(templateTeamYaml(template, 'Starter', harness, catalog.currentModelId ?? '', undefined, undefined, catalog)) as TeamDocument
-        expect(rules(run({ agents: tiered.agents, edges, entrypoint: tiered.entrypoint, responder, catalogFor: () => catalog })), `${template} on ${app}`).toEqual([])
-      }
     }
   })
 
-  it('suggests the fast tier for a gatherer on the strong one, with its share of the team’s tokens', () => {
-    const team = (model: string, extra: Partial<AgentConfig> = {}) => [agent('researcher', preset('researcher'), { model, ...extra }), agent('writer', preset('writer'), { model })]
+  it('suggests the faster model for a gatherer on the strong one, with its share of the team’s tokens', () => {
+    const team = (model: string, extra: Partial<AgentConfig> = {}) => [agent('researcher', preset('researcher'), { model, ...extra }), agent('writer', preset('writer'), { model: DEFAULT_MODEL })]
     const edges = [{ from: 'researcher', to: 'writer' }]
     const usage = { runs: 3, perRun: 90_000, agents: [{ id: 'writer', name: 'Writer', perRun: 53_000, share: 0.59, opening: null }, { id: 'researcher', name: 'Researcher', perRun: 37_000, share: 0.41, opening: null }] }
-    const [finding, ...others] = run({ agents: team('sonnet'), edges, catalogFor: () => claude, usage })
+    const [finding, ...others] = run({ agents: team(DEFAULT_MODEL), edges, usage })
     expect(others).toEqual([])
     expect(finding).toMatchObject({
-      rule: 'strong-gatherer', severity: 'improve', agentId: 'researcher', title: 'Researcher could gather on Haiku 4.5',
-      fix: { label: 'Use Haiku 4.5', change: { kind: 'model', agentId: 'researcher', model: 'haiku' } },
+      rule: 'strong-gatherer', severity: 'improve', agentId: 'researcher', title: 'Researcher could gather on Claude Sonnet 5.5',
+      fix: { label: 'Use Claude Sonnet 5.5', change: { kind: 'model', agentId: 'researcher', model: FAST_MODEL, thinkingEffort: 'medium' } },
     })
-    expect(finding.why).toBe('It collects facts for Writer to write up. A faster model does that well, and leaves Sonnet 5.5 for the step that writes the answer. In the last 3 runs it used 41% of the team’s tokens.')
+    expect(finding.why).toBe('It collects facts for Writer to write up. A faster model does that well, for less, and leaves Claude Opus 5.5 for the step that writes the answer. In the last 3 runs it used 41% of the team’s tokens.')
     // Before any run it says so without a figure: facts from runs only.
-    expect(run({ agents: team('sonnet'), edges, catalogFor: () => claude })[0].why).not.toContain('%')
-
-    // Codex lists no mini; it calls one model fast and affordable.
-    // Codex lists 6 Luna's efforts, so it gathers at the Researcher's.
-    expect(run({ agents: team('gpt-6.1-sol'), edges, catalogFor: () => codex })[0].fix?.change).toEqual({ kind: 'model', agentId: 'researcher', model: 'gpt-6-luna', thinkingEffort: 'medium' })
-    // Where the current model is already the smallest, the fast tier is less thinking.
-    const luna = { ...codex, currentModelId: 'gpt-6-luna', currentThinkingEffort: 'high' }
-    expect(run({ agents: team('gpt-6-luna'), edges, catalogFor: () => luna })[0]).toMatchObject({ title: 'Researcher could gather at medium effort', fix: { label: 'Use medium effort', change: { kind: 'model', model: 'gpt-6-luna', thinkingEffort: 'medium' } } })
-    expect(run({ agents: team('gpt-6-luna', { thinkingEffort: 'low' }), edges, catalogFor: () => luna })).toEqual([])
-    // Haiku 4.5 has no effort to lower, and nothing is faster.
-    expect(run({ agents: team('haiku'), edges, catalogFor: () => claudeOn('haiku') })).toEqual([])
+    expect(run({ agents: team(DEFAULT_MODEL), edges })[0].why).not.toContain('%')
+    // A name an AI app's team file used reads as the model it maps to.
+    expect(run({ agents: team('opus'), edges })[0]).toMatchObject({ rule: 'strong-gatherer' })
+    // The model list's own names, once it has arrived.
+    expect(run({ agents: team(DEFAULT_MODEL), edges, modelNames: new Map([[FAST_MODEL, 'Sonnet 5.5']]) })[0].title).toBe('Researcher could gather on Sonnet 5.5')
   })
 
-  it('leaves alone a gatherer whose reply is the answer, one it cannot judge, and one with nothing faster', () => {
-    const researcher = agent('researcher', preset('researcher'), { model: 'sonnet' })
-    expect(run({ agents: [researcher], catalogFor: () => claude })).toEqual([])
-    expect(run({ agents: [researcher, agent('writer', preset('writer'), { model: 'sonnet' })], edges: [{ from: 'researcher', to: 'writer' }] })).toEqual([])
-    const pickle = [agent('researcher', preset('researcher'), { model: 'opencode/big-pickle' }), agent('writer', preset('writer'), { model: 'opencode/big-pickle' })]
-    expect(run({ agents: pickle, edges: [{ from: 'researcher', to: 'writer' }], catalogFor: () => opencode })).toEqual([])
-    // The writer on the strong tier is where it belongs.
-    expect(run({ agents: [agent('researcher', preset('researcher'), { model: 'haiku' }), agent('writer', preset('writer'), { model: 'sonnet' })], edges: [{ from: 'researcher', to: 'writer' }], catalogFor: () => claude })).toEqual([])
+  it('leaves alone a gatherer whose reply is the answer, one already faster, and one on a model chosen on purpose', () => {
+    const researcher = agent('researcher', preset('researcher'))
+    expect(run({ agents: [researcher] })).toEqual([])
+    const writer = agent('writer', preset('writer'))
+    const edges = [{ from: 'researcher', to: 'writer' }]
+    expect(run({ agents: [{ ...researcher, model: FAST_MODEL }, writer], edges })).toEqual([])
+    expect(run({ agents: [{ ...researcher, model: 'anthropic/claude-haiku-5.5' }, writer], edges })).toEqual([])
+    expect(run({ agents: [{ ...researcher, model: 'openai/gpt-6.1-sol' }, writer], edges })).toEqual([])
   })
 
-  it('stays silent on every built-in job as the canvas places it, on every app', () => {
-    for (const [app, catalog] of Object.entries(CATALOGS)) {
-      const placed = ROLE_PRESETS.map((job) => agent(job.id, job.role, { ...modelForRole(job.role, catalog) }))
-      const edges = placed.filter((one) => one.id !== 'researcher').map((one) => ({ from: 'researcher', to: one.id }))
-      for (const responder of placed.filter((one) => one.id !== 'researcher').map((one) => one.id)) {
-        const findings = checkup({ agents: placed, edges, entrypoint: 'researcher', responder, catalogFor: () => catalog })
-        expect(findings.filter((finding) => finding.rule === 'strong-gatherer').map((finding) => finding.id), `${app} → ${responder}`).toEqual([])
-      }
+  it('stays silent on every built-in job as the canvas places it', () => {
+    const placed = ROLE_PRESETS.map((job) => agent(job.id, job.role, { ...modelForPreset(job) }))
+    const edges = placed.filter((one) => one.id !== 'researcher').map((one) => ({ from: 'researcher', to: one.id }))
+    for (const responder of placed.filter((one) => one.id !== 'researcher').map((one) => one.id)) {
+      const findings = checkup({ agents: placed, edges, entrypoint: 'researcher', responder })
+      expect(findings.filter((finding) => finding.rule === 'strong-gatherer').map((finding) => finding.id), responder).toEqual([])
     }
   })
 
@@ -112,8 +91,47 @@ describe('checkup', () => {
     expect(web).toMatchObject({ rule: 'needs-web', severity: 'improve', fix: { change: { kind: 'allow', agentId: 'scout', key: 'web' } } })
     expect(run({ agents: [agent('scout', 'Search the web for this week’s AI news and reply with five bullet points, each with a link.')], scheduled: true })[0]).toMatchObject({ rule: 'needs-web', severity: 'fix', title: 'Scout can\'t search the web when the team runs on schedule' })
     expect(run({ agents: [{ ...coder, allow: { edits: true, commands: true } }] })).toEqual([])
-    // OpenCode never asks, so there is nothing to allow.
-    expect(run({ agents: [{ ...coder, spawn: { ...CLAUDE, cmd: 'opencode', args: ['acp'] } }] })).toEqual([])
+  })
+
+  it('does not read a prohibition as a need', () => {
+    const asked = (role: string) => rules(run({ agents: [agent('gatherer', `${role} Reply with one bullet per story, each with its link.`, { allow: { web: true } })], scheduled: true }))
+    // The bundled daily digest's Gatherer (examples/usecases/daily-tech-digest.yaml).
+    expect(asked('Find and read pages with web search only. Commands are off for this team, so don\'t run curl or any other command.')).toEqual([])
+    for (const forbidden of [
+      'Do not run any command.',
+      'Never run scripts or open a shell.',
+      'Don\'t edit files or run commands.',
+      'Read pages without a terminal.',
+      'There is no need to run the tests.',
+      'Use web search instead of the shell.',
+      'The terminal is off for this team.',
+      'Do not change any files in this folder.',
+    ]) expect(asked(forbidden), forbidden).toEqual([])
+    for (const [needed, rule] of [
+      ['Run curl to fetch the feed with a command.', 'needs-commands'],
+      ['Run the tests before you reply.', 'needs-commands'],
+      ['Don\'t forget to run the tests.', 'needs-commands'],
+      ['Don\'t just read the code, run the tests.', 'needs-commands'],
+      ['Never install packages, run the tests.', 'needs-commands'],
+      ['Commands are off for this team. Run the build anyway.', 'needs-commands'],
+      ['Don\'t reply before you run the linter.', 'needs-commands'],
+      ['Save the digest to a file.', 'needs-edits'],
+    ] as const) expect(asked(needed), needed).toEqual([`${rule}:gatherer`])
+    // A condition plans for a missing switch; the web is still what it works from.
+    expect(rules(run({ agents: [agent('scout', 'If you can\'t browse the web, say so in your first line. Reply with five links, each with its date.')] }))).toEqual(['needs-web:scout'])
+  })
+
+  it('has nothing to fix in the bundled use cases, on their own schedule', () => {
+    // A finding to fix turns Build's heading from "Your team is ready" to "Almost ready".
+    const usecases = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../examples/usecases')
+    const files = readdirSync(usecases).filter((name) => name.endsWith('.yaml'))
+    expect(files.length).toBeGreaterThan(0)
+    for (const file of files) {
+      const doc = parse(readFileSync(path.join(usecases, file), 'utf8')) as TeamDocument
+      const scheduled = Boolean(doc.schedule && doc.schedule.enabled !== false)
+      const findings = run({ agents: doc.agents, edges: doc.edges.map((edge) => ({ from: edge.from, to: edge.to })), entrypoint: doc.entrypoint, responder: doc.responder, scheduled })
+      expect(findings.filter((finding) => finding.severity === 'fix').map((finding) => finding.title), file).toEqual([])
+    }
   })
 
   it('asks the team’s answer for a format, and a helper for what it sends back', () => {
@@ -130,11 +148,6 @@ describe('checkup', () => {
     expect(fix?.kind === 'append-role' && fix.text).toBe('When the request is bigger than one step, hand parts of it to your teammates, Writer, each the part that matches its job, then combine what they send into your answer.')
     // Naming a teammate is telling it when to use them.
     expect(run({ agents: [agent('lead', `${preset('researcher')} Pass the facts to Writer.`, { allow: { web: true } }), agent('writer', preset('writer'))] })).toEqual([])
-  })
-
-  it('says a lead on an app without Team Bus can never hand work on', () => {
-    const lead = agent('lead', preset('writer'), { spawn: { ...CLAUDE, cmd: 'openclaw', args: ['acp'] } })
-    expect(run({ agents: [lead, agent('helper', preset('researcher'))] })[0]).toMatchObject({ rule: 'lead-cannot-delegate', severity: 'fix' })
   })
 
   it('warns when the last step judges the work instead of delivering it', () => {
@@ -179,9 +192,9 @@ describe('checkup', () => {
   })
 
   it('puts what will go wrong before what could be better', () => {
-    const lead = agent('lead', 'Plan it.', { spawn: { ...CLAUDE, cmd: 'openclaw', args: ['acp'] } })
-    const findings = run({ agents: [lead, agent('writer', preset('writer'))] })
-    expect(findings.map((finding) => `${finding.severity}:${finding.rule}`)).toEqual(['fix:lead-cannot-delegate', 'improve:thin-instructions'])
+    const scout = agent('scout', 'Search the web for this week’s AI news and reply with five bullet points, each with a link.')
+    const findings = run({ agents: [agent('lead', preset('writer')), scout], scheduled: true })
+    expect(findings.map((finding) => `${finding.severity}:${finding.rule}`)).toEqual(['fix:needs-web', 'improve:lead-delegation'])
   })
 })
 
@@ -214,13 +227,8 @@ describe('checkup fixes', () => {
       { agents: [agent('writer', preset('writer')), agent('reviewer', preset('reviewer'))], edges: [{ from: 'writer', to: 'reviewer' }] },
       { agents: [agent('researcher', preset('researcher')), agent('coder', preset('coder'), { allow: { edits: true, commands: true } })], edges: [{ from: 'researcher', to: 'coder' }] },
       { agents: [agent('writer', `${preset('writer')}\nIMPORTANT: NEVER skip a source.`, { thinkingEffort: 'max' })] },
-      // A gatherer on the strong tier: a faster model, or the same model thinking less, by app.
-      ...Object.values(CATALOGS).map((catalog) => ({
-        agents: [agent('researcher', preset('researcher'), { model: catalog.currentModelId, thinkingEffort: 'max' }), agent('writer', preset('writer'), { model: catalog.currentModelId })],
-        edges: [{ from: 'researcher', to: 'writer' }],
-        catalogFor: () => catalog,
-      })),
-      { agents: [agent('researcher', preset('researcher'), { model: 'haiku' }), agent('writer', preset('writer'), { model: 'haiku' })], edges: [{ from: 'researcher', to: 'writer' }], catalogFor: () => ({ ...claude, currentModelId: 'haiku' }) },
+      // A gatherer on the strong model, thinking at the top setting.
+      { agents: [agent('researcher', preset('researcher'), { model: DEFAULT_MODEL, thinkingEffort: 'max' }), agent('writer', preset('writer'))], edges: [{ from: 'researcher', to: 'writer' }] },
     ]
     let fixed = 0
     for (const scenario of scenarios) {
@@ -239,17 +247,13 @@ describe('checkup fixes', () => {
 })
 
 describe('checkup helpers', () => {
-  it('reads Team Bus support off the spawn the way the daemon does', () => {
-    expect(canUseTeamBus({ spawn: { cmd: 'codex-acp', args: [], env: {}, cwd: '.' } })).toBe(true)
-    expect(canUseTeamBus({ spawn: { cmd: 'loomwatchd', args: ['harness-client', '--harness', 'opencode'], env: {}, cwd: '.' } })).toBe(true)
-    expect(canUseTeamBus({ spawn: { cmd: 'openclaw', args: ['acp'], env: {}, cwd: '.' } })).toBe(false)
-    expect(canUseTeamBus({ spawn: { cmd: 'my-agent', args: [], env: {}, cwd: '.' } })).toBe(false)
-  })
-
   it('matches a job by name first, then by instructions', () => {
     expect(jobFor({ name: 'Code reviewer', role: '' })?.id).toBe('reviewer')
     expect(jobFor({ name: 'Ada', role: 'Analyse the sales data' })?.id).toBe('analyst')
     expect(jobFor({ name: 'Ada', role: 'Be nice' })).toBeNull()
+    // A research lead leads; it is not a researcher on the faster model.
+    expect(jobFor({ name: 'Research lead', role: '' })?.id).toBe('lead')
+    expect(jobFor({ name: 'Lead researcher', role: '' })?.id).toBe('lead')
   })
 
   it('appends after a blank line', () => {

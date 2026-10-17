@@ -1,11 +1,16 @@
 // Mirrors schemas/team.schema.yaml (schemaVersion 1). Keep in sync with
 // docs/TEAM_CONFIG.md's semantic rules and crates/loomwatch-backend/src/config.rs.
 
+/**
+ * Where an agent works. `cmd`, `args` and `env` are retired: they named the AI app an earlier
+ * LoomWatch started, and a file written then still has them. They are read and ignored, and
+ * nothing writes them again.
+ */
 export interface SpawnConfig {
-  cmd: string
-  args: string[]
-  env: Record<string, string>
   cwd: string
+  cmd?: string
+  args?: string[]
+  env?: Record<string, string>
 }
 
 export interface GuardsConfig {
@@ -102,6 +107,11 @@ export interface TeamPermissions {
   mode?: PermissionMode
 }
 
+/** What one run may spend on model calls, in US dollars (ADR 0068). */
+export interface SpendConfig {
+  perRun?: number
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -125,8 +135,10 @@ export interface AgentConfig {
   memory?: { brief?: boolean; deliverAs?: 'native-file' | 'packet-only' }
   /** What it may do without asking (ADR 0037). Absent, or a switch left out, means off. */
   allow?: AgentAllow
-  /** Skills and tools of its app's own the operator turned off for it by taking them off the
-      canvas (ADR 0060). Absent means none: the agent chooses from everything its app has. */
+  /** Its own guard on what one run may spend on it (ADR 0068). Absent: no guard. */
+  spend?: SpendConfig
+  /** Skills and tools the operator turned off for it by taking them off the canvas (ADR 0060).
+      Absent means none: the agent chooses from every skill in LoomWatch's library. */
   turnedOff?: TurnedOff[]
   /** The agent in Your agents this one was placed from, and the version its fields copy. Absent
       means the agent is this team's own. */
@@ -184,6 +196,7 @@ export interface TeamDocument {
   /** Optional explicit owner of the canonical team output. */
   responder?: string
   guards?: GuardsConfig
+  /** `stop.keepAliveMinutes` is accepted from older team files and read by nothing. */
   conversation?: { stop?: { keepAliveMinutes?: number }; [key: string]: unknown }
   schedule?: ScheduleConfig
   /** Where every successful run's answer goes, whoever started it (ADR 0038). */
@@ -192,6 +205,8 @@ export interface TeamDocument {
   memory?: MemoryConfig
   /** Who decides what the agents' switches leave open (ADR 0061). Absent asks you. */
   permissions?: TeamPermissions
+  /** What one run may spend (ADR 0068). Absent: no limit; new teams are written with $1.00. */
+  spend?: SpendConfig
   agents: AgentConfig[]
   edges: EdgeConfig[]
 }

@@ -99,14 +99,14 @@ export type FigureMood = 'still' | 'starting' | 'working' | 'quiet' | 'asking' |
 /** A run that moved this recently counts as working; quieter than that, it is quiet. */
 export const WORKING_WINDOW_MS = 3000
 
-export function figureMood(record: Pick<RunRecord, 'status' | 'permissionRequests' | 'waitingOn'> | null, lastMoveAt: number | null, now: number): FigureMood {
+export function figureMood(record: Pick<RunRecord, 'status' | 'permissionRequests' | 'waitingOn' | 'spendStops'> | null, lastMoveAt: number | null, now: number): FigureMood {
   if (!record) return 'still'
   switch (record.status) {
     case 'queued':
     case 'starting':
       return 'starting'
     case 'running':
-      if ((record.permissionRequests?.length ?? 0) > 0 || record.waitingOn) return 'asking'
+      if ((record.permissionRequests?.length ?? 0) > 0 || (record.spendStops?.length ?? 0) > 0 || record.waitingOn) return 'asking'
       return lastMoveAt !== null && now - lastMoveAt < WORKING_WINDOW_MS ? 'working' : 'quiet'
     case 'succeeded':
       return 'done'

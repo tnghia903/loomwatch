@@ -4,6 +4,7 @@
 // stream and the panel reads back over REST, so docs/WEBSOCKET_SCHEMA.md stays frozen — see
 // docs/TEAM_MEMORY.md "One event stream".
 import { daemonFetch } from '../daemonFetch'
+import { safeFileStem } from '../files/paths'
 
 /** Mirrors `backend::api::MemoryEntryView`. */
 export interface MemoryEntry {
@@ -297,7 +298,7 @@ export function briefFileNameFor(body: string, taken: readonly string[] = [], fo
     .replace(/^-+|-+$/g, '')
   // Cut at a word boundary: the panel titles an entry with no heading from its file name, and
   // "…prefer trains over fligh" reads as a typo the operator never made.
-  const slug = (words.length <= 48 ? words : words.slice(0, 49).replace(/-[^-]*$/, '').slice(0, 48)) || 'note'
+  const slug = safeFileStem((words.length <= 48 ? words : words.slice(0, 49).replace(/-[^-]*$/, '').slice(0, 48)) || 'note')
   let candidate = `${folder}/${slug}.md`
   let suffix = 2
   while (taken.includes(candidate)) {

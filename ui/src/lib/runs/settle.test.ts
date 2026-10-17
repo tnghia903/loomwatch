@@ -13,7 +13,7 @@ describe('settleAfterRun', () => {
     expect(settleAfterRun('failed', { phase: 'failed', operator: false, laterStageStarted: false })).toBeNull()
   })
 
-  // A run stopped at a review step: the researcher was kept alive after handing over, the review
+  // A run stopped at a review step: the researcher was parked after handing over, the review
   // waited. Neither is "running" or "waiting" once the run is over.
   it('credits a stage that handed over before the run was stopped', () => {
     expect(settleAfterRun('running', { phase: 'cancelled', operator: false, laterStageStarted: true })).toMatchObject({ status: 'succeeded', task: 'Handed over' })

@@ -10,8 +10,7 @@ export interface AgentFacts {
   /** "ready", "working", "waiting for you", "failed" or "offline", as the team list says it. */
   state: 'idle' | 'working' | 'waiting' | 'failed' | 'away'
   stateWords: string
-  /** "Claude", "Codex (not installed)", "Offline demo (no AI)". */
-  app: string | null
+  /** The model it runs on: "Claude Opus 5.5", "Offline demo (no AI)". */
   model: string | null
   /** Its job, from the team file. */
   role: string | null

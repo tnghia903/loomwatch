@@ -1,3 +1,7 @@
+import { baseName, isAbsolutePath, pathFromFileUrl } from './paths'
+
+export { baseName }
+
 /**
  * Files an agent mentions in its reply, recognised so the UI can show a file — something to open —
  * instead of a raw path (ADR 0026).
@@ -7,7 +11,6 @@
  * ([`withFolderPaths`]). Bare words and API routes ("/api/runs") are not files, and a false
  * positive would put an Open button on something that is not openable.
  */
-const ABSOLUTE = /^(\/|[A-Za-z]:\\)/
 const EXTENSION = /\.([A-Za-z0-9]{1,8})$/
 
 /** The path a code span or link names, if it names a file, else `null`. */
@@ -15,17 +18,15 @@ export function filePathFrom(text: string | null | undefined): string | null {
   if (!text) return null
   let value = text.trim()
   if (value.startsWith('file://')) {
-    try { value = decodeURIComponent(new URL(value).pathname) } catch { return null }
+    const path = pathFromFileUrl(value)
+    if (path === null) return null
+    value = path
   }
   if (!value || value.length > 1024 || /[\n\r]/.test(value)) return null
-  if (!ABSOLUTE.test(value)) return null
+  if (!isAbsolutePath(value)) return null
   const name = baseName(value)
   if (!EXTENSION.test(name) || (name.startsWith('.') && name.split('.').length === 2)) return null
   return value
-}
-
-export function baseName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 }
 
 export function extensionOf(path: string): string {
@@ -201,9 +202,11 @@ function passagesOf(lines: string[]): number[][] {
 function folderPathFrom(text: string | undefined): string | null {
   let value = text?.trim() ?? ''
   if (value.startsWith('file://')) {
-    try { value = decodeURIComponent(new URL(value).pathname) } catch { return null }
+    const path = pathFromFileUrl(value)
+    if (path === null) return null
+    value = path
   }
-  if (!value || value.length > 1024 || /[\n\r]/.test(value) || !ABSOLUTE.test(value)) return null
+  if (!value || value.length > 1024 || /[\n\r]/.test(value) || !isAbsolutePath(value)) return null
   const folder = value.replace(/[\\/]+$/, '')
   if (!folder || (folder === value && EXTENSION.test(baseName(folder)))) return null
   return folder
@@ -212,7 +215,7 @@ function folderPathFrom(text: string | undefined): string | null {
 /** A file name, or a short path under a folder (`drafts/plan.pdf`), whose kind this module names. */
 function relativeFileFrom(text: string | undefined): string | null {
   const value = text?.trim().replace(/^\.\//, '') ?? ''
-  if (!value || value.length > 255 || ABSOLUTE.test(value) || value.includes('://')) return null
+  if (!value || value.length > 255 || isAbsolutePath(value) || value.includes('://')) return null
   if (/[\s`'"$|<>*?=;:()\\~]/.test(value)) return null
   const segments = value.split('/')
   if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.startsWith('.'))) return null

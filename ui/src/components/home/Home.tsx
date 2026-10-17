@@ -1,9 +1,9 @@
-import { ArrowRight, KeyRound, MessageSquareWarning, Moon, Plus, Search, Sun, UserRoundPlus, Users } from 'lucide-react'
+import { ArrowRight, MessageSquareWarning, Moon, Plus, Search, Sun, UserRoundPlus, Users } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { openFeedback } from '../../lib/feedback/report'
 import { relativeTime } from '../../lib/format'
-import { fetchHarnessModels, harnessProblem, harnessSaid, isHarnessRunnable, type DetectedHarness } from '../../lib/harnesses'
+import { useKeyStatus } from '../../lib/ai/useKeyStatus'
 import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, teamViewFor, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
@@ -15,21 +15,20 @@ import { chatPreview, listTime } from '../../lib/chat/preview'
 import { isUnread } from '../../lib/chat/seen'
 import { fabricFor } from '../../lib/story/fabric'
 import { TeamFabric } from './TeamFabric'
-import { AppSetup } from './AppSetup'
+import { OpenRouterKey } from '../connections/OpenRouterKey'
 import { UpdateBadge } from '../updates/Updates'
 import { QuestsLink } from '../quests/QuestsLink'
+import { SkillsLink } from '../skills/SkillsLink'
 import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
 import { YourAgentsShelf } from './YourAgentsShelf'
+import { keys } from '../../lib/platform'
+import { dollars } from '../../lib/runs/spend'
 
 export interface HomeProps {
   /** Something the operator must know before choosing a team, e.g. a link that did not open. */
   notice?: string | null
-  harnesses: DetectedHarness[]
-  harnessesLoading: boolean
-  harnessesError: string | null
-  onRetryHarnesses: () => void
   /** Open an unsaved, empty team at `path` (the "Empty team" choice). */
   onCreateBlank: (name: string, path: string) => void
   onPalette: () => void
@@ -90,30 +89,18 @@ function describeTeam(team: TeamSummary): string {
  * it is done. First your agents (build each one and chat with it on its own), then your teams (put agents
  * in a workflow, then give the team work in its chat). One obvious way to start: build an agent.
  */
-export function Home({ notice = null, harnesses, harnessesLoading, harnessesError, onRetryHarnesses, onCreateBlank, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
+export function Home({ notice = null, onCreateBlank, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
   const { resolved, toggle } = useTheme()
   const { teams, trashed, error, retry: retryTeams, forget } = useTeamList()
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<TeamSummary | null>(null)
   const [deleted, setDeleted] = useState<DeletedTeam | null>(null)
   const [query, setQuery] = useState('')
-  const [rechecking, setRechecking] = useState(false)
-  const runnable = harnesses.filter(isHarnessRunnable)
-  // Installed and ACP-capable, but the daemon's last attempt to start it failed. An app with no ACP
-  // bridge at all (`acpAvailable: false`) is the Library's to explain, not the first-run footer's.
-  const failing = harnesses.filter((harness) => harness.acpAvailable !== false && harness.health === 'error')
-  // "Set up an AI app" opens by itself when nothing can run, and stays open while the person
-  // installs and signs in, even through the moments an app is found but not yet checked.
-  // Judged on loaded lists only, so a reload (a footer "Check again") never reopens a panel the
-  // person hid; it reopens when an app that ran stops running.
-  const [setupOpen, setSetupOpen] = useState(false)
-  const [nothingRan, setNothingRan] = useState(false)
-  const nothingRuns = !harnessesError && runnable.length === 0
-  if (!harnessesLoading && nothingRuns !== nothingRan) {
-    setNothingRan(nothingRuns)
-    if (nothingRuns) setSetupOpen(true)
-  }
-  const openSetup = () => { setCreating(false); setSetupOpen(true) }
+  const key = useKeyStatus()
+  // The key card stays until the key is in, and for the moment after, so the person sees that
+  // OpenRouter accepted it before the card makes way.
+  const [keyCard, setKeyCard] = useState(false)
+  if (key && !key.connected && !keyCard) setKeyCard(true)
   // Teams are listed as chats (ADR 0051): the one with the newest work first, then the rest.
   const previews = useMemo(() => new Map((teams ?? []).map((team) => [team.path, chatPreview(runs, team.path)])), [teams, runs])
   const shown = useMemo(() => {
@@ -139,28 +126,14 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
     return () => window.removeEventListener('loomwatch:new-team', open)
   }, [])
 
-  // The list itself never starts an app, so "Check again" for a failing one has to: asking for its
-  // models is the same check the daemon's verdict came from, and it records the new answer.
-  async function recheck() {
-    setRechecking(true)
-    await Promise.allSettled(failing.map((harness) => fetchHarnessModels(harness.id)))
-    setRechecking(false)
-    onRetryHarnesses()
-  }
-  const recheckAction = <button type="button" className="link" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? 'Checking…' : 'Check again'}</button>
-
-  // The panel has its own per-app checks, so while it is open the footer only states the outcome.
-  const setupAction = setupOpen ? undefined : <button type="button" className="link" onClick={openSetup}>{runnable.length > 0 ? 'Set up another app' : 'Set up an AI app'}</button>
+  // What the footer says about the one thing every run needs: the OpenRouter key.
   let status: { state: 'dirty' | 'saved' | 'incomplete' | 'invalid'; text: string; action?: ReactNode }
-  if (harnessesLoading) status = { state: 'dirty', text: 'Looking for AI apps on this computer…' }
-  else if (harnessesError) status = { state: 'invalid', text: `Couldn't check which AI apps are installed: ${harnessesError}`, action: <button type="button" className="link" onClick={onRetryHarnesses}>Try again</button> }
-  else if (runnable.length === 0 && failing.length > 0) status = { state: 'incomplete', text: 'None of your AI apps can start right now.', action: setupOpen ? undefined : <>{recheckAction}{setupAction}</> }
-  else if (runnable.length === 0) status = { state: 'incomplete', text: 'No AI app is ready yet.', action: setupAction }
-  else status = { state: 'saved', text: `Ready to use: ${runnable.map((harness) => harness.name).join(', ')}`, action: <>{failing.length > 0 && !setupOpen && recheckAction}{setupAction}</> }
-  // With an app ready, another app waiting on a key or a sign-in is not a problem to show everyone
-  // who opens LoomWatch ("set GEMINI_API_KEY" means nothing to most of them): "Set up another app"
-  // is where it is. Before any app is ready, it is the way to start, so it is shown.
-  const problems = harnessesLoading || harnessesError || setupOpen ? [] : failing.filter((harness) => runnable.length === 0 || !isSetupStep(harness))
+  const manage = <a className="link" href="/connections">{key?.connected ? 'Manage key' : 'Add a key'}</a>
+  if (!key) status = { state: 'dirty', text: 'Checking your OpenRouter key…' }
+  else if (!key.connected) status = { state: 'incomplete', text: 'Add your OpenRouter key so your agents can run.', action: keyCard ? undefined : manage }
+  else if (key.problem) status = { state: 'invalid', text: `OpenRouter: ${key.problem}`, action: manage }
+  else if (key.freeTier) status = { state: 'incomplete', text: 'Your OpenRouter account has no credits yet, so only free models work.', action: manage }
+  else status = { state: 'saved', text: `Agents run on OpenRouter${key.label ? ` with key ${key.label}` : ''}${key.spentThisMonth === undefined ? '' : ` · ${dollars(key.spentThisMonth)} this month`}`, action: manage }
 
   return (
     <div className="lw-home" data-tour="home">
@@ -170,10 +143,11 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
         <span className="home-top-acts">
           {topActions}
           <UpdateBadge />
+          <SkillsLink />
           <QuestsLink />
           <button type="button" className="home-feedback" onClick={() => openFeedback({ screen: 'home' })} aria-label="Send feedback" title="Report a problem or share an idea"><MessageSquareWarning size={15} aria-hidden="true" /><span className="home-feedback-label">Feedback</span></button>
-          <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title="Commands (⌘K)"><Search size={15} aria-hidden="true" /></button>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title="Theme (⌘⇧L)">{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
+          <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title={`Commands (${keys('⌘K')})`}><Search size={15} aria-hidden="true" /></button>
+          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={`Theme (${keys('⌘⇧L')})`}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
       </header>
 
@@ -195,14 +169,7 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
           </ol>
         </section>
 
-        {setupOpen && (
-          <AppSetup
-            harnesses={harnesses}
-            onChanged={onRetryHarnesses}
-            onHide={() => setSetupOpen(false)}
-            firstTeam={teams?.length === 0}
-          />
-        )}
+        {keyCard && <div className="home-key" data-tour="key"><OpenRouterKey variant="card" /></div>}
 
         {/* In the order the work is done: agents first, then the teams they work in. */}
         <YourAgentsShelf />
@@ -253,34 +220,15 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
 
       <footer className="home-foot t-meta" role="status">
         <ChipDot state={status.state} size={10} />
-        <span data-tour="apps">{status.text}</span>
+        <span>{status.text}</span>
         {status.action}
-        {problems.length > 0 && (
-          <ul className="home-foot-problems" aria-label="Apps that need attention">
-            {problems.map((harness) => (
-              // An app that only needs a step from you (a key, a sign-in) is not broken: it reads as a
-              // note with the way to do that step, and only an app that fails stays an alert.
-              isSetupStep(harness) ? (
-                <li key={harness.id} className="setup" title={harness.healthDetail && harnessSaid(harness.healthDetail)}>
-                  <KeyRound size={13} aria-hidden="true" />
-                  <span>{harnessProblem(harness)}</span>
-                  {!setupOpen && <button type="button" className="link" onClick={openSetup}>Set it up</button>}
-                </li>
-              ) : (
-                <li key={harness.id} className="failed" title={harness.healthDetail && harnessSaid(harness.healthDetail)}>{harnessProblem(harness)}</li>
-              )
-            ))}
-          </ul>
-        )}
       </footer>
 
       {creating && (
         <NewTeamDialog
-          harnesses={harnesses}
           existingPaths={[...(teams?.map((team) => team.path) ?? []), ...trashed]}
           onCreateBlank={onCreateBlank}
           onClose={() => setCreating(false)}
-          onSetUpApps={openSetup}
         />
       )}
       {deleting && (
@@ -294,9 +242,4 @@ export function Home({ notice = null, harnesses, harnessesLoading, harnessesErro
       {children}
     </div>
   )
-}
-
-/** A step the app is waiting on you for — an API key, a sign-in — rather than a failure. */
-function isSetupStep(harness: DetectedHarness): boolean {
-  return harness.health === 'error' && (harness.healthCause === 'needs_api_key' || harness.healthCause === 'signed_out')
 }

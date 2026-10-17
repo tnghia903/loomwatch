@@ -1,31 +1,29 @@
+# A research pipeline on LoomWatch's own agent: the researcher gathers on a faster model and may
+# bring in helpers, the reviewer checks what it found on the strongest one. Each `model` is an
+# OpenRouter model id; with your OpenRouter key added in LoomWatch, the team runs as it is.
 schemaVersion: 1
 id: research-team
 name: Research and review
+spend:
+  perRun: 1.00
 entrypoint: researcher
 guards:
   maxDispatchDepth: 4
   maxConcurrentDispatches: 4
 agents:
   - id: researcher
-    name: Protocol Researcher
-    role: Research ACP behavior
-    spawn:
-      cmd: opencode
-      args:
-        - acp
-      env: {}
-      cwd: .
-    model: kimi-for-coding/k3-256k
+    name: Researcher
+    role: Research the question and report what you find, with a source for each finding
+    model: anthropic/claude-sonnet-5.5
+    allow:
+      web: true
     allowRecruiting: true
   - id: reviewer
-    name: Code Reviewer
-    role: Review research findings
-    spawn:
-      cmd: claude-agent-acp
-      args: []
-      env: {}
-      cwd: .
-    model: claude-opus-5
+    name: Reviewer
+    role: Review the research findings and say which of them hold up
+    model: anthropic/claude-opus-5.5
+    allow:
+      web: true
     allowRecruiting: false
 edges:
   - from: researcher

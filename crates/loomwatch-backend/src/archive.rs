@@ -125,6 +125,13 @@ impl EventArchive {
         crate::runs::RunStore::new(self.db.clone())
     }
 
+    /// The `agent_sessions` table on the same database: agents parked while they wait for an
+    /// answer, as data.
+    #[must_use]
+    pub fn parked_agents(&self) -> crate::agent::SessionStore {
+        crate::agent::SessionStore::new(self.db.clone())
+    }
+
     /// The `operator_questions` table on the same database — the queue behind "waiting for you".
     ///
     /// Same split again: an open question is mutable state with an `answered_at` that gets
@@ -136,8 +143,8 @@ impl EventArchive {
 
     /// Append one event and wait until it is written, enforcing the session sequence constraint.
     ///
-    /// A run's own events go through [`crate::acp::EventLog`], which hands them to the writer
-    /// without waiting; this is for a caller that has to know the row is there.
+    /// A run's own events go through `EventLog` (`engine/recorder.rs`), which hands them to the
+    /// writer without waiting; this is for a caller that has to know the row is there.
     ///
     /// # Errors
     ///
@@ -207,6 +214,10 @@ impl EventArchive {
         let used = i64::try_from(packet.used_chars).context("usedChars exceeds INTEGER")?;
         let sections =
             serde_json::to_string(&packet.sections).context("failed to encode packet sections")?;
+        // Everything this session handed the writer goes in first, so the packet's row follows
+        // the events recorded before it. Taking the one writing connection while the writer task
+        // waits for it with a batch in hand held both for the pool's whole acquire timeout.
+        self.flush().await;
         let mut last_error = None;
         for _ in 0..5 {
             let result = sqlx::query(

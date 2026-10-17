@@ -2,6 +2,7 @@ import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
 import { MarkerType, type Connection, type Edge, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { baseName, isAbsolutePath, joinUnderRoot, safeFileStem, splitPath } from '../files/paths'
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
 import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
@@ -92,9 +93,9 @@ function parseFailure(error: TeamFileParseError, source: string): LoadFailure {
 
 /** Resolve a daemon-approved relative team path against its canonical discovery root. */
 export function absoluteTeamPath(root: string, requestedPath: string): string {
-  if (requestedPath.startsWith('/')) return requestedPath
+  if (isAbsolutePath(requestedPath)) return requestedPath
   const parts: string[] = []
-  for (const part of requestedPath.split('/')) {
+  for (const part of splitPath(requestedPath)) {
     if (!part || part === '.') continue
     if (part === '..') {
       if (parts.length === 0) throw new Error('Team path escapes the configured teams directory.')
@@ -104,7 +105,7 @@ export function absoluteTeamPath(root: string, requestedPath: string): string {
     parts.push(part)
   }
   if (parts.length === 0) throw new Error('Team path does not name a file.')
-  return `${root.replace(/\/+$/, '')}/${parts.join('/')}`
+  return joinUnderRoot(root, parts.join('/'))
 }
 
 /**
@@ -129,16 +130,18 @@ function withoutChecks(agent: AgentConfig): AgentConfig {
   return next
 }
 
+/** A team's id and file name: the name in lowercase letters, digits and single hyphens, at most 64. */
 export function slugifyTeamName(name: string): string {
-  return (
-    name
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || 'new-team'
-  )
+  const slug = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '')
+  return safeFileStem(slug || 'new-team')
 }
 
 /**
@@ -147,8 +150,7 @@ export function slugifyTeamName(name: string): string {
  * by it, so a shared id silently handed the second team the first one's notes.
  */
 export function teamIdForPath(path: string): string {
-  const file = path.split('/').pop() ?? path
-  return slugifyTeamName(file.replace(/\.ya?ml$/i, ''))
+  return slugifyTeamName(baseName(path).replace(/\.ya?ml$/i, ''))
 }
 
 function edgeFromConfig(edge: EdgeConfig): ConfiguredEdge {
@@ -177,21 +179,14 @@ function drawableParts(snapshot: TeamDocument): { agents: AgentConfig[]; configu
 }
 
 /**
- * Fills in what the daemon defaults when a file leaves it out (`config.rs` `RawAgent` and
- * `SpawnConfig`): an empty `name` and `role`, and no `spawn.args` or `spawn.env`. An agent the daemon
- * accepts must be one the canvas can draw — harness detection compares `args` as a list and the card
- * reads `role` as text, and a file that left either out blanked the workspace. The schema still
- * requires them, and validation reads the snapshot rather than these nodes, so the file is still
- * shown as needing a fix.
+ * Fills in what the daemon defaults when a file leaves it out (`config.rs` `RawAgent`): an empty
+ * `name` and `role`. An agent the daemon accepts must be one the canvas can draw — the card reads
+ * `role` as text, and a file that left it out blanked the workspace. The schema still requires
+ * them, and validation reads the snapshot rather than these nodes, so the file is still shown as
+ * needing a fix.
  */
 function withDaemonDefaults(agent: AgentConfig): AgentConfig {
-  const { spawn } = agent
-  return {
-    ...agent,
-    name: agent.name ?? '',
-    role: agent.role ?? '',
-    ...(spawn ? { spawn: { ...spawn, args: Array.isArray(spawn.args) ? spawn.args : [], env: spawn.env ?? {} } } : {}),
-  }
+  return { ...agent, name: agent.name ?? '', role: agent.role ?? '' }
 }
 
 function nodeFromAgent(
@@ -460,7 +455,7 @@ export function useTeamDocument() {
       try {
         const [{ yaml, revision }, discovery] = await Promise.all([
           fetchTeamFile(requestedPath),
-          requestedPath.startsWith('/') ? Promise.resolve(null) : fetchTeamsDiscovery(),
+          isAbsolutePath(requestedPath) ? Promise.resolve(null) : fetchTeamsDiscovery(),
         ])
         source = yaml
         const loadedRevision = revision ?? await hashTeamYaml(yaml)
@@ -683,7 +678,7 @@ export function useTeamDocument() {
       }
       const yaml = modelRef.current.toYaml()
       let root = teamsRoot
-      if (!targetPath.startsWith('/') && !root) {
+      if (!isAbsolutePath(targetPath) && !root) {
         const discovery = await fetchTeamsDiscovery()
         root = discovery.root
         setTeamsRoot(root)
@@ -950,15 +945,6 @@ export function useTeamDocument() {
     markDirty()
   }, [markDirty, captureHistory])
 
-  const updateAgentSpawn = useCallback((id: string, value: SpawnConfig) => {
-    captureHistory()
-    modelRef.current?.setAgentField(id, 'spawn', value)
-    modelRef.current?.setAgentField(id, 'model', '')
-    modelRef.current?.setAgentField(id, 'thinkingEffort', undefined)
-    setNodes(current => current.map(node => node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn: value, model: '', thinkingEffort: undefined } } } : node))
-    markDirty()
-  }, [markDirty, captureHistory])
-
   const updateAgentModel = useCallback(
     (id: string, value: string) => {
       captureHistory()
@@ -997,7 +983,8 @@ export function useTeamDocument() {
       const target = nodes.find((node) => node.id === id)
       if (!target || target.data.agent.kind === 'operator') return
       captureHistory()
-      const spawn: SpawnConfig = { cmd: '', args: [], env: {}, ...target.data.agent.spawn, cwd }
+      // Only the folder: an AI app's command left from an earlier LoomWatch goes with this edit.
+      const spawn: SpawnConfig = { cwd }
       modelRef.current?.setAgentField(id, 'spawn', spawn)
       setNodes((current) =>
         current.map((node) => node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn } } } : node),
@@ -1204,6 +1191,34 @@ export function useTeamDocument() {
     (mode: PermissionMode) => {
       captureHistory()
       modelRef.current?.setPermissionMode(mode)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  /** What one run may spend, or no limit with `null` (ADR 0068): the chat's spend chip. */
+  const updateTeamSpend = useCallback(
+    (perRun: number | null) => {
+      captureHistory()
+      modelRef.current?.setSpend(perRun)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  /** An agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
+  const updateAgentSpend = useCallback(
+    (id: string, perRun: number | null) => {
+      captureHistory()
+      const spend = perRun !== null && perRun > 0 ? { perRun } : undefined
+      modelRef.current?.setAgentField(id, 'spend', spend)
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          const { spend: _old, ...rest } = node.data.agent
+          return { ...node, data: { ...node.data, agent: spend ? { ...rest, spend } : rest } }
+        }),
+      )
       markDirty()
     },
     [markDirty, captureHistory],
@@ -1564,6 +1579,8 @@ export function useTeamDocument() {
     teamDeliver: documentSnapshot?.deliver ?? null,
     /** Who decides what the agents' switches leave open (ADR 0061); absent is `ask`. */
     teamPermissionMode: (documentSnapshot?.permissions?.mode === 'auto' ? 'auto' : 'ask') as PermissionMode,
+    /** What one run may spend, in dollars (ADR 0068); `null` is no limit. */
+    teamSpendPerRun: documentSnapshot?.spend?.perRun ?? null,
     /**
      * The team's `memory.inherits` entries as the document holds them.
      *
@@ -1624,12 +1641,13 @@ export function useTeamDocument() {
     renameAgent,
     setAgentRoles,
     updateAgentModel,
-    updateAgentSpawn,
     updateAgentThinkingEffort,
     updateAgentCwd,
     updateAgentAllowRecruiting,
     updateAgentAllow,
     updateTeamPermissionMode,
+    updateTeamSpend,
+    updateAgentSpend,
     updateAgentMemory,
     setAgentCapabilities,
     turnOff,

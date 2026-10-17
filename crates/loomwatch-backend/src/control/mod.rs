@@ -1,30 +1,25 @@
-//! Ask `LoomWatch` (ADR 0033): your own AI app builds and runs teams, and you keep the decisions.
+//! Ask `LoomWatch` (ADR 0033): an assistant that builds and runs teams, while you keep the decisions.
 //!
-//! Two pieces live here. **`LoomWatch` Control** is an MCP tool server at `/api/control/mcp`: it
-//! reads teams and runs, and it *proposes* — a team file, a run, a review note — but writes no team
-//! file and answers no review stop. **Ask conversations** are what the Ask panel talks to: one of the
-//! person's own AI apps, started over ACP outside any run, kept open across turns, archived as its
-//! own session, and handed the tool server at `session/new` the way every run agent is handed the
-//! Team Bus.
+//! Two pieces live here. **`LoomWatch` Control** is a set of tools: they read teams and runs, and
+//! they *propose* — a team file, a run, a review note — but write no team file and answer no review
+//! stop. **Ask conversations** are what the Ask panel talks to: `LoomWatch`'s own agent on the
+//! operator's `OpenRouter` key, outside any run, kept open across turns, archived as its own session,
+//! and given the Control tools and nothing else: no files, no commands, no web.
 //!
 //! Everything a tool proposes is archived into the asking conversation as a `session_meta` event,
-//! so the panel renders it from the same stream as the app's own words and tool calls, and a
+//! so the panel renders it from the same stream as the assistant's own words and tool calls, and a
 //! reload shows exactly what was proposed.
 
-mod connect;
 mod instructions;
 mod mcp;
 #[cfg(test)]
 mod tests;
 
-pub use connect::{TOKEN_VARIABLE, bridge};
-
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path as RoutePath, State};
@@ -38,40 +33,35 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, mpsc};
 
 use crate::EventKind;
-use crate::acp::{AcpProcess, EventLog, ProcessSpec, TeamSessionContext};
 use crate::archive::EventArchive;
-use crate::delivery::{DeliveredTool, Permission, Transport};
+use crate::engine::{AgentRun, EventLog, ProcessSpec, TeamSessionContext};
 use crate::runs::RunRegistry;
 use crate::watch_api::local_evidence;
 
-/// The MCP server name every app lists the tools under: Claude Code's `mcp__loomwatch__*`.
-pub(crate) const SERVER_NAME: &str = "loomwatch";
-/// Apps that can host the assistant: they speak ACP and accept an HTTP tool server, in the order
-/// the default is chosen. `OpenClaw` cannot take HTTP MCP and pi does not speak ACP, so neither is
-/// offered.
-const ASK_APPS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "hermes"];
 /// A conversation nobody has written to for this long is closed; its transcript stays.
 const IDLE_LIMIT: Duration = Duration::from_mins(20);
-const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The longest message the panel sends. Long enough for a pasted brief, short enough to refuse a
 /// pasted file.
 const MAX_MESSAGE_CHARS: usize = 8_000;
 /// The `agentId` every event of a conversation is archived under.
 pub(crate) const AGENT_ID: &str = "ask";
-/// Where the assistant's app runs: a hidden, managed folder, never a team's own.
+/// Where the assistant works: a hidden, managed folder, never a team's own. It is given no file
+/// tools, so nothing is written there; it is only somewhere to stand.
 const ASK_WORKSPACE: &str = ".loomwatch/.ask";
+/// What the assistant shows as in the panel.
+const ASSISTANT_NAME: &str = "Ask LoomWatch";
 
-/// What `main` hands the tool server.
+/// What `main` hands Ask.
 pub struct ControlOptions {
     pub archive: Option<EventArchive>,
     /// The canonical teams root, the same one the editor and run control use.
     pub teams_root: PathBuf,
     pub registry: RunRegistry,
-    /// The daemon's own listener, which the tool server is reached at.
+    /// The daemon's own listener: links to runs in tool results start with it.
     pub listen: SocketAddr,
-    /// A command that replaces the detected apps as the assistant, from `LOOMWATCH_ASK_COMMAND`.
-    /// For offline demos and tests: it never reaches a model provider unless it is one.
-    pub ask_command: Option<Vec<String>>,
+    /// A model that replaces the person's choice for every conversation, from
+    /// `LOOMWATCH_ASK_MODEL`: `fake/offline` for an offline demo.
+    pub ask_model: Option<String>,
 }
 
 #[derive(Clone)]
@@ -83,51 +73,37 @@ struct Inner {
     archive: Option<EventArchive>,
     teams_root: PathBuf,
     registry: RunRegistry,
-    /// `http://127.0.0.1:<port>`: what links in tool results and the tool server's URL start with.
+    /// `http://127.0.0.1:<port>`: what links in tool results start with.
     origin: String,
-    /// Where apps are looked for, with the per-user folders `GET /api/harnesses` adds.
-    search_path: Option<OsString>,
-    ask_command: Option<Vec<String>>,
-    /// Bearer token → who is calling.
-    tokens: RwLock<BTreeMap<String, Caller>>,
+    ask_model: Option<String>,
     conversations: RwLock<BTreeMap<String, Arc<Conversation>>>,
     proposals: RwLock<BTreeMap<String, Proposal>>,
-    /// The default model each app reported, kept for ten minutes so `list_apps` does not start
-    /// every app on every call.
-    models: Mutex<BTreeMap<String, (Instant, mcp::AppModels)>>,
-    /// One lock per app while its models are being found, so a conversation's warm-up and its
-    /// first `list_apps` start the app once between them.
-    discovering: StdMutex<BTreeMap<String, Arc<Mutex<()>>>>,
-    connections: connect::Connections,
 }
 
-/// Who a tool call is from.
+/// Who a tool call is from: an Ask conversation, by id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Caller {
-    /// An Ask conversation, by id.
     Conversation(String),
-    /// An app the person connected from Settings, by app id.
-    Connection(String),
 }
 
-/// One Ask conversation: a live session of one app, and the archive session it writes to.
+/// One Ask conversation: a live session of the assistant, and the archive session it writes to.
 struct Conversation {
     id: String,
     app: AskApp,
-    token: String,
-    /// The one writer for this archive session. The app's frames and the tool server's proposals
+    /// The one writer for this archive session. The assistant's events and the tools' proposals
     /// both go through it, because a second writer would collide on the sequence numbers.
     event_log: EventLog,
     turns: Mutex<Option<mpsc::Sender<Turn>>>,
     status: StdMutex<ConversationStatus>,
 }
 
+/// What the panel shows the assistant as, and the model it runs on.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AskApp {
     id: String,
     name: String,
-    /// The model the person chose for this conversation; `None` is the app's own default.
+    /// The model this conversation runs on: the person's choice, or the default.
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
 }
@@ -197,47 +173,30 @@ struct Proposal {
 impl Control {
     #[must_use]
     pub fn new(options: ControlOptions) -> Self {
-        let runtime_home = std::env::var_os("HOME").map(PathBuf::from);
-        let search_path =
-            crate::api::augment_search_path(std::env::var_os("PATH"), runtime_home.as_deref());
-        Self::with_search_path(options, search_path)
-    }
-
-    /// [`Self::new`] with an explicit place to look for apps, so tests never find the real ones.
-    #[must_use]
-    pub fn with_search_path(options: ControlOptions, search_path: Option<OsString>) -> Self {
         let listen = if options.listen.ip().is_unspecified() {
             SocketAddr::from(([127, 0, 0, 1], options.listen.port()))
         } else {
             options.listen
         };
-        let connections = connect::Connections::load(&options.teams_root);
-        let control = Self {
+        Self {
             inner: Arc::new(Inner {
                 archive: options.archive,
                 teams_root: options.teams_root,
                 registry: options.registry,
                 origin: format!("http://{listen}"),
-                search_path,
-                ask_command: options.ask_command.filter(|command| !command.is_empty()),
-                tokens: RwLock::default(),
+                ask_model: options
+                    .ask_model
+                    .map(|model| model.trim().to_owned())
+                    .filter(|model| !model.is_empty()),
                 conversations: RwLock::default(),
                 proposals: RwLock::default(),
-                models: Mutex::default(),
-                discovering: StdMutex::default(),
-                connections,
             }),
-        };
-        control.restore_connection_tokens();
-        control
+        }
     }
 
-    /// The tool server and the Ask panel's endpoints. Loopback and same-origin only, like run
-    /// control; the tool server additionally takes a bearer token.
+    /// The Ask panel's endpoints. Loopback and same-origin only, like run control.
     pub fn router(&self) -> Router {
         Router::new()
-            .route("/api/control/mcp", post(mcp::post))
-            .route("/api/ask/apps", get(apps))
             .route("/api/ask/conversations", post(start_conversation))
             .route(
                 "/api/ask/conversations/{id}",
@@ -253,20 +212,10 @@ impl Control {
                 post(decide_run_request),
             )
             .route("/api/ask/instructions", post(instructions::rewrite))
-            .route("/api/ask/inbox", get(inbox))
             .route("/api/ask/proposals/{id}", get(get_proposal))
             .route("/api/ask/proposals/{id}/outcome", post(proposal_outcome))
-            .route("/api/ask/connections", get(connect::list))
-            .route(
-                "/api/ask/connections/{app}",
-                post(connect::connect).delete(connect::disconnect),
-            )
             .route_layer(middleware::from_fn(local_evidence))
             .with_state(self.clone())
-    }
-
-    fn mcp_url(&self) -> String {
-        format!("{}/api/control/mcp", self.inner.origin)
     }
 
     fn run_url(&self, team_path: &str, run_id: &str) -> String {
@@ -276,10 +225,6 @@ impl Control {
             encode_query(team_path),
             encode_query(run_id)
         )
-    }
-
-    async fn caller(&self, token: &str) -> Option<Caller> {
-        self.inner.tokens.read().await.get(token).cloned()
     }
 
     async fn conversation(&self, id: &str) -> Option<Arc<Conversation>> {
@@ -293,17 +238,14 @@ impl Control {
         if let Some(object) = payload.as_object_mut() {
             object.insert("phase".to_owned(), json!(phase));
         }
-        let log = match caller {
-            Caller::Conversation(id) => self
-                .conversation(id)
-                .await
-                .map(|item| item.event_log.clone()),
-            Caller::Connection(app) => {
-                self.inner.connections.remember(app, &payload);
-                self.inner.connections.event_log(app, self.archive())
-            }
+        let Caller::Conversation(id) = caller;
+        let Some(log) = self
+            .conversation(id)
+            .await
+            .map(|item| item.event_log.clone())
+        else {
+            return;
         };
-        let Some(log) = log else { return };
         if let Err(error) = log
             .append(
                 AGENT_ID,
@@ -317,29 +259,14 @@ impl Control {
         }
     }
 
-    fn archive(&self) -> Option<&EventArchive> {
-        self.inner.archive.as_ref()
+    /// The model a conversation runs on: the offline override, the person's choice, or the default.
+    fn model_for(&self, chosen: Option<String>) -> String {
+        self.inner
+            .ask_model
+            .clone()
+            .or(chosen)
+            .unwrap_or_else(|| crate::ai::DEFAULT_MODEL.to_owned())
     }
-
-    fn restore_connection_tokens(&self) {
-        let tokens = self.inner.connections.tokens();
-        let inner = Arc::clone(&self.inner);
-        // The listener is not serving yet, so nothing can race this write.
-        if let Ok(mut map) = inner.tokens.try_write() {
-            for (app, token) in tokens {
-                map.insert(token, Caller::Connection(app));
-            }
-        }
-    }
-}
-
-/// A random bearer token: two v4 UUIDs, 244 random bits.
-fn new_token() -> String {
-    format!(
-        "lw_{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    )
 }
 
 fn encode_query(value: &str) -> String {
@@ -366,58 +293,10 @@ fn lock<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The apps found here that can host the assistant, in the order the default is chosen.
-fn ask_apps(control: &Control) -> Vec<crate::api::DetectedHarness> {
-    if let Some(command) = &control.inner.ask_command {
-        return vec![crate::api::DetectedHarness {
-            id: "custom".to_owned(),
-            name: "Offline assistant".to_owned(),
-            command: command[0].clone(),
-            executable_path: command[0].clone(),
-            acp_available: true,
-            unavailable_reason: None,
-            health: None,
-            health_reason: None,
-            health_detail: None,
-            health_cause: None,
-            needs_restart: false,
-            connector: None,
-            spawn: crate::api::HarnessSpawn {
-                cmd: command[0].clone(),
-                args: command[1..].to_vec(),
-            },
-        }];
-    }
-    let detected = crate::api::detect_harnesses(control.inner.search_path.as_deref());
-    ASK_APPS
-        .iter()
-        .filter_map(|id| detected.iter().find(|app| app.id == *id).cloned())
-        .collect()
-}
-
-async fn apps(State(control): State<Control>) -> Json<Value> {
-    let apps = ask_apps(&control);
-    let default = apps
-        .iter()
-        .find(|app| app.acp_available)
-        .map(|app| app.id.clone());
-    Json(json!({
-        "apps": apps.iter().map(|app| json!({
-            "id": app.id,
-            "name": app.name,
-            "available": app.acp_available,
-            "reason": app.unavailable_reason,
-        })).collect::<Vec<_>>(),
-        "defaultApp": default,
-    }))
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StartConversation {
-    #[serde(default)]
-    app: Option<String>,
-    /// A model id from the app's own list; empty or absent uses the app's default.
+    /// An `OpenRouter` model id; empty or absent uses the default model.
     #[serde(default)]
     model: Option<String>,
     #[serde(default)]
@@ -425,51 +304,19 @@ struct StartConversation {
 }
 
 /// The longest model id the panel may name. Real ids are a few dozen characters; this only keeps a
-/// pasted paragraph out of the app's `session/set_model`.
+/// pasted paragraph out of a request to the provider.
 const MAX_MODEL_CHARS: usize = 200;
 
-/// The chosen model, trimmed, or `None` for the app's default. A model that can't be an id is
-/// refused here rather than handed to the app.
+/// The chosen model, trimmed, or `None` for the default. A model that can't be an id is refused
+/// here rather than sent to the provider.
 fn chosen_model(model: Option<&str>) -> Result<Option<String>, String> {
     let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
         return Ok(None);
     };
     if model.chars().count() > MAX_MODEL_CHARS || model.chars().any(char::is_control) {
-        return Err(
-            "That isn't a model this app lists. Choose one from the list, or its default."
-                .to_owned(),
-        );
+        return Err("That isn't a model id. Choose a model from the list.".to_owned());
     }
     Ok(Some(model.to_owned()))
-}
-
-/// The app the person asked for, or the first one here that can run Ask; why not, in plain words.
-fn chosen_app<'a>(
-    apps: &'a [crate::api::DetectedHarness],
-    requested: Option<&str>,
-) -> Result<&'a crate::api::DetectedHarness, String> {
-    let chosen = match requested {
-        Some(id) => Some(apps.iter().find(|app| app.id == id).ok_or_else(|| {
-            format!("{id} isn't an AI app Ask can use on this computer. Choose another app.")
-        })?),
-        None => apps.iter().find(|app| app.acp_available),
-    };
-    let Some(app) = chosen else {
-        return Err(
-            "No AI app that can run Ask was found on this computer. Install and sign in to Claude \
-             Code, Codex, Gemini CLI or OpenCode, then start LoomWatch again from a terminal where \
-             it works."
-                .to_owned(),
-        );
-    };
-    if !app.acp_available {
-        return Err(format!(
-            "{} can't run Ask here: {}",
-            app.name,
-            app.unavailable_reason.clone().unwrap_or_default()
-        ));
-    }
-    Ok(app)
 }
 
 async fn start_conversation(
@@ -484,12 +331,7 @@ async fn start_conversation(
         );
     };
     let model = match chosen_model(request.model.as_deref()) {
-        Ok(model) => model,
-        Err(message) => return error(StatusCode::UNPROCESSABLE_ENTITY, message),
-    };
-    let apps = ask_apps(&control);
-    let app = match chosen_app(&apps, request.app.as_deref()) {
-        Ok(app) => app,
+        Ok(model) => control.model_for(model),
         Err(message) => return error(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let workspace = match prepare_workspace(&control.inner.teams_root) {
@@ -497,15 +339,13 @@ async fn start_conversation(
         Err(message) => return error(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
     let id = format!("ask-{}", uuid::Uuid::new_v4());
-    let token = new_token();
     let conversation = Arc::new(Conversation {
         id: id.clone(),
         app: AskApp {
-            id: app.id.clone(),
-            name: app.name.clone(),
-            model,
+            id: "loomwatch".to_owned(),
+            name: ASSISTANT_NAME.to_owned(),
+            model: Some(model),
         },
-        token: token.clone(),
         event_log: EventLog::new(archive, id.clone()),
         turns: Mutex::new(None),
         status: StdMutex::new(ConversationStatus {
@@ -516,13 +356,7 @@ async fn start_conversation(
             run_requests: BTreeMap::new(),
         }),
     });
-    let spec = assistant_spec(&control, app, workspace, &token);
-    control
-        .inner
-        .tokens
-        .write()
-        .await
-        .insert(token, Caller::Conversation(id.clone()));
+    let spec = ask_spec(workspace);
     control
         .inner
         .conversations
@@ -540,16 +374,12 @@ async fn start_conversation(
         .await;
     let model = conversation.app.model.clone();
     tokio::spawn(converse(control.clone(), conversation, spec, receiver));
-    // Most first requests are "make me a team", which needs every app's models; finding them
-    // starts each app, so it begins now rather than when the assistant first asks.
-    let warm = control.clone();
-    tokio::spawn(async move { mcp::warm_models(&warm).await });
     (
         StatusCode::CREATED,
         Json(json!({
             "id": id,
-            "app": app.id,
-            "appName": app.name,
+            "app": "loomwatch",
+            "appName": ASSISTANT_NAME,
             "model": model,
             "state": "starting",
         })),
@@ -557,89 +387,29 @@ async fn start_conversation(
         .into_response()
 }
 
-/// How the assistant's app is started: the detected command, resolved to a path so it starts with
-/// the daemon's own `PATH`, in the managed folder, carrying the tool server as its one wired tool.
-fn assistant_spec(
-    control: &Control,
-    app: &crate::api::DetectedHarness,
-    workspace: PathBuf,
-    token: &str,
-) -> ProcessSpec {
+/// How the assistant runs: in the managed folder, with no permissions to ask for anything. Its
+/// only tools are the Control tools ([`mcp::ControlTools`]).
+fn ask_spec(workspace: PathBuf) -> ProcessSpec {
     ProcessSpec {
-        tools: vec![control_tool(&control.mcp_url(), token)],
-        ..app_spec(control, app, workspace)
-    }
-}
-
-/// The app on its own, with no tools: what [`assistant_spec`] starts from, and all a one-turn
-/// rewrite needs (ADR 0059).
-fn app_spec(
-    control: &Control,
-    app: &crate::api::DetectedHarness,
-    workspace: PathBuf,
-) -> ProcessSpec {
-    let command = control
-        .inner
-        .search_path
-        .as_deref()
-        .and_then(|path| crate::api::find_executable(path, &app.spawn.cmd))
-        .map_or_else(
-            || app.spawn.cmd.clone(),
-            |path| path.to_string_lossy().into_owned(),
-        );
-    ProcessSpec {
-        cmd: command,
-        args: app.spawn.args.clone(),
+        cmd: String::new(),
+        args: Vec::new(),
         env: BTreeMap::new(),
         cwd: workspace,
         tools: Vec::new(),
-        // The Ask assistant keeps its own rule: only its Control tools (ADR 0033).
         permissions: None,
         asker: None,
     }
 }
 
-/// The assistant's working folder: hidden, managed, and never a team's. Its Claude settings allow
-/// exactly the `LoomWatch` tools and deny shell, file edits and the web, because Claude's ACP adapter
-/// runs tools without asking (ADR 0033).
+/// The assistant's working folder: hidden, managed, and never a team's.
 fn prepare_workspace(teams_root: &Path) -> Result<PathBuf, String> {
     let workspace = teams_root.join(ASK_WORKSPACE);
-    let settings = workspace.join(".claude");
-    std::fs::create_dir_all(&settings)
-        .map_err(|error| format!("could not prepare the Ask folder: {error}"))?;
-    let rules = json!({
-        "permissions": {
-            "allow": [format!("mcp__{SERVER_NAME}")],
-            "deny": ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
-        }
-    });
-    let text = serde_json::to_string_pretty(&rules).unwrap_or_default();
-    std::fs::write(settings.join("settings.json"), text)
+    std::fs::create_dir_all(&workspace)
         .map_err(|error| format!("could not prepare the Ask folder: {error}"))?;
     Ok(workspace)
 }
 
-/// The tool server, as the one wired tool an Ask session carries.
-fn control_tool(url: &str, token: &str) -> DeliveredTool {
-    DeliveredTool {
-        name: "LoomWatch Control".to_owned(),
-        server: SERVER_NAME.to_owned(),
-        provider: "LoomWatch".to_owned(),
-        config_path: String::new(),
-        transport: Transport::Http,
-        env_names: Vec::new(),
-        header_names: vec!["Authorization".to_owned()],
-        permission: Permission::Granted,
-        server_definition: json!({
-            "type": "http",
-            "name": SERVER_NAME,
-            "url": url,
-            "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}]
-        }),
-    }
-}
-
-/// One conversation's life: start the app, take turns until it goes quiet or is ended, close it.
+/// One conversation's life: open the session, take turns until it goes quiet or is ended, close it.
 async fn converse(
     control: Control,
     conversation: Arc<Conversation>,
@@ -652,43 +422,36 @@ async fn converse(
     };
     let mut context = TeamSessionContext {
         archive: &archive,
-        exit_timeout: EXIT_TIMEOUT,
         bus: None,
         event_log: Some(conversation.event_log.clone()),
         packet: None,
         composed: None,
         boundary: None,
     };
-    let process = match AcpProcess::spawn(&spec) {
-        Ok(process) => process.approving_tools_of(SERVER_NAME),
+    let tools = Arc::new(mcp::ControlTools::new(control.clone(), caller.clone()));
+    let mut process = match AgentRun::spawn(&spec) {
+        Ok(process) => process.with_host_tools(tools),
         Err(failure) => {
-            let message = format!(
-                "{} could not start: {failure}. Check that it works in a terminal, then try again.",
-                conversation.app.name
-            );
-            fail(&control, &conversation, &message).await;
+            fail(
+                &control,
+                &conversation,
+                &format!("Ask couldn't start: {failure}"),
+            )
+            .await;
             return;
         }
     };
-    let mut process = process;
     let model = conversation.app.model.as_deref().unwrap_or_default();
     let mut recorder = match process.open_live(AGENT_ID, model, &mut context).await {
         Ok(recorder) => recorder,
         Err(failure) => {
-            let reason = first_line(&format!("{failure:#}"));
-            // A model the app turned down is the person's choice to change, so say so.
-            let message = if reason.contains("rejected configured model") {
-                format!(
-                    "{} wouldn't use {model}: {reason}. Choose another model, or its default.",
-                    conversation.app.name
-                )
-            } else {
-                format!(
-                    "{} started but did not answer LoomWatch: {reason}",
-                    conversation.app.name
-                )
-            };
-            fail(&control, &conversation, &message).await;
+            // Already in the person's words: no key, a refused key, no credits.
+            fail(
+                &control,
+                &conversation,
+                &first_line(&format!("{failure:#}")),
+            )
+            .await;
             return;
         }
     };
@@ -714,12 +477,12 @@ async fn converse(
         match process.prompt_turn(&mut recorder, &prompt).await {
             Ok(_) => set_state(&control, &conversation, ConversationState::Ready).await,
             Err(failure) => {
-                let message = format!(
-                    "{} stopped answering: {}",
-                    conversation.app.name,
-                    first_line(&format!("{failure:#}"))
-                );
-                fail(&control, &conversation, &message).await;
+                fail(
+                    &control,
+                    &conversation,
+                    &first_line(&format!("{failure:#}")),
+                )
+                .await;
                 break;
             }
         }
@@ -730,7 +493,7 @@ async fn converse(
     if lock(&conversation.status).state != ConversationState::Failed {
         set_state(&control, &conversation, ConversationState::Ended).await;
     }
-    forget_token(&control, &conversation).await;
+    *conversation.turns.lock().await = None;
 }
 
 fn first_line(text: &str) -> String {
@@ -772,16 +535,6 @@ async fn fail(control: &Control, conversation: &Conversation, message: &str) {
             json!({"state": "failed", "app": conversation.app, "error": message}),
         )
         .await;
-    forget_token(control, conversation).await;
-}
-
-async fn forget_token(control: &Control, conversation: &Conversation) {
-    control
-        .inner
-        .tokens
-        .write()
-        .await
-        .remove(&conversation.token);
     *conversation.turns.lock().await = None;
 }
 
@@ -1027,11 +780,6 @@ async fn decide_run_request(
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// What connected apps proposed or started recently, newest last, for the Ask panel to show.
-async fn inbox(State(control): State<Control>) -> Json<Value> {
-    Json(json!({"items": control.inner.connections.inbox()}))
-}
-
 async fn get_proposal(
     State(control): State<Control>,
     RoutePath(id): RoutePath<String>,
@@ -1073,10 +821,7 @@ async fn proposal_outcome(
             "This proposal is no longer available.",
         );
     };
-    let caller = proposal.source.strip_prefix("connection:").map_or_else(
-        || Caller::Conversation(proposal.source.clone()),
-        |app| Caller::Connection(app.to_owned()),
-    );
+    let caller = Caller::Conversation(proposal.source.clone());
     control
         .record(
             &caller,

@@ -1,11 +1,11 @@
 import { ReactFlowProvider } from '@xyflow/react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 
 import { Feedback } from './components/feedback/Feedback'
 import { Updates } from './components/updates/Updates'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
-import { type DetectedHarness, fetchHarnesses, isHarnessRunnable } from './lib/harnesses'
+import { useKeyStatus } from './lib/ai/useKeyStatus'
 import { fetchCapabilities, type CapabilityInventory } from './lib/library/client'
 import { useNeedsYou } from './lib/story/useNeedsYou'
 import { useTheme } from './lib/theme'
@@ -13,36 +13,10 @@ import { useTheme } from './lib/theme'
 const Connections = lazy(() => import('./components/Connections'))
 const AgentsPage = lazy(() => import('./components/agents/AgentsPage').then((module) => ({ default: module.AgentsPage })))
 const QuestsPage = lazy(() => import('./components/quests/QuestsPage').then((module) => ({ default: module.QuestsPage })))
-
-function useHarnesses() {
-  const [harnesses, setHarnesses] = useState<DetectedHarness[]>([])
-  // Where the daemon looked, and what for. Empty until the first reply; the Library only shows
-  // it on request, so an empty value never reads as "nowhere".
-  const [searchedPath, setSearchedPath] = useState<string[]>([])
-  const [knownIds, setKnownIds] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [generation, setGeneration] = useState(0)
-  useEffect(() => {
-    let cancelled = false
-    fetchHarnesses()
-      .then((report) => {
-        if (cancelled) return
-        setHarnesses(report.harnesses ?? [])
-        setSearchedPath(report.searchedPath ?? [])
-        setKnownIds(report.knownIds ?? [])
-        setError(report.runnerError ?? null)
-      })
-      .catch((caught: unknown) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [generation])
-  const retry = useCallback(() => { setLoading(true); setGeneration((value) => value + 1) }, [])
-  return { harnesses, searchedPath, knownIds, loading, error, retry }
-}
+const SkillsPage = lazy(() => import('./components/skills/SkillsPage').then((module) => ({ default: module.SkillsPage })))
 
 function useCapabilities() {
-  const [inventory, setInventory] = useState<CapabilityInventory>({ skills: [], tools: [], sources: [] })
+  const [inventory, setInventory] = useState<CapabilityInventory>({ skills: [], sources: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [scannedAt, setScannedAt] = useState<Date | null>(null)
@@ -65,24 +39,22 @@ function useCapabilities() {
   return { inventory, loading, error, scannedAt, retry }
 }
 
+/** The guide waits for an OpenRouter key before it asks for an agent. */
+function Guide() {
+  const key = useKeyStatus()
+  return <GettingStarted keyReady={key?.connected === true} keyLoading={key === null} />
+}
+
 function Editor({ initialRunId }: { initialRunId: string | null }) {
-  const { harnesses, searchedPath, knownIds, loading, error, retry } = useHarnesses()
   const capabilities = useCapabilities()
   const [, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
-  const readyApps = useMemo(() => harnesses.filter(isHarnessRunnable).map((harness) => harness.name), [harnesses])
   return (
     <ReactFlowProvider>
       {/* Above Home and the workspace alike: the guide carries on across the page load a new team causes. */}
-      <GettingStarted readyApps={readyApps} appsLoading={loading} />
-      <Feedback harnesses={harnesses} />
+      <Guide />
+      <Feedback />
       <Updates />
       <Workspace
-        harnesses={harnesses}
-        harnessSearchPath={searchedPath}
-        knownHarnessIds={knownIds}
-        harnessesLoading={loading}
-        harnessesError={error}
-        onRetryHarnesses={retry}
         capabilityInventory={capabilities.inventory}
         capabilitiesLoading={capabilities.loading}
         capabilitiesError={capabilities.error}
@@ -97,19 +69,23 @@ function Editor({ initialRunId }: { initialRunId: string | null }) {
 
 /** Your agents (`/agents`): build and try one agent at a time, then use it in any team. */
 function Agents() {
-  const { harnesses, loading } = useHarnesses()
   const capabilities = useCapabilities()
   // The same poll as the workspace's, so the header's mark and the tab icon say the same here.
   const { mark } = useNeedsYou()
-  const readyApps = useMemo(() => harnesses.filter(isHarnessRunnable).map((harness) => harness.name), [harnesses])
   return (
     <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading your agents…</p>}>
       {/* The guide starts with building an agent, here, then carries on at Home and in a team. */}
-      <GettingStarted readyApps={readyApps} appsLoading={loading} />
-      <Feedback harnesses={harnesses} />
-      <AgentsPage harnesses={harnesses} harnessesLoading={loading} skills={capabilities.inventory.skills} tools={capabilities.inventory.tools} skillsLoading={capabilities.loading} mark={mark} />
+      <Guide />
+      <Feedback />
+      <AgentsPage skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} mark={mark} />
     </Suspense>
   )
+}
+
+/** Skills (`/skills`): LoomWatch's own skills folder, bring-in and the marketplace. */
+function Skills() {
+  const { mark } = useNeedsYou()
+  return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading skills…</p>}><SkillsPage mark={mark} /></Suspense>
 }
 
 /** Quests (`/quests`), with the header's mark on the same poll as everywhere else. */
@@ -123,6 +99,7 @@ export default function App() {
   const { pathname, search } = window.location
   if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
   if (pathname === '/quests') return <Quests />
+  if (pathname === '/skills') return <Skills />
   if (pathname === '/connections') {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
   }

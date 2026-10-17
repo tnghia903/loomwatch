@@ -4,6 +4,7 @@ import { AgentCheckup } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
+import { AgentSpendGuard } from './AgentSpendGuard'
 import { AgentUsageLine } from './AgentUsageLine'
 import { CheckStep } from './CheckStep'
 import { DoneWhen } from './DoneWhen'
@@ -12,8 +13,9 @@ import { InstructionsUpdated } from './InstructionsUpdated'
 import { Inspector, type InspectorProps } from './Inspector'
 import { LinkedAgent } from './LinkedAgent'
 import { SaveAsJob } from './SaveAsJob'
+import { ModelPicker } from '../models/ModelPicker'
 import { StatusGlyph } from '../ui/glyphs'
-import type { DetectedHarness } from '../../lib/harnesses'
+import { openRouterId } from '../../lib/ai/modelIds'
 import type { SavedJob } from '../../lib/library/jobs'
 import type { AgentLinkState } from '../../lib/library/link'
 import type { AgentLink } from '../../lib/team-file/types'
@@ -28,10 +30,10 @@ export interface BuildInspectorLink {
   onLink: (link: AgentLink) => void
 }
 
-export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHarness[]; harnessId?: string; onHarnessChange?: (id: string) => void; startAdvanced?: boolean; link?: BuildInspectorLink; /** Open this agent on its workbench, in the team's Agents tab. */ onOpenWorkbench?: () => void }) {
+export function BuildInspector(props: InspectorProps & { startAdvanced?: boolean; link?: BuildInspectorLink; /** Open this agent on its workbench, in the team's Agents tab. */ onOpenWorkbench?: () => void }) {
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [advanced, setAdvanced] = useState(Object.keys(props.fieldProblems ?? {}).length > 0 || props.startAdvanced === true)
-  const { node, onRename, onClose, onDelete, readOnly, harnesses = [], harnessId, onHarnessChange } = props
+  const { node, onRename, onClose, onDelete, readOnly } = props
   // Something sent the operator to a field — an alert's Fix, a problem in the list. The short panel
   // does not contain most fields, so it opens the full one, including when this panel is already
   // open for the same agent (Build and a run share it, ADR 0041). It never folds it back.
@@ -65,8 +67,9 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
       {reviewStep
         ? <p>The team pauses here and waits for you to approve the work or ask for changes.</p>
         : <>
-          <label>AI app<select value={harnessId ?? ''} disabled={locked} onChange={e => onHarnessChange?.(e.target.value)}><option value="" disabled>Choose an app</option>{harnesses.map(h => <option key={h.id} value={h.id} disabled={h.acpAvailable === false}>{h.name}</option>)}</select></label>
+          <ModelPicker value={openRouterId(node.data.agent.model)} disabled={locked} onChange={props.onModelChange} />
           {props.usage && <AgentUsageLine usage={props.usage.agent} runs={props.usage.runs} alone={props.usage.alone} />}
+          {props.onSpendChange && <AgentSpendGuard perRun={node.data.agent.spend?.perRun ?? null} readOnly={locked} onChange={props.onSpendChange} />}
           <section className="build-context" aria-label="Context">
             <AgentContext
               agent={node.data.agent} place={props.place} briefCount={props.briefCount} inheritedMemory={props.inheritedMemory} readOnly={readOnly}
@@ -80,9 +83,9 @@ export function BuildInspector(props: InspectorProps & { harnesses?: DetectedHar
           <section className="build-context" aria-label="Allowed without asking">
             <AgentPermissions agent={node.data.agent} readOnly={locked} onChange={props.onAllowChange} teamAuto={props.teamAutoMode} headClassName="build-context-head" />
           </section>
-          <p><Puzzle size={13} />Skills you connect work with any AI app.</p>
-          <button className="btn" onClick={() => setAdvanced(true)}>Model and more settings</button>
-          {!link?.state && <SaveAsJob key={node.id} agent={node.data.agent} appId={harnessId} onLinked={readOnly ? undefined : link?.onLink} />}
+          <p><Puzzle size={13} />Skills you connect open when the work calls for them. <a className="link" href="/skills">Manage skills</a></p>
+          <button className="btn" onClick={() => setAdvanced(true)}>Thinking effort and more settings</button>
+          {!link?.state && <SaveAsJob key={node.id} agent={node.data.agent} onLinked={readOnly ? undefined : link?.onLink} />}
         </>}
     </div>
   </aside>

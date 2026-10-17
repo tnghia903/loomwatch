@@ -1,6 +1,5 @@
-import type { DetectedHarness } from '../harnesses'
+import { openRouterId } from '../ai/modelIds'
 import { chosenIsFile, chosenName } from '../knowledge/chosen'
-import { harnessIdForAgent } from '../models'
 import type { AgentConfig, CapabilityRef } from '../team-file/types'
 import type { AgentDraft } from './draft'
 import type { ReadSource } from './figure'
@@ -12,14 +11,15 @@ import { onlyOn } from './jobs'
  * every change is written straight back to it, so it is saved with the team like a canvas edit.
  * (An agent placed from Your agents is edited there instead, as its next version.)
  */
-export function draftFromTeamAgent(agent: AgentConfig, harnesses: readonly DetectedHarness[]): AgentDraft {
+export function draftFromTeamAgent(agent: AgentConfig): AgentDraft {
   return {
     name: agent.name,
     // A team agent has no palette line: that belongs to Your agents.
     does: '',
     instructions: agent.role,
-    appId: harnessIdForAgent(agent, harnesses),
-    model: agent.model ?? '',
+    // A name written for an AI app reads as the model it maps to; it is written back only when
+    // the operator chooses a model.
+    model: openRouterId(agent.model),
     effort: agent.thinkingEffort ?? '',
     skills: (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name),
     tools: toolsOf(agent),
@@ -111,19 +111,13 @@ export function toolsOf(agent: Pick<AgentConfig, 'capabilities'>): string[] {
 /** What one workbench change does to the team file. */
 export type TeamAgentEdit =
   | { kind: 'rename'; field: 'name' | 'role'; value: string }
-  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'turnedOff' | 'allow' | 'doneWhen'>> }
+  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'capabilities' | 'turnedOff' | 'allow' | 'doneWhen'>> }
 
 /** The team-file change for setting `key` to `value` on the workbench, or `null` when there is none. */
-export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, key: K, value: AgentDraft[K], harnesses: readonly DetectedHarness[]): TeamAgentEdit | null {
+export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, key: K, value: AgentDraft[K]): TeamAgentEdit | null {
   switch (key) {
     case 'name': return { kind: 'rename', field: 'name', value: value as string }
     case 'instructions': return { kind: 'rename', field: 'role', value: value as string }
-    case 'appId': {
-      const harness = harnesses.find((candidate) => candidate.id === value)
-      if (!harness) return null
-      // A new app: its own command, and the model and effort go back to that app's defaults.
-      return { kind: 'fields', fields: { spawn: { env: {}, cwd: '.', ...agent.spawn, cmd: harness.spawn.cmd, args: [...harness.spawn.args] }, model: '', thinkingEffort: undefined } }
-    }
     case 'model': return { kind: 'fields', fields: { model: value as string } }
     case 'effort': return { kind: 'fields', fields: { thinkingEffort: (value as string) || undefined } }
     case 'skills': {

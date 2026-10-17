@@ -275,29 +275,9 @@ describe('Delivery Lane', () => {
   })
 
   // lib/motion/lift.ts decides when; this is the Run view collecting it.
-  describe('a planned stage whose app is not on this computer', () => {
-    const sentence = 'Designer’s app “acme-agent-cli” isn’t installed on this computer.'
-    const stage = () => document.getElementById('delivery-stage-designer') as HTMLElement
-
-    it('says it cannot start, and why', () => {
-      setup({ planned: true, appProblems: new Map([['designer', sentence]]) })
-      expect(within(stage()).getByText('Can’t start')).toHaveClass('delivery-status', 'status-failed')
-      expect(within(stage()).getByText(sentence)).toHaveClass('delivery-stage-problem')
-      expect(within(stage()).queryByText('Ready')).not.toBeInTheDocument()
-    })
-
-    it('is ready when its app is here', () => {
-      setup({ planned: true })
-      expect(within(stage()).getByText('Ready')).toBeInTheDocument()
-      expect(stage().querySelector('.delivery-stage-problem')).toBeNull()
-    })
-
-    // A run that happened has its own state; a pre-run check says nothing about it.
-    it('is not marked on a run that already happened', () => {
-      setup({ appProblems: new Map([['designer', sentence]]) })
-      expect(within(stage()).queryByText('Can’t start')).not.toBeInTheDocument()
-      expect(within(stage()).queryByText(sentence)).not.toBeInTheDocument()
-    })
+  it('reads a planned stage as ready', () => {
+    setup({ planned: true })
+    expect(within(document.getElementById('delivery-stage-designer') as HTMLElement).getByText('Ready')).toBeInTheDocument()
   })
 })
 

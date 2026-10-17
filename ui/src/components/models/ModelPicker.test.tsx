@@ -1,0 +1,52 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { contextSize, price, shortName } from '../../lib/ai/client'
+import { forgetModels } from '../../lib/ai/useModels'
+import { ModelPicker } from './ModelPicker'
+
+const opus = { id: 'anthropic/claude-opus-5.5', name: 'Anthropic: Claude Opus 5.5', contextLength: 1_000_000, inputPrice: 4, outputPrice: 20, free: false, reasoning: true, note: 'Best for hard work' }
+const haiku = { id: 'anthropic/claude-haiku-5.5', name: 'Anthropic: Claude Haiku 5.5', contextLength: 1_000_000, inputPrice: 0.1, outputPrice: 0.5, free: false, reasoning: true, note: 'Fast and very cheap' }
+const gemma = { id: 'google/gemma-4-31b-it:free', name: 'Google: Gemma 4 31B (free)', contextLength: 262_144, inputPrice: 0, outputPrice: 0, free: true, reasoning: false }
+const catalog = { fetchedAt: '2026-10-17T00:00:00Z', defaultModel: opus.id, recommended: [opus, haiku], models: [haiku, gemma, opus] }
+
+beforeEach(() => {
+  forgetModels()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(catalog), { headers: { 'Content-Type': 'application/json' } })))
+})
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+describe('ModelPicker', () => {
+  it('shows the chosen model with its price, recommends a few, and searches the rest', async () => {
+    const onChange = vi.fn()
+    render(<ModelPicker value={opus.id} onChange={onChange} />)
+    const current = await screen.findByRole('button', { name: /Claude Opus 5\.5/ })
+    expect(current).toHaveTextContent('$4 / $20 per million tokens')
+    fireEvent.click(current)
+    const recommended = screen.getByRole('listbox', { name: 'Recommended models' })
+    expect(recommended).toHaveTextContent('Best for hard work')
+    expect(recommended).not.toHaveTextContent('Gemma')
+
+    fireEvent.change(screen.getByLabelText('Search all 3 models'), { target: { value: 'free' } })
+    fireEvent.click(screen.getByRole('option', { name: /Gemma 4 31B/ }))
+    expect(onChange).toHaveBeenCalledWith('google/gemma-4-31b-it:free')
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('says when a team names a model OpenRouter doesn’t list', async () => {
+    render(<ModelPicker value="someone/gone-model" onChange={() => {}} />)
+    expect(await screen.findByText('Not in OpenRouter’s list')).toBeInTheDocument()
+  })
+})
+
+describe('model words', () => {
+  it('reads prices, names and sizes the way a newcomer compares them', () => {
+    expect(price(0)).toBe('Free')
+    expect(price(0.1)).toBe('$0.10')
+    expect(price(4)).toBe('$4')
+    expect(price(2.5)).toBe('$2.50')
+    expect(shortName(opus)).toBe('Claude Opus 5.5')
+    expect(contextSize(1_000_000)).toBe('1M')
+    expect(contextSize(262_144)).toBe('262K')
+  })
+})

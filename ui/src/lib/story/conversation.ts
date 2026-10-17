@@ -178,7 +178,7 @@ const WORD: Record<MessageKind, string> = {
 const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note', 'permission'])
 
 /** How a permission request was settled, in a word for the bubble that says so. */
-const SETTLED: Record<PermissionOutcome, string> = { allow_once: 'allowed once', allow_run: 'allowed for this run', allow_team: 'allowed for the whole team', deny: 'denied', timed_out: 'declined, no answer' }
+const SETTLED: Record<PermissionOutcome, string> = { allow_once: 'allowed once', allow_run: 'allowed for this run', allow_team: 'allowed for the whole team', deny: 'denied', edited: 'allowed, changed', answered: 'answered instead', timed_out: 'declined, no answer' }
 
 /**
  * The bubbles of a run, in order: each message, then its answer right after it — so a question and
@@ -203,7 +203,8 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
       // Your answer to a permission request, or the clock's when nobody gave one: a word, not words.
       out.push({
         key: `${key}:reply`, item, part: 'reply', from: line.replier === null ? [] : [line.replier], to: line.senders.slice(0, 1),
-        word: SETTLED[permission.outcome], text: '', offsetMs: permission.settled.offsetMs, ts: permission.settled.ts,
+        // A changed command or an answer in its place is words you typed, so they are shown.
+        word: SETTLED[permission.outcome], text: permission.written ?? '', offsetMs: permission.settled.offsetMs, ts: permission.settled.ts,
       })
     } else if (reply && line.replier !== null) {
       const back = reply.sentBackTo

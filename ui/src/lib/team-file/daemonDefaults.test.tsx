@@ -5,8 +5,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 
-import type { DetectedHarness } from '../harnesses'
-import { appLabelForAgent, harnessIdForAgent } from '../models'
+import { modelLabelForAgent } from '../models'
 import { useTeamDocument } from './useTeamDocument'
 
 // Team files the daemon accepts because `config.rs` gives these keys serde defaults, while the UI
@@ -14,13 +13,7 @@ import { useTeamDocument } from './useTeamDocument'
 // schema is served, so the assertions about problems are the ones an operator actually sees.
 const SCHEMA = parse(readFileSync(resolve(process.cwd(), '../schemas/team.schema.yaml'), 'utf8')) as object
 
-const OPENCODE: DetectedHarness = {
-  id: 'opencode', name: 'OpenCode', command: 'opencode', executablePath: '/bin/opencode', acpAvailable: true,
-  spawn: { cmd: 'opencode', args: ['acp'] },
-}
-const OPENCODE_SPAWN = { ...OPENCODE.spawn, env: {}, cwd: '.' }
-
-/** `spawn` with `cmd` and `cwd` only. The cmd matches a detected harness, which is what reached `args`. */
+/** `spawn` with `cmd` and `cwd` only, as a file written for an AI app could have it. */
 const SPAWN_WITHOUT_ARGS = `schemaVersion: 1
 id: no-args
 name: No args
@@ -124,24 +117,21 @@ afterEach(() => {
 })
 
 describe('team files that omit keys the daemon defaults', () => {
-  it('opens a spawn without args or env, names both as problems, and choosing the app fixes them', async () => {
+  it('opens a spawn left from an AI app as it is, and a new work folder drops the app’s command', async () => {
     const { result } = open(SPAWN_WITHOUT_ARGS)
     await opened(result, 1)
 
     const agent = result.current.nodes[0].data.agent
-    expect(agent.spawn).toEqual({ cmd: 'opencode', args: [], env: {}, cwd: '.' })
-    expect(harnessIdForAgent(agent, [OPENCODE])).toBe('opencode')
-    expect(appLabelForAgent(agent, [OPENCODE])).toBe('OpenCode')
-    expect(messages(result)).toEqual(expect.arrayContaining([
-      expect.stringContaining('missing “args”'),
-      expect.stringContaining('missing “env”'),
-    ]))
-    expect(result.current.documentChipState).toBe('invalid')
+    expect(agent.spawn).toEqual({ cmd: 'opencode', cwd: '.' })
+    // Its model name, written for an AI app, reads as the OpenRouter model it maps to.
+    expect(modelLabelForAgent(agent)).toBe('Claude Sonnet 5.5')
+    // `cmd`, `args` and `env` are retired and accepted, so nothing is wrong with the file.
+    expect(result.current.documentProblems).toEqual([])
+    expect(result.current.documentChipState).toBe('clean')
 
-    // The Inspector's app picker writes the whole spawn back, which is the fix the schema asks for.
-    act(() => result.current.updateAgentSpawn('writer', OPENCODE_SPAWN))
-    expect(result.current.yamlPreview).toMatch(/args:\n\s+- acp\n\s+env: \{\}/)
-    expect(messages(result).filter((message) => /“(args|env)”/.test(message))).toEqual([])
+    act(() => result.current.updateAgentCwd('writer', 'notes'))
+    expect(result.current.yamlPreview).toMatch(/spawn:\n\s+cwd: notes/)
+    expect(result.current.yamlPreview).not.toContain('opencode')
   })
 
   it('reads a memory block without a brief as no Brief entries', async () => {
@@ -179,7 +169,7 @@ describe('team files that omit keys the daemon defaults', () => {
     await opened(result, 1)
 
     const agent = result.current.nodes[0].data.agent
-    expect(agent).toMatchObject({ id: 'writer', name: '', role: '', spawn: { cmd: 'opencode', args: [], env: {}, cwd: '.' } })
+    expect(agent).toMatchObject({ id: 'writer', name: '', role: '', spawn: { cmd: 'opencode', cwd: '.' } })
     expect(messages(result)).toEqual(expect.arrayContaining([
       expect.stringContaining('missing “name”'),
       expect.stringContaining('missing “role”'),

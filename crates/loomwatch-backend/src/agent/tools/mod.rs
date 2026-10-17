@@ -1,0 +1,492 @@
+//! The tools a built-in agent can call itself: files in its folder, commands, its plan, and the
+//! long tool outputs it set aside.
+//!
+//! Each tool says up front what it will touch ([`Prepared`]), so the session can ask
+//! [`Permissions`](super::Permissions) with the exact paths or command before anything happens.
+//! Tools the daemon serves (the Team Bus, Ask's tools) are not here: they come in through
+//! [`HostTools`](super::HostTools).
+
+mod command;
+mod files;
+
+use std::path::{Component, Path, PathBuf};
+
+use serde_json::{Value, json};
+
+use super::events::ToolKind;
+use super::provider::{Cancel, ToolSpec};
+
+pub(crate) use command::CommandSettings;
+
+/// What `run_command` says it does: which shell reads the command, and where it may change files,
+/// which only the Mac's sandbox enforces.
+const RUN_COMMAND: &str = if cfg!(windows) {
+    "Run a command in your work folder with cmd.exe, such as a script a skill provides. Write it \
+     for cmd.exe; for PowerShell, run powershell -NoProfile -Command \"…\". The operator may be \
+     asked first. Change files only inside your work folder."
+} else if cfg!(target_os = "macos") {
+    "Run a shell command in your work folder, such as a script a skill provides. The operator may \
+     be asked first. It can change files only inside your work folder."
+} else {
+    "Run a shell command in your work folder, such as a script a skill provides. The operator may \
+     be asked first. Change files only inside your work folder."
+};
+
+/// A built-in tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Builtin {
+    ListFiles,
+    ReadFile,
+    SearchFiles,
+    WriteFile,
+    EditFile,
+    RunCommand,
+    UpdatePlan,
+    ReadToolOutput,
+}
+
+/// What a tool call will do, worked out before it is allowed.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Prepared {
+    pub title: String,
+    pub kind: ToolKind,
+    pub locations: Vec<PathBuf>,
+    /// Whether it needs the operator's policy to allow it. The plan and set-aside outputs don't.
+    pub needs_permission: bool,
+}
+
+/// A tool's result, as the model reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Output {
+    pub text: String,
+    pub failed: bool,
+}
+
+impl Output {
+    pub(crate) fn ok(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            failed: false,
+        }
+    }
+
+    pub(crate) fn failed(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            failed: true,
+        }
+    }
+}
+
+/// What a tool runs with.
+pub(crate) struct Context<'a> {
+    pub cwd: &'a Path,
+    pub cancel: &'a Cancel,
+    pub command: &'a CommandSettings,
+}
+
+impl Builtin {
+    pub(crate) const ALL: [Self; 8] = [
+        Self::ListFiles,
+        Self::ReadFile,
+        Self::SearchFiles,
+        Self::WriteFile,
+        Self::EditFile,
+        Self::RunCommand,
+        Self::UpdatePlan,
+        Self::ReadToolOutput,
+    ];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::ListFiles => "list_files",
+            Self::ReadFile => "read_file",
+            Self::SearchFiles => "search_files",
+            Self::WriteFile => "write_file",
+            Self::EditFile => "edit_file",
+            Self::RunCommand => "run_command",
+            Self::UpdatePlan => "update_plan",
+            Self::ReadToolOutput => "read_tool_output",
+        }
+    }
+
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tool| tool.name() == name)
+    }
+
+    #[allow(clippy::too_many_lines)] // One table: each tool's description and argument schema.
+    pub(crate) fn spec(self) -> ToolSpec {
+        let (description, parameters) = match self {
+            Self::ListFiles => (
+                "List the files and folders in a folder. Paths are relative to your work folder.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "The folder. Default: your work folder."},
+                        "recursive": {"type": "boolean", "description": "Also list everything inside subfolders."},
+                    },
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::ReadFile => (
+                "Read a text file. Lines come numbered. For a long file, read it in parts with \
+                 offset and limit.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "offset": {"type": "integer", "minimum": 1, "description": "The first line to read, counting from 1."},
+                        "limit": {"type": "integer", "minimum": 1, "description": "How many lines to read. Default: 2000."},
+                    },
+                    "required": ["path"],
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::SearchFiles => (
+                "Search the text of files for a regular expression. Answers with path:line: text \
+                 for each match.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string", "description": "A regular expression."},
+                        "path": {"type": "string", "description": "The folder or file to search. Default: your work folder."},
+                        "glob": {"type": "string", "description": "Only files whose name matches, such as *.md."},
+                        "ignore_case": {"type": "boolean"},
+                    },
+                    "required": ["pattern"],
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::WriteFile => (
+                "Create a file, or replace a file's whole content. Folders are created as needed.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["path", "content"],
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::EditFile => (
+                "Change part of a file: replace old_text, which must appear exactly once, with \
+                 new_text. Set replace_all to replace every occurrence. Read the file first.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "old_text": {"type": "string"},
+                        "new_text": {"type": "string"},
+                        "replace_all": {"type": "boolean"},
+                    },
+                    "required": ["path", "old_text", "new_text"],
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::RunCommand => (
+                RUN_COMMAND,
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Default: 120."},
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::UpdatePlan => (
+                "Keep your plan for this task: the whole list of steps, each pending, in_progress \
+                 or completed. Send the full list every time it changes.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "steps": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "step": {"type": "string"},
+                                    "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                                },
+                                "required": ["step", "status"],
+                                "additionalProperties": false,
+                            },
+                        },
+                    },
+                    "required": ["steps"],
+                    "additionalProperties": false,
+                }),
+            ),
+            Self::ReadToolOutput => (
+                "Read more of a long tool output that was set aside, by the id the shortened \
+                 output named.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "offset": {"type": "integer", "minimum": 0, "description": "The first character to read. Default: 0."},
+                        "limit": {"type": "integer", "minimum": 1, "description": "How many characters. Default: 20000."},
+                    },
+                    "required": ["id"],
+                    "additionalProperties": false,
+                }),
+            ),
+        };
+        ToolSpec {
+            name: self.name().to_owned(),
+            description: description.to_owned(),
+            parameters,
+        }
+    }
+
+    /// What the call will do, or why it can't be done as asked.
+    pub(crate) fn prepare(self, input: &Value, cwd: &Path) -> Result<Prepared, String> {
+        let path = |key: &str| -> Result<PathBuf, String> {
+            let given = input.get(key).and_then(Value::as_str).unwrap_or(".");
+            Ok(resolve(cwd, given))
+        };
+        let needs = |kind: ToolKind, title: String, locations: Vec<PathBuf>| Prepared {
+            title,
+            kind,
+            locations,
+            needs_permission: true,
+        };
+        Ok(match self {
+            Self::ListFiles => {
+                let folder = path("path")?;
+                needs(
+                    ToolKind::Read,
+                    format!("List {}", shown(cwd, &folder)),
+                    vec![folder],
+                )
+            }
+            Self::ReadFile => {
+                let file = required_path(input, cwd)?;
+                needs(
+                    ToolKind::Read,
+                    format!("Read {}", shown(cwd, &file)),
+                    vec![file],
+                )
+            }
+            Self::SearchFiles => {
+                let pattern = required_str(input, "pattern")?;
+                let folder = path("path")?;
+                needs(
+                    ToolKind::Search,
+                    format!("Search {} for {pattern}", shown(cwd, &folder)),
+                    vec![folder],
+                )
+            }
+            Self::WriteFile => {
+                let file = required_path(input, cwd)?;
+                required_str(input, "content")?;
+                needs(
+                    ToolKind::Edit,
+                    format!("Write {}", shown(cwd, &file)),
+                    vec![file],
+                )
+            }
+            Self::EditFile => {
+                let file = required_path(input, cwd)?;
+                required_str(input, "old_text")?;
+                required_str(input, "new_text")?;
+                needs(
+                    ToolKind::Edit,
+                    format!("Edit {}", shown(cwd, &file)),
+                    vec![file],
+                )
+            }
+            Self::RunCommand => {
+                let command = required_str(input, "command")?;
+                needs(
+                    ToolKind::Execute,
+                    format!("Run: {}", one_line(command, 120)),
+                    vec![cwd.to_path_buf()],
+                )
+            }
+            Self::UpdatePlan => Prepared {
+                title: "Update the plan".to_owned(),
+                kind: ToolKind::Think,
+                locations: Vec::new(),
+                needs_permission: false,
+            },
+            Self::ReadToolOutput => Prepared {
+                title: "Read a set-aside output".to_owned(),
+                kind: ToolKind::Read,
+                locations: Vec::new(),
+                needs_permission: false,
+            },
+        })
+    }
+
+    /// Runs a file or command tool. The plan and set-aside outputs are the session's own and are
+    /// answered there.
+    pub(crate) async fn run(self, input: &Value, context: &Context<'_>) -> Output {
+        match self {
+            Self::ListFiles
+            | Self::ReadFile
+            | Self::SearchFiles
+            | Self::WriteFile
+            | Self::EditFile => {
+                let input = input.clone();
+                let cwd = context.cwd.to_path_buf();
+                tokio::task::spawn_blocking(move || files::run(self, &input, &cwd))
+                    .await
+                    .unwrap_or_else(|error| Output::failed(format!("The tool stopped: {error}")))
+            }
+            Self::RunCommand => Box::pin(command::run(input, context)).await,
+            Self::UpdatePlan | Self::ReadToolOutput => {
+                Output::failed("This tool is answered by the session.")
+            }
+        }
+    }
+}
+
+fn required_str<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("`{key}` is required and must be text."))
+}
+
+fn required_path(input: &Value, cwd: &Path) -> Result<PathBuf, String> {
+    let given = required_str(input, "path")?;
+    if given.trim().is_empty() {
+        return Err("`path` is empty.".to_owned());
+    }
+    Ok(resolve(cwd, given))
+}
+
+/// `given` as an absolute path: relative to `cwd`, with `.` and `..` worked out on the text alone,
+/// so a path that doesn't exist yet resolves too. The permission policy decides whether it may be
+/// touched; this only says which path it is.
+pub(crate) fn resolve(cwd: &Path, given: &str) -> PathBuf {
+    let given = given.trim();
+    // `~\` too on Windows, where `~` is the user profile.
+    let home_relative = given
+        .strip_prefix("~/")
+        .or_else(|| given.strip_prefix("~\\").filter(|_| cfg!(windows)));
+    let given = home_relative.map_or_else(
+        || PathBuf::from(given),
+        |rest| {
+            crate::platform::home_dir().map_or_else(|| PathBuf::from(given), |home| home.join(rest))
+        },
+    );
+    let joined = if given.is_absolute() {
+        given
+    } else {
+        cwd.join(given)
+    };
+    let mut out = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// A path the way the operator's card shows it: relative to the work folder when inside it.
+pub(crate) fn shown(cwd: &Path, path: &Path) -> String {
+    match path.strip_prefix(cwd) {
+        Ok(relative) if relative.as_os_str().is_empty() => "the work folder".to_owned(),
+        Ok(relative) => slashed(relative),
+        Err(_) => path.display().to_string(),
+    }
+}
+
+/// A relative path written with `/` on every system, as the agent and the operator read it and as
+/// the file tools take it back. Windows reads `/` too.
+pub(crate) fn slashed(relative: &Path) -> String {
+    relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The first line of `text`, cut to `limit` characters.
+pub(crate) fn one_line(text: &str, limit: usize) -> String {
+    let line = text.lines().next().unwrap_or_default().trim();
+    let cut: String = line.chars().take(limit).collect();
+    if cut.len() < line.len() || text.lines().nth(1).is_some() {
+        format!("{cut}…")
+    } else {
+        cut
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_resolve_against_the_work_folder_without_touching_the_disk() {
+        let cwd = Path::new("/work/team");
+        assert_eq!(
+            resolve(cwd, "notes/a.md"),
+            Path::new("/work/team/notes/a.md")
+        );
+        assert_eq!(resolve(cwd, "./a/../b.md"), Path::new("/work/team/b.md"));
+        assert_eq!(resolve(cwd, "../../etc/passwd"), Path::new("/etc/passwd"));
+        assert_eq!(resolve(cwd, "/tmp/x"), Path::new("/tmp/x"));
+    }
+
+    /// On Windows a path may start at a drive, at the root of the work folder's drive, or at `~\`,
+    /// and use either separator.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_resolve_as_windows_reads_them() {
+        let cwd = Path::new(r"C:\work\team");
+        assert_eq!(
+            resolve(cwd, r"notes\a.md"),
+            Path::new(r"C:\work\team\notes\a.md")
+        );
+        assert_eq!(
+            resolve(cwd, "notes/a.md"),
+            Path::new(r"C:\work\team\notes\a.md")
+        );
+        assert_eq!(resolve(cwd, r"..\..\x.md"), Path::new(r"C:\x.md"));
+        assert_eq!(resolve(cwd, r"\Users\x.md"), Path::new(r"C:\Users\x.md"));
+        assert_eq!(resolve(cwd, r"D:\data\x.md"), Path::new(r"D:\data\x.md"));
+        let home = crate::platform::home_dir().expect("a user profile");
+        assert_eq!(resolve(cwd, r"~\notes.md"), home.join("notes.md"));
+        assert_eq!(resolve(cwd, "~/notes.md"), home.join("notes.md"));
+        assert_eq!(
+            shown(cwd, &resolve(cwd, r"notes\a.md")),
+            "notes/a.md",
+            "the card shows a path inside the work folder relative to it, with `/`"
+        );
+    }
+
+    #[test]
+    fn a_call_says_what_it_will_touch_before_it_runs() {
+        let cwd = Path::new("/work");
+        let prepared = Builtin::EditFile
+            .prepare(
+                &json!({"path": "a.md", "old_text": "x", "new_text": "y"}),
+                cwd,
+            )
+            .unwrap();
+        assert_eq!(prepared.kind, ToolKind::Edit);
+        assert_eq!(prepared.locations, [PathBuf::from("/work/a.md")]);
+        assert_eq!(prepared.title, "Edit a.md");
+        assert!(Builtin::ReadFile.prepare(&json!({}), cwd).is_err());
+        let command = Builtin::RunCommand
+            .prepare(&json!({"command": "python3 make.py\necho done"}), cwd)
+            .unwrap();
+        assert_eq!(command.title, "Run: python3 make.py…");
+        assert!(
+            !Builtin::UpdatePlan
+                .prepare(&json!({"steps": []}), cwd)
+                .unwrap()
+                .needs_permission
+        );
+    }
+}

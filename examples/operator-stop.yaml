@@ -2,40 +2,31 @@
 #
 # Researcher works, you read what it handed over and say what happens next, Writer acts on your
 # answer. The `review` node is an `agents[]` entry like any other — it has an id, it sits on edges,
-# it takes part in the topological order — except that instead of a harness it has a question,
-# which is its `role`, and that is what the panel shows when the pipeline reaches it.
+# it takes part in the topological order — except that instead of a model it has a question, which
+# is its `role`, and that is what the panel shows when the pipeline reaches it.
 #
-# Both harnesses here use `operator-stop-harness.py` so the example runs without a paid provider: they answer
-# the ACP handshake, emit one line of text, then answer repeated send-back, handover and checkpoint turns. Swap
-# `spawn` for a real harness (see examples/research-team.yaml) when you want it to do real work.
-# See docs/TEAM_MEMORY.md, "The operator is a node", and docs/WATCH.md, "Verifying without a paid
-# harness".
+# Both agents run on `fake/offline`, LoomWatch's offline demo model, so the example runs with no
+# key and calls no provider: each says one line of text, then answers send-back, handover and
+# checkpoint turns. Give them an OpenRouter model (see examples/research-team.yaml) when you want
+# them to do real work. See docs/TEAM_CONFIG.md, "Operator review stops and questions", and
+# docs/WATCH.md, "Verifying without a model provider".
 schemaVersion: 1
 id: operator-stop
 name: Review stop demo
+# What one run may spend on model calls, in US dollars (ADR 0068). The offline demo costs nothing;
+# the limit is there for when you give the agents a real model.
+spend:
+  perRun: 1.00
 entrypoint: researcher
-
-conversation:
-  stop:
-    # Only harnesses that do NOT advertise `loadSession` read this. One that does is closed while
-    # you think and reopened with `session/load` when you answer, so it costs no process at all.
-    keepAliveMinutes: 15
 
 agents:
   - id: researcher
     name: Researcher
     role: Find out what is true and hand it over.
-    spawn:
-      cmd: python3
-      args:
-        - operator-stop-harness.py
-        - researcher
-      env: {}
-      cwd: .
     model: fake/offline
 
-  # The stop. No spawn, no model: there is nothing to start and no model to select. `name`
-  # defaults to "You" if you leave it out.
+  # The stop. No model: there is nothing to start and no model to select. `name` defaults to
+  # "You" if you leave it out.
   - id: review
     kind: operator
     name: You
@@ -44,13 +35,6 @@ agents:
   - id: writer
     name: Writer
     role: Write the answer the operator asked for.
-    spawn:
-      cmd: python3
-      args:
-        - operator-stop-harness.py
-        - writer
-      env: {}
-      cwd: .
     model: fake/offline
 
 edges:

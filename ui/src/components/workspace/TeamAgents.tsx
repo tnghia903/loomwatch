@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Network, Plus, UserRoundPlus, X } from 'lucide-react'
 
-import { fetchHarnessModels, type DetectedHarness, type HarnessModels } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
 import type { ReadSource } from '../../lib/library/figure'
 import type { AgentDraft } from '../../lib/library/draft'
-import { savedJobPreset, type SavedJob } from '../../lib/library/jobs'
-import { roleSource } from '../../lib/library/roles'
+import type { SavedJob } from '../../lib/library/jobs'
 import { linkState } from '../../lib/library/link'
 import { draftFromTeamAgent, readsOf, teamKnowledge, type TeamKnowledge } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
@@ -28,11 +26,7 @@ export interface TeamAgentsProps {
   teamPath: string | null
   /** Changes can be kept: the team is open for editing here. */
   editable: boolean
-  harnesses: DetectedHarness[]
-  harnessesLoading: boolean
   skills: readonly DetectedCapability[]
-  /** The tools (MCP servers) on this computer, from the same capability scan as the skills. */
-  tools: readonly DetectedCapability[]
   skillsLoading: boolean
   savedJobs: readonly SavedJob[]
   /** One workbench change on a team's own agent, written into the team file. */
@@ -52,7 +46,7 @@ export interface TeamAgentsProps {
  * team, like a canvas edit. One placed from Your agents opens its saved version: saving it makes the
  * next version and moves this team to it.
  */
-export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, editable, harnesses, harnessesLoading, skills, tools, skillsLoading, savedJobs, onEdit, onApplyVersion, onUnlink, onShowWorkflow, onAdd }: TeamAgentsProps) {
+export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, editable, skills, skillsLoading, savedJobs, onEdit, onApplyVersion, onUnlink, onShowWorkflow, onAdd }: TeamAgentsProps) {
   const agent = agents.find((candidate) => candidate.id === selected) ?? agents[0] ?? null
   const link = agent ? linkState(agent, savedJobs) : null
   // What the team gives it to read, kept the same list while the team file doesn't change it.
@@ -77,7 +71,7 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
         {onAdd && agent && <button type="button" className="team-agents-chip add" aria-expanded={adding} onClick={() => setAdding((value) => !value)}><Plus size={16} aria-hidden="true" /><span><b>Add an agent</b><em>From Your agents, or a new one</em></span></button>}
       </nav>
 
-      {choosing && onAdd && <AddAgents jobs={savedJobs} inTeam={agents} harnesses={harnesses} teamPath={teamPath} first={!agent} onAdd={(job) => { onAdd(job); setAdding(false) }} onClose={agent ? () => setAdding(false) : undefined} onShowWorkflow={onShowWorkflow} />}
+      {choosing && onAdd && <AddAgents jobs={savedJobs} inTeam={agents} teamPath={teamPath} first={!agent} onAdd={(job) => { onAdd(job); setAdding(false) }} onClose={agent ? () => setAdding(false) : undefined} onShowWorkflow={onShowWorkflow} />}
 
       {!agent && !onAdd && (
         <div className="team-agents-empty">
@@ -90,12 +84,12 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
         <div className="team-agents-linked" key={agent.id}>
           <LinkedAgent agent={agent} link={link} readOnly={!editable} onApply={(job) => onApplyVersion(agent.id, job)} onUnlink={() => onUnlink(agent.id)} teamPath={teamPath} headClassName="agent-section-head" showEdit={false} />
           {link.job
-            ? <AgentBuilder id={link.job.id} harnesses={harnesses} harnessesLoading={harnessesLoading} skills={[...skills]} tools={[...tools]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job) => { if (editable) onApplyVersion(agent.id, job) }, reads, knowledge, onShowWorkflow }} />
+            ? <AgentBuilder id={link.job.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job) => { if (editable) onApplyVersion(agent.id, job) }, reads, knowledge, onShowWorkflow }} />
             : <p className="t-meta">Its agent is gone from Your agents. Make it this team’s own to change it here.</p>}
         </div>
       )}
 
-      {agent && !link && <OwnAgent key={agent.id} agent={agent} teamPath={teamPath} editable={editable} harnesses={harnesses} harnessesLoading={harnessesLoading} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} reads={reads} knowledge={knowledge} tools={tools} onShowWorkflow={onShowWorkflow} />}
+      {agent && !link && <OwnAgent key={agent.id} agent={agent} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} reads={reads} knowledge={knowledge} onShowWorkflow={onShowWorkflow} />}
     </div>
   )
 }
@@ -104,7 +98,7 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
  * Choosing agents for the team: the ones you built in Your agents, each added in one click and
  * linked to its current version, or a new one built there first. The first step of a team.
  */
-function AddAgents({ jobs, inTeam, harnesses, teamPath, first, onAdd, onClose, onShowWorkflow }: { jobs: readonly SavedJob[]; inTeam: readonly AgentConfig[]; harnesses: readonly DetectedHarness[]; teamPath: string | null; first: boolean; onAdd: (job: SavedJob) => void; onClose?: () => void; onShowWorkflow: () => void }) {
+function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkflow }: { jobs: readonly SavedJob[]; inTeam: readonly AgentConfig[]; teamPath: string | null; first: boolean; onAdd: (job: SavedJob) => void; onClose?: () => void; onShowWorkflow: () => void }) {
   const here = new Set(inTeam.map((agent) => agent.from?.agent).filter(Boolean))
   return (
     <section className="team-agents-add" aria-label="Add an agent to this team" data-tour="agent-picker">
@@ -115,13 +109,12 @@ function AddAgents({ jobs, inTeam, harnesses, teamPath, first, onAdd, onClose, o
       {jobs.length > 0 && (
         <ul className="team-agents-add-list">
           {jobs.map((job) => {
-            const runnable = Boolean(roleSource(savedJobPreset(job), harnesses))
             const added = here.has(job.id)
             return (
               <li key={job.id}>
                 <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={52} height={52} loading="lazy" decoding="async" />
-                <span><b>{job.name}</b><em>{!runnable ? 'No AI app on this computer can run it' : added ? 'Already in this team' : job.does || 'One of your agents'}</em></span>
-                <button type="button" className="btn" disabled={!runnable} onClick={() => onAdd(job)}><Plus size={13} aria-hidden="true" />{added ? 'Add again' : 'Add'}</button>
+                <span><b>{job.name}</b><em>{added ? 'Already in this team' : job.does || 'One of your agents'}</em></span>
+                <button type="button" className="btn" onClick={() => onAdd(job)}><Plus size={13} aria-hidden="true" />{added ? 'Add again' : 'Add'}</button>
               </li>
             )
           })}
@@ -139,22 +132,10 @@ function AddAgents({ jobs, inTeam, harnesses, teamPath, first, onAdd, onClose, o
  * A team's own agent on the workbench, written straight into the team file, with the same two tabs
  * as one of Your agents: Build, and Chat, where you talk to it on its own.
  */
-function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skills, skillsLoading, onEdit, reads, knowledge, tools, onShowWorkflow }: { agent: AgentConfig; teamPath: string | null; editable: boolean; harnesses: DetectedHarness[]; harnessesLoading: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; reads: readonly ReadSource[]; knowledge: TeamKnowledge; tools: readonly DetectedCapability[]; onShowWorkflow: () => void }) {
-  const draft = useMemo(() => draftFromTeamAgent(agent, harnesses), [agent, harnesses])
-  const harness = harnesses.find((candidate) => candidate.id === draft.appId) ?? null
+function OwnAgent({ agent, teamPath, editable, skills, skillsLoading, onEdit, reads, knowledge, onShowWorkflow }: { agent: AgentConfig; teamPath: string | null; editable: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow: () => void }) {
+  const draft = useMemo(() => draftFromTeamAgent(agent), [agent])
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [record, setRecord] = useState<RunRecord | null>(null)
-  const [models, setModels] = useState<{ app: string; list: HarnessModels | null; error: string | null } | null>(null)
-  useEffect(() => {
-    if (!draft.appId) return
-    let cancelled = false
-    const app = draft.appId
-    fetchHarnessModels(app).then((list) => { if (!cancelled) setModels({ app, list, error: null }) }, (failed: unknown) => { if (!cancelled) setModels({ app, list: null, error: failed instanceof Error ? failed.message : String(failed) }) })
-    return () => { cancelled = true }
-  }, [draft.appId])
-  const appModels = models?.app === draft.appId ? models : null
-  const resolvedModel = draft.model || appModels?.list?.currentModelId || ''
-  const modelName = appModels?.list?.models.find((model) => model.id === resolvedModel)?.name
   // Its chat is named for this team and agent, so talking to one never touches another's. It is the
   // name its test bench had, so what was tried there before is in its chat.
   const chatId = `team-${(teamPath ?? 'new').replace(/^.*\//, '').replace(/\.ya?ml$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${agent.id}`.slice(0, 80)
@@ -170,8 +151,8 @@ function OwnAgent({ agent, teamPath, editable, harnesses, harnessesLoading, skil
         <AgentViewTabs view={view} onView={setView} />
       </div>
       <ByHand
-        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} tools={tools} toolsLoading={skillsLoading} reads={reads} onShowWorkflow={onShowWorkflow}
-        chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
+        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} reads={reads} onShowWorkflow={onShowWorkflow}
+        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
       />

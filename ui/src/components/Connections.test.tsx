@@ -4,10 +4,12 @@ import Connections from './Connections'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
-/** The page also lists the AI apps that can connect (ConnectAiApps); these tests are about Notion, so
-    that section is answered on its own and the Notion responses keep their order. */
+/** The page also has the OpenRouter key and the AI apps that can connect (ConnectAiApps); these tests
+    are about Notion, so those sections are answered on their own and the Notion responses keep their order. */
 const routed = (notion: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) => vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-  String(input).startsWith('/api/ask/') ? Promise.resolve(response({ url: 'http://127.0.0.1:3000/api/control/mcp', apps: [] })) : notion(input, init))
+  String(input).startsWith('/api/ask/') ? Promise.resolve(response({ url: 'http://127.0.0.1:3000/api/control/mcp', apps: [] }))
+    : String(input).startsWith('/api/ai') ? Promise.resolve(response({ openrouter: { connected: true, label: 'sk-or-v1-abc...xyz' } }))
+      : notion(input, init))
 
 describe('Notion connections', () => {
   it('clears the submitted secret and shows actionable authentication errors', async () => {

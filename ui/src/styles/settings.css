@@ -103,6 +103,29 @@
 }
 .lw-settings-advanced > * + * { margin-top: var(--sp-3); }
 
+/* Buttons that act on what a section shows, side by side. */
+.lw-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+
+/* The model picker: the chosen model as a field, and a list that opens under it. */
+.model-picker { position: relative; display: flex; flex-direction: column; gap: var(--sp-1); }
+.model-picker-current {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  height: auto; min-height: 32px; padding: var(--sp-2) var(--sp-3);
+  text-align: left; cursor: pointer;
+}
+.model-picker-pop {
+  position: absolute; z-index: 100; top: 100%; left: 0; right: 0; margin-top: var(--sp-1);
+  display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3);
+  min-width: 280px;
+}
+.model-picker-pop .pop-list { padding: 0; }
+.model-row { flex-wrap: wrap; row-gap: 0; padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
+.model-row-detail { flex-basis: 100%; color: var(--color-ink-3); }
+.model-row .badge {
+  padding: 0 var(--sp-2); border-radius: var(--r-sm);
+  background: var(--color-accent-tint); color: var(--color-ink-2);
+}
+
 @media (max-width: 767px) {
   .lw-settings { padding: var(--sp-6) var(--sp-4); }
   .lw-settings-search { flex-direction: column; align-items: stretch; }

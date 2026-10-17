@@ -100,8 +100,15 @@ fn is_shell(word: &str) -> bool {
     )
 }
 
+/// The program a command word starts: its last path part, without Windows' `.exe`.
 fn program_name(word: &str) -> &str {
-    word.rsplit('/').next().unwrap_or(word)
+    let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
+    match name.len().checked_sub(4) {
+        Some(stem) if name.is_char_boundary(stem) && name[stem..].eq_ignore_ascii_case(".exe") => {
+            &name[..stem]
+        }
+        _ => name,
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -148,9 +155,11 @@ pub fn never_auto(command: &str) -> Option<&'static str> {
         .replace("&>", " >");
     for segment in segments(&command) {
         let words: Vec<&str> = segment.split_whitespace().collect();
+        // Either separator, and any case: Windows and macOS find `.ENV` as `.env`.
         if words.iter().any(|word| {
             word.trim_matches(|c| matches!(c, '"' | '\'' | '>' | '<'))
-                .split('/')
+                .split(['/', '\\'])
+                .map(str::to_ascii_lowercase)
                 .any(|part| {
                     secrets.iter().any(|secret| {
                         part == *secret || (*secret == ".env" && part.starts_with(".env."))
@@ -637,9 +646,9 @@ impl Place<'_> {
 
     /// Where `word` points, from the current folder. `None` for `~user`.
     fn locate(&self, word: &str) -> Option<PathBuf> {
-        if word == "~" || word.starts_with("~/") {
-            let home = std::env::var_os("HOME").map(PathBuf::from)?;
-            return Some(home.join(word.trim_start_matches('~').trim_start_matches('/')));
+        if word == "~" || word.starts_with("~/") || word.starts_with("~\\") {
+            let home = crate::platform::home_dir()?;
+            return Some(home.join(word.trim_start_matches('~').trim_start_matches(['/', '\\'])));
         }
         if word.starts_with('~') {
             return None;
@@ -651,7 +660,7 @@ impl Place<'_> {
     /// temporary folder. A word with a wildcard is judged by the folder it lists.
     fn reads(&self, word: &str) -> bool {
         let word = match word.find(['*', '?', '[']) {
-            Some(at) => match word[..at].rfind('/') {
+            Some(at) => match word[..at].rfind(['/', '\\']) {
                 Some(0) => "/",
                 Some(slash) => &word[..slash],
                 None => ".",
@@ -701,6 +710,8 @@ impl Place<'_> {
             || word.contains("/../")
             || word.ends_with("/..")
             || word.contains(['*', '?', '['])
+            // Windows' own forms: `C:\…`, `C:/…`, `\\server\…`, `..\…`.
+            || (cfg!(windows) && (word.contains('\\') || Path::new(word).has_root()))
             || self.locate(word).is_some_and(|path| path.exists())
     }
 
@@ -864,12 +875,14 @@ impl Place<'_> {
     }
 }
 
-/// The temporary folders: `/tmp` and the one the system gives this user.
+/// The temporary folders: `/tmp` and the one the system gives this user. On Windows only the
+/// latter: `/tmp` there would be `\tmp` on whatever drive the agent is on.
 fn temp_folders() -> Vec<PathBuf> {
-    [PathBuf::from("/tmp"), std::env::temp_dir()]
-        .iter()
-        .map(|temp| resolve(temp))
-        .collect()
+    let mut temps = vec![std::env::temp_dir()];
+    if cfg!(unix) {
+        temps.insert(0, PathBuf::from("/tmp"));
+    }
+    temps.iter().map(|temp| resolve(temp)).collect()
 }
 
 /// `sed` that only prints or substitutes: no editing in place, no script file, and every command
@@ -1184,8 +1197,10 @@ mod tests {
             vec![resolve(&self.0.join("tmp"))]
         }
 
+        /// `relative` inside the scratch, `/`-separated as a command line holds it: the shell
+        /// reads a Windows `\` as an escape.
         fn path(&self, relative: &str) -> String {
-            self.0.join(relative).to_string_lossy().into_owned()
+            crate::test_support::sh_path(&self.0.join(relative))
         }
     }
 
@@ -1210,6 +1225,16 @@ mod tests {
         edits: true,
         commands: false,
     };
+
+    #[test]
+    fn a_program_is_named_by_its_last_path_part_without_windows_exe() {
+        assert_eq!(program_name("/bin/bash"), "bash");
+        assert_eq!(program_name(r"C:\Program Files\Git\bin\bash.exe"), "bash");
+        assert_eq!(program_name("RM.EXE"), "RM");
+        assert_eq!(program_name("exe"), "exe");
+        assert_eq!(program_name(".exe"), "");
+        assert!(is_shell(r"C:\Program Files\Git\usr\bin\sh.exe"));
+    }
 
     #[test]
     fn only_the_apps_own_commands_are_for_auto_mode() {
@@ -1244,6 +1269,9 @@ mod tests {
             ("vercel --prod", "deploys"),
             ("terraform apply -auto-approve", "deploys"),
             ("cat .env", "keys"),
+            ("cat .ENV.local", "keys"),
+            (r"type C:\work\agent\.env", "keys"),
+            (r"more ..\.SSH\id_rsa", "keys"),
             ("cp ~/.ssh/id_rsa .", "keys"),
             ("echo $(whoami)", "script"),
             ("echo `id`", "script"),

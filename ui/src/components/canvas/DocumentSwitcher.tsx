@@ -1,12 +1,13 @@
 import { ChevronDown, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AppProblem } from '../../lib/team-file/appChecks'
+import { baseName, dirName, relativeUnder, splitPath } from '../../lib/files/paths'
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from '../../lib/team-file/client'
 import { reviewProblems, shortenDirectory, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 import type { AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
 import { ChipDot, type ChipState } from '../ui/glyphs'
+import { keys } from '../../lib/platform'
 
 export interface DocumentSwitcherProps {
   path: string | null
@@ -20,7 +21,6 @@ export interface DocumentSwitcherProps {
   fieldProblemsByAgent: ReadonlyMap<string, AgentFieldProblems>
   agentNames: ReadonlyMap<string, string>
   /** Agents whose app is not on this computer (`lib/team-file/appChecks`). The file is still valid. */
-  appProblems?: readonly AppProblem[]
   isValid: boolean
   readOnlyReason: string | null
   fileGone?: boolean
@@ -40,12 +40,11 @@ export interface DocumentSwitcherProps {
   onProblemsOpenChange: (open: boolean) => void
 }
 
-const NO_APP_PROBLEMS: readonly AppProblem[] = []
 
 // UX_REDESIGN §9.1: the canvas is a view over a file and the file is the truth. This chip is
 // the only place file state is expressed, and the only way to reach another file.
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, appProblems = NO_APP_PROBLEMS, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onShowYaml, onNewTeam, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onShowYaml, onNewTeam, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [files, setFiles] = useState<TeamSummary[] | null>(null)
   const [root, setRoot] = useState<string | null>(null)
@@ -56,7 +55,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const chipRef = useRef<HTMLDivElement>(null)
 
-  const problems = useMemo(() => reviewProblems(entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames, appProblems), [entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames, appProblems])
+  const problems = useMemo(() => reviewProblems(entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames), [entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames])
   const errors = problems.filter((problem) => problem.weight === 'error')
   const incomplete = problems.filter((problem) => problem.weight === 'incomplete')
   const scheduleErrors = errors.filter((problem) => problem.yamlPath?.[0] === 'schedule')
@@ -79,8 +78,8 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   }, [switcherOpen, problemsOpen, onProblemsOpenChange])
 
   if (!path) return null
-  const filename = path.split('/').pop() ?? path
-  const directory = path.includes('/') ? shortenDirectory(path.slice(0, path.lastIndexOf('/'))) : ''
+  const filename = baseName(path)
+  const directory = /[\\/]/.test(path) ? shortenDirectory(dirName(path)) : ''
   const dirty = ['dirty', 'invalid', 'conflict', 'new'].includes(saveState)
   // Leaving the page after a delete would stop on the browser's "unsaved changes" prompt.
   const unsaved = dirty || saveState === 'saving' || saveState === 'error'
@@ -89,7 +88,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   let l1 = teamName ?? filename
   let l2 = teamName ? filename : directory || 'teams'
   let action: React.ReactNode = null
-  const primarySave = <button type="button" className="btn btn-primary" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>⌘S</kbd></button>
+  const primarySave = <button type="button" className="btn btn-primary" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>{keys('⌘S')}</kbd></button>
   const review = <button type="button" className="btn" onClick={() => { onProblemsOpenChange(!problemsOpen); setSwitcherOpen(false) }} aria-expanded={problemsOpen} aria-controls="problems-pop">Review</button>
 
   // The first line is always the team, so the operator never loses track of what is open; the
@@ -104,9 +103,6 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   else if (!isValid && incomplete.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
   else if (saveState === 'new') { state = 'new'; l2 = 'Not saved yet'; action = primarySave }
   else if (saveState === 'dirty') { state = 'dirty'; l2 = 'Unsaved changes'; action = primarySave }
-  // A missing app does not make the file wrong, so Save keeps its place above; once saved, the
-  // chip stops saying all is well.
-  else if (appProblems.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
   else if (editingDisabled) { l2 = 'Editing needs a wider window' }
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''
@@ -115,7 +111,9 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   // Two teams may share a name; their files never do, so a shared name shows its file beside it.
   const nameCounts = new Map<string, number>()
   for (const team of files ?? []) nameCounts.set(teamDisplayName(team), (nameCounts.get(teamDisplayName(team)) ?? 0) + 1)
-  const isCurrent = (file: string) => (root ? `${root.replace(/\/+$/, '')}/${file}` : file) === path || file === path
+  // The list names files under the root; the open team has its full path, `C:\…` on Windows.
+  const openUnderRoot = root && path ? relativeUnder(root, path) : null
+  const isCurrent = (file: string) => file === path || (openUnderRoot !== null && splitPath(file).join('/') === openUnderRoot)
 
   function switchTo(file: string) {
     if (dirty && saveState !== 'new') { setPendingSwitch(file); return }
@@ -175,7 +173,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
           <div className="pop-list">
             <button type="button" className="pop-row" onClick={() => { setSwitcherOpen(false); onNewTeam() }}>
               <Plus size={15} aria-hidden="true" />
-              <span className="name t-body">New team…</span><span className="kbd t-mono-sm">⌘N</span>
+              <span className="name t-body">New team…</span><span className="kbd t-mono-sm">{keys('⌘N')}</span>
             </button>
           </div>
           <div className="pop-sep" />
@@ -232,7 +230,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
           {problems.length === 0 && <p className="pop-empty t-meta">Nothing to fix.</p>}
           <div className="pop-sep" />
           <div className="pop-foot">
-            <span className="acts"><span className="pop-note t-meta">Next problem · F8 · Previous · ⇧F8</span></span>
+            <span className="acts"><span className="pop-note t-meta">Next problem · F8 · Previous · {keys('⇧F8')}</span></span>
           </div>
         </div>
       )}

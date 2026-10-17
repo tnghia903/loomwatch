@@ -1,28 +1,15 @@
 // The daemon's Ask LoomWatch surface (crates/loomwatch-backend/src/control, ADR 0033): one
-// conversation with an AI app on this computer, the proposals it makes, the runs it asks to start,
-// and the apps connected to the same tools from outside LoomWatch.
+// conversation with LoomWatch's assistant, on the person's OpenRouter key and the model they chose,
+// the proposals it makes and the runs it asks to start.
 import { daemonFetch } from '../daemonFetch'
 
 export type AskState = 'starting' | 'ready' | 'working' | 'ended' | 'failed'
-
-export interface AskApp {
-  id: string
-  name: string
-  available: boolean
-  reason: string | null
-}
-
-export interface AskApps {
-  apps: AskApp[]
-  /** The app a new conversation uses when none is named; null when none can. */
-  defaultApp: string | null
-}
 
 export interface ConversationInfo {
   id: string
   app: string
   appName: string
-  /** The model chosen for this conversation; absent or null is the app's own default. */
+  /** The model this conversation runs on. */
   model?: string | null
   state: AskState
   error?: string | null
@@ -40,7 +27,7 @@ export interface AskContext {
 /** A team file the assistant proposed. Nothing is saved until the person applies it. */
 export interface Proposal {
   id: string
-  /** The conversation id, or `connection:<app>` for a connected app. */
+  /** The conversation that proposed it. */
   source: string
   file: string
   name: string
@@ -52,43 +39,6 @@ export interface Proposal {
 }
 
 export type ProposalOutcome = 'applied' | 'discarded' | 'undone'
-
-/** Something a connected app did with LoomWatch's tools, newest last. */
-export interface InboxItem {
-  phase: 'ask_proposal' | 'ask_run_started' | 'ask_review_note' | 'ask_proposal_outcome' | string
-  app: string
-  appName: string
-  at: string
-  proposalId?: string
-  file?: string
-  name?: string
-  summary?: string
-  isNew?: boolean
-  runId?: string
-  request?: string
-  question?: string
-  text?: string
-}
-
-export interface ConnectableApp {
-  id: string
-  name: string
-  detected: boolean
-  connected: boolean
-  connectedAt: string | null
-  method: 'command' | 'snippet'
-  /** The command LoomWatch runs, with the token masked. */
-  command: string | null
-  canRemove: boolean
-  snippetPlace: string | null
-  /** Only in the answer to a connect, for an app the person has to paste into themselves. */
-  snippet?: unknown
-}
-
-export interface Connections {
-  url: string
-  apps: ConnectableApp[]
-}
 
 export class AskApiError extends Error {
   readonly status: number
@@ -108,8 +58,7 @@ async function read<T>(response: Response): Promise<T> {
   return body as T
 }
 
-/** How long a write may go unanswered before the panel says the server isn't answering. Starting
-    an app or connecting one can take a while; nothing here should take longer than this. */
+/** How long a write may go unanswered before the panel says the server isn't answering. */
 const WRITE_TIMEOUT_MS = 90_000
 
 function post(url: string, body?: unknown): Promise<Response> {
@@ -124,13 +73,9 @@ function post(url: string, body?: unknown): Promise<Response> {
 
 const conversationUrl = (id: string) => `/api/ask/conversations/${encodeURIComponent(id)}`
 
-export async function fetchAskApps(signal?: AbortSignal): Promise<AskApps> {
-  return read(await daemonFetch('/api/ask/apps', { signal, cache: 'no-store' }))
-}
-
-/** Starts a conversation with `app` (else the daemon's default) and `model` (else the app's own). */
-export async function startConversation(askBeforeRun: boolean, app?: string | null, model?: string | null): Promise<ConversationInfo> {
-  return read(await post('/api/ask/conversations', { askBeforeRun, ...(app ? { app } : {}), ...(app && model ? { model } : {}) }))
+/** Starts a conversation on `model`, else the agents' default model. */
+export async function startConversation(askBeforeRun: boolean, model?: string | null): Promise<ConversationInfo> {
+  return read(await post('/api/ask/conversations', { askBeforeRun, ...(model ? { model } : {}) }))
 }
 
 /** The conversation's current state, or null once the daemon no longer has it (ended, or restarted). */
@@ -165,47 +110,29 @@ export async function reportProposalOutcome(id: string, outcome: ProposalOutcome
 }
 
 export interface InstructionsRewrite {
-  app?: string | null
+  /** The model to ask; absent is the faster model. */
   model?: string | null
   /** What was taken off the canvas, as its card showed it. */
   removed: { name: string; kind: string }
   agents: { id: string; name: string; role: string }[]
 }
 
-/** The daemon gives the app three minutes; this waits a little longer so its own answer arrives. */
+/** The daemon gives the model three minutes; this waits a little longer so its own answer arrives. */
 const REWRITE_TIMEOUT_MS = 200_000
 
 /**
- * The named agents' instructions without the removed source (ADR 0059), from one turn of the Ask
- * app with no tools. Only agents the app answered for come back; nothing is saved.
+ * The named agents' instructions without the removed source (ADR 0059), from one turn of the
+ * assistant with no tools. Only agents it answered for come back; nothing is saved.
  */
 export async function rewriteInstructions(request: InstructionsRewrite): Promise<{ id: string; role: string }[]> {
   const body = await read<{ agents?: { id: string; role: string }[] }>(await daemonFetch('/api/ask/instructions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      removed: request.removed, agents: request.agents,
-      ...(request.app ? { app: request.app } : {}), ...(request.app && request.model ? { model: request.model } : {}),
+      removed: request.removed, agents: request.agents, ...(request.model ? { model: request.model } : {}),
     }),
     cache: 'no-store',
     signal: AbortSignal.timeout(REWRITE_TIMEOUT_MS),
   }))
   return Array.isArray(body?.agents) ? body.agents : []
-}
-
-export async function fetchInbox(signal?: AbortSignal): Promise<InboxItem[]> {
-  const body = await read<{ items?: InboxItem[] }>(await daemonFetch('/api/ask/inbox', { signal, cache: 'no-store' }))
-  return Array.isArray(body?.items) ? body.items : []
-}
-
-export async function fetchConnections(signal?: AbortSignal): Promise<Connections> {
-  return read(await daemonFetch('/api/ask/connections', { signal, cache: 'no-store' }))
-}
-
-export async function connectApp(id: string): Promise<ConnectableApp> {
-  return read(await post(`/api/ask/connections/${encodeURIComponent(id)}`))
-}
-
-export async function disconnectApp(id: string): Promise<{ removedFromApp: boolean; note: string | null }> {
-  return read(await daemonFetch(`/api/ask/connections/${encodeURIComponent(id)}`, { method: 'DELETE', cache: 'no-store' }))
 }

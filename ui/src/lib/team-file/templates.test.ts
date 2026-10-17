@@ -5,12 +5,8 @@ import Ajv2020 from 'ajv/dist/2020'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
-import type { DetectedHarness } from '../harnesses'
-import claude from '../models/fixtures/claude.json'
-import { claudeOn } from '../models/fixtures/claudeOn'
-import codex from '../models/fixtures/codex.json'
-import opencode from '../models/fixtures/opencode.json'
-import { rankHarnesses, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath } from './templates'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath } from './templates'
 import type { TeamDocument } from './types'
 import { teamIdForPath } from './useTeamDocument'
 import { compileTeamValidator } from './validation'
@@ -19,20 +15,20 @@ import { compileTeamValidator } from './validation'
 const schema = parse(readFileSync(resolve(process.cwd(), '../schemas/team.schema.yaml'), 'utf8')) as object
 const validate = compileTeamValidator(schema, Ajv2020)
 
-function harness(id: string, overrides: Partial<DetectedHarness> = {}): DetectedHarness {
-  return { id, name: id[0].toUpperCase() + id.slice(1), command: id, executablePath: `/bin/${id}`, acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', `@acp/${id}`] }, ...overrides }
-}
-
 describe('team templates', () => {
-  it.each(['single', 'research-write', 'research-review-write'] as const)('writes a complete, schema-valid team for %s', (template) => {
-    const yaml = templateTeamYaml(template, '  Blog writer ', harness('claude'), 'sonnet', new Date('2026-10-01T00:00:00Z'))
+  it.each(['single', 'research-write', 'research-write-check', 'research-review-write', 'research'] as const)('writes a complete, schema-valid team for %s', (template) => {
+    const yaml = templateTeamYaml(template, '  Blog writer ', new Date('2026-10-01T00:00:00Z'))
     const doc = parse(yaml) as TeamDocument
     const result = validate(doc)
     expect(result.documentProblems).toEqual([])
     expect(result.valid).toBe(true)
     expect(doc).toMatchObject({ id: 'blog-writer', name: 'Blog writer', entrypoint: doc.agents[0].id })
+    // A run spends real money: a new team may spend $1.00 a run until you change it (ADR 0068).
+    expect(doc.spend).toEqual({ perRun: 1 })
     for (const agent of doc.agents.filter((candidate) => candidate.kind !== 'operator')) {
-      expect(agent).toMatchObject({ model: 'sonnet', spawn: { cmd: 'npx', args: ['-y', '@acp/claude'], env: {}, cwd: '.' } })
+      // Every agent runs on LoomWatch's engine, in the team file's own folder.
+      expect(agent).not.toHaveProperty('spawn')
+      expect(agent.model).toMatch(/^[a-z-]+\/[a-z0-9.-]+$/)
       expect(agent.role.length).toBeGreaterThan(20)
     }
   })
@@ -40,57 +36,56 @@ describe('team templates', () => {
   // ADR 0037: a researcher that cannot search the web can only guess, so it starts allowed to;
   // nothing else is switched on for anyone.
   it('lets only the researcher search the web, and nothing more', () => {
-    const doc = parse(templateTeamYaml('research-review-write', 'Report', harness('claude'), 'sonnet')) as TeamDocument
+    const doc = parse(templateTeamYaml('research-review-write', 'Report')) as TeamDocument
     expect(Object.fromEntries(doc.agents.map((agent) => [agent.id, agent.allow ?? null]))).toEqual({ researcher: { web: true }, review: null, writer: null })
-    const single = parse(templateTeamYaml('single', 'Solo', harness('claude'), 'sonnet')) as TeamDocument
+    const single = parse(templateTeamYaml('single', 'Solo')) as TeamDocument
     expect(single.agents[0].allow).toBeUndefined()
   })
 
-  // ADR 0062: each job thinks as hard as it needs, at an effort the model lists, never at the
-  // app's most expensive default; without the model's catalog nothing is set.
-  it('sets each job’s effort from the model’s own list', () => {
-    const sonnet = { id: 'sonnet', name: 'Sonnet', thinkingEfforts: ['default', 'low', 'medium', 'high', 'xhigh', 'max'].map((id) => ({ id, name: id })), effortsKnown: true }
-    const doc = parse(templateTeamYaml('research-write', 'Report', harness('claude'), 'sonnet', undefined, undefined, { models: [sonnet] })) as TeamDocument
-    expect(Object.fromEntries(doc.agents.map((agent) => [agent.id, agent.thinkingEffort ?? null]))).toEqual({ researcher: 'medium', writer: 'medium' })
-    const unknown = parse(templateTeamYaml('research-write', 'Report', harness('claude'), 'sonnet')) as TeamDocument
-    expect(unknown.agents.every((agent) => agent.thinkingEffort === undefined)).toBe(true)
+  // ADR 0057 and 0062: the researcher gathers on the faster model, the writer writes on the strong
+  // one, the check step reads on another maker's, and each thinks as hard as its job needs.
+  it('puts each job on its tier’s model at its job’s effort', () => {
+    const tiers = (template: 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research') => {
+      const doc = parse(templateTeamYaml(template, 'Report')) as TeamDocument
+      return Object.fromEntries(doc.agents.filter((agent) => agent.kind !== 'operator').map((agent) => [agent.id, `${agent.model}${agent.thinkingEffort ? `[${agent.thinkingEffort}]` : ''}`]))
+    }
+    expect(tiers('research-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    expect(tiers('research-review-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    expect(tiers('research-write-check')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]`, checker: `${CHECK_MODEL}[high]` })
+    // The lead plans and judges on the strong model; its researchers gather on the faster one.
+    expect(tiers('research')).toEqual({ lead: `${DEFAULT_MODEL}[medium]`, researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    // One assistant writes the answer itself: the strong model, at its own default.
+    expect(tiers('single')).toEqual({ assistant: DEFAULT_MODEL })
+  })
+
+  // Open Deep Research's shape: no edges, so the lead answers, and reaches the Researcher (many
+  // times over, in parallel) and the Writer through the Team Bus. It names both, so it is told
+  // when to use them.
+  it('leads the Research team from one agent that hands the research out and has the Writer report', () => {
+    const doc = parse(templateTeamYaml('research', 'Question')) as TeamDocument
+    expect(doc.entrypoint).toBe('lead')
+    expect(doc.edges).toEqual([])
+    expect(doc.agents.map((agent) => agent.name)).toEqual(['Research lead', 'Researcher', 'Writer'])
+    const lead = doc.agents[0]
+    expect(lead.role).toMatch(/`dispatch` to the Researcher, one call for each/)
+    expect(lead.role).toMatch(/`ask` the Writer for the report/)
+    expect(lead.role).toMatch(/numbered citation such as \[1\] after every claim/)
+    expect(lead.allow).toBeUndefined()
+    expect(doc.agents[1].allow).toEqual({ web: true })
   })
 
   // ADR 0062: the checked starter team ends on a check step that checks the writer, so the writer's
   // piece stays the answer and the daemon accepts the file as it stands.
   it('ends the checked team on a Checker that checks the writer', () => {
-    const doc = parse(templateTeamYaml('research-write-check', 'Brief', harness('claude'), 'sonnet')) as TeamDocument
+    const doc = parse(templateTeamYaml('research-write-check', 'Brief')) as TeamDocument
     expect(doc.agents.map((agent) => agent.id)).toEqual(['researcher', 'writer', 'checker'])
     expect(doc.agents[2]).toMatchObject({ checks: 'writer', allow: { web: true } })
     expect(doc.agents[2].sendBackOnce).toBeUndefined()
     expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['researcher->writer', 'writer->checker'])
   })
 
-  // ADR 0057: the researcher gathers on the app's faster model, the writer writes on its current
-  // one, both from the app's own list; an app that lists nothing faster keeps one model. A job's
-  // effort is set only where the catalog knows the model's efforts: Claude's are known only for the
-  // model it runs on, and Haiku 4.5 has none; Codex lists each model's own.
-  it('puts the researcher on the app’s fast tier and the writer on its strong one', () => {
-    const tiers = (catalog: Parameters<typeof templateTeamYaml>[6] & { currentModelId?: string }, template: 'single' | 'research-write' | 'research-write-check' | 'research-review-write' = 'research-write') => {
-      const doc = parse(templateTeamYaml(template, 'Report', harness('claude'), catalog?.currentModelId ?? '', undefined, undefined, catalog)) as TeamDocument
-      return Object.fromEntries(doc.agents.filter((agent) => agent.kind !== 'operator').map((agent) => [agent.id, `${agent.model}${agent.thinkingEffort ? `[${agent.thinkingEffort}]` : ''}`]))
-    }
-    expect(tiers(claude)).toEqual({ researcher: 'haiku', writer: 'sonnet[medium]' })
-    expect(tiers(claude, 'research-review-write')).toEqual({ researcher: 'haiku', writer: 'sonnet[medium]' })
-    // The check step reads the finished piece: the strong tier, thinking hard.
-    expect(tiers(claude, 'research-write-check')).toEqual({ researcher: 'haiku', writer: 'sonnet[medium]', checker: 'sonnet[high]' })
-    expect(tiers(claudeOn('opus'))).toEqual({ researcher: 'sonnet', writer: 'opus[medium]' })
-    // Codex runs 6.1 Sol at medium without listing its efforts, and lists 6 Luna's.
-    expect(tiers(codex)).toEqual({ researcher: 'gpt-6-luna[medium]', writer: 'gpt-6.1-sol' })
-    // Haiku 4.5 is Claude's smallest and has no effort: both run on it at its own default.
-    expect(tiers(claudeOn('haiku'))).toEqual({ researcher: 'haiku', writer: 'haiku' })
-    expect(tiers(opencode)).toEqual({ researcher: 'opencode/big-pickle', writer: 'opencode/big-pickle' })
-    // One assistant writes the answer itself: the strong tier, as before.
-    expect(tiers(claude, 'single')).toEqual({ assistant: 'sonnet' })
-  })
-
   it('wires the review template as researcher → you → writer', () => {
-    const doc = parse(templateTeamYaml('research-review-write', 'Report', harness('codex'), 'gpt')) as TeamDocument
+    const doc = parse(templateTeamYaml('research-review-write', 'Report')) as TeamDocument
     expect(doc.agents.map((agent) => agent.kind ?? 'harness')).toEqual(['harness', 'operator', 'harness'])
     expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['researcher->review', 'review->writer'])
   })
@@ -112,23 +107,9 @@ describe('team templates', () => {
     expect(path).toBe('trip-planner-2.yaml')
     expect(teamIdForPath(path)).toBe('trip-planner-2')
     expect(teamIdForPath('nested/Café Plans.YML')).toBe('cafe-plans')
-    const doc = parse(templateTeamYaml('single', 'Trip planner', harness('claude'), 'sonnet', new Date(), teamIdForPath(path))) as TeamDocument
+    const doc = parse(templateTeamYaml('single', 'Trip planner', new Date(), teamIdForPath(path))) as TeamDocument
     expect(doc.id).toBe('trip-planner-2')
     expect(doc.name).toBe('Trip planner')
     expect(validate(doc).valid).toBe(true)
-  })
-
-  it('prefers apps most people have signed in, and drops ones that cannot run', () => {
-    const ranked = rankHarnesses([harness('hermes'), harness('gemini'), harness('codex'), harness('pi', { acpAvailable: false }), harness('claude')])
-    expect(ranked.map((item) => item.id)).toEqual(['claude', 'codex', 'gemini', 'hermes'])
-  })
-
-  it('skips an app the daemon last saw fail to start, and keeps one it has not checked yet', () => {
-    const ranked = rankHarnesses([
-      harness('gemini', { health: 'error', healthReason: 'Gemini: sign-in or version problem — run "gemini" in Terminal to fix' }),
-      harness('codex'),
-      harness('claude', { health: 'ok' }),
-    ])
-    expect(ranked.map((item) => item.id)).toEqual(['claude', 'codex'])
   })
 })

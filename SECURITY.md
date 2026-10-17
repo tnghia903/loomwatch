@@ -15,40 +15,100 @@ Only the newest release, and `main`, get security fixes.
 
 ## What LoomWatch protects, and what it doesn't
 
-LoomWatch starts AI apps on your computer and lets them work. It is not a sandbox: an agent runs
-as you, with your files and your sign-ins, inside the AI app you chose. Here is what LoomWatch
-does about that, so you can judge it for yourself.
+LoomWatch runs AI agents on your computer and lets them work. Each agent runs inside LoomWatch
+itself and thinks with the model you chose, reached through OpenRouter with your OpenRouter key. It
+is not a full sandbox: what you let an agent do, it does as you, with your files. Here is what
+LoomWatch does about that, so you can judge it for yourself.
 
 **It does:**
 
 - **Stay on your computer.** The app and its API answer only on `127.0.0.1`. Requests from other
-  websites, and from pages that rebind their address to `127.0.0.1`, are refused. The database is
-  published on `127.0.0.1` only.
-- **Check a team before it first runs.** A team file you didn't build in LoomWatch shows
-  what it runs before its first run. That covers a file you downloaded, unzipped or edited by hand.
-  You see each program, the folders it reads and what it may do without asking, then choose
-  **Trust and run**. Its schedule waits until then.
-- **Refuse settings that disguise an app.** A team file cannot set variables that change which
-  code an app loads or where it sends your traffic, such as `NODE_OPTIONS`, `DYLD_*`, proxies or
-  API base addresses.
-- **Keep its own secrets from agents.** Agents don't inherit LoomWatch's database address or its
-  settings, and they can't read the keys of the apps connected to LoomWatch without asking you.
-- **Ask before agents act.** LoomWatch puts each app in its ask-first mode and answers requests
-  by the switches you set for each agent. Web, edits in the agent's own folder, and commands are
-  all off by default. Anything else waits for you.
-- **Start agents without tools that reach past the run.** For example, Claude Code's publishing
-  and messaging tools, and Codex's plugins and apps. The run receipt flags any that ran anyway.
-- **Send nothing about you anywhere.** LoomWatch has no account and no telemetry. It contacts
-  only Notion, when you connect it, and the npm registry, the first time an app's connector has to
-  be downloaded.
+  websites, and from pages that rebind their address to `127.0.0.1`, are refused. In Docker, its
+  port is published on `127.0.0.1` only.
+- **Keep your OpenRouter key to itself.** You paste the key into LoomWatch, which checks it with
+  OpenRouter before keeping it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`. On
+  Windows it is kept in Windows Credential Manager, as `api-key.LoomWatch.OpenRouter`, which only
+  your Windows account can read (as with every credential there, so can any program you run). On
+  Linux it is kept in `keys.json` in LoomWatch's state folder, readable by your account only. Your
+  Notion connection is kept the same way, as `LoomWatch.Notion`, except that Linux keeps none. The
+  key is sent to OpenRouter and nowhere else: never to agents or the commands they run, and never
+  into team files, the run history or logs. Anything shaped like a key is cut out of an error
+  message before it is shown or kept. Only a key entered in LoomWatch is used: an
+  `OPENROUTER_API_KEY` in the environment is ignored, LoomWatch never reads another app's
+  credentials or sign-in, and it never uses an AI subscription. Other websites can't set or change
+  the key.
+- **Check a team before it first runs.** A team file you didn't build in LoomWatch shows what it
+  does before its first run. That covers a file you downloaded, unzipped or edited by hand. You see
+  each agent and the model it runs on ("Writer runs on LoomWatch with anthropic/claude-opus-5.5"),
+  the folders it works in and reads, the Notion pages it reads and what it may do without asking,
+  then choose **Trust and run**. Its schedule waits until then.
+- **Never start a program a team file names.** Team files made for earlier versions of LoomWatch
+  named an AI app to start for each agent. LoomWatch reads only the agent's folder from them; the
+  program, its arguments and its settings are never used.
+- **Keep its own files from agents.** An agent can't read LoomWatch's state folder (the database,
+  the approvals) without asking you, wherever its folders reach; only LoomWatch's skills folder is
+  open to it. The key file is refused outright, without asking, so no answer can hand the key to a
+  model. An agent that starts in your teams folder always works in a folder of its own, so its edits
+  and commands stay out of your team files. File edits you switch on cover only the agent's own folder, and never
+  its `.git`, its `.agents` and `.claude` skill folders or LoomWatch's `.loomwatch` folder; any other
+  edit asks you.
+- **Run commands without your keys.** A command an agent runs gets your environment with every
+  `*_API_KEY`, `*_API_TOKEN` and `*_AUTH_TOKEN` variable taken out, along with everything starting
+  `OPENROUTER_`, `ANTHROPIC_`, `OPENAI_`, `GEMINI_` or `GOOGLE_API`, and LoomWatch's own settings
+  and database address.
+- **Fence commands in on a Mac.** On a Mac every command an agent runs goes through macOS's sandbox
+  (Seatbelt, `/usr/bin/sandbox-exec`). It can change files only in the agent's work folder and in
+  temporary and cache folders, and it can reach the network only when the agent may use the web.
+  Every command is approved before it runs, so the sandbox is the second line of defence, not the
+  first.
+- **Stop commands whole.** A command stops at its time limit (two minutes unless the agent asks
+  for more, ten at most) or when its turn is stopped, and everything it started stops with it. On
+  Windows, where commands run in `cmd.exe`, each one runs in a Windows job of its own, so nothing it
+  started keeps running after it finishes either.
+- **Ask before agents act.** LoomWatch answers each agent's requests by the switches you set for
+  it. Reading inside its own folder and what you gave it needs no switch; web, file edits in its
+  own folder, and commands are all off by default. Anything else waits for you: **Allow**, **Allow
+  for this run**, **Allow for the whole team**, **Always allow** or **Deny**. **Edit, then allow**
+  changes a command before it runs, this once. **Answer instead** sends your words back to the
+  agent as the tool's answer, and nothing runs. A request nobody answers within 10 minutes is
+  declined, and a scheduled run, with nobody to ask, declines at once. In Auto mode, commands that
+  only read files, or download pages for an agent allowed the web, run without asking; everything
+  else still asks.
+- **Give agents no tools that reach past the run.** An agent's tools are its files, the web,
+  commands, its plan and the Team Bus to its teammates. None of them publishes, posts or sends a
+  message anywhere. Tools set up in another AI app's settings (MCP servers) are not given to
+  agents; an agent wired to one is told it is unavailable.
+- **Show a skill before it is installed.** The Skills page installs skills from skills.sh, ClawHub
+  or a GitHub link. It shows each skill's license, scripts and files first, and refuses a skill
+  whose license says "All rights reserved" or "proprietary". It caps a download at 50 MB and a
+  skill at 20 MB and 2,000 files, leaves out links, and refuses a download with a path outside its
+  own folder. Nothing in a skill runs when it is installed: an agent can run a skill's script only
+  as a command, which asks like any other. **Look on this computer** copies skills from your AI
+  apps' skill folders only when you click it, and reads nothing there but skill folders.
+- **Collect nothing about you.** LoomWatch has no account and no telemetry. It contacts only:
+  - OpenRouter, for the model calls your agents and Ask make, to check your key, and for its
+    public list of models;
+  - Notion, when you connect it;
+  - GitHub, once a day, to see whether a new version is out (you can turn this off);
+  - GitHub, skills.sh and ClawHub, when you search for or install a skill.
 
 **It doesn't:**
 
-- Stop an approved team from running the commands it names. Read the review, and only trust teams
-  from people you trust.
-- Hold back OpenCode, which acts without asking. The allow switches can't stop it.
-- Switch off MCP servers in Codex's own settings (`~/.codex/config.toml`); they still load.
-- Keep your prompts and files on your computer. Each AI app sends them to its model provider, as
-  it does when you use it yourself.
-- Protect you from an app or model that is itself compromised, or from a prompt that talks an
-  agent into misusing a permission you gave it. Keep **Run commands** off unless a job needs it.
+- Stop an approved team from doing what you allowed. Read the review, and only trust teams from
+  people you trust.
+- Keep your prompts and files on your computer. Everything an agent works with goes to OpenRouter
+  and on to the model's provider: its instructions, your prompt, the team's Brief and notes, the
+  Notion pages you give it, what its teammates hand it, and what its tools return, such as the
+  files it reads and the output of its commands.
+- Ask before each web search. An agent allowed the web searches and reads pages through OpenRouter,
+  which runs them for it; each one shows in the run afterwards.
+- Limit what an allowed command reads. The sandbox limits where a command writes and whether it
+  reaches the network, not which of your files it reads.
+- Sandbox commands on Windows. A command an agent runs there can read and change every file your
+  Windows account can, and reach the internet even when the agent may not use the web. Approving
+  each command is the only line, and in Auto mode LoomWatch's own reading of the command line is
+  all that lets a read-only command through. On Windows, keep **Run commands** off for any agent
+  whose job doesn't need it, and read each command before you allow it.
+- Sandbox commands on Linux yet. There too, approving each command is the only line.
+- Protect you from a model that is itself compromised, or from a prompt that talks an agent into
+  misusing a permission you gave it. Keep **Run commands** off unless a job needs it.

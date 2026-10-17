@@ -1,11 +1,10 @@
 //! `LoomWatch` decides what a run's agents may do without asking (ADR 0037).
 //!
-//! An app asks before it acts only when its own settings say to. So each run agent's session is put
-//! in its app's ask-first mode (`acp.rs`, `ensure_ask_first`), and every `session/request_permission`
-//! it sends is answered here by one policy, the same for every app: what the operator connected to
-//! the agent, plus the switches in its `allow:` block. Anything else is put to the operator of the
-//! run while the app waits (ADR 0040, [`PermissionAsker`]), and declined when nobody can be asked
-//! or nobody answers.
+//! Every tool call an agent makes that reaches past reading its own folder is described as a
+//! permission request (`agent::PermissionRequest`) and answered here by one policy: what the
+//! operator connected to the agent, plus the switches in its `allow:` block. Anything else is put
+//! to the operator of the run while the agent waits (ADR 0040, [`PermissionAsker`]), and declined
+//! when nobody can be asked or nobody answers.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -15,69 +14,21 @@ use serde_json::Value;
 use crate::config::{AgentAllow, AgentConfig, CapabilityKind, CapabilityRef, TurnedOff};
 use crate::delivery::{Delivery, RESERVED_SERVER};
 
-/// App settings folders an agent may never edit, even inside its own folder: a change there could
-/// grant it more on its next session than the operator switched on.
-const PROTECTED_FOLDERS: [&str; 7] = [
-    ".claude",
-    ".agents",
-    ".codex",
-    ".gemini",
-    ".opencode",
-    ".git",
-    ".loomwatch",
-];
+/// Folders an agent may never edit, even inside its own folder: a change there could give it more
+/// on its next session than the operator switched on. `.agents` and `.claude` hold the skills it is
+/// offered, `.loomwatch` what `LoomWatch` keeps for the team, and `.git` hooks run code.
+const PROTECTED_FOLDERS: [&str; 4] = [".claude", ".agents", ".git", ".loomwatch"];
 
-/// Mode ids that make an app ask before it acts, in the order they are tried: Claude Code's and
-/// Gemini CLI's `default` ("Always ask before making changes", "Prompts for approval") and
-/// Codex's `read-only` ("Requires approval to edit files and access the internet").
-pub(crate) const ASK_FIRST_MODES: [&str; 2] = ["default", "read-only"];
-
-/// Claude Code's own tools a run agent is started without (ADR 0044). Each reaches past the run:
-/// the operator's claude.ai account (`Artifact` and its companions, `DesignSync`), their cloud
-/// routines and schedules (`RemoteTrigger`, `Cron*`, `ScheduleWakeup`), their devices
-/// (`PushNotification`), and the other Claude sessions on the machine (`SendMessage`,
-/// `ListAgents`). Asking is not enough: Claude Code rules some of them need no consent — a first
-/// publish to a new private artifact, then every redeploy of it — so no request ever reaches the
-/// policy. A team's answer leaves through `LoomWatch` instead: the review stop and its delivery.
-pub(crate) const WITHHELD_CLAUDE_TOOLS: [&str; 13] = [
-    "Artifact",
-    "ArtifactComments",
-    "ArtifactData",
-    "ArtifactCheck",
-    "DesignSync",
-    "RemoteTrigger",
-    "CronCreate",
-    "CronDelete",
-    "CronList",
-    "ScheduleWakeup",
-    "PushNotification",
-    "SendMessage",
-    "ListAgents",
-];
-
-/// How Claude Code names an MCP server inside its tool names (`mcp__<server>__<tool>`): every
-/// character other than a letter, a digit, `_` or `-` becomes `_`, so `claude.ai Notion` is
-/// `claude_ai_Notion`.
-fn claude_server_name(server: &str) -> String {
-    server
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+/// Whether `name` is one of [`PROTECTED_FOLDERS`] as the file system sees it: in any case (Windows
+/// and macOS do not tell `.Claude` from `.claude`) and with Windows' trailing dots and spaces
+/// dropped, which it drops when it makes the folder.
+fn is_protected(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    let name = name.trim_end_matches(['.', ' ']);
+    PROTECTED_FOLDERS
+        .iter()
+        .any(|folder| name.eq_ignore_ascii_case(folder))
 }
-
-/// Codex features a run agent is started without (ADR 0047). `plugins` brings every enabled
-/// plugin's MCP servers, skills and hooks, among them the `ChatGPT` app's `cua_repl`, which drives
-/// the operator's browser and apps. `apps` is `codex_apps`, the connectors on the operator's
-/// `ChatGPT` account. Asking is not enough: Codex runs an MCP tool that calls itself read-only
-/// without asking, and those two do. The servers `LoomWatch` hands over are not plugins or apps,
-/// so they stay.
-pub(crate) const WITHHELD_CODEX_FEATURES: [&str; 2] = ["plugins", "apps"];
 
 /// How one run agent's permission requests are answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,10 +42,13 @@ pub struct PermissionPolicy {
     /// MCP servers `LoomWatch` handed this session: the Team Bus and every connected tool.
     servers: Vec<String>,
     /// What the operator turned off for this agent that `LoomWatch` does not also give it
-    /// (ADR 0060): withheld from the app's own skills and tools at session start.
+    /// (ADR 0060): left out of the skills the agent is offered.
     turned_off: Vec<TurnedOff>,
-    /// The same, as Claude Code's `disallowedTools` entries.
-    claude_off: Vec<String>,
+    /// `LoomWatch`'s own state folder: the key, the database, the approvals. Never read without
+    /// asking, whatever the agent's folder or knowledge reaches.
+    state_dir: Option<PathBuf>,
+    /// `LoomWatch`'s skills folder inside it, which every agent reads its skills from.
+    skills_folder: Option<PathBuf>,
 }
 
 impl PermissionPolicy {
@@ -105,14 +59,24 @@ impl PermissionPolicy {
         readable: impl IntoIterator<Item = PathBuf>,
         servers: impl IntoIterator<Item = String>,
     ) -> Self {
+        let installed = crate::ai::installed();
         Self {
             allow,
             folder: resolve(folder),
             readable: readable.into_iter().map(|path| resolve(&path)).collect(),
             servers: servers.into_iter().collect(),
             turned_off: Vec::new(),
-            claude_off: Vec::new(),
+            state_dir: installed.map(|ai| resolve(&ai.state_dir())),
+            skills_folder: installed.map(|ai| resolve(&ai.skills_folder())),
         }
+    }
+
+    /// This policy keeping `state_dir` private, with its `skills` folder readable.
+    #[cfg(test)]
+    fn keeping_private(mut self, state_dir: &Path) -> Self {
+        self.state_dir = Some(resolve(state_dir));
+        self.skills_folder = Some(resolve(&state_dir.join("skills")));
+        self
     }
 
     /// The policy for a run agent working in `folder` with what `delivery` connected to it. The
@@ -125,36 +89,22 @@ impl PermissionPolicy {
             .flat_map(|knowledge| knowledge.folders.iter().chain(&knowledge.files))
             .map(PathBuf::from)
             .chain(delivery.copies.clone());
-        let servers = std::iter::once(RESERVED_SERVER.to_owned())
-            .chain(delivery.tools.iter().map(|tool| tool.server.clone()));
-        Self::new(allow, folder, readable, servers)
+        Self::new(allow, folder, readable, [RESERVED_SERVER.to_owned()])
     }
 
     /// The policy for one of a run's agents: [`Self::for_agent`] with what the operator turned off
-    /// for it (ADR 0060), each tool found under the server names the operator's apps give it.
+    /// for it (ADR 0060).
     #[must_use]
     pub fn for_run_agent(agent: &AgentConfig, folder: &Path, delivery: &Delivery) -> Self {
-        let home = crate::capabilities::configured_home();
-        Self::for_agent(agent.allow, folder, delivery).turning_off(
-            &agent.turned_off,
-            &agent.capabilities,
-            |name| crate::capabilities::tool_servers_named(home.as_deref(), name),
-        )
+        Self::for_agent(agent.allow, folder, delivery)
+            .turning_off(&agent.turned_off, &agent.capabilities)
     }
 
     /// This policy with what the operator turned off for the agent (ADR 0060), less anything the
-    /// canvas gives it: a skill wired to the agent is how skills are shared across apps, so the
-    /// copy `LoomWatch` delivers is never caught by a turned-off entry of the same name.
-    ///
-    /// `servers_of` names the MCP servers behind a turned-off tool in the app's own config: the
-    /// canvas shows "Agent Memory", Claude Code lists `agentmemory`.
+    /// canvas gives it: a skill wired to the agent is delivered, so the copy `LoomWatch` delivers
+    /// is never caught by a turned-off entry of the same name.
     #[must_use]
-    pub fn turning_off(
-        mut self,
-        turned_off: &[TurnedOff],
-        given: &[CapabilityRef],
-        servers_of: impl Fn(&str) -> Vec<String>,
-    ) -> Self {
+    pub fn turning_off(mut self, turned_off: &[TurnedOff], given: &[CapabilityRef]) -> Self {
         self.turned_off = turned_off
             .iter()
             .filter(|entry| {
@@ -167,39 +117,11 @@ impl PermissionPolicy {
             })
             .cloned()
             .collect();
-        self.claude_off = self
-            .turned_off
-            .iter()
-            .flat_map(|entry| match entry.kind {
-                CapabilityKind::Skill => vec![format!("Skill({})", entry.name)],
-                CapabilityKind::Tool => servers_of(&entry.name)
-                    .iter()
-                    .filter(|server| !self.servers.contains(server))
-                    .map(|server| format!("mcp__{}", claude_server_name(server)))
-                    .collect(),
-                CapabilityKind::Knowledge => Vec::new(),
-            })
-            .collect();
-        self.claude_off.dedup();
         self
     }
 
-    /// The `_meta` this agent's sessions carry: [`Self::session_meta`] with its turned-off skills
-    /// and tools added to `disallowedTools` (ADR 0060). Claude Code blocks a skill by
-    /// `Skill(<name>)` and every tool of a server by `mcp__<server>`, its tool-name prefix.
-    #[must_use]
-    pub fn agent_meta(&self) -> Value {
-        let mut meta = Self::session_meta();
-        if let Some(tools) = meta
-            .pointer_mut("/claudeCode/options/disallowedTools")
-            .and_then(Value::as_array_mut)
-        {
-            tools.extend(self.claude_off.iter().cloned().map(Value::String));
-        }
-        meta
-    }
-
-    /// The skills turned off for this agent, by name, for Codex's `skills.config` (ADR 0060).
+    /// The skills turned off for this agent, by name: left out of the ones it is offered
+    /// (ADR 0060).
     #[must_use]
     pub fn turned_off_skills(&self) -> Vec<String> {
         self.turned_off
@@ -207,65 +129,6 @@ impl PermissionPolicy {
             .filter(|entry| entry.kind == CapabilityKind::Skill)
             .map(|entry| entry.name.clone())
             .collect()
-    }
-
-    /// The `_meta` a run agent's `session/new` and `session/load` carry (ADR 0044). Claude Code's
-    /// adapter passes `claudeCode.options` to the Agent SDK, whose `disallowedTools` takes those
-    /// tools out of the session before the model sees them. Other apps ignore the key.
-    #[must_use]
-    pub fn session_meta() -> Value {
-        serde_json::json!({"claudeCode": {"options": {"disallowedTools": WITHHELD_CLAUDE_TOOLS}}})
-    }
-
-    /// The `CODEX_CONFIG` a Codex run agent is spawned with (ADR 0047): `current`, the one the
-    /// team file or the daemon already sets, with every [`WITHHELD_CODEX_FEATURES`] switched off.
-    /// `codex-acp` reads it once at startup and merges it into every `thread/start` and
-    /// `thread/resume` it sends Codex, so a reloaded session is started without them too. It is
-    /// the adapter's only handle on a session's config, and it carries no secret: the agent's own
-    /// commands can read it.
-    ///
-    /// # Errors
-    ///
-    /// Each of `skills_off` is added to `skills.config` switched off by name (ADR 0060), the way
-    /// Codex itself records a skill turned off. `codex-acp` leaves `skills` alone, unlike
-    /// `mcp_servers`, which it replaces with the servers `LoomWatch` hands over: so a Codex agent's
-    /// own MCP servers cannot be turned off this way.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `current` is not a JSON object, which `codex-acp` would refuse too.
-    pub fn codex_config(current: Option<&str>, skills_off: &[String]) -> anyhow::Result<String> {
-        let mut config = match current {
-            Some(text) => serde_json::from_str::<Value>(text)
-                .ok()
-                .filter(Value::is_object)
-                .ok_or_else(|| anyhow::anyhow!("CODEX_CONFIG is set but is not a JSON object"))?,
-            None => Value::Object(serde_json::Map::new()),
-        };
-        // An object, never dotted keys: `codex-acp` sets `features` itself, and Codex applies a
-        // session's config keys in no fixed order, so `features.plugins` could lose to it.
-        if !config["features"].is_object() {
-            config["features"] = Value::Object(serde_json::Map::new());
-        }
-        for feature in WITHHELD_CODEX_FEATURES {
-            config["features"][feature] = Value::Bool(false);
-        }
-        if !skills_off.is_empty() {
-            if !config["skills"].is_object() {
-                config["skills"] = Value::Object(serde_json::Map::new());
-            }
-            if !config["skills"]["config"].is_array() {
-                config["skills"]["config"] = Value::Array(Vec::new());
-            }
-            if let Some(entries) = config["skills"]["config"].as_array_mut() {
-                entries.extend(
-                    skills_off
-                        .iter()
-                        .map(|name| serde_json::json!({"name": name, "enabled": false})),
-                );
-            }
-        }
-        Ok(config.to_string())
     }
 
     /// The agent's working folder, resolved: where Auto mode lets a command read (ADR 0061).
@@ -280,20 +143,13 @@ impl PermissionPolicy {
         self.allow
     }
 
-    /// Whether to approve one `session/request_permission`, from the tool call it describes.
+    /// Whether to approve one permission request, from the tool call it describes.
     ///
-    /// The app's `kind` decides which switch applies: `fetch` is the web, `execute` a command,
+    /// The call's `kind` decides which switch applies: `fetch` is the web, `execute` a command,
     /// `edit` a file change, which must also land inside the agent's own folder. A request that
     /// names no kind, or a kind no switch covers (`delete`, `move`, `other`), is declined.
     #[must_use]
     pub fn approves(&self, request: &Value) -> bool {
-        if self
-            .servers
-            .iter()
-            .any(|server| crate::acp::asks_about_server_tool(request, server))
-        {
-            return true;
-        }
         let kind = request
             .pointer("/params/toolCall/kind")
             .and_then(Value::as_str)
@@ -305,6 +161,28 @@ impl PermissionPolicy {
             "read" | "search" => self.every_location(request, |path| self.readable(path)),
             _ => false,
         }
+    }
+
+    /// Whether the request names `LoomWatch`'s own key file. No agent may touch it, even with the
+    /// operator's answer: the key never leaves the daemon, and a newcomer could allow a card that
+    /// reads "Read keys.json" without knowing what it hands the model.
+    #[must_use]
+    pub fn reaches_key(&self, request: &Value) -> bool {
+        let Some(state) = &self.state_dir else {
+            return false;
+        };
+        let key = state.join(crate::ai::KEY_FILE);
+        request
+            .pointer("/params/toolCall/locations")
+            .and_then(Value::as_array)
+            .is_some_and(|locations| {
+                locations.iter().any(|location| {
+                    location
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| self.locate(path) == key)
+                })
+            })
     }
 
     /// True when the request names at least one path and `test` holds for every one of them.
@@ -340,7 +218,8 @@ impl PermissionPolicy {
     }
 
     /// Whether a command may write `path` without asking, as an `edit` request may: only with
-    /// `allow.edits`, inside the agent's folder, never its app's settings (ADR 0061).
+    /// `allow.edits`, inside the agent's folder, never the folders it is offered skills from
+    /// (ADR 0061).
     pub(crate) fn may_write(&self, path: &Path) -> bool {
         self.allow.edits && self.editable(&resolve(path))
     }
@@ -349,31 +228,45 @@ impl PermissionPolicy {
         path.strip_prefix(&self.folder).is_ok_and(|inside| {
             inside.components().next().is_some()
                 && inside.components().all(|component| match component {
-                    Component::Normal(name) => {
-                        !PROTECTED_FOLDERS.iter().any(|folder| name == *folder)
-                    }
+                    Component::Normal(name) => !is_protected(name),
                     _ => false,
                 })
         })
     }
 
     fn readable(&self, path: &Path) -> bool {
-        !secret(path)
+        !self.private(path)
             && (path.starts_with(&self.folder)
+                || self
+                    .skills_folder
+                    .as_ref()
+                    .is_some_and(|skills| path.starts_with(skills))
                 || self.readable.iter().any(|root| path.starts_with(root)))
     }
-}
 
-/// A file no agent reads without asking, wherever its folder or knowledge reaches: the keys the AI
-/// apps connected to `LoomWatch` use (ADR 0033), which sit in the teams folder an agent working at
-/// the team's own folder can reach (ADR 0048).
-fn secret(path: &Path) -> bool {
-    path.file_name()
-        .is_some_and(|name| name == "connections.json")
-        && path
-            .parent()
-            .and_then(Path::file_name)
-            .is_some_and(|name| name == ".loomwatch")
+    /// Whether `path` is `LoomWatch`'s own, which no agent reads without asking wherever its folder
+    /// or knowledge reaches: everything in the state folder but the skills. A file directly in the
+    /// state folder (the key, the database, the approvals) stays private even for an agent working
+    /// in the state folder itself.
+    fn private(&self, path: &Path) -> bool {
+        let Some(state) = &self.state_dir else {
+            return false;
+        };
+        if !path.starts_with(state) {
+            return false;
+        }
+        if let Some(skills) = &self.skills_folder
+            && let Ok(inside) = path.strip_prefix(skills)
+        {
+            // What the Skills page took away or is still unpacking stays LoomWatch's.
+            return inside
+                .components()
+                .next()
+                .is_some_and(|first| first.as_os_str().to_string_lossy().starts_with('.'));
+        }
+        path.parent() == Some(state.as_path())
+            || !(path.starts_with(&self.folder) && self.folder.starts_with(state))
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -413,9 +306,60 @@ pub struct PermissionRequest {
     /// Why Auto mode left this command to the operator, when the run is in Auto mode (ADR 0061).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto: Option<String>,
+    /// What the operator may change before allowing it ([`editable`]): the command to run or the
+    /// address to fetch, whole. Absent for anything else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<PermissionEdit>,
     /// What "Allow for this run" covers ([`grant_scope`]). Internal: the card shows `kind`.
     #[serde(skip)]
     pub scope: String,
+}
+
+/// The one argument of a request the operator may change before allowing it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionEdit {
+    /// `command` or `url`: the argument's name in the tool's input.
+    pub field: String,
+    /// Its whole value, uncut.
+    pub value: String,
+}
+
+/// The longest edited command or address, or answer in the agent's place, the operator may send.
+pub const MAX_ANSWER_CHARS: usize = 4000;
+
+/// What of `request` the operator may change before allowing it: a command's command line, or the
+/// address a fetch opens. An MCP tool's arguments are its own, so nothing of one is offered.
+#[must_use]
+pub fn editable(request: &Value) -> Option<PermissionEdit> {
+    if mcp_tool(request).is_some() {
+        return None;
+    }
+    let call = request.pointer("/params/toolCall")?;
+    let field = match call.pointer("/kind").and_then(Value::as_str)? {
+        "execute" => "command",
+        "fetch" => "url",
+        _ => return None,
+    };
+    let value = call
+        .pointer(&format!("/rawInput/{field}"))
+        .and_then(Value::as_str)?;
+    Some(PermissionEdit {
+        field: field.to_owned(),
+        value: value.to_owned(),
+    })
+}
+
+/// The tool input `request` asked for with its editable argument set to `text`, as the operator
+/// changed it. `None` when nothing of the request may be changed.
+#[must_use]
+pub fn edited_input(request: &Value, input: &Value, text: &str) -> Option<Value> {
+    let edit = editable(request)?;
+    let mut input = input.clone();
+    input
+        .as_object_mut()?
+        .insert(edit.field, Value::String(text.to_owned()));
+    Some(input)
 }
 
 /// What the operator chose.
@@ -430,10 +374,24 @@ pub enum PermissionDecision {
     /// ends: one answer for a team whose agents all reach for the same tool.
     AllowTeam,
     Deny,
+    /// This request only, as the operator changed it ([`PermissionEdit`]): the reply's text is the
+    /// new command or address.
+    Edit,
+    /// Not this request: the reply's text goes back to the agent as what the tool returned.
+    Answer,
+}
+
+/// The operator's answer to one request, as the waiting agent receives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionReply {
+    pub decision: PermissionDecision,
+    /// The changed command or address for [`PermissionDecision::Edit`], or the words for
+    /// [`PermissionDecision::Answer`].
+    pub text: Option<String>,
 }
 
 /// How a request the policy declined was finally answered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskOutcome {
     /// Nobody could be asked: a routine, a finished run, or no run at all. Declined.
     NotAsked,
@@ -442,17 +400,23 @@ pub enum AskOutcome {
     /// The run is in Auto mode and the command only reads or downloads (ADR 0061).
     AutoApproved,
     Answered(PermissionDecision),
+    /// Allowed once as the operator changed it: the new command or address.
+    Edited(String),
+    /// Not run: the operator answered in the agent's place with these words.
+    AnsweredInstead(String),
     /// Nobody answered within [`PERMISSION_WAIT`]. Declined.
     TimedOut,
 }
 
 impl AskOutcome {
+    /// Whether the tool runs. An answer in its place does not: the agent gets the words instead.
     #[must_use]
-    pub fn allows(self) -> bool {
+    pub fn allows(&self) -> bool {
         matches!(
             self,
             Self::AllowedForRun
                 | Self::AutoApproved
+                | Self::Edited(_)
                 | Self::Answered(
                     PermissionDecision::AllowOnce
                         | PermissionDecision::AllowRun
@@ -463,7 +427,7 @@ impl AskOutcome {
 
     /// The word the archive records for this outcome.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::NotAsked => "not_asked",
             Self::AllowedForRun => "allowed_for_run",
@@ -472,6 +436,8 @@ impl AskOutcome {
             Self::Answered(PermissionDecision::AllowRun) => "allow_run",
             Self::Answered(PermissionDecision::AllowTeam) => "allow_team",
             Self::Answered(PermissionDecision::Deny) => "deny",
+            Self::Answered(PermissionDecision::Edit) | Self::Edited(_) => "edited",
+            Self::Answered(PermissionDecision::Answer) | Self::AnsweredInstead(_) => "answered",
             Self::TimedOut => "timed_out",
         }
     }
@@ -560,7 +526,7 @@ pub fn describe(request: &Value) -> (String, String, Option<String>) {
 }
 
 /// Who an agent's declined requests are put to: the operator of the run it belongs to (ADR 0040).
-/// Part of [`crate::acp::ProcessSpec`], so a respawned stage keeps asking the same run.
+/// Part of [`crate::engine::ProcessSpec`], so a respawned stage keeps asking the same run.
 #[derive(Clone, Debug)]
 pub struct PermissionAsker {
     desk: crate::operator::OperatorDesk,
@@ -598,6 +564,26 @@ impl PermissionAsker {
         self.desk
             .registry()
             .allowed_for_run(&self.run_id, &self.agent, &grant_scope(request))
+    }
+
+    /// What this agent's next model call meets at its run's spool (ADR 0068): the same operator
+    /// who answers its requests is the one who adds money or finishes the run.
+    pub(crate) fn spend_gate(&self) -> crate::spend::Gate {
+        self.desk
+            .registry()
+            .spend_gate(&self.run_id, &self.agent, &self.name)
+    }
+
+    /// Adds what one of this agent's model calls cost to its run's spool.
+    pub(crate) fn count_spend(&self, usd: f64) {
+        self.desk
+            .registry()
+            .count_spend(&self.run_id, &self.agent, usd);
+    }
+
+    /// Why this agent's run may make no more model calls at all, once it may not.
+    pub(crate) fn spend_stopped(&self) -> Option<crate::spend::SpendStopped> {
+        self.desk.registry().spend_stopped(&self.run_id)
     }
 
     /// What Auto mode makes of `request` (ADR 0061), when this run is in Auto mode and the request
@@ -643,6 +629,7 @@ impl PermissionAsker {
             since: stamp(now),
             expires_at: stamp(now + wait),
             auto,
+            edit: editable(request),
         };
         let answer = self
             .desk
@@ -660,7 +647,7 @@ impl PermissionAsker {
 pub struct OpenRequest {
     asker: PermissionAsker,
     pub request: PermissionRequest,
-    answer: tokio::sync::oneshot::Receiver<PermissionDecision>,
+    answer: tokio::sync::oneshot::Receiver<PermissionReply>,
 }
 
 impl OpenRequest {
@@ -669,7 +656,15 @@ impl OpenRequest {
     /// runs while a line is being awaited.
     pub async fn wait(self) -> AskOutcome {
         let outcome = match tokio::time::timeout(PERMISSION_WAIT, self.answer).await {
-            Ok(Ok(decision)) => AskOutcome::Answered(decision),
+            Ok(Ok(PermissionReply {
+                decision: PermissionDecision::Edit,
+                text: Some(text),
+            })) => AskOutcome::Edited(text),
+            Ok(Ok(PermissionReply {
+                decision: PermissionDecision::Answer,
+                text: Some(text),
+            })) => AskOutcome::AnsweredInstead(text),
+            Ok(Ok(reply)) => AskOutcome::Answered(reply.decision),
             // The waiting room dropped the request: the run ended while it was open.
             Ok(Err(_)) => AskOutcome::NotAsked,
             Err(_) => AskOutcome::TimedOut,
@@ -706,7 +701,7 @@ pub(crate) fn resolve(path: &Path) -> PathBuf {
         missing.push(name);
         existing.pop();
     }
-    let mut resolved = std::fs::canonicalize(&existing).unwrap_or(existing);
+    let mut resolved = crate::platform::canonicalize(&existing).unwrap_or(existing);
     for name in missing.into_iter().rev() {
         resolved.push(name);
     }
@@ -724,10 +719,15 @@ mod tests {
     struct Scratch(PathBuf);
 
     impl Scratch {
+        /// A folder of its own per test. The clock alone is not enough: on a Mac it counts in
+        /// microseconds, so two tests starting together shared a folder, and the first to finish
+        /// deleted it under the other.
         fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let path = std::env::temp_dir().join(format!(
-                "loomwatch-permissions-{}-{}",
+                "loomwatch-permissions-{}-{}-{}",
                 std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .expect("clock")
@@ -776,6 +776,68 @@ mod tests {
         commands: true,
     };
 
+    /// A settings folder is protected however the edit spells it: Windows and macOS make
+    /// `.Agents` or `.agents.` the same folder as `.agents` when it does not exist yet.
+    #[test]
+    fn a_protected_folder_is_protected_in_any_case_and_with_trailing_dots() {
+        let scratch = Scratch::new();
+        let policy = policy(&scratch, ALL);
+        let agent = scratch.0.join("agent");
+        for folder in [
+            ".agents",
+            ".Agents",
+            ".CLAUDE",
+            ".agents.",
+            ".git. .",
+            ".LoomWatch",
+        ] {
+            assert!(
+                !policy.may_write(&agent.join(folder).join("settings.json")),
+                "{folder}"
+            );
+        }
+        assert!(policy.may_write(&agent.join("agents-notes").join("a.md")));
+    }
+
+    /// "Edit, then allow" is offered for a command line or a fetch's address, whole, and for
+    /// nothing else: not a file write, not an MCP tool, whatever kind it carries.
+    #[test]
+    fn only_a_command_or_an_address_may_be_changed_before_it_is_allowed() {
+        let ask = |kind: &str, input: Value| json!({"params": {"toolCall": {"kind": kind, "title": "Run", "rawInput": input}}});
+        let long = "echo ".to_owned() + &"x".repeat(DETAIL_CHARS * 2);
+        let command = ask("execute", json!({"command": long}));
+        assert_eq!(
+            editable(&command),
+            Some(PermissionEdit {
+                field: "command".to_owned(),
+                value: long.clone()
+            })
+        );
+        assert_eq!(
+            editable(&ask("fetch", json!({"url": "https://example.com"}))).map(|edit| edit.field),
+            Some("url".to_owned())
+        );
+        assert_eq!(
+            editable(&ask("edit", json!({"path": "a.md", "content": "x"}))),
+            None
+        );
+        assert_eq!(
+            editable(&ask(
+                "execute",
+                json!({"server": "notion", "tool": "search", "command": "x"})
+            )),
+            None
+        );
+        assert_eq!(
+            edited_input(
+                &command,
+                &json!({"command": long, "timeout_seconds": 5}),
+                "ls"
+            ),
+            Some(json!({"command": "ls", "timeout_seconds": 5}))
+        );
+    }
+
     /// ADR 0040: "Allow for this run" covers a kind for the app's own tools, but exactly one MCP
     /// tool, however the app labels it. Codex calls every MCP tool `execute`, so allowing a tool for
     /// the run must not allow every command, and no switch is offered for it.
@@ -800,56 +862,10 @@ mod tests {
         assert_eq!(grant_scope(&ask(json!({"title": "?"}))), "other");
         assert_ne!(grant_scope(&codex), grant_scope(&command));
     }
-    /// ADR 0044: the tools a run agent starts without are the ones that reach past the run, and
-    /// none a team's work needs. Claude Code 2.1.286 published an artifact to the operator's
-    /// claude.ai account without asking; the rest were in the same session's tool list.
-    #[test]
-    fn a_run_agent_starts_without_outward_tools_and_keeps_its_working_ones() {
-        let meta = PermissionPolicy::session_meta();
-        let withheld: Vec<&str> = meta
-            .pointer("/claudeCode/options/disallowedTools")
-            .and_then(Value::as_array)
-            .expect("disallowedTools")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect();
-        for outward in [
-            "Artifact",
-            "ArtifactComments",
-            "ArtifactData",
-            "DesignSync",
-            "RemoteTrigger",
-            "CronCreate",
-            "ScheduleWakeup",
-            "PushNotification",
-            "SendMessage",
-        ] {
-            assert!(withheld.contains(&outward), "{outward} is withheld");
-        }
-        for working in [
-            "Read",
-            "Write",
-            "Edit",
-            "Glob",
-            "Grep",
-            "Bash",
-            "WebSearch",
-            "WebFetch",
-            "Task",
-            "Skill",
-            "ToolSearch",
-            "TodoWrite",
-            "TaskCreate",
-        ] {
-            assert!(!withheld.contains(&working), "{working} is kept");
-        }
-    }
 
-    /// ADR 0060: what the operator turned off is withheld from the agent's app, by the names
-    /// Claude Code blocks (live-checked on 2.1.286: `mcp__claude_ai_Notion` left no Notion tool
-    /// and Gmail's in place; `Skill(notebooklm)` was "blocked by permission rules"). A skill wired
-    /// to the agent, or a tool `LoomWatch` serves it, is never caught: wiring is how a skill is
-    /// shared across apps.
+    /// ADR 0060: a skill the operator turned off is left out of the ones the agent is offered. One
+    /// wired to the agent, or a tool `LoomWatch` serves it, is never caught: wiring is how it is
+    /// delivered.
     #[test]
     fn a_turned_off_skill_or_tool_is_withheld_but_never_one_the_canvas_gives() {
         let off = |kind, name: &str| TurnedOff {
@@ -872,103 +888,11 @@ mod tests {
             &[
                 off(CapabilityKind::Skill, "notebooklm"),
                 off(CapabilityKind::Skill, "canvas-design"),
-                off(CapabilityKind::Tool, "claude.ai Notion"),
                 off(CapabilityKind::Tool, "notion-local"),
-                off(CapabilityKind::Tool, "Agent Memory"),
             ],
             &[wired],
-            |name| match name {
-                "Agent Memory" => vec!["agentmemory".to_owned()],
-                other => vec![other.to_owned()],
-            },
-        );
-        let meta = policy.agent_meta();
-        let withheld: Vec<&str> = meta
-            .pointer("/claudeCode/options/disallowedTools")
-            .and_then(Value::as_array)
-            .expect("disallowedTools")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect();
-        assert!(withheld.contains(&"Skill(notebooklm)"));
-        assert!(withheld.contains(&"mcp__claude_ai_Notion"));
-        assert!(
-            withheld.contains(&"mcp__agentmemory"),
-            "a tool is withheld by its server name"
-        );
-        assert!(withheld.contains(&"Artifact"), "ADR 0044's list stays");
-        assert!(
-            !withheld.contains(&"Skill(canvas-design)"),
-            "a wired skill is delivered"
-        );
-        assert!(
-            !withheld
-                .iter()
-                .any(|tool| tool.starts_with("mcp__notion-local")),
-            "a served tool is delivered"
         );
         assert_eq!(policy.turned_off_skills(), vec!["notebooklm".to_owned()]);
-        assert_eq!(
-            PermissionPolicy::new(AgentAllow::default(), Path::new("/work"), [], []).agent_meta(),
-            PermissionPolicy::session_meta(),
-            "nothing turned off, nothing added"
-        );
-    }
-
-    /// ADR 0060: a Codex agent's turned-off skills go into `skills.config` by name, beside any the
-    /// team file already set. Probed on Codex 0.154.0: `{name = "herdr", enabled = false}` turned
-    /// off `herdr` and nothing else.
-    #[test]
-    fn a_codex_agent_turns_off_skills_by_name_beside_its_own_skill_config() {
-        let config: Value = serde_json::from_str(
-            &PermissionPolicy::codex_config(
-                Some(r#"{"skills":{"config":[{"path":"/x/SKILL.md","enabled":false}]}}"#),
-                &["herdr".to_owned()],
-            )
-            .expect("config"),
-        )
-        .expect("json");
-        assert_eq!(
-            config["skills"]["config"],
-            json!([{"path": "/x/SKILL.md", "enabled": false}, {"name": "herdr", "enabled": false}])
-        );
-        let untouched: Value =
-            serde_json::from_str(&PermissionPolicy::codex_config(None, &[]).expect("config"))
-                .expect("json");
-        assert!(untouched.get("skills").is_none());
-    }
-
-    /// ADR 0047: a Codex run agent starts with its plugins and apps off, and whatever config the
-    /// team file already gives Codex survives beside them.
-    #[test]
-    fn a_codex_run_agent_starts_without_plugins_or_apps_and_keeps_its_own_config() {
-        let fresh: Value =
-            serde_json::from_str(&PermissionPolicy::codex_config(None, &[]).expect("config"))
-                .expect("json");
-        assert_eq!(
-            fresh,
-            json!({"features": {"plugins": false, "apps": false}})
-        );
-
-        let kept: Value = serde_json::from_str(
-            &PermissionPolicy::codex_config(
-                Some(r#"{"model_provider":"gateway","features":{"js_repl":true,"plugins":true}}"#),
-                &[],
-            )
-            .expect("config"),
-        )
-        .expect("json");
-        assert_eq!(
-            kept,
-            json!({"model_provider": "gateway", "features": {"js_repl": true, "plugins": false, "apps": false}})
-        );
-
-        for broken in ["", "[]", "not json", r#""features""#] {
-            assert!(
-                PermissionPolicy::codex_config(Some(broken), &[]).is_err(),
-                "{broken:?} is refused"
-            );
-        }
     }
 
     #[test]
@@ -1046,6 +970,50 @@ mod tests {
         assert!(!edits.approves(&request(Some("edit"), "Edit", &[])));
     }
 
+    /// Windows paths are judged where Windows puts them: either separator, a drive letter or a
+    /// folder name in another case, `..\` out of the folder, a path from the root of the folder's
+    /// own drive, and another drive with or without its root.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_are_judged_where_windows_puts_them() {
+        let scratch = Scratch::new();
+        let edits = policy(&scratch, ALL);
+        let agent = resolve(&scratch.0.join("agent"));
+        let folder = agent.to_string_lossy().into_owned();
+        let edit = |path: &str| edits.approves(&request(Some("edit"), "Write", &[path]));
+        assert!(edit(&format!(r"{folder}\draft.md")), "{folder}");
+        assert!(
+            edit(&format!("{}/draft.md", folder.replace('\\', "/"))),
+            "forward slashes"
+        );
+        assert!(edit(r"sub\notes.md"), "relative, with backslashes");
+        let lower_drive = format!("{}{}", folder[..1].to_ascii_lowercase(), &folder[1..]);
+        assert!(edit(&format!(r"{lower_drive}\draft.md")), "{lower_drive}");
+        let upper = folder.to_ascii_uppercase();
+        assert!(edit(&format!(r"{upper}\draft.md")), "{upper}");
+        assert!(!edit(&format!(r"{folder}\..\team.yaml")));
+        assert!(!edit(r"..\team.yaml"));
+        assert!(!edit(r"sub\..\..\team.yaml"));
+        assert!(
+            !edit(r"\Windows\System32\drivers\etc\hosts"),
+            "the root of the folder's own drive"
+        );
+        let other = if folder.starts_with(['Z', 'z']) {
+            "Y:"
+        } else {
+            "Z:"
+        };
+        assert!(!edit(&format!(r"{other}\agent\draft.md")));
+        assert!(
+            !edit(&format!("{other}draft.md")),
+            "another drive's own folder"
+        );
+        assert!(!edit(&format!(r"{folder}\.CLAUDE\settings.json")));
+        assert!(!edit(&format!(r"{folder}\.git.\config")));
+        assert!(!edits.may_read(Path::new(r"C:\Windows\win.ini")));
+        assert!(edits.may_read(Path::new(&format!(r"{upper}\draft.md"))));
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_link_inside_the_folder_is_judged_by_where_it_points() {
@@ -1062,17 +1030,9 @@ mod tests {
     }
 
     #[test]
-    fn connected_servers_and_knowledge_are_approved_without_any_switch() {
+    fn connected_knowledge_is_read_without_any_switch() {
         let scratch = Scratch::new();
         let none = policy(&scratch, AgentAllow::default());
-        for title in [
-            "mcp__loomwatch-team-bus__handoff",
-            "dispatch (loomwatch-team-bus MCP Server)",
-            "agentmemory.search",
-        ] {
-            assert!(none.approves(&request(None, title, &[])), "{title}");
-        }
-        assert!(!none.approves(&request(None, "mcp__someone-else__dispatch", &[])));
         let brief = scratch.0.join("notes/brief.md");
         assert!(none.approves(&request(
             Some("read"),
@@ -1082,24 +1042,51 @@ mod tests {
         assert!(!none.approves(&request(Some("read"), "Read hosts", &["/etc/hosts"])));
     }
 
-    /// ADR 0048: an agent whose folder is the teams folder reads its files without asking, but not
-    /// the keys connected apps use, which `LoomWatch` keeps there.
+    /// `LoomWatch`'s own files are never read without asking, wherever an agent's folder or
+    /// knowledge reaches: the key, the database, the approvals. The skills in its skills folder are
+    /// read by every agent.
     #[test]
-    fn the_connection_keys_are_never_read_without_asking() {
+    fn loomwatchs_own_files_are_never_read_without_asking() {
         let scratch = Scratch::new();
-        let all = policy(&scratch, ALL);
-        let keys = scratch.0.join("agent/.loomwatch/connections.json");
-        let notes = scratch.0.join("agent/notes.md");
-        assert!(!all.approves(&request(
+        let state = scratch.0.join("state");
+        fs::create_dir_all(state.join("skills/notes")).expect("skills");
+        let at = |relative: &str| scratch.0.join(relative).to_string_lossy().into_owned();
+        let read = |policy: &PermissionPolicy, path: &str| {
+            policy.approves(&request(Some("read"), "Read", &[path]))
+        };
+        let reaching =
+            PermissionPolicy::new(ALL, &scratch.0.join("agent"), [scratch.0.clone()], [])
+                .keeping_private(&state);
+        assert!(!read(&reaching, &at("state/keys.json")));
+        assert!(!read(&reaching, &at("state/loomwatch.db")));
+        assert!(!read(&reaching, &at("state/models/cache.json")));
+        assert!(read(&reaching, &at("state/skills/notes/SKILL.md")));
+        assert!(!read(&reaching, &at("state/skills/.removed/old/SKILL.md")));
+        assert!(!read(
+            &reaching,
+            &at("state/skills/.staging/inspect-1/SKILL.md")
+        ));
+        assert!(read(&reaching, &at("agent/notes.md")));
+        // Its instructions list the skills in LoomWatch's folder, so it reads them wherever it works,
+        // and still nothing else there.
+        let elsewhere =
+            PermissionPolicy::new(ALL, &scratch.0.join("agent"), [], []).keeping_private(&state);
+        assert!(read(&elsewhere, &at("state/skills/notes/SKILL.md")));
+        assert!(!read(&elsewhere, &at("state/skills/.removed/old/SKILL.md")));
+        assert!(!read(&elsewhere, &at("state/keys.json")));
+        // The key file is never put to the operator at all.
+        let key_read = request(Some("read"), "Read keys.json", &[&at("state/keys.json")]);
+        assert!(elsewhere.reaches_key(&key_read));
+        assert!(!elsewhere.reaches_key(&request(
             Some("read"),
-            "Read connections.json",
-            &[&keys.to_string_lossy()]
+            "Read",
+            &[&at("state/skills/notes/SKILL.md")]
         )));
-        assert!(all.approves(&request(
-            Some("read"),
-            "Read notes.md",
-            &[&notes.to_string_lossy()]
-        )));
+        // An agent working inside the state folder keeps its own folder, never the files beside it.
+        let inside =
+            PermissionPolicy::new(ALL, &state.join("work"), [], []).keeping_private(&state);
+        assert!(read(&inside, &at("state/work/draft.md")));
+        assert!(!read(&inside, &at("state/keys.json")));
     }
 
     #[test]

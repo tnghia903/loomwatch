@@ -70,12 +70,12 @@ describe('InstructionUpdateBar', () => {
     expect(onKeepAll).toHaveBeenCalledTimes(1)
   })
 
-  it('says which instructions still name it and offers a rewrite by the Ask app, or none without one', () => {
+  it('says which instructions still name it and offers a rewrite by Ask’s model, or none without one', () => {
     const onRewrite = vi.fn()
     const stale = [update({ state: 'stale', after: null }), update({ agentId: 'plan', state: 'stale', after: null })]
-    const { rerender } = render(<InstructionUpdateBar entries={stale} names={names} onReview={vi.fn()} onKeepAll={vi.fn()} onRewrite={onRewrite} rewriteWith="Claude Code" />)
+    const { rerender } = render(<InstructionUpdateBar entries={stale} names={names} onReview={vi.fn()} onKeepAll={vi.fn()} onRewrite={onRewrite} rewriteWith="Claude Sonnet 5.5" />)
     expect(screen.getByRole('status')).toHaveTextContent('The instructions of 2 agents still name the Notion page “EKIS — SUTD Final Project Hub”, which you removed.')
-    fireEvent.click(screen.getByRole('button', { name: 'Rewrite with Claude Code' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Rewrite with Claude Sonnet 5.5' }))
     expect(onRewrite).toHaveBeenCalledTimes(1)
 
     rerender(<InstructionUpdateBar entries={stale} names={names} onReview={vi.fn()} onKeepAll={vi.fn()} />)

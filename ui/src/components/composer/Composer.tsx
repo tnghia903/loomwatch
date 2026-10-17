@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { Markdown } from '../ui/Markdown'
 
+import { keys } from '../../lib/platform'
 import type { WaitingOn } from '../../lib/runs/client'
 import type { ExecutionMode } from '../../lib/team-file/useTeamDocument'
 import type { RunPhase } from '../../lib/watch/events'
@@ -149,7 +150,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
   if (replyTo) {
     action = <>
       <button type="button" className="btn" onClick={() => setReplyTarget('')} disabled={replySending}>Cancel reply</button>
-      <button type="button" className="btn btn-primary" disabled={replySending || !value.trim()} onClick={() => onReply?.(replyTo.id)}>{replySending ? 'Sending…' : 'Reply'} <kbd>↵</kbd></button>
+      <button type="button" className="btn btn-primary" disabled={replySending || !value.trim()} onClick={() => onReply?.(replyTo.id)}>{replySending ? 'Sending…' : 'Reply'} <kbd>{keys('↵')}</kbd></button>
     </>
   } else if (answering) {
     // A review stop can be approved as it stands: requiring a typed comment before "Continue" made
@@ -157,7 +158,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     const from = answering.waiting.handoverFrom
     action = <>
       {answering.waiting.sendBackAvailable && from && <button type="button" className="btn" disabled={answering.sending || !value.trim()} title={value.trim() ? undefined : 'Type what should change first.'} onClick={() => onAnswer?.(from)}>Send back to {agentNames?.get(from) ?? from}</button>}
-      <button type="button" className="btn btn-primary" disabled={answering.sending || (!reviewing && !value.trim())} onClick={() => onAnswer?.()}>{answering.sending ? 'Sending…' : reviewing ? (value.trim() ? 'Continue' : 'Approve') : 'Reply'}{(!reviewing || value.trim()) && <kbd>↵</kbd>}</button>
+      <button type="button" className="btn btn-primary" disabled={answering.sending || (!reviewing && !value.trim())} onClick={() => onAnswer?.()}>{answering.sending ? 'Sending…' : reviewing ? (value.trim() ? 'Continue' : 'Approve') : 'Reply'}{(!reviewing || value.trim()) && <kbd>{keys('↵')}</kbd>}</button>
       <button type="button" className="btn btn-danger" onClick={onStop}>Stop</button>
     </>
   } else if (busy) {
@@ -170,7 +171,7 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     action = <>
       <button type="button" className="btn" onClick={onRetry} title="Run the original request again from scratch">Retry</button>
       {canFollowUp
-        ? <button type="button" className="btn btn-primary" onClick={followUp} disabled={!value.trim()} title={value.trim() ? undefined : 'Type what to change first.'}>{dirty ? 'Save & follow up' : 'Follow up'} <kbd>↵</kbd></button>
+        ? <button type="button" className="btn btn-primary" onClick={followUp} disabled={!value.trim()} title={value.trim() ? undefined : 'Type what to change first.'}>{dirty ? 'Save & follow up' : 'Follow up'} <kbd>{keys('↵')}</kbd></button>
         : <button type="button" className="btn btn-primary" onClick={newRun} disabled={!value.trim()} title={value.trim() ? undefined : 'Type a new goal first.'}>New run</button>}
     </>
   } else if (state.kind === 'saving') {
@@ -180,21 +181,21 @@ export function Composer({ compact = false, mode, stepCount, anomalyCount = 0, s
     // steps, and §1.4 requires they stay legible as two.
     action = <button type="button" className="btn" disabled>Starting…</button>
   } else if (state.kind === 'dirty') {
-    action = <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSubmit}>Save &amp; run <kbd>↵</kbd></button>
+    action = <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSubmit}>Save &amp; run <kbd>{keys('↵')}</kbd></button>
   } else if (state.kind === 'blocked' || state.kind === 'unavailable') {
     action = <>
       {state.kind === 'blocked' && state.action && <button type="button" className="btn" onClick={state.action.run}>{state.action.label}</button>}
-      <button type="button" className="btn btn-primary" disabled title={state.reason}>Run <kbd>↵</kbd></button>
+      <button type="button" className="btn btn-primary" disabled title={state.reason}>Run <kbd>{keys('↵')}</kbd></button>
     </>
   } else {
-    action = <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSubmit} title={canSubmit ? undefined : 'Type what the team should do.'}>Run <kbd>↵</kbd></button>
+    action = <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSubmit} title={canSubmit ? undefined : 'Type what the team should do.'}>Run <kbd>{keys('↵')}</kbd></button>
   }
 
   let noteNode: ReactNode = note
   let noteClass = ''
   if (!noteNode) {
     if (replyTo) noteNode = `Reply to ${replyTo.name}. This is another turn in its current session.`
-    else if (answering) noteNode = answering.waiting.kind === 'review_stop' ? 'Your turn: approve to let the team continue, or type what should change. Anything you type is passed on as your direction.' : answering.waiting.park === 'released' ? `Reply to ${answering.waiting.name}. Its session was released; your answer starts a new run from its checkpoint.` : `Reply to ${answering.waiting.name}. Your answer arrives as its next turn.`
+    else if (answering) noteNode = answering.waiting.kind === 'review_stop' ? 'Your turn: approve to let the team continue, or type what should change. Anything you type is passed on as your direction.' : `Reply to ${answering.waiting.name}. Your answer arrives as its next turn.`
     else if (busy) noteNode = 'Connection loss never starts, restarts or cancels a run.'
     // One line explaining the chosen target, because "from Writer" and "whole pipeline" cost
     // different amounts and the operator is choosing between them.

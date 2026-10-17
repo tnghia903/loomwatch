@@ -313,6 +313,12 @@ export interface Evidence {
   locations: { path: string; line?: number }[]
   /** For delegations: the agent the call targeted. */
   target: string | null
+  /**
+   * A call that asked permission and was not let through: `denied`, or `answered` when the
+   * operator answered in the agent's place. Either way it never ran, whatever status the call
+   * closed with, and it is told as that rather than as a failure or as work done.
+   */
+  declined?: 'denied' | 'answered'
   events: RunEvent[]
 }
 
@@ -944,6 +950,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
             last.events.push(event)
             const name = object(chosen) && typeof chosen.name === 'string' ? chosen.name : String(outcome.optionId ?? '')
             last.detail = allowed ? `answered ${String(outcome.optionId ?? '')}` : `declined (${selected ? name : String(outcome.outcome)})`
+            // The call it asked about never ran: say so on the call too.
+            const call = !allowed && last.callId ? calls.get(`${agent.id}:${last.callId}`) : undefined
+            if (call) call.declined = outcome.optionId === 'answer' ? 'answered' : 'denied'
           }
         }
         break
@@ -1075,6 +1084,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           // for its answer any more. Nothing went wrong.
           agent.task = interrupted.get(agent.id) ?? 'Stopped for your note'
           interrupted.delete(agent.id)
+        } else if (agent.stopReason === 'spend_limit') {
+          // The run, or this agent, reached what it may spend (ADR 0068), and you chose to stop
+          // there, or a routine had nobody to ask. The receipt says which; nothing went wrong.
+          agent.task = 'Stopped at its spending limit'
         } else if (agent.stopReason !== 'end_turn') {
           attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: `Turn ended: ${agent.stopReason}` })
           agent.task = `Turn ended: ${agent.stopReason}`

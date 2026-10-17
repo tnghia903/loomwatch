@@ -1,28 +1,21 @@
-//! Authenticated HTTP MCP Team Bus used by ACP harnesses for structured delegation.
+//! The Team Bus: the tools a team's agents delegate, ask and remember with. Each agent's calls
+//! arrive directly through its [`TeamBusConnection`], under a token that says which agent it is.
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use axum::extract::State;
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::post;
-use axum::{Json, Router};
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify, RwLock, Semaphore, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::acp::{AcpProcess, EventLog, ProcessSpec, TeamSessionContext};
 use crate::archive::EventArchive;
 use crate::config::{AgentConfig, TeamConfig};
+use crate::engine::{AgentRun, EventLog, ProcessSpec, TeamSessionContext};
 use crate::memory::{
     CheckpointArtifact, CheckpointWrite, NoteKind, NoteScope, NoteWrite, NotebookSelection,
     TeamMemory,
@@ -30,11 +23,9 @@ use crate::memory::{
 use crate::operator::LiveTurn;
 use crate::{EventKind, SessionOutcome, resolve_cwd};
 
-const SERVER_NAME: &str = "loomwatch-team-bus";
 /// The `turn_interrupted` reason when a kept-alive agent's answer is stopped because the agent
 /// that asked ended its turn first.
 pub(crate) const ASK_WITHDRAWN: &str = "ask_withdrawn";
-const MCP_PROTOCOL_VERSION: &str = "2025-03-26";
 
 /// Which execution mode is driving this run — see ARCHITECTURE.md §4.
 ///
@@ -63,13 +54,10 @@ struct TeamBusState {
     archive: EventArchive,
     exit_timeout: Duration,
     mode: TeamBusMode,
-    address: SocketAddr,
     tokens: RwLock<BTreeMap<String, AgentSession>>,
     statuses: RwLock<BTreeMap<String, String>>,
     dispatch_slots: Arc<Semaphore>,
     tasks: Mutex<Vec<JoinHandle<Result<()>>>>,
-    shutdown: Mutex<Option<oneshot::Sender<()>>>,
-    server: Mutex<Option<JoinHandle<std::io::Result<()>>>>,
     /// Pipeline stages that have finished their own turn but stay answerable to the stage after
     /// them. `ask` prefers these: a live session answers from the context it already built, where
     /// a freshly spawned one knows only its role and the question.
@@ -157,7 +145,7 @@ impl Drop for TeamBusTeardown {
     }
 }
 
-/// Per-agent credentials and endpoint details injected into ACP `session/new`.
+/// One agent's way into the bus: its tools, called as that agent.
 #[derive(Clone)]
 pub(crate) struct TeamBusConnection {
     bus: TeamBus,
@@ -165,7 +153,7 @@ pub(crate) struct TeamBusConnection {
 }
 
 impl TeamBus {
-    pub(crate) async fn start(
+    pub(crate) fn start(
         team: Arc<TeamConfig>,
         team_path: &Path,
         archive: EventArchive,
@@ -174,10 +162,6 @@ impl TeamBus {
         memory: Arc<TeamMemory>,
         operator: Option<crate::operator::OperatorDesk>,
     ) -> Result<Self> {
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-            .await
-            .context("failed to bind Team Bus HTTP listener")?;
-        let address = listener.local_addr()?;
         let statuses = team
             .agents
             .iter()
@@ -192,7 +176,6 @@ impl TeamBus {
                 Semaphore::MAX_PERMITS
             );
         }
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let state = Arc::new(TeamBusState {
             team,
             team_path: team_path.to_path_buf(),
@@ -200,13 +183,10 @@ impl TeamBus {
             archive,
             exit_timeout,
             mode,
-            address,
             tokens: RwLock::new(BTreeMap::new()),
             statuses: RwLock::new(statuses),
             dispatch_slots: Arc::new(Semaphore::new(dispatch_limit)),
             tasks: Mutex::new(Vec::new()),
-            shutdown: Mutex::new(Some(shutdown_tx)),
-            server: Mutex::new(None),
             live: Mutex::new(BTreeMap::new()),
             operator,
             pending_questions: Mutex::new(BTreeMap::new()),
@@ -216,17 +196,7 @@ impl TeamBus {
             delegated: std::sync::Mutex::new(BTreeMap::new()),
             delegated_changed: Notify::new(),
         });
-        let bus = Self { state };
-        let app = mcp_router(bus.clone());
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.await;
-                })
-                .await
-        });
-        *bus.state.server.lock().await = Some(server);
-        Ok(bus)
+        Ok(Self { state })
     }
 
     pub(crate) async fn connection(&self, agent_id: &str) -> Result<TeamBusConnection> {
@@ -257,13 +227,12 @@ impl TeamBus {
     pub(crate) async fn keep_alive(
         &self,
         agent_id: &str,
-        mut process: AcpProcess,
-        mut recorder: crate::acp::Recorder,
+        mut process: AgentRun,
+        mut recorder: crate::engine::Recorder,
         last_reply: String,
     ) -> LiveAgent {
         let (sender, mut requests) = mpsc::channel::<LiveTurn>(4);
         let archive = self.state.archive.clone();
-        let exit_timeout = self.state.exit_timeout;
         let run_id = process.event_log().map(|log| log.session_id().to_owned());
         let addressee = agent_id.to_owned();
         let task = tokio::spawn(async move {
@@ -308,7 +277,6 @@ impl TeamBus {
             }
             let context = TeamSessionContext {
                 archive: &archive,
-                exit_timeout,
                 bus: None,
                 event_log: None,
                 // The packet and the prompt record were archived when this session opened; a
@@ -473,37 +441,20 @@ impl TeamBus {
         }
     }
 
-    pub(crate) async fn shutdown(&self) -> Result<()> {
-        if let Some(shutdown) = self.state.shutdown.lock().await.take() {
-            let _ = shutdown.send(());
-        }
-        if let Some(server) = self.state.server.lock().await.take() {
-            server.await.context("Team Bus server task panicked")??;
-        }
-        Ok(())
-    }
-
     /// A guard that tears the bus down if the run future owning it is dropped before it
     /// reaches [`shutdown`](Self::shutdown) — which is exactly what happens when the run
     /// task is aborted by `POST /api/runs/{id}/cancel`.
     ///
     /// Delegated agents run as detached tasks that each hold a clone of this bus, so
     /// neither dropping their `JoinHandle`s nor a `Drop` on the shared state would ever
-    /// fire. The guard instead aborts every delegated task (killing its ACP child through
-    /// `kill_on_drop`) and the MCP server task, so a cancelled run leaves no helper
-    /// processes or listeners behind. After a normal `shutdown` it is a no-op.
+    /// fire. The guard instead aborts every delegated task, so a cancelled run leaves no helper
+    /// working. After [`wait_for_tasks`](Self::wait_for_tasks) it is a no-op.
     pub(crate) fn abort_on_drop(&self) -> TeamBusTeardown {
         TeamBusTeardown { bus: self.clone() }
     }
 
-    /// Abort the MCP server and every delegated agent task without waiting for them.
+    /// Abort every delegated agent task without waiting for them.
     async fn abort_background(&self) {
-        if let Some(shutdown) = self.state.shutdown.lock().await.take() {
-            let _ = shutdown.send(());
-        }
-        if let Some(server) = self.state.server.lock().await.take() {
-            server.abort();
-        }
         for task in self.state.tasks.lock().await.drain(..) {
             task.abort();
         }
@@ -524,38 +475,6 @@ impl TeamBus {
         resolve_agent(&self.state.team.agents, reference)
     }
 
-    async fn invoke(&self, token: &str, request: &Value) -> Value {
-        let id = request.get("id").cloned().unwrap_or(Value::Null);
-        let method = request.get("method").and_then(Value::as_str);
-        match method {
-            Some("initialize") => rpc_result(
-                &id,
-                &json!({
-                    "protocolVersion": MCP_PROTOCOL_VERSION,
-                    "capabilities": {"tools": {"listChanged": false}},
-                    "serverInfo": {"name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION")}
-                }),
-            ),
-            Some("ping") => rpc_result(&id, &json!({})),
-            Some("tools/list") => rpc_result(
-                &id,
-                &json!({
-                    "tools": tool_definitions(
-                        self.state.mode,
-                        self.state.memory.notebook_enabled,
-                        self.state.operator.is_some(),
-                    )
-                }),
-            ),
-            Some("tools/call") => match self.call_tool(token, request).await {
-                Ok(result) => rpc_result(&id, &result),
-                Err(error) => rpc_result(&id, &tool_error(&format!("{error:#}"))),
-            },
-            Some(other) => rpc_error(&id, -32601, &format!("method {other:?} not found")),
-            None => rpc_error(&id, -32600, "request omitted method"),
-        }
-    }
-
     async fn call_tool(&self, token: &str, request: &Value) -> Result<Value> {
         let session = self
             .state
@@ -568,7 +487,7 @@ impl TeamBus {
         let event_log = session
             .event_log
             .clone()
-            .context("Team Bus session is not attached to an ACP run")?;
+            .context("Team Bus session is not attached to a run")?;
         let name = request
             .pointer("/params/name")
             .and_then(Value::as_str)
@@ -743,14 +662,19 @@ impl TeamBus {
                     let mut context = self.guard_delegation(session, &target)?;
                     context.answering = true;
                     started.store(true, Ordering::SeqCst);
-                    let outcome = self
+                    let helped = self
                         .run_agent(&target, &question, event_log.clone(), context)
                         .await?;
-                    Ok(json!({
+                    let mut answer = json!({
                         "agent": target,
-                        "reply": outcome.reply,
-                        "sessionId": outcome.session_id
-                    }))
+                        "reply": helped.outcome.reply,
+                        "sessionId": helped.outcome.session_id
+                    });
+                    // Its reply says why it stopped; it is not an answer to the question.
+                    if helped.stopped {
+                        answer["stopped"] = json!("spend_limit");
+                    }
+                    Ok(answer)
                 };
                 // Withdrawn when the asker's turn ends first: the answer could reach nobody, so
                 // a kept-alive agent's turn is stopped and a helper started for it is ended.
@@ -828,12 +752,11 @@ impl TeamBus {
     /// `ask_user`: record a question for the person at the keyboard, and **return immediately**.
     ///
     /// This is the one tool on the bus whose whole design is what it does *not* do. A call that
-    /// waited for a person would sit inside `session/prompt` until [`crate::acp`]'s ten-minute
-    /// request timeout fired, and the turn — the agent's work, not just the question — would be
-    /// cancelled. So nothing waits: the question is recorded, the run record says it is waiting,
-    /// the agent is told in the result to end its turn, and the answer arrives as the *next*
-    /// `session/prompt` on the same session (reopened with `session/load` where the harness allows
-    /// it). Nothing is in flight while the operator thinks, so nothing can time out.
+    /// waited for a person would hold the agent's turn open for as long as they think, and if it
+    /// timed out the turn — the agent's work, not just the question — would be lost. So nothing
+    /// waits: the question is recorded, the run record says it is waiting, the agent is told in the
+    /// result to end its turn, and the answer arrives as the *next* turn of the same session, parked
+    /// meanwhile. Nothing is in flight while the operator thinks, so nothing can time out.
     ///
     /// The refusal of a second open question is the storage's, not this function's: `open` writes
     /// against a partial unique index, so two calls racing from one agent cannot both be recorded.
@@ -1134,7 +1057,7 @@ impl TeamBus {
                 .run_agent(&agent_id, &prompt, event_log.clone(), context)
                 .await;
             let returned = match &outcome {
-                Ok(outcome) => Ok(outcome.reply.clone()),
+                Ok(helped) => Ok(helped.outcome.reply.clone()),
                 Err(error) => Err(format!("{error:#}")),
             };
             bus.record_delegated(&event_log, &caller, &agent_id, mode, &prompt, &returned)
@@ -1193,17 +1116,37 @@ impl TeamBus {
         prompt: &str,
         event_log: EventLog,
         context: DelegationContext,
-    ) -> Result<crate::SessionOutcome> {
+    ) -> Result<Helped> {
         let agent = self.agent(agent_id)?;
         self.state
             .statuses
             .write()
             .await
             .insert(agent.id.clone(), "starting".to_owned());
-        let result = self
+        let run_id = event_log.session_id().to_owned();
+        let result = match self
             .run_agent_inner(&agent, prompt, event_log, context)
             .await
-            .with_context(|| format!("delegated agent {:?} failed", agent.id));
+        {
+            Ok(outcome) => Ok(self.say_if_stopped_at_its_guard(&run_id, &agent, outcome)),
+            // The run stopped at its spool while this helper waited there (ADR 0068): the
+            // operator finished it, or a scheduled run had nobody to ask. The helper did not fail,
+            // so what it comes back with says why it stopped instead of reading as a failure.
+            Err(error) => match crate::spend::SpendStopped::of(&error) {
+                Some(stopped) => Ok(Helped {
+                    outcome: crate::SessionOutcome {
+                        session_id: run_id,
+                        event_count: 0,
+                        exit_code: 0,
+                        reply: format!("({} stopped here. {stopped})", shown_name(&agent)),
+                    },
+                    stopped: true,
+                }),
+                None => {
+                    Err(error).with_context(|| format!("delegated agent {:?} failed", agent.id))
+                }
+            },
+        };
         self.state.statuses.write().await.insert(
             agent.id,
             if result.is_ok() {
@@ -1214,6 +1157,45 @@ impl TeamBus {
             .to_owned(),
         );
         result
+    }
+
+    /// A helper the operator stopped at its own spending guard (ADR 0068) ends its turn with what it
+    /// wrote, often nothing. Whoever reads what it came back with, the agent that handed it the
+    /// work and the run's record, is told why, and that it does no more work in this run, so a lead
+    /// neither takes an empty reply for findings nor hands it the work again.
+    fn say_if_stopped_at_its_guard(
+        &self,
+        run_id: &str,
+        agent: &AgentConfig,
+        mut outcome: crate::SessionOutcome,
+    ) -> Helped {
+        let Some(limit) = self
+            .state
+            .operator
+            .as_ref()
+            .and_then(|desk| desk.registry().guard_stopped(run_id, &agent.id))
+        else {
+            return Helped {
+                outcome,
+                stopped: false,
+            };
+        };
+        let note = format!(
+            "({} stopped here: it used its own {} for this run, and the person running the team \
+             chose to stop it. It does no more work in this run.)",
+            shown_name(agent),
+            crate::spend::usd(limit)
+        );
+        let words = outcome.reply.trim_end();
+        outcome.reply = if words.is_empty() {
+            note
+        } else {
+            format!("{words}\n\n{note}")
+        };
+        Helped {
+            outcome,
+            stopped: true,
+        }
     }
 
     async fn run_agent_inner(
@@ -1230,7 +1212,7 @@ impl TeamBus {
         // node now, which is what makes "a constraint written once reaches a delegated helper"
         // true rather than aspirational.
         let workspace = crate::workspace::materialise(
-            crate::capabilities::configured_home().as_deref(),
+            crate::capabilities::skills_folder().as_deref(),
             crate::memory_root(&self.state.team_path),
             &self.state.team_path,
             &self.state.team.id,
@@ -1301,13 +1283,15 @@ impl TeamBus {
         };
         let composed = crate::compose_for(agent, &packet, &task, workspace.as_ref());
         let connection = self.connection_with_context(&agent.id, context).await?;
-        let process = AcpProcess::spawn(&spec)
+        let process = AgentRun::spawn(&spec)
             .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
         let lineage = crate::RunLineage {
             operator: self.state.operator.clone(),
             ..crate::RunLineage::default()
         };
-        crate::run_answerable_session(
+        // Boxed: on Windows, where a child process takes more room, the session's future is over
+        // Clippy's 16 KB `large_futures` limit, and everything that awaits it would be too.
+        Box::pin(crate::run_answerable_session(
             crate::AskedQuestion {
                 team: &self.state.team,
                 agent,
@@ -1326,14 +1310,13 @@ impl TeamBus {
             &composed.text,
             TeamSessionContext {
                 archive: &self.state.archive,
-                exit_timeout: self.state.exit_timeout,
                 bus: Some(&connection),
                 event_log: Some(event_log.clone()),
                 packet: Some(&packet),
                 composed: Some(&composed),
                 boundary: None,
             },
-        )
+        ))
         .await
     }
 
@@ -1524,16 +1507,30 @@ impl TeamBusConnection {
         }
     }
 
-    pub(crate) fn server_definition(&self) -> Value {
-        json!({
-            "type": "http",
-            "name": SERVER_NAME,
-            "url": format!("http://{}/mcp", self.bus.state.address),
-            "headers": [{
-                "name": "Authorization",
-                "value": format!("Bearer {}", self.token)
-            }]
-        })
+    /// The bus's tools, as the agent behind this connection is offered them: `{name, description,
+    /// inputSchema}` each.
+    pub(crate) fn tool_definitions(&self) -> Vec<Value> {
+        tool_definitions(
+            self.bus.state.mode,
+            self.bus.state.memory.notebook_enabled,
+            self.bus.state.operator.is_some(),
+        )
+    }
+
+    /// One tool call from the agent behind this connection, made directly rather than over the
+    /// network: the same guards, the same events, the same answer `{content, structuredContent,
+    /// isError}`.
+    pub(crate) async fn call(&self, name: &str, arguments: Value) -> Value {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        });
+        match self.bus.call_tool(&self.token, &request).await {
+            Ok(result) => result,
+            Err(error) => tool_error(&format!("{error:#}")),
+        }
     }
 
     pub(crate) async fn register(&self, event_log: EventLog) {
@@ -1555,39 +1552,21 @@ impl TeamBusConnection {
     }
 }
 
-async fn mcp_post(
-    State(bus): State<TeamBus>,
-    headers: HeaderMap,
-    Json(request): Json<Value>,
-) -> Response {
-    let Some(token) = bearer_token(&headers) else {
-        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
-    };
-    if !bus.state.tokens.read().await.contains_key(token) {
-        return (StatusCode::UNAUTHORIZED, "invalid bearer token").into_response();
-    }
-    if request.get("id").is_none() {
-        return StatusCode::ACCEPTED.into_response();
-    }
-    let response = bus.invoke(token, &request).await;
-    (
-        StatusCode::OK,
-        [(CONTENT_TYPE, "application/json")],
-        Json(response),
-    )
-        .into_response()
+/// What a helper came back with.
+struct Helped {
+    outcome: crate::SessionOutcome,
+    /// It stopped at the run's spool, or at its own guard, before it finished (ADR 0068): its
+    /// reply says so, and is not the work it was given.
+    stopped: bool,
 }
 
-fn mcp_router(bus: TeamBus) -> Router {
-    Router::new().route("/mcp", post(mcp_post)).with_state(bus)
-}
-
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
+/// The name an agent is shown by, or its id when it has none.
+fn shown_name(agent: &AgentConfig) -> &str {
+    if agent.name.trim().is_empty() {
+        &agent.id
+    } else {
+        &agent.name
+    }
 }
 
 fn required_string(arguments: &Value, name: &str) -> Result<String> {
@@ -1698,14 +1677,6 @@ fn scope_sentence(scope: &NoteScope) -> String {
 
 fn rpc_result(id: &Value, result: &Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
-}
-
-fn rpc_error(id: &Value, code: i64, message: &str) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": {"code": code, "message": message}
-    })
 }
 
 fn tool_success(value: &Value) -> Value {
@@ -1995,37 +1966,118 @@ fn two_strings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::{Completion, Demo, Message, ToolCall};
     use crate::config::{ConversationConfig, GuardsConfig, SpawnConfig};
-    use axum::body::Body;
-    use axum::http::Request;
-    use http_body_util::BodyExt;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tower::ServiceExt;
+    use crate::engine::demo_model;
+
+    /// The offline demo model, for an agent a test never starts.
+    const OFFLINE: &str = crate::agent::OFFLINE_MODEL;
+
+    fn says(text: &str) -> Completion {
+        Completion::text(text)
+    }
+
+    /// A reply that calls one tool.
+    fn calls(tool: &str, arguments: &Value) -> Completion {
+        Completion::calls(
+            "",
+            vec![ToolCall {
+                id: format!("call-{}", Uuid::new_v4().simple()),
+                name: tool.to_owned(),
+                arguments: arguments.to_string(),
+            }],
+        )
+    }
+
+    /// A team with no agents yet, for a test to fill in.
+    fn team_of(id: &str, entrypoint: &str) -> TeamConfig {
+        TeamConfig {
+            schema_version: 1,
+            id: id.into(),
+            name: id.into(),
+            entrypoint: entrypoint.into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: Vec::new(),
+            edges: Vec::new(),
+        }
+    }
+
+    fn edge(from: &str, to: &str) -> crate::config::EdgeConfig {
+        crate::config::EdgeConfig {
+            from: from.into(),
+            to: to.into(),
+            layer: "configured".into(),
+            kind: "sequence".into(),
+            ts: "2026-10-12T00:00:00Z".into(),
+        }
+    }
+
+    /// How a session a test opens itself is started: in the team file's folder.
+    fn spec_in(team_path: &Path) -> ProcessSpec {
+        ProcessSpec {
+            cmd: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            tools: Vec::new(),
+            permissions: None,
+            asker: None,
+        }
+    }
+
+    fn test_agent(id: &str, model: &str) -> AgentConfig {
+        AgentConfig {
+            kind: crate::config::AgentKind::Harness,
+            id: id.into(),
+            name: format!("{id} name"),
+            role: format!("{id} role"),
+            spawn: SpawnConfig::default(),
+            model: model.into(),
+            thinking_effort: None,
+            capabilities: Vec::new(),
+            memory: None,
+            allow_recruiting: true,
+            allow: crate::config::AgentAllow::default(),
+            turned_off: Vec::new(),
+            done_when: Vec::new(),
+            checks: None,
+            send_back_once: false,
+            spend: crate::spend::SpendConfig::default(),
+        }
+    }
+
+    /// One Team Bus request as an agent's tools make it, answered the way the bus answered over
+    /// MCP: `tools/list`, or `tools/call` with the result or the error as a tool error.
+    async fn post_json(bus: &TeamBus, token: &str, request: &Value) -> Result<Value> {
+        let result = match request.get("method").and_then(Value::as_str) {
+            Some("tools/list") => json!({"tools": tool_definitions(
+                bus.state.mode,
+                bus.state.memory.notebook_enabled,
+                bus.state.operator.is_some(),
+            )}),
+            Some("tools/call") => match bus.call_tool(token, request).await {
+                Ok(result) => result,
+                Err(error) => tool_error(&format!("{error:#}")),
+            },
+            other => bail!("the Team Bus takes tools/list and tools/call, not {other:?}"),
+        };
+        Ok(
+            json!({"jsonrpc": "2.0", "id": request.get("id").cloned().unwrap_or(Value::Null), "result": result}),
+        )
+    }
 
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn all_tools_emit_events_and_dispatch_runs_a_second_agent() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'
-            IFS= read -r session_new
-            case "$session_new" in
-              *'"name":"loomwatch-team-bus"'* ) ;;
-              *) printf 'missing Team Bus config: %s\n' "$session_new" >&2; exit 11 ;;
-            esac
-            case "$session_new" in
-              *'"name":"Authorization"'*'"Bearer '* ) ;;
-              *) printf 'missing Team Bus auth: %s\n' "$session_new" >&2; exit 12 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"worker-acp-session","configOptions":[]}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"worker-acp-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"worker reply"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#;
+        let worker = demo_model(Demo::responder(|_| Some(says("worker reply"))));
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "test-team".into(),
@@ -2036,12 +2088,10 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![
-                test_agent("lead", "true", Vec::new()),
-                test_agent("worker", "/bin/sh", vec!["-c".into(), script.into()]),
-            ],
+            agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &worker)],
             edges: Vec::new(),
         });
         let archive = EventArchive::new(pool);
@@ -2056,19 +2106,10 @@ mod tests {
             // `ask_user` needs somewhere for the question to go. A bus with no desk refuses it,
             // which is the honest answer on the CLI path and is asserted in its own test below.
             Some(crate::runs::RunRegistry::default().operator_desk(Some(&archive))),
-        )
-        .await?;
+        )?;
         let connection = bus.connection("lead").await?;
         let event_log = EventLog::new(archive.clone(), "team-run".into());
         connection.register(event_log).await;
-
-        let initialized = post_live_json(
-            bus.state.address,
-            &connection.token,
-            &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
-        )
-        .await?;
-        assert_eq!(initialized["result"]["serverInfo"]["name"], SERVER_NAME);
 
         let calls = [
             ("roster", json!({})),
@@ -2105,7 +2146,7 @@ mod tests {
             }
             if *name == "ask_user" {
                 // The whole point of the tool: it came back. A call that waited for a person would
-                // have sat here until the ACP request timeout cancelled the turn.
+                // have held the agent's turn open until the person answered.
                 assert_eq!(response["result"]["structuredContent"]["parked"], true);
                 assert_eq!(
                     response["result"]["structuredContent"]["instruction"],
@@ -2115,7 +2156,6 @@ mod tests {
         }
 
         bus.wait_for_tasks().await?;
-        bus.shutdown().await?;
         let events = archive.load_verified_session("team-run").await?;
         let bus_calls: Vec<_> = events
             .iter()
@@ -2161,6 +2201,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig {
                 max_dispatch_depth: 2,
@@ -2168,7 +2209,7 @@ mod tests {
             },
             agents: ["a", "b", "c", "d"]
                 .into_iter()
-                .map(|id| test_agent(id, "/definitely/not/a/real/acp", Vec::new()))
+                .map(|id| test_agent(id, OFFLINE))
                 .collect(),
             edges: Vec::new(),
         });
@@ -2182,8 +2223,7 @@ mod tests {
             TeamBusMode::Team,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let event_log = EventLog::new(archive.clone(), "guard-run".into());
 
         let cycle = bus
@@ -2226,7 +2266,6 @@ mod tests {
                 .values()
                 .all(|status| status == "idle" || status == "running")
         );
-        bus.shutdown().await?;
 
         let events = archive.load_verified_session("guard-run").await?;
         let failures: Vec<_> = events
@@ -2244,18 +2283,8 @@ mod tests {
     #[tokio::test]
     async fn concurrent_dispatch_guard_caps_and_releases_background_slots() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"worker-acp-session","configOptions":[]}}'
-            IFS= read -r _
-            sleep 1
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#;
+        let (worker, hold) = Demo::held(vec![says("one"), says("two")]);
+        let worker = demo_model(worker);
         let team = Arc::new(TeamConfig {
             schema_version: 1,
             id: "fanout-test-team".into(),
@@ -2266,15 +2295,13 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig {
                 max_concurrent_dispatches: 1,
                 ..GuardsConfig::default()
             },
-            agents: vec![
-                test_agent("lead", "true", Vec::new()),
-                test_agent("worker", "/bin/sh", vec!["-c".into(), script.into()]),
-            ],
+            agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &worker)],
             edges: Vec::new(),
         });
         let archive = EventArchive::new(pool);
@@ -2287,8 +2314,7 @@ mod tests {
             TeamBusMode::Team,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let connection = bus.connection("lead").await?;
         let event_log = EventLog::new(archive.clone(), "fanout-run".into());
         connection.register(event_log).await;
@@ -2302,11 +2328,11 @@ mod tests {
         );
         assert_eq!(bus.state.tasks.lock().await.len(), 1);
 
+        hold.release(2);
         bus.wait_for_tasks().await?;
         let after_release = call_dispatch(&bus, &connection, "worker").await?;
         assert_eq!(after_release["result"]["isError"], false, "{after_release}");
         bus.wait_for_tasks().await?;
-        bus.shutdown().await?;
 
         let events = archive.load_verified_session("fanout-run").await?;
         assert_eq!(
@@ -2327,7 +2353,7 @@ mod tests {
     async fn pipeline_mode_withdraws_macro_sequencing_tools_and_enforces_the_recruiting_lock()
     -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let mut locked = test_agent("locked", "true", Vec::new());
+        let mut locked = test_agent("locked", OFFLINE);
         locked.allow_recruiting = false;
         let team = Arc::new(TeamConfig {
             schema_version: 1,
@@ -2339,12 +2365,13 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("open", "true", Vec::new()),
+                test_agent("open", OFFLINE),
                 locked,
-                test_agent("helper", "true", Vec::new()),
+                test_agent("helper", OFFLINE),
             ],
             edges: Vec::new(),
         });
@@ -2358,8 +2385,7 @@ mod tests {
             TeamBusMode::Pipeline,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let event_log = EventLog::new(archive.clone(), "pipeline-restriction-run".into());
 
         let open = bus.connection("open").await?;
@@ -2415,7 +2441,6 @@ mod tests {
             "may not recruit helpers within its own pipeline step",
         );
 
-        bus.shutdown().await?;
         Ok(())
     }
 
@@ -2434,11 +2459,12 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: ["a", "b", "c", "d"]
                 .into_iter()
-                .map(|id| test_agent(id, "/definitely/not/a/real/acp", Vec::new()))
+                .map(|id| test_agent(id, OFFLINE))
                 .collect(),
             edges: Vec::new(),
         });
@@ -2452,8 +2478,7 @@ mod tests {
             TeamBusMode::Team,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let event_log = EventLog::new(archive.clone(), "warning-run".into());
         for agent_id in ["c", "d"] {
             event_log
@@ -2470,7 +2495,6 @@ mod tests {
 
         bus.guard_delegation(&session, "d")?;
         bus.guard_delegation(&session, "d")?;
-        bus.shutdown().await?;
 
         let events = archive.load_verified_session("warning-run").await?;
         assert_eq!(
@@ -2511,9 +2535,10 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![test_agent("lead", "/definitely/not/a/real/acp", Vec::new())],
+            agents: vec![test_agent("lead", OFFLINE)],
             edges: Vec::new(),
         });
         let enabled = crate::memory::TeamMemory {
@@ -2530,8 +2555,7 @@ mod tests {
                 mode,
                 Arc::new(enabled.clone()),
                 None,
-            )
-            .await?;
+            )?;
             let connection = bus.connection("lead").await?;
             let listed = post_json(
                 &bus,
@@ -2590,7 +2614,6 @@ mod tests {
                 search["inputSchema"]["properties"]["limit"]["type"],
                 "integer"
             );
-            bus.shutdown().await?;
         }
 
         // With the Notebook off, the tools are gone and a cached call is refused rather than
@@ -2603,8 +2626,7 @@ mod tests {
             TeamBusMode::Team,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let connection = bus.connection("lead").await?;
         connection
             .register(EventLog::new(archive.clone(), "notebook-off".into()))
@@ -2656,7 +2678,6 @@ mod tests {
                 .is_empty(),
             "a refused call must write nothing"
         );
-        bus.shutdown().await?;
         Ok(())
     }
 
@@ -2678,12 +2699,10 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![
-                test_agent("lead", "/definitely/not/a/real/acp", Vec::new()),
-                test_agent("helper", "/definitely/not/a/real/acp", Vec::new()),
-            ],
+            agents: vec![test_agent("lead", OFFLINE), test_agent("helper", OFFLINE)],
             edges: Vec::new(),
         });
         let enabled = crate::memory::TeamMemory {
@@ -2698,8 +2717,7 @@ mod tests {
             TeamBusMode::Team,
             Arc::new(enabled),
             None,
-        )
-        .await?;
+        )?;
         let connection = bus.connection("lead").await?;
         connection
             .register(EventLog::new(archive.clone(), "scoped-run".into()))
@@ -2804,7 +2822,6 @@ mod tests {
             "a checkpoint says how much evidence it covers: {:?}",
             checkpoints[0]
         );
-        bus.shutdown().await?;
         Ok(())
     }
 
@@ -2839,37 +2856,16 @@ mod tests {
 
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
-    async fn teardown_guard_aborts_delegated_helpers_and_the_bus_server() -> Result<()> {
+    async fn teardown_guard_aborts_delegated_helpers() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        // Negotiates a session, then hangs inside `session/prompt`. `exec` makes the
-        // archived pid the sleeping process itself, so "is it gone" asks about exactly the
-        // child that `kill_on_drop` must have killed.
-        let sleeping = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"helper","configOptions":[]}}'
-            IFS= read -r _
-            exec sleep 60
-        "#;
+        // A helper still thinking when the run is aborted.
+        let (thinking, hold) = Demo::held(Vec::new());
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "teardown-team".into(),
-            name: "Teardown team".into(),
-            entrypoint: "a".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), sleeping.into()]),
-                test_agent("b", "/bin/sh", vec!["-c".into(), sleeping.into()]),
+                test_agent("a", OFFLINE),
+                test_agent("b", &demo_model(thinking)),
             ],
-            edges: Vec::new(),
+            ..team_of("teardown-team", "a")
         });
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -2881,13 +2877,11 @@ mod tests {
             TeamBusMode::Team,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
-        let address = bus.state.address;
+        )?;
         let event_log = EventLog::new(archive.clone(), "teardown-run".into());
 
-        // Stand-in for the run task `POST /api/runs` spawns: it owns the guard, dispatches
-        // a helper, and then never reaches `shutdown` because it gets aborted.
+        // Stand-in for the run task `POST /api/runs` spawns: it owns the guard, dispatches a
+        // helper, and then never finishes because it gets aborted.
         let run = tokio::spawn({
             let bus = bus.clone();
             async move {
@@ -2918,106 +2912,60 @@ mod tests {
                 std::future::pending::<()>().await;
             }
         });
-        let helper_pid = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let first = archive
-                    .event_page("teardown-run", -1, 1)
-                    .await
-                    .ok()
-                    .and_then(|page| page.into_iter().next());
-                if let Some(event) = first {
-                    assert_eq!(event.payload["phase"], "spawned");
-                    return u32::try_from(event.payload["pid"].as_u64().expect("pid"))
-                        .expect("pid fits u32");
-                }
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
         })
-        .await?;
-        assert!(
-            crate::test_support::process_is_alive(helper_pid),
-            "helper {helper_pid} should be sleeping"
-        );
-        assert!(
-            tokio::net::TcpStream::connect(address).await.is_ok(),
-            "bus server listens while the run is live"
-        );
+        .await
+        .context("the helper never started thinking")?;
 
         run.abort();
         tokio::time::timeout(Duration::from_secs(10), async {
-            while crate::test_support::process_is_alive(helper_pid) {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+            while hold.waiting() > 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
         })
         .await
-        .expect("aborting the run must kill the delegated helper");
+        .context("aborting the run must stop the delegated helper")?;
         tokio::time::timeout(Duration::from_secs(10), async {
-            while tokio::net::TcpStream::connect(address).await.is_ok() {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+            while !bus.state.tasks.lock().await.is_empty() {
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
         })
         .await
-        .expect("aborting the run must close the Team Bus listener");
-        assert!(
-            bus.state.tasks.lock().await.is_empty(),
-            "delegated task handles are drained"
-        );
+        .context("delegated task handles are drained")?;
         Ok(())
     }
 
     /// The point of keeping a stage alive: its successor gets an answer from the session that did
-    /// the work, not from a process spawned fresh for the question. The predecessor here proves it
-    /// by refusing to answer unless it is the same session that already took its own turn, and the
-    /// asker has `allowRecruiting: false` — which must not block a question to a predecessor,
-    /// because asking one is conversation along a configured edge, not recruiting a helper.
+    /// the work, not from a session opened fresh for the question. The predecessor here proves it
+    /// by answering only when its own first turn is in the conversation, and the asker has
+    /// `allowRecruiting: false` — which must not block a question to a predecessor, because asking
+    /// one is conversation along a configured edge, not recruiting a helper.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_kept_alive_predecessor_answers_its_successor_from_its_own_session() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"live-a","configOptions":[]}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"live-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"main turn done"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r question
-            case "$question" in
-              *'which source'*) ;;
-              *) printf 'expected the follow-up question, got: %s\n' "$question" >&2; exit 21 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"live-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"answered from the context I already had"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
-        "#;
-        let mut asker = test_agent("b", "true", Vec::new());
+        let predecessor = demo_model(Demo::responder(|request| {
+            if !request.prompt().contains("which source") {
+                return Some(says("main turn done"));
+            }
+            let remembers = request.messages.iter().any(|message| {
+                matches!(message, Message::Assistant { content, .. } if content == "main turn done")
+            });
+            Some(says(if remembers {
+                "answered from the context I already had"
+            } else {
+                "a fresh session, which knows nothing"
+            }))
+        }));
+        let mut asker = test_agent("b", OFFLINE);
         asker.allow_recruiting = false;
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "live-ask-team".into(),
-            name: "Live ask team".into(),
-            entrypoint: "a".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
-            agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), script.into()]),
-                asker,
-            ],
-            edges: vec![crate::config::EdgeConfig {
-                from: "a".into(),
-                to: "b".into(),
-                layer: "configured".into(),
-                kind: "sequence".into(),
-                ts: "2026-09-12T00:00:00Z".into(),
-            }],
+            agents: vec![test_agent("a", &predecessor), asker],
+            edges: vec![edge("a", "b")],
+            ..team_of("live-ask-team", "a")
         });
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -3029,31 +2977,20 @@ mod tests {
             TeamBusMode::Pipeline,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
 
         // Run the predecessor's own turn, then hand its still-open session to the bus.
-        let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
-            args: vec!["-c".into(), script.into()],
-            env: BTreeMap::new(),
-            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            tools: Vec::new(),
-            permissions: None,
-            asker: None,
-        };
-        let mut process = AcpProcess::spawn(&spec)?;
+        let mut process = AgentRun::spawn(&spec_in(&team_path))?;
         let event_log = EventLog::new(archive.clone(), "live-ask-run".into());
         let mut context = TeamSessionContext {
             archive: &archive,
-            exit_timeout: Duration::from_secs(5),
             bus: None,
             event_log: Some(event_log.clone()),
             packet: None,
             composed: None,
             boundary: None,
         };
-        let mut recorder = process.open_live("a", "test/model", &mut context).await?;
+        let mut recorder = process.open_live("a", &predecessor, &mut context).await?;
         let first = process.prompt_turn(&mut recorder, "do your work").await?;
         assert_eq!(first, "main turn done");
         let live = bus.keep_alive("a", process, recorder, first).await;
@@ -3062,8 +2999,8 @@ mod tests {
         connection.register(event_log.clone()).await;
         // Asked by the name the successor's orientation shows ("Before you: a name"), not by id:
         // `b` may not recruit, so the call passes only if the name resolves to the live `a`.
-        let answered = post_live_json(
-            bus.state.address,
+        let answered = post_json(
+            &bus,
             &connection.token,
             &json!({
                 "jsonrpc": "2.0",
@@ -3082,7 +3019,7 @@ mod tests {
         let payload: Value = serde_json::from_str(text)?;
         assert_eq!(
             payload["live"], true,
-            "the answer must come from the live session, not a fresh process: {payload}"
+            "the answer must come from the live session, not a fresh one: {payload}"
         );
         assert_eq!(
             payload["agent"], "a",
@@ -3127,58 +3064,22 @@ mod tests {
             outcome.exit_code, 0,
             "the released session must close cleanly"
         );
-        bus.shutdown().await?;
         Ok(())
     }
 
-    /// The 2026-10-14 run's other half: Reader asked Gatherer for its full list, and the answer
-    /// it got was Codex's refusal of the model. An `ask` whose turn the app reported as failed is
-    /// a tool error naming the refusal, not a reply, and the session it went to still closes.
-    #[allow(clippy::too_many_lines)]
+    /// An `ask` whose answering turn failed is a tool error naming why, not a reply, and the
+    /// session it went to still closes.
     #[tokio::test]
-    async fn an_ask_codex_refused_is_an_error_not_an_answer() -> Result<()> {
+    async fn an_ask_whose_turn_failed_is_an_error_not_an_answer() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let script = format!(
-            r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"refused-a","configOptions":[]}}}}'
-            IFS= read -r _
-            printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"refused-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"main turn done"}}}}}}}}'
-            printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-            IFS= read -r _
-            {}
-            IFS= read -r request
-            case "$request" in *'"method":"session/close"'*) ;; *) exit 9 ;; esac
-            printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
-            "#,
-            crate::test_support::codex_refuses_the_model("refused-a", 4)
-        );
+        let refusing = demo_model(Demo::failing_after(
+            vec![says("main turn done")],
+            "this model is not available on your plan",
+        ));
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "refused-ask-team".into(),
-            name: "Refused ask team".into(),
-            entrypoint: "a".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
-            agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), script.clone()]),
-                test_agent("b", "true", Vec::new()),
-            ],
-            edges: vec![crate::config::EdgeConfig {
-                from: "a".into(),
-                to: "b".into(),
-                layer: "configured".into(),
-                kind: "sequence".into(),
-                ts: "2026-10-14T00:00:00Z".into(),
-            }],
+            agents: vec![test_agent("a", &refusing), test_agent("b", OFFLINE)],
+            edges: vec![edge("a", "b")],
+            ..team_of("refused-ask-team", "a")
         });
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -3190,36 +3091,25 @@ mod tests {
             TeamBusMode::Pipeline,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
-        let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
-            args: vec!["-c".into(), script],
-            env: BTreeMap::new(),
-            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            tools: Vec::new(),
-            permissions: None,
-            asker: None,
-        };
-        let mut process = AcpProcess::spawn(&spec)?;
+        )?;
+        let mut process = AgentRun::spawn(&spec_in(&team_path))?;
         let event_log = EventLog::new(archive.clone(), "refused-ask-run".into());
         let mut context = TeamSessionContext {
             archive: &archive,
-            exit_timeout: Duration::from_secs(5),
             bus: None,
             event_log: Some(event_log.clone()),
             packet: None,
             composed: None,
             boundary: None,
         };
-        let mut recorder = process.open_live("a", "test/model", &mut context).await?;
+        let mut recorder = process.open_live("a", &refusing, &mut context).await?;
         let first = process.prompt_turn(&mut recorder, "do your work").await?;
         let live = bus.keep_alive("a", process, recorder, first).await;
 
         let connection = bus.connection("b").await?;
         connection.register(event_log.clone()).await;
-        let response = post_live_json(
-            bus.state.address,
+        let response = post_json(
+            &bus,
             &connection.token,
             &json!({
                 "jsonrpc": "2.0",
@@ -3232,61 +3122,30 @@ mod tests {
             }),
         )
         .await?;
-        assert_tool_error_contains(
-            &response,
-            &format!(
-                "Codex reported an error instead of an answer: {}",
-                crate::test_support::CODEX_REFUSAL
-            ),
-        );
+        assert_tool_error_contains(&response, "this model is not available on your plan");
 
         let outcome = bus.release("a", live).await?;
         assert_eq!(outcome.exit_code, 0, "the session still closes cleanly");
-        bus.shutdown().await?;
         Ok(())
     }
 
     /// A follow-up the operator writes to a kept-alive agent is archived under the reserved
     /// operator id, so it must say which agent it went to: the run view has no other way to know.
-    /// The agent's script refuses the turn unless the follow-up reaches it, so this cannot pass by
-    /// the event merely being written.
-    #[allow(clippy::too_many_lines)]
+    /// The agent answers "footnotes checked" only when the follow-up reaches it, so this cannot
+    /// pass by the event merely being written.
     #[tokio::test]
     async fn an_operator_follow_up_records_the_agent_it_went_to() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"live-a","configOptions":[]}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"live-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"main turn done"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r follow_up
-            case "$follow_up" in
-              *'check the footnotes'*) ;;
-              *) printf 'expected the follow-up, got: %s\n' "$follow_up" >&2; exit 23 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"live-a","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"footnotes checked"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}'
-        "#;
+        let model = demo_model(Demo::responder(|request| {
+            Some(says(if request.prompt().contains("check the footnotes") {
+                "footnotes checked"
+            } else {
+                "main turn done"
+            }))
+        }));
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "follow-up-team".into(),
-            name: "Follow-up team".into(),
-            entrypoint: "a".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
-            agents: vec![test_agent("a", "/bin/sh", vec!["-c".into(), script.into()])],
-            edges: Vec::new(),
+            agents: vec![test_agent("a", &model)],
+            ..team_of("follow-up-team", "a")
         });
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -3298,29 +3157,18 @@ mod tests {
             TeamBusMode::Pipeline,
             Arc::new(crate::memory::TeamMemory::default()),
             None,
-        )
-        .await?;
-        let spec = ProcessSpec {
-            cmd: "/bin/sh".into(),
-            args: vec!["-c".into(), script.into()],
-            env: BTreeMap::new(),
-            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            tools: Vec::new(),
-            permissions: None,
-            asker: None,
-        };
-        let mut process = AcpProcess::spawn(&spec)?;
+        )?;
+        let mut process = AgentRun::spawn(&spec_in(&team_path))?;
         let event_log = EventLog::new(archive.clone(), "follow-up-run".into());
         let mut context = TeamSessionContext {
             archive: &archive,
-            exit_timeout: Duration::from_secs(5),
             bus: None,
             event_log: Some(event_log),
             packet: None,
             composed: None,
             boundary: None,
         };
-        let mut recorder = process.open_live("a", "test/model", &mut context).await?;
+        let mut recorder = process.open_live("a", &model, &mut context).await?;
         let first = process.prompt_turn(&mut recorder, "do your work").await?;
         let live = bus.keep_alive("a", process, recorder, first).await;
 
@@ -3357,7 +3205,6 @@ mod tests {
         // Releasing waits for every sender to go: this clone must go first.
         drop(sender);
         bus.release("a", live).await?;
-        bus.shutdown().await?;
         Ok(())
     }
 
@@ -3367,8 +3214,8 @@ mod tests {
     /// This was the single largest context loss in the system. `run_agent_inner` used to build a
     /// helper's prompt from its role and the one string its caller typed, and it skipped
     /// `workspace::materialise` entirely, so a helper received neither the team's standing notes
-    /// nor the capabilities the operator had wired to it. The helper's own script refuses the turn
-    /// if the constraint is absent, so this cannot pass by the `ask` merely returning.
+    /// nor the capabilities the operator had wired to it. The helper answers "helper reply" only
+    /// when its prompt carries the constraint, so this cannot pass by the `ask` merely returning.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_delegated_helper_is_supplied_the_team_brief() -> Result<()> {
@@ -3384,40 +3231,24 @@ mod tests {
         let team_path = scratch.join("team.yaml");
         std::fs::write(&team_path, "").expect("team file");
 
-        let helper_script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"helper-session","configOptions":[]}}'
-            IFS= read -r prompt
-            case "$prompt" in
-              *'## Your assigned role'*'## What the team knows'*'## Task'*) ;;
-              *) printf 'memory section out of order for a helper: %s\n' "$prompt" >&2; exit 21 ;;
-            esac
-            case "$prompt" in
-              *'Never touch main.'*) ;;
-              *) printf 'brief missing from the helper prompt: %s\n' "$prompt" >&2; exit 22 ;;
-            esac
-            case "$prompt" in
-              *'what happened?'*) ;;
-              *) printf 'task missing from the helper prompt: %s\n' "$prompt" >&2; exit 23 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"helper-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"helper reply"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}'
-        "#;
+        let helper = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            let ordered = ["## Your assigned role", "## What the team knows", "## Task"]
+                .iter()
+                .map(|heading| prompt.find(heading))
+                .collect::<Option<Vec<_>>>()
+                .is_some_and(|at| at.windows(2).all(|pair| pair[0] < pair[1]));
+            Some(says(if !ordered {
+                "memory section out of order for a helper"
+            } else if !prompt.contains("Never touch main.") {
+                "brief missing from the helper prompt"
+            } else if !prompt.contains("what happened?") {
+                "task missing from the helper prompt"
+            } else {
+                "helper reply"
+            }))
+        }));
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "helper-brief-team".into(),
-            name: "Helper brief team".into(),
-            entrypoint: "lead".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -3429,12 +3260,8 @@ mod tests {
                 packet: crate::config::PacketConfig::default(),
                 deliver_as: crate::config::DeliverAs::NativeFile,
             }),
-            guards: GuardsConfig::default(),
-            agents: vec![
-                test_agent("lead", "true", Vec::new()),
-                test_agent("helper", "/bin/sh", vec!["-c".into(), helper_script.into()]),
-            ],
-            edges: Vec::new(),
+            agents: vec![test_agent("lead", OFFLINE), test_agent("helper", &helper)],
+            ..team_of("helper-brief-team", "lead")
         });
         let archive = EventArchive::new(pool);
         let memory = Arc::new(TeamMemory::load(
@@ -3451,8 +3278,7 @@ mod tests {
             TeamBusMode::Team,
             memory,
             None,
-        )
-        .await?;
+        )?;
         let connection = bus.connection("lead").await?;
         connection
             .register(EventLog::new(archive.clone(), "helper-brief-run".into()))
@@ -3476,7 +3302,6 @@ mod tests {
         );
 
         bus.wait_for_tasks().await?;
-        bus.shutdown().await?;
         // The helper's packet is stored under the run like any other agent's, so the inspector
         // can show what a helper was given without the caller having to remember.
         let packets = archive
@@ -3489,51 +3314,17 @@ mod tests {
     }
 
     /// A helper is started at its agent's `thinkingEffort`, as the same agent is when it runs as
-    /// a stage or as the lead. The helper's own script refuses its turn unless the effort it is
-    /// set to is the one the team file names, so the `ask` cannot succeed without it.
+    /// a stage or as the lead.
     #[tokio::test]
     async fn a_delegated_helper_runs_at_its_thinking_effort() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let helper_script = r#"
-            set -eu
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"effort-session","configOptions":[{"id":"model","currentValue":"test/model"},{"id":"reasoning_effort","currentValue":"medium"}]}}'
-            IFS= read -r model
-            case "$model" in
-              *'"configId":"model"'*'"value":"test/model"'*) ;;
-              *) printf 'expected the model first: %s\n' "$model" >&2; exit 31 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","currentValue":"test/model"},{"id":"reasoning_effort","currentValue":"medium"}]}}'
-            IFS= read -r effort
-            case "$effort" in
-              *'"configId":"reasoning_effort"'*'"value":"high"'*) ;;
-              *) printf 'expected thinking effort high: %s\n' "$effort" >&2; exit 32 ;;
-            esac
-            printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"configOptions":[]}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"effort-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"thought hard"}}}}'
-            printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}'
-            IFS= read -r _
-            printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{}}'
-        "#;
-        let mut helper = test_agent("helper", "/bin/sh", vec!["-c".into(), helper_script.into()]);
+        let thinking = Demo::scripted(vec![says("thought hard")]);
+        let model = demo_model(thinking.clone());
+        let mut helper = test_agent("helper", &model);
         helper.thinking_effort = Some("high".into());
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "effort-team".into(),
-            name: "Effort team".into(),
-            entrypoint: "lead".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
-            agents: vec![test_agent("lead", "true", Vec::new()), helper],
-            edges: Vec::new(),
+            agents: vec![test_agent("lead", OFFLINE), helper],
+            ..team_of("effort-team", "lead")
         });
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -3545,8 +3336,7 @@ mod tests {
             TeamBusMode::Team,
             Arc::new(TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let connection = bus.connection("lead").await?;
         connection
             .register(EventLog::new(archive.clone(), "effort-run".into()))
@@ -3568,7 +3358,8 @@ mod tests {
             response["result"]["structuredContent"]["reply"],
             "thought hard"
         );
-        bus.shutdown().await?;
+        let asked = thinking.requests();
+        assert_eq!(asked[0].effort.as_deref(), Some("high"), "{asked:?}");
         let events = archive.load_verified_session("effort-run").await?;
         assert!(
             events.iter().any(|event| {
@@ -3581,22 +3372,19 @@ mod tests {
         Ok(())
     }
 
-    /// The shell lines that pull the Team Bus endpoint and bearer token out of `session/new`.
-    const READ_BUS: &str = r#"url=$(printf '%s' "$new" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
-token=$(printf '%s' "$new" | sed -n 's/.*"Authorization","value":"Bearer \([^"]*\)".*/\1/p')"#;
-
-    /// A Team Bus `tools/call` from inside a fake app, as `curl` with the app's own token.
-    fn bus_call(tool: &str, arguments: &str) -> String {
-        format!(
-            r#"curl -s -X POST "$url" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d '{{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{{"name":"{tool}","arguments":{arguments}}}}}'"#
-        )
-    }
-
-    /// A temporary folder the fake apps of one test leave markers in.
-    fn markers(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("loomwatch-{name}-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).expect("marker folder");
-        dir
+    /// The tools' answers since the agent's newest prompt, oldest first.
+    fn answers(messages: &[Message]) -> Vec<String> {
+        let start = messages
+            .iter()
+            .rposition(|message| matches!(message, Message::User { .. }))
+            .map_or(0, |at| at + 1);
+        messages[start..]
+            .iter()
+            .filter_map(|message| match message {
+                Message::Tool { content, .. } => Some(content.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The Team Bus events of one tool call, by the agent that made it.
@@ -3626,129 +3414,84 @@ token=$(printf '%s' "$new" | sed -n 's/.*"Authorization","value":"Bearer \([^"]*
     /// **An agent answering a question answers from what it has: it may not start another one.**
     ///
     /// Run dabf40a3 spent 46% of its tokens on exactly that chain. Both shapes are driven through
-    /// the real bus by the answering agent's own `curl`, and each script exits non-zero unless the
-    /// bus refuses with the sentence that says what to do instead:
+    /// the real bus by the answering agent's own tool calls, and each answers "answered from what
+    /// I had" only when the bus refused with the sentence that says what to do instead:
     ///
     /// * a **kept-alive** stage, asked by its successor, tries to `ask` an agent nobody is
-    ///   keeping alive (exit 31);
-    /// * a **helper started by `ask`** tries `ask` (exit 32) and `dispatch` (exit 33).
+    ///   keeping alive;
+    /// * a **helper started by `ask`** tries `ask` and then `dispatch`.
     ///
-    /// The agent either would have started writes a marker first thing; neither marker exists.
+    /// The agent either would have started is never sent a request.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn an_agent_answering_a_question_may_not_start_another_agent() -> Result<()> {
+        const REFUSED: &str = "Answer from what you already have";
         let pool = crate::db::Db::temp().await;
-        let dir = markers("answering");
-        let never = |name: &str| {
-            format!(
-                ": > '{}'; exit 99",
-                dir.join(format!("{name}-started")).display()
-            )
+        // Each step asks for one more agent; every refusal so far is the right one, or it says so.
+        let answering = |tries: &'static [(&'static str, &'static str)]| {
+            move |request: &crate::agent::SeenRequest| {
+                if !request.prompt().contains('?') {
+                    return Some(says("done"));
+                }
+                let answers = answers(&request.messages);
+                if let Some(wrong) = answers.iter().find(|answer| !answer.contains(REFUSED)) {
+                    return Some(says(&format!("started another agent: {wrong}")));
+                }
+                Some(match tries.get(answers.len()) {
+                    Some((tool, arguments)) => {
+                        calls(tool, &serde_json::from_str(arguments).expect("arguments"))
+                    }
+                    None => says("answered from what I had"),
+                })
+            }
         };
-        let refused = "*'Answer from what you already have'*";
-        let live_script = format!(
-            r#"set -eu
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
-IFS= read -r new
-{READ_BUS}
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"live-a","configOptions":[]}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-IFS= read -r _
-answer=$({ask_c})
-case "$answer" in {refused}) ;; *) printf 'a kept-alive answer started a helper: %s\n' "$answer" >&2; exit 31 ;; esac
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"live-a","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"answered from what I had"}}}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
-"#,
-            ask_c = bus_call("ask", r#"{"agent":"c","question":"can you check?"}"#),
-        );
-        let helper_script = format!(
-            r#"set -eu
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
-IFS= read -r new
-{READ_BUS}
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"helper-h","configOptions":[]}}}}'
-IFS= read -r _
-answer=$({ask_c})
-case "$answer" in {refused}) ;; *) printf 'an ask helper started a helper: %s\n' "$answer" >&2; exit 32 ;; esac
-answer=$({dispatch_c})
-case "$answer" in {refused}) ;; *) printf 'an ask helper dispatched: %s\n' "$answer" >&2; exit 33 ;; esac
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"helper-h","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"answered from what I had"}}}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
-"#,
-            ask_c = bus_call("ask", r#"{"agent":"c","question":"can you check?"}"#),
-            dispatch_c = bus_call("dispatch", r#"{"agent":"c","task":"check it"}"#),
-        );
-        let team_with = |mode_edges: Vec<crate::config::EdgeConfig>| {
+        let live_model = demo_model(Demo::responder(answering(&[(
+            "ask",
+            r#"{"agent": "c", "question": "can you check?"}"#,
+        )])));
+        let helper_model = demo_model(Demo::responder(answering(&[
+            ("ask", r#"{"agent": "c", "question": "can you check?"}"#),
+            ("dispatch", r#"{"agent": "c", "task": "check it"}"#),
+        ])));
+        let never = Demo::scripted(Vec::new());
+        let never_model = demo_model(never.clone());
+        let team_with = |edges: Vec<crate::config::EdgeConfig>| {
             Arc::new(TeamConfig {
-                schema_version: 1,
-                id: "answering-team".into(),
-                name: "Answering team".into(),
-                entrypoint: "a".into(),
-                responder: None,
-                schedule: None,
-                deliver: None,
-                conversation: ConversationConfig::default(),
-                permissions: crate::config::TeamPermissions::default(),
-                memory: None,
-                guards: GuardsConfig::default(),
                 agents: vec![
-                    test_agent("a", "/bin/sh", vec!["-c".into(), live_script.clone()]),
-                    test_agent("b", "true", Vec::new()),
-                    test_agent("c", "/bin/sh", vec!["-c".into(), never("c")]),
-                    test_agent("h", "/bin/sh", vec!["-c".into(), helper_script.clone()]),
+                    test_agent("a", &live_model),
+                    test_agent("b", OFFLINE),
+                    test_agent("c", &never_model),
+                    test_agent("h", &helper_model),
                 ],
-                edges: mode_edges,
+                edges,
+                ..team_of("answering-team", "a")
             })
         };
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
 
         // A kept-alive stage, asked by the stage after it.
-        let team = team_with(vec![crate::config::EdgeConfig {
-            from: "a".into(),
-            to: "b".into(),
-            layer: "configured".into(),
-            kind: "sequence".into(),
-            ts: "2026-10-12T00:00:00Z".into(),
-        }]);
         let bus = TeamBus::start(
-            team.clone(),
+            team_with(vec![edge("a", "b")]),
             &team_path,
             archive.clone(),
             Duration::from_secs(5),
             TeamBusMode::Pipeline,
             Arc::new(TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let event_log = EventLog::new(archive.clone(), "answering-run".into());
         let a_connection = bus.connection("a").await?;
-        let mut process = AcpProcess::spawn(&ProcessSpec {
-            cmd: "/bin/sh".into(),
-            args: vec!["-c".into(), live_script.clone()],
-            env: BTreeMap::new(),
-            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            tools: Vec::new(),
-            permissions: None,
-            asker: None,
-        })?;
+        let mut process = AgentRun::spawn(&spec_in(&team_path))?;
         let mut context = TeamSessionContext {
             archive: &archive,
-            exit_timeout: Duration::from_secs(5),
             bus: Some(&a_connection),
             event_log: Some(event_log.clone()),
             packet: None,
             composed: None,
             boundary: None,
         };
-        let mut recorder = process.open_live("a", "test/model", &mut context).await?;
+        let mut recorder = process.open_live("a", &live_model, &mut context).await?;
         let first = process.prompt_turn(&mut recorder, "do your work").await?;
         let live = bus.keep_alive("a", process, recorder, first).await;
         let b = bus.connection("b").await?;
@@ -3766,7 +3509,6 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             "answered from what I had"
         );
         bus.release("a", live).await?;
-        bus.shutdown().await?;
 
         // A helper `ask` started, in a team-mode run.
         let bus = TeamBus::start(
@@ -3777,8 +3519,7 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             TeamBusMode::Team,
             Arc::new(TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let lead = bus.connection("b").await?;
         lead.register(event_log.clone()).await;
         let answered = post_json(
@@ -3794,90 +3535,31 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             "answered from what I had"
         );
         bus.wait_for_tasks().await?;
-        bus.shutdown().await?;
 
         assert!(
-            !dir.join("c-started").exists(),
+            never.requests().is_empty(),
             "an agent answering a question started another"
         );
-        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
 
     /// **A question is withdrawn when the agent that asked ends its turn first.**
     ///
-    /// The shape of run dabf40a3: a Codex stage asked its kept-alive predecessor and ended its
-    /// turn with the `ask` still in flight, and the predecessor went on answering for nobody. The
-    /// asker here is a real ACP session that starts its `ask` in the background and ends its turn
-    /// once the predecessor has the question; nothing calls the bus to cancel anything. The
-    /// predecessor's script answers only a `session/cancel` (exit 41 otherwise), so the run can
-    /// finish only if the end of the asker's turn reached the kept-alive turn.
+    /// The shape of run dabf40a3: a stage asked its kept-alive predecessor and its turn ended with
+    /// the `ask` still in flight, and the predecessor went on answering for nobody. Here the
+    /// predecessor is still thinking about the question when the asker's turn ends
+    /// ([`TeamBusConnection::turn_ended`], which the engine calls at the end of every turn); its
+    /// turn is stopped, and the `ask` comes back withdrawn.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_question_is_withdrawn_when_the_agent_that_asked_ends_its_turn() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let dir = markers("withdrawn");
-        let asked = dir.join("asked");
-        let predecessor = format!(
-            r#"set -eu
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"live-a","configOptions":[]}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-IFS= read -r _
-: > '{asked}'
-IFS= read -r cancel
-case "$cancel" in *'"method":"session/cancel"'*) ;; *) printf 'expected session/cancel, got: %s\n' "$cancel" >&2; exit 41 ;; esac
-printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"cancelled"}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
-"#,
-            asked = asked.display(),
-        );
-        let asking_script = format!(
-            r#"set -eu
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
-IFS= read -r new
-{READ_BUS}
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"asker-b","configOptions":[]}}}}'
-IFS= read -r _
-{ask_a} > /dev/null 2>&1 &
-i=0
-while [ ! -f '{asked}' ]; do i=$((i+1)); [ "$i" -lt 200 ] || exit 43; sleep 0.05; done
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"asker-b","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"moved on without it"}}}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
-"#,
-            ask_a = bus_call("ask", r#"{"agent":"a","question":"which source?"}"#),
-            asked = asked.display(),
-        );
+        let (thinking, hold) = Demo::held(vec![says("done")]);
+        let predecessor = demo_model(thinking);
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "withdrawn-team".into(),
-            name: "Withdrawn team".into(),
-            entrypoint: "a".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
-            agents: vec![
-                test_agent("a", "/bin/sh", vec!["-c".into(), predecessor.clone()]),
-                test_agent("b", "/bin/sh", vec!["-c".into(), asking_script.clone()]),
-            ],
-            edges: vec![crate::config::EdgeConfig {
-                from: "a".into(),
-                to: "b".into(),
-                layer: "configured".into(),
-                kind: "sequence".into(),
-                ts: "2026-10-12T00:00:00Z".into(),
-            }],
+            agents: vec![test_agent("a", &predecessor), test_agent("b", OFFLINE)],
+            edges: vec![edge("a", "b")],
+            ..team_of("withdrawn-team", "a")
         });
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -3889,71 +3571,66 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             TeamBusMode::Pipeline,
             Arc::new(TeamMemory::default()),
             None,
-        )
-        .await?;
+        )?;
         let event_log = EventLog::new(archive.clone(), "withdrawn-run".into());
-        let spec = |script: &str| ProcessSpec {
-            cmd: "/bin/sh".into(),
-            args: vec!["-c".into(), script.to_owned()],
-            env: BTreeMap::new(),
-            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            tools: Vec::new(),
-            permissions: None,
-            asker: None,
-        };
-        let mut a = AcpProcess::spawn(&spec(&predecessor))?;
+        let mut a = AgentRun::spawn(&spec_in(&team_path))?;
         let mut a_context = TeamSessionContext {
             archive: &archive,
-            exit_timeout: Duration::from_secs(5),
             bus: None,
             event_log: Some(event_log.clone()),
             packet: None,
             composed: None,
             boundary: None,
         };
-        let mut a_recorder = a.open_live("a", "test/model", &mut a_context).await?;
+        let mut a_recorder = a.open_live("a", &predecessor, &mut a_context).await?;
+        // Its own turn goes through; the question will wait at the hold.
+        hold.release(1);
         let first = a.prompt_turn(&mut a_recorder, "do your work").await?;
         let live = bus.keep_alive("a", a, a_recorder, first).await;
 
-        let b_connection = bus.connection("b").await?;
-        let mut b = AcpProcess::spawn(&spec(&asking_script))?;
-        let mut b_context = TeamSessionContext {
-            archive: &archive,
-            exit_timeout: Duration::from_secs(5),
-            bus: Some(&b_connection),
-            event_log: Some(event_log.clone()),
-            packet: None,
-            composed: None,
-            boundary: None,
-        };
-        let mut b_recorder = b.open_live("b", "test/model", &mut b_context).await?;
-        let reply = b.prompt_turn(&mut b_recorder, "your stage").await?;
-        assert_eq!(reply, "moved on without it");
-        b.finish_live(&mut b_recorder, reply, &b_context).await?;
-
-        // The predecessor's turn was stopped, so releasing it is prompt; a turn left running
-        // would hold it until the ten-minute request timeout.
-        tokio::time::timeout(Duration::from_secs(10), bus.release("a", live))
-            .await
-            .context("the kept-alive turn was never stopped")??;
-        let update = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(update) = bus_tool_update(&archive, "withdrawn-run", "b", "ask").await?
-                {
-                    return Ok::<_, anyhow::Error>(update);
-                }
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+        let asking = tokio::spawn({
+            let bus = bus.clone();
+            let token = b.token.clone();
+            async move {
+                post_json(
+                    &bus,
+                    &token,
+                    &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                        "params": {"name": "ask", "arguments": {"agent": "a", "question": "which source?"}}}),
+                )
+                .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
         })
         .await
-        .context("the withdrawn ask was never answered")??;
+        .context("the predecessor never got the question")?;
+        b.turn_ended().await;
+
+        let withdrawn = tokio::time::timeout(Duration::from_secs(10), asking)
+            .await
+            .context("the withdrawn ask never came back")???;
+        assert_tool_error_contains(&withdrawn, "the question was withdrawn");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() > 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .context("the predecessor's turn was never stopped")?;
+        // The predecessor's turn was stopped, so releasing it is prompt.
+        tokio::time::timeout(Duration::from_secs(10), bus.release("a", live))
+            .await
+            .context("the kept-alive turn was never stopped")??;
+        let update = bus_tool_update(&archive, "withdrawn-run", "b", "ask")
+            .await?
+            .context("the ask was recorded")?;
         assert_eq!(update["status"], "failed", "{update}");
-        assert!(
-            update["rawOutput"]["error"]
-                .as_str()
-                .is_some_and(|error| error.contains("the question was withdrawn")),
-            "{update}"
-        );
         let events = archive.load_session("withdrawn-run").await?;
         assert!(
             events.iter().any(|event| event.agent_id == "a"
@@ -3961,69 +3638,22 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
                 && event.payload["reason"] == ASK_WITHDRAWN),
             "the kept-alive turn was not stopped as withdrawn: {events:#?}"
         );
-        bus.shutdown().await?;
-        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
 
     /// The cold half of the same rule: a helper started for an `ask` is ended when the asker's
-    /// turn ends first, instead of finishing an answer nobody reads. The helper's script records
-    /// its pid and then blocks; it must be gone, and the roster must say it was cancelled.
-    #[allow(clippy::too_many_lines)]
+    /// turn ends first, instead of finishing an answer nobody reads, and the roster says it was
+    /// cancelled.
     #[tokio::test]
     async fn a_helper_started_for_a_question_is_ended_when_the_asker_moves_on() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let dir = markers("withdrawn-helper");
-        let pid = dir.join("pid");
-        let helper = format!(
-            r#"set -eu
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"helper-h","configOptions":[]}}}}'
-IFS= read -r _
-echo $$ > '{pid}.tmp' && mv '{pid}.tmp' '{pid}'
-IFS= read -r never
-exit 0
-"#,
-            pid = pid.display(),
-        );
-        let lead = format!(
-            r#"set -eu
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"mcpCapabilities":{{"http":true}}}}}}}}'
-IFS= read -r new
-{READ_BUS}
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"lead-l","configOptions":[]}}}}'
-IFS= read -r _
-{ask_h} > /dev/null 2>&1 &
-i=0
-while [ ! -f '{pid}' ]; do i=$((i+1)); [ "$i" -lt 200 ] || exit 43; sleep 0.05; done
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"lead-l","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"answered without h"}}}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
-IFS= read -r _
-printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
-"#,
-            ask_h = bus_call("ask", r#"{"agent":"h","question":"what happened?"}"#),
-            pid = pid.display(),
-        );
+        let (thinking, hold) = Demo::held(Vec::new());
         let team = Arc::new(TeamConfig {
-            schema_version: 1,
-            id: "withdrawn-helper-team".into(),
-            name: "Withdrawn helper team".into(),
-            entrypoint: "lead".into(),
-            responder: None,
-            schedule: None,
-            deliver: None,
-            conversation: ConversationConfig::default(),
-            permissions: crate::config::TeamPermissions::default(),
-            memory: None,
-            guards: GuardsConfig::default(),
             agents: vec![
-                test_agent("lead", "/bin/sh", vec!["-c".into(), lead.clone()]),
-                test_agent("h", "/bin/sh", vec!["-c".into(), helper]),
+                test_agent("lead", OFFLINE),
+                test_agent("h", &demo_model(thinking)),
             ],
-            edges: Vec::new(),
+            ..team_of("withdrawn-helper-team", "lead")
         });
         let archive = EventArchive::new(pool);
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
@@ -4035,76 +3665,59 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
             TeamBusMode::Team,
             Arc::new(TeamMemory::default()),
             None,
-        )
-        .await?;
-        let connection = bus.connection("lead").await?;
-        let mut process = AcpProcess::spawn(&ProcessSpec {
-            cmd: "/bin/sh".into(),
-            args: vec!["-c".into(), lead],
-            env: BTreeMap::new(),
-            cwd: team_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            tools: Vec::new(),
-            permissions: None,
-            asker: None,
-        })?;
-        let mut context = TeamSessionContext {
-            archive: &archive,
-            exit_timeout: Duration::from_secs(5),
-            bus: Some(&connection),
-            event_log: Some(EventLog::new(
-                archive.clone(),
-                "withdrawn-helper-run".into(),
-            )),
-            packet: None,
-            composed: None,
-            boundary: None,
-        };
-        let mut recorder = process
-            .open_live("lead", "test/model", &mut context)
-            .await?;
-        let reply = process.prompt_turn(&mut recorder, "the task").await?;
-        assert_eq!(reply, "answered without h");
-        process.finish_live(&mut recorder, reply, &context).await?;
-
-        let helper_pid: u32 = std::fs::read_to_string(&pid)?.trim().parse()?;
-        let gone = tokio::time::timeout(Duration::from_secs(5), async {
-            while crate::test_support::process_is_alive(helper_pid) {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-        })
+        )?;
+        let lead = bus.connection("lead").await?;
+        lead.register(EventLog::new(
+            archive.clone(),
+            "withdrawn-helper-run".into(),
+        ))
         .await;
-        assert!(
-            gone.is_ok(),
-            "the helper outlived the question it was started for"
-        );
-        let update = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(update) =
-                    bus_tool_update(&archive, "withdrawn-helper-run", "lead", "ask").await?
-                {
-                    return Ok::<_, anyhow::Error>(update);
-                }
+        let asking = tokio::spawn({
+            let bus = bus.clone();
+            let token = lead.token.clone();
+            async move {
+                post_json(
+                    &bus,
+                    &token,
+                    &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                        "params": {"name": "ask", "arguments": {"agent": "h", "question": "what happened?"}}}),
+                )
+                .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
         })
         .await
-        .context("the withdrawn ask was never answered")??;
-        assert_eq!(update["status"], "failed", "{update}");
+        .context("the helper never started")?;
+        lead.turn_ended().await;
+
+        let withdrawn = tokio::time::timeout(Duration::from_secs(10), asking)
+            .await
+            .context("the withdrawn ask never came back")???;
+        assert_eq!(withdrawn["result"]["isError"], true, "{withdrawn}");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while hold.waiting() > 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .context("the helper outlived the question it was started for")?;
         assert_eq!(
             bus.state.statuses.read().await.get("h").map(String::as_str),
             Some("cancelled")
         );
-        bus.shutdown().await?;
-        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
 
     #[test]
     fn a_call_may_name_an_agent_by_id_or_by_the_name_it_was_shown() {
         let mut agents = vec![
-            test_agent("technical-research", "true", Vec::new()),
-            test_agent("data-science", "true", Vec::new()),
-            test_agent("review", "true", Vec::new()),
+            test_agent("technical-research", OFFLINE),
+            test_agent("data-science", OFFLINE),
+            test_agent("review", OFFLINE),
         ];
         agents[0].name = "Technical approach researcher".into();
         agents[1].name = "Data science researcher".into();
@@ -4149,70 +3762,6 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}'
              technical-research (Technical approach researcher), data-science (technical \
              approach researcher)"
         );
-    }
-
-    fn test_agent(id: &str, command: &str, args: Vec<String>) -> AgentConfig {
-        AgentConfig {
-            kind: crate::config::AgentKind::Harness,
-            id: id.into(),
-            name: format!("{id} name"),
-            role: format!("{id} role"),
-            spawn: SpawnConfig {
-                cmd: command.into(),
-                args,
-                env: BTreeMap::new(),
-                cwd: PathBuf::from("."),
-            },
-            model: "test/model".into(),
-            thinking_effort: None,
-            capabilities: Vec::new(),
-            memory: None,
-            allow_recruiting: true,
-            allow: crate::config::AgentAllow::default(),
-            turned_off: Vec::new(),
-            done_when: Vec::new(),
-            checks: None,
-            send_back_once: false,
-        }
-    }
-
-    async fn post_json(bus: &TeamBus, token: &str, request: &Value) -> Result<Value> {
-        let body = serde_json::to_vec(request)?;
-        let response = mcp_router(bus.clone())
-            .oneshot(
-                Request::post("/mcp")
-                    .header(AUTHORIZATION, format!("Bearer {token}"))
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(body))?,
-            )
-            .await?;
-        let status = response.status();
-        let bytes = response.into_body().collect().await?.to_bytes();
-        if status != StatusCode::OK {
-            bail!(
-                "Team Bus returned HTTP {status}: {}",
-                String::from_utf8_lossy(&bytes)
-            );
-        }
-        serde_json::from_slice(&bytes).context("invalid JSON HTTP response")
-    }
-
-    async fn post_live_json(address: SocketAddr, token: &str, request: &Value) -> Result<Value> {
-        let body = serde_json::to_vec(request)?;
-        let mut stream = tokio::net::TcpStream::connect(address).await?;
-        let head = format!(
-            "POST /mcp HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        stream.write_all(head.as_bytes()).await?;
-        stream.write_all(&body).await?;
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).await?;
-        let separator = response
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .context("HTTP response omitted header terminator")?;
-        serde_json::from_slice(&response[separator + 4..]).context("invalid JSON HTTP response")
     }
 
     fn assert_events_match_schema(events: &[crate::RunEvent]) {

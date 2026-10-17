@@ -5,8 +5,8 @@ import type { AgentConfig } from '../../lib/team-file/types'
 import { SaveAsJob } from './SaveAsJob'
 
 const agent: AgentConfig = {
-  id: 'writer', name: 'Writer', role: 'Write release notes.', model: 'gpt-5.6',
-  spawn: { cmd: 'codex', args: ['acp'], env: {}, cwd: '.' }, capabilities: [{ kind: 'skill', name: 'release-style' }],
+  id: 'writer', name: 'Writer', role: 'Write release notes.', model: 'openai/gpt-6.1-sol',
+  capabilities: [{ kind: 'skill', name: 'release-style' }],
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -26,23 +26,23 @@ function daemon(existing: Set<string>) {
 }
 
 describe('SaveAsJob', () => {
-  it('keeps the agent’s instructions, app, model, skills and switches under the name given, and links the agent to it', async () => {
+  it('keeps the agent’s instructions, model, skills and switches under the name given, and links the agent to it', async () => {
     const saves = daemon(new Set())
     const linked = vi.fn()
-    render(<SaveAsJob agent={{ ...agent, allow: { web: true } }} appId="codex" onLinked={linked} />)
+    render(<SaveAsJob agent={{ ...agent, allow: { web: true } }} onLinked={linked} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add to Your agents' }))
     fireEvent.change(screen.getByLabelText('Name in Your agents'), { target: { value: 'Release notes writer' } })
     fireEvent.change(screen.getByLabelText(/What it does/), { target: { value: 'Drafts release notes' } })
-    expect(screen.getByText(/Keeps its instructions, app and model, its skill and what it may do without asking/)).toBeInTheDocument()
+    expect(screen.getByText(/Keeps its instructions, model, its skill and what it may do without asking/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Added “Release notes writer” to Your agents as v1. This agent now follows it.')
-    expect(saves).toEqual([{ id: 'release-notes-writer', createOnly: true, body: { name: 'Release notes writer', does: 'Drafts release notes', instructions: 'Write release notes.', icon: 'write', apps: ['codex'], model: 'gpt-5.6', skills: ['release-style'], allow: { web: true } } }])
+    expect(saves).toEqual([{ id: 'release-notes-writer', createOnly: true, body: { name: 'Release notes writer', does: 'Drafts release notes', instructions: 'Write release notes.', icon: 'write', model: 'openai/gpt-6.1-sol', skills: ['release-style'], allow: { web: true } } }])
     expect(linked).toHaveBeenCalledWith({ agent: 'release-notes-writer', version: 1 })
   })
 
   it('asks before saving over an agent of the same name, as its next version', async () => {
     const saves = daemon(new Set(['writer']))
-    render(<SaveAsJob agent={agent} appId="codex" />)
+    render(<SaveAsJob agent={agent} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add to Your agents' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(await screen.findByText(/You already have an agent called “Writer”. Save this as its next version\?/)).toBeInTheDocument()
@@ -53,7 +53,7 @@ describe('SaveAsJob', () => {
   })
 
   it('cannot save an agent with no instructions', () => {
-    render(<SaveAsJob agent={{ ...agent, role: '  ' }} appId="codex" />)
+    render(<SaveAsJob agent={{ ...agent, role: '  ' }} />)
     expect(screen.getByRole('button', { name: 'Add to Your agents' })).toBeDisabled()
   })
 })

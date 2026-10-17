@@ -2,6 +2,7 @@ import { ArrowUpCircle, Check, Copy, ExternalLink } from 'lucide-react'
 import { useEffect, useId, useState, type ReactNode } from 'react'
 
 import { relativeTime } from '../../lib/format'
+import { isWindows } from '../../lib/platform'
 import { fetchRuns } from '../../lib/runs/client'
 import { teamLabel } from '../../lib/story/needsYou'
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries } from '../../lib/team-file/client'
@@ -341,6 +342,11 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                   {rollback && <> If the new version gives you trouble, <code className="t-mono-sm">{rollback}</code> goes back to this one.</>}
                 </p>
               </>
+            ) : status?.install === 'app' && isWindows() ? (
+              <ol>
+                <li>Download <strong>LoomWatch-windows-setup.exe</strong> from the release page above and open it.</li>
+                <li>It closes LoomWatch, puts the new version in its place, and opens it again. Your teams and history stay.</li>
+              </ol>
             ) : status?.install === 'app' ? (
               <ol>
                 <li>Download <strong>LoomWatch-macos.dmg</strong> from the release page above and open it.</li>

@@ -11,15 +11,14 @@ import type { LibrarySource } from './types'
 
 export type AgentNode = Node<{
   label: string
-  harnessLabel?: string
+  /** The model it runs on, in words, once the model list has named it. */
+  modelLabel?: string
   agent: AgentConfig
   isEntrypoint?: boolean
   waiting?: WaitingOn | null
   onAnswer?: () => void
   /** docs/CANVAS_SPEC.md §5.2/§5.4: live per-field problems, already reveal-gated. */
   fieldProblems?: AgentFieldProblems
-  /** Build only: why this agent's app cannot start on this computer (`lib/team-file/appChecks`). */
-  appProblem?: string
   /** Build only: what LoomWatch did to this agent's instructions after a removal (ADR 0059). */
   instructionNote?: string
   /** TNG-113: runtime task state while a run is shown. View state only. */

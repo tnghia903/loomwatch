@@ -1,11 +1,10 @@
 import { Check, FilePen, Globe, SquareTerminal } from 'lucide-react'
 
-import type { DetectedHarness } from '../../lib/harnesses'
+import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { AgentDraft } from '../../lib/library/draft'
-import { agentFromDraft } from '../../lib/library/draft'
 import { figureWords, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from './FigureStill'
-import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
+import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { AgentMark } from '../ui/AgentMark'
 
@@ -17,10 +16,9 @@ export interface AgentBadgeProps {
   /** The figure it wears in Your agents: its portrait leads the card. Without one, its woven mark does. */
   figure?: FigureChoice
   draft: AgentDraft
-  harness: DetectedHarness | null
   /** The model's name to show; the id when no name is known. */
   modelName?: string
-  /** Its thinking effort's name, when it has one other than the app's default. */
+  /** Its thinking effort's name, when it has one other than the model's default. */
   effortName?: string
   version?: number | null
   /** Teams that use it, and how many of those run on a schedule. */
@@ -33,9 +31,7 @@ export interface AgentBadgeProps {
  * right now — what it carries, and where it is used. It is the staff badge of the design notes:
  * an access card with an "after hours" rule, because a scheduled team has nobody to answer.
  */
-export function AgentBadge({ markId, figure, draft, harness, modelName, effortName, version, usedIn, compact = false }: AgentBadgeProps) {
-  const agent = agentFromDraft(draft, harness)
-  const wild = actsWithoutAsking(agent)
+export function AgentBadge({ markId, figure, draft, modelName, effortName, version, usedIn, compact = false }: AgentBadgeProps) {
   const scheduled = (usedIn?.scheduled ?? 0) > 0
   const asks = ALLOW_SWITCHES.filter(({ key }) => !draft.allow[key])
   const name = draft.name.trim() || 'New agent'
@@ -48,7 +44,7 @@ export function AgentBadge({ markId, figure, draft, harness, modelName, effortNa
         <div className="agent-badge-who">
           <strong>{name}</strong>
           {draft.does.trim() && <span className="agent-badge-does">{draft.does.trim()}</span>}
-          <span className="agent-badge-app t-mono-sm">{harness ? harness.name : 'No app chosen'}{harness ? ` · ${modelName || draft.model || 'its current model'}${effortName ? ` · ${effortName.toLowerCase()} effort` : ''}` : ''}</span>
+          <span className="agent-badge-app t-mono-sm">{modelName || modelNameFromId(draft.model)}{effortName ? ` · ${effortName.toLowerCase()} effort` : ''}</span>
         </div>
         {version != null && <span className="agent-badge-version" title={`Version ${version}`}>v{version}</span>}
       </div>
@@ -57,15 +53,14 @@ export function AgentBadge({ markId, figure, draft, harness, modelName, effortNa
         <span className="agent-badge-tiles">
           {ALLOW_SWITCHES.map(({ key, short, label }) => {
             const on = draft.allow[key] === true
-            const state = wild ? 'wild' : on ? 'on' : 'asks'
+            const state = on ? 'on' : 'asks'
             const Icon = ICONS[key]
-            const word = wild ? 'Doesn’t ask' : on ? 'Allowed' : 'Asks you'
-            return <span key={key} className={`agent-badge-tile ${state}`} title={`${label}: ${word}`}>{on && !wild && <Check size={10} strokeWidth={3} aria-hidden="true" />}<Icon size={13} aria-hidden="true" /><span>{short}</span><em>{word}</em></span>
+            const word = on ? 'Allowed' : 'Asks you'
+            return <span key={key} className={`agent-badge-tile ${state}`} title={`${label}: ${word}`}>{on && <Check size={10} strokeWidth={3} aria-hidden="true" />}<Icon size={13} aria-hidden="true" /><span>{short}</span><em>{word}</em></span>
           })}
         </span>
       </div>
-      {wild && <p className="agent-badge-warn">{wild} doesn’t ask before it acts, so these switches can’t hold it back.</p>}
-      {!wild && !compact && asks.length > 0 && (
+      {!compact && asks.length > 0 && (
         <div className="agent-badge-row">
           <span className="agent-badge-label">After hours</span>
           <span className={`agent-badge-after${scheduled ? ' live' : ''}`}>

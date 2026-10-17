@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Bot, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, Lock, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
-import { harnessProblem, KNOWN_HARNESSES, knownHarness } from '../../lib/harnesses'
+import { BookmarkCheck, Bot, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
+import { modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { usedInRun, type UsedInRun } from '../../lib/library/observed'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
-import { harnessForRole, ROLE_PRESETS, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
+import { modelForPreset, ROLE_PRESETS, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
 import type { CapabilityDragPayload, CapabilityKind } from '../../lib/composer-layout/types'
-import type { DetectedHarness } from '../../lib/harnesses'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { Evidence } from '../../lib/watch/events'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
@@ -18,32 +17,25 @@ import { CONNECTIONS_HREF, NOTION_PAGE_SOURCE, type NotionConnection } from '../
 import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
 import { PaletteResizer } from './PaletteResizer'
 import { SectionHead } from '../ui/SectionHead'
+import { keys } from '../../lib/platform'
 
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
 const USED = 'Used in this run'
 const BUILT_IN = 'Hire by job'
 const YOURS = 'Your agents'
-const APPS = 'AI apps'
+const SKILLS = 'Skills'
 const CONNECTIONS = 'Connections'
 const FILES = 'Folders & files'
 const MEMORY = 'Team memory'
 
 export interface LibraryProps {
-  harnesses: DetectedHarness[]
-  /** PATH entries the daemon scanned, shown behind "Show search path" (§4.2). */
-  harnessSearchPath?: readonly string[]
-  /** Harness ids the daemon looked for; "Not installed" is this list minus what it found. */
-  knownHarnessIds?: readonly string[]
-  harnessesLoading: boolean
-  harnessesError: string | null
-  onRetry?: () => void
   capabilityInventory?: CapabilityInventory
   capabilitiesLoading?: boolean
   capabilitiesError?: string | null
   capabilitiesScannedAt?: Date | null
   onRetryCapabilities?: () => void
-  /** A skill, tool or knowledge row's details, which also connect it to agents. */
+  /** A skill or knowledge row's details, which also connect it to agents. */
   onInspectCapability?: (item: DetectedCapability, kind: CapabilityKind) => void
   onDragStateChange?: (dragging: boolean) => void
   /** Lets the shell keep its layout clear of the panel. */
@@ -102,7 +94,7 @@ export interface TeamNotionPage {
 interface PaletteItem {
   name: string
   detail: string
-  /** A third line: the app a job runs on, or a capability's compatibility. */
+  /** A third line: the model a job runs on, or where a capability comes from. */
   engine?: string
   quiet?: boolean
   Icon: LucideIcon
@@ -114,7 +106,7 @@ interface PaletteItem {
   jobId?: string
   /** One of Your agents wears its figure here, as it does on Home and on the canvas. */
   figure?: FigureChoice
-  /** A skill, tool or knowledge source: the row offers its details. */
+  /** A skill or knowledge source: the row offers its details. */
   capability?: { item: DetectedCapability; kind: CapabilityKind }
   /** What a click does instead of adding: a folder or file already has a card, so it is found. */
   onActivate?: () => void
@@ -126,14 +118,16 @@ interface PaletteItem {
   nested?: boolean
 }
 
-function jobItem(preset: RolePreset, harnesses: readonly DetectedHarness[], jobId?: string): PaletteItem {
-  const harness = harnessForRole(preset, harnesses)
-  return { name: preset.label, detail: preset.does, engine: harness ? `on ${harness.name}` : 'needs an AI app', Icon: preset.icon ? ROLE_ICONS[preset.icon] : BookmarkCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: !harness, payload: (roleSource(preset, harnesses) ?? {}) as object, ...(jobId ? { jobId } : {}) }
+function jobItem(preset: RolePreset, jobId?: string): PaletteItem {
+  return { name: preset.label, detail: preset.does, engine: `on ${modelNameFromId(modelForPreset(preset).model)}`, Icon: preset.icon ? ROLE_ICONS[preset.icon] : BookmarkCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: roleSource(preset) as object, ...(jobId ? { jobId } : {}) }
 }
+
+/** An agent with no job yet: the default model and a general brief, for writing its own. */
+const BLANK_AGENT: PaletteItem = { name: 'Blank agent', detail: 'You write its instructions', Icon: Bot, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: { group: 'agents', id: 'blank', label: 'Agent' } }
 
 function capabilityItem(item: DetectedCapability, kind: CapabilityKind): PaletteItem {
   const payload: CapabilityDragPayload = { kind, name: item.name, source: item.source, ...(item.memory ? { memory: { team: item.memory.team, pack: item.memory.pack } } : {}) }
-  return { name: item.name, detail: item.source, engine: item.status, quiet: item.status === 'Local only', Icon: kind === 'skill' ? Puzzle : kind === 'tool' ? Wrench : Box, mime: CAPABILITY_DRAG_MIME, event: 'loomwatch:add-capability', disabled: false, payload, capability: { item, kind } }
+  return { name: item.name, detail: item.source, engine: item.status, quiet: item.status === 'Local only', Icon: kind === 'skill' ? Puzzle : Box, mime: CAPABILITY_DRAG_MIME, event: 'loomwatch:add-capability', disabled: false, payload, capability: { item, kind } }
 }
 
 const listOf = (names: readonly string[]) => names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
@@ -198,7 +192,7 @@ function notionPageItem(page: TeamNotionPage, reveal?: (id: string) => void): Pa
 
 /** "Built into the app · Researcher and Fact-checker" — what it is, and who used it. */
 function usedDetail(row: UsedInRun, name: (id: string) => string): string {
-  const origin = { app: 'Built into the app', connected: 'Connected tool', team: 'LoomWatch', skill: 'Skill' }[row.origin]
+  const origin = { app: 'Built into LoomWatch', connected: 'Connected tool', team: 'LoomWatch', skill: 'Skill' }[row.origin]
   return `${origin} · ${listOf(row.agents.map((agent) => name(agent.id)))}`
 }
 
@@ -217,10 +211,8 @@ function usedRefusal(row: UsedInRun, name: (id: string) => string): string | nul
  * when a group is empty; these sentences are for whoever wonders why.
  */
 const EXPLAIN: Record<string, ReactNode> = {
-  [BUILT_IN]: 'Each job is placed with working instructions on the best AI app you have.',
-  [APPS]: 'The same agents without a job: an AI app and an empty brief, for when you write the instructions yourself.',
-  Skills: 'Skills found on this Mac. Drag one onto an agent to supply its instructions there; skills you connect work with any AI app.',
-  Tools: <>Tools found on this Mac. Web search, commands and file edits are built into each AI app instead: switch them on per agent, under <b>Allowed without asking</b>.</>,
+  [BUILT_IN]: 'Each job is placed with working instructions, on the model its kind of work suits. A blank agent starts on the default model with a general brief.',
+  [SKILLS]: <>LoomWatch’s skills, and the ones this team’s project folder has. Drag one onto an agent to supply its instructions there. Add, bring in or install skills on the <a href="/skills">Skills</a> page. Web search, commands and file edits need no skill: switch them on per agent, under <b>Allowed without asking</b>.</>,
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
@@ -228,20 +220,18 @@ const EXPLAIN: Record<string, ReactNode> = {
 }
 
 /**
- * The one add panel, in Build and in a run's full trace (ADR 0041): what you can add — jobs, AI
- * apps, skills, tools, knowledge — and, while a run is shown, what that run used. It replaced a
+ * The one add panel, in Build and in a run's full trace (ADR 0041): what you can add — jobs,
+ * skills, knowledge — and, while a run is shown, what that run used. It replaced a
  * second "Library" that the trace drew with other groups, other rows and other words for the
  * same skills and tools.
  */
-export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetry, capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, width, onResize }: LibraryProps) {
+export function ComponentPalette({ capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, width, onResize }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
   const [collapsed, setCollapsed] = useState(narrow)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const [notInstalledOpen, setNotInstalledOpen] = useState(false)
-  const [searchPathOpen, setSearchPathOpen] = useState(false)
   // A saved job is removed on a second click, so one stray click never loses it.
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
@@ -270,45 +260,30 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
       window.removeEventListener('loomwatch:toggle-library', toggle)
     }
   }, [])
-  // What the daemon looked for, minus what it found: the difference between "not installed" and
-  // "installed but not visible from the PATH the daemon was started with".
-  const notInstalled = useMemo(() => {
-    const ids = knownHarnessIds.length > 0 ? knownHarnessIds : KNOWN_HARNESSES.map((known) => known.id)
-    return ids.filter((id) => !harnesses.some((harness) => harness.id === id)).map((id) => knownHarness(id).name)
-  }, [harnesses, knownHarnessIds])
-
   const builtIn = { name: BUILT_IN, items: [
-    // Jobs first: a newcomer knows they need a researcher, not which app to run one on. Each job is
-    // placed with working instructions on the best installed app, which stays changeable in its
-    // settings. "You" is the review step that pauses the team for the operator's approval.
-    ...ROLE_PRESETS.map(preset => jobItem(preset, harnesses)),
+    // Jobs first: a newcomer knows they need a researcher, not which model to run one on. Each job
+    // is placed with working instructions on its kind of work's model, which stays changeable in
+    // its settings. "You" is the review step that pauses the team for the operator's approval.
+    ...ROLE_PRESETS.map(preset => jobItem(preset)),
+    BLANK_AGENT,
     { name: 'You (review step)', detail: 'Pause so you can approve the work', Icon: UserCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: OPERATOR_SOURCE as object },
   ] }
   // The operator's own jobs, saved from agents that worked (ADR 0030). Once there are any they lead
   // the list: someone who saved a job comes back for it more than for a built-in one.
-  const yours = { name: YOURS, items: saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), harnesses, job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}`, figure: figureFor(job.id, job.figure) } }) }
+  const yours = { name: YOURS, items: saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}`, figure: figureFor(job.id, job.figure) } }) }
   const groups: { name: string; items: PaletteItem[] }[] = [
     ...(yours.items.length || saved.problems.length ? [yours, builtIn] : [builtIn]),
-    // The same agents without a job: an app and an empty brief, for operators who write their own.
-    { name: APPS, items: [
-      // An app that last failed to start stays addable — the operator may have just fixed it, and
-      // placing it asks for its models again — but it says why it may not run instead of "AI agent".
-      ...harnesses.map(h => ({ name: h.name, detail: harnessProblem(h) ?? 'Blank agent · you write its brief', Icon: Bot, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: h.acpAvailable === false, payload: { group: 'detected', id: h.id, label: h.name, spawn: h.spawn } as object })),
-    ] },
-    ...(['skills', 'tools'] as const).map(key => {
-      const kind: CapabilityKind = key === 'skills' ? 'skill' : 'tool'
-      return { name: { skills: 'Skills', tools: 'Tools' }[key], items: (capabilityInventory?.[key] ?? []).map(item => capabilityItem(item, kind)) }
-    }),
+    { name: SKILLS, items: (capabilityInventory?.skills ?? []).map(item => capabilityItem(item, 'skill')) },
     // Services connected in Connections, and the pages this team reads from them (ADR 0050).
     ...(notion ? [{ name: CONNECTIONS, items: [notionServiceItem(notion), ...notion.pages.map(page => notionPageItem(page, onRevealSource))] }] : []),
     // Chosen, not discovered (ADR 0036): only what this team was given, each with its own card.
     { name: FILES, items: teamSources.map(source => sourceItem(source, onRevealSource)) },
-    // Other teams' memory and imported packs: the only knowledge this Mac is scanned for.
+    // Other teams' memory and imported packs: the only knowledge LoomWatch lists for itself.
     { name: MEMORY, items: (capabilityInventory?.sources ?? []).map(item => capabilityItem(item, 'knowledge')) },
   ]
   // The agent lists are short and are what a new team needs, so they are shown whole; the
   // capability groups can run to hundreds of entries and fold to three.
-  const limitFor = (group: string) => (group === BUILT_IN ? 8 : group === YOURS ? 6 : group === APPS ? 4 : group === USED || group === FILES ? 6 : group === CONNECTIONS ? 7 : 3)
+  const limitFor = (group: string) => (group === BUILT_IN ? 10 : group === YOURS ? 6 : group === USED || group === FILES ? 6 : group === CONNECTIONS ? 7 : 3)
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase())
   const remove = (item: PaletteItem) => {
     if (!item.jobId) return
@@ -355,76 +330,42 @@ export function ComponentPalette({ harnesses, harnessSearchPath = [], knownHarne
   </section>
   const visible = <T,>(name: string, items: readonly T[]) => items.slice(0, query || expanded[name] ? undefined : limitFor(name))
 
-  if (collapsed) return <button className="palette-reopen" onClick={expand} title="Open the panel (⌘\)">
+  if (collapsed) return <button className="palette-reopen" onClick={expand} title={`Open the panel (${keys('⌘\\')})`}>
     <PanelLeftOpen size={16} />{used.length > 0 ? `${USED} · ${used.length}` : 'Add agents'}
   </button>
   const usedShown = used.filter(item => matches(`${item.name} ${usedDetail(item, agentName)}`))
-  const scanned = capabilitiesScannedAt ? `Scanned this Mac at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Scanning finds the skills and tools on this Mac'
+  const scanned = capabilitiesScannedAt ? `Skills listed at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Listing LoomWatch’s skills'
   return <aside className="node-palette" aria-label="Add to your team" data-tour="palette">
     <div className="palette-body">
-    <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas, or onto an agent</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library" title="Collapse (⌘\)"><PanelLeftClose size={16} /></button></div>
-    <div className="palette-search"><Search size={12} /><input aria-label="Search agents, skills and tools" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /><button className="icon-button" onClick={onRetryCapabilities} disabled={capabilitiesLoading} aria-label="Scan this computer again" title="Scan again"><RefreshCw size={12} /></button></div>
-    <p className="palette-scan" role="status">{capabilitiesLoading ? 'Checking this Mac…' : scanned}</p>
-    {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t scan this Mac’s skills and tools.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}
+    <div className="palette-head"><div><span className="eyebrow">Add to your team</span><p>Click + or drag onto the canvas, or onto an agent</p></div><button className="icon-button" onClick={() => setCollapsed(true)} aria-label="Collapse the library" title={`Collapse (${keys('⌘\\')})`}><PanelLeftClose size={16} /></button></div>
+    <div className="palette-search"><Search size={12} /><input aria-label="Search agents and skills" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /><button className="icon-button" onClick={onRetryCapabilities} disabled={capabilitiesLoading} aria-label="List the skills again" title="List again"><RefreshCw size={12} /></button></div>
+    <p className="palette-scan" role="status">{capabilitiesLoading ? 'Listing skills…' : scanned}</p>
+    {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t list the skills.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}
     {removeError && <p role="alert">{removeError}</p>}
     {/* A run's own record first, while one is shown: what it used, one row per tool, not per call. */}
     {used.length > 0 && usedShown.length > 0 && section(USED, visible(USED, usedShown).map(usedRow), usedShown.length, undefined,
-      used.some(item => item.origin === 'app' && !item.outward) && <>Tools built into an app are not added from here. Switch them on per agent, under <b>Allowed without asking</b>.</>)}
+      used.some(item => item.origin === 'app' && !item.outward) && <>LoomWatch’s own tools are not added from here. Switch them on per agent, under <b>Allowed without asking</b>.</>)}
     {groups.map(group => {
       const items = group.items.filter(item => matches(`${item.name} ${item.detail}`))
       if (query && items.length === 0) return null
-      const loadingApps = group.name === APPS && harnessesLoading
-      const loadingCapabilities = (group.name === 'Skills' || group.name === 'Tools' || group.name === MEMORY) && capabilitiesLoading && group.items.length === 0
+      const loadingCapabilities = (group.name === SKILLS || group.name === MEMORY) && capabilitiesLoading && group.items.length === 0
       return section(group.name, [
-        ...(loadingApps || loadingCapabilities ? [40, 56].map(width => <div key={width} className="skel-row" aria-hidden="true"><span className="skel-sq" /><span className="skel-bars"><i className="skel-bar" style={{ width: `${width}%` }} /><i className="skel-bar" style={{ width: `${100 - width}%` }} /></span></div>) : []),
+        ...(loadingCapabilities ? [40, 56].map(width => <div key={width} className="skel-row" aria-hidden="true"><span className="skel-sq" /><span className="skel-bars"><i className="skel-bar" style={{ width: `${width}%` }} /><i className="skel-bar" style={{ width: `${100 - width}%` }} /></span></div>) : []),
         ...visible(group.name, items).map(row),
       ], items.length, <>
         {group.name === YOURS && saved.problems.map(problem => <p key={problem.file} className="palette-hint palette-problem" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
         {group.name === YOURS && !query && <a className="palette-hint palette-build-agent" href="/agents/new">Build a new agent</a>}
-        {group.name === APPS && !query && <AppsFooter loading={harnessesLoading} error={harnessesError} onRetry={onRetry} found={harnesses.length} notInstalled={notInstalled} notInstalledOpen={notInstalledOpen} onToggleNotInstalled={() => setNotInstalledOpen(open => !open)} searchPathOpen={searchPathOpen} onToggleSearchPath={() => setSearchPathOpen(open => !open)} knownIds={knownHarnessIds} searchPath={harnessSearchPath} />}
         {/* An empty group is one dashed slot, the shape its first row will fill; why it is empty is behind the heading's "?". */}
         {group.name === FILES && !query && group.items.length === 0 && <p className="palette-empty"><Folder size={13} aria-hidden="true" />None yet</p>}
         {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Box size={13} aria-hidden="true" />None yet</p>}
-        {(group.name === 'Skills' || group.name === 'Tools') && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty">{group.name === 'Skills' ? <Puzzle size={13} aria-hidden="true" /> : <Wrench size={13} aria-hidden="true" />}None found on this Mac</p>}
+        {group.name === SKILLS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Puzzle size={13} aria-hidden="true" />None yet</p>}
+        {group.name === SKILLS && !query && <a className="palette-hint palette-build-agent" href="/skills">Manage skills</a>}
       </>, group.name === BUILT_IN && saved.available
         ? <><div>{EXPLAIN[BUILT_IN]}</div><div>To reuse an agent that worked, select it and choose <b>Add to Your agents</b>, or build one in <a href="/agents">Your agents</a>.</div></>
         : EXPLAIN[group.name])
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
-    <p className="palette-foot" title="Only names and compatibility are scanned; private contents stay on this Mac."><Lock size={10} aria-hidden="true" />Names only. Contents stay on this Mac.</p>
     </div>
     {onResize && <PaletteResizer width={width ?? PALETTE_WIDTH.default} onResize={onResize} />}
   </aside>
-}
-
-/** Under the apps: why the list looks the way it does — still looking, could not look, or not installed. */
-function AppsFooter({ loading, error, onRetry, found, notInstalled, notInstalledOpen, onToggleNotInstalled, searchPathOpen, onToggleSearchPath, knownIds, searchPath }: {
-  loading: boolean; error: string | null; onRetry?: () => void; found: number
-  notInstalled: readonly string[]; notInstalledOpen: boolean; onToggleNotInstalled: () => void
-  searchPathOpen: boolean; onToggleSearchPath: () => void; knownIds: readonly string[]; searchPath: readonly string[]
-}) {
-  if (loading) return <span className="visually-hidden">Looking for AI apps…</span>
-  if (error) return <div className="palette-alert" role="alert"><span>Couldn’t read the list of AI apps.</span><small>{error}</small>{onRetry && <button className="btn" onClick={onRetry}>Retry</button>}</div>
-  const disclosure = <SearchPathDisclosure open={searchPathOpen} onToggle={onToggleSearchPath} knownIds={knownIds} searchPath={searchPath} />
-  if (found === 0) return <div className="palette-hint"><p>No AI apps found on this Mac.</p>{disclosure}</div>
-  if (notInstalled.length === 0) return null
-  return <div className="palette-hint">
-    <button className="palette-more" aria-expanded={notInstalledOpen} onClick={onToggleNotInstalled}>Not installed · {notInstalled.length}</button>
-    {notInstalledOpen && <><p>{notInstalled.join(', ')}</p>{disclosure}</>}
-  </div>
-}
-
-/** §4.2: "we looked here, for these" — the only honest answer to an app that is installed but
- * missing from the list, because the daemon searches the PATH it was started with and nothing else. */
-function SearchPathDisclosure({ open, onToggle, knownIds, searchPath }: { open: boolean; onToggle: () => void; knownIds: readonly string[]; searchPath: readonly string[] }) {
-  const ids = knownIds.length > 0 ? knownIds : KNOWN_HARNESSES.map((known) => known.id)
-  return <>
-    <button className="palette-more" onClick={onToggle} aria-expanded={open}>{open ? 'Hide search path' : 'Show search path'}</button>
-    {open && <div className="palette-path">
-      <p>Looked for {ids.join(', ')} on the PATH loomwatchd was started with.</p>
-      {searchPath.length === 0
-        ? <p>The daemon reported no search path at all, so it was started without a PATH.</p>
-        : <ol>{searchPath.map((directory) => <li key={directory}>{directory}</li>)}</ol>}
-    </div>}
-  </>
 }

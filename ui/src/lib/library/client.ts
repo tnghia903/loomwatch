@@ -40,12 +40,9 @@ export interface MemorySourceRef {
 }
 
 export interface CapabilityInventory {
+  /** LoomWatch's own skills folder, and the team project's `.agents/skills` and `.claude/skills`. */
   skills: DetectedCapability[]
-  tools: DetectedCapability[]
   sources: DetectedCapability[]
-  /** claude.ai connectors Claude Code has connected (ADR 0060): every Claude agent has them, and
-      LoomWatch can only turn one off, never give it. Absent from older daemons. */
-  connectors?: DetectedCapability[]
 }
 
 export interface CapabilityDefinition {
@@ -66,21 +63,21 @@ export interface CapabilityDetails {
   portability?: SkillPortability
 }
 
-/** How one skill reaches one agent (`backend::skill_routing::SkillRoute`). */
-export type SkillRoute = 'native' | 'inline' | 'blocked'
+/** How a skill reaches an agent (`backend::skill_routing::SkillRoute`). */
+export type SkillRoute = 'native' | 'inline'
 
 export interface SkillPortability {
   /** `artifact`, `behavior`, or `portable`. */
   kind: string
-  /** The harness assumptions found in the skill's text, as words the operator can read. */
+  /** What the skill's text assumes it can do, as words the operator can read. */
   needs: string[]
   evidence: { need: string; line: string }[]
   /**
-   * Harness id to route. Computed by the daemon, not re-derived here: the rule lives in
-   * `skill_routing::route`, and a second copy of it in TypeScript would be a second rule that
-   * could disagree with the one the run actually applies.
+   * How it reaches every agent it is given to. Computed by the daemon, not re-derived here: the
+   * rule lives in `skill_routing::route`, and a second copy of it in TypeScript would be a second
+   * rule that could disagree with the one the run actually applies.
    */
-  routes: Record<string, SkillRoute>
+  route: SkillRoute
 }
 
 /** The daemon embeds this UI at build time (`spa.rs`), so a long-running `loomwatchd` can serve a

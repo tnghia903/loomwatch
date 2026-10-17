@@ -1,23 +1,15 @@
-//! Ask `LoomWatch` end to end, with a scripted ACP app and fake app commands: no model provider is
-//! ever contacted (ADR 0033).
+//! Ask `LoomWatch` end to end, on `LoomWatch`'s own agent with a scripted stand-in for the model:
+//! no model provider is ever contacted (ADR 0033).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::{Control, ControlOptions};
+use super::{Caller, Control, ControlOptions, mcp::ControlTools};
+use crate::agent::{Completion, Demo, HostTools, Message, ToolCall};
 use crate::archive::EventArchive;
 use crate::runs::RunRegistry;
-
-const FAKE_ASSISTANT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/ask_fake_assistant.py"
-);
-const DEMO_HARNESS: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../examples/operator-stop-harness.py"
-);
 
 struct TempDirectory(PathBuf);
 
@@ -26,7 +18,7 @@ impl TempDirectory {
         let path =
             std::env::temp_dir().join(format!("loomwatch-ask-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).expect("temporary directory");
-        Self(std::fs::canonicalize(&path).expect("canonical temporary directory"))
+        Self(crate::platform::canonicalize(&path).expect("canonical temporary directory"))
     }
 }
 
@@ -34,6 +26,210 @@ impl Drop for TempDirectory {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// The team the stand-in proposes: four steps with a review stop, every agent on the offline demo
+/// model, so a run of it needs no key.
+const TEAM: &str = r#"schemaVersion: 1
+id: morning-chip-brief
+name: Morning chip brief
+entrypoint: collector
+agents:
+  - id: collector
+    name: Collector
+    role: Collect today's AI and chip news, with a link for every story.
+    model: fake/offline
+  - id: checker
+    name: Fact-checker
+    role: Check every claim against its source and list any you cannot confirm.
+    model: fake/offline
+  - id: review
+    kind: operator
+    name: You
+    role: Fact-checker is done. Approve the brief, or say what to change.
+  - id: writer
+    name: Writer
+    role: Write a five-bullet brief from the checked stories.
+    model: fake/offline
+edges:
+  - {from: collector, to: checker, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z"}
+  - {from: checker, to: review, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z"}
+  - {from: review, to: writer, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z"}
+"#;
+
+/// What the tools answered since the person's newest message, oldest first.
+fn answers(messages: &[Message]) -> Vec<&str> {
+    let start = messages
+        .iter()
+        .rposition(|message| matches!(message, Message::User { .. }))
+        .map_or(0, |at| at + 1);
+    messages[start..]
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn calling(step: usize, text: &str, tool: &str, arguments: &Value) -> Completion {
+    Completion::calls(
+        text,
+        vec![ToolCall {
+            id: format!("call-{step}-{tool}"),
+            name: tool.to_owned(),
+            arguments: arguments.to_string(),
+        }],
+    )
+}
+
+/// Stands in for the model behind Ask: reads the person's message and the tools' answers, and
+/// calls the Control tools the way a model would.
+///
+/// - "team" or "brief": proposes a broken team file first (to exercise the validation loop), then
+///   the valid four-step team with a review stop.
+/// - "run": asks to start a run of it.
+/// - "note": drafts a note for an open review stop.
+/// - anything else: lists the teams.
+///
+/// An instructions rewrite (ADR 0059) is answered without tools and with edits only: a numbered
+/// sentence that says "from the <name> page" loses those words, every other sentence naming what
+/// was removed is dropped, and the edits come back as JSON in a code fence, as a real model tends
+/// to send them. Something removed whose name says "unreadable" gets an answer with no JSON in it.
+fn assistant() -> Demo {
+    Demo::responder(|request| {
+        let prompt = request.prompt();
+        if prompt.contains("## The agents' instructions") {
+            return Some(Completion::text(&rewrite(prompt)));
+        }
+        let message = prompt
+            .rsplit("## The person's message")
+            .next()
+            .unwrap_or(prompt)
+            .to_lowercase();
+        let answers = answers(&request.messages);
+        let step = answers.len();
+        let reply = if message.contains("note") {
+            match step {
+                0 => calling(step, "", "get_run", &json!({})),
+                1 => calling(
+                    step,
+                    "",
+                    "draft_review_note",
+                    &json!({"text": "Approved. Keep the brief to five bullets."}),
+                ),
+                _ => {
+                    let run: Value = serde_json::from_str(answers[0]).unwrap_or_default();
+                    let question = run
+                        .pointer("/waitingOn/question")
+                        .and_then(Value::as_str)
+                        .unwrap_or("the open question");
+                    Completion::text(&format!(
+                        "The team is waiting for you on: {question} I drafted a note you can put \
+                         in the review box."
+                    ))
+                }
+            }
+        } else if message.contains("run") {
+            if step == 0 {
+                calling(
+                    step,
+                    "",
+                    "start_run",
+                    &json!({"file": "morning-chip-brief.yaml", "request": "Prepare today's brief."}),
+                )
+            } else {
+                Completion::text(&match serde_json::from_str::<Value>(answers[0]) {
+                    Ok(outcome) if outcome["status"] == "started" => {
+                        "Started the run. I'll keep an eye on it here.".to_owned()
+                    }
+                    Ok(_) => "Press Start run in the card when you're ready. Nothing runs until \
+                              you do."
+                        .to_owned(),
+                    Err(_) => format!("I couldn't start it: {}", answers[0]),
+                })
+            }
+        } else if message.contains("team") || message.contains("brief") {
+            let propose = |yaml: &str, summary: &str| json!({"file": "morning-chip-brief.yaml", "yaml": yaml, "summary": summary});
+            match step {
+                0 => calling(
+                    step,
+                    "",
+                    "propose_team",
+                    &propose(
+                        &TEAM.replace("entrypoint: collector", "entrypoint: nobody"),
+                        "A first draft",
+                    ),
+                ),
+                1 => calling(
+                    step,
+                    "My first draft named a starting agent that doesn't exist, so I fixed it. ",
+                    "propose_team",
+                    &propose(
+                        TEAM,
+                        "A weekday brief: Collector gathers, Fact-checker checks, you approve, \
+                         Writer writes.",
+                    ),
+                ),
+                _ => Completion::text(
+                    "Here is a team for that. Fact-checker checks every claim, and the team stops \
+                     for you before the Writer starts. Apply it on the canvas, or tell me what to \
+                     change.",
+                ),
+            }
+        } else if step == 0 {
+            calling(step, "", "list_teams", &json!({}))
+        } else {
+            let listed: Value = serde_json::from_str(answers[0]).unwrap_or_default();
+            let names = listed["teams"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|team| team["name"].as_str().or_else(|| team["file"].as_str()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Completion::text(&format!(
+                "Your teams: {}.",
+                if names.is_empty() { "none yet" } else { &names }
+            ))
+        };
+        Some(reply)
+    })
+}
+
+fn rewrite(prompt: &str) -> String {
+    let removed = prompt
+        .split("removed the ")
+        .nth(1)
+        .and_then(|rest| rest.split('"').nth(1))
+        .unwrap_or_default();
+    if removed.contains("unreadable") {
+        return "I removed it from their instructions.".to_owned();
+    }
+    let lead = removed.split(" — ").next().unwrap_or(removed);
+    let mut edits = Vec::new();
+    let mut agent = "";
+    let listing = prompt
+        .split("## The agents' instructions")
+        .nth(1)
+        .unwrap_or_default();
+    for line in listing.lines() {
+        if let Some(heading) = line.strip_prefix("### ") {
+            agent = heading.split_whitespace().next().unwrap_or_default();
+        } else if let Some(rest) = line.strip_prefix('[')
+            && let Some((n, sentence)) = rest.split_once("] ")
+            && let Ok(n) = n.parse::<u64>()
+            && sentence.contains(lead)
+        {
+            let kept = sentence.replace(&format!(" from the {lead} page"), "");
+            edits.push(if kept == sentence {
+                json!({"agent": agent, "n": n, "drop": true})
+            } else {
+                json!({"agent": agent, "n": n, "replace": kept})
+            });
+        }
+    }
+    format!("Here they are:\n```json\n{}\n```", json!({"edits": edits}))
 }
 
 /// A served [`Control`] over a scratch teams folder.
@@ -46,24 +242,22 @@ struct Fixture {
 }
 
 impl Fixture {
-    async fn start(archive: Option<EventArchive>, search_path: Option<std::ffi::OsString>) -> Self {
+    /// With `ask_model`, every conversation runs on it whatever the person chose, as
+    /// `LOOMWATCH_ASK_MODEL` makes them.
+    async fn start(archive: Option<EventArchive>, ask_model: Option<String>) -> Self {
         let root = TempDirectory::new("teams");
-        std::fs::copy(DEMO_HARNESS, root.0.join("operator-stop-harness.py")).expect("demo harness");
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("bind");
         let address = listener.local_addr().expect("address");
         let registry = RunRegistry::default();
-        let control = Control::with_search_path(
-            ControlOptions {
-                archive,
-                teams_root: root.0.clone(),
-                registry: registry.clone(),
-                listen: address,
-                ask_command: Some(vec!["python3".to_owned(), FAKE_ASSISTANT.to_owned()]),
-            },
-            search_path,
-        );
+        let control = Control::new(ControlOptions {
+            archive,
+            teams_root: root.0.clone(),
+            registry: registry.clone(),
+            listen: address,
+            ask_model,
+        });
         let router = control.router();
         tokio::spawn(async move { axum::serve(listener, router).await });
         Self {
@@ -98,20 +292,7 @@ impl Fixture {
         (status, response.json().await.unwrap_or(Value::Null))
     }
 
-    async fn mcp(&self, token: &str, body: &Value) -> (u16, Value) {
-        let response = self
-            .client
-            .post(format!("{}/api/control/mcp", self.base))
-            .bearer_auth(token)
-            .json(body)
-            .send()
-            .await
-            .expect("mcp");
-        let status = response.status().as_u16();
-        (status, response.json().await.unwrap_or(Value::Null))
-    }
-
-    /// Send a message and wait for the app to finish its turn.
+    /// Send a message and wait for the assistant to finish its turn.
     async fn say(&self, conversation: &str, text: &str) {
         let (status, body) = self
             .post(
@@ -130,7 +311,7 @@ impl Fixture {
                 _ => tokio::time::sleep(Duration::from_millis(100)).await,
             }
         }
-        panic!("the app never finished its turn");
+        panic!("the assistant never finished its turn");
     }
 
     async fn events(&self, conversation: &str) -> Vec<crate::RunEvent> {
@@ -144,13 +325,17 @@ impl Fixture {
             .expect("events")
     }
 
-    async fn token_of(&self, conversation: &str) -> String {
-        self.control
-            .conversation(conversation)
+    async fn end(&self, conversation: &str) -> u16 {
+        self.client
+            .delete(format!(
+                "{}/api/ask/conversations/{conversation}",
+                self.base
+            ))
+            .send()
             .await
-            .expect("conversation")
-            .token
-            .clone()
+            .expect("delete")
+            .status()
+            .as_u16()
     }
 }
 
@@ -203,10 +388,15 @@ fn said(events: &[crate::RunEvent]) -> String {
 #[tokio::test]
 async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() {
     let pool = crate::db::Db::temp().await;
-    let fixture = Fixture::start(Some(EventArchive::new(pool)), None).await;
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
     let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
     assert_eq!(status, 201, "{started}");
-    assert_eq!(started["appName"], "Offline assistant");
+    assert_eq!(started["appName"], "Ask LoomWatch");
     let id = started["id"].as_str().expect("id").to_owned();
 
     // A proposal: the broken draft is refused by the same rules as a save, the fixed one is
@@ -236,10 +426,15 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
             event.kind == crate::EventKind::ToolUpdate && event.payload["status"] == "failed"
         })
         .count();
-    assert_eq!(refused, 1, "the broken draft came back as a tool error");
+    assert_eq!(
+        refused,
+        1,
+        "the broken draft came back as a tool error: {}",
+        dump(&events)
+    );
     assert!(
         said(&events).contains("fixed it"),
-        "the app saw the error and fixed it"
+        "the assistant saw the error and fixed it"
     );
     assert_eq!(
         phases(&events, "ask_message")[0]["text"],
@@ -254,6 +449,22 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
     assert_eq!(status, 200);
     assert_eq!(stored["yaml"], yaml.as_str());
 
+    // Its only tools are the Control tools: no files, no commands, no web.
+    let offered = &demo.requests()[0].tools;
+    assert_eq!(
+        offered,
+        &[
+            "list_teams",
+            "read_team",
+            "list_models",
+            "propose_team",
+            "start_run",
+            "get_run",
+            "draft_review_note"
+        ],
+        "no tool answers a review stop, saves a file, or deletes anything"
+    );
+
     // A run of a team that was only proposed is refused with the reason.
     fixture.say(&id, "run it").await;
     let events = fixture.events(&id).await;
@@ -265,15 +476,15 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
     );
     assert!(phases(&events, "ask_run_request").is_empty());
 
-    // Applied (the panel saves with the editor's own PUT): now the app may only ask.
+    // Applied (the panel saves with the editor's own PUT): now the assistant may only ask.
     std::fs::write(fixture.root.0.join("morning-chip-brief.yaml"), &yaml).expect("apply");
     fixture.say(&id, "run it").await;
     let events = fixture.events(&id).await;
     let requests = phases(&events, "ask_run_request");
-    assert_eq!(requests.len(), 1);
+    assert_eq!(requests.len(), 1, "{}", dump(&events));
     assert_eq!(requests[0]["name"], "Morning chip brief");
     assert_eq!(requests[0]["request"], "Prepare today's brief.");
-    assert_eq!(requests[0]["apps"], json!(["a custom command"]));
+    assert_eq!(requests[0]["models"], json!(["fake/offline"]));
     assert!(fixture.registry.list().is_empty(), "asking starts nothing");
     let request = requests[0]["requestId"]
         .as_str()
@@ -302,11 +513,11 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
     fixture.say(&id, "run it").await;
     let events = fixture.events(&id).await;
     let started = phases(&events, "ask_run_started");
-    assert_eq!(started.len(), 1);
+    assert_eq!(started.len(), 1, "{}", dump(&events));
     let run_id = started[0]["runId"].as_str().expect("run").to_owned();
     assert!(fixture.registry.get(&run_id).is_some());
 
-    // The run reaches its review stop; the app can draft a note but not answer it.
+    // The run reaches its review stop; the assistant can draft a note but not answer it.
     let mut waiting = false;
     for _ in 0..300 {
         if fixture
@@ -327,7 +538,7 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
     fixture.say(&id, "draft a note").await;
     let events = fixture.events(&id).await;
     let notes = phases(&events, "ask_review_note");
-    assert_eq!(notes.len(), 1);
+    assert_eq!(notes.len(), 1, "{}", dump(&events));
     assert_eq!(notes[0]["runId"], run_id.as_str());
     assert_eq!(notes[0]["node"], "review");
     assert_eq!(
@@ -340,55 +551,28 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
         "a drafted note answers nothing"
     );
 
-    // Ending the conversation revokes its token.
-    let token = fixture.token_of(&id).await;
-    let client = reqwest::Client::new();
-    let deleted = client
-        .delete(format!("{}/api/ask/conversations/{id}", fixture.base))
-        .send()
-        .await
-        .expect("delete");
-    assert_eq!(deleted.status().as_u16(), 204);
-    let mut revoked = false;
+    assert_eq!(fixture.end(&id).await, 204);
+    let mut ended = Value::Null;
     for _ in 0..100 {
-        let (status, _) = fixture
-            .mcp(
-                &token,
-                &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
-            )
-            .await;
-        if status == 401 {
-            revoked = true;
+        (_, ended) = fixture.get(&format!("/api/ask/conversations/{id}")).await;
+        if ended["state"] == "ended" {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(revoked, "an ended conversation's token no longer works");
-    let (_, ended) = fixture.get(&format!("/api/ask/conversations/{id}")).await;
-    assert_eq!(ended["state"], "ended");
+    assert_eq!(ended["state"], "ended", "{ended}");
     let _ = fixture.registry.cancel(&run_id);
 }
 
 #[tokio::test]
-async fn the_person_chooses_the_app_and_model_a_conversation_uses() {
+async fn the_person_chooses_the_model_a_conversation_uses() {
     let pool = crate::db::Db::temp().await;
     let fixture = Fixture::start(Some(EventArchive::new(pool)), None).await;
+    let demo = assistant();
+    let chosen = crate::engine::demo_model(demo.clone());
 
     let (status, refused) = fixture
-        .post("/api/ask/conversations", &json!({"app": "nope"}))
-        .await;
-    assert_eq!(status, 422, "{refused}");
-    assert!(
-        refused["error"]
-            .as_str()
-            .is_some_and(|text| text.starts_with("nope isn't an AI app Ask can use")),
-        "{refused}"
-    );
-    let (status, refused) = fixture
-        .post(
-            "/api/ask/conversations",
-            &json!({"app": "custom", "model": "a\nb"}),
-        )
+        .post("/api/ask/conversations", &json!({"model": "a\nb"}))
         .await;
     assert_eq!(
         status, 422,
@@ -398,61 +582,64 @@ async fn the_person_chooses_the_app_and_model_a_conversation_uses() {
     let (status, started) = fixture
         .post(
             "/api/ask/conversations",
-            &json!({"app": "custom", "model": "  fake-model-2  "}),
+            &json!({"model": format!("  {chosen}  ")}),
         )
         .await;
     assert_eq!(status, 201, "{started}");
-    assert_eq!(started["app"], "custom");
-    assert_eq!(started["model"], "fake-model-2");
+    assert_eq!(started["app"], "loomwatch");
+    assert_eq!(started["model"], chosen.as_str());
     let id = started["id"].as_str().expect("id").to_owned();
     let (_, status) = fixture.get(&format!("/api/ask/conversations/{id}")).await;
-    assert_eq!(status["model"], "fake-model-2");
+    assert_eq!(status["model"], chosen.as_str());
 
-    // The app is asked for that model when its session opens, and the transcript says which.
-    fixture.say(&id, "Which teams do I have?").await;
+    // Every turn is asked of that model, and the transcript says which.
+    fixture.say(&id, "What do I have here?").await;
     let events = fixture.events(&id).await;
-    let asked_for = events
-        .iter()
-        .filter(|event| event.kind == crate::EventKind::SessionMeta)
-        .any(|event| {
-            event.payload["configId"] == "model" && event.payload["value"] == "fake-model-2"
-        });
-    assert!(asked_for, "the model reached the app: {}", dump(&events));
+    assert!(
+        demo.requests()
+            .iter()
+            .all(|request| request.model == chosen),
+        "{:?}",
+        demo.requests()
+    );
+    assert!(
+        said(&events).starts_with("Your teams: none yet."),
+        "{}",
+        said(&events)
+    );
     let recorded = phases(&events, "ask_status");
     assert!(
         recorded
             .iter()
-            .all(|status| status["app"]["model"] == "fake-model-2"),
+            .all(|status| status["app"]["model"] == chosen.as_str()),
         "{}",
         dump(&events)
     );
 
-    // No model means the app's own default, and the status leaves the model out.
+    // No model means LoomWatch's default.
     let (status, default) = fixture
         .post("/api/ask/conversations", &json!({"model": ""}))
         .await;
     assert_eq!(status, 201, "{default}");
-    assert_eq!(default["model"], Value::Null);
+    assert_eq!(default["model"], crate::ai::DEFAULT_MODEL);
     for conversation in [id, default["id"].as_str().expect("id").to_owned()] {
-        let _ = fixture
-            .client
-            .delete(format!(
-                "{}/api/ask/conversations/{conversation}",
-                fixture.base
-            ))
-            .send()
-            .await;
+        fixture.end(&conversation).await;
     }
 }
 
-/// ADR 0059: one turn of the Ask app, with no tools, answers with edits to numbered sentences, and
-/// the daemon returns each changed agent's instructions with them made: every sentence the app didn't
-/// name, and the spacing between, stays as it was. Nothing is written and no conversation is left
-/// open.
+/// ADR 0059: one turn of the assistant, with no tools, answers with edits to numbered sentences,
+/// and the daemon returns each changed agent's instructions with them made: every sentence the
+/// assistant didn't name, and the spacing between, stays as it was. Nothing is written and no
+/// conversation is left open.
 #[tokio::test]
 async fn removing_a_source_rewrites_the_instructions_that_named_it() {
     let pool = crate::db::Db::temp().await;
-    let fixture = Fixture::start(Some(EventArchive::new(pool)), None).await;
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
     let removed = |name: &str| json!({"name": name, "kind": "Notion page"});
     let agents = json!([
         {"id": "scope", "name": "Project scope", "role": "Establish the project's problem from the EKIS page. Locate the EKIS page through the connected Notion tools.\n\nReply with a brief.  Keep it short.\n"},
@@ -467,12 +654,18 @@ async fn removing_a_source_rewrites_the_instructions_that_named_it() {
         )
         .await;
     assert_eq!(status, 200, "{answer}");
-    assert_eq!(answer["appName"], "Offline assistant");
+    assert_eq!(answer["appName"], "Ask LoomWatch");
     assert_eq!(
         answer["agents"],
         json!([{"id": "scope", "role": "Establish the project's problem.\n\nReply with a brief.  Keep it short.\n"}]),
         "an agent left with no instructions is not rewritten to nothing, one with no edits is not \
          returned, and the rest of scope's instructions are byte for byte what they were"
+    );
+    assert!(
+        demo.requests()
+            .iter()
+            .all(|request| request.tools.is_empty()),
+        "the rewrite is given no tools"
     );
     assert!(
         fixture.control.inner.conversations.read().await.is_empty(),
@@ -495,7 +688,7 @@ async fn removing_a_source_rewrites_the_instructions_that_named_it() {
     assert_eq!(status, 502, "{refused}");
     assert_eq!(
         refused["error"],
-        "Offline assistant replied without the rewritten instructions. Try again."
+        "Ask LoomWatch replied without the rewritten instructions. Try again."
     );
 
     let (status, refused) = fixture
@@ -507,60 +700,18 @@ async fn removing_a_source_rewrites_the_instructions_that_named_it() {
     assert_eq!(status, 422, "{refused}");
 }
 
+/// A proposal has to be one the editor can save: the editor checks the team schema before every
+/// save, so a file `TeamConfig::parse` accepts but the schema refuses would land on the canvas and
+/// then refuse to apply. Paths a proposal may not use are refused before anything is parsed.
 #[tokio::test]
-async fn the_tool_server_needs_a_live_token_and_lists_only_its_tools() {
-    let pool = crate::db::Db::temp().await;
-    let fixture = Fixture::start(
-        Some(EventArchive::new(pool)),
-        Some(std::ffi::OsString::new()),
-    )
-    .await;
-    let (status, _) = fixture
-        .mcp(
-            "not-a-token",
-            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
-        )
-        .await;
-    assert_eq!(status, 401);
-    let response = reqwest::Client::new()
-        .post(format!("{}/api/control/mcp", fixture.base))
-        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
-        .send()
-        .await
-        .expect("post");
-    assert_eq!(response.status().as_u16(), 401, "no token, no tools");
-
-    let (_, started) = fixture.post("/api/ask/conversations", &json!({})).await;
-    let id = started["id"].as_str().expect("id").to_owned();
-    let token = fixture.token_of(&id).await;
-    let (status, listed) = fixture
-        .mcp(
-            &token,
-            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
-        )
-        .await;
-    assert_eq!(status, 200);
-    let names = listed["result"]["tools"]
-        .as_array()
-        .expect("tools")
-        .iter()
-        .map(|tool| tool["name"].as_str().expect("name").to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        [
-            "list_teams",
-            "read_team",
-            "list_apps",
-            "propose_team",
-            "start_run",
-            "get_run",
-            "draft_review_note"
-        ],
-        "no tool answers a review stop, saves a file, or deletes anything"
+async fn a_proposal_must_pass_the_editors_schema_and_name_a_plain_team_file() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
     );
-
-    // Paths a proposal may not use, checked before anything is parsed or archived.
+    let propose =
+        |file: &str, yaml: &str| json!({"file": file, "yaml": yaml, "summary": "A brief."});
     for file in [
         "../outside.yaml",
         "/etc/team.yaml",
@@ -568,296 +719,54 @@ async fn the_tool_server_needs_a_live_token_and_lists_only_its_tools() {
         "team.txt",
         "missing/team.yaml",
     ] {
-        let (_, reply) = fixture
-            .mcp(
-                &token,
-                &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
-                    "name": "propose_team",
-                    "arguments": {"file": file, "yaml": "schemaVersion: 1", "summary": "x"}
-                }}),
-            )
+        let (_, failed) = tools
+            .call("propose_team", propose(file, "schemaVersion: 1"))
             .await;
-        assert_eq!(reply["result"]["isError"], true, "{file}: {reply}");
+        assert!(failed, "{file}");
     }
-    let (_, apps) = fixture
-        .mcp(
-            &token,
-            &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_apps", "arguments": {}}}),
-        )
-        .await;
-    assert_eq!(
-        apps["result"]["structuredContent"]["apps"],
-        json!([]),
-        "an empty search path finds no apps"
-    );
-    let _ = reqwest::Client::new()
-        .delete(format!("{}/api/ask/conversations/{id}", fixture.base))
-        .send()
-        .await;
-}
 
-/// A stand-in for an app's own command: records its arguments, then succeeds or fails.
-fn fake_app(bin: &Path, name: &str, record: &Path, fail: bool) {
-    let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\n{}",
-        record.display(),
-        if fail {
-            "echo \"error: refused $*\" >&2\nexit 1\n"
-        } else {
-            "exit 0\n"
-        }
-    );
-    let path = bin.join(name);
-    std::fs::write(&path, script).expect("fake app");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-            .expect("executable");
-    }
-}
-
-#[tokio::test]
-async fn connect_runs_the_apps_own_command_and_disconnect_revokes_the_token() {
-    let bin = TempDirectory::new("bin");
-    let record = bin.0.join("calls.txt");
-    fake_app(&bin.0, "claude", &record, false);
-    let fixture = Fixture::start(None, Some(bin.0.clone().into_os_string())).await;
-
-    let (_, before) = fixture.get("/api/ask/connections").await;
-    let claude = before["apps"]
-        .as_array()
-        .expect("apps")
-        .iter()
-        .find(|app| app["id"] == "claude")
-        .expect("claude")
-        .clone();
-    assert_eq!(claude["detected"], true);
-    assert_eq!(claude["connected"], false);
-    let shown = claude["command"].as_str().expect("command");
-    assert!(
-        shown.starts_with("claude mcp add --scope user --transport http loomwatch"),
-        "{shown}"
-    );
-    assert!(
-        shown.contains("lw_••••••••"),
-        "the token is never shown: {shown}"
-    );
-
-    let (status, connected) = fixture
-        .post("/api/ask/connections/claude", &json!({}))
-        .await;
-    assert_eq!(status, 200, "{connected}");
-    assert_eq!(connected["connected"], true);
-    let calls = std::fs::read_to_string(&record).expect("calls");
-    let token = calls
-        .lines()
-        .find_map(|line| line.strip_prefix("Authorization: Bearer "))
-        .expect("the header carried the token")
-        .to_owned();
-    assert!(calls.contains(&format!("{}/api/control/mcp", fixture.base)));
-    assert!(
-        !connected.to_string().contains(&token),
-        "the token never comes back for a command app"
-    );
-    let saved =
-        std::fs::read_to_string(fixture.root.0.join(".loomwatch/connections.json")).expect("saved");
-    assert!(saved.contains(&token));
-    let (status, listed) = fixture
-        .mcp(
-            &token,
-            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
-        )
-        .await;
-    assert_eq!(status, 200, "{listed}");
-
-    let removed = reqwest::Client::new()
-        .delete(format!("{}/api/ask/connections/claude", fixture.base))
-        .send()
-        .await
-        .expect("disconnect");
-    let removed: Value = removed.json().await.expect("json");
-    assert_eq!(removed["removedFromApp"], true);
-    assert!(
-        std::fs::read_to_string(&record)
-            .expect("calls")
-            .contains("remove")
-    );
-    let (status, _) = fixture
-        .mcp(
-            &token,
-            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
-        )
-        .await;
-    assert_eq!(status, 401, "a disconnected app can no longer call in");
-}
-
-#[tokio::test]
-async fn a_refused_connection_is_not_saved_and_never_echoes_the_token() {
-    let bin = TempDirectory::new("bin");
-    let record = bin.0.join("calls.txt");
-    fake_app(&bin.0, "claude", &record, true);
-    let fixture = Fixture::start(None, Some(bin.0.clone().into_os_string())).await;
-    let (status, refused) = fixture
-        .post("/api/ask/connections/claude", &json!({}))
-        .await;
-    assert_eq!(status, 502);
-    let message = refused["error"].as_str().expect("error");
-    assert!(
-        message.starts_with("Claude Code didn't accept the connection"),
-        "{message}"
-    );
-    assert!(
-        !message.contains("Bearer lw_") || message.contains("lw_••••••••"),
-        "{message}"
-    );
-    assert!(!fixture.root.0.join(".loomwatch/connections.json").exists());
-}
-
-#[tokio::test]
-async fn snippet_apps_get_their_snippet_once_connected() {
-    let fixture = Fixture::start(None, Some(std::ffi::OsString::new())).await;
-    let (status, connected) = fixture
-        .post("/api/ask/connections/opencode", &json!({}))
-        .await;
-    assert_eq!(status, 200, "{connected}");
-    let header = connected["snippet"]["loomwatch"]["headers"]["Authorization"]
-        .as_str()
-        .expect("header");
-    assert!(header.starts_with("Bearer lw_"));
-    assert_eq!(
-        connected["snippetPlace"],
-        "the \"mcp\" section of ~/.config/opencode/opencode.json"
-    );
-}
-
-/// A proposal has to be one the editor can save: the editor checks the team schema before every
-/// save, so a file `TeamConfig::parse` accepts but the schema refuses would land on the canvas and
-/// then refuse to apply. And a connected app is told where the person will find it.
-#[tokio::test]
-async fn a_proposal_must_pass_the_editors_schema_and_a_connected_app_learns_where_it_waits() {
-    let fixture = Fixture::start(None, Some(std::ffi::OsString::new())).await;
-    let (_, connected) = fixture
-        .post("/api/ask/connections/opencode", &json!({}))
-        .await;
-    let token = connected["snippet"]["loomwatch"]["headers"]["Authorization"]
-        .as_str()
-        .and_then(|header| header.strip_prefix("Bearer "))
-        .expect("token")
-        .to_owned();
-    let team = |spawn: &str| {
+    let team = |extra: &str| {
         format!(
             "schemaVersion: 1\nid: brief\nname: Brief\nentrypoint: a\nagents:\n  - id: a\n    \
-             name: Collector\n    role: Collect\n    model: m\n    spawn: {spawn}\nedges: []\n"
+             name: Collector\n    role: Collect\n    model: anthropic/claude-sonnet-5.5\n{extra}edges: []\n"
         )
     };
-    let propose = |yaml: String| {
-        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-            "name": "propose_team",
-            "arguments": {"file": "brief.yaml", "yaml": yaml, "summary": "A brief."}
-        }})
-    };
-
-    let (_, refused) = fixture
-        .mcp(
-            &token,
-            &propose(team(r#"{"cmd": "python3", "args": [], "cwd": "."}"#)),
+    let (message, failed) = tools
+        .call(
+            "propose_team",
+            propose("brief.yaml", &team("    colour: blue\n")),
         )
         .await;
-    assert_eq!(refused["result"]["isError"], true, "{refused}");
-    let message = refused["result"]["content"][0]["text"]
-        .as_str()
-        .expect("text");
+    assert!(failed, "{message}");
     assert!(
-        message.starts_with("The team file has a problem:") && message.contains("env"),
+        message.starts_with("The team file has a problem:") && message.contains("colour"),
         "{message}"
     );
-    let (_, inbox) = fixture.get("/api/ask/inbox").await;
-    assert_eq!(inbox["items"], json!([]), "a refused proposal is not shown");
-
-    let (_, accepted) = fixture
-        .mcp(
-            &token,
-            &propose(team(
-                r#"{"cmd": "python3", "args": [], "env": {}, "cwd": "."}"#,
-            )),
-        )
+    let (answer, failed) = tools
+        .call("propose_team", propose("brief.yaml", &team("")))
         .await;
-    let result = &accepted["result"]["structuredContent"];
-    assert_eq!(result["status"], "waiting_for_the_person", "{accepted}");
+    assert!(!failed, "an agent needs only a name and a model: {answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
     assert!(
-        result["message"]
+        answer["message"]
             .as_str()
-            .is_some_and(|text| text.contains("From your connected apps")),
-        "{result}"
+            .is_some_and(|text| text.contains("Nothing is saved until they press Apply")),
+        "{answer}"
     );
-    let (_, inbox) = fixture.get("/api/ask/inbox").await;
-    assert_eq!(inbox["items"][0]["phase"], "ask_proposal");
-    assert_eq!(inbox["items"][0]["appName"], "OpenCode");
-    assert_eq!(inbox["items"][0]["proposalId"], result["proposalId"]);
 }
 
+/// Without the daemon's model list (no state folder set up), `list_models` says so rather than
+/// inventing models.
 #[tokio::test]
-async fn the_stdio_bridge_forwards_requests_and_explains_a_revoked_token() {
-    let bin = TempDirectory::new("bin");
-    let record = bin.0.join("calls.txt");
-    fake_app(&bin.0, "codex", &record, false);
-    let fixture = Fixture::start(None, Some(bin.0.clone().into_os_string())).await;
-    let (status, _) = fixture.post("/api/ask/connections/codex", &json!({})).await;
-    assert_eq!(status, 200);
-    let calls = std::fs::read_to_string(&record).expect("calls");
-    let token = calls
-        .lines()
-        .find_map(|line| line.strip_prefix("LOOMWATCH_CONTROL_TOKEN="))
-        .expect("the token travels as an environment variable")
-        .to_owned();
-    assert!(
-        calls.lines().any(|line| line == "mcp"),
-        "codex starts `loomwatchd mcp`: {calls}"
+async fn list_models_never_invents_a_model() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
     );
-
-    let url = format!("{}/api/control/mcp", fixture.base);
-    let input = concat!(
-        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
-        "\n",
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-        "\n",
-        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
-        "\n",
-    );
-    let mut output = Vec::new();
-    super::connect::bridge_io(&url, &token, input.as_bytes(), &mut output)
-        .await
-        .expect("bridge");
-    let replies = String::from_utf8(output).expect("utf-8");
-    let replies = replies
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("json"))
-        .collect::<Vec<_>>();
-    assert_eq!(replies.len(), 2, "a notification gets no reply");
-    assert_eq!(replies[0]["result"]["protocolVersion"], "2025-06-18");
-    assert_eq!(
-        replies[1]["result"]["tools"]
-            .as_array()
-            .expect("tools")
-            .len(),
-        7
-    );
-
-    let mut output = Vec::new();
-    super::connect::bridge_io(
-        &url,
-        "lw_revoked",
-        r#"{"jsonrpc":"2.0","id":9,"method":"tools/list"}"#.as_bytes(),
-        &mut output,
-    )
-    .await
-    .expect("bridge");
-    let reply: Value = serde_json::from_slice(&output).expect("json");
-    assert!(
-        reply["error"]["message"]
-            .as_str()
-            .expect("message")
-            .contains("Connect this app again")
-    );
+    let (answer, failed) = tools.call("list_models", json!({})).await;
+    if crate::ai::installed().is_none() {
+        assert!(failed, "{answer}");
+        assert!(answer.contains("model list isn't available"), "{answer}");
+    }
 }

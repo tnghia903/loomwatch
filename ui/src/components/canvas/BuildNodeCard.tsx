@@ -7,8 +7,7 @@ import { middleTruncate } from '../../lib/format'
 import type { OutputNode } from '../../lib/runs/graph'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import type { AgentConfig, AgentStatus, CapabilityRef } from '../../lib/team-file/types'
-import { monogramForSpawnCmd } from '../../lib/harnesses'
-import { splitModelSelector } from '../../lib/models'
+import { modelLabelForAgent, splitModelSelector } from '../../lib/models'
 import { allowedSummary } from '../../lib/team-file/allow'
 import { workFolder } from '../../lib/team-file/workFolder'
 import { StatusGlyph } from '../ui/glyphs'
@@ -26,7 +25,7 @@ import { AgentMark } from '../ui/AgentMark'
 function modelLine(agent: Pick<AgentConfig, 'model' | 'thinkingEffort'>): string {
   const { modelId, thinkingEffort } = splitModelSelector(agent.model ?? '')
   const effort = agent.thinkingEffort ?? thinkingEffort
-  return `${modelId || 'App default'}${effort ? ` · ${effort} effort` : ''}`
+  return `${modelId || 'Default model'}${effort ? ` · ${effort} effort` : ''}`
 }
 
 /** Everything connected to an agent, by name; a skill or a tool says which it is. */
@@ -39,10 +38,8 @@ function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ')
 }
 
-const HARNESS_BY_MONOGRAM: Record<string, string> = { Cx: 'Codex', C: 'Claude Code', G: 'Gemini', Oc: 'OpenCode', H: 'Hermes', Ow: 'OpenClaw' }
-
 /**
- * The one agent card, drawn in the Build canvas anatomy: icon, harness kind, name, role.
+ * The one agent card, drawn in the Build canvas anatomy: icon, model, name, role.
  *
  * The Run canvas ("Full trace") draws the same card rather than a second one — a run shows the
  * team the operator composed, so it must be recognisably the same object. What a run adds is
@@ -91,8 +88,7 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
     )
   }
 
-  const monogram = monogramForSpawnCmd(agent.spawn?.cmd ?? '', agent.spawn?.args)
-  const harness = typeof data.harnessLabel === 'string' ? data.harnessLabel : HARNESS_BY_MONOGRAM[monogram] ?? 'Harness'
+  const model = data.modelLabel ?? modelLabelForAgent(agent)
   const eventCount = runtime?.eventCount ?? 0
   const givenNotes = runtime?.givenNotes ?? 0
   // The job the instructions describe, when they name one; a generic agent keeps the robot.
@@ -105,17 +101,15 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
       className={cx('build-node kind-harness', runtime && 'has-run', runtime && `st-${status}`, selected && 'selected', dropTargetId === id && 'drop-target')}
       // While a run is shown the node wrapper already carries the run's own accessible name,
       // so labelling the card too would announce the same agent twice.
-      aria-label={runtime ? undefined : [agent.name, harness, agent.role, data.appProblem, data.instructionNote].filter(Boolean).join(', ')}
+      aria-label={runtime ? undefined : [agent.name, model, agent.role, data.instructionNote].filter(Boolean).join(', ')}
     >
       {step && <span className="step" aria-hidden="true">{step.step}</span>}
       <div className="build-node-body">
         <div className="build-node-row">
           <span className="build-node-icon figure-holder"><FigureStill className="build-node-figure" figure={figure} alt="" draggable={false} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
-          <div><span className="node-kind">{harness}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent, runtime)}</p>}</div>
+          <div><span className="node-kind">{model}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent, runtime)}</p>}</div>
           {runtime && <StatusGlyph status={status} />}
         </div>
-        {/* Before a run, not during one: a run that could not start says so in its own error. */}
-        {data.appProblem && !runtime && <p className="build-node-app-problem">{data.appProblem}</p>}
         {/* LoomWatch changed these instructions, or could not, after a removal (ADR 0059). */}
         {data.instructionNote && !runtime && <p className="build-node-instruction-note">{data.instructionNote}</p>}
         {runtime && (

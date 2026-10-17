@@ -1,12 +1,12 @@
 //! Instructions rewritten after the person removes something they name (ADR 0059).
 //!
 //! Taking a card off the canvas takes it out of the team file, but an agent still told "find the
-//! EKIS page through the connected Notion tools" goes looking for it. This asks the person's own
-//! Ask app, for one turn and with no tools, which sentences to drop or replace so the instructions
-//! no longer depend on it. The app is shown every agent's instructions as numbered sentences and
-//! answers with edits only; `LoomWatch` makes them, so a sentence the app doesn't name stays exactly
-//! as the person wrote it. Claude Code is started lean for it: a short system prompt in place of
-//! its own, and no tools, settings, MCP servers or slash commands.
+//! EKIS page through the connected Notion tools" goes looking for it. This asks `LoomWatch`'s own
+//! agent, for one turn and with no tools, which sentences to drop or replace so the instructions
+//! no longer depend on it. The agent is shown every agent's instructions as numbered sentences and
+//! answers with edits only; `LoomWatch` makes them, so a sentence the agent doesn't name stays
+//! exactly as the person wrote it. It runs with a short system prompt of its own in place of the
+//! agents' base prompt, on the fast model unless the person chose one.
 //! Nothing here writes a team file: the canvas applies the answer as an ordinary edit, marks it so
 //! the person sees what changed, and keeps what they had one click away.
 
@@ -24,30 +24,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{
-    AGENT_ID, Control, EXIT_TIMEOUT, app_spec, ask_apps, chosen_app, chosen_model, error,
-    first_line, prepare_workspace,
+    AGENT_ID, ASSISTANT_NAME, Control, ask_spec, chosen_model, error, first_line, prepare_workspace,
 };
-use crate::acp::{AcpProcess, EventLog, TeamSessionContext};
+use crate::engine::{AgentRun, EventLog, TeamSessionContext};
 
 /// More than any team the canvas draws; a request naming more is not from the canvas.
 const MAX_AGENTS: usize = 20;
 const MAX_ROLE_CHARS: usize = 20_000;
 const MAX_NAME_CHARS: usize = 300;
 const MAX_KIND_CHARS: usize = 40;
-/// One short turn with no tools to call. An app still going after this has stalled.
+/// One short turn with no tools to call. An agent still going after this has stalled.
 const REWRITE_LIMIT: Duration = Duration::from_mins(3);
-/// What Claude Code is told it is, in place of its own system prompt.
+/// What the agent is told it is, in place of the base prompt every team agent gets.
 const SYSTEM_PROMPT: &str =
     "You edit the instructions of agents in a LoomWatch team. Reply with JSON only.";
-/// The model Claude Code answers with when the person chose none. Started without the person's
-/// settings, it would otherwise pick a model of its own, which can be its largest.
-const CLAUDE_MODEL: &str = "sonnet";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RewriteRequest {
-    #[serde(default)]
-    app: Option<String>,
     #[serde(default)]
     model: Option<String>,
     removed: Removed,
@@ -88,51 +82,27 @@ pub(super) async fn rewrite(
         );
     };
     let model = match chosen_model(request.model.as_deref()) {
-        Ok(model) => model,
+        Ok(model) => model.unwrap_or_else(|| crate::ai::FAST_MODEL.to_owned()),
         Err(message) => return error(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let apps = ask_apps(&control);
-    let app = match chosen_app(&apps, request.app.as_deref()) {
-        Ok(app) => app,
-        Err(message) => return error(StatusCode::UNPROCESSABLE_ENTITY, message),
-    };
-    let claude = app.id == "claude";
-    let model = if claude {
-        Some(
-            model
-                .filter(|model| model != "default")
-                .unwrap_or_else(|| CLAUDE_MODEL.to_owned()),
-        )
-    } else {
-        model
-    };
+    let model = control.model_for(Some(model));
     let workspace = match prepare_workspace(&control.inner.teams_root) {
         Ok(path) => path,
         Err(message) => return error(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
-    // No tools: the answer is the reply itself, and every request the app makes is declined.
-    let spec = app_spec(&control, app, workspace);
-    let process = match AcpProcess::spawn(&spec) {
-        Ok(process) => process,
+    // No tools: the answer is the reply itself.
+    let mut process = match AgentRun::spawn(&ask_spec(workspace)) {
+        Ok(process) => process.without_tools().with_instructions(SYSTEM_PROMPT),
         Err(failure) => {
             return error(
                 StatusCode::BAD_GATEWAY,
-                format!(
-                    "{} could not start: {failure}. Check that it works in a terminal, then try again.",
-                    app.name
-                ),
+                format!("{ASSISTANT_NAME} could not start: {failure}"),
             );
         }
-    };
-    let mut process = if claude {
-        process.with_session_meta(lean_claude())
-    } else {
-        process
     };
     let session = format!("{AGENT_ID}-instructions-{}", uuid::Uuid::new_v4());
     let context = TeamSessionContext {
         archive: &archive,
-        exit_timeout: EXIT_TIMEOUT,
         bus: None,
         event_log: Some(EventLog::new(archive.clone(), session)),
         packet: None,
@@ -140,51 +110,30 @@ pub(super) async fn rewrite(
         boundary: None,
     };
     let prompt = compose(&request);
-    let turn = process.run_session_with_bus(
-        AGENT_ID,
-        model.as_deref().unwrap_or_default(),
-        &prompt,
-        context,
-    );
+    let turn = process.run_session_with_bus(AGENT_ID, &model, &prompt, context);
     let reply = match tokio::time::timeout(REWRITE_LIMIT, turn).await {
         Ok(Ok(outcome)) => outcome.reply,
         Ok(Err(failure)) => {
             let reason = first_line(&format!("{failure:#}"));
             return error(
                 StatusCode::BAD_GATEWAY,
-                format!("{} stopped answering: {reason}", app.name),
+                format!("{ASSISTANT_NAME} stopped answering: {reason}"),
             );
         }
         Err(_) => {
             return error(
                 StatusCode::GATEWAY_TIMEOUT,
-                format!(
-                    "{} didn't finish rewriting the instructions in 3 minutes.",
-                    app.name
-                ),
+                format!("{ASSISTANT_NAME} didn't finish rewriting the instructions in 3 minutes."),
             );
         }
     };
     match parse_reply(&reply, &request.agents) {
-        Ok(agents) => Json(json!({"agents": agents, "appName": app.name})).into_response(),
-        Err(message) => error(StatusCode::BAD_GATEWAY, format!("{} {message}", app.name)),
+        Ok(agents) => Json(json!({"agents": agents, "appName": ASSISTANT_NAME})).into_response(),
+        Err(message) => error(
+            StatusCode::BAD_GATEWAY,
+            format!("{ASSISTANT_NAME} {message}"),
+        ),
     }
-}
-
-/// The `_meta` Claude Code's ACP adapter opens the session with: the short system prompt in place
-/// of Claude Code's own, and none of its built-in tools, the person's settings and memory, their
-/// MCP servers and connectors, or skills and slash commands. On a five-agent team this is about
-/// 2.7k tokens in, where a full Claude Code session was 42k.
-fn lean_claude() -> Value {
-    json!({
-        "systemPrompt": SYSTEM_PROMPT,
-        "claudeCode": {"options": {
-            "tools": [],
-            "settingSources": [],
-            "strictMcpConfig": true,
-            "extraArgs": {"disable-slash-commands": null},
-        }},
-    })
 }
 
 fn check(request: &RewriteRequest) -> Result<(), String> {
@@ -456,7 +405,6 @@ mod tests {
 
     fn request(agents: Vec<AgentInstructions>) -> RewriteRequest {
         RewriteRequest {
-            app: None,
             model: None,
             removed: Removed {
                 name: "EKIS — SUTD Final Project Hub".to_owned(),
@@ -642,20 +590,6 @@ mod tests {
         ] {
             assert!(parse_reply(reply, &asked).is_err(), "{reply}");
         }
-    }
-
-    #[test]
-    fn claude_code_starts_with_nothing_but_the_short_system_prompt() {
-        let meta = lean_claude();
-        assert_eq!(meta["systemPrompt"], SYSTEM_PROMPT);
-        let options = &meta["claudeCode"]["options"];
-        assert_eq!(options["tools"], json!([]));
-        assert_eq!(options["settingSources"], json!([]));
-        assert_eq!(options["strictMcpConfig"], true);
-        assert_eq!(
-            options["extraArgs"],
-            json!({"disable-slash-commands": null})
-        );
     }
 
     #[test]

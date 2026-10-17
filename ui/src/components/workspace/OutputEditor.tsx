@@ -42,7 +42,7 @@ export function OutputEditor({ output, onOutputChange, saving, responder, agents
         <label>Deliverable name<input value={output?.name ?? DEFAULT_OUTPUT.name} onChange={(event) => onOutputChange({ name: event.target.value, format: output?.format ?? DEFAULT_OUTPUT.format })} /></label>
         <label>Format<select value={output?.format ?? DEFAULT_OUTPUT.format} onChange={(event) => onOutputChange({ name: output?.name ?? DEFAULT_OUTPUT.name, format: event.target.value })}><option>Markdown report</option><option>HTML dashboard</option><option>Document and files</option></select></label>
         <label>Produced by<select value={responder ?? ''} disabled={!canChooseResponder} onChange={(event) => onPromoteResponder(event.target.value)}>{agents.map((node) => <option key={node.id} value={node.id}>{node.data.agent.name}</option>)}</select></label>
-        <p>Connect the final harness to make its ownership explicit.</p>
+        <p>Connect the final agent to make its ownership explicit.</p>
         <small>{saving ? 'Saving…' : 'Applies to the next new run.'}</small>
         {delivery && <NotionDeliverySettings {...delivery} />}
       </div>

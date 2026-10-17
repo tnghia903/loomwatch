@@ -453,7 +453,7 @@ pub fn spawn(
     // Every run delivers through the registry (ADR 0038), so the one publisher lives there.
     registry.set_publisher(scheduler.publisher.clone());
     if let Some(archive) = archive {
-        let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+        let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
         let ticking = scheduler.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(TICK);
@@ -679,7 +679,7 @@ pub fn router(
     archive: Option<EventArchive>,
     teams_root: PathBuf,
 ) -> Router {
-    let teams_root = fs::canonicalize(&teams_root).unwrap_or(teams_root);
+    let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     // Already done by `spawn` in the daemon; a router built on its own (tests) still needs it.
     registry.set_publisher(scheduler.publisher.clone());
     Router::new()
@@ -790,7 +790,7 @@ mod tests {
     use super::*;
     use crate::notion::NOT_CONNECTED_MESSAGE;
     use crate::runs::DeliveryStatus;
-    use crate::runs::tests::{COMPLETING_HARNESS, SLEEPING_HARNESS, TeamsDir};
+    use crate::runs::tests::{TeamsDir, completing, sleeping};
 
     fn utc(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)
@@ -821,11 +821,10 @@ mod tests {
         }
     }
 
-    /// A scheduled team whose single agent is the shell-script harness at `harness`.
-    fn scheduled_team_yaml(harness: &Path, schedule_yaml: &str) -> String {
+    /// A scheduled team whose single agent runs on `model`.
+    fn scheduled_team_yaml(model: &str, schedule_yaml: &str) -> String {
         format!(
-            "schemaVersion: 1\nid: routine\nname: Routine team\nentrypoint: solo\nschedule:\n{schedule_yaml}agents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    spawn:\n      cmd: /bin/sh\n      args: [\"{}\"]\n      cwd: .\n    model: test/model\n",
-            harness.display()
+            "schemaVersion: 1\nid: routine\nname: Routine team\nentrypoint: solo\nschedule:\n{schedule_yaml}agents:\n  - id: solo\n    name: Solo\n    role: answer directly\n    model: {model}\n"
         )
     }
 
@@ -1049,7 +1048,7 @@ mod tests {
     #[test]
     fn scan_leaves_out_the_folders_a_team_keeps_beside_it() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         let routine = scheduled_team_yaml(&harness, DAILY);
         fs::write(dir.0.join("routine.yaml"), &routine).unwrap();
         let added = crate::chosen_knowledge::store_file(
@@ -1077,7 +1076,7 @@ mod tests {
     #[test]
     fn scan_skips_hidden_directories_and_reads_broken_schedules() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         fs::write(
             dir.0.join("routine.yaml"),
             scheduled_team_yaml(&harness, DAILY),
@@ -1169,7 +1168,7 @@ mod tests {
     #[tokio::test]
     async fn api_answers_503_without_an_archive_and_404_without_a_schedule() {
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         fs::write(
             dir.0.join("routine.yaml"),
             scheduled_team_yaml(&harness, DAILY),
@@ -1219,7 +1218,7 @@ mod tests {
     async fn run_now_fires_the_routine_and_records_a_not_connected_delivery() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("harness.sh", COMPLETING_HARNESS);
+        let harness = completing();
         // A nested root so `../outside.yaml` names a real file that escapes it.
         let teams_root = dir.0.join("teams");
         fs::create_dir(&teams_root).unwrap();
@@ -1328,7 +1327,7 @@ mod tests {
     async fn run_now_refuses_to_overlap_a_live_scheduled_run() {
         let pool = crate::db::Db::temp().await;
         let dir = TeamsDir::new();
-        let harness = dir.write_harness("sleepy.sh", SLEEPING_HARNESS);
+        let (harness, _thinking) = sleeping();
         fs::write(
             dir.0.join("routine.yaml"),
             scheduled_team_yaml(&harness, DAILY),
