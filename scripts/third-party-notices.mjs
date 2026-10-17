@@ -59,8 +59,21 @@ function addNotice(groups, license, text, user) {
   groups.get(key).users.add(user)
 }
 
+// One cargo-about run per target in about.toml. Given several targets at once, cargo-about keeps
+// every dependency edge that any of them builds, so it joins paths no single target has (tray-icon
+// on macOS and Windows, tray-icon's GTK stack on Linux) and counts crates no build contains.
+function cargoAbout() {
+  const config = readFileSync(join(repo, 'about.toml'), 'utf8')
+  const targets = [...config.match(/^targets = \[([^\]]*)\]/m)[1].matchAll(/"([^"]+)"/g)].map((match) => match[1])
+  const runs = targets.map((target) =>
+    JSON.parse(run('cargo', ['about', 'generate', '--format', 'json', '--locked', '--target', target], repo)),
+  )
+  const crates = new Map(runs.flatMap((about) => about.crates).map((crate) => [crate.package.id, crate]))
+  return { crates: [...crates.values()], licenses: runs.flatMap((about) => about.licenses) }
+}
+
 function rustNotices() {
-  const about = JSON.parse(run('cargo', ['about', 'generate', '--format', 'json', '--locked'], repo))
+  const about = cargoAbout()
   const groups = new Map()
   // cargo-about falls back to the standard license text, with no copyright line, when it cannot
   // match one of a crate's licenses to a file (aws-lc-sys ships one combined LICENSE). Quote such a
