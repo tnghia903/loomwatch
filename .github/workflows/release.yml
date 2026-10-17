@@ -104,6 +104,12 @@ jobs:
             target/aarch64-apple-darwin/release/LoomWatch \
             target/x86_64-apple-darwin/release/LoomWatch
           lipo -info build/LoomWatch
+      # dmgbuild lays out the .dmg's window (packaging/macos/dmg-settings.py), pinned by hash.
+      - name: Install dmgbuild
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmgbuild"
+          "$RUNNER_TEMP/dmgbuild/bin/pip" install --require-hashes -r packaging/macos/dmgbuild-requirements.txt
+          echo "$RUNNER_TEMP/dmgbuild/bin" >>"$GITHUB_PATH"
       # Signing and notarizing need an Apple Developer account. Until its secrets are set, the app is
       # signed ad hoc, and macOS asks people once to allow it (System Settings, Privacy & Security).
       - name: Package LoomWatch.app
