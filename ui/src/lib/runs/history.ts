@@ -49,7 +49,7 @@ export function mergeHistory(records: readonly RunRecord[], sessions: readonly S
     })
   }
   for (const record of records) {
-    const status: AgentStatus = record.status === 'running' && record.waitingOn ? 'waiting' : record.status === 'succeeded' ? 'succeeded' : record.status === 'failed' ? 'failed' : record.status === 'cancelled' ? 'stopped' : record.status === 'queued' ? 'idle' : record.status === 'starting' ? 'starting' : 'running'
+    const status: AgentStatus = record.status === 'running' && (record.waitingOn || record.spendStops?.length) ? 'waiting' : record.status === 'succeeded' ? 'succeeded' : record.status === 'failed' ? 'failed' : record.status === 'cancelled' ? 'stopped' : record.status === 'queued' ? 'idle' : record.status === 'starting' ? 'starting' : 'running'
     const existing = byId.get(record.runId)
     byId.set(record.runId, {
       id: record.runId,

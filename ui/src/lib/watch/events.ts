@@ -1084,6 +1084,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           // for its answer any more. Nothing went wrong.
           agent.task = interrupted.get(agent.id) ?? 'Stopped for your note'
           interrupted.delete(agent.id)
+        } else if (agent.stopReason === 'spend_limit') {
+          // The run, or this agent, reached what it may spend (ADR 0068), and you chose to stop
+          // there, or a routine had nobody to ask. The receipt says which; nothing went wrong.
+          agent.task = 'Stopped at its spending limit'
         } else if (agent.stopReason !== 'end_turn') {
           attention.push({ id: event.id, seq: event.seq, agentId: agent.id, message: `Turn ended: ${agent.stopReason}` })
           agent.task = `Turn ended: ${agent.stopReason}`

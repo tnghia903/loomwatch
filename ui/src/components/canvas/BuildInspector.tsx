@@ -4,6 +4,7 @@ import { AgentCheckup } from './AgentCheckup'
 import { AgentContext } from './AgentContext'
 import { AgentPermissions } from './AgentPermissions'
 import { AgentWorkFolder } from './AgentWorkFolder'
+import { AgentSpendGuard } from './AgentSpendGuard'
 import { AgentUsageLine } from './AgentUsageLine'
 import { CheckStep } from './CheckStep'
 import { DoneWhen } from './DoneWhen'
@@ -68,6 +69,7 @@ export function BuildInspector(props: InspectorProps & { startAdvanced?: boolean
         : <>
           <ModelPicker value={openRouterId(node.data.agent.model)} disabled={locked} onChange={props.onModelChange} />
           {props.usage && <AgentUsageLine usage={props.usage.agent} runs={props.usage.runs} alone={props.usage.alone} />}
+          {props.onSpendChange && <AgentSpendGuard perRun={node.data.agent.spend?.perRun ?? null} readOnly={locked} onChange={props.onSpendChange} />}
           <section className="build-context" aria-label="Context">
             <AgentContext
               agent={node.data.agent} place={props.place} briefCount={props.briefCount} inheritedMemory={props.inheritedMemory} readOnly={readOnly}

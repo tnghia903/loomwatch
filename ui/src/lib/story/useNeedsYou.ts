@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { keepIfSame } from '../keepIfSame'
-import { answerPermission, answerRun, fetchRuns, type PermissionDecision, type RunRecord } from '../runs/client'
+import { answerPermission, answerRun, answerSpend, fetchRuns, type PermissionDecision, type RunRecord, type SpendDecision } from '../runs/client'
 import { teamDisplayName } from '../team-file/client'
 import { useTeamList } from '../team-file/useTeamList'
 import { useLoomMarkState } from './loomMark'
@@ -55,7 +55,7 @@ export function useNeedsYou() {
 
   const names = useMemo(() => new Map((teams ?? []).map((team) => [team.path, teamDisplayName(team)])), [teams])
   const tickets = useMemo(() => ticketsFrom(records, names, dismissed), [records, names, dismissed])
-  const working = useMemo(() => records.filter((record) => (record.status === 'running' || record.status === 'starting') && !record.waitingOn && !record.permissionRequests?.length).length, [records])
+  const working = useMemo(() => records.filter((record) => (record.status === 'running' || record.status === 'starting') && !record.waitingOn && !record.permissionRequests?.length && !record.spendStops?.length).length, [records])
 
   const dismiss = useCallback((runId: string) => {
     setDismissed((current) => {
@@ -78,10 +78,16 @@ export function useNeedsYou() {
     await refresh()
   }, [refresh])
 
+  const answerSpendTicket = useCallback(async (ticket: Ticket, decision: SpendDecision) => {
+    if (!ticket.stopId) return
+    await answerSpend(ticket.runId, ticket.stopId, decision)
+    await refresh()
+  }, [refresh])
+
   usePresence(tickets.length, working)
   const mark = useLoomMarkState(records, tickets.length, working)
   const teamList = useMemo(() => [...names].map(([path, name]) => ({ path, name })), [names])
-  return { records, tickets, working, mark, error, dismiss, answer, answerPermission: answerPermissionTicket, refresh, teams: teamList }
+  return { records, tickets, working, mark, error, dismiss, answer, answerPermission: answerPermissionTicket, answerSpend: answerSpendTicket, refresh, teams: teamList }
 }
 
 /** Tab title and tab icon carry the count, so a waiting team is visible from another tab. */

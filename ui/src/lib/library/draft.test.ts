@@ -80,6 +80,8 @@ describe('the agent builder’s draft', () => {
       schemaVersion: 1,
       id: 'bench-release-notes-writer',
       name: 'Release notes writer · chat',
+      // A run spends real money, so a chat with an agent has the same $1.00 a new team has (ADR 0068).
+      spend: { perRun: 1 },
       entrypoint: 'release-notes-writer',
       agents: [{
         id: 'release-notes-writer', name: 'Release notes writer', role: 'Write the notes.',

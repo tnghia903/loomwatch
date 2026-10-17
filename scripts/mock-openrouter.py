@@ -175,7 +175,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self.authorised():
                 return self.send_json(401, {"error": {"code": 401, "message": "No auth credentials found"}})
             return self.send_json(200, {"data": {"label": "sk-or-v1-moc...ock", "usage": 0.42,
-                                                 "limit_remaining": 9.58, "is_free_tier": False}})
+                                                 "usage_monthly": 0.17, "limit_remaining": 9.58,
+                                                 "is_free_tier": False}})
         self.send_json(404, {"error": {"code": 404, "message": "not found"}})
 
     def do_POST(self):

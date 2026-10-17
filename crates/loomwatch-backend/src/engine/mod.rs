@@ -31,7 +31,7 @@ use crate::agent::{
 use crate::archive::EventArchive;
 use crate::team_bus::TeamBusConnection;
 use crate::{EventKind, SessionOutcome};
-use bridge::{BusTools, ChannelSink, PolicyGate, Record};
+use bridge::{BusTools, ChannelSink, PolicyGate, Record, SpoolGate};
 
 /// How an agent is run: its folder, the tools wired to it, its switches (ADR 0037) and who it asks
 /// about anything else (ADR 0040).
@@ -365,17 +365,18 @@ impl AgentRun {
             .await;
         let (sender, receiver) = unbounded_channel();
         let host = self.host_tools(context.bus);
-        self.session = Some(Session::open(
+        let session = Session::open(
             config,
             provider,
             Arc::new(ChannelSink(sender.clone())),
             Arc::new(PolicyGate {
                 policy: self.spec.permissions.clone(),
                 asker: self.spec.asker.clone(),
-                records: sender,
+                records: sender.clone(),
             }),
             host,
-        ));
+        );
+        self.session = Some(self.metered(session, sender));
         self.records = Some(receiver);
         self.session_id = Some(session_id);
         Ok(recorder)
@@ -428,7 +429,7 @@ impl AgentRun {
             .await;
         let (sender, receiver) = unbounded_channel();
         let host = self.host_tools(context.bus);
-        self.session = Some(Session::resume(
+        let session = Session::resume(
             snapshot,
             config,
             provider,
@@ -436,10 +437,11 @@ impl AgentRun {
             Arc::new(PolicyGate {
                 policy: self.spec.permissions.clone(),
                 asker: self.spec.asker.clone(),
-                records: sender,
+                records: sender.clone(),
             }),
             host,
-        ));
+        );
+        self.session = Some(self.metered(session, sender));
         self.records = Some(receiver);
         self.session_id = Some(session_id.to_owned());
         recorder
@@ -450,6 +452,23 @@ impl AgentRun {
             )
             .await?;
         Ok(recorder)
+    }
+
+    /// `session`, held to its run's spool (ADR 0068) when it belongs to a run with an operator.
+    /// Ask, helpers and the CLI have no run record to keep a spool on; `OpenRouter`'s own limit on
+    /// the key is what holds them.
+    fn metered(
+        &self,
+        session: Session,
+        records: tokio::sync::mpsc::UnboundedSender<Record>,
+    ) -> Session {
+        match &self.spec.asker {
+            Some(asker) => session.with_spend(Arc::new(SpoolGate {
+                asker: asker.clone(),
+                records,
+            })),
+            None => session,
+        }
     }
 
     /// Park the session: keep its conversation in the database, under the run it belongs to, and
@@ -595,6 +614,27 @@ impl AgentRun {
                     )
                     .await?;
                 recorder.note_self_report().await?;
+                // The run's spool is closed: the operator finished it there, or a scheduled run had
+                // nobody to ask. The whole run ends; the run registry says what it became.
+                if end.stop_reason == crate::agent::StopReason::SpendLimit
+                    && let Some(stopped) = self
+                        .spec
+                        .asker
+                        .as_ref()
+                        .and_then(crate::permissions::PermissionAsker::spend_stopped)
+                {
+                    // Its session ends here, on the record too, as a finished one would: nothing
+                    // will ask it anything more.
+                    self.close_session();
+                    recorder
+                        .append(
+                            EventKind::Process,
+                            json!({"phase": "exited", "exitCode": 0, "signal": null, "message": "stopped at the run's spending limit"}),
+                            None,
+                        )
+                        .await?;
+                    return Err(stopped.into());
+                }
                 Ok(recorder.reply.take())
             }
             Err(error) => {

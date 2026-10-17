@@ -33,6 +33,7 @@ pub mod skill_routing;
 pub mod skills_api;
 pub mod skills_store;
 pub mod spa;
+pub mod spend;
 mod team_bus;
 pub mod updates;
 pub mod wardrobe;
@@ -3189,6 +3190,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3299,6 +3301,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![agent],
@@ -3417,6 +3420,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![writer_agent, checker_agent],
@@ -3501,6 +3505,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3600,6 +3605,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3721,6 +3727,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3790,6 +3797,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3870,6 +3878,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![pipeline_agent("solo", &completing_script("solo done"))],
@@ -3945,6 +3954,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -3998,6 +4008,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![pipeline_agent("solo", "anthropic/claude-sonnet-5.5")],
@@ -4081,6 +4092,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -4342,6 +4354,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -4509,6 +4522,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: Some(crate::config::MemoryConfig {
                 enabled: true,
                 brief: vec![crate::config::BriefEntryConfig {
@@ -4784,6 +4798,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -4944,6 +4959,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -5054,6 +5070,7 @@ mod tests {
             done_when: Vec::new(),
             checks: None,
             send_back_once: false,
+            spend: crate::spend::SpendConfig::default(),
         }
     }
 
@@ -5081,6 +5098,7 @@ mod tests {
             done_when: Vec::new(),
             checks: None,
             send_back_once: false,
+            spend: crate::spend::SpendConfig::default(),
         }
     }
 
@@ -5102,6 +5120,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![
@@ -5759,6 +5778,7 @@ mod tests {
             deliver: None,
             conversation: ConversationConfig::default(),
             permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
             agents: vec![pipeline_agent("a", &asking), pipeline_agent("b", &after)],

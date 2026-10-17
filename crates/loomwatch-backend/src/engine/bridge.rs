@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::agent::{
-    BoxFuture, Decision, EventSink, HostTools, PermissionRequest, Permissions, ToolSpec,
+    BoxFuture, Decision, EventSink, Go, HostTools, PermissionRequest, Permissions, Spend, ToolSpec,
+    Usage,
 };
 use crate::permissions::{AskOutcome, PermissionAsker, PermissionPolicy};
 use crate::team_bus::TeamBusConnection;
@@ -90,6 +91,97 @@ impl Permissions for PolicyGate {
             decision
         })
     }
+}
+
+/// Holds a session to its run's spool (ADR 0068). Each call's cost goes on the run record; before
+/// each call, an agent whose run (or whose own guard) is used up waits at the run's spend stop
+/// until the operator adds money or finishes, and a scheduled run, with nobody to ask, stops.
+///
+/// The agent that opens a stop records it, and how it was answered, as `session_meta` notes
+/// (`awaiting_spend`, `spend_answered`, `spend_stopped`), so the chat and the receipt can say what
+/// happened. The others wait at the same stop without a record of their own.
+pub(crate) struct SpoolGate {
+    pub(crate) asker: PermissionAsker,
+    pub(crate) records: UnboundedSender<Record>,
+}
+
+impl Spend for SpoolGate {
+    fn before_call(&self) -> BoxFuture<'_, Go> {
+        use crate::spend::Gate;
+        Box::pin(async move {
+            loop {
+                match self.asker.spend_gate() {
+                    Gate::Ahead => return Go::Ahead,
+                    Gate::Stop { first } => {
+                        if let Some(stop) = first {
+                            self.note(spend_note("spend_stopped", &stop, |note| {
+                                note["reason"] = json!("nobody_to_ask");
+                            }));
+                        }
+                        return Go::Stop;
+                    }
+                    Gate::Wait {
+                        stop,
+                        opened,
+                        mut answer,
+                    } => {
+                        if opened {
+                            self.note(spend_note("awaiting_spend", &stop, |_| {}));
+                        }
+                        // Closed rather than answered when the run ends while it waits.
+                        let answered = answer
+                            .wait_for(Option::is_some)
+                            .await
+                            .ok()
+                            .and_then(|answered| *answered);
+                        if opened && let Some(answered) = answered {
+                            self.note(spend_note("spend_answered", &stop, |note| {
+                                note["decision"] = json!(answered.decision);
+                                note["limitUsd"] = json!(answered.limit_usd);
+                                if let Some(add) = answered.add_usd {
+                                    note["addedUsd"] = json!(add);
+                                }
+                            }));
+                        }
+                        // Look again: money added lets the call go ahead, while a finish, or a run
+                        // that ended, stops it.
+                    }
+                }
+            }
+        })
+    }
+
+    fn spent(&self, usage: &Usage) {
+        self.asker.count_spend(usage.cost_usd);
+    }
+}
+
+impl SpoolGate {
+    fn note(&self, payload: Value) {
+        let _ = self.records.send(Record::Meta(payload));
+    }
+}
+
+/// A `session_meta` note about a spend stop: whose limit, what it was, what was spent, what "Add"
+/// offers.
+fn spend_note(
+    phase: &str,
+    stop: &crate::spend::SpendStop,
+    extra: impl FnOnce(&mut Value),
+) -> Value {
+    let mut note = json!({
+        "phase": phase,
+        "stopId": stop.id,
+        "scope": if stop.agent.is_some() { "agent" } else { "team" },
+        "limitUsd": stop.limit_usd,
+        "spentUsd": stop.spent_usd,
+        "addUsd": stop.add_usd,
+    });
+    if let Some(agent) = &stop.agent {
+        note["agent"] = json!(agent);
+    }
+    extra(&mut note);
+    note
 }
 
 impl PolicyGate {

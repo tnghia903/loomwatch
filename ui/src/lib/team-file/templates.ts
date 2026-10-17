@@ -4,6 +4,7 @@ import { DEFAULT_MODEL } from '../ai/modelIds'
 import { modelForPreset, ROLE_PRESETS } from '../library/roles'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
+import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
 
 /**
  * Starter teams for the New team dialog.
@@ -175,5 +176,5 @@ export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, nam
     ]
     edges = [sequence('researcher', 'review', ts), sequence('review', 'writer', ts)]
   }
-  return stringify({ schemaVersion: 1, id, name: name.trim(), entrypoint: agents[0].id, agents, edges }, { lineWidth: 0 })
+  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: agents[0].id, agents, edges }, { lineWidth: 0 })
 }

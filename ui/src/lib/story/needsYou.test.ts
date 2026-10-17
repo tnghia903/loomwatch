@@ -44,6 +44,21 @@ describe('ticketsFrom', () => {
     expect(tickets[0]).toMatchObject({ teamName: 'Daily news', node: 'researcher', asker: 'Researcher', text: 'Researcher wants to use the web', context: 'Web search · model cards 2019' })
   })
 
+  // ADR 0068: a run at its spool, or an agent at its own guard, waits on you like a permission.
+  it('turns each spend stop into a ticket with its two answers, ahead of failures', () => {
+    const tickets = ticketsFrom([
+      run('f1', { status: 'failed', finishedAt: '2026-10-01T03:30:00Z' }),
+      run('r1', { status: 'running', spendStops: [{ id: 's1', limitUsd: 1, spentUsd: 1.02, addUsd: 0.5, since: '2026-10-01T03:58:00Z' }] }),
+      run('r2', { status: 'succeeded', spendStops: [{ id: 'gone', limitUsd: 1, spentUsd: 1, addUsd: 0.5, since: '2026-10-01T03:50:00Z' }] }),
+    ], names, new Set(), NOW)
+    expect(tickets.map((ticket) => [ticket.kind, ticket.stopId ?? null])).toEqual([['spend', 's1'], ['failed', null]])
+    expect(tickets[0]).toMatchObject({
+      teamName: 'Daily news', asker: 'Daily news', text: 'The team used its $1.00 for this run.',
+      context: 'Spent $1.02. Nothing more is spent until you answer.',
+      spendActions: { add: 'Add $0.50 and carry on', finish: 'Finish with what it has' },
+    })
+  })
+
   it('offers no send-back when the daemon does not allow it', () => {
     const [ticket] = ticketsFrom([run('r1', { status: 'running', waitingOn: { ...waiting('review_stop', '2026-10-01T03:40:00Z'), sendBackAvailable: false } })], names, new Set(), NOW)
     expect(ticket.sendBackTo).toBeNull()

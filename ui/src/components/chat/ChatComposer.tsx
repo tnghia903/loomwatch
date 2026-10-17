@@ -5,6 +5,7 @@ import type { ChatTarget } from '../../lib/chat/client'
 import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent, type Destination } from '../../lib/chat/route'
 import { Swap } from './Appearing'
 import { AutoModeSwitch, type AutoModeControl } from './AutoModeSwitch'
+import { SpendLimitChip, type SpendLimitControl } from './SpendLimitChip'
 import type { RunRecord } from '../../lib/runs/client'
 
 /** What the team is waiting on you for, which a typed answer goes with. */
@@ -35,6 +36,8 @@ interface ChatComposerProps {
   mentioned?: number
   /** Who decides the commands agents ask to run (ADR 0061); absent hides the switch. */
   autoMode?: AutoModeControl
+  /** What one run of the team may spend (ADR 0068), beside Auto mode. */
+  spendLimit?: SpendLimitControl
   /**
    * The one agent this chat is with (an agent's own chat in Your agents): every message goes to it,
    * so there is nothing to @ and no picker. It starts work when the agent is free, and joins its
@@ -49,7 +52,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, autoMode, solo = null }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, autoMode, spendLimit, solo = null }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
@@ -208,6 +211,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
         )}
         {!answering && route === 'team_note' && trimmed && <em className="tc-where-hint">Add @team or @{agents.find((agent) => !agent.operator)?.name ?? 'name'} to start work.</em>}
       </div>
+      {spendLimit && <SpendLimitChip {...spendLimit} />}
       {autoMode && <AutoModeSwitch {...autoMode} />}
       </div>
       <div className="tc-box">

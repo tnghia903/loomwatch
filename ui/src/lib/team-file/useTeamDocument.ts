@@ -1194,6 +1194,34 @@ export function useTeamDocument() {
     [markDirty, captureHistory],
   )
 
+  /** What one run may spend, or no limit with `null` (ADR 0068): the chat's spend chip. */
+  const updateTeamSpend = useCallback(
+    (perRun: number | null) => {
+      captureHistory()
+      modelRef.current?.setSpend(perRun)
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
+  /** An agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
+  const updateAgentSpend = useCallback(
+    (id: string, perRun: number | null) => {
+      captureHistory()
+      const spend = perRun !== null && perRun > 0 ? { perRun } : undefined
+      modelRef.current?.setAgentField(id, 'spend', spend)
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== id) return node
+          const { spend: _old, ...rest } = node.data.agent
+          return { ...node, data: { ...node.data, agent: spend ? { ...rest, spend } : rest } }
+        }),
+      )
+      markDirty()
+    },
+    [markDirty, captureHistory],
+  )
+
   /** Where every run's answer goes (ADR 0038): the Team response's "Send to Notion". */
   const updateTeamDeliver = useCallback(
     (deliver: DeliverConfig | null) => {
@@ -1549,6 +1577,8 @@ export function useTeamDocument() {
     teamDeliver: documentSnapshot?.deliver ?? null,
     /** Who decides what the agents' switches leave open (ADR 0061); absent is `ask`. */
     teamPermissionMode: (documentSnapshot?.permissions?.mode === 'auto' ? 'auto' : 'ask') as PermissionMode,
+    /** What one run may spend, in dollars (ADR 0068); `null` is no limit. */
+    teamSpendPerRun: documentSnapshot?.spend?.perRun ?? null,
     /**
      * The team's `memory.inherits` entries as the document holds them.
      *
@@ -1614,6 +1644,8 @@ export function useTeamDocument() {
     updateAgentAllowRecruiting,
     updateAgentAllow,
     updateTeamPermissionMode,
+    updateTeamSpend,
+    updateAgentSpend,
     updateAgentMemory,
     setAgentCapabilities,
     turnOff,

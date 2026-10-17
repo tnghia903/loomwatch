@@ -6,7 +6,7 @@
 //! 3. Every tool call it asks for is worked out, allowed or declined by [`Permissions`], run, and
 //!    its result goes back to the model.
 //! 4. That repeats until the model replies without a tool call, the turn hits its tool-call cap,
-//!    or someone cancels it.
+//!    the run's spool says no more ([`Spend`]), or someone cancels it.
 //!
 //! The conversation is append-only (see [`Message`]). A long output is set aside rather than put
 //! in it whole, and a conversation that nears the model's context limit is replaced by a summary.
@@ -31,6 +31,7 @@ use super::provider::{
     ToolSpec, Usage,
 };
 use super::skills::index_skills;
+use super::spend::{Go, Spend, Unmetered};
 use super::tools::{Builtin, CommandSettings, Context, Output};
 
 /// The context size assumed for a model whose size isn't known.
@@ -167,6 +168,8 @@ pub enum StopReason {
     /// The provider's safety filter stopped the reply.
     Refusal,
     Cancelled,
+    /// The run's spool, or the agent's own guard, allows no more model calls (ADR 0068).
+    SpendLimit,
 }
 
 impl StopReason {
@@ -178,6 +181,7 @@ impl StopReason {
             Self::MaxTurnRequests => "max_turn_requests",
             Self::Refusal => "refusal",
             Self::Cancelled => "cancelled",
+            Self::SpendLimit => "spend_limit",
         }
     }
 }
@@ -245,6 +249,7 @@ pub struct Session {
     sink: Arc<dyn EventSink>,
     permissions: Arc<dyn Permissions>,
     host: Arc<dyn HostTools>,
+    spend: Arc<dyn Spend>,
     history: Vec<Message>,
     outputs: BTreeMap<String, String>,
     usage: Usage,
@@ -299,6 +304,7 @@ impl Session {
             sink,
             permissions,
             host,
+            spend: Arc::new(Unmetered),
         }
     }
 
@@ -327,6 +333,7 @@ impl Session {
             sink,
             permissions,
             host,
+            spend: Arc::new(Unmetered),
         }
     }
 
@@ -342,6 +349,13 @@ impl Session {
             usage: self.usage,
             messages_written: self.messages_written,
         }
+    }
+
+    /// Check every model call against `spend` (the run's spool) instead of making them freely.
+    #[must_use]
+    pub fn with_spend(mut self, spend: Arc<dyn Spend>) -> Self {
+        self.spend = spend;
+        self
     }
 
     #[must_use]
@@ -379,6 +393,9 @@ impl Session {
             if cancel.is_cancelled() {
                 return Ok(ended(StopReason::Cancelled, turn, &reply));
             }
+            if !self.may_call(&cancel).await {
+                return Ok(ended(stopped(&cancel), turn, &reply));
+            }
             if self.needs_compacting() {
                 match self.compact(&cancel, &mut turn).await {
                     Ok(()) => {}
@@ -386,6 +403,10 @@ impl Session {
                         return Ok(ended(StopReason::Cancelled, turn, &reply));
                     }
                     Err(CallError::Failed(error)) => return Err(error),
+                }
+                // The summary was a call of its own, and may have used what was left.
+                if !self.may_call(&cancel).await {
+                    return Ok(ended(stopped(&cancel), turn, &reply));
                 }
             }
             let completion = match self.call_model(&cancel, true).await {
@@ -498,9 +519,19 @@ impl Session {
         self.provider.complete(&request, &deltas, cancel).await
     }
 
+    /// Whether the next model call may be made: [`Spend`] says so, and nobody cancelled the turn
+    /// while it waited for the operator.
+    async fn may_call(&self, cancel: &Cancel) -> bool {
+        tokio::select! {
+            go = self.spend.before_call() => go == Go::Ahead && !cancel.is_cancelled(),
+            () = cancel.cancelled() => false,
+        }
+    }
+
     async fn count(&mut self, usage: &Usage, turn: &mut Usage) -> Result<(), AgentError> {
         turn.add(usage);
         self.usage.add(usage);
+        self.spend.spent(usage);
         self.last_prompt_tokens = usage.prompt_tokens() + usage.output_tokens;
         if self.provider.is_demo() && usage.total_tokens() == 0 {
             return Ok(());
@@ -861,6 +892,15 @@ impl Session {
         ))
         .await
         .map_err(CallError::Failed)
+    }
+}
+
+/// Why a turn that may not make its next call ends: it was cancelled, or the spool is used up.
+fn stopped(cancel: &Cancel) -> StopReason {
+    if cancel.is_cancelled() {
+        StopReason::Cancelled
+    } else {
+        StopReason::SpendLimit
     }
 }
 

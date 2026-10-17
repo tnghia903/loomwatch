@@ -1,6 +1,7 @@
 import { type Document, isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml'
 
 import type { AgentConfig, BriefEntryConfig, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, TeamDocument } from './types'
+import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
 
 /** The document could not be parsed as YAML, or does not shape up as a team file. */
 export class TeamFileParseError extends Error {
@@ -62,7 +63,7 @@ export class TeamFileModel {
   static create(id: string, name: string): TeamFileModel {
     return TeamFileModel.parse(
       stringify(
-        { schemaVersion: 1, id, name, entrypoint: '', agents: [], edges: [] },
+        { schemaVersion: 1, id, name, spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: '', agents: [], edges: [] },
         { lineWidth: 0 },
       ),
     )
@@ -122,6 +123,15 @@ export class TeamFileModel {
   setPermissionMode(mode: PermissionMode): void {
     if (mode === 'auto') this.doc.setIn(['permissions', 'mode'], 'auto')
     else this.doc.delete('permissions')
+  }
+
+  /**
+   * Set what one run may spend, in dollars, or remove the limit with `null` (ADR 0068). A file
+   * with no `spend` block has no limit.
+   */
+  setSpend(perRun: number | null): void {
+    if (perRun !== null && perRun > 0) this.doc.setIn(['spend', 'perRun'], perRun)
+    else this.doc.delete('spend')
   }
 
   /** Set the team-wide `deliver` block, or remove it with `null` (ADR 0038). */

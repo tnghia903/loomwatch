@@ -642,6 +642,7 @@ mod tests {
             done_when: Vec::new(),
             checks: None,
             send_back_once: false,
+            spend: crate::spend::SpendConfig::default(),
         }
     }
 

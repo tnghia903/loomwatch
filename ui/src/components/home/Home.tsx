@@ -23,6 +23,7 @@ import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
 import { YourAgentsShelf } from './YourAgentsShelf'
+import { dollars } from '../../lib/runs/spend'
 
 export interface HomeProps {
   /** Something the operator must know before choosing a team, e.g. a link that did not open. */
@@ -131,7 +132,7 @@ export function Home({ notice = null, onCreateBlank, onPalette, topActions, runs
   else if (!key.connected) status = { state: 'incomplete', text: 'Add your OpenRouter key so your agents can run.', action: keyCard ? undefined : manage }
   else if (key.problem) status = { state: 'invalid', text: `OpenRouter: ${key.problem}`, action: manage }
   else if (key.freeTier) status = { state: 'incomplete', text: 'Your OpenRouter account has no credits yet, so only free models work.', action: manage }
-  else status = { state: 'saved', text: `Agents run on OpenRouter${key.label ? ` with key ${key.label}` : ''}`, action: manage }
+  else status = { state: 'saved', text: `Agents run on OpenRouter${key.label ? ` with key ${key.label}` : ''}${key.spentThisMonth === undefined ? '' : ` · ${dollars(key.spentThisMonth)} this month`}`, action: manage }
 
   return (
     <div className="lw-home" data-tour="home">

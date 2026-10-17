@@ -86,6 +86,23 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(model.toYaml()).toBe(source)
   })
 
+  // ADR 0068: what one run may spend. No block means no limit, so taking it off removes the block.
+  it('sets what one run may spend and takes the limit off without touching any other line', () => {
+    const source = readExample('operator-stop.yaml')
+    const model = TeamFileModel.parse(source)
+    expect(model.snapshot().spend).toEqual({ perRun: 1 })
+    model.setSpend(2.5)
+    expect(model.snapshot().spend).toEqual({ perRun: 2.5 })
+    expect(isOrderedSubsequence(source.split('\n').filter((line) => !line.includes('perRun')), model.toYaml().split('\n'))).toBe(true)
+    model.setSpend(null)
+    expect(model.snapshot().spend).toBeUndefined()
+    expect(model.toYaml()).not.toMatch(/^spend:/m)
+  })
+
+  it('writes a new team with $1.00 a run (ADR 0068)', () => {
+    expect(TeamFileModel.create('blog', 'Blog').snapshot().spend).toEqual({ perRun: 1 })
+  })
+
   it('adds and removes a schedule without touching any other line', () => {
     const source = readExample('research-team.yaml')
     const model = TeamFileModel.parse(source)

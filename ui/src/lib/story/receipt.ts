@@ -1,5 +1,7 @@
 import { outwardCalls } from '../library/observed'
+import type { RunSpend } from '../runs/client'
 import type { AgentRuntime } from '../runs/graph'
+import { spendNote } from '../runs/spend'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
 import { formatCost, formatTokens, type TokenSummary, type TurnPurpose } from '../watch/usage'
@@ -94,6 +96,8 @@ export interface ReceiptInput {
   /** Agent id → the model it ran on ("Claude Opus 5.5"). */
   harnessLabels: ReadonlyMap<string, string>
   answered: boolean
+  /** What the run spent and may spend (ADR 0068): money added at a stop, and a stop at the limit. */
+  spend?: RunSpend | null
 }
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
@@ -189,7 +193,11 @@ export function receiptTokens(summary: TokenSummary | null | undefined, names: R
   return {
     ...tokenRow('Tokens', summary),
     cached: summary.cacheShare === null ? null : `${Math.round(summary.cacheShare * 100)}% cached`,
-    agents: summary.agents.filter((agent) => agent.total > 0).map((agent) => tokenRow(names.get(agent.agentId) ?? agent.agentId, agent)),
+    // Beside each agent's tokens, what its calls cost, when every one of them said.
+    agents: summary.agents.filter((agent) => agent.total > 0).map((agent) => {
+      const row = tokenRow(names.get(agent.agentId) ?? agent.agentId, agent)
+      return agent.costUsd === undefined ? row : { ...row, value: `${row.value} · ${formatCost(agent.costUsd)}` }
+    }),
     purposes: summary.purposes.filter((purpose) => purpose.total > 0).map((purpose) => tokenRow(PURPOSE_WORDS[purpose.purpose], purpose)),
     estimate: why.length > 0 ? `~ ${why.join(' ')}` : null,
     cost: summary.costUsd === undefined ? null : `${summary.costComplete ? '' : 'at least '}${formatCost(summary.costUsd)}`,
@@ -285,6 +293,8 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   }
   if (anyRefused) checks.push({ tone: 'warn', text: 'What an agent isn’t allowed to do waits for your answer during a run. Requests you denied, or that nobody answered in time, were declined. Change what each agent may do on its workbench, in Agents.', aside: true })
   if (terminal && !input.answered) checks.push({ tone: 'bad', text: 'The run ended without an answer' })
+  const money = spendNote({ spend: input.spend }, (id) => input.agents.find((agent) => agent.id === id)?.name ?? id)
+  if (money) checks.push({ tone: input.spend?.stopped ? 'warn' : 'ok', text: money, aside: true })
   const gaps = Object.entries(input.projection.coverage).filter(([, value]) => value.level !== 'complete' && value.reason !== 'none_recorded')
   if (gaps.length) checks.push({ tone: 'warn', text: `Not everything was recorded: ${gaps.map(([key]) => key).join(', ')}` })
 

@@ -557,6 +557,26 @@ impl PermissionAsker {
             .allowed_for_run(&self.run_id, &self.agent, &grant_scope(request))
     }
 
+    /// What this agent's next model call meets at its run's spool (ADR 0068): the same operator
+    /// who answers its requests is the one who adds money or finishes the run.
+    pub(crate) fn spend_gate(&self) -> crate::spend::Gate {
+        self.desk
+            .registry()
+            .spend_gate(&self.run_id, &self.agent, &self.name)
+    }
+
+    /// Adds what one of this agent's model calls cost to its run's spool.
+    pub(crate) fn count_spend(&self, usd: f64) {
+        self.desk
+            .registry()
+            .count_spend(&self.run_id, &self.agent, usd);
+    }
+
+    /// Why this agent's run may make no more model calls at all, once it may not.
+    pub(crate) fn spend_stopped(&self) -> Option<crate::spend::SpendStopped> {
+        self.desk.registry().spend_stopped(&self.run_id)
+    }
+
     /// What Auto mode makes of `request` (ADR 0061), when this run is in Auto mode and the request
     /// is one of the app's own commands; `policy` is the asking agent's.
     #[must_use]
