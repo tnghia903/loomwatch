@@ -569,9 +569,18 @@ em { font-style: italic; }
 .start-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 560px); gap: 56px; align-items: center; }
 /* The download, in a card of its own: the button first, the Terminal line under it for those who want it. */
 .get { max-width: 560px; padding: 28px; border: 1px solid var(--hairline-2); border-radius: 14px; background: var(--panel-solid); box-shadow: var(--shadow); }
-.get-mac { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* Mac or Windows. Without JavaScript both show, one under the other, and the switch stays hidden;
+   main.js sets data-os on the card to show the visitor's computer and the switch to change it. */
+.get-pick { display: none; margin-bottom: 22px; }
+.get[data-os] .get-pick { display: inline-flex; }
+.get-pick button { display: inline-flex; align-items: center; gap: 7px; }
+.get-pick .os-logo { width: 13px; height: 13px; margin-top: -1px; }
+.get-os + .get-os { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--hairline-2); }
+.get[data-os] .get-os + .get-os { margin-top: 0; padding-top: 0; border-top: 0; }
+.get[data-os="mac"] .get-os[data-os="windows"], .get[data-os="windows"] .get-os[data-os="mac"] { display: none; }
+.get-dl { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .os-logo { width: 15px; height: 15px; fill: currentColor; flex: none; }
-.get-mac .os-logo { width: 17px; height: 17px; margin: -2px 2px 0 -4px; }
+.get-dl .os-logo { width: 17px; height: 17px; margin: -2px 2px 0 -4px; }
 .start-meta { font-size: 13px; color: var(--ink-3); }
 .start-note { margin: 14px 0 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .start-note b { font-weight: 600; color: var(--ink); }
