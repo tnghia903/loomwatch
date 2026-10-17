@@ -202,7 +202,9 @@ span.story-schedule { cursor: default; }
 .chat-msg { display: grid; grid-template-columns: 42px minmax(0, 1fr); margin-top: 14px; outline: none; }
 .chat-msg.continued { margin-top: 4px; }
 .chat-msg.mine { grid-template-columns: minmax(0, 1fr); justify-items: end; }
-.chat-gutter { padding-top: 20px; }
+/* The figure sits on its name's row, centred on it whatever its size: the gutter is as tall as the
+   name row (`.chat-meta`, 12.5px at 1.5), and the figure overflows it evenly above and below. */
+.chat-gutter { display: flex; align-items: center; height: 18.75px; }
 .chat-stack { display: grid; justify-items: start; min-width: 0; max-width: min(700px, 88%); }
 .chat-msg.mine .chat-stack { justify-items: end; }
 .chat-meta { display: flex; align-items: baseline; gap: 8px; margin: 0 0 3px 2px; font-size: 12.5px; }
