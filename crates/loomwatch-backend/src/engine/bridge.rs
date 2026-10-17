@@ -38,7 +38,9 @@ impl EventSink for ChannelSink {
 }
 
 /// Answers a session's permission requests with the run agent's policy (ADR 0037), Auto mode
-/// (ADR 0061) and, when those don't decide, the operator (ADR 0040).
+/// (ADR 0061) and, when those don't decide, the operator (ADR 0040). The operator may also change
+/// a command before allowing it, or answer in the agent's place: the agent then runs the changed
+/// command, or reads the answer as what the tool returned.
 ///
 /// What the policy approves on its own — reading inside the agent's folder, a web fetch with the
 /// web switched on — is approved without a record, as an app's own settings approved it before.
@@ -65,13 +67,21 @@ impl Permissions for PolicyGate {
                 Some(asker) => self.ask(asker, &message, policy).await,
                 None => AskOutcome::NotAsked,
             };
-            let allowed = outcome.allows();
-            self.record(&message, &request.tool_call_id, allowed);
-            if allowed {
-                Decision::Allow
-            } else {
-                Decision::Deny
-            }
+            let decision = match &outcome {
+                AskOutcome::Edited(command) => {
+                    crate::permissions::edited_input(&message, &request.input, command)
+                        .map_or(Decision::Deny, Decision::AllowEdited)
+                }
+                AskOutcome::AnsweredInstead(answer) => Decision::Answer(answer.clone()),
+                other if other.allows() => Decision::Allow,
+                _ => Decision::Deny,
+            };
+            self.record(
+                &message,
+                &request.tool_call_id,
+                matches!(decision, Decision::Allow | Decision::AllowEdited(_)),
+            );
+            decision
         })
     }
 }
@@ -136,7 +146,7 @@ impl PolicyGate {
         } else {
             (AskOutcome::NotAsked, None)
         };
-        self.note(json!({
+        let mut answered = json!({
             "phase": "permission_answered",
             "requestId": request_id,
             "title": title,
@@ -145,7 +155,14 @@ impl PolicyGate {
             "allowed": outcome.allows(),
             "detail": detail,
             "autoNote": auto_note,
-        }));
+        });
+        // What the operator wrote, so the team's chat can say what was run, or what the agent was told.
+        match &outcome {
+            AskOutcome::Edited(command) => answered["edited"] = json!(command),
+            AskOutcome::AnsweredInstead(answer) => answered["answer"] = json!(answer),
+            _ => {}
+        }
+        self.note(answered);
         outcome
     }
 }
@@ -217,4 +234,142 @@ pub(crate) fn tool_answer(result: &Value) -> (String, bool) {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     (text, failed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use serde_json::json;
+    use tokio::sync::mpsc;
+
+    use super::{PolicyGate, Record};
+    use crate::agent::{Decision, PermissionRequest, Permissions, ToolKind};
+    use crate::config::{AgentAllow, TeamConfig};
+    use crate::permissions::{PermissionAsker, PermissionDecision, PermissionPolicy};
+    use crate::runs::{RunRecord, RunRegistry, RunTrigger};
+
+    /// A person-started run whose one agent may do nothing without asking, and its gate.
+    fn gate() -> (
+        PolicyGate,
+        RunRegistry,
+        String,
+        mpsc::UnboundedReceiver<Record>,
+    ) {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    name: Builder\n    role: Build it.\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let record =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        let desk = crate::operator::OperatorDesk::new(registry.clone(), None);
+        let (records, received) = mpsc::unbounded_channel();
+        let gate = PolicyGate {
+            policy: Some(PermissionPolicy::new(
+                AgentAllow::default(),
+                Path::new("/tmp/loomwatch-bridge-test"),
+                [],
+                [],
+            )),
+            asker: Some(PermissionAsker::new(desk, &run_id, "a", "Builder")),
+            records,
+        };
+        (gate, registry, run_id, received)
+    }
+
+    fn command(text: &str) -> PermissionRequest {
+        PermissionRequest {
+            session_id: "s".to_owned(),
+            tool_call_id: "call-1".to_owned(),
+            title: format!("Run: {text}"),
+            kind: ToolKind::Execute,
+            input: json!({"command": text, "timeout_seconds": 30}),
+            locations: Vec::new(),
+        }
+    }
+
+    /// Answers the run's one waiting request, once the gate has put it on the record.
+    async fn answer(
+        registry: &RunRegistry,
+        run_id: &str,
+        decision: PermissionDecision,
+        text: &str,
+    ) {
+        for _ in 0..200 {
+            let waiting = registry.get(run_id).unwrap().permission_requests;
+            if let Some(request) = waiting.first() {
+                registry
+                    .answer_permission(run_id, &request.id, decision, Some(text))
+                    .unwrap();
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the gate never asked");
+    }
+
+    fn answered(received: &mut mpsc::UnboundedReceiver<Record>) -> serde_json::Value {
+        let mut last = None;
+        while let Ok(record) = received.try_recv() {
+            if let Record::Meta(payload) = record
+                && payload["phase"] == "permission_answered"
+            {
+                last = Some(payload);
+            }
+        }
+        last.expect("the answer is recorded")
+    }
+
+    /// "Edit, then allow": the agent runs the command as the operator changed it, its other
+    /// arguments kept, and the run records what was run.
+    #[tokio::test]
+    async fn a_command_changed_on_the_card_is_the_one_that_runs() {
+        let (gate, registry, run_id, mut received) = gate();
+        let request = command("rm -rf build");
+        let (decision, ()) = tokio::join!(
+            gate.request(&request),
+            answer(
+                &registry,
+                &run_id,
+                PermissionDecision::Edit,
+                " rm -rf build/tmp "
+            ),
+        );
+        assert_eq!(
+            decision,
+            Decision::AllowEdited(json!({"command": "rm -rf build/tmp", "timeout_seconds": 30}))
+        );
+        let note = answered(&mut received);
+        assert_eq!(note["outcome"], "edited");
+        assert_eq!(note["allowed"], true);
+        assert_eq!(note["edited"], "rm -rf build/tmp");
+    }
+
+    /// "Answer instead": nothing runs, and the agent reads the operator's words as the result.
+    #[tokio::test]
+    async fn an_answer_in_the_agents_place_goes_back_as_the_result() {
+        let (gate, registry, run_id, mut received) = gate();
+        let request = command("curl https://example.com/feed");
+        let (decision, ()) = tokio::join!(
+            gate.request(&request),
+            answer(
+                &registry,
+                &run_id,
+                PermissionDecision::Answer,
+                "Use the feed in notes.md instead."
+            ),
+        );
+        assert_eq!(
+            decision,
+            Decision::Answer("Use the feed in notes.md instead.".to_owned())
+        );
+        let note = answered(&mut received);
+        assert_eq!(note["outcome"], "answered");
+        assert_eq!(note["allowed"], false);
+        assert_eq!(note["answer"], "Use the feed in notes.md instead.");
+    }
 }

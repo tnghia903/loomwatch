@@ -357,6 +357,8 @@ function permitted(message: TeamMessage, agent: string): string {
   if (outcome === 'allow_once') return `You let ${agent} do this once: ${message.text}`
   if (outcome === 'allow_run') return `You let ${agent} do this for the rest of the run: ${message.text}`
   if (outcome === 'allow_team') return `You let the whole team do this for the rest of the run: ${message.text}`
+  if (outcome === 'edited') return `You changed it, then let ${agent} run it: ${message.permission?.written ?? message.text}`
+  if (outcome === 'answered') return `You answered ${agent} instead: “${message.permission?.written ?? ''}”`
   return `You denied ${agent}: ${message.text}`
 }
 

@@ -59,10 +59,16 @@ export interface PermissionRequest {
   expiresAt: string
   /** Why Auto mode left this command to you, when the team is in Auto mode (ADR 0061). */
   auto?: string | null
+  /** What you may change before allowing it: the command line or the address, whole. */
+  edit?: { field: 'command' | 'url'; value: string } | null
 }
 
 /** `allow_team`: every agent in the run, for the same thing, until the run ends. */
-export type PermissionDecision = 'allow_once' | 'allow_run' | 'allow_team' | 'deny'
+/** `edit` allows it changed, and `answer` sends words in its place: both carry text. */
+export type PermissionDecision = 'allow_once' | 'allow_run' | 'allow_team' | 'deny' | 'edit' | 'answer'
+
+/** The longest changed command or answer the daemon takes (`permissions::MAX_ANSWER_CHARS`). */
+export const MAX_PERMISSION_TEXT = 4000
 
 export interface WaitingOn {
   node: string
@@ -309,10 +315,11 @@ export async function answerRun(runId: string, node: string, text: string, sendB
 }
 
 /** Your answer to one permission request (ADR 0040). Resolves with the run once the agent has it. */
-export async function answerPermission(runId: string, requestId: string, decision: PermissionDecision): Promise<RunRecord> {
+/** Your answer to a request an agent waits on; `text` is the changed command, or your answer. */
+export async function answerPermission(runId: string, requestId: string, decision: PermissionDecision, text?: string): Promise<RunRecord> {
   return readRun<RunRecord>(await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/permissions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requestId, decision }), cache: 'no-store',
+    body: JSON.stringify({ requestId, decision, ...(text === undefined ? {} : { text }) }), cache: 'no-store',
   }))
 }
 

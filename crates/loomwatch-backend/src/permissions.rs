@@ -271,9 +271,60 @@ pub struct PermissionRequest {
     /// Why Auto mode left this command to the operator, when the run is in Auto mode (ADR 0061).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto: Option<String>,
+    /// What the operator may change before allowing it ([`editable`]): the command to run or the
+    /// address to fetch, whole. Absent for anything else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<PermissionEdit>,
     /// What "Allow for this run" covers ([`grant_scope`]). Internal: the card shows `kind`.
     #[serde(skip)]
     pub scope: String,
+}
+
+/// The one argument of a request the operator may change before allowing it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionEdit {
+    /// `command` or `url`: the argument's name in the tool's input.
+    pub field: String,
+    /// Its whole value, uncut.
+    pub value: String,
+}
+
+/// The longest edited command or address, or answer in the agent's place, the operator may send.
+pub const MAX_ANSWER_CHARS: usize = 4000;
+
+/// What of `request` the operator may change before allowing it: a command's command line, or the
+/// address a fetch opens. An MCP tool's arguments are its own, so nothing of one is offered.
+#[must_use]
+pub fn editable(request: &Value) -> Option<PermissionEdit> {
+    if mcp_tool(request).is_some() {
+        return None;
+    }
+    let call = request.pointer("/params/toolCall")?;
+    let field = match call.pointer("/kind").and_then(Value::as_str)? {
+        "execute" => "command",
+        "fetch" => "url",
+        _ => return None,
+    };
+    let value = call
+        .pointer(&format!("/rawInput/{field}"))
+        .and_then(Value::as_str)?;
+    Some(PermissionEdit {
+        field: field.to_owned(),
+        value: value.to_owned(),
+    })
+}
+
+/// The tool input `request` asked for with its editable argument set to `text`, as the operator
+/// changed it. `None` when nothing of the request may be changed.
+#[must_use]
+pub fn edited_input(request: &Value, input: &Value, text: &str) -> Option<Value> {
+    let edit = editable(request)?;
+    let mut input = input.clone();
+    input
+        .as_object_mut()?
+        .insert(edit.field, Value::String(text.to_owned()));
+    Some(input)
 }
 
 /// What the operator chose.
@@ -288,10 +339,24 @@ pub enum PermissionDecision {
     /// ends: one answer for a team whose agents all reach for the same tool.
     AllowTeam,
     Deny,
+    /// This request only, as the operator changed it ([`PermissionEdit`]): the reply's text is the
+    /// new command or address.
+    Edit,
+    /// Not this request: the reply's text goes back to the agent as what the tool returned.
+    Answer,
+}
+
+/// The operator's answer to one request, as the waiting agent receives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionReply {
+    pub decision: PermissionDecision,
+    /// The changed command or address for [`PermissionDecision::Edit`], or the words for
+    /// [`PermissionDecision::Answer`].
+    pub text: Option<String>,
 }
 
 /// How a request the policy declined was finally answered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskOutcome {
     /// Nobody could be asked: a routine, a finished run, or no run at all. Declined.
     NotAsked,
@@ -300,17 +365,23 @@ pub enum AskOutcome {
     /// The run is in Auto mode and the command only reads or downloads (ADR 0061).
     AutoApproved,
     Answered(PermissionDecision),
+    /// Allowed once as the operator changed it: the new command or address.
+    Edited(String),
+    /// Not run: the operator answered in the agent's place with these words.
+    AnsweredInstead(String),
     /// Nobody answered within [`PERMISSION_WAIT`]. Declined.
     TimedOut,
 }
 
 impl AskOutcome {
+    /// Whether the tool runs. An answer in its place does not: the agent gets the words instead.
     #[must_use]
-    pub fn allows(self) -> bool {
+    pub fn allows(&self) -> bool {
         matches!(
             self,
             Self::AllowedForRun
                 | Self::AutoApproved
+                | Self::Edited(_)
                 | Self::Answered(
                     PermissionDecision::AllowOnce
                         | PermissionDecision::AllowRun
@@ -321,7 +392,7 @@ impl AskOutcome {
 
     /// The word the archive records for this outcome.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::NotAsked => "not_asked",
             Self::AllowedForRun => "allowed_for_run",
@@ -330,6 +401,8 @@ impl AskOutcome {
             Self::Answered(PermissionDecision::AllowRun) => "allow_run",
             Self::Answered(PermissionDecision::AllowTeam) => "allow_team",
             Self::Answered(PermissionDecision::Deny) => "deny",
+            Self::Answered(PermissionDecision::Edit) | Self::Edited(_) => "edited",
+            Self::Answered(PermissionDecision::Answer) | Self::AnsweredInstead(_) => "answered",
             Self::TimedOut => "timed_out",
         }
     }
@@ -501,6 +574,7 @@ impl PermissionAsker {
             since: stamp(now),
             expires_at: stamp(now + wait),
             auto,
+            edit: editable(request),
         };
         let answer = self
             .desk
@@ -518,7 +592,7 @@ impl PermissionAsker {
 pub struct OpenRequest {
     asker: PermissionAsker,
     pub request: PermissionRequest,
-    answer: tokio::sync::oneshot::Receiver<PermissionDecision>,
+    answer: tokio::sync::oneshot::Receiver<PermissionReply>,
 }
 
 impl OpenRequest {
@@ -527,7 +601,15 @@ impl OpenRequest {
     /// runs while a line is being awaited.
     pub async fn wait(self) -> AskOutcome {
         let outcome = match tokio::time::timeout(PERMISSION_WAIT, self.answer).await {
-            Ok(Ok(decision)) => AskOutcome::Answered(decision),
+            Ok(Ok(PermissionReply {
+                decision: PermissionDecision::Edit,
+                text: Some(text),
+            })) => AskOutcome::Edited(text),
+            Ok(Ok(PermissionReply {
+                decision: PermissionDecision::Answer,
+                text: Some(text),
+            })) => AskOutcome::AnsweredInstead(text),
+            Ok(Ok(reply)) => AskOutcome::Answered(reply.decision),
             // The waiting room dropped the request: the run ended while it was open.
             Ok(Err(_)) => AskOutcome::NotAsked,
             Err(_) => AskOutcome::TimedOut,
@@ -633,6 +715,45 @@ mod tests {
         edits: true,
         commands: true,
     };
+
+    /// "Edit, then allow" is offered for a command line or a fetch's address, whole, and for
+    /// nothing else: not a file write, not an MCP tool, whatever kind it carries.
+    #[test]
+    fn only_a_command_or_an_address_may_be_changed_before_it_is_allowed() {
+        let ask = |kind: &str, input: Value| json!({"params": {"toolCall": {"kind": kind, "title": "Run", "rawInput": input}}});
+        let long = "echo ".to_owned() + &"x".repeat(DETAIL_CHARS * 2);
+        let command = ask("execute", json!({"command": long}));
+        assert_eq!(
+            editable(&command),
+            Some(PermissionEdit {
+                field: "command".to_owned(),
+                value: long.clone()
+            })
+        );
+        assert_eq!(
+            editable(&ask("fetch", json!({"url": "https://example.com"}))).map(|edit| edit.field),
+            Some("url".to_owned())
+        );
+        assert_eq!(
+            editable(&ask("edit", json!({"path": "a.md", "content": "x"}))),
+            None
+        );
+        assert_eq!(
+            editable(&ask(
+                "execute",
+                json!({"server": "notion", "tool": "search", "command": "x"})
+            )),
+            None
+        );
+        assert_eq!(
+            edited_input(
+                &command,
+                &json!({"command": long, "timeout_seconds": 5}),
+                "ls"
+            ),
+            Some(json!({"command": "ls", "timeout_seconds": 5}))
+        );
+    }
 
     /// ADR 0040: "Allow for this run" covers a kind for the app's own tools, but exactly one MCP
     /// tool, however the app labels it. Codex calls every MCP tool `execute`, so allowing a tool for

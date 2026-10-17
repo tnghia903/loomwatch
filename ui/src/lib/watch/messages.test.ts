@@ -166,6 +166,20 @@ describe('messages between agents', () => {
     expect(projectRun(events, 1).messages[0]).toMatchObject({ state: 'pending', reply: null, permission: { outcome: null } })
   })
 
+  it('keeps the command you changed, or the answer you gave in its place, with the request', () => {
+    seq = 0
+    const asked = (seconds: number, requestId: string) =>
+      event(seconds, 'builder', 'session_meta', { phase: 'awaiting_permission', requestId, title: 'Run: rm -rf build', kind: 'execute', switch: 'commands', detail: 'rm -rf build' }, loomwatch('awaiting_permission'))
+    const { messages } = projectRun([
+      asked(1, 'p1'),
+      event(9, 'builder', 'session_meta', { phase: 'permission_answered', requestId: 'p1', title: 'Run: rm -rf build', kind: 'execute', outcome: 'edited', allowed: true, edited: 'rm -rf build/tmp' }, loomwatch('permission_answered')),
+      asked(20, 'p2'),
+      event(30, 'builder', 'session_meta', { phase: 'permission_answered', requestId: 'p2', title: 'Run: rm -rf build', kind: 'execute', outcome: 'answered', allowed: false, answer: 'Leave the build folder alone.' }, loomwatch('permission_answered')),
+    ])
+    expect(messages[0]).toMatchObject({ state: 'answered', reply: { text: 'rm -rf build/tmp' }, permission: { outcome: 'edited', written: 'rm -rf build/tmp' } })
+    expect(messages[1]).toMatchObject({ state: 'answered', reply: { text: 'Leave the build folder alone.' }, permission: { outcome: 'answered', written: 'Leave the build folder alone.' } })
+  })
+
   it('reads a review step as a handover you answer, and your answer reaching the next stage as direction', () => {
     seq = 0
     const { messages } = projectRun([

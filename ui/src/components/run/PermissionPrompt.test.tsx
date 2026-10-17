@@ -27,6 +27,42 @@ describe('the permission card (ADR 0040)', () => {
     expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'allow_run' })
   })
 
+  // A command you'd run a little differently: change it on the card, and that is what runs.
+  it('lets you change a command before allowing it, starting from the whole command', async () => {
+    const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
+    vi.stubGlobal('fetch', fetch)
+    const whole = 'rm -rf build && npm run build -- --mode production'
+    render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request({ title: 'Run: rm -rf build', kind: 'execute', switch: 'commands', detail: 'rm -rf build…', edit: { field: 'command', value: whole } })] }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit, then allow' }))
+    const field = screen.getByLabelText('The command to allow instead')
+    expect(field).toHaveValue(whole)
+    expect(screen.getByText('Researcher runs it as you wrote it, this once.')).toBeInTheDocument()
+    fireEvent.change(field, { target: { value: '  rm -rf build/tmp ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Allow it changed' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'edit', text: 'rm -rf build/tmp' })
+  })
+
+  it('offers no edit for a request with nothing to change, and answers in its place instead', async () => {
+    const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
+    vi.stubGlobal('fetch', fetch)
+    render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request({ title: 'Write notes.md', kind: 'edit', switch: 'edits', detail: 'notes.md' })] }} />)
+    expect(screen.queryByRole('button', { name: 'Edit, then allow' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Answer instead' }))
+    const send = screen.getByRole('button', { name: 'Send answer' })
+    expect(send).toBeDisabled()
+    // Back to the answers, nothing sent.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(fetch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Answer instead' }))
+    fireEvent.change(screen.getByLabelText('Your answer to Researcher, in place of what it asked to do'), { target: { value: 'Put it in the reply instead of a file.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ requestId: 'p1', decision: 'answer', text: 'Put it in the reply instead of a file.' })
+  })
+
   it('offers "Always allow" only for a request a switch covers, and switches it on as it lets the run through', async () => {
     const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
     vi.stubGlobal('fetch', fetch)

@@ -443,7 +443,7 @@ struct RegistryInner {
     live: BTreeMap<String, mpsc::Sender<crate::operator::LiveTurn>>,
     /// The other half of each open permission request (ADR 0040), keyed by request id: the
     /// channel `POST /api/runs/{id}/permissions` hands the operator's decision to.
-    asking: BTreeMap<String, oneshot::Sender<crate::permissions::PermissionDecision>>,
+    asking: BTreeMap<String, oneshot::Sender<crate::permissions::PermissionReply>>,
     /// What the operator allowed for the rest of a run, keyed `run_id\0agent_id\0scope`, where the
     /// scope is a tool kind or one MCP tool (`permissions::grant_scope`).
     allowed_for_run: BTreeSet<String>,
@@ -1067,7 +1067,7 @@ impl RunRegistry {
         &self,
         run_id: &str,
         request: crate::permissions::PermissionRequest,
-    ) -> Option<oneshot::Receiver<crate::permissions::PermissionDecision>> {
+    ) -> Option<oneshot::Receiver<crate::permissions::PermissionReply>> {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         let entry = inner.runs.get_mut(run_id)?;
         if entry.record.status.is_terminal() || entry.record.trigger == RunTrigger::Schedule {
@@ -1103,18 +1103,23 @@ impl RunRegistry {
     }
 
     /// The operator's answer to one open permission request, handed to the agent waiting on it.
-    /// Answers the run as it is once the request is closed.
+    /// Answers the run as it is once the request is closed. `text` is the changed command or
+    /// address for an edit, and the words for an answer in the agent's place.
     ///
     /// # Errors
     ///
     /// Not found when the run or the request is unknown — already answered, declined after the
-    /// wait, or the run ended.
+    /// wait, or the run ended. A conflict when an edit or an answer has no text, or too much, or
+    /// the request has nothing that may be changed; the request stays open for another answer.
     pub fn answer_permission(
         &self,
         run_id: &str,
         request_id: &str,
         decision: crate::permissions::PermissionDecision,
+        text: Option<&str>,
     ) -> Result<RunRecord, OperatorError> {
+        use crate::permissions::{MAX_ANSWER_CHARS, PermissionDecision};
+        let text = text.map(str::trim).filter(|text| !text.is_empty());
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         let Some(entry) = inner.runs.get_mut(run_id) else {
             return Err(OperatorError::not_found(format!(
@@ -1131,6 +1136,37 @@ impl RunRegistry {
                 "That request is no longer waiting: it was answered, or declined when nobody \
                  answered in time.",
             ));
+        };
+        let worded = matches!(
+            decision,
+            PermissionDecision::Edit | PermissionDecision::Answer
+        );
+        if decision == PermissionDecision::Edit
+            && entry.record.permission_requests[position].edit.is_none()
+        {
+            return Err(OperatorError::conflict(
+                "Only a command can be changed before it is allowed. Allow it, deny it, or answer \
+                 in its place.",
+            ));
+        }
+        if worded && text.is_none() {
+            return Err(OperatorError::conflict(
+                if decision == PermissionDecision::Edit {
+                    "Write the command to run instead, or choose another answer."
+                } else {
+                    "Write your answer first, or choose another answer."
+                },
+            ));
+        }
+        if text.is_some_and(|text| text.chars().count() > MAX_ANSWER_CHARS) {
+            return Err(OperatorError::conflict(format!(
+                "That is longer than {MAX_ANSWER_CHARS} characters. Shorten it and send it again."
+            )));
+        }
+        let text = if worded {
+            text.map(str::to_owned)
+        } else {
+            None
         };
         let request = entry.record.permission_requests.remove(position);
         // "Allow for the whole team" also answers every other agent already waiting on the same
@@ -1158,7 +1194,10 @@ impl RunRegistry {
         }
         for id in answered {
             if let Some(sender) = inner.asking.remove(&id) {
-                let _delivered = sender.send(decision);
+                let _delivered = sender.send(crate::permissions::PermissionReply {
+                    decision,
+                    text: text.clone(),
+                });
             }
         }
         Ok(record)
@@ -3579,6 +3618,9 @@ async fn get_run_questions(
 struct PermissionAnswer {
     request_id: String,
     decision: crate::permissions::PermissionDecision,
+    /// The changed command for `edit`, and the words for `answer`.
+    #[serde(default)]
+    text: Option<String>,
 }
 
 /// `POST /api/runs/{id}/permissions` (ADR 0040): the operator's answer to one request an agent's
@@ -3597,7 +3639,12 @@ async fn answer_permission(
     })?;
     let record = state
         .registry
-        .answer_permission(&run_id, &answer.request_id, answer.decision)
+        .answer_permission(
+            &run_id,
+            &answer.request_id,
+            answer.decision,
+            answer.text.as_deref(),
+        )
         .map_err(operator_status)?;
     Ok((StatusCode::OK, Json(record)).into_response())
 }
@@ -3815,6 +3862,7 @@ pub(crate) mod tests {
             since: now(),
             expires_at: now(),
             auto: None,
+            edit: None,
             scope: kind.to_owned(),
         }
     }
@@ -3858,10 +3906,10 @@ pub(crate) mod tests {
         assert_eq!(wire["permissionRequests"][0]["switch"], "web");
         assert!(!registry.allowed_for_run(&manual_id, "a", "fetch"));
         let record = registry
-            .answer_permission(&manual_id, "p1", PermissionDecision::AllowRun)
+            .answer_permission(&manual_id, "p1", PermissionDecision::AllowRun, None)
             .expect("open");
         assert!(record.permission_requests.is_empty());
-        assert_eq!(answer.await.unwrap(), PermissionDecision::AllowRun);
+        assert_eq!(answer.await.unwrap().decision, PermissionDecision::AllowRun);
         assert!(registry.allowed_for_run(&manual_id, "a", "fetch"));
         assert!(!registry.allowed_for_run(&manual_id, "a", "execute"));
         // An MCP tool the app calls `execute` is granted as that tool, never as every command.
@@ -3871,13 +3919,16 @@ pub(crate) mod tests {
             .open_permission_request(&manual_id, tool)
             .expect("open");
         registry
-            .answer_permission(&manual_id, "p-tool", PermissionDecision::AllowRun)
+            .answer_permission(&manual_id, "p-tool", PermissionDecision::AllowRun, None)
             .expect("open");
-        assert_eq!(tool_answer.await.unwrap(), PermissionDecision::AllowRun);
+        assert_eq!(
+            tool_answer.await.unwrap().decision,
+            PermissionDecision::AllowRun
+        );
         assert!(registry.allowed_for_run(&manual_id, "a", "mcp:notion.search"));
         assert!(!registry.allowed_for_run(&manual_id, "a", "execute"));
         assert!(!registry.allowed_for_run(&manual_id, "b", "fetch"));
-        let again = registry.answer_permission(&manual_id, "p1", PermissionDecision::Deny);
+        let again = registry.answer_permission(&manual_id, "p1", PermissionDecision::Deny, None);
         assert!(
             again.is_err(),
             "an answered request cannot be answered twice"
@@ -3931,10 +3982,13 @@ pub(crate) mod tests {
         let waiting = ask("t2", "c", "mcp:notion.fetch");
         let other = ask("t3", "c", "mcp:notion.search");
         let record = registry
-            .answer_permission(&manual_id, "t1", PermissionDecision::AllowTeam)
+            .answer_permission(&manual_id, "t1", PermissionDecision::AllowTeam, None)
             .expect("open");
-        assert_eq!(first.await.unwrap(), PermissionDecision::AllowTeam);
-        assert_eq!(waiting.await.unwrap(), PermissionDecision::AllowTeam);
+        assert_eq!(first.await.unwrap().decision, PermissionDecision::AllowTeam);
+        assert_eq!(
+            waiting.await.unwrap().decision,
+            PermissionDecision::AllowTeam
+        );
         assert_eq!(
             record
                 .permission_requests
@@ -3947,9 +4001,9 @@ pub(crate) mod tests {
         assert!(registry.allowed_for_run(&manual_id, "d", "mcp:notion.fetch"));
         assert!(!registry.allowed_for_run(&manual_id, "d", "mcp:notion.search"));
         registry
-            .answer_permission(&manual_id, "t3", PermissionDecision::Deny)
+            .answer_permission(&manual_id, "t3", PermissionDecision::Deny, None)
             .expect("open");
-        assert_eq!(other.await.unwrap(), PermissionDecision::Deny);
+        assert_eq!(other.await.unwrap().decision, PermissionDecision::Deny);
         assert!(matches!(
             registry.cancel(&manual_id),
             CancelOutcome::Cancelled(_)
@@ -3958,6 +4012,105 @@ pub(crate) mod tests {
             !registry.allowed_for_run(&manual_id, "d", "mcp:notion.fetch"),
             "the grant ends with the run"
         );
+    }
+
+    /// "Edit, then allow" changes only a command, and needs the changed command; "Answer instead"
+    /// needs its words. A refused answer leaves the request open, and an answer carries its text.
+    #[tokio::test]
+    async fn an_edit_or_an_answer_carries_its_text_and_is_refused_without_it() {
+        use crate::permissions::{MAX_ANSWER_CHARS, PermissionDecision, PermissionEdit};
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let record =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+
+        let file = registry
+            .open_permission_request(&run_id, permission_request("w1", "edit"))
+            .expect("open");
+        let refused = registry
+            .answer_permission(&run_id, "w1", PermissionDecision::Edit, Some("x"))
+            .unwrap_err();
+        assert!(
+            refused.conflict && refused.message.contains("Only a command"),
+            "{refused:?}"
+        );
+        let blank = registry
+            .answer_permission(&run_id, "w1", PermissionDecision::Answer, Some("   "))
+            .unwrap_err();
+        assert!(blank.message.contains("Write your answer"), "{blank:?}");
+        let long = "x".repeat(MAX_ANSWER_CHARS + 1);
+        assert!(
+            registry
+                .answer_permission(&run_id, "w1", PermissionDecision::Answer, Some(&long))
+                .is_err()
+        );
+        assert_eq!(
+            registry.get(&run_id).unwrap().permission_requests.len(),
+            1,
+            "a refused answer leaves the request waiting"
+        );
+        registry
+            .answer_permission(
+                &run_id,
+                "w1",
+                PermissionDecision::Answer,
+                Some(" Not now. "),
+            )
+            .unwrap();
+        let reply = file.await.unwrap();
+        assert_eq!(reply.decision, PermissionDecision::Answer);
+        assert_eq!(reply.text.as_deref(), Some("Not now."));
+
+        let mut command = permission_request("c1", "execute");
+        command.edit = Some(PermissionEdit {
+            field: "command".to_owned(),
+            value: "rm -rf build".to_owned(),
+        });
+        let waiting = registry
+            .open_permission_request(&run_id, command)
+            .expect("open");
+        assert!(
+            registry
+                .answer_permission(&run_id, "c1", PermissionDecision::Edit, None)
+                .unwrap_err()
+                .message
+                .contains("Write the command")
+        );
+        registry
+            .answer_permission(
+                &run_id,
+                "c1",
+                PermissionDecision::Edit,
+                Some("rm -rf build/tmp"),
+            )
+            .unwrap();
+        assert_eq!(
+            waiting.await.unwrap().text.as_deref(),
+            Some("rm -rf build/tmp")
+        );
+        assert!(
+            !registry.allowed_for_run(&run_id, "a", "execute"),
+            "an edit allows that one command, not every command"
+        );
+
+        // Text sent with a plain answer is not passed on.
+        let plain = registry
+            .open_permission_request(&run_id, permission_request("p1", "fetch"))
+            .expect("open");
+        registry
+            .answer_permission(
+                &run_id,
+                "p1",
+                PermissionDecision::AllowOnce,
+                Some("ignored"),
+            )
+            .unwrap();
+        assert_eq!(plain.await.unwrap().text, None);
     }
 
     /// `POST /api/runs/{id}/permissions`: the answer reaches the waiting agent and the run comes
@@ -3991,7 +4144,7 @@ pub(crate) mod tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["permissionRequests"], Value::Null, "{body}");
         assert_eq!(
-            waiting.await.unwrap(),
+            waiting.await.unwrap().decision,
             crate::permissions::PermissionDecision::AllowOnce
         );
         let (status, body) = answer(json!({"requestId": "p1", "decision": "deny"})).await;
@@ -4004,6 +4157,21 @@ pub(crate) mod tests {
         );
         let (status, _) = answer(json!({"requestId": "p1", "decision": "maybe"})).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // An answer in the agent's place carries its words; one without them is refused, and the
+        // request still waits.
+        let waiting = registry
+            .open_permission_request(&run_id, permission_request("p2", "fetch"))
+            .expect("open");
+        let (status, body) = answer(json!({"requestId": "p2", "decision": "answer"})).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        let (status, body) =
+            answer(json!({"requestId": "p2", "decision": "answer", "text": "Use notes.md."})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            waiting.await.unwrap().text.as_deref(),
+            Some("Use notes.md.")
+        );
     }
 
     #[test]

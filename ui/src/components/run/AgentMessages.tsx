@@ -212,11 +212,13 @@ function isNotice(bubble: Bubble): boolean {
 }
 
 /** How a permission request was settled, as a line in the chat. */
-const SETTLED: Record<PermissionOutcome, (agent: string) => string> = {
+const SETTLED: Record<PermissionOutcome, (agent: string, written: string) => string> = {
   allow_once: () => 'You allowed it, this once',
   allow_run: () => 'You allowed it for the rest of this run',
   allow_team: () => 'You allowed the whole team to do this for the rest of this run',
   deny: (agent) => `You denied it. ${agent} carries on without it`,
+  edited: (_agent, written) => `You changed it, then allowed it: ${written}`,
+  answered: (agent, written) => `You answered instead: “${written}”. ${agent} carries on with that`,
   timed_out: () => 'Nobody answered in time, so it was declined',
 }
 
@@ -226,7 +228,7 @@ function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: 
   if (outcome) {
     return (
       <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, ${bubble.word}`}>
-        <span>{SETTLED[outcome](writer ? member(writer).name : 'The agent')}</span>
+        <span>{SETTLED[outcome](writer ? member(writer).name : 'The agent', bubble.item.line.message.permission?.written ?? '')}</span>
         <time dateTime={bubble.ts}>{when(bubble)}</time>
       </li>
     )

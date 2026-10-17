@@ -20,7 +20,7 @@ interface NeedsYouTrayProps {
 
 const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', failed: 'Stopped' }
 
-const PERMISSION_SAID: Record<PermissionDecision, string> = { allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
+const PERMISSION_SAID: Record<PermissionDecision, string> = { edit: 'Allowed as you changed it.', answer: 'Your answer was sent.', allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
 
 /**
  * Every place a team is waiting on the operator, across all teams, as one-question tickets.
