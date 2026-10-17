@@ -90,19 +90,40 @@ have been tried.
 2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. The Release workflow
    checks the tag matches the version and drafts the release with `loomwatch-macos-universal.tar.gz`,
    `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz` and a `.sha256` for each.
-3. Try the draft with the real installer, in a folder of its own:
+3. Try the draft with the real installer, apart from the LoomWatch installed on this computer:
 
    ```sh
    gh release download v0.2.0 -D /tmp/lw-release
    python3 -m http.server -d /tmp/lw-release 8765 &
-   LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 \
-     LOOMWATCH_APP_DIR=/tmp/lw-try/app LOOMWATCH_TEAMS_ROOT=/tmp/lw-try/teams LOOMWATCH_PORT=3320 \
-     bash scripts/install.sh
+   export LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 LOOMWATCH_APP_DIR=/tmp/lw-try/app \
+     LOOMWATCH_TEAMS_ROOT=/tmp/lw-try/teams LOOMWATCH_PORT=3320 \
+     LOOMWATCH_STATE_DIR=/tmp/lw-try/state LOOMWATCH_KEY_STORE=file
+   bash scripts/install.sh
    ```
 
-   A copy installed anywhere but `~/LoomWatch/app` keeps its run history in its own folder
-   (`/tmp/lw-try/app/.loomwatch/loomwatch.db`), never the installed app's. Stop it with Ctrl-C and
-   the file server with `kill %1`, then remove the trial: `rm -rf /tmp/lw-try /tmp/lw-release`.
+   Everything the trial keeps is in `/tmp/lw-try`, and the installed app's state folder and
+   Keychain items are left as they were:
+
+   - A copy installed anywhere but `~/LoomWatch/app` keeps its run history in its own folder
+     (`/tmp/lw-try/app/.loomwatch/loomwatch.db`).
+   - `LOOMWATCH_STATE_DIR` puts the rest of its state (approved team files, skills, what
+     Connections shows) in `/tmp/lw-try/state` instead of `~/Library/Application Support/LoomWatch`.
+   - `LOOMWATCH_KEY_STORE=file` keeps an OpenRouter key and a Notion connection in private files
+     in that folder (`keys.json`, `notion-credentials.json`). The Keychain items
+     `LoomWatch.OpenRouter` and `LoomWatch.Notion` are never read or written, so the trial starts
+     with no key and Notion not connected.
+
+   The launcher passes both settings on to `loomwatchd`. Without them a trial reads and writes the
+   installed app's state folder and Keychain items. They are exported so that starting the trial
+   again from the same terminal (`/tmp/lw-try/app/loomwatch`) uses them too. Stop it with Ctrl-C,
+   then stop the file server, remove the trial and clear its settings:
+
+   ```sh
+   kill %1
+   rm -rf /tmp/lw-try /tmp/lw-release
+   unset LOOMWATCH_DOWNLOAD_BASE LOOMWATCH_APP_DIR LOOMWATCH_TEAMS_ROOT LOOMWATCH_PORT \
+     LOOMWATCH_STATE_DIR LOOMWATCH_KEY_STORE
+   ```
 4. Edit the notes, then publish: `gh release edit v0.2.0 --draft=false`. Write the notes for the
    people using LoomWatch: every copy on an older version shows them in its **Update available**
    dialog within a day (ADR 0052), as Markdown without images. Say when a release changes how the

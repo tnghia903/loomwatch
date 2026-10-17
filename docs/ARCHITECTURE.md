@@ -71,7 +71,9 @@ Connections page. The backend handles exactly one key, and it guards it:
 
 - **Where it is kept.** `ai/keys.rs` keeps it in the macOS Keychain as `LoomWatch.OpenRouter`.
   On other systems it is in `<state dir>/keys.json`, readable by this account only.
-  `LOOMWATCH_KEY_STORE=file` uses the file on a Mac too, for trial copies. An
+  `LOOMWATCH_KEY_STORE=file` uses the file on a Mac too, for trial copies. It covers the Notion
+  connection as well, which then goes in `<state dir>/notion-credentials.json`, so a trial copy
+  with its own state folder never reads or writes either of the installed app's Keychain items. An
   `OPENROUTER_API_KEY` in the daemon's environment is ignored, and LoomWatch never looks for
   another app's credentials.
 - **How it is checked.** A key is checked with OpenRouter before it is kept

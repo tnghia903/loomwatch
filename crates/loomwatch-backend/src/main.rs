@@ -253,6 +253,9 @@ async fn main() -> Result<()> {
             // agent starts, and the model list when it is first asked for.
             let ai = loomwatch_backend::ai::Ai::new(&state_dir);
             loomwatch_backend::ai::install(ai.clone());
+            // Where the Notion connection is kept, chosen the same way as the key's store. Also
+            // before anything can start a run, since a run reads the pages its agents are given.
+            loomwatch_backend::notion::install(&state_dir);
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
             let approvals =
