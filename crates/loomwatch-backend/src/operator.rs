@@ -77,20 +77,17 @@ pub enum StopKind {
 
 /// How the session behind a stop is waiting, which is what the card says out loud.
 ///
-/// Decision 7's two tiers, and the third state the second tier decays into. The operator is told
-/// which one they are in because the three cost different things and offer different actions: a
-/// parked session can take a note for as long as you like, a kept-alive one cannot be left
-/// overnight, and a released one can only be continued from its checkpoint.
+/// An agent waiting for the operator is always parked in the database, so the only other answer
+/// is that nothing is waiting behind the stop at all. Builds that kept a third-party app's process
+/// running also wrote `kept_alive` and `released`. A record holding either is of a run that has
+/// ended, since a restart fails every run still in progress and clears what it waited on, and
+/// [`WaitingOn::from_value`] reads it as nothing waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParkTier {
     /// The agent's conversation is parked as data, with nothing running; answering picks it up
-    /// where it stopped. Every built-in agent parks this way.
+    /// where it stopped.
     Reloadable,
-    /// The harness did not: the session idles, bounded by `conversation.stop.keepAliveMinutes`.
-    KeptAlive,
-    /// The window expired: a coordinator checkpoint was written and the session released.
-    Released,
     /// Nothing is holding a session — the stop is the first thing after a replayed stage, or the
     /// predecessor had already finished.
     None,
@@ -99,19 +96,12 @@ pub enum ParkTier {
 impl ParkTier {
     /// The phrase the waiting card shows under the question.
     #[must_use]
-    pub fn sentence(self, predecessor: Option<&str>, keep_alive_minutes: u32) -> String {
+    pub fn sentence(self, predecessor: Option<&str>) -> String {
         let who = predecessor.unwrap_or("The stage before this");
         match self {
             Self::Reloadable => {
                 format!("{who} is parked · carries on when you answer · nothing running")
             }
-            Self::KeptAlive => format!(
-                "{who} is kept alive · checkpoints and releases after {keep_alive_minutes} minutes"
-            ),
-            Self::Released => format!(
-                "{who} was released after {keep_alive_minutes} minutes · its checkpoint is where \
-                 the work stopped"
-            ),
             Self::None => "No session is being held for this stop.".to_owned(),
         }
     }
@@ -141,8 +131,8 @@ pub struct WaitingOn {
     pub park: ParkTier,
     /// The parking fact in plain words, so the card never has to reconstruct it.
     pub park_note: String,
-    /// Whether `sendBack` can still reach the predecessor. False once a kept-alive session has
-    /// been released: a note cannot be delivered to a session that is gone, and saying so at the
+    /// Whether `sendBack` can reach the predecessor. False when no session is parked behind the
+    /// stop: a note cannot be delivered to a session that is not there, and saying so at the
     /// moment the operator presses the button is better than accepting it and dropping it.
     pub send_back_available: bool,
     /// The id of the row in `operator_questions` this is the open half of.
@@ -188,9 +178,9 @@ pub struct OperatorWait {
 impl OperatorWait {
     /// Block this run's loop — and nothing else — until an answer arrives.
     ///
-    /// There is no timeout here on purpose. Nothing is in flight: the harness process is parked or
-    /// released, the ACP request timeout is not racing anybody, and a stop that waits an hour
-    /// costs exactly what a stop that waits a minute costs. The only thing that ends this wait
+    /// There is no timeout here on purpose. Nothing is in flight: the agent is parked in the
+    /// database, no model request is racing anybody, and a stop that waits an hour costs exactly
+    /// what a stop that waits a minute costs. The only thing that ends this wait
     /// other than an answer is the run being cancelled, which drops the whole task.
     ///
     /// # Errors
@@ -456,8 +446,8 @@ impl OperatorDesk {
         })
     }
 
-    /// Rewrite the parking fact of a stop that is still open — the one thing about a stop that
-    /// changes while nobody is touching it, when a kept-alive window expires under it.
+    /// Rewrite the parking fact of a stop that is still open, once the session behind it has
+    /// actually been parked.
     pub async fn repark(&self, run_id: &str, waiting: &WaitingOn) {
         self.registry
             .set_waiting_on(run_id, Some(waiting.to_value()));
@@ -487,8 +477,8 @@ impl OperatorDesk {
     ///
     /// # Errors
     ///
-    /// Returns a conflict when nothing is waiting, when a different node is, when the run task has
-    /// gone away, or when `sendBack` names a session that has already been released.
+    /// Returns a conflict when nothing is waiting, when a different node is, or when the run task
+    /// has gone away.
     pub async fn deliver(
         &self,
         run_id: &str,
@@ -566,5 +556,37 @@ impl OperatorDesk {
     /// Forget it again, when the session is released.
     pub(crate) fn detach_live(&self, run_id: &str, agent_id: &str) {
         self.registry.detach_live(run_id, agent_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stop written by a build that kept an app's process running reads as nothing waiting,
+    /// rather than failing whatever reads the record.
+    #[test]
+    fn a_park_tier_from_an_older_build_reads_as_nothing_waiting() {
+        let waiting = WaitingOn {
+            node: "review".into(),
+            name: "You".into(),
+            kind: StopKind::ReviewStop,
+            since: now_rfc3339(),
+            question: "Approve?".into(),
+            context: None,
+            handover_from: Some("researcher".into()),
+            park: ParkTier::Reloadable,
+            park_note: ParkTier::Reloadable.sentence(Some("Researcher")),
+            send_back_available: true,
+            question_id: None,
+        };
+        let value = waiting.to_value();
+        assert_eq!(value["park"], "reloadable");
+        assert_eq!(WaitingOn::from_value(&value), Some(waiting));
+        for old in ["kept_alive", "released"] {
+            let mut stored = value.clone();
+            stored["park"] = Value::from(old);
+            assert_eq!(WaitingOn::from_value(&stored), None, "{old}");
+        }
     }
 }

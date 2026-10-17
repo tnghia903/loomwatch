@@ -78,7 +78,8 @@ export interface WaitingOn {
   question: string
   context?: string | null
   handoverFrom?: string | null
-  park: 'reloadable' | 'kept_alive' | 'released' | 'none'
+  /** `reloadable`: the agent is parked in the database. `none`: no session is held behind the stop. */
+  park: 'reloadable' | 'none'
   parkNote: string
   sendBackAvailable: boolean
   questionId?: string | null

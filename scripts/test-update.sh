@@ -135,6 +135,7 @@ if [ "$(cat "$here/run/loomwatchd.pid" 2>/dev/null)" = "$$" ]; then pid=same; fi
 printf 'started %s install=%s command=%s supervised=%s request=%s pid=%s failed=%s\n' \
   "$(cut -d ' ' -f 1 "$here/VERSION")" "$LOOMWATCH_INSTALL" "$LOOMWATCH_UPDATE_COMMAND" \
   "${LOOMWATCH_SUPERVISED:-}" "${LOOMWATCH_UPDATE_REQUEST:-}" "$pid" "${LOOMWATCH_UPDATE_FAILED:-}" >>"$FAKE_LOG"
+printf 'kept in state=%s keys=%s\n' "${LOOMWATCH_STATE_DIR:-}" "${LOOMWATCH_KEY_STORE:-}" >>"$FAKE_LOG"
 # As the program does: the first start sets the run history up.
 if [ ! -f "$db" ]; then
   mkdir -p "$(dirname "$db")"
@@ -179,7 +180,8 @@ for version in 0.1.4 0.1.5 0.1.6; do release "$version"; done
 app="$work/app"
 export LOOMWATCH_TEAMS_ROOT="$work/teams" LOOMWATCH_BACKUP_DIR="$work/backups" LOOMWATCH_PORT=3399
 unset LOOMWATCH_VERSION LOOMWATCH_DOWNLOAD_BASE LOOMWATCH_DATABASE_URL LOOMWATCH_DATABASE \
-  COMPOSE_PROJECT_NAME LOOMWATCH_UPDATE_CHECK LOOMWATCH_IMPORT_FROM
+  COMPOSE_PROJECT_NAME LOOMWATCH_UPDATE_CHECK LOOMWATCH_IMPORT_FROM LOOMWATCH_STATE_DIR \
+  LOOMWATCH_KEY_STORE
 
 # Runs the installed launcher like the operator would, without a terminal to answer questions.
 # Sets status, which the checks read through eval.
@@ -352,6 +354,20 @@ check "ends the launcher with LoomWatch's status, as before" '[ $status = 3 ] &&
 
 echo "Three copies are kept"
 check "older copies are removed" '[ "$(find "$work/backups" -name "*.db" | wc -l | tr -d " ")" = 3 ]'
+
+echo "A release being tried, as docs/CI.md tries one"
+check "a copy started without the settings is given none" 'logged "kept in state= keys=" && ! logged "kept in state=/"'
+rm -f "$FAKE/daemon-up"
+: >"$FAKE_LOG"
+set +e
+FAKE_LATEST=v0.1.6 LOOMWATCH_APP_DIR="$work/trial/app" LOOMWATCH_STATE_DIR="$work/trial/state" \
+  LOOMWATCH_KEY_STORE=file bash "$root/scripts/install.sh" </dev/null >"$FAKE/out" 2>&1
+status=$?
+set -e
+sleep 1
+rm -f "$FAKE/daemon-up"
+check "the installer starts it" '[ $status = 0 ] && logged "started 0.1.6 install=release command=$work/trial/app/loomwatch update supervised=1 "'
+check "its own state folder and key store reach the program" '[ "$(grep -c "^kept in" "$FAKE_LOG")" = 1 ] && logged "kept in state=$work/trial/state keys=file"'
 
 # --- Coming from a version that kept the run history in PostgreSQL in Docker -------------------
 # What such a version leaves in the folder: its settings, naming the database and its password.

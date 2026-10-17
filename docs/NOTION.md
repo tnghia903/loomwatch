@@ -85,6 +85,13 @@ across `local-workspace`, `local-workspace#2`, and so on. Connecting replaces th
 Only one workspace connection is supported per local OS user. Missing or locked credential storage
 is an error; there is no plaintext fallback. Linux storage is not yet implemented.
 
+A trial copy is different. When `loomwatchd` starts with `LOOMWATCH_KEY_STORE=file`, the setting
+that keeps the OpenRouter key in `keys.json`, the connection goes in `notion-credentials.json` in
+that copy's state folder instead. Only your account can read that file. That copy never reads or
+writes the Keychain item (or, on Windows, the Credential Manager one), so a scratch
+`LOOMWATCH_STATE_DIR` starts with Notion not connected, whatever the installed app has. Without the
+setting, LoomWatch uses only the Keychain or Credential Manager.
+
 What Connections shows of it is also kept, with no token, in `notion-connection.json` in
 LoomWatch's state folder (`~/Library/Application Support/LoomWatch`, or `LOOMWATCH_STATE_DIR`):
 whether a workspace is connected, its name, whether it was connected by sign-in or token, and the

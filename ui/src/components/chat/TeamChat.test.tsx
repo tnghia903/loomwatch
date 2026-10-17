@@ -427,7 +427,7 @@ describe('who has the work', () => {
   it('puts whoever waits on you first, in gold and without the typing dots', async () => {
     fold()
     said.messages = [talk({ id: 'a1', kind: 'ask', from: 'writer', to: 'researcher', state: 'pending' })]
-    page = working({ waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', context: null, handoverFrom: null, park: 'kept_alive', parkNote: '', sendBackAvailable: false } })
+    page = working({ waitingOn: { node: 'writer', name: 'Writer', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', context: null, handoverFrom: null, park: 'reloadable', parkNote: '', sendBackAvailable: false } })
     renderChat()
     await waitFor(() => expect(pill()).toHaveTextContent('needs you'))
     expect(pill()).toHaveClass('waiting')
@@ -625,7 +625,7 @@ describe("an agent's face", () => {
 
 describe('a piece of work', () => {
   it('asks for your review with buttons: Approve needs no words, Send back needs them', async () => {
-    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: '## Summary\nThree stories', handoverFrom: 'researcher', park: 'kept_alive', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: '## Summary\nThree stories', handoverFrom: 'researcher', park: 'reloadable', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
     answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
     renderChat()
     expect(await screen.findByText(/handed over its work for your review/)).toBeInTheDocument()
@@ -641,7 +641,7 @@ describe('a piece of work', () => {
       id: 'h-1', kind: 'handover', from: null, handedBy: { from: ['researcher'], via: [] }, to: 'review', text: 'Three stories, sourced.', context: null,
       eventId: 'e0', evidenceId: null, seq: 0, ts: '2026-10-06T02:01:00.000Z', offsetMs: 60_000, state: 'pending', error: null, reply: null, carried: false,
     }]
-    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: 'Three stories, sourced.', handoverFrom: 'researcher', park: 'kept_alive', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: 'Three stories, sourced.', handoverFrom: 'researcher', park: 'reloadable', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
     answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
     renderChat()
     const talk = await screen.findByRole('region', { name: 'What the agents said' })
