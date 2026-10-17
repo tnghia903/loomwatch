@@ -1,0 +1,168 @@
+/* ===========================================================================
+   LoomWatch — the Skills page (components/skills/).
+   A settings surface: it sits in settings.css's reading column and sections,
+   and adds only its own parts here — skill rows, their small labels, the
+   where-to-find switch and the confirm strip. Every class is `lw-skills-*`,
+   so nothing here can restyle another surface (a bare `.ghost` once did).
+
+   Built strictly on tokens.css: no hex values and no --lw-* primitives.
+   =========================================================================== */
+
+/* A list of skills: rows stack with the section's rhythm. */
+.lw-skills-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* One skill in the folder, or one search result: an e2 row. */
+.lw-skills-item {
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.lw-skills-item > p { margin: 0; }
+.lw-skills-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.lw-skills-name { min-width: 0; overflow-wrap: anywhere; }
+
+/* Two lines of a description at most: the full text is the skill's own. */
+.lw-skills-desc {
+  margin: 0;
+  color: var(--color-ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* A row with a tick box: the box and name, then what it is beneath, aligned to the name. */
+.lw-skills-row {
+  padding: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  border-top: 1px solid var(--color-hairline);
+}
+.lw-skills-row:first-child { border-top: 0; padding-top: 0; }
+.lw-skills-row-body {
+  padding-left: calc(16px + var(--sp-3));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.lw-skills-row-body > p { margin: 0; }
+.lw-skills-row.locked .check .txt b { color: var(--color-ink-2); }
+
+/* Small labels: license, Needs Node, what its instructions assume. */
+.lw-skills-tags { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.lw-skills-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-full);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-ink-2);
+  font: 500 11.5px/16px var(--font-sans);
+  white-space: nowrap;
+}
+.lw-skills-tag.needs { color: var(--color-live); border-color: color-mix(in srgb, var(--color-live) 35%, transparent); background: var(--color-live-tint); }
+.lw-skills-tag.alert { color: var(--color-alert); border-color: color-mix(in srgb, var(--color-alert) 40%, transparent); }
+.lw-skills-tag.quiet { color: var(--color-ink-3); }
+
+/* Why a row can't be ticked. */
+.lw-skills-locked {
+  margin: 0;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  color: var(--color-ink-2);
+}
+.lw-skills-locked svg { flex: none; margin-top: 2px; color: var(--color-ink-3); }
+
+.lw-skills-conflict { color: var(--color-accent); }
+.lw-skills-error { margin: 0; color: var(--color-alert); }
+.lw-skills-path { font-family: var(--font-mono); font-size: 11.5px; overflow-wrap: anywhere; }
+
+.lw-skills-out { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; line-height: 16px; }
+
+/* Buttons that act on what's above them, left-aligned like .lw-settings-start. */
+.lw-skills-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-self: flex-start; }
+
+/* "Remove this?" and "Replace these?": asked in place, never in a popup. */
+.lw-skills-confirm {
+  margin-top: var(--sp-1);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px dashed var(--color-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* What a bring-in did, and the skills it left out. */
+.lw-skills-done { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-skills-done > p { margin: 0; }
+.lw-skills-skipped { margin: 0; padding-left: var(--sp-5); list-style: disc; color: var(--color-ink-2); }
+.lw-skills-skipped b { font-weight: 500; color: var(--color-ink); }
+
+/* skills.sh · ClawHub · GitHub link: one choice, the depth dial's look. */
+.lw-skills-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--color-hairline);
+  background: var(--color-panel-solid);
+}
+.lw-skills-switch > button {
+  border: 0;
+  background: transparent;
+  padding: 4px var(--sp-3);
+  border-radius: 6px;
+  font: 500 12.5px/1.2 var(--font-sans);
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+.lw-skills-switch > button:hover { color: var(--color-ink); }
+.lw-skills-switch > button[aria-checked="true"] {
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+/* A download looked inside: what it is, its safety check, its skills. */
+.lw-skills-inside { display: flex; flex-direction: column; gap: var(--sp-3); }
+.lw-skills-inside > p { margin: 0; }
+.lw-skills-scan { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--color-ink-2); }
+.lw-skills-scan.ok svg { color: var(--color-ok); }
+
+.lw-skills-files > summary { width: fit-content; cursor: pointer; color: var(--color-ink-2); }
+.lw-skills-files > ul {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-5);
+  max-height: 160px;
+  overflow-y: auto;
+  list-style: disc;
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+@media (max-width: 767px) {
+  .lw-skills-item-head { flex-wrap: wrap; }
+  .lw-skills-row-body { padding-left: 0; }
+}
