@@ -517,9 +517,9 @@ account is involved, and nothing else needs installing, not even for the offline
    `~/Library/Application Support/LoomWatch/loomwatch.db` (`%LOCALAPPDATA%\LoomWatch` on Windows,
    `~/.local/state/loomwatch` on Linux), so they survive restarts and reinstalling.
 
-Coming from a version that kept the run history in Docker? The first start after the update copies
-it into the file and leaves the Docker database as it was. If Docker is not running then, the
-terminal says how to do it later: `~/LoomWatch/app/loomwatch import`.
+Coming from a version before 0.5, which kept the run history in Docker? Only 0.5.0 copies that
+history into the file. Update to it first and start it once, with
+`LOOMWATCH_VERSION=v0.5.0 ~/LoomWatch/app/loomwatch update`, then update again to the newest.
 
 Started from Terminal, keep that window open while you use LoomWatch, and press
 <kbd>Ctrl</kbd>+<kbd>C</kbd> in it to stop LoomWatch. The Mac app needs no window: quit it from its
@@ -527,8 +527,8 @@ menu-bar icon. Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it).
 the same beside the clock, with its log in `%LOCALAPPDATA%\LoomWatch\Logs`.
 
 Already used LoomWatch from Terminal? The Mac app uses the same teams and the same run history
-file. Run `~/LoomWatch/app/loomwatch update` once first if that copy still kept its history in
-Docker, so the history is moved into the file. Only one LoomWatch can use the history at a time:
+file. If that copy still keeps its history in Docker, update it to 0.5.0 first, as above, so the
+history is moved into the file. Only one LoomWatch can use the history at a time:
 stop the Terminal one before opening the app.
 
 LoomWatch reads no other app's settings or sign-ins. Your skills live in LoomWatch's own folder (see
@@ -681,7 +681,8 @@ saves a copy of the run history when anything changed, and rebuilds; `rollback` 
 copies, since Git keeps every version of yours. `./loomwatch --rebuild` builds again even when
 nothing changed. `main` moves faster than the releases, so expect rough edges. A copy of the source
 keeps its own run history in `.loomwatch/loomwatch.db` inside its folder, apart from the installed
-app's. If it ran before with its database in Docker, the first start copies that history in.
+app's. A history it kept in Docker before 0.5 is copied in only by 0.5.0: run
+`git checkout v0.5.0 && ./loomwatch` once first.
 
 <details>
 <summary>What <code>./loomwatch</code> runs, if you prefer to do it by hand</summary>
@@ -696,8 +697,7 @@ cp -n examples/operator-stop.yaml "$HOME/LoomWatch/teams/"
 ```
 
 The browser app is built before the program because it is packed into it. `loomwatchd backup <file>`
-saves a copy of the run history, safely while it runs, and `loomwatchd import-postgres --from
-postgres://…` copies in one an older version kept in PostgreSQL.
+saves a copy of the run history, safely while it runs.
 
 </details>
 
@@ -1084,7 +1084,6 @@ you can share it by copying it into another teams folder's `.jobs`.
 | Windows: `running scripts is disabled on this system` while installing | Install with `powershell -ExecutionPolicy Bypass -c "irm https://loomwatch.github.io/install.ps1 \| iex"`. Starting LoomWatch afterwards needs no change: `loomwatch` allows its own script. |
 | Windows: an agent's command fails with "Python was not found; run without arguments to install from the Microsoft Store" | That message is Windows' stand-in for a missing Python, which a skill's script may need. Install Python 3 (`winget install Python.Python.3.13`), then quit LoomWatch and start it again so its agents' commands find it. |
 | `permission denied: ./loomwatch` (a copy of the source) | Run `chmod +x loomwatch` once, or start it with `bash loomwatch`. |
-| "Your run history from the earlier version is still in Docker" | The first start after updating could not read the Docker database an earlier version used. Start Docker Desktop, stop LoomWatch, and run `~/LoomWatch/app/loomwatch import`. Running it twice is safe: nothing is copied twice. |
 | "The database … was set up by a newer LoomWatch" | You went back to an older version by hand. Run the newer one again, or `loomwatch rollback`, which puts back the copy saved before the update. |
 | Another program is using port 3000 | Start LoomWatch on another port: `LOOMWATCH_PORT=3001 ~/LoomWatch/app/loomwatch`. |
 | LoomWatch says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `loomwatch` again. |

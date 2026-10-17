@@ -11,8 +11,7 @@ and **Release** builds the ready-to-run program for a version tag.
 | --- | --- | --- | --- |
 | `ci.yml` — **Frontend**, then **Rust** | every pull request, push to `main`, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite, each database test on a SQLite file of its own, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
 | `ci.yml` — **Windows** | the same, after Frontend | on a Windows runner: the PowerShell scripts parse and are ASCII, Clippy (`-D warnings`) and the full test suite; then the release zip and `LoomWatch-windows-setup.exe` are packed and `scripts/smoke-windows.ps1` tries both: the PowerShell install driven through the offline demo's review stop, an agent on a stand-in for OpenRouter (`scripts/mock-openrouter.py`) keeping its key in Credential Manager and running a `cmd.exe` command in its own folder, `LoomWatch.exe` (one at a time, `--quit`), and the installer installing, updating over a running LoomWatch, and uninstalling | 20–30 min |
-| `ci.yml` — **PostgreSQL import** | the same, after Frontend | `loomwatchd import-postgres` copies every table of the old PostgreSQL archive whole, against PostgreSQL 17.6 | 5–8 min |
-| `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback`, `version` and `import` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
+| `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback` and `version` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
 | `ci.yml` — **Dependency review** | every pull request | the change adds no dependency with a known vulnerability of moderate severity or worse (`Cargo.lock`, `ui/pnpm-lock.yaml`) | < 1 min |
 | `ci.yml` — **CI result** | after the jobs above | every job above passed. This is the check the branch rule requires | seconds |
 | `container.yml` — **Build image** | a pull request or push to `main` that changes the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
@@ -24,8 +23,7 @@ and **Release** builds the ready-to-run program for a version tag.
 pull request / push to main
         │
         ▼
-   Frontend ─┬─ui/dist──▶ Rust (fmt → clippy → test) ──────────────────┐
-             └─ui/dist──▶ PostgreSQL import (Postgres service) ─────────┤
+   Frontend ───ui/dist──▶ Rust (fmt → clippy → test) ──────────────────┐
    Launcher (shellcheck → update/rollback test) ───────────────────────┼──▶ CI result
    Dependency review (pull requests only) ─────────────────────────────┘
 ```
@@ -62,7 +60,6 @@ cd ui && pnpm install --frozen-lockfile && pnpm run lint --deny-warnings && pnpm
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-LOOMWATCH_TEST_POSTGRES_URL=postgres://… cargo test --locked -p loomwatch-backend --lib import:: -- --include-ignored
 shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh
 scripts/test-update.sh
 ```
@@ -78,8 +75,7 @@ It compiles everything Windows-only, `LoomWatch.exe`'s icon among it, but runs n
 **Windows** job is what runs it. To run that job on a branch before opening a pull request:
 `gh workflow run ci.yml --ref <branch>`.
 
-The import tests create and drop a database of their own on the PostgreSQL you name; without
-`LOOMWATCH_TEST_POSTGRES_URL` they are skipped. Nothing else needs a database server.
+No check needs a database server: each database test makes a SQLite file of its own.
 
 `scripts/test-update.sh` touches nothing outside its scratch folder: Docker, GitHub and the program
 are stand-ins on its `PATH`. The stand-in program also plays the app's **Update and restart**: it

@@ -97,17 +97,6 @@ enum Commands {
         /// The copy to write. It must not exist yet.
         dest: PathBuf,
     },
-    /// Copy the run history an earlier `LoomWatch` kept in PostgreSQL into the database file.
-    ///
-    /// Safe to run again: rows already in the file are left as they are and counted as skipped.
-    /// Nothing in PostgreSQL is changed.
-    ImportPostgres {
-        #[command(flatten)]
-        database: DatabaseArgs,
-        /// The PostgreSQL database, as `postgres://user:password@host:port/name`.
-        #[arg(long, env = "LOOMWATCH_IMPORT_FROM", hide_env_values = true)]
-        from: String,
-    },
     /// Print the database file this `LoomWatch` uses.
     #[command(hide = true)]
     DatabasePath {
@@ -458,14 +447,6 @@ async fn main() -> Result<()> {
             let source = database.database()?;
             loomwatch_backend::db::backup(&source, &dest).await?;
             println!("Saved a copy of {} in {}", source.display(), dest.display());
-        }
-        Commands::ImportPostgres { database, from } => {
-            let database = database.database()?;
-            // The import writes the whole history in one transaction; a LoomWatch using the file
-            // meanwhile would wait on it.
-            let _claim = loomwatch_backend::db::claim(&database)?;
-            let report = loomwatch_backend::import::import_postgres(&from, &database).await?;
-            println!("{report}");
         }
         Commands::DatabasePath { database } => {
             println!("{}", database.database()?.display());
