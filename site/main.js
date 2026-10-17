@@ -2662,13 +2662,29 @@
 
   /* ================================================================ 09 · Start */
 
-  const cmds = $('#cmds')
-  $('#copy-cmds').addEventListener('click', async (event) => {
+  // The download for the visitor's computer: Windows when the browser says it runs on Windows, the
+  // Mac otherwise (a phone too, as before). The other one is a click away on the switch.
+  const get = $('#get')
+  const osButtons = $$('.get-pick [data-os]')
+  function setOs(os) {
+    get.dataset.os = os
+    osButtons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.os === os)))
+  }
+  osButtons.forEach((b) => b.addEventListener('click', () => setOs(b.dataset.os)))
+  $('.get-pick').addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+    const at = osButtons.findIndex((b) => b.dataset.os === get.dataset.os)
+    const next = osButtons[(at + (event.key === 'ArrowRight' ? 1 : osButtons.length - 1)) % osButtons.length]
+    setOs(next.dataset.os); next.focus(); event.preventDefault()
+  })
+  setOs(/\bwin/i.test(navigator.userAgentData?.platform || navigator.userAgent) ? 'windows' : 'mac')
+
+  $$('.get-term').forEach((term) => $('[data-copy]', term).addEventListener('click', async (event) => {
     const button = event.currentTarget
-    const text = $$('.cmd', cmds).map((c) => c.textContent).join('\n')
+    const text = $$('.cmd', term).map((c) => c.textContent).join('\n')
     try { await navigator.clipboard.writeText(text); button.textContent = 'Copied' } catch { button.textContent = 'Select and copy' }
     window.setTimeout(() => { button.textContent = 'Copy' }, 1600)
-  })
+  }))
 
   const SCREENS = {
     home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
