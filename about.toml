@@ -21,7 +21,10 @@ accepted = [
 ]
 
 # Only crates that end up inside loomwatchd on the platforms it ships for; build scripts and
-# test-only crates are not part of the program.
+# test-only crates are not part of the program. The script runs cargo-about once per target and
+# merges the results: one run over all of them joins dependency paths no single target builds.
+# That run would count tray-icon's Linux-only GTK stack (tray-icon is only built on macOS and
+# Windows) and fail on its option-ext crate, whose MPL-2.0 is not accepted above.
 targets = [
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
