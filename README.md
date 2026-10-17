@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/banner-dark.svg">
-    <img src="docs/assets/readme/banner-light.svg" width="880" alt="LoomWatch. Put AI agents to work as a team. Build a team from the AI apps already on your computer, ask in plain words, and review every step before you use the result.">
+    <img src="docs/assets/readme/banner-light.svg" width="880" alt="LoomWatch. Put AI agents to work as a team. One OpenRouter key and nothing else to install. Build a team, ask in plain words, and review every step before you use the result. A Researcher on Claude Sonnet 5.5 hands its work to you, then to a Writer on Claude Opus 5.5.">
   </picture>
 </p>
 
@@ -60,7 +60,7 @@ and asks.
 <td width="50%" valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/agents-dark.webp">
-  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer in Your agents. On the left, a figure sits at a workbench: a clipboard for its job, a laptop for its app, a recipe card for its one skill, empty key hooks because it may not act without asking, and a tray for what it hands back. On the right, the same settings as plain blocks: Name, Instructions and App. Above them, one sentence sums the agent up.">
+  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer in Your agents. On the left, a figure sits at a workbench: a clipboard for its job, a laptop showing the model it thinks with, Claude Opus 5.5, a recipe card for its one skill, empty key hooks because it may not act without asking, and a tray for what it hands back. On the right, the same settings as plain blocks, starting with Name and Instructions. Above them, one sentence sums the agent up: Writer thinks with Claude Opus 5.5 and has 1 recipe card.">
 </picture>
 </td>
 <td width="50%" valign="middle">
@@ -95,7 +95,7 @@ anything runs.
 <td valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/step-watch-dark.png">
-  <img src="docs/assets/readme/step-watch-light.png" alt="The team's chat while it works: the request @team Prepare a short getting-started guide for new users, then a note for Researcher, Assume readers have never used an AI app, which waits for Researcher's current step to end. Below them: Researcher is working.">
+  <img src="docs/assets/readme/step-watch-light.png" alt="The team's chat while it works: the request @team Prepare a short getting-started guide for new users, then a note for Researcher, Assume readers have never used AI before, which waits for Researcher's current step to end. Below them: Researcher is working.">
 </picture>
 </td>
 <td valign="middle">
@@ -360,7 +360,7 @@ and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as a team. Build an agent, New team and the 3-minute guide, a box to describe the job to Ask, the Agents, Workflow and Chat steps, a row of Your agents with their figures and versions, and Your teams below.">
+  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as a team. Build an agent, New team and the 3-minute guide, a box to describe the job to Ask, the Agents, Workflow and Chat steps, a row of Your agents with their figures and versions, and Your teams below, where the Review stop demo is Waiting for you. At the top, the bell says 1 needs you.">
 </picture>
 <br><sub><strong>Home.</strong> Your agents first, each with its face and version, then the teams they work in.</sub>
 </td>
@@ -369,7 +369,7 @@ and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists Your agents with their versions, then Hire by job. The heading offers One way to make it work better beside Run team.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists Your agents with their versions and the models they think with, then Hire by job. The heading says Your team is ready, beside Run team.">
 </picture>
 <br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
@@ -378,7 +378,7 @@ and rename agents to match. To run a team on a schedule, ask
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
-  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: Researcher answers Writer's question with two sources, Writer hands its draft to You, and Approve waits under it. Beside the chat, Details shows the live timeline with a replay slider and the team handoff, stage by stage. Commands · Ask me sits beside the message box.">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users, then Researcher's handover to You, with Approve and Send back to Researcher waiting under it. Beside the chat, Details shows the live timeline with a replay slider and the team handoff, stage by stage, with the model each agent runs on. Commands · Ask me sits beside the message box.">
 </picture>
 <br><sub><strong>Chat.</strong> What the agents say to each other, your review, and the record one pane away in Details.</sub>
 </td>
