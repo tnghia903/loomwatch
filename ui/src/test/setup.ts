@@ -1,6 +1,12 @@
 import '@testing-library/jest-dom/vitest'
+import { configure } from '@testing-library/react'
 import { vi } from 'vitest'
 import { webcrypto } from 'node:crypto'
+
+// `waitFor` and `findBy…` give up after a second by default. Loading a team document (parsing it and
+// compiling the schema) takes longer than that on a busy machine or a slow CI runner, and a test
+// failed for no reason but load. Waiting longer costs nothing when the thing arrives in time.
+configure({ asyncUtilTimeout: 4000 })
 
 // jsdom implements Crypto but not SubtleCrypto; production browsers provide it on secure
 // origins (including localhost), so tests use Node's standards-compatible implementation.

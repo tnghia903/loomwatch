@@ -262,27 +262,28 @@ fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -
         let full = Arc::clone(&full);
         std::thread::spawn(move || {
             let mut text = Vec::new();
-            let _ = stdout
-                .take(u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1))
-                .read_to_end(&mut text);
+            // The pipe stays open until the limit is recorded: closing it stops the program, and
+            // its exit must not be seen before we know it was stopped for having said enough.
+            let mut pipe = stdout.take(u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1));
+            let _ = pipe.read_to_end(&mut text);
             if text.len() > limit {
                 text.truncate(limit);
                 full.store(true, Ordering::Release);
             }
+            drop(pipe);
             text
         })
     };
     let stop_by = Instant::now() + deadline;
-    let finished = loop {
+    let exited_well = loop {
         match child.try_wait() {
-            // A program stopped by the pipe closing behind the text limit still gave enough text.
-            Ok(Some(status)) => break status.success() || full.load(Ordering::Acquire),
+            Ok(Some(status)) => break Some(status.success()),
             // Enough text: the rest is never read, so the program is stopped rather than left
             // blocked on a full pipe.
             Ok(None) if full.load(Ordering::Acquire) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                break true;
+                break Some(true);
             }
             Ok(None) if Instant::now() < stop_by => {
                 std::thread::sleep(Duration::from_millis(20));
@@ -290,11 +291,14 @@ fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                break false;
+                break None;
             }
         }
     };
     let text = reader.join().ok()?;
+    // Asked once the reader is done: a program stopped by the pipe closing behind the text limit
+    // still gave enough text, though it may exit before the reader has said so.
+    let finished = exited_well.is_some_and(|well| well || full.load(Ordering::Acquire));
     finished.then(|| String::from_utf8_lossy(&text).into_owned())
 }
 
@@ -713,6 +717,14 @@ mod tests {
         let text = extract_text(&endless, &file, Duration::from_secs(10), 1000).expect("text");
         assert_eq!(text.len(), 1000);
         assert!(text.starts_with("loomwatch\nloomwatch\n"));
+
+        // More text than the limit, then a failing exit: the text read is still kept, however the
+        // exit and the reader's "enough" are ordered.
+        let then_fails = fake_pdftotext(dir.path(), "head -c 4000 /dev/zero | tr '\\0' x; exit 1");
+        for _ in 0..20 {
+            let text = extract_text(&then_fails, &file, Duration::from_secs(10), 1000);
+            assert_eq!(text.map(|text| text.len()), Some(1000));
+        }
 
         let quick = fake_pdftotext(dir.path(), "printf 'Quarterly revenue rose'");
         assert_eq!(
