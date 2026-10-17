@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
-use crate::agent::DEFAULT_BASE_URL;
+use crate::agent::{base_url, is_loopback_http};
 
 const CACHE_FILE: &str = "models.json";
 const KEEP_FOR: Duration = Duration::from_hours(1);
@@ -173,7 +173,7 @@ impl Models {
     #[must_use]
     pub fn new(state_dir: &Path) -> Self {
         Self::with_url(
-            &format!("{DEFAULT_BASE_URL}/models"),
+            &format!("{}/models", base_url()),
             Some(state_dir.join(CACHE_FILE)),
         )
     }
@@ -181,7 +181,7 @@ impl Models {
     /// Another address serving the same list, for tests.
     #[must_use]
     pub fn with_url(url: &str, cache_file: Option<PathBuf>) -> Self {
-        let local = url.starts_with("http://127.0.0.1");
+        let local = is_loopback_http(url);
         let client = reqwest::Client::builder()
             .user_agent(concat!("LoomWatch/", env!("CARGO_PKG_VERSION")))
             .timeout(FETCH_TIMEOUT)

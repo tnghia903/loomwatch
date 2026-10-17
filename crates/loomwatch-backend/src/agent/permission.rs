@@ -28,7 +28,8 @@ pub struct PermissionRequest {
 
 impl PermissionRequest {
     /// The request as the daemon's permission policy and Auto mode read one: a
-    /// `session/request_permission` message offering "allow once" and "reject once".
+    /// `session/request_permission` message offering "allow once" and "reject once", and the
+    /// operator's answer in the agent's place, which runs nothing either.
     #[must_use]
     pub fn as_message(&self) -> Value {
         json!({
@@ -46,6 +47,7 @@ impl PermissionRequest {
                 "options": [
                     {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
                     {"optionId": "deny", "name": "Decline", "kind": "reject_once"},
+                    {"optionId": "answer", "name": "Answered instead", "kind": "reject_once"},
                 ],
             },
         })

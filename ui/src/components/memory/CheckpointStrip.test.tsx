@@ -52,7 +52,7 @@ it('offers to start a new run from the checkpoint, and never says Resume', async
  * A `coordinator` row is not a stage's plan. Its `next` is empty because the run died before
  * anyone said, and the strip states that rather than leaving a gap that reads as "nothing left".
  */
-it('says who assembled a coordinator checkpoint and that next was not recorded', () => {
+it('says LoomWatch kept a checkpoint it put together, and what was done, with no empty "next"', () => {
   render(
     <CheckpointStrip
       attempt={3}
@@ -62,8 +62,8 @@ it('says who assembled a coordinator checkpoint and that next was not recorded',
       onDismiss={vi.fn()}
     />,
   )
-  expect(screen.getByText(/LoomWatch recorded this from the archive/)).toBeInTheDocument()
-  expect(screen.getByText(/Next: not recorded\./)).toBeInTheDocument()
+  expect(screen.getByTestId('checkpoint-strip')).toHaveTextContent('LoomWatch kept the work up to here: half of section three. A new run carries on from it.')
+  expect(screen.queryByText(/not recorded/)).toBeNull()
 })
 
 /** The last stage to reach a boundary is where the work stopped, so it leads the strip. */

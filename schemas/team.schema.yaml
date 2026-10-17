@@ -594,8 +594,8 @@ $defs:
           edits:
             description: >-
               Create and change files inside the agent's own working folder, never in its
-              `.agents`, `.claude`, `.git` or `.loomwatch` folders. An agent whose folder holds its team file is given a folder of
-              its own first.
+              `.agents`, `.claude`, `.git` or `.loomwatch` folders. An agent whose folder holds its
+              team file always works in a folder of its own, allowed or not.
             type: boolean
             default: false
           commands:

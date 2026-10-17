@@ -28,10 +28,12 @@ use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// The key file's name in the state folder, where it is kept off a Mac: no agent may touch it.
+pub(crate) use keys::FILE_NAME as KEY_FILE;
 pub use keys::Keys;
 pub use models::{Catalog, DEFAULT_MODEL, FAST_MODEL, Model, Models, openrouter_id};
 
-use crate::agent::{ApiKey, DEFAULT_BASE_URL};
+use crate::agent::{ApiKey, base_url, is_loopback_http};
 use crate::api::ApiError;
 
 const STATUS_FILE: &str = "openrouter.json";
@@ -108,14 +110,14 @@ impl Ai {
             },
             Models::new(state_dir),
             state_dir,
-            &format!("{DEFAULT_BASE_URL}/key"),
+            &format!("{}/key", base_url()),
         )
     }
 
     /// Any key store, catalog and key-check address, for tests and trial copies.
     #[must_use]
     pub fn with(keys: Keys, models: Models, state_dir: &Path, key_url: &str) -> Self {
-        let local = key_url.starts_with("http://127.0.0.1");
+        let local = is_loopback_http(key_url);
         let client = reqwest::Client::builder()
             .user_agent(concat!("LoomWatch/", env!("CARGO_PKG_VERSION")))
             .timeout(CHECK_TIMEOUT)

@@ -41,9 +41,11 @@ LoomWatch does about that, so you can judge it for yourself.
 - **Never start a program a team file names.** Team files made for earlier versions of LoomWatch
   named an AI app to start for each agent. LoomWatch reads only the agent's folder from them; the
   program, its arguments and its settings are never used.
-- **Keep its own files from agents.** An agent can't read LoomWatch's state folder (the key file,
-  the database, the approvals) without asking you, wherever its folders reach; only LoomWatch's
-  skills folder is open to it. File edits you switch on cover only the agent's own folder, and never
+- **Keep its own files from agents.** An agent can't read LoomWatch's state folder (the database,
+  the approvals) without asking you, wherever its folders reach; only LoomWatch's skills folder is
+  open to it. The key file is refused outright, without asking, so no answer can hand the key to a
+  model. An agent that starts in your teams folder always works in a folder of its own, so its edits
+  and commands stay out of your team files. File edits you switch on cover only the agent's own folder, and never
   its `.git`, its `.agents` and `.claude` skill folders or LoomWatch's `.loomwatch` folder; any other
   edit asks you.
 - **Run commands without your keys.** A command an agent runs gets your environment with every

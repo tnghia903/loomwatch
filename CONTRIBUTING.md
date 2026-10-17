@@ -35,6 +35,20 @@ offline demo team ([examples/operator-stop.yaml](examples/operator-stop.yaml)) t
 puts in a new teams folder. It calls no model and costs nothing
 ([docs/WATCH.md](docs/WATCH.md#verifying-without-a-model-provider)).
 
+To try real runs end to end without spending, with tool calls, permission cards, the Team Bus and
+costs, point LoomWatch at the stand-in for OpenRouter in
+[scripts/mock-openrouter.py](scripts/mock-openrouter.py):
+
+```sh
+python3 scripts/mock-openrouter.py 4100 &
+LOOMWATCH_OPENROUTER_URL=http://127.0.0.1:4100/api/v1 LOOMWATCH_KEY_STORE=file \
+  LOOMWATCH_STATE_DIR=/tmp/lw-trial ./target/debug/loomwatchd serve --teams-root /tmp/lw-trial/teams
+```
+
+Add any key starting `sk-or-v1-mock`. `LOOMWATCH_OPENROUTER_URL` is taken only for an address on
+this computer, so a key can never be sent anywhere else. The script's opening comment lists the
+requests that make it run a command, write a file or hand out research.
+
 ## Before you open a pull request
 
 CI runs on every pull request, and its **CI result** check says whether everything passed. If this

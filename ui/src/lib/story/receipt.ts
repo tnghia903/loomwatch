@@ -125,9 +125,18 @@ export function switchForRequest(item: Pick<Evidence, 'rawInput'>): AllowSwitch 
 
 const REFUSED: Record<AllowSwitch, string> = { web: 'search the web', edits: 'edit files', commands: 'run commands' }
 
-/** Refused requests as the agent's lines: one per switch, so ten refused searches read as one. */
+/** Whether the operator answered this request in the agent's place, rather than declining it. */
+function answeredInstead(item: Evidence): boolean {
+  const outcome = item.rawOutput as { optionId?: unknown } | null
+  return item.kind === 'permission' && outcome?.optionId === 'answer'
+}
+
+/**
+ * Refused requests as the agent's lines: one per switch, so ten refused searches read as one. A
+ * request you answered in the agent's place is said as that, not as something it wasn't allowed.
+ */
 function refusalLines(agent: ReceiptAgent, items: readonly Evidence[], carriedOn: boolean): ReceiptLine[] {
-  const refused = items.filter((item) => item.kind === 'permission' && item.status === 'rejected')
+  const refused = items.filter((item) => item.kind === 'permission' && item.status === 'rejected' && !answeredInstead(item))
   const groups = new Map<AllowSwitch | null, Evidence[]>()
   for (const item of refused) {
     const key = switchForRequest(item)
@@ -146,6 +155,11 @@ function refusalLines(agent: ReceiptAgent, items: readonly Evidence[], carriedOn
     } else {
       lines.push({ tone: 'bad', text: `${agent.name} wasn’t allowed to ${REFUSED[key]}${times}${carried}`, agentId: agent.id, evidenceId, allow: key, allowed: agent.allow?.[key] === true })
     }
+  }
+  const answered = items.filter(answeredInstead)
+  if (answered.length > 0) {
+    const times = answered.length > 1 ? ` (${answered.length} times)` : ''
+    lines.push({ tone: 'ok', text: `You answered in ${agent.name}’s place instead of letting it act${times}`, agentId: agent.id, evidenceId: answered[0].id })
   }
   return lines
 }
@@ -234,7 +248,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     if (failed.length > 3) lines.push({ tone: 'bad', text: `…and ${plural(failed.length - 3, 'more failed call')} from ${agent.name}`, agentId: agent.id })
     const refusals = refusalLines(agent, items, run.status === 'succeeded')
     lines.push(...refusals)
-    anyRefused ||= refusals.length > 0
+    anyRefused ||= refusals.some((line) => line.tone === 'bad')
     // Its app ended the turn at a decline, so the reply was finished on LoomWatch's request to
     // carry on (ADR 0046). That explains the turn; it is not a finding of its own.
     if (run.resumedTurns) {

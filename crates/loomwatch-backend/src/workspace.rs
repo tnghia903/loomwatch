@@ -206,10 +206,10 @@ pub fn materialise(
     // The declared folder, when the agent starts in the workspace instead of it.
     let carried = starts_here.then_some(declared_cwd);
     let brief_file = native_memory_file(agent, memory).filter(|_| starts_here);
-    // ADR 0037: an agent allowed to edit files edits only inside its own folder, and the teams
-    // folder is never one, so the team files stay out of its reach.
-    let edits_need_own_folder = agent.allow.edits && starts_here;
-    if agent.capabilities.is_empty() && brief_file.is_none() && !edits_need_own_folder {
+    // ADR 0037: the teams folder is never an agent's own folder, so the team files stay out of its
+    // reach. An agent that would start there always gets a folder of its own: an edit can be
+    // allowed once at any time, and an allowed command may write in its working folder.
+    if agent.capabilities.is_empty() && brief_file.is_none() && !starts_here {
         return Ok(None);
     }
     let fail = |message: String| CapabilityError {
@@ -815,17 +815,20 @@ mod tests {
         );
     }
 
+    /// A folder the operator chose is theirs, so an agent that wired nothing stays in it.
     #[test]
-    fn an_agent_that_wired_nothing_keeps_the_cwd_it_declared() {
+    fn an_agent_that_wired_nothing_keeps_a_folder_the_operator_chose() {
         let temp = TempDirectory::new();
         let team = temp.path().join("team.yaml");
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).expect("project");
         let materialised = materialise(
             None,
             temp.path(),
             &team,
             "team",
             &agent("npx", &["claude-agent-acp"], Vec::new()),
-            temp.path(),
+            &project,
             &no_memory(),
             BusMode::Pipeline,
         )
@@ -833,8 +836,9 @@ mod tests {
         assert!(materialised.is_none());
     }
 
-    /// ADR 0037: edits are allowed only in the agent's own folder, so an agent that would otherwise
-    /// work beside its team file is given one; web and commands alone change nothing.
+    /// ADR 0037: the teams folder is never an agent's own folder. An agent that would otherwise
+    /// work beside its team file is given one, whatever it is allowed: an edit can be allowed once
+    /// at any time, and an allowed command may write in its working folder.
     #[test]
     fn an_agent_allowed_to_edit_never_works_in_the_folder_holding_its_team_file() {
         let temp = TempDirectory::new();
@@ -871,7 +875,11 @@ mod tests {
             commands: true,
             ..Default::default()
         };
-        assert!(with(web_and_commands, temp.path()).is_none());
+        for allow in [web_and_commands, crate::config::AgentAllow::default()] {
+            let moved = with(allow, temp.path()).expect("a folder of its own");
+            assert_eq!(moved.cwd, temp.path().join(".loomwatch/team/writer"));
+            assert!(with(allow, &project).is_none());
+        }
     }
 
     #[test]
@@ -1291,13 +1299,16 @@ mod tests {
             brief: true,
             deliver_as: Some(DeliverAs::PacketOnly),
         });
+        // The repository it must run in: a folder of its own, not the teams folder.
+        let repo = temp.path().join("repo");
+        fs::create_dir_all(&repo).expect("repo");
         let workspace = materialise(
             None,
             &teams,
             &team,
             "team",
             &opted_out,
-            &teams,
+            &repo,
             &memory,
             BusMode::Pipeline,
         )

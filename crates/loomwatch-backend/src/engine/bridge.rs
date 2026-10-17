@@ -57,11 +57,16 @@ impl Permissions for PolicyGate {
             let message = request.as_message();
             let Some(policy) = &self.policy else {
                 // An agent with no policy (Ask, a one-turn helper) is offered no tool that asks.
-                self.record(&message, &request.tool_call_id, false);
+                self.record(&message, &request.tool_call_id, "deny");
                 return Decision::Deny;
             };
             if policy.approves(&message) {
                 return Decision::Allow;
+            }
+            if policy.reaches_key(&message) {
+                // Not asked: no answer may hand the key to a model.
+                self.record(&message, &request.tool_call_id, "deny");
+                return Decision::Deny;
             }
             let outcome = match &self.asker {
                 Some(asker) => self.ask(asker, &message, policy).await,
@@ -76,22 +81,25 @@ impl Permissions for PolicyGate {
                 other if other.allows() => Decision::Allow,
                 _ => Decision::Deny,
             };
-            self.record(
-                &message,
-                &request.tool_call_id,
-                matches!(decision, Decision::Allow | Decision::AllowEdited(_)),
-            );
+            let option = match &decision {
+                Decision::Allow | Decision::AllowEdited(_) => "allow",
+                Decision::Answer(_) => "answer",
+                Decision::Deny => "deny",
+            };
+            self.record(&message, &request.tool_call_id, option);
             decision
         })
     }
 }
 
 impl PolicyGate {
-    fn record(&self, message: &Value, tool_call_id: &str, allowed: bool) {
+    /// Records which of the request's options was chosen: `allow` (as asked, or changed),
+    /// `answer` (the operator answered in the agent's place), or `deny`.
+    fn record(&self, message: &Value, tool_call_id: &str, option: &str) {
         let response = json!({
             "jsonrpc": "2.0",
             "id": tool_call_id,
-            "result": {"outcome": {"outcome": "selected", "optionId": if allowed { "allow" } else { "deny" }}},
+            "result": {"outcome": {"outcome": "selected", "optionId": option}},
         });
         let _ = self.records.send(Record::Permission {
             request: message.clone(),
@@ -312,16 +320,26 @@ mod tests {
         panic!("the gate never asked");
     }
 
-    fn answered(received: &mut mpsc::UnboundedReceiver<Record>) -> serde_json::Value {
-        let mut last = None;
+    /// The run's note of the answer, and the option the recorded permission response chose.
+    fn answered(received: &mut mpsc::UnboundedReceiver<Record>) -> (serde_json::Value, String) {
+        let (mut note, mut option) = (None, None);
         while let Ok(record) = received.try_recv() {
-            if let Record::Meta(payload) = record
-                && payload["phase"] == "permission_answered"
-            {
-                last = Some(payload);
+            match record {
+                Record::Meta(payload) if payload["phase"] == "permission_answered" => {
+                    note = Some(payload);
+                }
+                Record::Permission { response, .. } => {
+                    option = response["result"]["outcome"]["optionId"]
+                        .as_str()
+                        .map(str::to_owned);
+                }
+                _ => {}
             }
         }
-        last.expect("the answer is recorded")
+        (
+            note.expect("the answer is recorded"),
+            option.expect("the response is recorded"),
+        )
     }
 
     /// "Edit, then allow": the agent runs the command as the operator changed it, its other
@@ -343,7 +361,8 @@ mod tests {
             decision,
             Decision::AllowEdited(json!({"command": "rm -rf build/tmp", "timeout_seconds": 30}))
         );
-        let note = answered(&mut received);
+        let (note, option) = answered(&mut received);
+        assert_eq!(option, "allow");
         assert_eq!(note["outcome"], "edited");
         assert_eq!(note["allowed"], true);
         assert_eq!(note["edited"], "rm -rf build/tmp");
@@ -367,7 +386,9 @@ mod tests {
             decision,
             Decision::Answer("Use the feed in notes.md instead.".to_owned())
         );
-        let note = answered(&mut received);
+        let (note, option) = answered(&mut received);
+        // Its own option, so the receipt tells an answer from a refusal.
+        assert_eq!(option, "answer");
         assert_eq!(note["outcome"], "answered");
         assert_eq!(note["allowed"], false);
         assert_eq!(note["answer"], "Use the feed in notes.md instead.");

@@ -152,6 +152,28 @@ impl PermissionPolicy {
         }
     }
 
+    /// Whether the request names `LoomWatch`'s own key file. No agent may touch it, even with the
+    /// operator's answer: the key never leaves the daemon, and a newcomer could allow a card that
+    /// reads "Read keys.json" without knowing what it hands the model.
+    #[must_use]
+    pub fn reaches_key(&self, request: &Value) -> bool {
+        let Some(state) = &self.state_dir else {
+            return false;
+        };
+        let key = state.join(crate::ai::KEY_FILE);
+        request
+            .pointer("/params/toolCall/locations")
+            .and_then(Value::as_array)
+            .is_some_and(|locations| {
+                locations.iter().any(|location| {
+                    location
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| self.locate(path) == key)
+                })
+            })
+    }
+
     /// True when the request names at least one path and `test` holds for every one of them.
     fn every_location(&self, request: &Value, test: impl Fn(&Path) -> bool) -> bool {
         let Some(locations) = request
@@ -956,6 +978,14 @@ mod tests {
         assert!(read(&elsewhere, &at("state/skills/notes/SKILL.md")));
         assert!(!read(&elsewhere, &at("state/skills/.removed/old/SKILL.md")));
         assert!(!read(&elsewhere, &at("state/keys.json")));
+        // The key file is never put to the operator at all.
+        let key_read = request(Some("read"), "Read keys.json", &[&at("state/keys.json")]);
+        assert!(elsewhere.reaches_key(&key_read));
+        assert!(!elsewhere.reaches_key(&request(
+            Some("read"),
+            "Read",
+            &[&at("state/skills/notes/SKILL.md")]
+        )));
         // An agent working inside the state folder keeps its own folder, never the files beside it.
         let inside =
             PermissionPolicy::new(ALL, &state.join("work"), [], []).keeping_private(&state);

@@ -64,7 +64,8 @@ const WHOLE_TEAM: &str = "*";
 /// What a record left non-terminal by a previous process is failed with at boot. Operator-facing
 /// prose, not a code: the contract defines no code for a supervisor that went away, and the UI
 /// already renders a `failed` record with its error verbatim.
-pub const INTERRUPTED_BY_RESTART: &str = "interrupted by daemon restart";
+pub const INTERRUPTED_BY_RESTART: &str = "LoomWatch restarted while this run was going, so it stopped. Run it again, or carry on from \
+     where it stopped if the team offers that.";
 
 /// Lifecycle of one run. Transitions only move forward; terminal states never change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

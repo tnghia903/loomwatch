@@ -21,7 +21,7 @@ use crate::agent::ApiKey;
 const SERVICE: &str = "LoomWatch.OpenRouter";
 #[cfg(target_os = "macos")]
 const ACCOUNT: &str = "api-key";
-const FILE_NAME: &str = "keys.json";
+pub(crate) const FILE_NAME: &str = "keys.json";
 
 /// The operator's provider keys.
 #[derive(Clone)]

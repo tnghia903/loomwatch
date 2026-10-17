@@ -44,7 +44,7 @@ use std::sync::Arc;
 pub use demo::{Demo, Hold, OFFLINE_MODEL, Respond, SeenRequest};
 pub use error::AgentError;
 pub use events::{EventSink, ToolKind, ToolStatus};
-pub use openrouter::{DEFAULT_BASE_URL, OpenRouter};
+pub use openrouter::{BASE_URL_ENV, DEFAULT_BASE_URL, OpenRouter, base_url, is_loopback_http};
 pub use permission::{AllowAll, Decision, DenyAll, PermissionRequest, Permissions};
 pub use provider::{Completion, Finish, Message, Provider, ServerTools, ToolCall, ToolSpec, Usage};
 pub use session::{

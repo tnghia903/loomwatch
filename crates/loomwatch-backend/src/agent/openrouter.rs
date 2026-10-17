@@ -27,6 +27,43 @@ use super::sse::SseDecoder;
 
 /// Where `OpenRouter`'s API lives.
 pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
+
+/// Names a stand-in for `OpenRouter` on this computer, for trial copies and end-to-end checks that
+/// must not spend real credit.
+pub const BASE_URL_ENV: &str = "LOOMWATCH_OPENROUTER_URL";
+
+/// Where the daemon reaches `OpenRouter`: [`DEFAULT_BASE_URL`], or the stand-in [`BASE_URL_ENV`]
+/// names. Every caller (the agent, the key check, the model list) asks here, so they agree.
+#[must_use]
+pub fn base_url() -> String {
+    choose_base(std::env::var(BASE_URL_ENV).ok().as_deref())
+}
+
+/// [`base_url`] for a given setting. Only an `http` address on this computer is taken, so a stray
+/// setting can never send the key off it; anything else is reported and ignored.
+fn choose_base(setting: Option<&str>) -> String {
+    let Some(setting) = setting.map(str::trim).filter(|setting| !setting.is_empty()) else {
+        return DEFAULT_BASE_URL.to_owned();
+    };
+    let setting = setting.trim_end_matches('/');
+    if is_loopback_http(setting) {
+        return setting.to_owned();
+    }
+    eprintln!(
+        "warning: {BASE_URL_ENV} must be an http address on this computer (127.0.0.1, localhost \
+         or [::1]); using OpenRouter itself"
+    );
+    DEFAULT_BASE_URL.to_owned()
+}
+
+/// Whether `url` is plain `http` to this computer, which is the one place it may skip TLS.
+#[must_use]
+pub fn is_loopback_http(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        url.scheme() == "http"
+            && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+    })
+}
 /// How `OpenRouter` names `LoomWatch` on its dashboards.
 const REFERER: &str = "https://github.com/tnghia903/loomwatch";
 const TITLE: &str = "LoomWatch";
@@ -57,7 +94,7 @@ impl OpenRouter {
     ///
     /// When the HTTP client cannot be built.
     pub fn new(key: ApiKey) -> anyhow::Result<Self> {
-        Self::with_base(key, DEFAULT_BASE_URL)
+        Self::with_base(key, &base_url())
     }
 
     /// Another address speaking `OpenRouter`'s API: `https`, or `http` on this computer for tests.
@@ -67,7 +104,7 @@ impl OpenRouter {
     /// When `base` is neither, or the HTTP client cannot be built.
     pub fn with_base(key: ApiKey, base: &str) -> anyhow::Result<Self> {
         let base = base.trim_end_matches('/').to_owned();
-        let local = base.starts_with("http://127.0.0.1") || base.starts_with("http://localhost");
+        let local = is_loopback_http(&base);
         anyhow::ensure!(
             base.starts_with("https://") || local,
             "an OpenRouter address must be https"
@@ -576,6 +613,33 @@ fn network_error(error: &reqwest::Error) -> String {
 mod tests {
     use super::*;
     use crate::agent::provider::ToolSpec;
+
+    /// A stand-in on this computer is taken, with or without a trailing slash; anything that would
+    /// send the key elsewhere, even dressed up as local, falls back to `OpenRouter` itself.
+    #[test]
+    fn only_a_stand_in_on_this_computer_replaces_openrouter() {
+        assert_eq!(choose_base(None), DEFAULT_BASE_URL);
+        assert_eq!(choose_base(Some("  ")), DEFAULT_BASE_URL);
+        assert_eq!(
+            choose_base(Some("http://127.0.0.1:4100/api/v1/")),
+            "http://127.0.0.1:4100/api/v1"
+        );
+        assert_eq!(
+            choose_base(Some("http://localhost:4100/api/v1")),
+            "http://localhost:4100/api/v1"
+        );
+        for refused in [
+            "https://openrouter.example.com/api/v1",
+            "http://example.com/api/v1",
+            "http://localhost.example.com/api/v1",
+            "http://127.0.0.1.example.com/api/v1",
+            "http://user@example.com:80/127.0.0.1",
+            "file:///etc/hosts",
+            "not a url",
+        ] {
+            assert_eq!(choose_base(Some(refused)), DEFAULT_BASE_URL, "{refused}");
+        }
+    }
 
     fn request<'a>(
         messages: &'a [Message],

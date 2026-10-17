@@ -301,22 +301,23 @@ reply what the tool would have let it do, and the run records the tool as unavai
 ### Where an agent starts
 
 LoomWatch prepares `<team dir>/.loomwatch/<team>/<agent>/` for an agent that wires capabilities,
-gets the Brief as a file, or may edit files from the team's own folder. The prepared folder holds
+gets the Brief as a file, or would otherwise start in the team's own folder. The prepared folder holds
 the agent's wired skills under `.agents/skills/`, the full texts of long added files under
 `knowledge/`, and `AGENTS.md` when the Brief is delivered that way. The skill and knowledge copies
 are rebuilt on every run, so one disconnected since does not linger. Where the agent *starts*
 depends on its `spawn.cwd`:
 
 - **The team's own folder** (`cwd: .`, no `spawn` at all, or any folder that holds the team file):
-  it starts in the prepared folder instead, so it never reads or changes your other team files. The
-  same happens to an agent allowed to edit files, or one whose Brief is delivered as `AGENTS.md`.
+  it starts in the prepared folder instead, whatever it is allowed, so what it writes and the
+  commands it runs stay out of your team files. A command's sandbox on a Mac lets it write only in
+  its working folder and temporary folders.
 - **A folder you chose**: it starts there, however much is connected. Its wired skills and the
   full texts of long files are read from the prepared folder by the full paths its prompt names,
   and it may read them without asking. Nothing is written into your folder, so the Brief reaches
   the agent in its prompt only.
 
-An agent with nothing wired, no Brief file and no permission to edit works in its `spawn.cwd`
-exactly. Wiring a capability grants nothing beyond reading it: every other use still goes through
+An agent whose `spawn.cwd` is a folder you chose, with nothing wired and no Brief file, works in
+that folder exactly. Wiring a capability grants nothing beyond reading it: every other use still goes through
 the agent's permissions.
 
 ### Tools an agent has
@@ -364,8 +365,9 @@ allow:
 
 Every switch defaults to `false`, and an absent block means all off. `web` decides whether the
 agent has web tools at all. `edits` and `commands` decide whether a file change or a command runs
-without asking. An agent allowed to edit whose `spawn.cwd` holds its own team file (`cwd: .`)
-works in its prepared folder instead. An operator node takes no `allow:`.
+without asking. An agent whose `spawn.cwd` holds its own team file (`cwd: .`) works in its
+prepared folder, so neither an edit nor a command reaches the team files. An operator node takes no
+`allow:`.
 
 Anything else is put to the operator while the agent waits. The run shows, for example,
 "Researcher wants to run a command", with these answers:

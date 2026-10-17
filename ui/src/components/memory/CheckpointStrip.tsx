@@ -42,8 +42,10 @@ export function CheckpointStrip({ attempt, checkpoints, names, onStart, onDismis
       <span style={{ flex: 1, minWidth: 0 }}>
         <b>Run {String(attempt).padStart(2, '0')} stopped at {who}</b>
         {' · '}
+        {/* A checkpoint LoomWatch put together from the run's record (a stop or a restart) has no
+            "next" of its own: the new run picks up from what was done. */}
         {latest.source === 'coordinator'
-          ? <>LoomWatch recorded this from the archive. Done: {plain(latest.done) || 'nothing was recorded'}. Next: not recorded.</>
+          ? <>LoomWatch kept the work up to here{plain(latest.done) ? <>: {plain(latest.done)}</> : null}. A new run carries on from it.</>
           : <>Done: {plain(latest.done)}. Next: {plain(latest.next)}.</>}
         {latest.blockers ? <> Blocked on: {plain(latest.blockers)}.</> : null}
       </span>

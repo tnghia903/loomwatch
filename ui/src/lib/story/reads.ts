@@ -15,7 +15,7 @@ import { commandRedone } from './commands'
  * Counts are of things, not calls: a skill the agent opened and LoomWatch then recorded as opened
  * is one skill, and a file read in two pages is one file.
  */
-type Item = Pick<Evidence, 'id' | 'kind' | 'relation' | 'name' | 'status' | 'toolKind' | 'rawInput' | 'locations'>
+type Item = Pick<Evidence, 'id' | 'kind' | 'relation' | 'name' | 'status' | 'toolKind' | 'rawInput' | 'locations'> & Partial<Pick<Evidence, 'declined'>>
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 const failed = (item: Pick<Evidence, 'status'>) => item.status === 'failed' || item.status === 'rejected'
@@ -122,7 +122,8 @@ export function mendOf<T extends Item>(miss: T, items: readonly T[]): Mend<T> | 
  * permission requests are left out: the receipt tells those apart by what was not allowed.
  */
 export function failuresOf<T extends Item>(items: readonly T[]): T[] {
-  return items.filter((item) => failed(item) && item.kind !== 'permission' && mendOf(item, items) === null)
+  // A call that was declined, or answered in the agent's place, is told as that, not as a failure.
+  return items.filter((item) => failed(item) && item.kind !== 'permission' && !item.declined && mendOf(item, items) === null)
 }
 
 /** Commands that failed and then worked when the agent ran them again, each counted once. */
@@ -195,7 +196,8 @@ export function workCount(items: readonly Item[]): WorkCount {
     read: readCount(items),
     searches: items.filter((item) => item.kind === 'search').length,
     changed: changedFiles(items),
-    commands: items.filter((item) => item.kind === 'command').length,
+    // A command that was declined, or answered in the agent's place, never ran.
+    commands: items.filter((item) => item.kind === 'command' && !item.declined).length,
     retried: retriedCommands(items),
   }
 }

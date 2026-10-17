@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { projectRun, recordedReplyText, type RunEvent } from '../watch/events'
 import { buildReceipt, receiptMarkdown } from './receipt'
+import { describeEvidence } from './weft'
 import { findingsOf } from './verdict'
 
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 3, 0, 0, seconds)).toISOString()
@@ -276,5 +277,51 @@ describe('a turn its app reported as failed', () => {
     })
     expect(receipt.lines).toEqual([{ tone: 'bad', text: 'Gatherer stopped (Codex reported an error)', agentId: 'gatherer' }])
     expect(receipt.checks).toContainEqual({ tone: 'warn', text: `Codex reported an error instead of an answer: ${REFUSAL}`, agentId: 'gatherer', evidenceId: undefined })
+  })
+})
+
+// A command the operator answered in the agent's place, or declined, never ran: the receipt must
+// not count it as run, and an answer is not something the agent "wasn't allowed" to do. Recorded the
+// way LoomWatch's engine records a permission card and its answer.
+describe('a command that was asked about and never ran', () => {
+  const asked = (option: 'answer' | 'deny'): RunEvent[] => [
+    event(1, 'tool_call', { callId: 'c1', name: 'run_command', title: 'Run: rm -rf build', toolKind: 'execute', status: 'pending', rawInput: { command: 'rm -rf build' } }),
+    event(2, 'permission', {
+      sessionId: 's', toolCall: { toolCallId: 'c1', title: 'Run: rm -rf build', kind: 'execute', rawInput: { command: 'rm -rf build' }, locations: [] },
+      options: [
+        { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'deny', name: 'Decline', kind: 'reject_once' },
+        { optionId: 'answer', name: 'Answered instead', kind: 'reject_once' },
+      ],
+    }),
+    event(3, 'permission', { outcome: { outcome: 'selected', optionId: option } }),
+    // The engine closes an answered call as completed (the answer is its result) and a declined
+    // one as failed.
+    event(4, 'tool_update', option === 'answer'
+      ? { callId: 'c1', status: 'completed', content: 'The person answered instead of letting this run: Leave the build folder alone.' }
+      : { callId: 'c1', status: 'failed', content: 'The person declined this. Carry on without it, or say what you need and why.' }),
+  ]
+
+  it('is your answer in its place, not a refusal, and not a command it ran', () => {
+    const receipt = receiptFor(asked('answer'))
+    const texts = receipt.lines.map((line) => line.text)
+    expect(texts).toContain('Writer finished')
+    expect(texts).toContain('You answered in Writer’s place instead of letting it act')
+    expect(texts.some((text) => text.includes('wasn’t allowed'))).toBe(false)
+    expect(receipt.checks.some((check) => check.text.startsWith('What an agent isn’t allowed'))).toBe(false)
+  })
+
+  it('is a refusal when declined, not a failed command, and still not a command it ran', () => {
+    const texts = receiptFor(asked('deny')).lines.map((line) => line.text)
+    expect(texts).toEqual(['Writer finished', 'Writer wasn’t allowed to run commands, and carried on without it'])
+  })
+
+  it('reads on the timeline as what happened to it, not as a command that ran', () => {
+    const call = (option: 'answer' | 'deny') => projectRun([event(0, 'process', { phase: 'spawned', pid: 7 }), ...asked(option)]).evidence.find((item) => item.kind === 'command')
+    expect(call('answer')).toMatchObject({ declined: 'answered' })
+    expect(describeEvidence('Writer', call('answer')!)).toBe('Writer didn’t run “rm -rf build”: you answered instead.')
+    expect(describeEvidence('Writer', call('deny')!)).toBe('Writer wasn’t allowed to run “rm -rf build”.')
+    const waiting = projectRun([event(0, 'process', { phase: 'spawned', pid: 7 }), ...asked('answer').slice(0, 2)]).evidence.find((item) => item.kind === 'command')
+    expect(describeEvidence('Writer', waiting!)).toBe('Writer is running “rm -rf build”.')
   })
 })
