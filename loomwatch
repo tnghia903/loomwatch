@@ -117,7 +117,9 @@ launcher_pid_file=$state_dir/launcher.pid
 # The run history is one file. The ready-built copy in the usual folder keeps it where the program
 # keeps it by default, in LoomWatch's state folder, so it outlives reinstalling the app. Every other
 # copy, a copy of the source or a release being tried, keeps its own in its folder: two copies never
-# share one, as they once shared a database by accident.
+# share one, as they once shared a database by accident. The state folder and the Keychain items stay
+# shared, so a copy of the source uses the key you gave LoomWatch. A release being tried sets
+# LOOMWATCH_STATE_DIR and LOOMWATCH_KEY_STORE=file, which reach loomwatchd unchanged (docs/CI.md).
 usual_app=
 if [ -d "$HOME/LoomWatch/app" ]; then usual_app=$(cd "$HOME/LoomWatch/app" && pwd -P); fi
 if [ -z "${LOOMWATCH_DATABASE:-}" ] && { [ "$prebuilt" = 0 ] || [ "$repo_root" != "$usual_app" ]; }; then
