@@ -155,7 +155,7 @@ fi
 touch "$FAKE/daemon-up"
 EOF
   cp "$root/loomwatch" "$root/scripts/install.sh" "$stage/loomwatch/"
-  cp "$root/examples/operator-stop.yaml" "$root/examples/operator-stop-harness.py" "$stage/loomwatch/examples/"
+  cp "$root/examples/operator-stop.yaml" "$stage/loomwatch/examples/"
   chmod 755 "$stage/loomwatch/bin/loomwatchd" "$stage/loomwatch/loomwatch" "$stage/loomwatch/install.sh"
   printf '%s c0ffee%s\n' "$version" "$(printf '%s' "$version" | tr -d .)" >"$stage/loomwatch/VERSION"
   local folder="$FAKE/releases/v$version" archive

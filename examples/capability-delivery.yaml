@@ -14,28 +14,19 @@ agents:
   - id: researcher
     name: Market Researcher
     role: Research the competitive landscape and report what you find
-    spawn:
-      cmd: claude-agent-acp
-      args: []
-      env: {}
-      cwd: .
-    model: claude-opus-5
+    model: anthropic/claude-opus-5.5
     allowRecruiting: true
   - id: designer
     name: Report Designer
     role: Turn the research handed to you into a report the owner can act on
-    spawn:
-      cmd: claude-agent-acp
-      args: []
-      env: {}
-      cwd: .
-    model: claude-opus-5
+    model: anthropic/claude-opus-5.5
     allowRecruiting: false
-    # Delivered into this agent's workspace before it starts. Only Claude Code discovers skills
-    # this way, so wiring one to a Codex agent fails the run instead of going quiet.
+    # Delivered into this agent's folder before it starts, and the agent is told to read it in
+    # full first. The skill must be in LoomWatch's skills (the Skills page) or in this team's
+    # `.agents/skills` folder.
     capabilities:
       - kind: skill
-        name: claude-design
+        name: report-design
 edges:
   - from: researcher
     to: designer

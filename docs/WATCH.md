@@ -12,8 +12,8 @@ Build the UI and start the daemon:
 
 ```sh
 cd ui
-npm install
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build
 cd ..
 cargo run -- serve --listen 127.0.0.1:3000 --teams-root teams
 ```
@@ -21,8 +21,8 @@ cargo run -- serve --listen 127.0.0.1:3000 --teams-root teams
 The archive is one SQLite file: `loomwatch.db` in the state folder (`LOOMWATCH_STATE_DIR`), or
 the file `--database` or `LOOMWATCH_DATABASE` names. `loomwatchd run` and `show` take the same
 option, so they read and write the same history. `serve` rejects non-loopback listeners (unless
-`--allow-container-listener`). Exact archive evidence may contain harness inputs, paths, and other
-private data; this implementation does not publish it on the LAN.
+`--allow-container-listener`). Exact archive evidence may contain prompts, file contents, command
+output, paths and other private data; this implementation does not publish it on the LAN.
 
 ## Reading a run
 
@@ -78,13 +78,14 @@ Who said what to whom is read from the record, not from the team file as it is n
 All five are additive: runs archived before them still read, and a handover sender that had to be
 taken from the team's connections says so when its row is opened.
 
-Past work lives in each team's chat (ADR 0051): the Chat tab lists the team's runs as pieces of
+Past work lives in each team's chat: the Chat tab lists the team's runs as pieces of
 work, oldest first. The newest piece and any piece still working show the talk between agents as
 it happens; older pieces fold it to one line. **Details** on a piece opens this view beside the
 chat, and Esc closes it. The chat holds what was said and Details how it was made: a piece's
 answer is read only in the chat, with its record's verdict (which opens the review), the files it
-names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt,
-timeline, stages and tools. A long answer (or a titled one past a few lines) is a document: the
+names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt (the
+run's tokens, and its exact cost as OpenRouter reported it on each turn's `turn_end`), timeline,
+stages and tools. A long answer (or a titled one past a few lines) is a document: the
 chat shows a card with its title, opening words and length, and **Open** shows it in full in the
 pane beside the chat, under an **Answer** tab next to **Details**. Once a document answer
 arrives, the pane following the newest work switches to it. Drag the edge between them to resize; double-click
@@ -103,19 +104,21 @@ use `loomwatchd show --session <id>` for larger sessions.
 Below 768 px the coordinate graph becomes a reading column in the same causal order, with
 the relationship words kept on the cards.
 
-## Verifying without a paid harness
+## Verifying without a model provider
 
-Any executable that speaks ACP over stdio is a harness. For a deterministic end-to-end
-check, point an agent's `spawn.cmd` (an absolute path) at a shell script that answers
-`initialize`, `session/new` and `session/prompt` and streams a few `session/update`
-notifications (`agent_thought_chunk`, `tool_call` / `tool_call_update` with a `kind`,
-`agent_message_chunk`) before replying `{"stopReason":"end_turn"}` — the backend tests in
-`crates/loomwatch-backend/src/runs.rs` (`COMPLETING_HARNESS`) show the minimal shape. Put
-the team file in a scratch `--teams-root` so the fake never lands next to real teams.
+For a deterministic end-to-end check, give the team's agents `model: fake/offline`. That is
+LoomWatch's built-in offline demo model: it needs no OpenRouter key, no network and nothing
+installed, and it calls no provider. Each agent answers with fixed text, and answers handover,
+send-back and checkpoint turns too, so a run, its review stops, its handovers and the team's chat
+can all be checked without spending anything. A team whose agents all use it runs without a key.
+[`examples/operator-stop.yaml`](../examples/operator-stop.yaml) is a complete team on it. The
+backend's own tests use scripted stand-ins of the same provider, which can also call tools
+(`crates/loomwatch-backend/src/agent/demo.rs`). Put the team file in a scratch `--teams-root` so
+the demo never lands next to real teams.
 
 ## Evidence transport
 
-These are legacy **session** endpoints, separate from the proposed immutable **run** API:
+These **session** endpoints read the archive. Starting and stopping runs is *Run control*, below:
 
 | Route | Result |
 |---|---|
@@ -137,11 +140,10 @@ views show it, and none for a finished run once its recorded `eventCount` has ar
 All evidence routes validate loopback Host and same-origin Origin/Fetch Metadata headers,
 return no CORS grants, and disable HTTP caching. The service worker never caches API data.
 
-The graph shows **observed process state**, not a durable run status. In particular,
-`turn_end` alone does not complete a team, and a process exit does not prove that a whole
-pipeline completed. Helper output is not combined into a canonical answer. Immutable run
-creation, completion barriers, normalized provenance, redacted sharing, and response
-assembly remain separate work described in `RUN_PROVENANCE_CONTRACT.md`.
+The graph shows **what the archive observed**, not a durable run status. In particular,
+`turn_end` alone does not complete a team, and an agent's session closing (its `process`
+`exited` event) does not prove that a whole pipeline completed. Helper output is not combined
+into a canonical answer. The run record (*Run control*, below) is what says how a run ended.
 
 ## Run control
 
@@ -160,7 +162,7 @@ always has its archive; a router built without one (tests) answers 503.
 Request body:
 
 ```json
-{ "teamPath": "research-team.yaml", "prompt": "Summarise what ACP session/new negotiates." }
+{ "teamPath": "research-team.yaml", "prompt": "Compare three note-taking apps for a small team." }
 ```
 
 `teamPath` is relative to the daemon's `--teams-root` (an absolute path is accepted only if it
@@ -177,7 +179,7 @@ Response (`202 Accepted`):
   "runId": "6f0c1c4e-2b7a-4c1e-9b0e-3f2a1d5c8e77",
   "sessionId": "6f0c1c4e-2b7a-4c1e-9b0e-3f2a1d5c8e77",
   "teamPath": "research-team.yaml",
-  "prompt": "Summarise what ACP session/new negotiates.",
+  "prompt": "Compare three note-taking apps for a small team.",
   "status": "queued",
   "mode": "pipeline",
   "entrypoint": "researcher",
@@ -199,7 +201,9 @@ Response (`202 Accepted`):
 
 - `runId` **is** the archive `sessionId`: open
   `GET /api/session/stream?session=<runId>` as soon as the run is accepted; the first
-  frame is the entrypoint's `process`/`spawned` event.
+  frame is the entrypoint's `process`/`spawned` event. Nothing is started for it: each agent is
+  a session of LoomWatch's own agent inside the daemon, and the event marks that session opening,
+  in the same shape older runs were recorded in.
 - `status` moves forward only: `queued` → `starting` (the task began; `startedAt` set)
   → `running` (the first `process`/`spawned` event is archived; polled every 250 ms)
   → `succeeded` (`exitCode`, `eventCount`, `reply` = the responder's reply) or `failed`
@@ -209,9 +213,10 @@ Response (`202 Accepted`):
 - `mode` is `team` when the file has no edges and `pipeline` otherwise. `responder` is fixed from
   the optional root team-file setting; when that setting is absent, it falls back to the entrypoint
   in team mode and the last node of the topological order in pipeline mode.
-- Cancel aborts the run task. ACP children are spawned with `kill_on_drop`, so the harness,
-  any delegated helpers, and the run's Team Bus listener are torn down. No cancellation
-  event is archived; the run record is the source of truth for terminal classification.
+- Cancel aborts the run task. Every agent's session ends where it is, delegated helpers are
+  aborted with it, and a command an agent was still running has its shell killed
+  (`kill_on_drop`). No cancellation event is archived; the run record is the source of truth for
+  terminal classification.
 - The registry is in memory: a daemon restart forgets `GET /api/runs`, while the archive
   keeps every event and `GET /api/sessions` still lists the session with its `prompt`.
 - `trigger` is `manual` for `POST /api/runs` and `schedule` for routine runs (below).
@@ -224,21 +229,28 @@ Response (`202 Accepted`):
 - `teamName` (the team file's `name`) and `agentNames` (each agent's name by id, its id when it
   has none) are fixed at launch, so a client that has not read the team file, such as the menu
   bar, can say who `working` is. Runs recorded before they were kept have neither.
-- `permissionRequests` lists what an agent's app is blocked on until the operator answers: `{id,
-  agent, name, title, kind, switch, detail, since, expiresAt}`. It is live only, emptied when the
-  run ends and never stored. `POST /api/runs/{id}/permissions` with `{ "requestId": "…", "decision":
-  "allow_once" | "allow_run" | "allow_team" | "deny" }` answers one and returns `200` with the
-  record. `allow_run` lets that agent do the same thing again until the run ends; `allow_team` lets
-  every agent in the run do it, and answers any agent already waiting on it. It returns 404 when
-  that request is no longer waiting: it was answered, timed out after 10 minutes, or its run ended.
-  The archive records `session_meta` events with `phase: "awaiting_permission"` (with the request's
-  `requestId`, `title`, `kind`, `switch`, `detail` and `expiresAt`) and `phase:
-  "permission_answered"` (`outcome`: `allow_once`, `allow_run`, `allow_team`, `allowed_for_run`,
-  `deny`, `timed_out`, or `not_asked` in a routine's run) between the request and the reply sent to
-  the app. The team chat shows each asked request as the agent's message to you, answered there, and
-  keeps how it was settled in the conversation. An app that ends its turn when a request is
-  declined, as Codex does, is asked to carry on in the same session: the archive records `phase:
-  "turn_resumed"` and the request to carry on, and the turn ends once.
+- `permissionRequests` lists what an agent is waiting on the operator for: `{id, agent, name,
+  title, kind, switch, detail, since, expiresAt}`, plus `auto` (why Auto mode left a command to
+  you, in a run in Auto mode) and `edit` (`{field, value}`: the whole command, when it may be
+  changed before it runs). `kind` is the tool's kind (`read`, `search`, `edit`, `execute`, …) and
+  `switch` the `allow:` switch that would let it through without asking. It is live only, emptied
+  when the run ends and never stored. `POST /api/runs/{id}/permissions` with `{ "requestId": "…",
+  "decision": "allow_once" | "allow_run" | "allow_team" | "deny" | "edit" | "answer", "text": "…" }`
+  answers one and returns `200` with the record. `allow_run` lets that agent do the same thing
+  again until the run ends; `allow_team` lets every agent in the run do it, and answers any agent
+  already waiting on it. `edit` runs the command in `text` instead, this once. `answer` runs nothing
+  and hands `text` back to the agent as the tool's result. Both need a `text` of at most 4,000
+  characters; without one, or for an `edit` of a request that has nothing to change, it returns 409
+  and the request keeps waiting. It returns 404 when that request is no longer waiting: it was
+  answered, timed out after 10 minutes, or its run ended. The app's **Always allow** is `allow_run`
+  plus switching that switch on for the agent in the team file. The archive records `session_meta`
+  events with `phase: "awaiting_permission"` (with the request's `requestId`, `title`, `kind`,
+  `switch`, `detail`, `expiresAt` and `autoNote`) and `phase: "permission_answered"` (`outcome`:
+  `allow_once`, `allow_run`, `allow_team`, `allowed_for_run`, `auto_approved`, `deny`, `edited`
+  with the command that ran as `edited`, `answered` with your words as `answer`, `timed_out`, or
+  `not_asked` in a routine's run) between the request and the answer the agent gets. The team chat
+  shows each asked request as the agent's message to you, answered there, and keeps how it was
+  settled in the conversation.
 
 ## Routines
 
@@ -330,14 +342,13 @@ bold, italic and code; at most 500 blocks. The outcome is stored on the run reco
 
 ### Unattended runs
 
-A routine only works if the harness never has to ask. LoomWatch answers every ACP
-`session/request_permission` with a rejection, so a tool the harness must confirm is simply
-refused. For Claude's adapter that means a `.claude/settings.json` in the agent's `cwd`
-whose `permissions.allow` covers the tools the run needs (for the news digest `WebSearch`,
-`WebFetch`, `Read`, `Glob`, `Grep`) and whose `deny` list keeps the rest closed;
-`teams/daily-news/.claude/settings.json` is the worked example. Installed adapters still do
-not imply a logged-in account or a usable model — a routine that fails for that reason
-shows up as a `failed` run, not a delivery.
+A routine only works if its agents never have to ask. A routine's run has nobody to ask, so
+every request that an agent's `allow:` switches (or the team's Auto mode) do not already cover is
+declined at once, recorded as `not_asked`, and the agent carries on without it. Reading inside an
+agent's own folder and what it was given needs no switch; for a news digest, `web: true` is all
+the agents need. [`examples/usecases/daily-tech-digest.yaml`](../examples/usecases/daily-tech-digest.yaml)
+is the worked example: only its web switches are on. A routine also needs the OpenRouter key and
+credit for its models; one that fails for that reason shows up as a `failed` run, not a delivery.
 
 ## Team-file revisions
 
@@ -348,43 +359,45 @@ targets return 412. Rejected writes leave the file unchanged.
 
 The daemon serializes precondition checks and replacements among its API clients. Creation
 uses an atomic no-overwrite link. External editors that do not participate in the daemon's
-write lock can still change a file between its check and replacement; this is not the
-capability-based snapshot guarantee proposed for future run acceptance. Save a copy never
+write lock can still change a file between its check and replacement. Save a copy never
 silently overwrites an existing destination. The UI preserves local edits after a 412 and
 lets the user compare, reload, or explicitly keep the local version.
 
-## Harness readiness
+## Models and the OpenRouter key
 
-`GET /api/harnesses` includes `acpAvailable`. A detected vendor CLI is not sufficient
-when its separate ACP adapter is missing. The Library shows the missing executable and
-disables that drag source until the adapter is on the daemon's PATH. Discovery checks
-executable presence, not authentication or provider connectivity.
+Every agent is a session of LoomWatch's own agent inside the daemon, and calls the model its team
+file names through OpenRouter, with the operator's OpenRouter key. The key is entered in LoomWatch:
+**Add your OpenRouter key** on Home, or **AI models** in Connections. Like the Notion connection,
+these routes are mounted only on a loopback listener:
 
-Each harness may also carry `health` (`ok` | `error`), with `healthReason` (plain words, printed
-verbatim) and `healthDetail` (the harness's own error, truncated) when it is `error`. It is the
-outcome of the last `GET /api/harnesses/{id}/models` handshake, cached in the daemon for ten
-minutes and only for the same executable and spawn descriptor; listing never spawns a harness, so
-an unchecked harness simply has no `health`. The UI keeps a harness with `health: error` out of new
-team templates, names it with its reason on Home and in the New team dialog, and re-runs the
-models handshake when the operator chooses "Check again".
+| Route | Result |
+|---|---|
+| `GET /api/ai` | `{ "openrouter": { connected, label, spent, limitRemaining, freeTier, checkedAt, problem } }`: what OpenRouter said about the key the last time it was checked. It never reads the key, so opening the app never brings up a Keychain prompt |
+| `PUT /api/ai/openrouter` | `{ "key": "sk-or-…" }`: checks the key with OpenRouter, then keeps it. A key OpenRouter refuses is never kept (400) |
+| `POST /api/ai/openrouter/check` | Asks OpenRouter about the kept key again |
+| `DELETE /api/ai/openrouter` | Forgets the key |
+| `GET /api/models` | The models an agent can use: OpenRouter's public catalog, cut down to the models that can call tools, with a short recommended list and the default. Fetched when first asked for and kept an hour; the last copy is saved in the state folder, so the list still shows offline. 502 when there is no list at all |
 
-A team file can also name an app LoomWatch never offered — a team shared by someone who uses
-`acme-agent-cli`. `GET /api/commands?cmd=…&cmd=…` answers, for each distinct `spawn.cmd`, whether a
-run would start it, without executing anything: `found` (with `path`), `not_found`, `not_executable`
-(an absolute path that is not a program), `outside_path` (only in a per-user folder that harness
-detection searches but the daemon's own `PATH` lacks — the launchd case — with `path`), or
-`unchecked` (a relative path such as `./bin/agent`, which resolves against the agent's working
-folder at run time). A bare name is looked up on the daemon's own `PATH`, the one
-`AcpProcess::spawn` uses, so `npx`-bridged harnesses are judged like any other name. At most 64
-commands per request.
+Requests that change the key need the `X-LoomWatch-Request: 1` header the app sends, so another
+site cannot set one.
 
-Build asks about the open document rather than the saved file, because Run saves first; it asks
-again when the set of commands changes and when the window regains focus. An agent whose app cannot
-start is named on its card ("Helper’s app “acme-agent-cli” isn’t installed on this computer."), in
-the Build heading, as a *to finish* entry in the team's Review list, and on its planned stage in
-Run, which reads "Can’t start" instead of "Ready"; the composer's Run is blocked with that reason. The file is still valid and still saves. An agent that sets `PATH` in
-`spawn.env` is not checked, since the daemon cannot see that `PATH`; a failed check (an older
-daemon, a dropped connection) reports nothing rather than blocking a run.
+`model` is an OpenRouter id such as `anthropic/claude-opus-5.5`, and `thinkingEffort` its
+reasoning effort (an effort written into the model, `…[high]`, still reads). Names written for an
+earlier LoomWatch still load and are read as OpenRouter ids: `opus`, `sonnet` and `haiku` become
+Anthropic's models, `gpt-…` OpenAI's and `gemini-…` Google's, an `openrouter/` prefix is dropped,
+and a name LoomWatch does not know becomes the default model. `fake/offline` is the offline demo
+(*Verifying without a model provider*, above).
+
+Build blocks Run while no key is added and any agent needs a model: the composer says "Add your
+OpenRouter key to run this team." with **Add key**. A run started anyway (a routine, or a client of
+`POST /api/runs`) fails at its first agent with "Agents need an OpenRouter key to run." and the
+way to add one. A key OpenRouter refuses later, or an account out of credit, fails the turn with a
+reason in plain words, such as "Your OpenRouter account is out of credits." A team whose agents
+all run on `fake/offline` needs no key.
+
+A team file written for an earlier LoomWatch may carry a `spawn` block naming an AI app to start.
+Only its `cwd`, the agent's folder, is read; `cmd`, `args` and `env` are accepted and ignored, and
+nothing they name is ever started.
 
 ## Installation
 

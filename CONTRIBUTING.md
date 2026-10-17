@@ -8,14 +8,16 @@ change and why.
 ## Reporting problems
 
 - **Bugs and ideas:** use **Send feedback** in the app (☰ menu). It opens a GitHub issue form with
-  your LoomWatch version, system and AI apps filled in. You can also open the forms directly.
+  your LoomWatch version, system, browser and whether an OpenRouter key is added filled in, never
+  the key itself or your teams. You can also open the forms directly.
 - **Security problems:** report them privately, as [SECURITY.md](SECURITY.md) describes, never in a
   public issue.
 
 ## Building from source
 
 You need Node.js 22.12 or newer and Rust (the exact toolchain installs itself from
-`rust-toolchain.toml`). The database is SQLite, built into the program, so nothing else. Then:
+`rust-toolchain.toml`). The database is SQLite, built into the program, and agents run inside it,
+so nothing else. Then:
 
 ```sh
 git clone https://github.com/tnghia903/loomwatch.git
@@ -26,6 +28,12 @@ cd loomwatch
 `./loomwatch` builds the browser app and the program the first time and after every change to
 them, starts it and opens the app. See [the README](README.md#build-from-source) for the
 details and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit.
+
+Real runs need an [OpenRouter](https://openrouter.ai) API key. To try a change without one, use a
+team whose agents run on `model: fake/offline`, LoomWatch's built-in offline demo model, such as the
+offline demo team ([examples/operator-stop.yaml](examples/operator-stop.yaml)) that `./loomwatch`
+puts in a new teams folder. It calls no model and costs nothing
+([docs/WATCH.md](docs/WATCH.md#verifying-without-a-model-provider)).
 
 ## Before you open a pull request
 

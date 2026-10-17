@@ -18,8 +18,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
   <img src="https://img.shields.io/badge/platform-macOS-56524A" alt="Platform: macOS">
-  <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20AI%20account-17724A" alt="First run: offline demo, no AI account">
-  <img src="https://img.shields.io/badge/agents%20over-ACP-56524A" alt="Agents over ACP">
+  <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20key-17724A" alt="First run: offline demo, no key">
+  <img src="https://img.shields.io/badge/models%20via-OpenRouter-56524A" alt="Models via OpenRouter">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
 </p>
 
@@ -38,7 +38,7 @@ open it, drag LoomWatch to Applications, and open it. Then follow
 curl -fsSL https://loomwatch.github.io/install.sh | bash
 ```
 
-## Your AI apps are the threads. LoomWatch is the loom.
+## Your agents are the threads. LoomWatch is the loom.
 
 LoomWatch runs on your computer and opens in your browser. Build each agent once and try it on its
 own, connect your agents into a workflow on a canvas, then give the team work in its chat and watch
@@ -47,10 +47,10 @@ step-by-step pipeline, or a team that delegates work as it goes. When the team n
 and asks.
 
 <p align="center">
-  <sub>WORKS WITH THE AI APPS YOU ALREADY USE</sub><br>
-  <strong>Claude Code</strong> &nbsp;·&nbsp; <strong>Codex</strong> &nbsp;·&nbsp; <strong>OpenCode</strong> &nbsp;·&nbsp;
-  <strong>Hermes</strong> &nbsp;·&nbsp; <strong>OpenClaw</strong><br>
-  <sub>and, through OpenCode, models such as DeepSeek, Kimi, GLM, Qwen and Mistral</sub>
+  <sub>ONE OPENROUTER KEY, MODELS FROM EVERY MAJOR AI COMPANY</sub><br>
+  <strong>Claude</strong> &nbsp;·&nbsp; <strong>GPT</strong> &nbsp;·&nbsp; <strong>Gemini</strong> &nbsp;·&nbsp;
+  <strong>DeepSeek</strong> &nbsp;·&nbsp; <strong>Kimi</strong> &nbsp;·&nbsp; <strong>Qwen</strong><br>
+  <sub>with nothing else to install, and no AI app or subscription to sign in to</sub>
 </p>
 
 ## How it works
@@ -67,8 +67,8 @@ and asks.
 
 ### 01 &nbsp;Agents
 
-**Build an agent** once: its job, the AI app and model it thinks with, its skills, and the keys it
-may use without asking, such as the web or running commands. Pick it a face, **try it on its own**
+**Build an agent** once: its job, the model it thinks with, its skills, and the keys it may use
+without asking, such as the web or running commands. Pick it a face, **try it on its own**
 with a real request, and save it to **Your agents**. Change its job later and it becomes the next
 version; a team keeps the version it was given until you choose **Update**.
 
@@ -132,24 +132,25 @@ you decide**, and the finished answer comes with the evidence to check before yo
 
 ## LoomWatch is right for you if
 
-- ✅ You use one or more AI apps, such as Claude Code, Codex or OpenCode, and want them to **work on
-  one job together**.
+- ✅ You want AI agents to **work on one job together**, without installing coding tools or signing
+  in to an AI app.
 - ✅ You want to **build an agent once, try it on its own**, and reuse it in every team that needs it.
 - ✅ You want to **see what each agent did**, not just read a final answer: every tool call, file and
   handover is recorded.
 - ✅ You want to **approve or redirect work** before the next agent builds on it.
-- ✅ You want it **on your own computer**, with the skills and MCP tools you already have.
+- ✅ You want it **on your own computer**, with skills you add from skills.sh, ClawHub or GitHub, or
+  bring in from the AI apps you already have.
 - ✅ You run the same kind of job again and again, such as a daily digest or a research brief, and
   want it **repeatable, or scheduled**.
 
-## What changes when your apps work as a team
+## What changes when your agents work as a team
 
 | Without LoomWatch | With LoomWatch |
 | --- | --- |
-| You copy one app's answer into the next app's prompt. | Agents hand work to each other, and every handover is on the timeline. |
+| You copy one chat's answer into the next chat's prompt. | Agents hand work to each other, and every handover is on the timeline. |
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
-| Each app has its own skills, tools and folders. | Skills, MCP tools and the folders and files you choose are delivered to the agents that need them. Take one off and it is turned off for that agent. |
+| Each AI app keeps its own skills and folders. | Skills and the folders and files you choose are delivered to the agents that need them. Take one off and it is turned off for that agent. |
 | You set the same agent up again in every project. | Build it once in Your agents, try it on its own, and add it to any team. Teams keep their version until you choose Update. |
 | Doing the job again means retyping the prompt. | One chat per team that remembers the conversation, **@** an agent to redo one step, and daily schedules. |
 
@@ -157,18 +158,20 @@ you decide**, and the finished answer comes with the evidence to check before yo
 
 ```mermaid
 flowchart LR
-    ask(["You ask, in plain words"]) --> researcher["Researcher<br/>on Claude Code"]
+    ask(["You ask, in plain words"]) --> researcher["Researcher<br/>on Claude Sonnet 5.5"]
     researcher -- "hands over" --> review{{"You review"}}
-    review -- "approve" --> writer["Writer<br/>on Codex"]
+    review -- "approve" --> writer["Writer<br/>on Claude Opus 5.5"]
     review -. "send back" .-> researcher
     writer --> response[["Team response<br/>with its evidence"]]
     classDef stop stroke:#AD8A20,stroke-width:2px
     class review stop
 ```
 
-Each agent is its own AI app, started by LoomWatch on your computer and driven over
-[ACP](https://agentclientprotocol.com) (the Agent Client Protocol). Agents can hand work to each
-other, or ask each other questions, through LoomWatch's Team Bus. Every message, tool call and
+Each agent runs on LoomWatch's own agent, inside the program on your computer. It thinks with the
+model you chose, reached through [OpenRouter](https://openrouter.ai) with your own key, and uses
+LoomWatch's tools to read and write files in its folder, search the web and run commands, each only
+as far as you allow. Agents can hand work to each other, or ask each other questions, through
+LoomWatch's Team Bus. Every message, tool call and
 handover is recorded in a local database, so you can watch a run live, replay it later, and follow
 up from any step.
 
@@ -205,7 +208,7 @@ with a lead that hands out work and asks its teammates questions as it goes.
 
 ### 🧑‍🔧 Your agents
 
-Build an agent once: its job, app, model, skills and the keys it may use. Try it on its own on a
+Build an agent once: its job, model, skills and the keys it may use. Try it on its own on a
 test bench, then add it to any team. A new job makes a new version, and teams keep theirs until you
 choose **Update**.
 
@@ -230,10 +233,10 @@ with a one-click fix, and says about how many tokens a run uses.
 <tr>
 <td valign="top">
 
-### 🧵 One team, many apps
+### 🧵 One team, many models
 
-Each agent runs on its own app and model: Claude Code researches, Codex reviews, OpenCode writes on
-a free model. Each agent uses its own app's sign-in or API key, under that provider's terms.
+Each agent thinks with its own model, chosen from hundreds on OpenRouter: Claude researches, GPT
+checks, a free model drafts. Every run's receipt shows exactly what it cost.
 
 </td>
 <td width="33%" valign="top">
@@ -260,7 +263,8 @@ replay what happened, and when.
 ### ✋ You stay in the loop
 
 Add a **You** step to approve the work or send it back with changes. Agents can also stop and ask you
-a question mid-run. In **Auto** mode, commands that only read or download run without asking.
+a question mid-run, and when one asks to run a command you can change it first, or answer in its
+place. In **Auto** mode, commands that only read or download run without asking.
 
 </td>
 <td valign="top">
@@ -273,11 +277,11 @@ stream read it. Nothing is guessed from a title.
 </td>
 <td valign="top">
 
-### 🧰 Your skills, tools and files
+### 🧰 Skills, folders and files
 
-Wire in the skills and MCP tools already on your computer, and give an agent any folder or file,
-PDFs included once `pdftotext` is installed (`brew install poppler`). LoomWatch delivers each one
-to the agents you choose, and turns off what you take off the canvas.
+Add skills from skills.sh, ClawHub or GitHub, or copy in the ones your AI apps already have. Give an
+agent any folder or file, PDFs included once `pdftotext` is installed (`brew install poppler`).
+LoomWatch delivers each one to the agents you choose, and turns off what you take off the canvas.
 
 </td>
 </tr>
@@ -311,7 +315,7 @@ Run a team every morning and send the answer to Notion. A review stop still wait
 
 ### 💬 Ask LoomWatch
 
-Describe the team you want in a sentence. One of your own AI apps sets it up on the canvas, and
+Describe the team you want in a sentence. Ask sets it up on the canvas, on your OpenRouter key, and
 nothing is saved until you click **Apply**.
 
 </td>
@@ -319,16 +323,15 @@ nothing is saved until you click **Apply**.
 
 ### 🎓 Guided first run
 
-An offline demo team and a three-minute guide. You can learn the whole app before you connect an AI
-account.
+An offline demo team and a three-minute guide. You can learn the whole app before you add a key.
 
 </td>
 <td valign="top">
 
 ### 🔒 Runs on your computer
 
-The app, your teams and your run history stay on this computer. Agents' apps still talk to their own
-model providers, as they always do.
+The app, your teams, your run history and your key stay on this computer. Agents send their prompts
+to the model you chose, through OpenRouter.
 
 </td>
 </tr>
@@ -336,18 +339,19 @@ model providers, as they always do.
 
 ## Teams you can build
 
-Every team below is made from the jobs under **Hire by job** in Workflow's add panel, each on the AI
-app it suits, or from agents you built in **Your agents**. Start from **New team**, then add, connect
+Every team below is made from the jobs under **Hire by job** in Workflow's add panel, each on the
+model its kind of work suits, or from agents you built in **Your agents**. Start from **New team**, then add, connect
 and rename agents to match. To run a team on a schedule, ask
 [Ask LoomWatch](#ask-loomwatch-to-set-up-a-team) to add one, or see [Routines](docs/WATCH.md#routines).
 
 | Team | The steps | Good for |
 | --- | --- | --- |
 | **Morning briefing** | ⏰ Every day at 10:00 → Collector → Editor → Writer → Notion | A digest that is waiting when you start work |
-| **Research and review** | Researcher *(OpenCode)* → Reviewer *(Claude Code)* | Answers whose sources a second agent has checked |
+| **Research team** | Lead → Researchers *(at the same time)* → Writer | A report on a big question, with a source cited for every claim |
+| **Research and review** | Researcher → Reviewer | Answers whose sources a second agent has checked |
 | **Approve before writing** | Researcher → ✋ **You** → Writer | Anything where a wrong first step is costly |
-| **Code with a second opinion** | Coder *(Codex)* → Reviewer *(Claude Code)* → ✋ **You** | Changes in a folder, checked before you keep them |
-| **From numbers to slides** | Analyst *(Codex)* → Designer *(Claude Code)* | A deck or page built from real data |
+| **Code with a second opinion** | Coder → Reviewer *(another company's model)* → ✋ **You** | Changes in a folder, checked before you keep them |
+| **From numbers to slides** | Analyst → Designer | A deck or page built from real data |
 
 ## See it
 
@@ -383,9 +387,10 @@ and rename agents to match. To run a team on a schedule, ask
 
 ## What LoomWatch is not
 
-- **Not a chatbot.** It runs teams of the AI apps you already have, one app per agent.
+- **Not a chatbot.** It runs teams of agents, each with its own job, and shows you every step.
 - **Not a cloud service.** It runs on your computer and keeps your run history there.
-- **Not a model provider.** Your agents use your own AI apps and accounts.
+- **Not a model provider.** Your agents use models through your own OpenRouter key, and OpenRouter
+  bills you for what they use.
 - **Not autopilot.** You choose where the team stops for your review, and it waits for you.
 
 ## Quickstart
@@ -420,7 +425,7 @@ against the release's checksum, puts it in `~/LoomWatch/app`, and opens
 administrator password is needed. Then follow [Try your first run](#try-your-first-run).
 
 > [!TIP]
-> No AI account yet? The offline demo needs no API key and no model usage, so you can learn the whole
+> No OpenRouter key yet? The offline demo needs no key and calls no model, so you can learn the whole
 > app first.
 
 <details>
@@ -440,32 +445,21 @@ already on your `PATH`.
 
 </details>
 
-LoomWatch runs on your computer as one program, and keeps your run history in one file there. That
-way it can use the AI apps, skills, MCP tools, sign-ins and folders already set up for your user
-account.
+LoomWatch runs on your computer as one program, and keeps your run history in one file there, so
+your agents can work in the folders you give them.
 
 ### What you need
 
 - **A Mac** with macOS 11 or newer. Linux downloads exist for x86_64 and arm64 but are untested.
   Windows is not supported yet.
-- **For real runs, one AI app** signed in: Claude Code, Codex or OpenCode, for example. OpenCode has
-  free models and needs no account. You don't need any for the demo. The home screen's **Set up an
-  AI app** has a button for each: **Set up Claude Code** and **Set up Codex** download the app into
-  LoomWatch's own folder (Node.js too, when this computer has none), **Sign in** opens the app's own
-  sign-in page, and **Install OpenCode** runs OpenCode's installer. Each also shows the Terminal
-  commands, for anyone who prefers them.
+- **For real runs, an [OpenRouter](https://openrouter.ai) API key.** One key reaches models from
+  Anthropic, OpenAI, Google and others, including some free ones. Make one at
+  [openrouter.ai/keys](https://openrouter.ai/keys), add a few dollars of credit for the models that
+  aren't free, and paste it into **Add your OpenRouter key** on Home. LoomWatch checks it with
+  OpenRouter, then keeps it in this Mac's Keychain. You don't need a key for the demo.
 
-The offline demo runs on Python 3. On a Mac without Apple's Command Line Tools, macOS offers to
-install them the first time the demo runs; say yes, or install them first with
-`xcode-select --install`.
-
-> [!NOTE]
-> Gemini CLI no longer works with a personal Google sign-in. Google now refuses it ("This client is
-> no longer supported"), and LoomWatch shows Gemini as not working once that happens. Gemini CLI
-> signed in with a Gemini API key may still work, but LoomWatch has not been tested that way.
-
-Start LoomWatch from a terminal where your AI app's command already works, because LoomWatch finds
-your apps, skills and tools through it.
+LoomWatch never signs in to an AI app and never uses an AI subscription: no Claude, ChatGPT or Gemini
+account is involved, and nothing else needs installing, not even for the offline demo.
 
 ### What the first start does
 
@@ -489,9 +483,9 @@ file. Run `~/LoomWatch/app/loomwatch update` once first if that copy still kept 
 Docker, so the history is moved into the file. Only one LoomWatch can use the history at a time:
 stop the Terminal one before opening the app.
 
-LoomWatch looks for your skills and tools in the usual places in your home folder (`.claude`,
-`.codex`, `.agents`, `.config/opencode` and similar) and for AI apps on the terminal's `PATH`. It
-reads them only on your computer; nothing is uploaded.
+LoomWatch reads no other app's settings or sign-ins. Your skills live in LoomWatch's own folder (see
+[Where your work is saved](#where-your-work-is-saved)). On the Skills page, **Look on this computer**
+copies in the skills your AI apps keep, and only when you click it.
 
 ### Every day
 
@@ -561,18 +555,17 @@ LoomWatch from Applications to the Trash. Your teams and history stay where step
 say; delete those folders, and `~/Library/Logs/LoomWatch`, to leave nothing behind. The steps
 below are for the Terminal install.
 
-1. If you connected LoomWatch to other AI apps, choose **Connections…** from the ☰ menu and click
-   **Disconnect** beside each one. For Claude Code, Codex and Gemini CLI this also removes LoomWatch
-   from the app's own settings. For an app you pasted a snippet into, delete its `loomwatch` entry
-   yourself.
+1. Remove your OpenRouter key: choose **Connections…** from the ☰ menu and click **Remove key**
+   under **AI models**. Otherwise it stays in your Keychain as `LoomWatch.OpenRouter`. To stop it
+   working anywhere, delete the key at [openrouter.ai/keys](https://openrouter.ai/keys) too.
 2. Stop LoomWatch: `~/LoomWatch/app/loomwatch stop`.
 3. Delete the program: `rm -rf ~/LoomWatch/app`, and `rm ~/.local/bin/loomwatch` if the installer
    made that shortcut.
 4. Your teams are kept in `~/LoomWatch/teams` until you delete `~/LoomWatch` too. It also holds Your
    agents, deleted teams, the agents' working folders, and in `backups` the copies of your run
    history that updates saved.
-5. Your run history, Notebook entries and Ask conversations, which teams you approved to run, and
-   your update-check choices are in `~/Library/Application Support/LoomWatch`
+5. Your run history, Notebook entries and Ask conversations, your skills, which teams you approved
+   to run, and your update-check choices are in `~/Library/Application Support/LoomWatch`
    (`~/.local/state/loomwatch` on Linux). Delete that folder too to leave nothing behind.
 
 For a copy built from source, run `./loomwatch stop` in its folder, then delete the folder: its run
@@ -631,14 +624,12 @@ app's. If it ran before with its database in Docker, the first start copies that
 (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build)
 cargo build --release --locked --bin loomwatchd
 mkdir -p "$HOME/LoomWatch/teams"
-cp -n examples/operator-stop.yaml examples/operator-stop-harness.py "$HOME/LoomWatch/teams/"
-unset LOOMWATCH_CAPABILITY_HOME LOOMWATCH_HOST_RUNNER_ADDR LOOMWATCH_HOST_RUNNER_TOKEN
+cp -n examples/operator-stop.yaml "$HOME/LoomWatch/teams/"
 ./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000 \
   --database .loomwatch/loomwatch.db
 ```
 
-The browser app is built before the program because it is packed into it. The `unset` line keeps
-settings meant for the Docker Compose mode below out of a local run. `loomwatchd backup <file>`
+The browser app is built before the program because it is packed into it. `loomwatchd backup <file>`
 saves a copy of the run history, safely while it runs, and `loomwatchd import-postgres --from
 postgres://…` copies in one an older version kept in PostgreSQL.
 
@@ -647,7 +638,7 @@ postgres://…` copies in one an older version kept in PostgreSQL.
 ## Try your first run
 
 The first time you open LoomWatch, a short guide offers to walk you through building your first
-agent, trying it on its own, putting it in a team and running it with one of your own AI apps.
+agent, trying it on its own, putting it in a team and running it on your OpenRouter key.
 Reopen it any time with **New here? Take the 3-minute guide** on Home, from the menu in a team, or
 by pressing <kbd>⌘</kbd><kbd>K</kbd> and choosing **Getting started guide**.
 
@@ -674,63 +665,46 @@ with what should change; under its new version, **Continue with the team** runs 
 
 ## Run your own agents
 
-1. Install and sign in to the AI app you want to use (Claude Code, Codex or OpenCode, for example)
-   in Terminal, and confirm it works on its own.
-2. Start LoomWatch from a terminal where that app is available. The bottom of the home screen
-   lists the AI apps it found. If none can run, **Set up an AI app** opens on the home screen. It
-   checks each app's sign-in, not just that it is installed, and says when LoomWatch needs a
-   restart to use an app installed after it started.
-3. Click **Build an agent** on Home. Give it a name and its instructions, choose its app and model,
-   pin up the skills it needs and hand it the keys it may use without asking. Pick it a face, then
-   **Try it** with a real request: it runs on that app, counts toward that app's account, and asks
-   you before it uses a key it wasn't given. **Save to Your agents** when it does the job.
-4. Click **New team**, give it a name and choose how it should start:
+1. Add your OpenRouter key: paste it into **Add your OpenRouter key** on Home, or under **AI models**
+   in **Connections…** (☰ menu). LoomWatch checks it with OpenRouter and shows how much credit is
+   left on it.
+2. Click **Build an agent** on Home. Give it a name and its instructions, choose its model and how
+   hard it thinks, pin up the skills it needs and hand it the keys it may use without asking. Pick it
+   a face, then **Try it** with a real request: it runs on your key, and asks you before it uses a
+   key it wasn't given. **Save to Your agents** when it does the job.
+3. Click **New team**, give it a name and choose how it should start:
    - **One assistant** — a single agent that does the whole task (recommended to begin with).
    - **Researcher and writer** — one agent gathers facts, a second writes the result.
+   - **Research, write and check** — a third agent, on another company's model, checks the finished
+     piece against what it must have.
    - **Research, your approval, then writing** — the team pauses so you can approve the research.
+   - **Research team** — a lead splits your question, researchers look into each part at the same
+     time, and a writer turns what they found into a report that cites every source.
    - **Empty team** — build it yourself from the library on the left.
 
-   Ready-made teams are saved straight away with your AI app's own default model, so you can
-   run them immediately.
-5. A team has three tabs: **Agents**, **Workflow** and **Chat**. On **Agents**, click **Add an
+   Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
+   them immediately.
+4. A team has three tabs: **Agents**, **Workflow** and **Chat**. On **Agents**, click **Add an
    agent** to bring in one from Your agents. On **Workflow**, add more from the panel on the left:
-   **Your agents**, or a job under **Hire by job**, such as Researcher or Writer, which is set up on
-   the best AI app you have. For a blank agent on one app, pick that app under **AI apps**. Select a
-   card to edit its name, instructions and app, or click **Model and more settings** to change its
-   model. Drag from the dot on a card's right edge to the next card to make them work in order, and
+   **Your agents**, or a job under **Hire by job**, such as Researcher or Writer, which starts on the
+   model its kind of work suits. Select a card to edit its name, instructions, model and how hard it
+   thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
    add **You (review step)** wherever you want to approve work before the team continues.
-6. Click **Run team**, or open **Chat**, describe what you want in plain words, and press
+5. Click **Run team**, or open **Chat**, describe what you want in plain words, and press
    <kbd>Enter</kbd>.
 
-LoomWatch connects to agent apps through ACP, a protocol for exchanging tasks and results.
-The Library recognizes these integrations:
-
-| Agent app | Connection used by LoomWatch |
-| --- | --- |
-| Claude | `claude-agent-acp`: LoomWatch installs its own copy once |
-| Codex | `codex-acp`: LoomWatch installs its own copy once |
-| Gemini | `gemini --acp` (API key sign-in only; untested) |
-| OpenCode | `opencode acp` |
-| Hermes | `hermes-acp` |
-| OpenClaw | `openclaw acp` |
-
-LoomWatch also recognizes pi, but cannot run it: pi has no ACP connection. Use its models through
-OpenCode instead.
-
-Claude and Codex connect through bridges that run on Node.js. The first time LoomWatch sees one of
-these apps, it installs that bridge once into its own folder, from versions it was tested with, and
-from then on starts it directly: an agent starts in about a fifth of a second. If this computer has
-no Node.js 22 or newer, LoomWatch downloads its own copy from nodejs.org (about 50 MB) and checks it
-before use. Availability in the Library means the required commands were found; it does not confirm
-that your account is signed in or has model access. Delegation and session-resume support vary by
-integration.
+Each agent's model is an OpenRouter model id, such as `anthropic/claude-opus-5.5`. The model picker
+recommends a short list, marks the free ones **Free**, and searches the rest of OpenRouter's
+catalogue. New agents start on Claude Opus 5.5; the jobs that gather facts start on the faster Claude
+Sonnet 5.5, and a check step on another company's model, so the work is read by a model that didn't
+write it.
 
 > [!IMPORTANT]
-> Provider authentication stays with your agent app. Real runs use your existing provider account
-> and its usage limits or billing. Check each provider's terms for using its app through other
-> tools. The offline demo does not consume that usage. Agent apps may send
-> prompts and files to their configured model providers; running LoomWatch locally does not make
-> cloud models offline.
+> OpenRouter bills real runs to your key, at each model's price, and each run's receipt shows what
+> it cost. Your request, the agents' instructions and the files and pages they read go to OpenRouter
+> and the company whose model you chose. Running LoomWatch locally does not make cloud models
+> offline. Free models change often, and some let their maker learn from what you send, so keep
+> private work for a model you pay for. The offline demo calls no model.
 
 <details>
 <summary><strong>Keep the pipeline easy to follow</strong></summary>
@@ -746,30 +720,32 @@ layout; organizing does not change the workflow or start a run.
 <details>
 <summary><strong>Connect skills, knowledge and tools</strong></summary>
 
-The add panel on the left of **Workflow** lists the skills and MCP tools found on your computer,
-and the teams whose memory you can share. Add one to the canvas, then drag from an agent to it, or
+The add panel on the left of **Workflow** lists your skills and the teams whose memory you can
+share. **Manage skills** opens the Skills page, where you add more: search skills.sh and ClawHub at
+once, paste a GitHub link, or copy in the skills your AI apps already have. Each one shows its
+license and what it needs before anything is copied, and nothing in it runs when it is added. Add a
+skill to the canvas, then drag from an agent to it, or
 open the card's **Details & connections** and tick the agents that should use it. To give an agent
 a folder or a file, select the agent and click **Folder** or **File** under **Given** in its
 **Context**. Save the team, and the next run delivers it:
 
-- A **skill** is copied into the agent's working folder and its instructions are given to the agent.
+- A **skill** is copied into the agent's working folder, and the agent is told to read it in full
+  before it starts. Every agent also sees the name and purpose of each skill in LoomWatch, and reads
+  one when its work calls for it.
 - A **folder or file** is given to the agent as reference material: a folder's listing and README,
   or a file's text. A PDF's text is read when `pdftotext` is installed (`brew install poppler`).
   The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
   folder for anything bigger.
-- A **tool** is your own MCP server, handed to that agent's app with the settings you already gave it
-  in Claude Code, Codex or OpenCode.
+- A **tool** from an AI app's own settings, such as an MCP server, is not given to LoomWatch's
+  agents: reading those settings would mean reading that app's sign-ins. An agent that still has
+  one is told it isn't there, and the run carries on without it.
 
-Taking a skill or tool card off the canvas, or the line from it to one agent, **turns it off** for
-that agent, even the copy its own app would load by itself. The agent's **Context** lists what is
-turned off, with a button to turn each back on, and under **Also from** its app, what the app brings
-of its own, each with a button to turn it off. For Claude Code agents this covers skills, tools and
-claude.ai connectors; for Codex agents, skills. Codex's own MCP servers can't be turned off yet, and
-the panel says so. When an agent's instructions still name what you removed, LoomWatch marks it, and
-**Rewrite with** your Ask app drops or rewrites just those sentences as one edit you can keep or put
-back.
+Taking a skill card off the canvas, or the line from it to one agent, **turns it off** for that
+agent. The agent's **Context** lists what is turned off, with a button to turn each back on. When an
+agent's instructions still name what you removed, LoomWatch marks it, and **Rewrite with** Ask's
+model drops or rewrites just those sentences as one edit you can keep or put back.
 
-If something cannot be delivered (for example, a tool that is turned off in your app's settings),
+If something cannot be delivered (for example, a skill that is no longer in LoomWatch's skills),
 the run stops before it starts and says what to change. If an older team shows "drawn but not
 delivered to agents yet" at the top of Workflow, click **Deliver on the next run**, then save.
 
@@ -800,7 +776,7 @@ request box and click **Reply**.
 
 Click **Ask** at the top of any screen (or press <kbd>⌘</kbd><kbd>J</kbd>), or type in **Or describe
 the job** on Home. Say what you want in plain words, such as _"Every weekday at 8, brief me on AI
-news"_. One of your own AI apps sets the team up on the canvas. New and changed agents are marked,
+news"_. Ask sets the team up on the canvas. New and changed agents are marked,
 and nothing is saved until you click **Apply**; **Discard** drops the proposal, and **Undo** takes
 an applied one back.
 
@@ -808,72 +784,58 @@ an applied one back.
   unless you turn off **Ask me before starting a run**.
 - **It never answers a review step.** It can put a drafted note in the review box; only you click
   **Approve** or **Send back**.
-- **You choose the app.** The panel says which app it is using ("Using Claude on this computer").
-  Click the app's name to pick another, and a model under it. Ask can use Claude Code, Codex,
-  OpenCode or Hermes. Each conversation counts toward that app's account, like a run.
-
-<details>
-<summary><strong>Use LoomWatch from your other AI apps</strong></summary>
-
-Choose **Connections…** from the ☰ menu (or from <kbd>⌘</kbd><kbd>K</kbd>). Under **Use LoomWatch
-from your AI apps**, **Connect** registers LoomWatch with Claude Code, Codex, Gemini CLI or VS Code
-using that app's own command, which you can read under **What LoomWatch runs** first. OpenCode and
-Claude Desktop get a snippet to paste instead; it holds a private key, so don't share it. What a
-connected app proposes or starts appears in the Ask panel under **From your connected apps**.
-**Disconnect** stops it at once.
-
-</details>
+- **You choose the model.** Ask runs on LoomWatch's own agent with your OpenRouter key, and the
+  panel names its model. Click the name to pick another. Each conversation is billed to your key,
+  like a run. Without a key, the panel asks you to add one.
 
 ## FAQ
 
 <details>
 <summary><strong>Do I need an account or an API key?</strong></summary>
 
-Not for LoomWatch itself: it is free, has no account and never sees your sign-ins. Each agent runs
-one of your AI apps, signed in the way you set that app up, and its usage counts toward your own
-account with that provider. Providers set their own rules for using their apps through other
-programs: Anthropic, for example, asks products built on its Agent SDK, which LoomWatch uses to
-run Claude Code, to use an API key (see
-[Authentication and credential use](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)).
-To run Claude agents on an API key, start LoomWatch from a terminal where `ANTHROPIC_API_KEY` is
-set.
+For real runs, yes: an OpenRouter API key, which you make at
+[openrouter.ai/keys](https://openrouter.ai/keys). LoomWatch itself is free and has no account. It
+never signs in to an AI app, never uses an AI subscription and never reads another app's sign-ins:
+every model call goes through LoomWatch's own agent with your key. The key stays in this Mac's
+Keychain (on Linux, in a file only your user can read), and agents never see it: it is not in their
+commands, their folders, the team file or the run history.
 
-The offline demo needs no AI account at all, and OpenCode runs real agents on its free models
-without one. Free models change often, and some let their maker learn from what you send, so keep
-private work for a model you pay for.
+The offline demo needs no key at all, and some models on OpenRouter are free. Free models change
+often, and some let their maker learn from what you send, so keep private work for a model you pay
+for.
 
 </details>
 
 <details>
 <summary><strong>What does a run cost?</strong></summary>
 
-Real runs use your AI apps' own accounts, so they count toward those accounts' usage limits or API
-billing, under each provider's terms. The offline demo uses none.
+OpenRouter bills your key for each model call, at that model's price. Each run's receipt shows the
+exact cost OpenRouter reported. The offline demo costs nothing.
 
 </details>
 
 <details>
 <summary><strong>Is my work sent anywhere?</strong></summary>
 
-LoomWatch serves everything on `127.0.0.1` and keeps your run history in a file on this computer. It reads your skills and tools only on your computer. The agents' own apps still send
-prompts and files to their model providers, as they do when you use them directly.
+LoomWatch serves everything on `127.0.0.1` and keeps your run history in a file on this computer.
+What an agent works with (its instructions, your request, and the files and pages it reads) goes to
+OpenRouter and the company whose model it uses, as with any AI service. Skills are fetched from
+skills.sh, ClawHub or GitHub only when you add one.
 
 </details>
 
 <details>
-<summary><strong>Can different agents in one team use different apps and models?</strong></summary>
+<summary><strong>Can different agents in one team use different models?</strong></summary>
 
-Yes. Each agent card has its own app and model. A team can research with Claude Code, review with
-Codex and write with OpenCode. Through OpenCode, an agent can also use models such as DeepSeek, Kimi,
-GLM, Qwen or Mistral.
+Yes. Each agent card has its own model and effort. A team can research on Claude Sonnet, check on
+GPT and draft on a free model such as DeepSeek or Qwen, all through the one OpenRouter key.
 
 </details>
 
 <details>
 <summary><strong>What happens when an agent asks for permission to do something?</strong></summary>
 
-LoomWatch decides, so every AI app follows the same rules. It puts each app in its ask-first mode and
-answers every request itself. Each agent's panel in **Workflow** has three switches under **Allowed
+LoomWatch decides, for every agent. Each agent's panel in **Workflow** has three switches under **Allowed
 without asking**: **Search the web**, **Edit files** (only in the agent's own folder) and **Run
 commands**. They start off, except **Search the web** for researchers. LoomWatch always allows the
 team's own handovers and the tools, folders and files you connected to the agent.
@@ -881,8 +843,10 @@ team's own handovers and the tools, folders and files you connected to the agent
 Anything else waits for you. The agent pauses and asks in the team chat, as its own message, such
 as "Asks to use the web · Web search · …". You answer right below it: **Allow**, **Allow for this
 run**, **Allow for the whole team** (every agent in this run may use that tool without asking),
-**Always allow** (which switches it on for that agent) or **Deny**. The chat keeps how it
-ended, such as "You allowed it, this once". The same question shows up in the Needs-you tray from
+**Always allow** (which switches it on for that agent) or **Deny**. For a command, **Edit, then
+allow** lets you change it before it runs, this once, and **Answer instead** sends the agent your
+reply in place of what it asked to do, so nothing runs. The chat keeps how it ended, such
+as "You allowed it, this once". The same question shows up in the Needs-you tray from
 any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
 straight away because nobody is watching.
 
@@ -896,41 +860,31 @@ LoomWatch decides this on your computer from the command itself; no model is ask
 sent anywhere.
 
 The run records every request and who answered it. When something was declined, the run receipt says
-what the agent couldn't do and offers **Allow from now on**. OpenCode doesn't ask before it acts, so
-the switches can't hold it back.
+what the agent couldn't do and offers **Allow from now on**.
 
-LoomWatch starts agents without the tools that publish, post or message outside the run. An agent
-you allow to run commands or use the web, an OpenCode agent, or an MCP server in Codex's own
-settings can still reach the internet. Claude Code can publish to your
-claude.ai account, schedule work, send notifications and message your other Claude sessions without
-asking, so LoomWatch starts every agent without those tools. Your team's answer leaves through your
-review and the delivery you set up, such as **Send every answer to Notion**. If such a tool runs anyway,
-for example on an app that ignores the rule, the run receipt flags it.
-
-Codex brings its plugins and the apps on your ChatGPT account into every session, including the
-ChatGPT app's browser and computer control, and runs any of their tools that call themselves
-read-only without asking. So LoomWatch starts every Codex agent with plugins and apps switched off.
-The MCP servers you added to Codex's own settings (`~/.codex/config.toml`) still load, because
-LoomWatch can't switch them off through Codex's adapter yet. If an agent uses any tool LoomWatch
-didn't connect to it without asking you, the run receipt flags it.
+LoomWatch's agents have no tools that publish, post or message outside the run: they read and write
+files in their folder, search and read the web, run commands, and talk to their team. An agent you
+allow to run commands or use the web can still reach the internet. Your team's answer leaves
+through your review and the delivery you set up, such as **Send every answer to Notion**.
 
 </details>
 
 <details>
 <summary><strong>Is it safe to run a team someone shared?</strong></summary>
 
-A team file is a list of programs to start, so treat one like any script you download. LoomWatch
+A team file says what each agent is told, which model it runs on, what it may do without asking,
+which folders it works in and when it runs, so treat one from someone else with care. LoomWatch
 helps you check it. The first time you run a team that wasn't built in LoomWatch, or that changed
 outside it, LoomWatch shows what it will do before anything starts:
 
-- which app or program each agent runs, with any program LoomWatch doesn't know quoted in full;
+- which model each agent runs on;
 - what each agent may do without asking;
 - the folders it can read;
 - whether it runs on a schedule.
 
 Choose **Trust and run** only if you trust where it came from. Until then its schedule does
-nothing. A team file also can't change what an app loads or where it connects, for example with
-`NODE_OPTIONS` or a proxy. See [SECURITY.md](SECURITY.md) for what LoomWatch does and doesn't
+nothing. A team file can't start a program of its own: a program an older team file names is never
+run. See [SECURITY.md](SECURITY.md) for what LoomWatch does and doesn't
 protect against.
 
 </details>
@@ -939,27 +893,25 @@ protect against.
 <summary><strong>Can I run it on a server, or entirely in Docker?</strong></summary>
 
 Yes. See [Run everything with Docker Compose](#optional-run-everything-with-docker-compose). The
-recommended desktop setup runs LoomWatch itself on your computer so it can use the apps, skills and
-sign-ins already there.
+recommended desktop setup runs LoomWatch itself on your computer, so agents can work in your own
+folders.
 
 </details>
 
 ## Optional: run everything with Docker Compose
 
 Use this mode for CI, demos, or an intentionally isolated Linux deployment. It is not the
-recommended desktop setup: a container cannot automatically see host executables, skills, MCP
-configuration, credentials, or arbitrary host workspace paths.
+recommended desktop setup: agents in the container can only work in the folders mounted into it.
 
 <details>
 <summary>Set up the Compose stack</summary>
 
-Create your settings file with `cp .env.example .env` and replace the `replace-with-…` value with
-long random letters and numbers. Then create a repository-local teams folder, and build and start
-the stack:
+To change a default, copy the settings file with `cp .env.example .env` and edit it. Then create a
+repository-local teams folder, and build and start the stack:
 
 ```sh
 mkdir -p teams
-cp -n examples/operator-stop.yaml examples/operator-stop-harness.py teams/
+cp -n examples/operator-stop.yaml teams/
 docker compose up --build --detach --wait
 ```
 
@@ -975,61 +927,17 @@ The defaults mount these explicit roots:
 | --- | --- | --- | --- |
 | `/data/teams` | `./teams` | Read/write | Team YAML, Brief files, layouts, and managed `.loomwatch` workspaces |
 | `/workspaces` | `./container/workspaces` | Read/write | Repositories used by container-native agents |
-| `/opt/loomwatch/capabilities` | `./container/capabilities` | Read-only | Skills and plugin metadata intentionally imported for discovery |
-| `/home/node` | `loomwatch-home` volume | Read/write | Harness credentials, mutable CLI state, and the run history |
+| `/home/node` | `loomwatch-home` volume | Read/write | The run history, your OpenRouter key and LoomWatch's skills |
 
 </details>
 
 <details>
-<summary>Use harnesses installed on the host</summary>
+<summary>Your key and skills in the container</summary>
 
-A Linux container cannot execute a macOS or Windows binary, so LoomWatch uses a narrow native
-runner instead of mounting your home directory or Docker socket. Set a random
-`LOOMWATCH_HOST_RUNNER_TOKEN` in `.env`, then start the companion from the repository in a host
-terminal:
-
-```sh
-./container/run-host-runner.sh
-```
-
-Keep that terminal open and start the Compose stack normally in another terminal. The Library now
-shows the harnesses found on the host. Agents added from those rows use an internal
-`loomwatchd harness-client` command: model discovery and runs stream over the same authenticated
-connection to the native ACP adapter. The runner accepts only LoomWatch's known ACP harnesses and
-maps working directories only beneath `/data/teams` and `/workspaces` back to their configured host
-bind mounts.
-
-The runner listens on `0.0.0.0:3031` so Docker Desktop's `host.docker.internal` gateway can reach
-it. It requires the token on every connection. If port 3031 is already used, change both
-`LOOMWATCH_HOST_RUNNER_LISTEN` and `LOOMWATCH_HOST_RUNNER_ADDR` in `.env`.
-
-Override the three bind-mounted host directories in `.env`. Do not point the capability import at
-your complete home directory. Its README documents the expected `.codex`, `.claude`, `.agents`, and
-OpenCode subdirectories.
-
-</details>
-
-<details>
-<summary>Harnesses and skills in the container</summary>
-
-The Library combines harness commands executable inside the container with harnesses reported by a
-reachable native companion; host entries win when both environments provide the same app. The base
-image includes Node.js, Python, Git, curl, and everything needed by the offline demo, but it does
-not bundle third-party provider CLIs. Without the native companion, build a derived image with the
-required Linux harnesses or install user-scoped CLI packages into the persistent runtime home. The
-image's `PATH` includes `/home/node/.local/bin`.
-
-Authenticate from the same runtime after installing a harness:
-
-```sh
-docker compose exec loomwatch sh
-npm config set prefix "$HOME/.local"
-# Install and authenticate only the provider CLIs you intend to use.
-```
-
-Import skill definitions through `container/capabilities`, preserving their conventional paths.
-Imports are read-only; LoomWatch copies only a skill explicitly wired to an agent into that team's
-managed workspace. Do not put provider tokens, SSH keys, or other credentials in the import.
+Add your OpenRouter key in the browser as on a Mac. In the container it is kept in `keys.json` in
+LoomWatch's state folder, inside the `loomwatch-home` volume, readable only by LoomWatch's user, and
+the skills you add on the Skills page are kept in the same volume. The image includes Node.js,
+Python, Git and curl, for skills whose scripts need them.
 
 Team files running against a mounted repository should use a path below `/workspaces`. Absolute
 host paths such as `/Users/name/project` do not exist inside the Linux container.
@@ -1046,12 +954,12 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Your agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that **Try it** runs are in `.jobs/.bench` |
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
-| AI apps you connected to LoomWatch | `.loomwatch/connections.json` in your teams folder. It holds each app's private key. |
+| Your OpenRouter key | This Mac's Keychain, as `LoomWatch.OpenRouter`. On Linux and in Compose, `keys.json` in LoomWatch's state folder, readable only by your user |
+| Your skills | `skills/` in `~/Library/Application Support/LoomWatch` (`~/.local/state/loomwatch` on Linux), and where each one came from in `skills.json` beside it. Skills that travel with a team are in `.agents/skills` beside its file |
 | Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | One file, `loomwatch.db`, in `~/Library/Application Support/LoomWatch` on macOS or `~/.local/state/loomwatch` on Linux. A copy of the source keeps its own in `.loomwatch/` in its folder; Compose deployments in the `loomwatch-home` volume. |
 | Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `~/.local/state/loomwatch` on Linux |
 | Copies of the run history saved by `loomwatch update` | `~/LoomWatch/backups`, one folder per copy of LoomWatch, the three newest in each |
 | The version the last update replaced, for `loomwatch rollback` | `.previous` in `~/LoomWatch/app` |
-| Provider sign-in | Managed by each host agent app; Compose-only deployments use `loomwatch-home` |
 
 Back up your teams folder and the run history if you want to move or preserve your work. Copy the
 history while LoomWatch runs with `~/LoomWatch/app/bin/loomwatchd backup ~/loomwatch-copy.db`, or
@@ -1082,7 +990,7 @@ delete its folder from `.trash`.
 
 Build an agent in **Your agents** (**Build an agent** on Home), or keep one that works in a team:
 select it and choose **Add to Your agents**. It appears under **Your agents** in every team's add
-panel, with its instructions, app, model, skills and what it may do without asking.
+panel, with its instructions, model, skills and what it may do without asking.
 
 Placing it copies that version into the team, so a team runs exactly what it was approved with.
 Saving a change to what a team copies, such as its job, makes the next version and keeps the
@@ -1109,13 +1017,14 @@ you can share it by copying it into another teams folder's `.jobs`.
 | "Your run history from the earlier version is still in Docker" | The first start after updating could not read the Docker database an earlier version used. Start Docker Desktop, stop LoomWatch, and run `~/LoomWatch/app/loomwatch import`. Running it twice is safe: nothing is copied twice. |
 | "The database … was set up by a newer LoomWatch" | You went back to an older version by hand. Run the newer one again, or `loomwatch rollback`, which puts back the copy saved before the update. |
 | Another program is using port 3000 | Start LoomWatch on another port: `LOOMWATCH_PORT=3001 ~/LoomWatch/app/loomwatch`. |
-| LoomWatch says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" and none of your AI apps can start | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `loomwatch` again. |
+| LoomWatch says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `loomwatch` again. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
-| Agent is missing or unavailable | Run `command -v <agent-command>` in the LoomWatch terminal. Authenticate the app, then restart LoomWatch from that same terminal. Compose-only deployments scan the container unless the native companion is running. |
-| Skill or tool is missing locally | Confirm it exists below your `.claude`, `.codex`, `.agents`, `.gemini`, `.hermes`, `.openclaw` or `.config/opencode` folder, then click ↻ beside **Search** in Workflow's add panel to scan again. Check that LoomWatch was not started with `LOOMWATCH_CAPABILITY_HOME` pointing elsewhere. |
-| Skill is missing in Compose | Copy its definition below `LOOMWATCH_CAPABILITIES_DIR` using the conventional harness path, then click ↻ beside **Search** in Workflow's add panel to scan again. Symlinks whose targets are outside that mounted root cannot be followed. |
-| Ask says it needs an AI app | Install and sign in to Claude Code, Codex or OpenCode, then start LoomWatch again from that terminal. |
-| Harness working directory is missing | Native teams should use a real host path accessible to the agent app. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
+| "OpenRouter refused the API key" | The key was deleted or mistyped. Make a new one at [openrouter.ai/keys](https://openrouter.ai/keys) and paste it under **AI models** in **Connections…**. |
+| "Your OpenRouter account is out of credits" | Add credits at [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits), or choose a free model for the agent. |
+| "OpenRouter has no model called …" | The model was renamed or retired. Choose another model in the agent's panel. |
+| A skill is missing | Add it on the Skills page, or click **Look on this computer** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
+| Ask asks for a key | Ask runs on your OpenRouter key, like your agents. Add it on Home or under **AI models** in **Connections…**. |
+| An agent's working folder is missing | Native teams should use a real folder on this computer. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Workflow. An edit outside the agent's own folder is never allowed. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
 | UI assets are missing or look out of date | Installed copy: run `~/LoomWatch/app/loomwatch update`. Copy of the source: stop LoomWatch, then start it with `./loomwatch --rebuild`. |
@@ -1127,10 +1036,10 @@ you can share it by copying it into another teams folder's `.jobs`.
 
 | Piece | What it does |
 | --- | --- |
-| `loomwatchd` | One Rust program that starts each agent's app, supervises it, and serves the browser app |
-| [ACP](https://agentclientprotocol.com) | How LoomWatch talks to every agent app, over its standard input and output |
-| Team Bus | A tool server the agents call back into to hand work over, ask each other questions, or report |
-| LoomWatch Control | The tool server Ask LoomWatch and your connected apps use to read, propose and start teams. It answers only on this computer, with a key per app |
+| `loomwatchd` | One Rust program that runs every agent itself, supervises the runs, and serves the browser app |
+| LoomWatch's agent | Each agent's loop: it calls the model through OpenRouter with your key, and uses LoomWatch's tools for files, the web, commands and the team. The key never leaves the program |
+| Team Bus | The tools agents use to hand work over, ask each other questions, or report |
+| LoomWatch Control | The tools Ask LoomWatch uses to read, propose and start teams |
 | Event archive | One SQLite file, built into the program, holding every message, tool call and handover, so runs can be replayed |
 | Browser app | React, streamed live over a WebSocket and packed into the program |
 
@@ -1152,7 +1061,7 @@ The licenses cover the code, not the LoomWatch name, its logo or its crew figure
 
 The fonts packed into LoomWatch (Inter, Fraunces and JetBrains Mono) are under the [SIL Open Font License](ui/public/fonts/OFL.txt). Notices for the other open-source software inside LoomWatch are in [third-party-notices.txt](ui/public/third-party-notices.txt). The running app serves the same file at `/third-party-notices.txt`. After changing a dependency, regenerate it with `node scripts/third-party-notices.mjs`.
 
-LoomWatch is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google, Notion or any other company whose apps it works with. Claude, Claude Code, Codex, Gemini and the other product names here are trademarks of their owners. They are used only to say which apps LoomWatch works with.
+LoomWatch is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google, OpenRouter, Notion or any other company whose models or services it works with. Claude, GPT, Gemini, OpenRouter and the other product names here are trademarks of their owners. They are used only to say which models and services LoomWatch works with.
 
 <br>
 
@@ -1162,5 +1071,5 @@ LoomWatch is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI,
     <img src="docs/assets/readme/loommark-light.svg" width="72" alt="The LoomWatch mark: the crew's face, sewn onto its tile with a gold running stitch.">
   </picture>
   <br>
-  <sub>Woven with Rust, React and ACP. Watch every thread.</sub>
+  <sub>Woven with Rust and React. Watch every thread.</sub>
 </p>

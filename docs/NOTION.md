@@ -1,9 +1,10 @@
 # Connect your own Notion workspace
 
-Open **Connections** from the workspace menu (the **LW** button, top right of the canvas) or
+Open **Connections** from the workspace menu (the ☰ button, top right of the canvas) or
 at `/connections` on the same local daemon as the editor. The menu is the discoverable
 route; `⌘K → Connections…` and the URL reach the same surface. Like the rest of that menu
-it is hidden below 768px, so connecting is a desktop task.
+it is hidden below 768px, so connecting is a desktop task. The same page holds your OpenRouter
+key, under **AI models**. The two are kept apart, and agents never get either.
 
 ## Connect with your Notion account
 
@@ -37,8 +38,8 @@ LoomWatch in Notion's settings, under its connections.
 
 ## Advanced: connect with an integration token
 
-For workspaces where an admin only lets approved AI apps connect. Open **Advanced: connect with an
-integration token** under **Connect Notion**:
+For workspaces where an admin lets only approved AI tools connect to Notion. Open **Advanced:
+connect with an integration token** under **Connect Notion**:
 
 1. Create an internal integration for your workspace in Notion's developer portal. Enable
    Read, Insert and Update content. A workspace owner may need to do this.

@@ -38,8 +38,8 @@ mkdir -p "$pkg/bin" "$pkg/examples"
 cp "$program" "$pkg/bin/loomwatchd"
 cp "$root/loomwatch" "$root/scripts/install.sh" "$pkg/"
 cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$pkg/"
-cp "$root/examples/operator-stop.yaml" "$root/examples/operator-stop-harness.py" "$pkg/examples/"
-chmod 755 "$pkg/bin/loomwatchd" "$pkg/loomwatch" "$pkg/install.sh" "$pkg/examples/operator-stop-harness.py"
+cp "$root/examples/operator-stop.yaml" "$pkg/examples/"
+chmod 755 "$pkg/bin/loomwatchd" "$pkg/loomwatch" "$pkg/install.sh"
 # "<version> <commit>": install.sh shows the first, and the launcher reports the second in
 # Send feedback, as a copy of the source reports its checkout.
 printf '%s %s\n' "$version" "$commit" >"$pkg/VERSION"
