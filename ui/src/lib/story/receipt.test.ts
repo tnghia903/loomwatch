@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, recordedReplyText, type RunEvent } from '../watch/events'
@@ -112,9 +109,9 @@ describe('an MCP server its app brought, used without asking', () => {
     ])
   })
 
-  it('names the app that brought a server nothing more is known about', () => {
+  it('says LoomWatch didn’t connect a server nothing more is known about', () => {
     expect(outward([...mcp(2, 'm1', 'agentmemory', 'memory_recall', 'completed'), ...mcp(4, 'm2', 'agentmemory', 'memory_save', 'failed')]).map((line) => line.text))
-      .toEqual(['Gatherer used agentmemory, which Codex brought and LoomWatch didn’t connect, without asking you (2 times)'])
+      .toEqual(['Gatherer used agentmemory, which LoomWatch didn’t connect, without asking you (2 times)'])
   })
 
   it('is not a finding for a server the run record says LoomWatch connected, or for the Team Bus', () => {
@@ -179,12 +176,11 @@ describe('a request an app declined by its own option', () => {
     expect(projectRun(allowed).evidence.find((item) => item.kind === 'permission')).toMatchObject({ status: 'succeeded', detail: 'answered allow_once' })
   })
 
-  it('reads one turn once Codex is asked to carry on: its answer, its whole cost, and why', () => {
+  it('reads one turn once Codex is asked to carry on: its answer, and why', () => {
     const events = [...asked, ...carriedOn, exited]
     const gatherer = projectRun(events).agents[0]
     expect(gatherer.reply).toBe(answer)
     expect(recordedReplyText(events, 'gatherer', answer)).toBe(answer)
-    expect(gatherer.tokens).toBe(116260)
     expect(gatherer.resumedTurns).toBe(1)
     expect(gatherer.turns).toBe(1)
 
@@ -197,11 +193,22 @@ describe('a request an app declined by its own option', () => {
   })
 })
 
-/** The real digest run in lib/watch/usage.test.ts: Gatherer on Codex, Reader and Writer on Claude. */
+/** A run as LoomWatch's engine records it: Gatherer, then Writer, each turn reported whole. */
 describe('the run’s tokens', () => {
-  const digest = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../watch/fixtures/usage-digest-run.json'), 'utf8')) as RunEvent[]
-  const receiptOf = (evidenceComplete: boolean) => {
-    const projection = projectRun(digest, Infinity, { status: 'succeeded', evidenceComplete })
+  const turn = (start: number, agentId: string, usage: Record<string, number>, costUsd: number | null): RunEvent[] => {
+    const totalTokens = Object.values(usage).reduce((sum, value) => sum + value, 0)
+    const result = { stopReason: 'end_turn', usage: { ...usage, totalTokens }, ...(costUsd === null ? {} : { _meta: { loomwatch: { costUsd } } }) }
+    return [
+      { id: `t${start}`, sessionId: 'run-3', agentId, seq: start, ts: at(start), kind: 'message', payload: { role: 'user', content: { type: 'text', text: 'Go' } } },
+      { id: `t${start + 1}`, sessionId: 'run-3', agentId, seq: start + 1, ts: at(start + 1), kind: 'turn_end', payload: { stopReason: 'end_turn', usage: result.usage }, raw: { jsonrpc: '2.0', result } },
+    ]
+  }
+  const run = (writerCost: number | null) => [
+    ...turn(0, 'gatherer', { inputTokens: 20_000, cachedReadTokens: 180_000, outputTokens: 4_000 }, 0.0412),
+    ...turn(2, 'writer', { inputTokens: 6_000, cachedReadTokens: 30_000, outputTokens: 2_499 }, writerCost),
+  ]
+  const receiptOf = (evidenceComplete: boolean, writerCost: number | null = 0.0233) => {
+    const projection = projectRun(run(writerCost), Infinity, { status: 'succeeded', evidenceComplete })
     return buildReceipt({
       attempt: 4,
       prompt: 'Today’s tech news digest',
@@ -209,27 +216,30 @@ describe('the run’s tokens', () => {
       elapsed: '12m',
       agents: [
         { id: 'gatherer', name: 'Gatherer', operator: false, runtime: { status: 'succeeded' } },
-        { id: 'reader', name: 'Reader', operator: false, runtime: { status: 'succeeded' } },
         { id: 'writer', name: 'Writer', operator: false, runtime: { status: 'succeeded' } },
       ],
       projection,
       evidenceByAgent: new Map(),
-      harnessLabels: new Map([['gatherer', 'Codex'], ['reader', 'Claude'], ['writer', 'Claude']]),
+      harnessLabels: new Map([['gatherer', 'Claude Sonnet 5.5'], ['writer', 'Claude Opus 5.5']]),
       answered: true,
     })
   }
 
-  it('prints every call each app made, says which counts were added up, and copies the line', () => {
-    const { tokens } = receiptOf(true)
-    expect(tokens).toMatchObject({ value: '~2.63M', exact: '2,628,961 tokens', cached: '89% cached' })
+  it('prints every agent’s tokens as reported, what OpenRouter charged, and copies the line', () => {
+    const { tokens, ranOn } = receiptOf(true)
+    expect(ranOn).toBe('Claude Sonnet 5.5, Claude Opus 5.5')
+    expect(tokens).toMatchObject({ value: '242k', exact: '242,499 tokens', cached: '89% cached', cost: '$0.0645', estimate: null })
     expect(tokens?.agents).toEqual([
-      { label: 'Gatherer', value: '~2.25M', exact: '2,245,301 tokens' },
-      { label: 'Reader', value: '313k', exact: '313,161 tokens' },
-      { label: 'Writer', value: '70.5k', exact: '70,499 tokens' },
+      { label: 'Gatherer', value: '204k', exact: '204,000 tokens' },
+      { label: 'Writer', value: '38.5k', exact: '38,499 tokens' },
     ])
-    expect(tokens?.purposes.map((row) => [row.label, row.value])).toEqual([['The work', '~2.16M'], ['Handovers', '219k'], ['Checkpoints', '254k']])
-    expect(tokens?.estimate).toBe('~ Codex reports only the last model call of each turn, so LoomWatch adds up every call it reported.')
-    expect(receiptMarkdown(receiptOf(true))).toContain('- **Tokens:** ~2.63M · 89% cached')
+    expect(tokens?.purposes.map((row) => [row.label, row.value])).toEqual([['The work', '242k']])
+    expect(receiptMarkdown(receiptOf(true))).toContain('- **Tokens:** 242k · 89% cached')
+    expect(receiptMarkdown(receiptOf(true))).toContain('- **Cost:** $0.0645')
+  })
+
+  it('says the cost is at least what is known when a turn’s cost isn’t', () => {
+    expect(receiptOf(true, null).tokens?.cost).toBe('at least $0.0412')
   })
 
   it('prints nothing while the replay is still paging in', () => {

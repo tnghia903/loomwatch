@@ -1,7 +1,7 @@
 // "Send feedback": a prefilled GitHub issue, opened by the operator in their own browser.
 // LoomWatch never posts anything itself; it only builds the link and the details it carries.
 import { daemonFetch } from '../daemonFetch'
-import { harnessProblem, type DetectedHarness } from '../harnesses'
+import type { KeyStatus } from '../ai/client'
 
 /** Where LoomWatch's issues live. */
 export const FEEDBACK_REPOSITORY = 'https://github.com/tnghia903/loomwatch'
@@ -79,11 +79,12 @@ export function withoutHomeFolder(text: string): string {
 
 /**
  * The details added to a report, one fact per line. It names the build, the system, the browser,
- * the screen and which AI apps can start, never a team, a file, a prompt or a run's contents.
+ * the screen and whether an OpenRouter key is added, never the key, a team, a file, a prompt or a
+ * run's contents.
  */
 export function describeSystem(
   about: AboutLoomWatch | null,
-  harnesses: readonly DetectedHarness[] | null,
+  key: KeyStatus | null,
   context: FeedbackContext,
   userAgent: string = typeof navigator === 'undefined' ? '' : navigator.userAgent,
 ): string {
@@ -97,13 +98,7 @@ export function describeSystem(
   }
   lines.push(`Browser: ${browserName(userAgent)}`)
   if (context.screen) lines.push(`Screen: ${SCREENS[context.screen]}`)
-  if (harnesses) {
-    const apps = harnesses.map((harness) => {
-      const problem = harnessProblem(harness)
-      return problem ? `${harness.name} (can't start: ${problem.slice(0, 160)})` : `${harness.name} (ready)`
-    })
-    lines.push(`AI apps: ${apps.length > 0 ? apps.join('; ') : 'none found'}`)
-  }
+  if (key) lines.push(`OpenRouter key: ${key.connected ? `added${key.freeTier ? ', free models only' : ''}` : 'not added'}`)
   if (context.error) lines.push(`Error: ${context.error.slice(0, 1200)}`)
   const text = withoutHomeFolder(lines.join('\n'))
   return text.length > MAX_DETAILS ? `${text.slice(0, MAX_DETAILS - 1)}…` : text

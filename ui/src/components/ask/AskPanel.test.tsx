@@ -1,30 +1,39 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AskApp } from '../../lib/ask/client'
-
+import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
+import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
+import { forgetModels } from '../../lib/ai/useModels'
 import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import type { CardActions } from './AskCards'
 import { AskButton } from './AskButton'
 import { AskPanel } from './AskPanel'
 
+const model = (id: string, name: string) => ({ id, name, contextLength: 200_000, inputPrice: 2, outputPrice: 10, free: false, reasoning: true })
+const opus = model(DEFAULT_MODEL, 'Anthropic: Claude Opus 5.5')
+const haiku = model('anthropic/claude-haiku-5.5', 'Anthropic: Claude Haiku 5.5')
+const catalog = { fetchedAt: '2026-10-17T00:00:00Z', defaultModel: opus.id, recommended: [opus, haiku], models: [opus, haiku] }
+
+beforeEach(() => {
+  forgetModels()
+  forgetKeyStatus()
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const body = String(input) === '/api/ai' ? { openrouter: { connected: false } } : catalog
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }))
+})
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
 })
 
-const CLAUDE: AskApp = { id: 'claude', name: 'Claude', available: true, reason: null }
-const CODEX: AskApp = { id: 'codex', name: 'Codex', available: true, reason: null }
-const GEMINI: AskApp = { id: 'gemini', name: 'Gemini', available: false, reason: 'gemini is not signed in' }
-
 function controller(overrides: Partial<AskController> = {}): AskController {
   return {
-    open: true, setOpen: vi.fn(), apps: { apps: [CLAUDE, CODEX, GEMINI], defaultApp: 'claude' },
-    selectedApp: CLAUDE, selectedModel: null, chooseApp: vi.fn(),
+    open: true, setOpen: vi.fn(), selectedModel: DEFAULT_MODEL, chooseModel: vi.fn(), needsKey: false,
     conversationId: null, unavailable: null, thread: EMPTY_THREAD, activity: null, pending: null, ended: false, sending: false, sentAt: null,
     error: null, dismissError: vi.fn(), askBeforeRun: true, setAskBeforeRun: vi.fn(), draft: '', setDraft: vi.fn(), focusRequest: 0,
-    ask: vi.fn(), send: vi.fn(async () => true), startOver: vi.fn(), inbox: [], inboxUnseen: 0, markInboxSeen: vi.fn(),
+    ask: vi.fn(), send: vi.fn(async () => true), startOver: vi.fn(),
     ...overrides,
   }
 }
@@ -39,15 +48,15 @@ function cards(overrides: Partial<CardActions> = {}): CardActions {
 
 const TEAM = 'schemaVersion: 1\nid: brief\nname: Brief\nentrypoint: a\nagents:\n  - { id: a, name: Collector, role: Collect, model: m, spawn: { cmd: c, args: [], env: {}, cwd: "." } }\n  - { id: b, name: Writer, role: Write, model: m, spawn: { cmd: c, args: [], env: {}, cwd: "." } }\nedges:\n  - { from: a, to: b, layer: configured, kind: sequence, ts: "2026-10-02T00:00:00Z" }\n'
 const proposal: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:00:00Z', file: 'brief.yaml', name: 'Brief', isNew: true, summary: 'Gathers and writes.', yaml: TEAM, outcome: null, superseded: false }
-const request: RunRequestCard = { kind: 'run-request', id: 'r1', file: 'brief.yaml', name: 'Brief', request: 'Today’s news', apps: ['Claude'], steps: 2, decision: null, runId: null }
+const request: RunRequestCard = { kind: 'run-request', id: 'r1', file: 'brief.yaml', name: 'Brief', request: 'Today’s news', steps: 2, decision: null, runId: null }
 const note: ReviewNoteCard = { kind: 'review-note', id: 'n1', runId: 'run-1', file: 'brief.yaml', name: 'You', question: 'Approve the brief?', text: 'Approved. Keep it short.' }
 
 function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteCard)[]): AskThread {
   return {
-    state: 'ready', error: null, appName: 'Claude', appId: 'claude', model: null,
+    state: 'ready', error: null, appName: 'LoomWatch', appId: 'loomwatch', model: DEFAULT_MODEL,
     items: [
       { kind: 'person', id: 'm1', text: 'Make me a brief team' },
-      { kind: 'assistant', id: 'a1', steps: [{ id: 's1', label: 'Checked your AI apps', status: 'done', detail: null }], text: 'Here it is.', cards: cardsInTurn, done: true, thinking: false },
+      { kind: 'assistant', id: 'a1', steps: [{ id: 's1', label: 'Checked the models', status: 'done', detail: null }], text: 'Here it is.', cards: cardsInTurn, done: true, thinking: false },
     ],
   }
 }
@@ -57,7 +66,7 @@ describe('AskPanel', () => {
     const ask = controller()
     render(<AskPanel ask={ask} view="home" cards={cards()} />)
     expect(screen.getByRole('heading', { name: 'Ask LoomWatch' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'AI app: Claude. Change' }).closest('.ask-app-line')).toHaveTextContent('Using Claude on this computer')
+    expect(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' }).closest('.ask-app-line')).toHaveTextContent('Using Claude Opus 5.5')
     expect(screen.getByText(/Nothing is saved or run until you say so/)).toBeInTheDocument()
     const suggestions = within(screen.getByRole('list', { name: 'Try asking' })).getAllByRole('button')
     expect(suggestions).toHaveLength(3)
@@ -79,11 +88,12 @@ describe('AskPanel', () => {
     await vi.waitFor(() => expect(ask.setDraft).toHaveBeenLastCalledWith('Add a fact-checker'))
   })
 
-  it('says why Ask cannot be used and keeps the box closed', () => {
-    render(<AskPanel ask={controller({ unavailable: 'Ask needs Claude Code, Codex, Gemini CLI or OpenCode on this computer.' })} view="home" cards={cards()} />)
-    expect(screen.getByText(/Ask needs Claude Code/)).toBeInTheDocument()
+  it('shows the key card in place of the conversation until an OpenRouter key is added, and keeps the box closed', async () => {
+    render(<AskPanel ask={controller({ needsKey: true, unavailable: 'Ask runs on your OpenRouter key. Add it to start.' })} view="home" cards={cards()} />)
+    expect(screen.getByText(/Ask runs on your OpenRouter key/)).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Add your OpenRouter key' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Message to Ask LoomWatch' })).toBeDisabled()
-    for (const button of within(screen.getByRole('list', { name: 'Try asking' })).getAllByRole('button')) expect(button).toBeDisabled()
+    expect(screen.queryByRole('list', { name: 'Try asking' })).toBeNull()
   })
 
   it('shows what the assistant is doing while it works, and Esc closes the panel', () => {
@@ -116,7 +126,7 @@ describe('AskPanel', () => {
     const actions = cards()
     const { rerender } = render(<AskPanel ask={controller({ thread: threadWith(request) })} view="build" cards={actions} />)
     const card = screen.getByRole('article', { name: 'Run Brief?' })
-    expect(within(card).getByText('Uses Claude · 2 steps')).toBeInTheDocument()
+    expect(within(card).getByText('2 steps')).toBeInTheDocument()
     fireEvent.click(within(card).getByRole('button', { name: 'Start run' }))
     expect(actions.onStartRun).toHaveBeenCalledWith(request)
     fireEvent.click(within(card).getByRole('button', { name: 'Not now' }))
@@ -137,107 +147,46 @@ describe('AskPanel', () => {
     expect(actions.onUseNote).toHaveBeenCalledWith(note)
   })
 
-  it('lists what connected apps proposed, newest first, without what was already handled', () => {
-    const actions = cards()
-    const inbox = [
-      { phase: 'ask_proposal', app: 'codex', appName: 'Codex', at: '2026-10-02T09:00:00Z', proposalId: 'old', file: 'a.yaml', name: 'Old', isNew: true },
-      { phase: 'ask_proposal_outcome', app: 'codex', appName: 'Codex', at: '2026-10-02T09:01:00Z', proposalId: 'old' },
-      { phase: 'ask_proposal', app: 'opencode', appName: 'OpenCode', at: '2026-10-02T09:02:00Z', proposalId: 'p9', file: 'b.yaml', name: 'Evening wrap-up', isNew: true },
-    ]
-    render(<AskPanel ask={controller({ inbox })} view="home" cards={actions} />)
-    const section = screen.getByRole('region', { name: 'From your connected apps' })
-    expect(within(section).getAllByRole('listitem')).toHaveLength(1)
-    expect(section).toHaveTextContent('OpenCode proposed a new team “Evening wrap-up”')
-    fireEvent.click(within(section).getByRole('button', { name: 'Show' }))
-    expect(actions.onShowProposal).toHaveBeenCalledWith('p9')
-  })
 })
 
-describe('Choosing the AI app', () => {
-  function stubModels() {
-    const fetch = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === '/api/harnesses/claude/models') {
-        return new Response(JSON.stringify({
-          harnessId: 'claude', currentModelId: 'default',
-          models: [
-            { id: 'default', name: 'Default (recommended)', thinkingEfforts: [] },
-            { id: 'opus', name: 'Opus', thinkingEfforts: [] },
-            { id: 'haiku', name: 'Haiku', thinkingEfforts: [] },
-          ],
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      return new Response(JSON.stringify({ error: `unknown harness ${url}` }), { status: 404 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    return fetch
-  }
-
-  it('lists the apps Ask can use, and an app that cannot run here is shown but not offered', async () => {
-    stubModels()
+describe('Choosing the model', () => {
+  it('lists the recommended models and chooses one', async () => {
     const ask = controller()
     render(<AskPanel ask={ask} view="home" cards={cards()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'AI app: Claude. Change' }))
-    const apps = within(screen.getByRole('group', { name: 'AI app' }))
-    expect(apps.getByRole('button', { name: 'Claude' })).toHaveAttribute('aria-pressed', 'true')
-    const gemini = apps.getByRole('button', { name: /Gemini/ })
-    expect(gemini).toBeDisabled()
-    expect(gemini).toHaveTextContent('Can’t run here')
-    expect(gemini).toHaveAttribute('title', 'gemini is not signed in')
-    fireEvent.click(apps.getByRole('button', { name: 'Codex' }))
-    expect(ask.chooseApp).toHaveBeenCalledWith('codex', null)
-    // Choosing an app keeps the list open, for its models.
-    expect(screen.getByRole('dialog', { name: 'Choose the AI app Ask uses' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' }))
+    const list = await screen.findByRole('listbox', { name: 'Recommended models' })
+    fireEvent.click(within(list).getByRole('option', { name: /Claude Haiku 5\.5/ }))
+    expect(ask.chooseModel).toHaveBeenCalledWith(haiku.id)
+    expect(screen.queryByRole('dialog', { name: 'Choose the model Ask runs on' })).not.toBeInTheDocument()
     // No conversation yet, so nothing warns about starting a new one.
     expect(screen.queryByText(/starts a new conversation/)).not.toBeInTheDocument()
   })
 
-  it('offers the app’s models, its default first, and closes on a choice', async () => {
-    stubModels()
-    const ask = controller()
+  it('keeps the conversation when the same model is chosen, and says a change starts a new one', async () => {
+    const ask = controller({ thread: threadWith() })
     render(<AskPanel ask={ask} view="build" cards={cards()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'AI app: Claude. Change' }))
-    const models = within(screen.getByRole('group', { name: 'Model' }))
-    const opus = await models.findByRole('button', { name: 'Opus' })
-    expect(models.getByRole('button', { name: /Its default/ })).toHaveTextContent('Default (recommended)')
-    // The app's current model is "Its default", so it is not listed twice.
-    expect(models.queryByRole('button', { name: 'Default (recommended)' })).not.toBeInTheDocument()
-    fireEvent.click(opus)
-    expect(ask.chooseApp).toHaveBeenCalledWith('claude', { id: 'opus', name: 'Opus' })
-    expect(screen.queryByRole('dialog', { name: 'Choose the AI app Ask uses' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' }))
+    expect(screen.getByText('Changing the model starts a new conversation.')).toBeInTheDocument()
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Recommended models' })).getByRole('option', { name: /Claude Opus 5\.5/ }))
+    expect(ask.chooseModel).not.toHaveBeenCalled()
   })
 
-  it('names the chosen model, and says a change starts a new conversation', () => {
-    stubModels()
-    render(<AskPanel ask={controller({ selectedModel: { id: 'opus', name: 'Opus' }, thread: { ...threadWith(), model: 'opus' } })} view="build" cards={cards()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'AI app: Claude · Opus. Change' }))
-    expect(screen.getByText('Changing the app or model starts a new conversation.')).toBeInTheDocument()
-  })
-
-  it('shows the app a live conversation started with, even when another is chosen for the next one', () => {
-    render(<AskPanel ask={controller({ selectedApp: CLAUDE, thread: { ...threadWith(), appName: 'Codex', appId: 'codex', model: 'gpt-5.5' } })} view="build" cards={cards()} />)
-    expect(screen.getByRole('button', { name: 'AI app: Codex · gpt-5.5. Change' })).toBeInTheDocument()
+  it('shows the model a live conversation started with, even when another is chosen for the next one', () => {
+    render(<AskPanel ask={controller({ selectedModel: haiku.id, thread: { ...threadWith(), model: 'openai/gpt-6.1-sol' } })} view="build" cards={cards()} />)
+    expect(screen.getByRole('button', { name: 'Model: GPT-6.1 Sol. Change' })).toBeInTheDocument()
   })
 
   it('cannot be changed while a message is on its way', () => {
     render(<AskPanel ask={controller({ sending: true })} view="build" cards={cards()} />)
-    expect(screen.getByRole('button', { name: 'AI app: Claude. Change' })).toBeDisabled()
-  })
-
-  it('says it could not list the models and keeps the default', async () => {
-    stubModels()
-    render(<AskPanel ask={controller({ selectedApp: CODEX })} view="build" cards={cards()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'AI app: Codex. Change' }))
-    expect(await screen.findByText('Codex will use its own default. LoomWatch couldn’t list its other models.')).toBeInTheDocument()
-    expect(within(screen.getByRole('group', { name: 'Model' })).getByRole('button', { name: /Its default/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' })).toBeDisabled()
   })
 })
 
 describe('AskButton', () => {
-  it('says when the assistant is working and when a connected app left something', () => {
+  it('says when the assistant is working, and whether the panel is open', () => {
     const { rerender } = render(<AskButton ask={controller({ open: false, activity: 'Drafting the team' })} />)
     expect(screen.getByRole('button', { name: 'Ask LoomWatch (Drafting the team)' })).toHaveAttribute('aria-pressed', 'false')
-    rerender(<AskButton ask={controller({ open: true, inboxUnseen: 2 })} />)
-    expect(screen.getByRole('button', { name: 'Ask LoomWatch, 2 new from your connected apps' })).toHaveAttribute('aria-pressed', 'true')
+    rerender(<AskButton ask={controller({ open: true })} />)
+    expect(screen.getByRole('button', { name: 'Ask LoomWatch' })).toHaveAttribute('aria-pressed', 'true')
   })
 })

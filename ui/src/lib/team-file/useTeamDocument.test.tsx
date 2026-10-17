@@ -100,7 +100,7 @@ const SCHEMA_GATE = {
       type: 'array',
       items: {
         type: 'object',
-        required: ['name', 'role', 'model', 'spawn'],
+        required: ['name', 'role', 'model'],
         properties: {
           name: { type: 'string', minLength: 1 },
           role: { type: 'string', minLength: 1 },
@@ -131,7 +131,7 @@ afterEach(() => {
 })
 
 describe('useTeamDocument', () => {
-  it('switches harnesses without losing attached skills and clears incompatible model choices', async () => {
+  it('changes an agent’s model without losing its attached skills', async () => {
     const yaml = TEAM_YAML.replace('    model: kimi-for-coding/k3-256k', '    capabilities: [{ kind: skill, name: claude-design }]\n    model: kimi-for-coding/k3-256k')
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
       String(input) === '/api/config/schema' ? jsonResponse(200, SCHEMA_GATE) : jsonResponse(200, { path: '/teams/research-team.yaml', yaml }),
@@ -139,15 +139,13 @@ describe('useTeamDocument', () => {
     const { result } = renderHook(() => useTeamDocument())
     await waitFor(() => expect(result.current.nodes).toHaveLength(2))
     const before = result.current.nodes[0].data.agent
-    act(() => result.current.updateAgentSpawn('researcher', { cmd: 'codex-acp', args: [], env: {}, cwd: '.' }))
+    act(() => result.current.updateAgentModel('researcher', 'openai/gpt-6.1-sol'))
     const after = result.current.nodes[0].data.agent
-    expect(after.spawn?.cmd).toBe('codex-acp')
+    expect(after.model).toBe('openai/gpt-6.1-sol')
     expect(before.capabilities).toEqual([{ kind: 'skill', name: 'claude-design' }])
     expect(after.capabilities).toEqual(before.capabilities)
-    expect(after.model).toBe('')
     expect(after.role).toBe(before.role)
-    expect(result.current.documentChipState).toBe('invalid')
-    act(() => result.current.updateAgentModel('researcher', 'gpt-5.6'))
+    expect(result.current.yamlPreview).toContain('model: openai/gpt-6.1-sol')
     // Validation waits for the schema, which loads on its own; under a busy test run it can land
     // after this edit, so wait for it rather than assume it is already there.
     await waitFor(() => expect(result.current.documentChipState).toBe('dirty'))
@@ -216,8 +214,7 @@ describe('useTeamDocument', () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
 
     act(() => result.current.addAgentFromDrop(JSON.stringify({
-      group: 'presets', id: 'reviewer', label: 'Reviewer', role: 'Review work', model: 'model-1',
-      spawn: { cmd: 'codex-acp', args: [] },
+      group: 'presets', id: 'reviewer', label: 'Reviewer', role: 'Review work', model: 'anthropic/claude-haiku-5.5',
     }), { x: 0, y: 0 }))
     await act(async () => { await result.current.save() })
 
@@ -634,7 +631,7 @@ describe('useTeamDocument', () => {
     expect(result.current.yamlPreview).not.toContain('allow:')
   })
 
-  it('shows a working-folder edit in the YAML preview and validation at once, keeping the rest of spawn', async () => {
+  it('shows a working-folder edit in the YAML preview and validation at once, dropping an AI app’s command', async () => {
     const yaml = TEAM_YAML.replace('      cwd: .\n    model: kimi-for-coding/k3-256k', '      cwd: ""\n    model: kimi-for-coding/k3-256k')
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) =>
       String(input) === '/api/config/schema'
@@ -649,8 +646,7 @@ describe('useTeamDocument', () => {
     expect(result.current.yamlPreview).toContain('cwd: work')
     expect(result.current.fieldProblemsByAgent.get('researcher')?.cwd).toBeUndefined()
     expect(result.current.isValid).toBe(true)
-    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.spawn)
-      .toEqual({ cmd: 'opencode', args: ['acp'], env: {}, cwd: 'work' })
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.spawn).toEqual({ cwd: 'work' })
   })
 
   it('save() rechecks an unchanged disk revision, PUTs the mutated YAML, and settles on saved', async () => {

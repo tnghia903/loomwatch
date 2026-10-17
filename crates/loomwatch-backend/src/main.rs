@@ -346,6 +346,14 @@ async fn main() -> Result<()> {
                 // The OpenRouter key and the model list. Like Notion's connection, only on this
                 // computer's own address.
                 app = app.merge(loomwatch_backend::ai::router(ai.clone()));
+                // LoomWatch's skills folder, bringing skills in from apps on request, and installing
+                // from GitHub, skills.sh and ClawHub. Building it scans and fetches nothing.
+                app = app.merge(loomwatch_backend::skills_api::router(
+                    state_dir.clone(),
+                    std::env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_default(),
+                ));
             }
             // After "Update and restart": stop taking requests, give the open ones a moment (the
             // app's live streams never end by themselves), then exit with the status that has the

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
-import type { DetectedHarness } from '../../lib/harnesses'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
 import { benchFolder } from '../../lib/library/jobs'
@@ -18,8 +17,7 @@ import { TeamFiguresContext } from './figureContext'
 
 export interface AgentChatProps {
   draft: AgentDraft
-  harness: DetectedHarness | null
-  /** A model the app advertises: the draft's, else the app's current one. Empty while unknown. */
+  /** The OpenRouter model it runs on. */
   model: string
   /**
    * Names the chat: the saved agent's id, or what a new one will be saved as. The chat's history
@@ -53,28 +51,28 @@ const message = (failed: unknown) => (failed instanceof Error ? failed.message :
  * as it is on screen, saved or not, so a change made in Build is in its next answer. Every message
  * goes to the agent: it starts work when the agent is free and joins its turn while it works.
  */
-export function AgentChat({ draft, harness, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge }: AgentChatProps) {
+export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge }: AgentChatProps) {
   const agentId = chatAgentId(chatId)
   const name = draft.name.trim() || 'New agent'
   // A new agent's chat is kept under its name, so one with no name yet has nowhere to keep it.
   const blocked = !draft.name.trim() ? 'Give it a name in Build first: its chat is kept under it.'
-    : !harness ? 'Choose an app for it in Build first.' : !model ? 'Waiting for the app’s models…' : !draft.instructions.trim() ? 'Write its instructions in Build first.' : null
+    : !model ? 'Choose a model for it in Build first.' : !draft.instructions.trim() ? 'Write its instructions in Build first.' : null
   const [said, setSaid] = useState('')
   const announce = useCallback((text: string) => setSaid(text), [])
 
   // The chat's team file, written as the agent is now, for what is about to start.
   const write = useCallback(async (path: string): Promise<Prepared> => {
-    if (!harness || !model) return { ok: false, error: blocked ?? 'Choose an app for it first.' }
+    if (!model) return { ok: false, error: blocked ?? 'Choose a model for it first.' }
     try {
       let revision: string | null = null
       try { revision = (await fetchTeamFile(path)).revision ?? null } catch { revision = null }
       const reads = knowledge ? knowledgeForChat(knowledge, path) : []
-      const saved = await saveTeamFile(path, chatTeamYaml(draft, harness, model, chatId, reads), revision)
+      const saved = await saveTeamFile(path, chatTeamYaml(draft, model, chatId, reads), revision)
       return { ok: true, revision: saved.revision ?? null }
     } catch (failed) {
       return { ok: false, error: `Couldn’t set up ${name}’s chat: ${message(failed)}` }
     }
-  }, [draft, harness, model, chatId, name, blocked, knowledge])
+  }, [draft, model, chatId, name, blocked, knowledge])
 
   // Where the chat is kept. An agent you have never talked to has no file yet: it is written once
   // it can be, so the chat has something to open.
@@ -115,10 +113,9 @@ export function AgentChat({ draft, harness, model, chatId, figure, onAllow, onRe
     predecessors: new Map(),
     order: [],
     operators: new Set(),
-    configs: new Map([[agentId, { ...agentFromDraft(draft, harness, model), id: agentId }]]),
-    apps: new Map(harness ? [[agentId, harness.name]] : []),
+    configs: new Map([[agentId, { ...agentFromDraft(draft, model), id: agentId }]]),
     solo: agentId,
-  }), [agentId, name, figure, draft, harness, model])
+  }), [agentId, name, figure, draft, model])
   const agents = useMemo(() => [{ id: agentId, name }], [agentId, name])
   const figures = useMemo(() => new Map([[agentId, figure]]), [agentId, figure])
 

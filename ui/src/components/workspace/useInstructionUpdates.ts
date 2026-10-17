@@ -3,7 +3,7 @@
 // Removing a card, or the line from one agent to it, marks every agent whose instructions name the
 // source: found by matching text, so it costs nothing. The agent can no longer use the source
 // whatever its instructions say (ADR 0060); the mark is so the instructions can be made to match.
-// Rewriting them is the person's call, because it is a turn of their Ask app. What comes back is
+// Rewriting them is the person's call, because it is a model call on their OpenRouter key. What comes back is
 // applied as one ordinary edit, so one ⌘Z puts it all back and nothing is saved until the team is,
 // and each change stays marked until the person keeps it or puts the old instructions back.
 
@@ -30,10 +30,7 @@ export interface InstructionUpdate {
 export interface InstructionUpdatesInput {
   agents: readonly AgentConfig[]
   teamPath: string | null
-  /** The Ask app and model the person chose; null for the daemon's default. */
-  app: string | null
-  model: string | null
-  /** Why no AI app can rewrite them here, or null when one can. */
+  /** Why they can't be rewritten here (no OpenRouter key), or null when they can. */
   unavailable: string | null
   /** Whether the source is given again (an undo): the card is back, or the line for `source.from`. */
   isBack: (source: RemovedSource) => boolean
@@ -52,7 +49,7 @@ export interface InstructionUpdates {
   keepAll: () => void
   /** Put back the instructions as they were when the source was removed. */
   putBack: (agentId: string) => void
-  /** Have the Ask app rewrite every agent whose instructions still name a removed source. */
+  /** Have LoomWatch rewrite every agent whose instructions still name a removed source. */
   rewrite: () => void
   /** What each marked agent's card says. */
   notes: ReadonlyMap<string, string>
@@ -78,7 +75,7 @@ export function useInstructionUpdates(input: InstructionUpdatesInput): Instructi
 
   const ask = useCallback((source: RemovedSource, agents: readonly AgentConfig[]) => {
     const ids = new Set(agents.map((agent) => agent.id))
-    const { unavailable, app, model, rewrite = rewriteInstructions } = latest.current
+    const { unavailable, rewrite = rewriteInstructions } = latest.current
     const start = (agent: AgentConfig): InstructionUpdate => unavailable
       ? { agentId: agent.id, source, before: agent.role, after: null, state: 'failed', error: unavailable }
       : { agentId: agent.id, source, before: agent.role, after: null, state: 'working' }
@@ -91,7 +88,7 @@ export function useInstructionUpdates(input: InstructionUpdatesInput): Instructi
       const next = change(entry)
       return next ? [next] : []
     }))
-    void rewrite({ app, model, removed: { name: source.name, kind: source.kind }, agents: agents.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role })) })
+    void rewrite({ removed: { name: source.name, kind: source.kind }, agents: agents.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role })) })
       .then((answers) => {
         const now = latest.current
         if (now.isBack(source)) return settle(() => null)
@@ -116,7 +113,7 @@ export function useInstructionUpdates(input: InstructionUpdatesInput): Instructi
         settle((entry) => outcome.has(entry.agentId) ? outcome.get(entry.agentId) ?? null : entry)
       })
       .catch((error: unknown) => {
-        const reason = error instanceof Error && error.message ? error.message : 'The AI app did not answer.'
+        const reason = error instanceof Error && error.message ? error.message : 'The model did not answer.'
         settle((entry) => ({ ...entry, state: 'failed', error: reason }))
       })
   }, [])

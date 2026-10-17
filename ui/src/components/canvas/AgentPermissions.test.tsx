@@ -45,9 +45,4 @@ describe('AgentPermissions', () => {
     rerender(<AgentPermissions agent={agent()} onChange={onChange} readOnly />)
     expect(screen.getByRole('button', { name: /Edit files/ })).toBeDisabled()
   })
-
-  it('says plainly when the agent’s app never asks, so the switches cannot hold it back', () => {
-    render(<AgentPermissions agent={agent({ spawn: { cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' } })} onChange={vi.fn()} />)
-    expect(screen.getByText('OpenCode doesn’t ask before it acts, so these switches can’t hold it back.')).toBeInTheDocument()
-  })
 })

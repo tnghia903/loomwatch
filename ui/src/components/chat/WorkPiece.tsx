@@ -39,8 +39,8 @@ export interface TeamView {
   operators: ReadonlySet<string>
   /** Each agent's configuration from the team file: the skills its answer's review rests on. */
   configs?: ReadonlyMap<string, AgentConfig>
-  /** The AI app each agent runs in, in words ("Claude", "Codex (not installed)"), for its card. */
-  apps?: ReadonlyMap<string, string>
+  /** The model each agent runs on, in words ("Claude Opus 5.5"), for its card. */
+  models?: ReadonlyMap<string, string>
   /** An agent's own chat (Your agents): its one agent, whom all the work is with. There is no team. */
   solo?: string
 }

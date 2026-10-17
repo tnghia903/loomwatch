@@ -18,7 +18,7 @@ function tick(ms = 0) {
 }
 
 function renderGuide() {
-  render(<GettingStarted readyApps={['Claude', 'Codex']} appsLoading={false} />)
+  render(<GettingStarted keyReady keyLoading={false} />)
   tick()
 }
 
@@ -58,7 +58,7 @@ describe('GettingStarted', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('welcomes a first-time user, then starts with building an agent in the apps it found', () => {
+  it('welcomes a first-time user, then starts with building an agent', () => {
     showPage(HOME)
     startTour()
     renderGuide()
@@ -68,7 +68,7 @@ describe('GettingStarted', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start the guide' }))
     tick()
     expect(screen.getByRole('heading', { name: 'Build your first agent' })).toBeInTheDocument()
-    expect(screen.getByText(/found Claude and Codex/)).toBeInTheDocument()
+    expect(screen.getByText(/the AI model you choose for it/)).toBeInTheDocument()
     expect(screen.getByText('Getting started · Step 1 of 11')).toBeInTheDocument()
     expect(screen.getByText('Waiting for you')).toBeInTheDocument()
   })

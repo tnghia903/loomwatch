@@ -1,13 +1,14 @@
 import { AlertCircle, ArrowUp, Check, RotateCcw, X } from 'lucide-react'
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 
-import type { AskContext, InboxItem } from '../../lib/ask/client'
+import type { AskContext } from '../../lib/ask/client'
 import type { AskStep, AssistantTurn } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import { StatusGlyph } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
-import { AskAppPicker } from './AskAppPicker'
+import { OpenRouterKey } from '../connections/OpenRouterKey'
 import { AskCardView, type CardActions } from './AskCards'
+import { AskModelPicker } from './AskModelPicker'
 
 const SUGGESTIONS: Record<AskContext['view'], string[]> = {
   home: [
@@ -69,39 +70,6 @@ function Reply({ turn, cards }: { turn: AssistantTurn; cards: CardActions }) {
   )
 }
 
-function inboxLine(item: InboxItem): string {
-  if (item.phase === 'ask_proposal') return `${item.appName} proposed ${item.isNew ? 'a new team' : 'changes to'} “${item.name || item.file}”`
-  if (item.phase === 'ask_run_started') return `${item.appName} started a run of ${item.file}`
-  if (item.phase === 'ask_review_note') return `${item.appName} drafted a note for ${item.file}`
-  return `${item.appName} used LoomWatch`
-}
-
-function Inbox({ items, cards }: { items: InboxItem[]; cards: CardActions }) {
-  // A proposal the person already applied or discarded has nothing left to do here.
-  const handled = new Set(items.filter((item) => item.phase === 'ask_proposal_outcome').map((item) => item.proposalId))
-  const shown = items
-    .filter((item) => item.phase !== 'ask_proposal_outcome' && !(item.proposalId && handled.has(item.proposalId)))
-    .slice(-3).reverse()
-  if (shown.length === 0) return null
-  return (
-    <section className="ask-inbox" aria-label="From your connected apps">
-      <h3 className="t-micro">From your connected apps</h3>
-      <ul>
-        {shown.map((item) => (
-          <li key={`${item.phase}:${item.at}`}>
-            <span>{inboxLine(item)}</span>
-            {item.phase === 'ask_proposal' && item.proposalId && <button type="button" className="link" onClick={() => cards.onShowProposal(item.proposalId as string)}>Show</button>}
-            {item.phase === 'ask_run_started' && item.runId && item.file && <button type="button" className="link" onClick={() => cards.onOpenRun(item.runId as string, item.file as string)}>Watch</button>}
-            {item.phase === 'ask_review_note' && item.runId && item.file && item.text && (
-              <button type="button" className="link" onClick={() => cards.onUseNote({ kind: 'review-note', id: item.at, runId: item.runId as string, file: item.file as string, name: '', question: item.question ?? '', text: item.text as string })}>Use note</button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
 interface AskPanelProps {
   ask: AskController
   view: AskContext['view']
@@ -113,8 +81,8 @@ interface AskPanelProps {
 }
 
 /**
- * Ask LoomWatch: a conversation with one of the person's own AI apps, which sets up, changes, runs
- * and reviews teams through LoomWatch's tools (ADR 0033). What it makes is shown, never done: a team
+ * Ask LoomWatch: a conversation with LoomWatch's assistant, on the person's OpenRouter key, which
+ * sets up, changes, runs and reviews teams through LoomWatch's tools (ADR 0033). What it makes is shown, never done: a team
  * arrives on the canvas to apply, a run waits for Start, a review note goes in the box unsent.
  */
 export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: AskPanelProps) {
@@ -144,10 +112,6 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
     lastLength.current = element.scrollHeight
   }, [shape])
 
-  useEffect(() => {
-    if (!hidden && ask.open && ask.inboxUnseen > 0) ask.markInboxSeen()
-  }, [hidden, ask])
-
   const submit = () => {
     const text = ask.draft
     if (!text.trim() || working || ask.sending) return
@@ -162,12 +126,8 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
   }
 
   if (hidden) return null
-  // A live conversation keeps the app and model it started with; otherwise the next one's are shown.
-  const liveApp = !finished && thread.appId ? ask.apps?.apps.find((app) => app.id === thread.appId) : undefined
-  const shownApp = liveApp ?? ask.selectedApp
-  const shownModel = liveApp
-    ? thread.model ? (thread.model === ask.selectedModel?.id ? ask.selectedModel : { id: thread.model, name: thread.model }) : null
-    : ask.selectedModel
+  // A live conversation keeps the model it started with; otherwise the next one's is shown.
+  const shownModel = (!finished && thread.model) || ask.selectedModel
 
   return (
     <aside className={`ask-panel ${onHome ? 'on-home' : ''}`} aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); ask.setOpen(false) } }}>
@@ -177,31 +137,26 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
           <h2 id={titleId}>Ask LoomWatch</h2>
           {ask.unavailable
             ? <p className="unavailable">{ask.unavailable}</p>
-            : shownApp && ask.apps
-              ? (
-                // A div, not a p: the picker's list opens inside it.
-                <div className="ask-app-line">
-                  Using{' '}
-                  <AskAppPicker
-                    apps={ask.apps.apps}
-                    app={shownApp}
-                    model={shownModel}
-                    inConversation={items.length > 0 && !finished}
-                    disabled={ask.sending}
-                    onChoose={ask.chooseApp}
-                  />
-                  {' '}on this computer
-                </div>
-              )
-              : <p>{thread.appName ? `Using ${thread.appName} on this computer` : 'Looking for an AI app…'}</p>}
+            : (
+              // A div, not a p: the picker's list opens inside it.
+              <div className="ask-app-line">
+                Using{' '}
+                <AskModelPicker
+                  model={shownModel}
+                  inConversation={items.length > 0 && !finished}
+                  disabled={ask.sending}
+                  onChoose={ask.chooseModel}
+                />
+              </div>
+            )}
         </div>
         {items.length > 0 && <button type="button" className="iconbtn" onClick={ask.startOver} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={15} aria-hidden="true" /></button>}
         <button type="button" className="iconbtn" onClick={() => ask.setOpen(false)} aria-label="Close Ask LoomWatch" title="Close (Esc)"><X size={15} aria-hidden="true" /></button>
       </header>
 
       <div className="ask-scroll" ref={scroller}>
-        <Inbox items={ask.inbox} cards={cards} />
-        {empty ? (
+        {ask.needsKey && <div className="ask-key"><OpenRouterKey variant="card" /></div>}
+        {ask.needsKey ? null : empty ? (
           <div className="ask-empty">
             <p className="ask-empty-title">What should your team do?</p>
             <p className="ask-empty-text">I can set up a team, change one, start a run, or help you review one. Nothing is saved or run until you say so.</p>

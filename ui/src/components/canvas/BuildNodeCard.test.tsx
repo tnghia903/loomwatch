@@ -30,8 +30,7 @@ const nodeData: AgentNode['data'] = {
     id: 'ada',
     name: 'Agent Ada',
     role: 'Protocol Researcher',
-    spawn: { cmd: 'opencode', args: [], env: {}, cwd: '.' },
-    model: 'openai/gpt-5.4',
+    model: 'openai/gpt-6.1-sol',
     status: 'idle',
   },
   isEntrypoint: true,
@@ -50,26 +49,29 @@ function renderCard(data: AgentNode['data'], actionOverrides: Partial<CanvasActi
 afterEach(cleanup)
 
 describe('BuildAgentCard on the Build canvas', () => {
-  it('draws the harness card: kind, name, role and the entrypoint chip', () => {
-    const { container } = renderCard({ ...nodeData, harnessLabel: 'Claude Code' })
+  it('draws the agent card: its model, name, role and the entrypoint chip', () => {
+    const { container } = renderCard({ ...nodeData, modelLabel: 'GPT-6.1 Sol' })
     const card = container.firstElementChild!
     expect(card).toHaveClass('build-node', 'kind-harness')
     expect(card).not.toHaveClass('has-run')
-    expect(screen.getByText('Claude Code')).toHaveClass('node-kind')
+    expect(screen.getByText('GPT-6.1 Sol')).toHaveClass('node-kind')
     expect(screen.getByText('Agent Ada')).toHaveClass('node-name')
     expect(screen.getByText('Protocol Researcher')).toBeInTheDocument()
     expect(screen.getByText('Start')).toHaveClass('primary-chip')
   })
 
-  it('names the harness from the spawn command when the daemon reported no label', () => {
+  it('names the model from its id before the model list has arrived', () => {
     renderCard(nodeData)
-    expect(screen.getByText('OpenCode')).toHaveClass('node-kind')
+    expect(screen.getByText('GPT-6.1 Sol')).toHaveClass('node-kind')
+    cleanup()
+    renderCard({ ...nodeData, agent: { ...nodeData.agent, model: 'fake/offline' } })
+    expect(screen.getByText('Offline demo (no AI)')).toHaveClass('node-kind')
   })
 
   // Nothing a run projects belongs on a card with no run behind it: the task row and the
   // evidence routes would both be claims about an attempt that does not exist.
   it('carries no run rows without a runtime', () => {
-    const { container } = renderCard({ ...nodeData, harnessLabel: 'Claude Code' })
+    const { container } = renderCard(nodeData)
     expect(container.querySelector('.build-node-task')).toBeNull()
     expect(container.querySelector('.build-node-meta')).toBeNull()
   })
@@ -80,18 +82,9 @@ describe('BuildAgentCard on the Build canvas', () => {
     expect(container.firstElementChild).toHaveClass('kind-harness')
   })
 
-  // A team shared from another computer: the file is fine, the app is not here.
-  it('says on the card when its app is not on this computer, and in its accessible name', () => {
-    const sentence = 'Agent Ada’s app “acme-agent-cli” isn’t installed on this computer.'
-    const { container } = renderCard({ ...nodeData, appProblem: sentence })
-    expect(screen.getByText(sentence)).toHaveClass('build-node-app-problem')
-    expect(container.firstElementChild).toHaveAccessibleName(`Agent Ada, OpenCode, Protocol Researcher, ${sentence}`)
-  })
-
-  it('draws no app problem on a card that has none', () => {
+  it('names the agent, its model and its job in its accessible name', () => {
     const { container } = renderCard(nodeData)
-    expect(container.querySelector('.build-node-app-problem')).toBeNull()
-    expect(container.firstElementChild).toHaveAccessibleName('Agent Ada, OpenCode, Protocol Researcher')
+    expect(container.firstElementChild).toHaveAccessibleName('Agent Ada, GPT-6.1 Sol, Protocol Researcher')
   })
 })
 
@@ -117,14 +110,14 @@ describe('BuildAgentCard wears the agent’s figure', () => {
 
 describe('BuildAgentCard while a run is shown', () => {
   it('keeps the Build identity row and adds the task row, model and pipeline ordinal', () => {
-    const { container } = renderCard({ ...nodeData, harnessLabel: 'Claude Code', runtime })
+    const { container } = renderCard({ ...nodeData, modelLabel: 'GPT-6.1 Sol', runtime })
     const card = container.firstElementChild!
     expect(card).toHaveClass('build-node', 'kind-harness', 'has-run', 'st-running')
-    expect(screen.getByText('Claude Code')).toHaveClass('node-kind')
+    expect(screen.getByText('GPT-6.1 Sol')).toHaveClass('node-kind')
     // The state in words, not the record's code (STREAMING).
     expect(screen.getByText('Agent A · lead · Writing its reply')).toBeInTheDocument()
     expect(screen.getByText('Writing the reply')).toHaveClass('task-text')
-    expect(screen.getByText('openai/gpt-5.4')).toHaveClass('model')
+    expect(screen.getByText('openai/gpt-6.1-sol')).toHaveClass('model')
     // Spend is not tracked: the meta row is the model alone, with no dollar figure or meter.
     expect(card.querySelector('.build-node-meta')?.children).toHaveLength(1)
     expect(card).not.toHaveTextContent('$')
@@ -133,18 +126,12 @@ describe('BuildAgentCard while a run is shown', () => {
 
   // The React Flow node wrapper already carries the run's accessible name; a second one on the
   // card would announce the same agent twice.
-  // A run that could not start says so in its own error; the card does not repeat a pre-run check.
-  it('draws no app problem while a run is shown', () => {
-    const { container } = renderCard({ ...nodeData, runtime, appProblem: 'Agent Ada’s app “acme-agent-cli” isn’t installed on this computer.' })
-    expect(container.querySelector('.build-node-app-problem')).toBeNull()
-  })
-
   it('leaves the accessible name to the node wrapper while a run is shown', () => {
     const { container } = renderCard({ ...nodeData, runtime })
     expect(container.firstElementChild).not.toHaveAttribute('aria-label')
     cleanup()
-    const planned = renderCard({ ...nodeData, harnessLabel: 'Claude Code' })
-    expect(planned.container.firstElementChild).toHaveAttribute('aria-label', 'Agent Ada, Claude Code, Protocol Researcher')
+    const planned = renderCard({ ...nodeData, modelLabel: 'GPT-6.1 Sol' })
+    expect(planned.container.firstElementChild).toHaveAttribute('aria-label', 'Agent Ada, GPT-6.1 Sol, Protocol Researcher')
   })
 
   it('marks the perimeter with the run status, and lets selection take it back', () => {
@@ -237,31 +224,24 @@ describe('BuildAgentCard at each depth', () => {
 
   it('adds what the agent may do and is given when zoomed in to Trace', () => {
     view.zoom = 1.4
-    renderCard({ ...nodeData, agent: { ...nodeData.agent, spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }, model: 'sonnet', thinkingEffort: 'high', allow: { web: true, commands: true }, capabilities: [{ kind: 'knowledge', name: 'brand.pdf' }, { kind: 'skill', name: 'claude-design' }] } })
+    renderCard({ ...nodeData, agent: { ...nodeData.agent, model: 'sonnet', thinkingEffort: 'high', allow: { web: true, commands: true }, capabilities: [{ kind: 'knowledge', name: 'brand.pdf' }, { kind: 'skill', name: 'claude-design' }] } })
     expect(facts()).toEqual({
       Model: 'sonnet · high effort',
       Allowed: 'Search the web, run commands',
       Given: 'brand.pdf, claude-design skill',
     })
-    expect(document.querySelector('.depth-trace-facts')).not.toHaveTextContent('claude-agent-acp')
     expect(document.querySelector('.depth-story-line')).toBeNull()
   })
 
   it('says plainly when an agent is allowed and given nothing extra', () => {
     view.zoom = 1.4
-    renderCard({ ...nodeData, agent: { ...nodeData.agent, spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' }, model: undefined } })
-    expect(facts()).toEqual({ Model: 'App default', Allowed: 'Reading only', Given: 'Nothing connected' })
-  })
-
-  it('says an app that never asks is not held back by the switches', () => {
-    view.zoom = 1.4
-    renderCard(nodeData)
-    expect(facts().Allowed).toBe('Anything: OpenCode doesn’t ask')
+    renderCard({ ...nodeData, agent: { ...nodeData.agent, model: undefined } })
+    expect(facts()).toEqual({ Model: 'Default model', Allowed: 'Reading only', Given: 'Nothing connected' })
   })
 
   it('names a folder chosen for the agent, whatever is connected to it (ADR 0042)', () => {
     view.zoom = 1.4
-    const chosen = { ...nodeData.agent, spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '/Users/me/Projects/website' } }
+    const chosen = { ...nodeData.agent, spawn: { cwd: '/Users/me/Projects/website' } }
     renderCard({ ...nodeData, agent: chosen })
     expect(facts()['Works in']).toBe('website')
     cleanup()

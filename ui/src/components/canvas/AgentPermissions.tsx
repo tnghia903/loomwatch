@@ -1,6 +1,6 @@
 import { Check, FilePen, Globe, SquareTerminal } from 'lucide-react'
 
-import { actsWithoutAsking, ALLOW_SWITCHES } from '../../lib/team-file/allow'
+import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
 import { SectionHead } from '../ui/SectionHead'
 
@@ -22,7 +22,7 @@ const ICONS: Record<AllowSwitch, typeof Globe> = { web: Globe, edits: FilePen, c
 const AUTO_TITLE = 'Auto mode: commands that only read files or download pages run on their own; anything else asks you.'
 
 /**
- * ALLOWED WITHOUT ASKING (ADR 0037). LoomWatch answers every permission request the agent's app
+ * ALLOWED WITHOUT ASKING (ADR 0037). LoomWatch answers every permission request the agent
  * makes: these switches are what it says yes to by itself, and anything else waits for the
  * operator's answer during the run (ADR 0040). Everything defaults to off, and what is connected to
  * the agent (its tools, its folders, the team's own handovers) never needs a switch.
@@ -32,7 +32,6 @@ const AUTO_TITLE = 'Auto mode: commands that only read files or download pages r
  * consequence to know about.
  */
 export function AgentPermissions({ agent, readOnly = false, onChange, headClassName, teamAuto = false }: AgentPermissionsProps) {
-  const app = actsWithoutAsking(agent)
   const allowed = ALLOW_SWITCHES.filter(({ key }) => agent.allow?.[key] === true)
   return (
     <div className="agent-context agent-permissions">
@@ -56,12 +55,11 @@ export function AgentPermissions({ agent, readOnly = false, onChange, headClassN
           )
         })}
       </div>
-      {allowed.length > 0 && !app && (
+      {allowed.length > 0 && (
         <ul className="allow-consequences t-meta">
           {allowed.map(({ key, on }) => <li key={key}>{on}</li>)}
         </ul>
       )}
-      {app && <div className="t-meta agent-context-warning">{app} doesn’t ask before it acts, so these switches can’t hold it back.</div>}
     </div>
   )
 }

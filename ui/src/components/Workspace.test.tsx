@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { forgetKeyStatus } from '../lib/ai/useKeyStatus'
+import { forgetModels } from '../lib/ai/useModels'
 import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { Workspace } from './Workspace'
@@ -94,7 +96,7 @@ const event = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload']
 const runRecord = { runId: 'run-1', sessionId: 'run-1', teamPath: 'demo.yaml', prompt: 'Summarise the repo', status: 'running', mode: 'pipeline', entrypoint: 'researcher', responder: 'reviewer', agentIds: ['researcher', 'reviewer'], createdAt: at(0), startedAt: at(0), finishedAt: null, error: null, exitCode: null, eventCount: null, reply: null }
 
 function renderWorkspace(runId: string | null = null, presentation: 'trace' | 'delivery' = 'trace') {
-  const view = render(<Workspace harnesses={[]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onDocumentOpen={vi.fn()} initialRunId={runId} />)
+  const view = render(<Workspace onDocumentOpen={vi.fn()} initialRunId={runId} />)
   // Existing graph regressions exercise the preserved Full trace surface.
   if (runId && presentation === 'trace') fireEvent.click(screen.getByRole('button', { name: 'Full trace' }))
   return view
@@ -120,8 +122,11 @@ beforeEach(() => {
   flowRuntime.onNodeDragStart = null
   flowRuntime.onNodeDragStop = null
   flowRuntime.onConnect = null
+  forgetKeyStatus()
+  forgetModels()
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    if (url === '/api/ai') return new Response(JSON.stringify({ openrouter: { connected: true, label: 'sk-or-v1-abc...xyz' } }), { status: 200 })
     if (url.endsWith('/api/team/layout') && init?.method === 'PUT') return new Response(JSON.stringify({}), { status: 200 })
     // A **version-1** sidecar on purpose: the daemon stamps it forward, and every test in this
     // file therefore exercises the migration path as well as whatever it is about.
@@ -355,7 +360,7 @@ describe('Workspace', () => {
   it('opens the Library row for a card whose recorded source has since changed', async () => {
     composerLayoutState.nodes = [{ id: 'skill:claude-design', kind: 'skill', name: 'claude-design', source: 'Claude Code + OpenCode', position: { x: 10, y: 20 } }]
     const inventory = { tools: [], sources: [], skills: [{ id: 'skill-a1eb6eeb', name: 'claude-design', source: 'Claude Code + Hermes + OpenCode', detail: 'Design one-off HTML artifacts.', status: 'Ready' as const }] }
-    const view = render(<Workspace harnesses={[]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onDocumentOpen={vi.fn()} initialRunId={null} capabilityInventory={inventory} />)
+    const view = render(<Workspace onDocumentOpen={vi.fn()} initialRunId={null} capabilityInventory={inventory} />)
     try {
       await screen.findByLabelText(/claude-design, skill from Claude Code \+ OpenCode/)
       act(() => flowRuntime.onNodesChange?.([{ id: 'skill:claude-design', type: 'select', selected: true }]))
@@ -406,7 +411,7 @@ describe('Workspace', () => {
       expect(await screen.findAllByLabelText(/^reports, linked folder at \/Users\/me\/reports, used by 2 agents$/)).toHaveLength(1)
       expect(screen.getByText('Researcher reads reports')).toBeInTheDocument()
       expect(screen.getByText('Reviewer reads reports')).toBeInTheDocument()
-      expect(screen.getByLabelText(/^claude-design, skill from Not found on this computer, used by 1 agent$/)).toBeInTheDocument()
+      expect(screen.getByLabelText(/^claude-design, skill from Not in LoomWatch’s skills, used by 1 agent$/)).toBeInTheDocument()
       expect(screen.getByText('Researcher uses skill claude-design')).toBeInTheDocument()
 
       // Taking one agent's line away disconnects that agent only, by path, whatever its label.
@@ -884,7 +889,7 @@ describe('Workspace', () => {
     renderWorkspace()
     fireEvent.click(screen.getAllByRole('button', { name: 'Review' }).find((button) => button.hasAttribute('aria-controls'))!)
     fireEvent.click(screen.getByRole('button', { name: /Researcher · Model.*Required/ }))
-    await waitFor(() => expect(screen.getByLabelText('Model')).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Model/ })).toHaveFocus())
     Object.assign(documentState, { nodes: originalNodes, isValid: true, documentChipState: 'clean', fieldProblemsByAgent: new Map() })
   })
 
@@ -984,7 +989,7 @@ describe('Workspace', () => {
       const view = renderWorkspace()
       try {
         expect(screen.getByRole('region', { name: 'Context' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
-        fireEvent.click(screen.getByRole('button', { name: 'Model and more settings' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Thinking effort and more settings' }))
         expect(screen.queryByRole('button', { name: /Produces the team output/ })).not.toBeInTheDocument()
         expect(screen.getByText(/Step 1 of \d · receives your request first/)).toBeInTheDocument()
       } finally {
@@ -1540,57 +1545,39 @@ describe('Connections entry point', () => {
   })
 })
 
-// A team shared by a colleague names an app this computer does not have. Build used to say "Your
-// team is ready" and the run failed at once with `spawn_failed`; now the daemon is asked first.
-describe('an agent whose app is not on this computer', () => {
-  function answerCommands(status: 'not_found' | 'found') {
+// Every agent thinks on the person's OpenRouter key: a team can't run until one is added, and Build
+// says so before the run rather than letting the first model call fail.
+describe('a team with no OpenRouter key added', () => {
+  function withKey(connected: boolean) {
     const fallback = globalThis.fetch
-    const asked: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-      if (url.startsWith('/api/commands?')) {
-        asked.push(url)
-        return new Response(JSON.stringify({ commands: [{ cmd: 'fake', status }] }), { status: 200, headers: { 'content-type': 'application/json' } })
-      }
+      if (String(input) === '/api/ai') return new Response(JSON.stringify({ openrouter: { connected } }), { status: 200, headers: { 'content-type': 'application/json' } })
       return fallback(input, init)
     }))
-    return asked
   }
 
-  it('is named on its card and in the heading, and Run is blocked with the reason', async () => {
-    const asked = answerCommands('not_found')
+  it('says so in the heading, and Run is blocked with the reason', async () => {
+    withKey(false)
     renderWorkspace()
     expect(await screen.findByRole('heading', { name: 'Finish setting up' })).toBeInTheDocument()
-    expect(asked).toEqual(['/api/commands?cmd=fake'])
-    expect(screen.getByText('2 agents’ apps can’t start on this computer: Researcher, Reviewer. Open the list at the top to see what to change.')).toBeInTheDocument()
-    expect(screen.getByText('Researcher’s app “fake” isn’t installed on this computer.')).toHaveClass('build-node-app-problem')
-    expect(screen.getByText('Reviewer’s app “fake” isn’t installed on this computer.')).toHaveClass('build-node-app-problem')
-    expect(screen.getByRole('button', { name: /2 things to finish, open team switcher/ })).toBeInTheDocument()
-
+    expect(screen.getByText('Add your OpenRouter key so these agents can think. LoomWatch keeps it in this Mac’s Keychain.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-    // The team's chat says so before you write, rather than offering a box that cannot start work.
-    const reason = '2 agents’ apps can’t start on this computer: Researcher, Reviewer.'
-    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.getByText('Add your OpenRouter key to run this team.')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Message the team' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Send note' })).toBeDisabled()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
-  // The counterfactual: the same team, with its app installed, is ready and runs.
-  it('leaves a team whose apps are installed ready to run', async () => {
-    const asked = answerCommands('found')
+  // The counterfactual: the same team, with a key, is ready and runs.
+  it('leaves a team ready to run once a key is added', async () => {
+    withKey(true)
     renderWorkspace()
-    await waitFor(() => expect(asked).toHaveLength(1))
     expect(await screen.findByRole('heading', { name: 'Your team is ready' })).toBeInTheDocument()
-    expect(document.querySelector('.build-node-app-problem')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
     // Run team means start the team: the box starts with @team, not as a note that starts nothing.
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message the team' })).toHaveValue('@team '))
     fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Summarise the repo' } })
-    // Ready, the box says where the message goes and starts the team with it.
     expect(screen.getByText(/^Starts the team/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled()
-    expect(screen.queryByText(/can’t start on this computer/)).not.toBeInTheDocument()
   })
 })
 

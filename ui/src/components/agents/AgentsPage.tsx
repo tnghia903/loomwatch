@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Moon, Plus, Sun, UserRound } from 'lucide-react'
 
-import type { DetectedHarness } from '../../lib/harnesses'
 import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
 import { figureFor } from '../../lib/library/figures'
@@ -11,16 +10,14 @@ import { useAgentUses } from '../../lib/library/uses'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
 import { QuestsLink } from '../quests/QuestsLink'
+import { SkillsLink } from '../skills/SkillsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
 import { navigate, useAgentsRoute } from './route'
 
 export interface AgentsPageProps {
-  harnesses: DetectedHarness[]
-  harnessesLoading: boolean
   skills: DetectedCapability[]
-  tools: DetectedCapability[]
   skillsLoading: boolean
   /** What the header's mark says, from the needs-you poll. */
   mark?: LoomMarkState
@@ -40,6 +37,7 @@ export function AgentsPage(props: AgentsPageProps) {
       <header className="home-top">
         <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={props.mark} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
+          <SkillsLink />
           <QuestsLink />
           <a className="btn" href="/" data-tour="your-teams">Your teams</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
@@ -47,14 +45,14 @@ export function AgentsPage(props: AgentsPageProps) {
       </header>
       <main className="home-main agents-main">
         {route.kind === 'list'
-          ? <AgentsList harnesses={props.harnesses} />
+          ? <AgentsList />
           : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} {...props} />}
       </main>
     </div>
   )
 }
 
-function AgentsList({ harnesses }: { harnesses: DetectedHarness[] }) {
+function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
   const { uses } = useAgentUses()
   const [choosing, setChoosing] = useState(false)
@@ -108,7 +106,7 @@ function AgentsList({ harnesses }: { harnesses: DetectedHarness[] }) {
             {jobs.map((job) => (
               <li key={job.id}>
                 <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} harness={harnesses.find((harness) => harness.id === job.apps?.[0]) ?? null} version={versionOf(job)} usedIn={usage.get(job.id)} />
+                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} version={versionOf(job)} usedIn={usage.get(job.id)} />
                 </button>
               </li>
             ))}

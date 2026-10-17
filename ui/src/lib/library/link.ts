@@ -1,14 +1,12 @@
-import type { DetectedHarness } from '../harnesses'
-import { harnessIdForAgent } from '../models'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
-import { onlyOn, savedJobPreset, versionOf, type JobSpec, type SavedJob } from './jobs'
-import { capabilitiesOf, harnessForRole } from './roles'
+import { onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
+import { capabilitiesOf } from './roles'
 
 /**
  * A team's side of the versioned link to Your agents.
  *
  * A linked agent carries `from: {agent, version}` and a copy of that version's fields. What the
- * version decides is its name, instructions, app and model, skills and tools, and what it may do
+ * version decides is its name, instructions, model, skills and tools, and what it may do
  * without asking; where it works, what it reads, and its place in the team stay the team's own.
  */
 
@@ -31,14 +29,11 @@ export function linkState(agent: AgentConfig, jobs: readonly SavedJob[]): AgentL
 }
 
 /**
- * The fields to write on a team's agent to bring it to `job`'s current version. What it reads
- * stays; its skills and tools become the version's, and the canvas draws each tool as a card. Its app changes only when the version prefers an
- * installed app other than the one it runs on, and then its folder and environment stay.
+ * The fields to write on a team's agent to bring it to `job`'s current version. What it reads and
+ * where it works stay; its skills and tools become the version's, and the canvas draws each tool
+ * as a card. Its model becomes the version's when the version names one.
  */
-export function fieldsForVersion(job: SavedJob, agent: AgentConfig, harnesses: readonly DetectedHarness[]): Partial<AgentConfig> {
-  const preset = savedJobPreset(job)
-  const harness = harnessForRole(preset, harnesses)
-  const currentApp = harnessIdForAgent(agent, harnesses)
+export function fieldsForVersion(job: SavedJob, agent: AgentConfig): Partial<AgentConfig> {
   const own = (agent.capabilities ?? []).filter((capability) => capability.kind === 'knowledge')
   const capabilities = [...own, ...capabilitiesOf(job.skills ?? [], job.tools ?? [])]
   const fields: Partial<AgentConfig> = {
@@ -49,12 +44,7 @@ export function fieldsForVersion(job: SavedJob, agent: AgentConfig, harnesses: r
     allow: onlyOn(job.allow),
     from: { agent: job.id, version: versionOf(job) },
   }
-  if (harness && harness.id !== currentApp) {
-    fields.spawn = { env: {}, cwd: '.', ...agent.spawn, cmd: harness.spawn.cmd, args: [...harness.spawn.args] }
-    const ownModel = harness.id === preset.prefers[0] && Boolean(job.model)
-    fields.model = ownModel ? job.model : ''
-    fields.thinkingEffort = ownModel ? job.thinkingEffort : undefined
-  } else if (job.model && currentApp !== null && currentApp === preset.prefers[0]) {
+  if (job.model) {
     // The effort goes with the model it belongs to.
     fields.model = job.model
     fields.thinkingEffort = job.thinkingEffort

@@ -1,4 +1,3 @@
-import { listNames } from '../format'
 import { currentRun } from './currentRun'
 
 /**
@@ -24,9 +23,10 @@ export type TourScreen = 'home' | 'agents' | 'workspace' | 'any'
 export type TourSide = 'top' | 'bottom' | 'left' | 'right'
 
 export interface TourContext {
-  /** Names of the AI apps that can run an agent right now. */
-  readyApps: readonly string[]
-  appsLoading: boolean
+  /** An OpenRouter key is added, so agents can run. */
+  keyReady: boolean
+  /** The daemon hasn't said yet whether one is. */
+  keyLoading: boolean
 }
 
 export interface TourStepView {
@@ -81,7 +81,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'Welcome to LoomWatch',
-      body: 'LoomWatch puts AI agents to work as a team, on your computer, using the AI apps you already have. This guide takes you the whole way once: build an agent, put it in a team, then give the team work in its chat. You do each step yourself, and it takes about three minutes.',
+      body: 'LoomWatch puts AI agents to work as a team, on your computer, with your OpenRouter key. This guide takes you the whole way once: build an agent, put it in a team, then give the team work in its chat. You do each step yourself, and it takes about three minutes.',
       advance: 'start',
     }),
   },
@@ -89,18 +89,17 @@ export const TOUR_STEPS: readonly TourStep[] = [
     id: 'build-agent',
     screen: 'home',
     // Opening the builder is a new page, Your agents, where the guide carries on by itself.
-    view: ({ readyApps, appsLoading }) => !appsLoading && readyApps.length === 0
+    view: ({ keyReady, keyLoading }) => !keyLoading && !keyReady
       ? {
-          title: 'Set up an AI app first',
-          body: 'An agent works inside an AI app on this computer, and none is ready yet. Set up an AI app shows how to install one and sign in, and notices on its own when it is ready. Then click Build an agent.',
-          // The setup panel when it is open; the footer's app status otherwise.
-          target: ['[data-tour="app-setup"]', '[data-tour="apps"]'],
-          sides: ['top'],
+          title: 'Add your OpenRouter key first',
+          body: 'Agents think with AI models, which LoomWatch reaches through OpenRouter with one key. The card here shows how to make one and paste it in. Then click Build an agent.',
+          target: ['[data-tour="key"]'],
+          sides: ['bottom', 'top', 'right'],
           advance: 'action',
         }
       : {
           title: 'Build your first agent',
-          body: `An agent is an AI helper with one job. It works inside an AI app you already have, signed in as you${readyApps.length > 0 ? `: LoomWatch found ${listNames(readyApps)}` : ''}. Click Build an agent.`,
+          body: 'An agent is an AI helper with one job, thinking with the AI model you choose for it. Click Build an agent.',
           target: ['[data-tour="build-agent"]'],
           sides: ['bottom', 'right', 'top'],
           advance: 'action',
@@ -113,7 +112,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-blocks"]')
       ? {
           title: 'Give it a name and a job',
-          body: 'Each block is one of its settings, in plain words: its name, its instructions, the AI app it works in, its model, its skills, and what it may do without asking. The figure at the bench shows the same things. Type a name, and in Instructions say what it does and what it replies with.',
+          body: 'Each block is one of its settings, in plain words: its name, its instructions, its model, its skills, and what it may do without asking. The figure at the bench shows the same things. Type a name, and in Instructions say what it does and what it replies with.',
           target: ['[data-tour="agent-blocks"]'],
           sides: ['left', 'right', 'top', 'bottom'],
           advance: 'next',
@@ -225,7 +224,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => teamView() === 'workflow' && agentCount() > 0
       ? {
           title: 'Connect them in Workflow',
-          body: 'Each card is one of the team’s agents, working in the AI app named on it. With more than one, connect the cards so work passes from one to the next, or add a review step that waits for you. One agent needs nothing more.',
+          body: 'Each card is one of the team’s agents, on the model named on it. With more than one, connect the cards so work passes from one to the next, or add a review step that waits for you. One agent needs nothing more.',
           target: [AGENT_CARD],
           sides: ['right', 'bottom', 'left', 'top'],
           advance: 'next',

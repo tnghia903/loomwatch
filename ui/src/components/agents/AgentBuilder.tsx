@@ -1,20 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ExternalLink, History, MessagesSquare, Trash2, Wrench } from 'lucide-react'
 
-import { fetchHarnessModels, type DetectedHarness, type HarnessModels } from '../../lib/harnesses'
+import { shortName } from '../../lib/ai/client'
+import { modelNameFromId } from '../../lib/ai/modelIds'
+import { useModels } from '../../lib/ai/useModels'
 import type { DetectedCapability } from '../../lib/library/client'
 import { BLANK_DRAFT, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
 import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobVersion, type SavedJob } from '../../lib/library/jobs'
-import { effortFor } from '../../lib/library/effort'
-import { modelForJob } from '../../lib/library/jobModel'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import type { TeamKnowledge } from '../../lib/library/teamDraft'
 import { useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
 import type { RunRecord } from '../../lib/runs/client'
-import { rankHarnesses } from '../../lib/team-file/templates'
 import { SegmentThumb } from '../ui/SegmentThumb'
 import { AgentBadge } from './AgentBadge'
 import { AgentAnswer, AgentChat } from './AgentChat'
@@ -27,11 +26,7 @@ export interface AgentBuilderProps {
   id: string | null
   /** A built-in job a new agent starts from. */
   startFrom?: string | null
-  harnesses: DetectedHarness[]
-  harnessesLoading: boolean
   skills: DetectedCapability[]
-  /** The tools (MCP servers) on this computer, from the same capability scan as the skills. */
-  tools: DetectedCapability[]
   skillsLoading: boolean
   /** The team the operator came from ("Edit in Your agents"), so the way back is one click. */
   cameFrom?: string | null
@@ -61,13 +56,12 @@ type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; versio
  * Inside a team (`inTeam`) it has the same two tabs, and its Chat is the one it has in Your agents:
  * talking to one agent on its own is a different thing from giving the team work in the team's chat.
  */
-export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading, skills, tools, skillsLoading, cameFrom = null, view: asked = 'build', inTeam }: AgentBuilderProps) {
+export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam }: AgentBuilderProps) {
   // Inside a team the address is the team's, so the page keeps which tab is open.
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
   const { jobs, available, loaded } = useSavedJobs()
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
-  const runnable = useMemo(() => rankHarnesses(harnesses), [harnesses])
   const [base, setBase] = useState<AgentDraft | null>(null)
   const [draft, setDraft] = useState<AgentDraft>(BLANK_DRAFT)
   const [note, setNote] = useState('')
@@ -78,7 +72,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   // A long answer from the chat, read in full over the bench.
   const [answerRun, setAnswerRun] = useState<string | null>(null)
 
-  // Start once per agent: from the saved version, from a built-in job, or blank on the best app.
+  // Start once per agent: from the saved version, from a built-in job, or blank on the default model.
   // Later reloads of the list (every save anywhere) must never overwrite edits on screen.
   const [startedFor, setStartedFor] = useState<string | null>(null)
   const startKey = id ?? `new:${startFrom ?? ''}`
@@ -88,10 +82,10 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
       const from = draftFromJob(saved)
       setBase(from)
       setDraft(from)
-    } else if (!id && !harnessesLoading && loaded) {
+    } else if (!id && loaded) {
       setStartedFor(startKey)
       const preset = ROLE_PRESETS.find((candidate) => candidate.id === startFrom)
-      const from = preset ? draftFromPreset(preset, harnesses) : { ...BLANK_DRAFT, appId: runnable[0]?.id ?? null }
+      const from = preset ? draftFromPreset(preset) : BLANK_DRAFT
       // A new agent wears a figure none of your agents wears yet, so it is easy to tell apart.
       const worn = jobs.map((job) => figureFor(job.id, job.figure))
       setBase(null)
@@ -99,32 +93,10 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
     }
   }
 
-  const harness = harnesses.find((candidate) => candidate.id === draft.appId) ?? null
-  const [models, setModels] = useState<{ app: string; list: HarnessModels | null; error: string | null } | null>(null)
-  useEffect(() => {
-    if (!draft.appId) return
-    let cancelled = false
-    const app = draft.appId
-    fetchHarnessModels(app).then((list) => { if (!cancelled) setModels({ app, list, error: null }) }, (failed: unknown) => { if (!cancelled) setModels({ app, list: null, error: failed instanceof Error ? failed.message : String(failed) }) })
-    return () => { cancelled = true }
-  }, [draft.appId])
-  const appModels = models?.app === draft.appId ? models : null
-  // A built-in job starts on its tier's model (ADR 0057) at the effort its job needs (ADR 0062),
-  // once its app's models are known, with the model pinned as the effort slider pins it. Once per
-  // start, so moving the slider back to the app's default sticks.
-  const [tieredFor, setTieredFor] = useState<string | null>(null)
-  const startJob = !id ? ROLE_PRESETS.find((candidate) => candidate.id === startFrom) : undefined
-  if (startJob && startedFor === startKey && tieredFor !== startKey && appModels?.list && !draft.effort) {
-    setTieredFor(startKey)
-    const current = appModels.list.currentModelId ?? ''
-    const choice = draft.model
-      ? { model: draft.model, thinkingEffort: startJob.effort ? effortFor(startJob.effort, appModels.list.models.find((entry) => entry.id === draft.model)) : undefined }
-      : modelForJob(startJob, appModels.list)
-    if (choice && (choice.thinkingEffort || choice.model !== current)) setDraft((now) => ({ ...now, model: now.model || choice.model, effort: choice.thinkingEffort ?? '' }))
-  }
-  const resolvedModel = draft.model || appModels?.list?.currentModelId || ''
-  const modelName = appModels?.list?.models.find((model) => model.id === resolvedModel)?.name
-  const effortName = draft.effort ? appModels?.list?.models.find((model) => model.id === resolvedModel)?.thinkingEfforts.find((effort) => effort.id === draft.effort)?.name : undefined
+  const { catalog } = useModels()
+  const listed = catalog?.models.find((model) => model.id === draft.model)
+  const modelName = listed ? shortName(listed) : modelNameFromId(draft.model)
+  const effortName = draft.effort ? `${draft.effort.charAt(0).toUpperCase()}${draft.effort.slice(1)}` : undefined
 
   const { uses } = useAgentUses()
   const mine = (uses ?? []).filter((use) => saved && use.agent === saved.id)
@@ -199,7 +171,7 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
   const saveLabel = !saved ? 'Save to Your agents' : bumps ? `Save as v${(version ?? 1) + 1}` : 'Save'
   const markId = saved?.id ?? (draft.name || 'new')
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
-  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} harness={harness} modelName={modelName} effortName={effortName} version={saved && !changed ? version : null} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
+  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} version={saved && !changed ? version : null} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
 
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
@@ -226,8 +198,8 @@ export function AgentBuilder({ id, startFrom = null, harnesses, harnessesLoading
       </header>
 
       <ByHand
-        draft={draft} set={set} harness={harness} harnesses={harnesses} harnessesLoading={harnessesLoading} models={appModels?.list ?? null} modelsError={appModels?.error ?? null} modelName={modelName} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} tools={tools} toolsLoading={skillsLoading} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
-        chat={view === 'chat' ? <AgentChat draft={draft} harness={harness} model={resolvedModel} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} /> : undefined}
+        draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} /> : undefined}
         onBuild={() => showView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
       />

@@ -6,11 +6,11 @@ import { CapabilityInspector } from './CapabilityInspector'
 /** What the daemon answers `GET /api/capabilities/{id}` with, for a skill with no coupling. */
 const PORTABLE_DETAILS = {
   id: 'skill-notebooklm', kind: 'skill',
-  definitions: [{ source: 'Codex', path: '/skills/notebooklm/SKILL.md', content: '---\nname: notebooklm\n---\nUse the notebook.' }],
-  portability: { kind: 'portable', needs: [], evidence: [], routes: { claude: 'native', codex: 'native' } },
+  definitions: [{ source: 'LoomWatch', path: '/skills/notebooklm/SKILL.md', content: '---\nname: notebooklm\n---\nUse the notebook.' }],
+  portability: { kind: 'portable', needs: [], evidence: [], route: 'native' },
 }
 
-/** The same shape for a Claude-coupled skill that produces a deliverable. */
+/** The same shape for a skill that produces a deliverable and leans on what its text assumes. */
 const COUPLED_DETAILS = {
   ...PORTABLE_DETAILS,
   portability: {
@@ -20,7 +20,7 @@ const COUPLED_DETAILS = {
       { need: 'subagents', line: 'Use the Task tool to fan out three variants.' },
       { need: 'scripts', line: 'Run `python3 scripts/render.py` to build it.' },
     ],
-    routes: { claude: 'native', codex: 'inline', hermes: 'blocked' },
+    route: 'inline',
   },
 }
 
@@ -35,84 +35,50 @@ beforeEach(() => { serve(PORTABLE_DETAILS) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('CapabilityInspector', () => {
-  const item = { id: 'skill-notebooklm', name: 'notebooklm', source: 'Claude Code + Codex', detail: 'Research notebooks', status: 'Ready' as const }
+  const item = { id: 'skill-notebooklm', name: 'notebooklm', source: 'LoomWatch', detail: 'Research notebooks', status: 'Ready' as const }
 
   it('shows scanned details, the local skill definition, and an explicit canvas action', async () => {
     const onAdd = vi.fn()
     render(<CapabilityInspector item={item} kind="skill" placed={false} connectedAgents={[]} onAdd={onAdd} onReveal={vi.fn()} onClose={vi.fn()} />)
 
     expect(screen.getByRole('region', { name: 'Skill details' })).toHaveTextContent('Research notebooks')
-    expect(screen.getByText('Claude Code + Codex')).toBeInTheDocument()
+    expect(screen.getByText('LoomWatch')).toBeInTheDocument()
     expect(await screen.findByText(/Use the notebook/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add to canvas' }))
     expect(onAdd).toHaveBeenCalledOnce()
   })
 
-  it('connects a skill discovered in another harness through a direct agent choice', async () => {
+  it('connects a skill through a direct agent choice', async () => {
     const onToggleAgent = vi.fn()
-    const props = {item, kind: 'skill' as const, placed: false, connectedAgents: [], agents: [{id: 'designer', name: 'Report Designer', harness: 'Codex', connected: false}], onToggleAgent, onAdd: vi.fn(), onReveal: vi.fn(), onClose: vi.fn()}
+    const props = {item, kind: 'skill' as const, placed: false, connectedAgents: [], agents: [{id: 'designer', name: 'Report Designer', model: 'GPT-6.1 Sol', connected: false}], onToggleAgent, onAdd: vi.fn(), onReveal: vi.fn(), onClose: vi.fn()}
     const view = render(<CapabilityInspector {...props} />)
     await screen.findByText(/Use the notebook/)
-    fireEvent.click(screen.getByRole('checkbox', {name: 'Use notebooklm with Report Designer (Codex)'}))
+    fireEvent.click(screen.getByRole('checkbox', {name: 'Use notebooklm with Report Designer (GPT-6.1 Sol)'}))
     expect(onToggleAgent).toHaveBeenCalledWith('designer', true)
     view.rerender(<CapabilityInspector {...props} agents={[{...props.agents[0], connected: true}]} readOnly />)
-    expect(screen.getByRole('checkbox', {name: 'Use notebooklm with Report Designer (Codex)'})).toBeChecked()
-    expect(screen.getByRole('checkbox', {name: 'Use notebooklm with Report Designer (Codex)'})).toBeDisabled()
+    expect(screen.getByRole('checkbox', {name: 'Use notebooklm with Report Designer (GPT-6.1 Sol)'})).toBeChecked()
+    expect(screen.getByRole('checkbox', {name: 'Use notebooklm with Report Designer (GPT-6.1 Sol)'})).toBeDisabled()
   })
 
   /**
    * ADR 0021's operator-facing half: the panel says what the skill assumes, quotes the line that
-   * says so, and states what will happen on each agent's harness. The old copy said only that
-   * "skill-specific tools still need to be available in the receiving harness", which named no
-   * skill, no tool and no harness.
+   * says so, and says how it reaches every agent it is given to.
    */
-  it('names what a skill assumes, quotes the line proving it, and states the route per agent', async () => {
+  it('names what a skill assumes, quotes the line proving it, and says how it is delivered', async () => {
     serve(COUPLED_DETAILS)
-    const agents = [
-      { id: 'designer', name: 'Report Designer', harness: 'Codex', harnessId: 'codex', connected: true },
-      { id: 'writer', name: 'Research', harness: 'Claude', harnessId: 'claude', connected: false },
-    ]
+    const agents = [{ id: 'designer', name: 'Report Designer', model: 'GPT-6.1 Sol', connected: true }]
     render(<CapabilityInspector item={item} kind="skill" placed connectedAgents={['Report Designer']} agents={agents} onToggleAgent={vi.fn()} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
 
     expect(await screen.findByText('Produces a deliverable.')).toBeInTheDocument()
     expect(screen.getByText('subagents')).toBeInTheDocument()
     expect(screen.getByText('Use the Task tool to fan out three variants.')).toBeInTheDocument()
-    expect(screen.getByText(/Codex · in-prompt, translated for Codex/)).toBeInTheDocument()
-    expect(screen.getByText(/Claude · native/)).toBeInTheDocument()
-    // The route is the daemon's answer, not this component's: a harness the report says nothing
-    // about must show no route rather than a guessed one.
-    const quiet = { id: 'other', name: 'Other', harness: 'OpenCode', harnessId: 'opencode', connected: false }
-    cleanup()
-    serve(COUPLED_DETAILS)
-    render(<CapabilityInspector item={item} kind="skill" placed connectedAgents={[]} agents={[quiet]} onToggleAgent={vi.fn()} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
-    expect(await screen.findByText('OpenCode')).toBeInTheDocument()
+    expect(screen.getByText(/Its text goes into each connected agent’s prompt, with a note mapping what it assumes/)).toBeInTheDocument()
   })
 
-  it('offers the Claude agent already in the team for a deliverable-producing skill, and connects it', async () => {
-    serve(COUPLED_DETAILS)
-    const onToggleAgent = vi.fn()
-    const agents = [
-      { id: 'designer', name: 'Report Designer', harness: 'Codex', harnessId: 'codex', connected: true },
-      { id: 'writer', name: 'Research', harness: 'Claude', harnessId: 'claude', connected: false },
-    ]
-    const view = render(<CapabilityInspector item={item} kind="skill" placed connectedAgents={['Report Designer']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect to Research' }))
-    expect(onToggleAgent).toHaveBeenCalledWith('writer', true)
-
-    // The counterfactual: the suggestion exists because one connected agent would only get the
-    // skill inlined. Connect the Claude agent and there is nothing left to suggest.
-    view.rerender(<CapabilityInspector item={item} kind="skill" placed connectedAgents={['Report Designer', 'Research']} agents={[agents[0], { ...agents[1], connected: true }]} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: 'Connect to Research' })).not.toBeInTheDocument()
-  })
-
-  it('does not suggest a Claude agent for a skill that assumes nothing', async () => {
-    const agents = [
-      { id: 'designer', name: 'Report Designer', harness: 'Codex', harnessId: 'codex', connected: true },
-      { id: 'writer', name: 'Research', harness: 'Claude', harnessId: 'claude', connected: false },
-    ]
-    render(<CapabilityInspector item={item} kind="skill" placed connectedAgents={['Report Designer']} agents={agents} onToggleAgent={vi.fn()} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
+  it('says a skill that assumes nothing is delivered to the agent’s skills folder', async () => {
+    render(<CapabilityInspector item={item} kind="skill" placed connectedAgents={[]} agents={[]} onToggleAgent={vi.fn()} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
     expect(await screen.findByText(/Nothing in its text assumes/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Connect to Research' })).not.toBeInTheDocument()
+    expect(screen.getByText(/delivered to each connected agent’s skills folder/)).toBeInTheDocument()
   })
 
   it('shows what team memory holds', async () => {
@@ -138,12 +104,12 @@ describe('CapabilityInspector', () => {
   it('connects a tool to an agent, but neither team memory nor a knowledge card', async () => {
     serve({ id: 'tool-memory', kind: 'tool', definitions: [] })
     const onToggleAgent = vi.fn()
-    const agents = [{ id: 'research', name: 'Research', harness: 'Claude Code', connected: false }]
-    const tool = { id: 'tool-memory', name: 'Agent Memory', source: 'Claude Code', detail: 'Local MCP connector', status: 'Compatible' as const }
+    const agents = [{ id: 'research', name: 'Research', model: 'Claude Opus 5.5', connected: false }]
+    const tool = { id: 'tool-memory', name: 'Agent Memory', source: 'From an AI app, not available', detail: 'Local MCP connector', status: 'Compatible' as const }
     const view = render(<CapabilityInspector item={tool} kind="tool" placed={false} connectedAgents={[]} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Use Agent Memory with Research (Claude Code)' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use Agent Memory with Research (Claude Opus 5.5)' }))
     expect(onToggleAgent).toHaveBeenLastCalledWith('research', true)
-    expect(screen.getByText(/give an agent its MCP server in the next run/)).toBeInTheDocument()
+    expect(screen.getByText(/a connected agent is told it isn’t available/)).toBeInTheDocument()
 
     serve({ id: 'memory-team', kind: 'knowledge', definitions: [] })
     const memory = { id: 'memory-team', name: 'Research team · memory', source: 'LoomWatch', detail: '1 brief entry', status: 'Ready' as const, memory: { team: 'research-team', brief: 1 } }
@@ -152,7 +118,7 @@ describe('CapabilityInspector', () => {
     expect(screen.queryByText('Not delivered')).not.toBeInTheDocument()
 
     vi.mocked(fetch).mockClear()
-    const card = { id: 'knowledge:loomwatch-project', name: 'loomwatch project', source: 'LoomWatch + OpenCode', detail: 'Planned capability on this canvas.', status: 'Compatible' as const }
+    const card = { id: 'knowledge:loomwatch-project', name: 'loomwatch project', source: 'LoomWatch', detail: 'Planned capability on this canvas.', status: 'Compatible' as const }
     view.rerender(<CapabilityInspector item={card} kind="knowledge" placed connectedAgents={['Research']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(screen.getByText('Not delivered')).toBeInTheDocument()
@@ -167,8 +133,8 @@ describe('CapabilityInspector', () => {
     vi.mocked(fetch).mockClear()
     const onToggleAgent = vi.fn()
     const agents = [
-      { id: 'research', name: 'Research', harness: 'Claude Code', connected: true },
-      { id: 'writer', name: 'Writer', harness: 'Codex', connected: false },
+      { id: 'research', name: 'Research', model: 'Claude Opus 5.5', connected: true },
+      { id: 'writer', name: 'Writer', model: 'Claude Sonnet 5.5', connected: false },
     ]
     const folder = { id: 'knowledge@/Users/me/reports', name: 'reports', source: 'Linked folder', path: '/Users/me/reports', detail: 'A folder on this computer.', status: 'Local only' as const }
     render(<CapabilityInspector item={folder} kind="knowledge" placed connectedAgents={['Research']} agents={agents} onToggleAgent={onToggleAgent} onAdd={vi.fn()} onReveal={vi.fn()} onClose={vi.fn()} />)
@@ -178,7 +144,7 @@ describe('CapabilityInspector', () => {
     expect(screen.getByText('/Users/me/reports')).toBeInTheDocument()
     expect(screen.getByText('reads · read only')).toBeInTheDocument()
     expect(screen.getByText('Reads it')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Use reports with Writer (Codex)' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use reports with Writer (Claude Sonnet 5.5)' }))
     expect(onToggleAgent).toHaveBeenLastCalledWith('writer', true)
     expect(screen.getByText(/Connect the folder to an agent above or on the canvas/)).toBeInTheDocument()
     expect(fetch).not.toHaveBeenCalled()

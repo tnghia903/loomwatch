@@ -45,7 +45,7 @@ struct SkillsState {
 }
 
 /// The Skills page's routes. `state_dir` holds `skills/` and `skills.json`; `home` is the folder
-/// whose apps' skill folders bring-in reads (`capabilities::configured_home()`).
+/// whose apps' skill folders bring-in reads (`$HOME`).
 ///
 /// The caller must only mount this router on a loopback listener.
 pub fn router(state_dir: PathBuf, home: PathBuf) -> Router {

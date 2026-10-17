@@ -2,7 +2,7 @@ import { outwardCalls } from '../library/observed'
 import type { AgentRuntime } from '../runs/graph'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
-import { formatTokens, type TokenSummary, type TurnPurpose } from '../watch/usage'
+import { formatCost, formatTokens, type TokenSummary, type TurnPurpose } from '../watch/usage'
 import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
 
@@ -47,7 +47,7 @@ export interface Receipt {
   took: string
   team: string
   ranOn: string
-  /** `null` until the run's evidence is all in, and for a run whose apps reported no tokens. */
+  /** `null` until the run's evidence is all in, and for a run that reported no tokens. */
   tokens: ReceiptTokens | null
   lines: ReceiptLine[]
   checks: ReceiptLine[]
@@ -69,6 +69,9 @@ export interface ReceiptTokens extends ReceiptTokenRow {
   purposes: ReceiptTokenRow[]
   /** Why a count carries `~`, when one does. */
   estimate: string | null
+  /** What OpenRouter charged for the run, "$0.0123", or "at least $0.0123" when a turn's cost is
+      unknown; `null` when no turn's cost is known. */
+  cost: string | null
 }
 
 export interface ReceiptAgent {
@@ -88,7 +91,7 @@ export interface ReceiptInput {
   agents: readonly ReceiptAgent[]
   projection: RunProjection
   evidenceByAgent: ReadonlyMap<string, readonly Evidence[]>
-  /** Agent id → the app it ran on ("Claude Code"). */
+  /** Agent id → the model it ran on ("Claude Opus 5.5"). */
   harnessLabels: ReadonlyMap<string, string>
   answered: boolean
 }
@@ -156,25 +159,18 @@ const PURPOSE_WORDS: Record<TurnPurpose, string> = {
   note: 'Your notes and answers',
 }
 
-const APP_WORDS: Record<string, string> = { codex: 'Codex', claude: 'Claude' }
-
 function tokenRow(label: string, group: { total: number; estimated: boolean }): ReceiptTokenRow {
   return { label, value: `${group.estimated ? '~' : ''}${formatTokens(group.total)}`, exact: `${group.total.toLocaleString('en-US')} tokens` }
 }
 
 /**
- * The run's tokens as the receipt prints them: one figure with its cache share, then who spent
- * them and on what. Nothing is printed for a run whose apps reported none — a zero there would
+ * The run's tokens as the receipt prints them: one figure with its cache share and its cost, then
+ * who spent them and on what. Nothing is printed for a run that reported none — a zero there would
  * claim the run cost nothing, when it only means nobody said.
  */
 export function receiptTokens(summary: TokenSummary | null | undefined, names: ReadonlyMap<string, string>): ReceiptTokens | null {
   if (!summary || summary.total <= 0) return null
   const why: string[] = []
-  for (const app of summary.estimatedApps) {
-    why.push(app === 'codex'
-      ? 'Codex reports only the last model call of each turn, so LoomWatch adds up every call it reported.'
-      : `${APP_WORDS[app] ?? 'An app'} left a turn's total out, so LoomWatch added it up from its readings.`)
-  }
   if (summary.stoppedTurns > 0) why.push(`${summary.stoppedTurns === 1 ? 'A turn' : `${summary.stoppedTurns} turns`} stopped before ${summary.stoppedTurns === 1 ? 'it' : 'they'} ended, so ${summary.stoppedTurns === 1 ? 'it counts' : 'they count'} what was seen until then.`)
   return {
     ...tokenRow('Tokens', summary),
@@ -182,6 +178,7 @@ export function receiptTokens(summary: TokenSummary | null | undefined, names: R
     agents: summary.agents.filter((agent) => agent.total > 0).map((agent) => tokenRow(names.get(agent.agentId) ?? agent.agentId, agent)),
     purposes: summary.purposes.filter((purpose) => purpose.total > 0).map((purpose) => tokenRow(PURPOSE_WORDS[purpose.purpose], purpose)),
     estimate: why.length > 0 ? `~ ${why.join(' ')}` : null,
+    cost: summary.costUsd === undefined ? null : `${summary.costComplete ? '' : 'at least '}${formatCost(summary.costUsd)}`,
   }
 }
 
@@ -220,7 +217,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     else if (status === 'failed' || status === 'stopped' || status === 'unavailable') {
       // A turn its app reported as failed still ends `end_turn`, so the stop reason says nothing:
       // name who reported it here, and what it said is under "Worth a look".
-      const why = run.error ? ` (${input.harnessLabels.get(agent.id) || 'its app'} reported an error)`
+      const why = run.error ? ` (${input.harnessLabels.get(agent.id) || 'its model'} reported an error)`
         : run.stopReason ? ` (${run.stopReason.replace(/_/g, ' ')})` : run.exitCode !== null ? ` (exit code ${run.exitCode})` : ''
       lines.push({ tone: 'bad', text: !why && stoppedByYou ? `${agent.name} was stopped before it finished` : `${agent.name} stopped${why}`, agentId: agent.id })
     } else if (terminal) lines.push({ tone: 'bad', text: stoppedByYou ? `${agent.name} was stopped before it finished` : `${agent.name} didn’t finish`, agentId: agent.id })
@@ -261,10 +258,10 @@ export function buildReceipt(input: ReceiptInput): Receipt {
       if (skill.state !== 'opened') checks.push({ tone: 'warn', text: `${agent.name} was given the skill “${skill.name}” but the record never shows it opened`, agentId: agent.id })
     }
     if (run.openCalls > 0) checks.push({ tone: 'warn', text: `${plural(run.openCalls, 'call')} from ${agent.name} never reported back`, agentId: agent.id })
-    // A tool that reaches past the run and ran without asking (ADR 0044), or an MCP server its app
-    // brought that LoomWatch did not connect (ADR 0047): the call shows what it sent.
+    // A tool that reaches past the run and ran without asking (ADR 0044), or an MCP server an AI
+    // app brought that LoomWatch did not connect (ADR 0047): the call shows what it sent.
     for (const [tool, use] of outwardCalls(items, run.connectedServers)) {
-      const what = use.does === null ? `which ${input.harnessLabels.get(agent.id) || 'its app'} brought and LoomWatch didn’t connect` : `which ${use.does}`
+      const what = use.does === null ? 'which LoomWatch didn’t connect' : `which ${use.does}`
       const times = use.calls.length > 1 ? ` (${use.calls.length} times)` : ''
       checks.push({ tone: 'bad', text: `${agent.name} ${use.completed ? 'used' : 'tried'} ${tool}, ${what}, without asking you${times}`, agentId: agent.id, evidenceId: use.calls[0].id })
     }
@@ -306,6 +303,7 @@ export function receiptMarkdown(receipt: Receipt): string {
     `- **Took:** ${receipt.took}`,
     `- **Ran on:** ${receipt.ranOn}`,
     ...(receipt.tokens ? [`- **Tokens:** ${[receipt.tokens.value, receipt.tokens.cached].filter(Boolean).join(' · ')}`] : []),
+    ...(receipt.tokens?.cost ? [`- **Cost:** ${receipt.tokens.cost}`] : []),
     '',
     ...receipt.lines.map((line) => `- ${MARK[line.tone]} ${line.text}`),
   ]

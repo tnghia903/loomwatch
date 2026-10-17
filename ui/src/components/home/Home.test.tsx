@@ -1,13 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DetectedHarness } from '../../lib/harnesses'
+import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
+import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { readTourState, resetTourForTests } from '../../lib/tour/store'
 import { Home } from './Home'
-
-const claude: DetectedHarness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] } }
-const geminiReason = 'Gemini: sign-in or version problem — run "gemini" in Terminal to fix'
-const brokenGemini: DetectedHarness = { id: 'gemini', name: 'Gemini', command: 'gemini', executablePath: '/bin/gemini', acpAvailable: true, health: 'error', healthReason: geminiReason, healthDetail: 'ACP session/new failed during model discovery: This client is no longer supported', spawn: { cmd: 'gemini', args: ['--acp'] } }
 
 let assign: ReturnType<typeof vi.fn>
 let fetchMock: ReturnType<typeof vi.fn>
@@ -21,13 +18,17 @@ beforeEach(() => {
   Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign, search: '', pathname: '/' } })
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
+  forgetKeyStatus()
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function renderHome(harnesses: DetectedHarness[] = [claude], onCreateBlank = vi.fn(), onRetryHarnesses = vi.fn()) {
-  render(<Home harnesses={harnesses} harnessesLoading={false} harnessesError={null} onRetryHarnesses={onRetryHarnesses} onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
-  return { onCreateBlank, onRetryHarnesses }
+function renderHome(onCreateBlank = vi.fn()) {
+  render(<Home onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
+  return { onCreateBlank }
 }
+
+/** The daemon with no teams and the OpenRouter key as `key` says. */
+const keyed = (key: Record<string, unknown>) => (url: string) => respond(url === '/api/ai' ? { openrouter: key } : { root: '/teams', files: [], teams: [] })
 
 describe('Home', () => {
   it('lists teams by name, newest first, and opens one with a single click', async () => {
@@ -103,7 +104,7 @@ describe('Home', () => {
       entrypoint: 'a', responder: 'b', agentIds: ['a', 'b'], createdAt: '2026-10-06T02:00:00.000Z', startedAt: '2026-10-06T02:00:00.000Z',
       finishedAt: '2026-10-06T02:04:00.000Z', error: null, exitCode: 0, eventCount: 3, reply: '# Today’s AI digest\nChips lead.',
     }]
-    render(<Home harnesses={[claude]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} runs={runs} />)
+    render(<Home onCreateBlank={vi.fn()} onPalette={vi.fn()} runs={runs} />)
     const cards = await screen.findAllByRole('button', { name: /desk/ })
     expect(cards.map((card) => within(card).getByText(/desk$/).textContent)).toEqual(['News desk', 'Quiet desk'])
     expect(within(cards[0]).getByText('Today’s AI digest')).toBeInTheDocument()
@@ -122,46 +123,37 @@ describe('Home', () => {
     expect(await screen.findByRole('button', { name: /research-team/ })).toBeInTheDocument()
   })
 
-  it('says how to start when there are no teams, and opens app setup when no AI app is installed', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/harnesses' ? { harnesses: [], searchedPath: [], knownIds: [] } : { root: '/teams', files: [], teams: [] }))
-    renderHome([])
+  it('says how to start when there are no teams, and asks for an OpenRouter key until there is one', async () => {
+    fetchMock.mockImplementation(keyed({ connected: false }))
+    renderHome()
     expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
-    expect(screen.getByText('No AI app is ready yet.')).toBeInTheDocument()
-    const setup = screen.getByRole('region', { name: 'Set up an AI app' })
-    expect(within(setup).getByRole('listitem', { name: /^Claude Code: Not installed/ })).toBeInTheDocument()
-    // Hidden, it is one footer link away.
-    fireEvent.click(within(setup).getByRole('button', { name: 'Hide' }))
-    expect(screen.queryByRole('region', { name: 'Set up an AI app' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Set up an AI app' }))
-    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Add your OpenRouter key' })).toBeInTheDocument()
+    expect(screen.getByText('Add your OpenRouter key so your agents can run.')).toBeInTheDocument()
+    expect(screen.getByLabelText('OpenRouter key')).toHaveAttribute('type', 'password')
   })
 
-  it('keeps app setup out of the way once an app can run, one footer link away', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/harnesses' ? { harnesses: [claude], searchedPath: [], knownIds: [] } : { root: '/teams', files: [], teams: [] }))
-    renderHome([claude])
-    await screen.findByText(/No teams yet/)
-    expect(screen.queryByRole('region', { name: 'Set up an AI app' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Set up another app' }))
-    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Set up another app' })).toBeNull()
+  it('keeps the key card away once a key is added, and says the agents run on OpenRouter', async () => {
+    fetchMock.mockImplementation(keyed({ connected: true, label: 'sk-or-v1-abc...xyz' }))
+    renderHome()
+    expect(await screen.findByText('Agents run on OpenRouter with key sk-or-v1-abc...xyz')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Add your OpenRouter key' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Manage key' })).toHaveAttribute('href', '/connections')
   })
 
-  it('takes someone from New team to app setup when no app can build a template', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/harnesses' ? { harnesses: [], searchedPath: [], knownIds: [] } : { root: '/teams', files: [], teams: [] }))
-    renderHome([])
-    await screen.findByText(/No teams yet/)
-    fireEvent.click(within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('button', { name: 'Hide' }))
-    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
-    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Set up an AI app' }))
-    expect(screen.queryByRole('dialog', { name: 'Create a team' })).toBeNull()
-    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
+  it('says when the account has no credits yet, or OpenRouter refused the key', async () => {
+    fetchMock.mockImplementation(keyed({ connected: true, freeTier: true }))
+    renderHome()
+    expect(await screen.findByText('Your OpenRouter account has no credits yet, so only free models work.')).toBeInTheDocument()
+    cleanup()
+    forgetKeyStatus()
+    fetchMock.mockImplementation(keyed({ connected: true, problem: 'OpenRouter refused the key.' }))
+    renderHome()
+    expect(await screen.findByText('OpenRouter: OpenRouter refused the key.')).toBeInTheDocument()
   })
 
   it('creates a ready-to-run team from a template and opens it', async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/teams') return respond({ root: '/teams', files: ['blog-writer.yaml'], teams: [{ path: 'blog-writer.yaml', name: 'Blog writer', agentCount: 1 }] })
-      if (url === '/api/harnesses/claude/models') return respond({ harnessId: 'claude', models: [{ id: 'default', name: 'Default', thinkingEfforts: [] }], currentModelId: 'sonnet' })
       if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'blog-writer-2.yaml', yaml: '', revision: 'r1' })
       return respond({ error: 'unexpected' }, 404)
     })
@@ -177,9 +169,10 @@ describe('Home', () => {
     const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
     expect(put?.[1]?.headers).toMatchObject({ 'If-None-Match': '*' })
     const body = JSON.parse(String(put?.[1]?.body)) as { path: string; yaml: string }
-    // The existing file is never overwritten, and the agent uses the app's own current model.
+    // The existing file is never overwritten, and the assistant runs on the default model.
     expect(body.path).toBe('blog-writer-2.yaml')
-    expect(body.yaml).toContain('model: sonnet')
+    expect(body.yaml).toContain(`model: ${DEFAULT_MODEL}`)
+    expect(body.yaml).not.toContain('spawn')
     expect(body.yaml).toContain('name: Blog writer')
     // Same name, own id: the Notebook is filed by id, so sharing one shared the first team's notes.
     expect(body.yaml).toContain('id: blog-writer-2')
@@ -227,89 +220,6 @@ describe('Home', () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
   })
 
-  it('does not call an app that failed to start ready, and says how to fix it', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
-    renderHome([claude, brokenGemini])
-    await screen.findByText(/No teams yet/)
-    expect(screen.getByText('Ready to use: Claude')).toBeInTheDocument()
-    const problem = within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(geminiReason)
-    // The harness's own words stay one hover away for whoever needs them.
-    expect(problem).toHaveAttribute('title', brokenGemini.healthDetail)
-  })
-
-  // An app that needs a key from you is waiting on a step, not broken: a note, and the way to do it.
-  it('reads an app that needs an API key as a setup note, not an error, with Set it up', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
-    const keyReason = 'Gemini CLI needs a Gemini API key to work with other apps: set GEMINI_API_KEY, then restart LoomWatch.'
-    const needsKey = { ...brokenGemini, healthCause: 'needs_api_key' as const, healthReason: keyReason }
-    // With another app ready it is left to "Set up another app": most people have nothing to do about it.
-    renderHome([claude, needsKey])
-    await screen.findByText(/No teams yet/)
-    expect(screen.queryByText(keyReason)).toBeNull()
-    expect(screen.getByRole('button', { name: 'Set up another app' })).toBeInTheDocument()
-    cleanup()
-    // With none ready, it is the way to start.
-    renderHome([needsKey])
-    await screen.findByText(/No teams yet/)
-    fireEvent.click(within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('button', { name: 'Hide' }))
-    const note = within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(keyReason).closest('li')
-    expect(note).toHaveClass('setup')
-    expect(note).not.toHaveClass('failed')
-    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: 'Set it up' }))
-    expect(screen.getByRole('region', { name: 'Set up an AI app' })).toBeInTheDocument()
-    // A failure with no step to take stays an alert, even with another app ready.
-    cleanup()
-    renderHome([claude, brokenGemini])
-    await screen.findByText(/No teams yet/)
-    expect(within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(geminiReason).closest('li')).toHaveClass('failed')
-  })
-
-  it('re-checks a failing app on request, then reloads the list', async () => {
-    fetchMock.mockImplementation((url: string) => {
-      if (url === '/api/harnesses/gemini/models') return respond({ error: 'still signed out' }, 502)
-      if (url === '/api/harnesses') return respond({ harnesses: [brokenGemini], searchedPath: [], knownIds: [] })
-      if (url.startsWith('/api/commands?')) return respond({ commands: [{ cmd: 'gemini', status: 'found', path: '/bin/gemini' }] })
-      return respond({ root: '/teams', files: [], teams: [] })
-    })
-    const { onRetryHarnesses } = renderHome([brokenGemini])
-    await screen.findByText(/No teams yet/)
-    expect(screen.getByText('None of your AI apps can start right now.')).toBeInTheDocument()
-    // Hidden, the footer re-checks every failing app at once.
-    fireEvent.click(within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('button', { name: 'Hide' }))
-    expect(within(screen.getByRole('list', { name: 'Apps that need attention' })).getByText(geminiReason)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
-    await waitFor(() => expect(onRetryHarnesses).toHaveBeenCalledTimes(1))
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/harnesses/gemini/models')).toBe(true)
-  })
-
-  it('lists a failing app inside app setup, with its own Check again', async () => {
-    fetchMock.mockImplementation((url: string) => {
-      if (url === '/api/harnesses/gemini/models') return respond({ error: 'still signed out' }, 502)
-      if (url === '/api/harnesses') return respond({ harnesses: [brokenGemini], searchedPath: [], knownIds: [] })
-      if (url.startsWith('/api/commands?')) return respond({ commands: [{ cmd: 'gemini', status: 'found', path: '/bin/gemini' }] })
-      return respond({ root: '/teams', files: [], teams: [] })
-    })
-    renderHome([brokenGemini])
-    await screen.findByText(/No teams yet/)
-    // While setup is open it is the one place for app problems; the footer only states the outcome.
-    expect(screen.queryByRole('list', { name: 'Apps that need attention' })).toBeNull()
-    const gemini = within(screen.getByRole('region', { name: 'Set up an AI app' })).getByRole('listitem', { name: /^Gemini: Can’t start/ })
-    expect(within(gemini).getByRole('alert')).toHaveTextContent(geminiReason)
-    fireEvent.click(within(gemini).getByRole('button', { name: 'Check again' }))
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/harnesses/gemini/models')).toBe(true))
-  })
-
-  it('never builds a template on an app that failed to start', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
-    renderHome([brokenGemini])
-    await screen.findByText(/No teams yet/)
-    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
-    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-    expect(within(dialog).getByRole('radio', { name: /One assistant/ })).toBeDisabled()
-    expect(within(dialog).getByRole('radio', { name: /Empty team/ })).toBeChecked()
-    expect(within(dialog).getByText(/None of your AI apps can start right now/)).toBeInTheDocument()
-    expect(within(dialog).getByText(geminiReason)).toBeInTheDocument()
-  })
 })
 
 describe('Home and the getting-started guide', () => {
@@ -337,7 +247,7 @@ describe('Home and the getting-started guide', () => {
   it('takes the job in plain words for Ask LoomWatch, and says why when it cannot', async () => {
     fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
     const onAsk = vi.fn()
-    const { unmount } = render(<Home harnesses={[claude]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
+    const { unmount } = render(<Home onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
     const box = screen.getByRole('textbox', { name: /Or describe the job/ })
     fireEvent.change(box, { target: { value: '  Brief me on chip news every weekday  ' } })
     fireEvent.keyDown(box, { key: 'Enter' })
@@ -347,8 +257,8 @@ describe('Home and the getting-started guide', () => {
     expect(screen.getByRole('button', { name: 'Ask' })).not.toHaveClass('btn-primary')
     unmount()
 
-    render(<Home harnesses={[]} harnessesLoading={false} harnessesError={null} onRetryHarnesses={vi.fn()} onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: 'Ask needs Claude Code, Codex, Gemini CLI or OpenCode on this computer.', onAsk }} />)
+    render(<Home onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: 'Ask runs on your OpenRouter key. Add it to start.', onAsk }} />)
     expect(screen.getByRole('textbox', { name: /Or describe the job/ })).toBeDisabled()
-    expect(screen.getByText(/Ask needs Claude Code/)).toBeInTheDocument()
+    expect(screen.getByText(/Ask runs on your OpenRouter key/)).toBeInTheDocument()
   })
 })

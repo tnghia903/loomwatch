@@ -26,13 +26,13 @@ import type { WeftKnot } from '../../lib/story/weft'
 import { markLabel, markState } from '../../lib/story/mark'
 import { AgentPortrait } from '../agents/AvatarFace'
 import type { RunRecord } from '../../lib/runs/client'
+import { modelLabelForAgent } from '../../lib/models'
 import { useRunQuests } from './useRunQuests'
 
 export interface DeliveryLaneProps extends RunColumnProps {
+  /** The model each agent runs on, in words, by agent id. */
   harnessLabels?: ReadonlyMap<string, string>
   planned?: boolean
-  /** Planned runs only: agent id → why its app cannot start on this computer (`lib/team-file/appChecks`). */
-  appProblems?: ReadonlyMap<string, string>
   pipeline: boolean
   linearPipeline?: boolean
   onTrace: () => void
@@ -60,9 +60,9 @@ export interface DeliveryLaneProps extends RunColumnProps {
  * into prompt" for it — that would claim something the run did not do.
  */
 const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
-  native: 'Native — the bundle sits in this harness’s own skill directory and the prompt points at it.',
-  inline: 'In-prompt, translated — the harness cannot be relied on to run it as written, so its body was inlined with a mapping note.',
-  blocked: 'Blocked — LoomWatch knows no project skill directory for this harness.',
+  native: 'Native — the bundle sits in the agent’s skills folder and the prompt points at it.',
+  inline: 'In-prompt, translated — it could not be relied on to run as written, so its body was inlined with a mapping note.',
+  blocked: 'Blocked — this run had no skills folder for it.',
 }
 
 
@@ -88,7 +88,6 @@ export function DeliveryLane({
   linearPipeline = true,
   planned = false,
   harnessLabels = new Map(),
-  appProblems = new Map(),
   onInspectEvidence,
   onSelectAgent,
   onTrace,
@@ -196,9 +195,13 @@ export function DeliveryLane({
     agents: agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', runtime: node.data.runtime, allow: node.data.agent.allow })),
     projection,
     evidenceByAgent,
-    harnessLabels: new Map(agents.map((node) => [node.id, snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? ''])),
+    // The model each agent ran on: what the run recorded, else what the team file names now.
+    harnessLabels: new Map(agents.map((node) => {
+      const recorded = projection.agents.find((item) => item.id === node.id)?.model
+      return [node.id, recorded ? modelLabelForAgent({ ...node.data.agent, model: recorded }) : harnessLabels.get(node.id) ?? modelLabelForAgent(node.data.agent)]
+    })),
     answered: Boolean(output.text),
-  })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, snapshots, harnessLabels, output.text])
+  })), [planned, terminal, attempt, prompt, phase, elapsed, agents, projection, evidenceByAgent, harnessLabels, output.text])
   // What the run earned on a quest, judged from the whole team file as the run ran it, not from
   // the agents shown or the editor's copy (useRunQuests.ts `agentsRunWith`).
   const earned = useRunQuests({ record: planned ? null : record, projection, phase })
@@ -285,9 +288,9 @@ export function DeliveryLane({
             <div className="delivery-stages" role="list" aria-label="Team stages" data-tour="stages">
               {agents.map((node, index) => {
                 const { agent, runtime } = node.data
-                // A planned stage whose app is not on this computer is not ready: the run would fail
-                // the moment it reached it. Only a plan says so — a run that happened has its own state.
-                const appProblem = planned ? appProblems.get(node.id) : undefined
+                // The model the run recorded for it, else the one the team file names now.
+                const recorded = projection.agents.find((item) => item.id === node.id)?.model
+                const model = recorded ? modelLabelForAgent({ ...agent, model: recorded }) : harnessLabels.get(node.id) ?? modelLabelForAgent(agent)
                 const required = capabilityEvidence(
                   agent,
                   evidenceByAgent.get(node.id) ?? [],
@@ -321,18 +324,15 @@ export function DeliveryLane({
                           <small>{agent.role || 'Team agent'}</small>
                         </span>
                         <span
-                          className={`delivery-status status-${appProblem ? 'failed' : runtime?.status ?? 'idle'}`}
+                          className={`delivery-status status-${runtime?.status ?? 'idle'}`}
                         >
-                          {appProblem
-                            ? 'Can’t start'
-                            : planned
-                              ? 'Ready'
-                              : runtime ? markLabel(markState(runtime), runtime.openCalls) : 'Not started yet'}
+                          {planned
+                            ? 'Ready'
+                            : runtime ? markLabel(markState(runtime), runtime.openCalls) : 'Not started yet'}
                         </span>
                       </button>
-                      {appProblem && <p className="delivery-stage-problem">{appProblem}</p>}
                       <div className="delivery-agent-facts">
-                        <div><span>{agent.kind === 'operator' ? 'Done by' : 'AI app'}</span><strong><Code2 size={15} />{agent.kind === 'operator' ? 'You' : snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? 'Not recorded'}</strong></div>
+                        <div><span>{agent.kind === 'operator' ? 'Done by' : 'Model'}</span><strong><Code2 size={15} />{agent.kind === 'operator' ? 'You' : model}</strong></div>
                         <div><span>{planned ? 'Produces' : 'Contribution'}</span><strong>{node.id === output.producer ? 'Team output' : pipeline ? 'Stage handoff' : 'Agent response'}</strong></div>
                         {(evidenceByAgent.get(node.id) ?? []).some(item => item.kind === 'source') && <div><span>Sources</span><button className="delivery-link" onClick={() => setSourceAgent(node.id)}><FileText size={14} />{(evidenceByAgent.get(node.id) ?? []).filter(item => item.kind === 'source').length} sources <ArrowRight size={12} /></button></div>}
                       </div>
@@ -340,7 +340,7 @@ export function DeliveryLane({
                         <span>
                           {agent.kind === 'operator'
                             ? 'Your review step'
-                            : `${snapshots.get(node.id)?.[0]?.harness ?? harnessLabels.get(node.id) ?? 'AI app not recorded'} · ${projection.agents.find((item) => item.id === node.id)?.model ?? agent.model ?? 'model not recorded'}`}
+                            : model}
                         </span>
                         <span>{runtime?.eventCount ?? 0} events</span>
                       </div>
@@ -504,7 +504,7 @@ export function DeliveryLane({
                       <dd>{receipt.receipt.source}</dd>
                       {receipt.receipt.harness && (
                         <>
-                          <dt>Run harness</dt>
+                          <dt>Ran on</dt>
                           <dd>{receipt.receipt.harness}</dd>
                         </>
                       )}
@@ -519,7 +519,7 @@ export function DeliveryLane({
                             {ROUTE_SENTENCE[receipt.receipt.route]}
                             {receipt.receipt.needs?.length
                               ? ` Needs: ${receipt.receipt.needs.join(', ')}.`
-                              : ' It assumes nothing this harness lacks.'}
+                              : ' It assumes nothing the agent lacks.'}
                           </dd>
                         </>
                       )}

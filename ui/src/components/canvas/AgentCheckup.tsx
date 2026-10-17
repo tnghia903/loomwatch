@@ -9,7 +9,7 @@ export interface CheckupActions {
   onFix?: (finding: CheckupFinding) => void
   /** Hide it for this team: the operator knows better. */
   onDismiss?: (finding: CheckupFinding) => void
-  /** Ask LoomWatch for an edit only judgement can make; absent when no AI app can answer. */
+  /** Ask LoomWatch for an edit only judgement can make; absent when Ask can't answer (no OpenRouter key). */
   onAsk?: (prompt: string) => void
   /** Open the agent a finding is about. The agent's own panel leaves this out. */
   onOpenAgent?: (agentId: string) => void

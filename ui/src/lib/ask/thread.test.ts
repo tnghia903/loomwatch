@@ -25,9 +25,9 @@ function proposeTurn(): RunEvent[] {
     status('starting'), event('process', { phase: 'spawned' }), status('ready'), status('working'),
     meta('ask_message', { text: 'Make me a news brief team', context: { view: 'home', teamPath: null, runId: null } }),
     event('message', { role: 'user', content: { type: 'text', text: 'You are Ask LoomWatch… (instructions)' } }),
-    call('c1', 'mcp__loomwatch__list_apps'),
+    call('c1', 'list_models'),
     meta('ask_proposal', { proposalId: 'p1', file: 'brief.yaml', name: 'Brief', isNew: true, summary: 'Gathers, checks, writes.', yaml: TEAM }),
-    done('c1', { apps: [] }),
+    done('c1', { models: [] }),
     call('c2', 'mcp__loomwatch__propose_team', { file: 'brief.yaml' }),
     failed('c2', 'The team file has a problem: entrypoint agent "nobody" does not exist. Fix it and propose again.'),
     say('My first draft named a starting agent that doesn’t exist, so I fixed it. ', 'm1'),
@@ -50,7 +50,7 @@ describe('projectAskThread', () => {
   it('names each tool call in plain words, and a refused draft it then fixed reads as fixed', () => {
     const turn = projectAskThread(proposeTurn()).items[1] as AssistantTurn
     expect(turn.steps.map((step) => [step.label, step.status])).toEqual([
-      ['Checked your AI apps', 'done'],
+      ['Checked the models', 'done'],
       ['Fixed a problem in its draft', 'done'],
       ['Drafted the team', 'done'],
     ])
@@ -104,11 +104,11 @@ describe('projectAskThread', () => {
     seq = 0
     const base = [
       meta('ask_message', { text: 'run it', context: {} }),
-      meta('ask_run_request', { requestId: 'r1', file: 'brief.yaml', name: 'Brief', request: 'Today', apps: ['Claude'], steps: 3 }),
+      meta('ask_run_request', { requestId: 'r1', file: 'brief.yaml', name: 'Brief', request: 'Today', steps: 3 }),
       event('turn_end', {}),
     ]
     const asked = projectAskThread(base).items[1] as AssistantTurn
-    expect(asked.cards[0]).toMatchObject({ kind: 'run-request', decision: null, apps: ['Claude'], steps: 3 })
+    expect(asked.cards[0]).toMatchObject({ kind: 'run-request', decision: null, steps: 3 })
     const started = projectAskThread([...base, meta('ask_run_started', { requestId: 'r1', runId: 'run-9', file: 'brief.yaml' })]).items[1] as AssistantTurn
     expect(started.cards[0]).toMatchObject({ decision: 'started', runId: 'run-9' })
     const declined = projectAskThread([...base, meta('ask_run_declined', { requestId: 'r1', file: 'brief.yaml' })]).items[1] as AssistantTurn

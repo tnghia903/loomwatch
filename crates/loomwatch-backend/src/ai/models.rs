@@ -26,7 +26,7 @@ const MAX_DESCRIPTION_CHARS: usize = 400;
 /// The model new agents get.
 pub const DEFAULT_MODEL: &str = "anthropic/claude-opus-5.5";
 /// The step down from the default, for `LoomWatch`'s own short jobs: rewriting instructions after
-/// a removal. The same step-down the fast tier takes in `ui/src/lib/team-file/tiers.ts`.
+/// a removal. The same step-down the fast tier takes in `ui/src/lib/ai/modelIds.ts`.
 pub const FAST_MODEL: &str = "anthropic/claude-sonnet-5.5";
 
 /// The `OpenRouter` id for a team file's `model`, written for an app `LoomWatch` no longer runs or

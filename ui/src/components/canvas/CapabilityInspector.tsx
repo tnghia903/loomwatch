@@ -14,13 +14,8 @@ export interface InspectedCapability {
 interface CapabilityInspectorProps extends InspectedCapability {
   placed: boolean
   connectedAgents: readonly string[]
-  /**
-   * `harnessId` is the daemon's own id for the agent's harness (`claude`, `codex`, …), which is
-   * the key `portability.routes` is stated in. The display `harness` name cannot serve: it is
-   * "Harness not detected" when the daemon found nothing on the PATH, and a route keyed on a
-   * sentence would silently stop resolving.
-   */
-  agents?: readonly { id: string; name: string; harness: string; harnessId?: string | null; connected: boolean }[]
+  /** The team's agents, each with the model it runs on, in words. */
+  agents?: readonly { id: string; name: string; model: string; connected: boolean }[]
   onToggleAgent?: (id: string, connected: boolean) => void
   readOnly?: boolean
   onAdd: () => void
@@ -34,10 +29,9 @@ interface CapabilityInspectorProps extends InspectedCapability {
  * `native` is not "the instructions are in the prompt" — that is the whole point of the route, and
  * saying otherwise here would promise something the run does not do.
  */
-const ROUTE_NOTE: Record<SkillRoute, (harness: string) => string> = {
-  native: () => 'native — delivered to this harness’s own skill directory, and the prompt points at it',
-  inline: (harness) => `in-prompt, translated for ${harness}`,
-  blocked: () => 'blocked — LoomWatch knows no project skill directory for this harness',
+const ROUTE_NOTE: Record<SkillRoute, string> = {
+  native: 'It is delivered to each connected agent’s skills folder, and its prompt points at it.',
+  inline: 'Its text goes into each connected agent’s prompt, with a note mapping what it assumes onto what the agent actually has.',
 }
 
 /**
@@ -45,14 +39,14 @@ const ROUTE_NOTE: Record<SkillRoute, (harness: string) => string> = {
  * `knowledge` is a folder or file the operator chose (ADR 0042); memory has no picker.
  */
 const PICKER_NOTE: Record<CapabilityKind, string> = {
-  skill: 'Connect this skill to require it in the next run. Its discovery source can differ from the agent’s harness.',
-  tool: 'Connect this tool to give an agent its MCP server in the next run. Its config source can differ from the agent’s harness.',
+  skill: 'Connect this skill to require it in the next run.',
+  tool: 'This tool was set up in an AI app, and LoomWatch doesn’t read AI apps’ settings, so a connected agent is told it isn’t available.',
   knowledge: 'Connect every agent that should read this. They share the one source, and each is told it in its own instructions.',
 }
 
 const DELIVERY_NOTE: Record<CapabilityKind, string> = {
-  skill: 'Save the team to keep these connections. LoomWatch delivers the bundle to every connected agent and adapts how the prompt introduces it: a harness that cannot be relied on to run the skill as written gets its text inlined with a note mapping what it assumes onto what that agent actually has.',
-  tool: 'Save the team to keep these connections. LoomWatch hands this MCP server to each connected agent’s app when the run starts, using your own server settings. On Claude Code it also allows the server’s tools; other apps apply their own rules. A run fails up front if an app cannot take the server.',
+  skill: 'Save the team to keep these connections. LoomWatch delivers the skill to every connected agent when the run starts.',
+  tool: 'Save the team to keep these connections. Take the tool off the canvas once no agent needs it.',
   knowledge: 'Save the team to keep these connections. Each connected agent may read it wherever that agent works, and never changes it. A run fails up front if it has gone or holds nothing readable.',
 }
 
@@ -63,7 +57,7 @@ const NOTION_DELIVERY_NOTE = 'Save the team to keep these connections. When a ru
 const KIND_NOTE: Record<string, string> = {
   artifact: 'Produces a deliverable',
   behavior: 'Governs how the agent works',
-  portable: 'Assumes nothing about its harness',
+  portable: 'Assumes nothing about where it runs',
 }
 
 /** Read-only provenance and planning details for a locally detected capability. */
@@ -95,25 +89,6 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
   const details = detailState.id === item.id ? detailState.details : null
   const detailsError = detailState.id === item.id ? detailState.error : null
   const portability = details?.portability ?? null
-  /** The route this skill takes on one agent's harness, or `null` when the daemon cannot say. */
-  const routeFor = (harnessId: string | null | undefined): SkillRoute | null =>
-    (harnessId && portability?.routes[harnessId]) || null
-  // A skill that produces a deliverable, whose own text leans on Claude, wired to an agent that is
-  // not Claude — while a Claude agent sits unconnected in the same team. That is the one case
-  // worth a nudge, and it is a suggestion rather than a rule: the operator may well want the
-  // deliverable produced by the other agent, which is why the skill stays wired either way.
-  //
-  // `needs` must be non-empty. An artifact skill that assumes nothing works the same everywhere,
-  // and suggesting a move for it would be advice with no reason behind it.
-  const claudeAgent = agents.find((agent) => agent.harnessId === 'claude')
-  const suggestion =
-    portability?.kind === 'artifact' &&
-    portability.needs.length > 0 &&
-    claudeAgent &&
-    !claudeAgent.connected &&
-    agents.some((agent) => agent.connected && agent.harnessId !== 'claude')
-      ? claudeAgent
-      : null
   return (
     <aside className="panel right top e1 lw-inspector capability-inspector" aria-label={`${KIND_LABEL[kind]} details`} role="region" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <div className="inspector-glass" aria-hidden="true" />
@@ -146,7 +121,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
             <div className="zone-head t-micro">Portability</div>
             <p className="capability-description t-body">{KIND_NOTE[portability.kind] ?? portability.kind}.</p>
             {portability.needs.length === 0 ? (
-              <p className="capability-description t-meta">Nothing in its text assumes a facility only one harness has, so every harness gets it the same way.</p>
+              <p className="capability-description t-meta">Nothing in its text assumes a facility an agent may lack.</p>
             ) : (
               <>
                 <p className="capability-description t-meta">Its instructions assume these. Each line below is the sentence that says so.</p>
@@ -160,6 +135,7 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
                 </dl>
               </>
             )}
+            {portability.route && <p className="capability-description t-meta">{ROUTE_NOTE[portability.route]}</p>}
           </div>
         )}
 
@@ -175,21 +151,14 @@ export function CapabilityInspector({ item, kind, placed, connectedAgents, agent
             <div className="zone-head t-micro">Use with agents</div>
             <p className="capability-description t-meta">{PICKER_NOTE[kind]}</p>
             {agents.length ? agents.map((agent) => {
-              const route = routeFor(agent.harnessId)
               return (
                 <label key={agent.id} className="capability-agent-option">
-                  <input type="checkbox" aria-label={`Use ${item.name} with ${agent.name} (${agent.harness})`} checked={agent.connected} disabled={readOnly || !onToggleAgent} onChange={(event) => onToggleAgent?.(agent.id, event.target.checked)} />
-                  <span><strong>{agent.name}</strong><small>{agent.harness}{route ? ` · ${ROUTE_NOTE[route](agent.harness)}` : ''}</small></span>
+                  <input type="checkbox" aria-label={`Use ${item.name} with ${agent.name} (${agent.model})`} checked={agent.connected} disabled={readOnly || !onToggleAgent} onChange={(event) => onToggleAgent?.(agent.id, event.target.checked)} />
+                  <span><strong>{agent.name}</strong><small>{agent.model}</small></span>
                   {agent.connected && <span className="capability-required">{kind === 'skill' ? 'Required' : kind === 'knowledge' ? 'Reads it' : 'Connected'}</span>}
                 </label>
               )
             }) : <p className="hint t-meta">Add an agent to your team to connect this {noun}.</p>}
-            {suggestion && (
-              <p className="capability-suggestion t-meta">
-                <span>This skill produces a deliverable and its own text leans on Claude ({portability?.needs.join(', ')}). {suggestion.name} runs Claude Code, where those assumptions hold.</span>
-                <button type="button" className="btn" disabled={readOnly || !onToggleAgent} onClick={() => onToggleAgent?.(suggestion.id, true)}>Connect to {suggestion.name}</button>
-              </p>
-            )}
             <p className="hint t-meta">{notionPage ? NOTION_DELIVERY_NOTE : DELIVERY_NOTE[kind]}</p>
           </div>
         )}

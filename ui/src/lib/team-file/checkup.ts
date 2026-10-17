@@ -10,11 +10,8 @@
 //
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
-import { OVERTHINKING_EFFORTS } from '../library/effort'
-import { modelForJob } from '../library/jobModel'
+import { DEFAULT_MODEL, OVERTHINKING_EFFORTS, modelForJob, modelNameFromId, openRouterId } from '../ai/modelIds'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
-import { effortName, modelName, modelTiers, onStrongTier, sameModel, type ModelCatalog } from '../models/tiers'
-import { actsWithoutAsking } from './allow'
 import type { TeamUsage } from './runLessons'
 import type { AgentAllow, AgentConfig, AllowSwitch } from './types'
 
@@ -32,14 +29,13 @@ export interface CheckupInput {
   responder: string | null
   /** Runs on a schedule, so nobody may be there to answer a permission request. */
   scheduled?: boolean
-  /** The model list of each agent's app, once read (ADR 0057's tiers); absent, no tier is judged. */
-  catalogFor?: (agent: AgentConfig) => ModelCatalog | null | undefined
+  /** The model list's own names by id, once it has arrived; absent, names come from the ids. */
+  modelNames?: ReadonlyMap<string, string>
   /** Where the team's tokens went in its recent runs (`teamUsage`), quoted beside a tier finding. */
   usage?: TeamUsage | null
 }
 
 export type CheckupRule =
-  | 'lead-cannot-delegate'
   | 'needs-web'
   | 'needs-edits'
   | 'needs-commands'
@@ -67,7 +63,7 @@ export type CheckupFix =
   /** A built-in job's instructions, with the switches the job cannot work without (roles.ts). */
   | { kind: 'replace-role'; agentId: string; text: string; allow?: AgentAllow }
   | { kind: 'effort'; agentId: string; value: string }
-  /** A model the agent's app listed, with the effort to run it at; none means the app's default. */
+  /** A model to run the agent on, with the effort to run it at; none means the model's default. */
   | { kind: 'model'; agentId: string; model: string; thinkingEffort?: string }
 
 export interface CheckupFinding {
@@ -108,11 +104,11 @@ export function unshout(role: string): string {
   })
 }
 
-/** Fewer words than this and the AI app has to guess the scope, the method and the format. */
+/** Fewer words than this and the model has to guess the scope, the method and the format. */
 export const THIN_WORDS = 12
 /**
- * More words than this and the instructions cost more than they add: the app reads every word at the
- * start of every run, and in a long prompt each line gets less of the model's attention. The
+ * More words than this and the instructions cost more than they add: the model reads every word at
+ * the start of every run, and in a long prompt each line gets less of the model's attention. The
  * built-in jobs are well under 300.
  */
 export const LONG_WORDS = 700
@@ -176,16 +172,6 @@ function overlap(a: Set<string>, b: Set<string>): number {
   return shared / Math.min(a.size, b.size)
 }
 
-/**
- * The daemon's `Harness::of` (crates/loomwatch-backend/src/workspace.rs), as far as Team Bus goes:
- * only these apps are offered Team Bus tools, so only they can hand work to a teammate.
- */
-export function canUseTeamBus(agent: Pick<AgentConfig, 'spawn'>): boolean {
-  const haystack = [agent.spawn?.cmd ?? '', ...(agent.spawn?.args ?? [])].join(' ').toLowerCase()
-  if (haystack.includes('openclaw')) return false
-  return ['opencode', 'claude', 'codex', 'gemini', 'hermes'].some((name) => haystack.includes(name))
-}
-
 /** A built-in job whose name the agent carries, so its instructions can stand in for one line. */
 export function jobFor(agent: Pick<AgentConfig, 'name' | 'role'>): RolePreset | null {
   const name = agent.name.toLowerCase()
@@ -210,14 +196,14 @@ export const bySeverity = (a: CheckupFinding, b: CheckupFinding) => (a.severity 
 /** The instructions name this agent, which is how a lead is told when to use it. */
 export const mentions = (role: string, name: string) => name.trim() !== '' && role.toLowerCase().includes(name.trim().toLowerCase())
 
-/** "In the last 3 runs it used 41% of the team's tokens.", from its app's own reports; empty without them. */
+/** "In the last 3 runs it used 41% of the team's tokens.", from the runs' own counts; empty without them. */
 function shareOfTeam(usage: TeamUsage | null | undefined, agentId: string): string {
   const mine = usage?.agents.find((candidate) => candidate.id === agentId)
   if (!usage || !mine || usage.agents.length < 2) return ''
   return ` In ${usage.runs === 1 ? 'the last run' : `the last ${usage.runs} runs`} it used ${Math.round(mine.share * 100)}% of the team’s tokens.`
 }
 
-export function checkup({ agents, edges, entrypoint, responder, scheduled = false, catalogFor, usage }: CheckupInput): CheckupFinding[] {
+export function checkup({ agents, edges, entrypoint, responder, scheduled = false, modelNames, usage }: CheckupInput): CheckupFinding[] {
   const findings: CheckupFinding[] = []
   const workers = agents.filter((agent) => agent.kind !== 'operator')
   const byId = new Map(agents.map((agent) => [agent.id, agent]))
@@ -233,13 +219,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
   // unconnected is the team sentence's to say (teamSentence.ts), with its own fix: not repeated. ──
   if (!pipeline && lead && lead.kind !== 'operator' && workers.length > 1) {
     const teammates = workers.filter((agent) => agent.id !== lead.id)
-    if (!canUseTeamBus(lead)) {
-      add({
-        rule: 'lead-cannot-delegate', severity: 'fix', agentId: lead.id,
-        title: `${lead.name} can't hand work to ${list(teammates.map((agent) => agent.name))}`,
-        why: `${lead.name}'s AI app has no Team Bus, so its teammates never get any work. Choose another AI app for ${lead.name}, or connect the agents in the order they should work.`,
-      })
-    } else if (!DELEGATES.test(lead.role) && !teammates.some((agent) => mentions(lead.role, agent.name))) {
+    if (!DELEGATES.test(lead.role) && !teammates.some((agent) => mentions(lead.role, agent.name))) {
       add({
         rule: 'lead-delegation', severity: 'improve', agentId: lead.id,
         title: `Tell ${lead.name} when to bring in ${list(teammates.map((agent) => agent.name))}`,
@@ -266,7 +246,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
     add({
       rule: 'large-team', severity: 'improve', agentId: anchor.id,
       title: `${workers.length} agents is a large team`,
-      why: 'Each agent that runs starts a session of its own and pays its app’s opening cost, and each hand-off loses some detail. Check whether some of them could be one agent with clearer instructions.',
+      why: 'Each agent that runs starts a session of its own and pays its own opening cost, and each hand-off loses some detail. Check whether some of them could be one agent with clearer instructions.',
       askPrompt: `This team has ${workers.length} agents. Suggest how it could do the same work with fewer agents, merging jobs that belong together, and propose the change.`,
     })
   }
@@ -278,8 +258,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
     const final = agent.id === responder
     const predecessors = edges.filter((edge) => edge.to === agent.id).map((edge) => edge.from)
 
-    // An app that never asks (allow.ts) has nothing to be allowed: the panel already says so.
-    for (const allow of actsWithoutAsking(agent) ? [] : ALLOW_RULES) {
+    for (const allow of ALLOW_RULES) {
       if (agent.allow?.[allow.key] || !allow.needs.test(role)) continue
       add({
         rule: allow.rule, severity: scheduled ? 'fix' : 'improve', agentId: agent.id,
@@ -303,25 +282,21 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       })
     }
 
-    // A gatherer on the strong tier (ADR 0057): it feeds the agent that writes the answer, so the
-    // app's faster model, or the same model thinking less, does its work. Judged only against the
-    // app's own list, and never for the agent whose reply is the team's answer.
+    // A gatherer on the strongest model (ADR 0057): it feeds the agent that writes the answer, so a
+    // faster model does its work and leaves the strong one for the step that writes. Never for the
+    // agent whose reply is the team's answer, and only for one on the default strong model: a model
+    // the operator chose on purpose is theirs.
     const job = jobFor(agent)
-    const catalog = job?.tier === 'fast' && !final ? catalogFor?.(agent) : null
-    const tiers = catalog ? modelTiers(catalog) : null
-    const fast = catalog && job && tiers && onStrongTier(agent, tiers, catalog) ? modelForJob(job, catalog) : null
-    if (catalog && fast && agent.model) {
-      const newModel = !sameModel(fast.model, agent.model, catalog.models)
+    if (job?.tier === 'fast' && !final && openRouterId(agent.model) === DEFAULT_MODEL) {
+      const fast = modelForJob(job)
+      const named = (id: string) => modelNames?.get(id) ?? modelNameFromId(id)
       const writer = responder ? name(responder) : 'the next step'
-      const level = fast.thinkingEffort ? effortName(fast.model, fast.thinkingEffort, catalog).toLowerCase() : ''
       add({
         rule: 'strong-gatherer', severity: 'improve', agentId: agent.id,
-        title: newModel ? `${agent.name} could gather on ${modelName(fast.model, catalog)}` : `${agent.name} could gather at ${level} effort`,
-        why: `${newModel
-          ? `It collects facts for ${writer} to write up. A faster model does that well, and leaves ${modelName(agent.model, catalog)} for the step that writes the answer.`
-          : `It collects facts for ${writer} to write up, which takes less thinking than writing the answer.`}${shareOfTeam(usage, agent.id)}`,
+        title: `${agent.name} could gather on ${named(fast.model)}`,
+        why: `It collects facts for ${writer} to write up. A faster model does that well, for less, and leaves ${named(DEFAULT_MODEL)} for the step that writes the answer.${shareOfTeam(usage, agent.id)}`,
         fix: {
-          label: newModel ? `Use ${modelName(fast.model, catalog)}` : `Use ${level} effort`,
+          label: `Use ${named(fast.model)}`,
           change: { kind: 'model', agentId: agent.id, model: fast.model, ...(fast.thinkingEffort ? { thinkingEffort: fast.thinkingEffort } : {}) },
         },
       })
@@ -332,7 +307,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       add({
         rule: 'thin-instructions', severity: 'improve', agentId: agent.id,
         title: `${agent.name}'s instructions are very short`,
-        why: 'With one line to go on, the AI app guesses the scope, the method and the format. Say what it does, how to work, and what to hand back.',
+        why: 'With one line to go on, the model guesses the scope, the method and the format. Say what it does, how to work, and what to hand back.',
         ...(job ? { fix: { label: `Use the ${job.label} job's instructions`, change: { kind: 'replace-role' as const, agentId: agent.id, text: job.role, ...(job.allow ? { allow: job.allow } : {}) } } } : {}),
         askPrompt: `Rewrite the instructions of ${agent.name} in this team so it knows what it does and does not do, how to work, and exactly what to reply with. Keep the job it has now: “${role.trim()}”.`,
       })
@@ -343,7 +318,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       add({
         rule: 'long-instructions', severity: 'improve', agentId: agent.id,
         title: `${agent.name}'s instructions are ${count} words long`,
-        why: 'Its AI app reads every word at the start of every run, and in a long prompt each line counts for less. Keep what changes how it works; cut background it can look up and rules any careful worker follows anyway.',
+        why: 'The model reads every word at the start of every run, and in a long prompt each line counts for less. Keep what changes how it works; cut background it can look up and rules any careful worker follows anyway.',
         askPrompt: `Tighten the instructions of ${agent.name} in this team to under 300 words. Keep its job, how it works, how it checks and exactly what it replies with; cut repetition, background and rules any careful worker would follow anyway.`,
       })
     }
@@ -352,7 +327,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       add({
         rule: 'shouting', severity: 'improve', agentId: agent.id,
         title: `${agent.name}'s instructions use capitals for emphasis`,
-        why: 'AI apps follow instructions closely, and a rule in capitals gets applied even where it doesn’t fit. Plain words, with the reason for the rule, work better.',
+        why: 'Models follow instructions closely, and a rule in capitals gets applied even where it doesn’t fit. Plain words, with the reason for the rule, work better.',
         fix: { label: 'Write them in plain case', change: { kind: 'replace-role', agentId: agent.id, text: unshout(role) } },
       })
     }

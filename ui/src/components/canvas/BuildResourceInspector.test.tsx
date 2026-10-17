@@ -13,11 +13,11 @@ describe('BuildResourceInspector', () => {
     const card = { id: 'knowledge:loomwatch-project', name: 'loomwatch project', source: 'LoomWatch + OpenCode', detail: '', status: 'Compatible' as const }
     const view = render(<BuildResourceInspector {...props} item={card} kind="knowledge" />)
     expect(screen.getByText(/^Not delivered\. Knowledge is now a folder or file you choose/)).toBeInTheDocument()
-    expect(screen.queryByText(/Wire this node from a harness/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Wire this node from an agent/)).not.toBeInTheDocument()
 
     const memory = { id: 'memory-team', name: 'Research team · memory', source: 'LoomWatch', detail: '', status: 'Ready' as const, memory: { team: 'research-team', brief: 1 } }
     view.rerender(<BuildResourceInspector {...props} item={memory} kind="knowledge" />)
-    expect(screen.getByText(/Wire this node from a harness/)).toBeInTheDocument()
+    expect(screen.getByText(/Wire this node from an agent/)).toBeInTheDocument()
     expect(screen.queryByText(/Not delivered/)).not.toBeInTheDocument()
   })
 })

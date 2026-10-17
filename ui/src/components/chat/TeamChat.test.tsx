@@ -563,13 +563,13 @@ describe("an agent's face", () => {
   const described: TeamView = {
     ...team,
     configs: new Map([
-      ['researcher', { id: 'researcher', name: 'Researcher', role: 'Finds the three stories that matter today, with a source for each.', model: 'claude-opus-4-5', capabilities: [{ kind: 'skill', name: 'eli5' }, { kind: 'tool', name: 'notion' }, { kind: 'knowledge', name: 'Notes', path: 'notes' }, { kind: 'knowledge', name: 'Brief', path: 'brief.md' }] }],
+      ['researcher', { id: 'researcher', name: 'Researcher', role: 'Finds the three stories that matter today, with a source for each.', model: 'anthropic/claude-opus-5.5', capabilities: [{ kind: 'skill', name: 'eli5' }, { kind: 'tool', name: 'notion' }, { kind: 'knowledge', name: 'Notes', path: 'notes' }, { kind: 'knowledge', name: 'Brief', path: 'brief.md' }] }],
       ['writer', { id: 'writer', name: 'Writer', role: 'Writes the digest.' }],
     ]),
-    apps: new Map([['researcher', 'Claude'], ['writer', 'Codex']]),
+    models: new Map([['researcher', 'Claude Opus 5.5'], ['writer', 'Claude Sonnet 5.5']]),
   }
 
-  it('shows rough details on hover: what it is doing, its app and model, its job and what it works with', async () => {
+  it('shows rough details on hover: what it is doing, its model, its job and what it works with', async () => {
     renderChat({ team: described })
     const face = within(screen.getByRole('list', { name: 'Who is on the team' })).getByRole('button', { name: 'Researcher: mention in your message' })
     fireEvent.pointerEnter(face, { pointerType: 'mouse' })
@@ -577,7 +577,7 @@ describe("an agent's face", () => {
     expect(face).toHaveAttribute('aria-describedby', card.id)
     expect(card).toHaveTextContent('Researcher')
     expect(card).toHaveTextContent('ready · step 1 of 3')
-    expect(card).toHaveTextContent('Claude · claude-opus-4-5')
+    expect(card).toHaveTextContent('Claude Opus 5.5')
     expect(card).toHaveTextContent('Finds the three stories that matter today')
     expect(card).toHaveTextContent('1 skill · 1 tool · 2 sources')
     expect(card).toHaveTextContent('Click to mention Researcher')
@@ -613,7 +613,7 @@ describe("an agent's face", () => {
     const face = screen.getByRole('button', { name: 'Researcher: mention in your message' })
     face.focus()
     fireEvent.focus(face)
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Claude · claude-opus-4-5')
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Claude Opus 5.5')
     fireEvent.keyDown(face, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
     fireEvent.click(face)

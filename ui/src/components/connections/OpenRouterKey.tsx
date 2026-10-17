@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 
 import { type KeyStatus, fetchKeyStatus, recheckOpenRouterKey, removeOpenRouterKey, saveOpenRouterKey } from '../../lib/ai/client'
+import { announceKeyStatus } from '../../lib/ai/useKeyStatus'
 
 const KEYS_PAGE = 'https://openrouter.ai/keys'
 const CREDITS_PAGE = 'https://openrouter.ai/settings/credits'
@@ -30,11 +31,14 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  // Home and the Ask panel can both show the card, so its ids are its own.
+  const headingId = useId()
+  const inputId = useId()
 
   useEffect(() => {
     let active = true
     fetchKeyStatus()
-      .then((value) => { if (active) setStatus(value) })
+      .then((value) => { announceKeyStatus(value); if (active) setStatus(value) })
       .catch((caught: unknown) => { if (active) setError(caught instanceof Error ? caught.message : 'Couldn’t load the OpenRouter key.') })
     return () => { active = false }
   }, [])
@@ -45,6 +49,7 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
     try {
       const value = await work()
       setStatus(value)
+      announceKeyStatus(value)
       onChange?.(value)
       setNotice(done)
     } catch (caught) {
@@ -55,10 +60,10 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
   }
 
   const connected = status?.connected === true
-  const heading = <h2 id="openrouter-heading" className="t-title">{variant === 'card' ? 'Add your OpenRouter key' : 'AI models'}</h2>
+  const heading = <h2 id={headingId} className="t-title">{variant === 'card' ? 'Add your OpenRouter key' : 'AI models'}</h2>
 
   return (
-    <section className={variant === 'card' ? 'e1 lw-settings-section lw-key-card' : 'e1 lw-settings-section'} aria-labelledby="openrouter-heading" aria-busy={busy}>
+    <section className={variant === 'card' ? 'e1 lw-settings-section lw-key-card' : 'e1 lw-settings-section'} aria-labelledby={headingId} aria-busy={busy}>
       {heading}
       {error && <p role="alert" className="inline-error t-body"><span className="detail">{error}</span></p>}
       {notice && <p role="status" className="lw-notice t-meta">{notice}</p>}
@@ -90,8 +95,8 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
           setKey('')
           void act(() => saveOpenRouterKey(submitted), 'OpenRouter accepted the key. Your agents can run now.')
         }}>
-          <label className="t-meta" htmlFor="openrouter-key">OpenRouter key</label>
-          <input id="openrouter-key" type="password" autoComplete="off" spellCheck={false} value={key} maxLength={512} placeholder="sk-or-…" onChange={(event) => setKey(event.target.value)} className="input mono" />
+          <label className="t-meta" htmlFor={inputId}>OpenRouter key</label>
+          <input id={inputId} type="password" autoComplete="off" spellCheck={false} value={key} maxLength={512} placeholder="sk-or-…" onChange={(event) => setKey(event.target.value)} className="input mono" />
           <span className="hint t-meta">LoomWatch checks it with OpenRouter first, then keeps it in this Mac’s Keychain. It is never shown again, and agents never see it.</span>
           <button disabled={busy || !key.trim()} className="btn btn-primary lw-settings-start">{busy ? 'Checking the key…' : 'Save key'}</button>
         </form>

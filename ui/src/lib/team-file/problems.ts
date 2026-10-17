@@ -1,6 +1,5 @@
 import { LineCounter, parseDocument } from 'yaml'
 
-import type { AppProblem } from './appChecks'
 import type { EntrypointProblem } from './useTeamDocument'
 import type { AgentField, AgentFieldProblems, DocumentProblem } from './validation'
 
@@ -44,14 +43,8 @@ export function shortenDirectory(directory: string): string {
   return `${parts[0]}/…/${tail}`
 }
 
-/**
- * Collects every problem the chip counts so a counted problem can never vanish from Review.
- *
- * `appProblems` are about this computer, not the file: the team is valid and saves, but an agent's
- * app is not here to start. They are `incomplete` — something to finish before running — and carry
- * no YAML path, so choosing one selects the agent, whose inspector is where its app is chosen.
- */
-export function reviewProblems(entrypointProblem: EntrypointProblem | null, fieldProblemsByAgent: ReadonlyMap<string, AgentFieldProblems>, documentProblems: DocumentProblem[], agentNames: ReadonlyMap<string, string>, appProblems: readonly AppProblem[] = []): ReviewProblem[] {
+/** Collects every problem the chip counts so a counted problem can never vanish from Review. */
+export function reviewProblems(entrypointProblem: EntrypointProblem | null, fieldProblemsByAgent: ReadonlyMap<string, AgentFieldProblems>, documentProblems: DocumentProblem[], agentNames: ReadonlyMap<string, string>): ReviewProblem[] {
   const fields: ReviewProblem[] = Array.from(fieldProblemsByAgent, ([agentId, problems]) =>
     (Object.entries(problems) as [AgentField, NonNullable<AgentFieldProblems[AgentField]>][]).map(([field, problem]) => ({
       message: problem.message,
@@ -64,15 +57,9 @@ export function reviewProblems(entrypointProblem: EntrypointProblem | null, fiel
   return [
     // An empty team is unfinished, not wrong: it is the state every new team starts in.
     ...(entrypointProblem ? [entrypointProblem.candidates.length === 0
-      ? { message: 'Click + next to an AI app in the library on the left.', yamlPath: ['entrypoint'], weight: 'incomplete' as const, title: 'Add your first agent' }
+      ? { message: 'Click + next to a job in the library on the left, such as Researcher.', yamlPath: ['entrypoint'], weight: 'incomplete' as const, title: 'Add your first agent' }
       : { message: 'Choose which agent receives your request first.', yamlPath: ['entrypoint'], weight: 'error' as const, title: 'Choose a starting agent' }] : []),
     ...fields,
-    ...appProblems.map((problem) => ({
-      message: `${problem.sentence} ${problem.remedy}`,
-      agentId: problem.agentId,
-      weight: 'incomplete' as const,
-      title: `${agentNames.get(problem.agentId) ?? problem.agentId} · AI app`,
-    })),
     ...documentProblems.map((problem) => {
       const friendly = friendlyDocumentProblem(problem)
       return { ...problem, message: friendly.message, weight: 'error' as const, title: problem.agentId && problem.yamlPath?.[0] !== 'schedule' ? (agentNames.get(problem.agentId) ?? friendly.title) : friendly.title }

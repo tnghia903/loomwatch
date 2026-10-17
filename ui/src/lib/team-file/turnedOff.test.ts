@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ownedByApp, turnedOffFor, withTurnedOff, withheldByApp, withoutWired } from './turnedOff'
+import { inLibrary, turnedOffFor, withTurnedOff, withoutWired } from './turnedOff'
 
 describe('turned off skills and tools (ADR 0060)', () => {
   it('turns off skills and tools, never knowledge, memory or the Team Bus', () => {
@@ -19,37 +19,10 @@ describe('turned off skills and tools (ADR 0060)', () => {
   })
 })
 
-describe('what an agent’s app has of its own', () => {
-  const inventory = {
-    tools: [{ name: 'Agent Memory', source: 'Claude Code + Codex + OpenCode' }, { name: 'Node REPL', source: 'Codex' }],
-    connectors: [{ name: 'claude.ai Notion', source: 'Claude Code' }],
-    skills: [
-      { name: 'canvas-design', source: 'Claude Code' },
-      { name: 'engineering:code-review', source: 'Claude Code · engineering' },
-      { name: 'herdr', source: 'Codex' },
-      { name: 'investment-banking:cim-builder', source: 'Codex · investment-banking' },
-    ],
-  }
-
-  it('lists a Claude agent’s tools, connectors and skills, plugins included', () => {
-    expect(ownedByApp('claude', inventory)?.items.map((item) => `${item.kind}:${item.name}`)).toEqual([
-      'tool:Agent Memory', 'tool:claude.ai Notion', 'skill:canvas-design', 'skill:engineering:code-review',
-    ])
-  })
-
-  it('leaves out Codex plugins, which run agents start without, and connectors, which are Claude’s', () => {
-    expect(ownedByApp('codex', inventory)?.items.map((item) => `${item.kind}:${item.name}`)).toEqual(['tool:Agent Memory', 'tool:Node REPL', 'skill:herdr'])
-    expect(ownedByApp(null, inventory)).toBeNull()
-  })
-})
-
-describe('which apps LoomWatch can keep from their own copy', () => {
-  it('withholds Claude’s skills and tools and Codex’s skills, and says so for the rest', () => {
-    expect(withheldByApp('claude', 'tool')).toBe(true)
-    expect(withheldByApp('claude', 'skill')).toBe(true)
-    expect(withheldByApp('codex', 'skill')).toBe(true)
-    expect(withheldByApp('codex', 'tool')).toBe(false)
-    expect(withheldByApp('gemini', 'skill')).toBe(false)
-    expect(withheldByApp(null, 'skill')).toBe(false)
+describe('what every agent chooses from (ADR 0060)', () => {
+  it('is every skill in LoomWatch’s library, each once', () => {
+    const skills = [{ name: 'canvas-design' }, { name: 'brief-writer' }, { name: 'canvas-design' }]
+    expect(inLibrary({ skills })).toEqual({ app: 'LoomWatch', items: [{ kind: 'skill', name: 'canvas-design' }, { kind: 'skill', name: 'brief-writer' }] })
+    expect(inLibrary({ skills: [] }).items).toEqual([])
   })
 })

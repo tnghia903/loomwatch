@@ -56,7 +56,10 @@ async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T>
 }
 
 export async function fetchKeyStatus(): Promise<KeyStatus> {
-  return (await call<{ openrouter: KeyStatus }>('/api/ai')).openrouter
+  const status = (await call<{ openrouter?: KeyStatus }>('/api/ai')).openrouter
+  // An answer that doesn't say is no answer: what everything waiting on a key shows stays unknown.
+  if (!status || typeof status !== 'object') throw new Error('LoomWatch didn’t say whether an OpenRouter key is set. Restart LoomWatch and try again.')
+  return status
 }
 
 /** Checks the key with OpenRouter, then keeps it. A key OpenRouter refuses is never kept. */

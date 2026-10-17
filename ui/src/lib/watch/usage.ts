@@ -1,34 +1,20 @@
 import type { RunEvent } from './events'
 
 /**
- * Tokens per turn, right for each AI app, worked out from the archived events alone — so a run
- * archived before this existed reads the same as one recorded today.
+ * Tokens and cost per turn, worked out from the archived events alone.
  *
- * No app reports every turn whole, and each falls short differently:
- *
- * - **codex-acp** (2.x) puts only the turn's *last* model call in its `session/prompt` usage, and
- *   each `usage_update.used` is one call's total, sent as the call ends. A turn is the sum of its
- *   distinct readings — for every Codex session archived when this was written, exactly the total
- *   Codex logged itself. The last call's split is reported; an earlier call's cache read is
- *   estimated from how the context grew (each call re-reads the context the call before it ended
- *   with).
- * - **claude-agent-acp** (0.85) sums the turn's main loop in `usage`, and lists every model the
- *   turn ran — Haiku side calls, subagents, compaction — in `_meta.quota.model_usage`. The rows are
- *   the whole turn. Mid-turn it sends two readings per model call (as the call starts and as it
- *   ends), and its `usage_update.cost.amount` is the session's running total, so a turn's cost is
- *   what it added to the reading before it.
- * - A turn the run stopped before it ended has no response at all. It counts what its readings
- *   saw up to the stop.
- *
- * Anything worked out rather than reported is marked `estimated`.
+ * LoomWatch's engine reports each turn whole when it ends: its tokens, split into fresh input,
+ * cache reads and writes and output, and what OpenRouter charged for it (`turn_end`'s result,
+ * `_meta.loomwatch.costUsd`). A turn the run stopped before it ended has no such report; it counts
+ * the model calls its `usage` readings saw, each one call's tokens, without the split, and is
+ * marked `estimated`.
  */
 
 /** Why a turn happened. `work` is the task itself; the rest are turns LoomWatch or you asked for. */
 export type TurnPurpose = 'work' | 'handover' | 'checkpoint' | 'ask' | 'note'
-export type UsageApp = 'claude' | 'codex' | 'other'
 
 export interface TokenCounts {
-  /** Prompt tokens processed fresh: neither read from the app's cache nor written to it. */
+  /** Prompt tokens processed fresh: neither read from the model's cache nor written to it. */
   input: number
   cacheRead: number
   cacheWrite: number
@@ -38,22 +24,20 @@ export interface TokenCounts {
 
 export interface TurnUsage extends TokenCounts {
   agentId: string
-  app: UsageApp
   purpose: TurnPurpose
   /** The turn's prompt, and its last event. */
   startSeq: number
   endSeq: number
-  /** How the app ended the turn; `null` when it never did, because the run stopped first. */
+  /** How the turn ended; `null` when it never did, because the run stopped first. */
   stopReason: string | null
-  /** Some of these counts were worked out from the app's readings rather than reported whole. */
+  /** Counted from the turn's readings, because it never reported itself whole. */
   estimated: boolean
-  /** What the app priced the turn at, when it prices turns at all (Claude does; Codex does not). */
+  /** What OpenRouter charged for the turn, in dollars, when that is known. */
   costUsd?: number
 }
 
 export interface AgentTokens extends TokenCounts {
   agentId: string
-  app: UsageApp
   turns: number
   estimated: boolean
   costUsd?: number
@@ -74,12 +58,12 @@ export interface TokenSummary extends TokenCounts {
   agents: AgentTokens[]
   /** Only the purposes some turn had, in {@link PURPOSES} order. */
   purposes: PurposeTokens[]
-  /** Apps whose finished turns had to be added up from their readings. */
-  estimatedApps: UsageApp[]
   /** Turns the run stopped before they ended, which count only what was seen until then. */
   stoppedTurns: number
-  /** Only when every turn that used tokens was priced by its app. */
+  /** What the turns whose cost is known came to. */
   costUsd?: number
+  /** Every turn that used tokens has a known cost, so `costUsd` is the whole run's. */
+  costComplete: boolean
 }
 
 export const PURPOSES: readonly TurnPurpose[] = ['work', 'handover', 'checkpoint', 'ask', 'note']
@@ -96,102 +80,32 @@ function add(into: TokenCounts, from: TokenCounts) {
   into.total += from.total
 }
 
-/** One `token_count` row of `_meta.quota`, or an ACP `usage`: the two spell cache reads differently. */
-function counts(usage: Record<string, unknown>): TokenCounts {
+/** A turn's `usage` as `turn_end` records it. `null` when it says nothing. */
+function reported(usage: unknown): TokenCounts | null {
+  if (!object(usage)) return null
   const split = {
     input: count(usage.inputTokens),
     cacheRead: count(usage.cachedReadTokens ?? usage.cachedInputTokens),
     cacheWrite: count(usage.cachedWriteTokens),
-    // Both apps count thinking inside their output tokens; `thoughtTokens` is a part, not more.
+    // Thinking is counted inside the output tokens; `reasoningTokens` is a part, not more.
     output: count(usage.outputTokens),
   }
   const total = count(usage.totalTokens) || split.input + split.cacheRead + split.cacheWrite + split.output
-  return { ...split, total }
+  return total > 0 ? { ...split, total } : null
 }
 
-/**
- * What a `session/prompt` result says it spent: every model's row from `_meta.quota.model_usage`
- * when the app lists them — Claude's rows include the side calls its `usage` leaves out — else its
- * ACP `usage`. `null` when it says nothing.
- */
-function reportedUsage(usage: unknown, meta: unknown): TokenCounts | null {
-  const quota = object(meta) && object(meta.quota) ? meta.quota : null
-  const rows = quota && Array.isArray(quota.model_usage) ? quota.model_usage.filter(object) : []
-  if (rows.length > 0) {
-    const total = zero()
-    for (const row of rows) if (object(row.token_count)) add(total, counts(row.token_count))
-    return total
-  }
-  return object(usage) ? counts(usage) : null
-}
-
-/** The app that answered `initialize`, by the name it gave. */
-function appOf(event: RunEvent): UsageApp {
-  const raw = object(event.raw) ? event.raw : {}
-  const result = object(event.payload.result) ? event.payload.result : object(raw.result) ? raw.result : {}
-  const name = object(result.agentInfo) && typeof result.agentInfo.name === 'string' ? result.agentInfo.name.toLowerCase() : ''
-  return name.includes('codex') ? 'codex' : name.includes('claude') ? 'claude' : 'other'
-}
-
-/** One model call, as its readings saw it: the context it started with and the total it ended on. */
-interface Call { start: number; final: number }
-
-/**
- * The readings of one part of a turn: from a prompt to the app's response, or to the stop. A turn
- * cut by its app and carried on (ADR 0046) has one part per prompt.
- */
-class Part {
-  readonly calls: Call[] = []
-  private last: number | null = null
-  private wroteSince = false
-  /** Codex sends one reading per call; Claude one as a call starts and one as it ends. */
-  private readonly onePerCall: boolean
-
-  constructor(onePerCall: boolean) {
-    this.onePerCall = onePerCall
-  }
-
-  /** The app streamed something of its answer: a model call is under way. */
-  wrote() { this.wroteSince = true }
-
-  read(used: number) {
-    // A reading repeated — Claude's closing `result`, a rate-limit notice — is the same call.
-    if (used === this.last) return
-    const call = this.calls.at(-1)
-    // Nothing written since the last reading: this one opens the next call, and the last one
-    // closed the call before it.
-    if (this.onePerCall || !call || !this.wroteSince) this.calls.push({ start: used, final: used })
-    else call.final = used
-    this.last = used
-    this.wroteSince = false
-  }
-}
-
-/**
- * Split calls the app reported only as totals. A call re-reads from cache what the call before it
- * in the same session ended on; the rest of its prompt is new — fresh input for Codex, written to
- * the cache for Claude, whose app caches each new prefix. Codex's output cannot be told from new
- * input, so it is counted with the input.
- */
-function estimateCalls(calls: readonly Call[], app: UsageApp, previous: number | null): TokenCounts {
-  const total = zero()
-  let before = previous
-  for (const call of calls) {
-    const output = app === 'codex' ? 0 : Math.max(0, call.final - call.start)
-    const prompt = call.final - output
-    const cacheRead = before === null ? 0 : Math.min(before, prompt)
-    const fresh = prompt - cacheRead
-    add(total, { input: app === 'claude' ? 0 : fresh, cacheRead, cacheWrite: app === 'claude' ? fresh : 0, output, total: call.final })
-    before = call.final
-  }
-  return total
+/** What a turn cost, from its `turn_end` result. */
+function reportedCost(result: Record<string, unknown>): number | undefined {
+  const meta = object(result._meta) && object(result._meta.loomwatch) ? result._meta.loomwatch : null
+  const cost = meta?.costUsd
+  return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : undefined
 }
 
 interface Ask { asker: string; from: number; to: number; target: string | null; question: string | null }
 
 /**
  * Every Team Bus `ask`, from the call to its answer. The asked agent answers inside that span —
- * a kept-alive one in a new turn, a cold one in a new session — and nothing else marks that turn.
+ * a parked one in a new turn, a new one in a new session — and nothing else marks that turn.
  */
 function askSpans(events: readonly RunEvent[], throughSeq: number): Ask[] {
   const asks = new Map<string, Ask>()
@@ -200,7 +114,6 @@ function askSpans(events: readonly RunEvent[], throughSeq: number): Ask[] {
     const p = event.payload
     if (typeof p.callId !== 'string') continue
     const key = `${event.agentId}:${p.callId}`
-    // Only the bus's own record of the call; the app's echo of it carries a prefixed name.
     if (event.kind === 'tool_call' && p.name === 'ask' && p.title === 'Team Bus: ask') {
       const input = object(p.rawInput) ? p.rawInput : {}
       asks.set(key, {
@@ -222,7 +135,8 @@ function askSpans(events: readonly RunEvent[], throughSeq: number): Ask[] {
 
 interface OpenTurn {
   turn: TurnUsage
-  part: Part
+  /** Each model call's tokens, as the `usage` readings reported them. */
+  calls: number[]
   /** The session's running cost when the turn began; `undefined` when it cannot be known. */
   costFrom: number | undefined
   /** The last running cost the turn reported. */
@@ -230,18 +144,13 @@ interface OpenTurn {
 }
 
 interface AgentState {
-  app: UsageApp
   /** Set by LoomWatch's `turn_purpose` note before a turn it asks for, and reset after. */
   purpose: 'work' | 'handover' | 'checkpoint'
   open: OpenTurn | null
-  /** The next prompt is LoomWatch's request to carry on: the same turn, a new part. */
-  resuming: boolean
   replaying: boolean
   /** You wrote to this agent since its last turn began. */
   noted: boolean
-  /** The total of the session's last model call: what the next call reads back from cache. */
-  previous: number | null
-  /** The session's running cost: 0 for a new session, unknown for one reloaded mid-history. */
+  /** The session's running cost: 0 for a new session, unknown for one resumed from earlier. */
   cost: number | undefined
 }
 
@@ -257,62 +166,45 @@ export function turnUsage(events: readonly RunEvent[], throughSeq = Infinity): T
   const stateOf = (id: string): AgentState => {
     let state = agents.get(id)
     if (!state) {
-      state = { app: 'other', purpose: 'work', open: null, resuming: false, replaying: false, noted: false, previous: null, cost: 0 }
+      state = { purpose: 'work', open: null, replaying: false, noted: false, cost: 0 }
       agents.set(id, state)
     }
     return state
   }
 
-  /** Close the open part: the app's own account when it gave one that covers it, else the readings. */
-  const settle = (state: AgentState, open: OpenTurn, said: TokenCounts | null) => {
-    const { calls } = open.part
-    const counted = zero()
-    let estimated = false
-    const read = calls.reduce((sum, call) => sum + call.final, 0)
-    const last = calls.at(-1)
-    // A report of nothing, over readings that saw calls, is no report.
-    const reported = said && (said.total > 0 || read === 0) ? said : null
-    if (reported && (state.app !== 'codex' || reported.total >= read)) {
-      add(counted, reported)
-    } else if (reported && last && last.final === reported.total) {
-      // Codex: the earlier calls from their readings, the last one as reported.
-      add(counted, estimateCalls(calls.slice(0, -1), state.app, state.previous))
-      add(counted, reported)
-      estimated = calls.length > 1
-    } else {
-      add(counted, estimateCalls(calls, state.app, state.previous))
-      estimated = calls.length > 0
-    }
-    if (last) state.previous = last.final
-    add(open.turn, counted)
-    open.turn.estimated ||= estimated
-    open.part = new Part(state.app === 'codex')
-  }
-
-  const finish = (state: AgentState, stopReason: string | null, reported: TokenCounts | null) => {
+  /** Close the open turn: its own report when it ended with one, else what its readings saw. */
+  const finish = (state: AgentState, stopReason: string | null, result: Record<string, unknown> | null) => {
     const open = state.open
     if (!open) return
-    settle(state, open, reported)
-    open.turn.stopReason = stopReason
-    if (open.costTo !== null) {
-      // A running total that fell back restarted under the turn, so the reading is all of it.
-      if (open.costFrom !== undefined) open.turn.costUsd = open.costTo >= open.costFrom ? open.costTo - open.costFrom : open.costTo
-      state.cost = open.costTo
+    const whole = result ? reported(result.usage) : null
+    if (whole) add(open.turn, whole)
+    else {
+      const seen = open.calls.reduce((sum, tokens) => sum + tokens, 0)
+      add(open.turn, { input: seen, cacheRead: 0, cacheWrite: 0, output: 0, total: seen })
+      open.turn.estimated = seen > 0
     }
+    open.turn.stopReason = stopReason
+    const cost = result ? reportedCost(result) : undefined
+    if (cost !== undefined) open.turn.costUsd = cost
+    else if (open.costTo !== null && open.costFrom !== undefined) {
+      // A running total that fell back restarted under the turn, so the reading is all of it.
+      open.turn.costUsd = open.costTo >= open.costFrom ? open.costTo - open.costFrom : open.costTo
+    }
+    if (open.costTo !== null) state.cost = open.costTo
+    else if (cost !== undefined && state.cost !== undefined) state.cost += cost
     turns.push(open.turn)
     state.open = null
-    state.resuming = false
   }
 
-  /** A turn begins at its prompt — or, where the archive holds no prompt, at the app's answer. */
+  /** A turn begins at its prompt — or, where the archive holds no prompt, at its end. */
   const begin = (state: AgentState, event: RunEvent, text: string): OpenTurn => {
     const asked = asks.some((ask) => ask.asker !== event.agentId && ask.from < event.seq && event.seq < ask.to
       && (ask.target === event.agentId || (ask.question !== null && text.includes(ask.question))))
     const purpose: TurnPurpose = state.purpose !== 'work' ? state.purpose : asked ? 'ask' : state.noted ? 'note' : 'work'
     state.noted = false
     state.open = {
-      turn: { agentId: event.agentId, app: state.app, purpose, startSeq: event.seq, endSeq: event.seq, stopReason: null, estimated: false, ...zero() },
-      part: new Part(state.app === 'codex'),
+      turn: { agentId: event.agentId, purpose, startSeq: event.seq, endSeq: event.seq, stopReason: null, estimated: false, ...zero() },
+      calls: [],
       costFrom: state.cost,
       costTo: null,
     }
@@ -329,7 +221,8 @@ export function turnUsage(events: readonly RunEvent[], throughSeq = Infinity): T
       continue
     }
     const state = stateOf(event.agentId)
-    // A reloaded session replays its history: those readings were spent before, not now.
+    // A resumed session may replay its history: those turns were spent before, not now. Its
+    // running cost carries on from then, so it is not known here; each turn's own report is.
     if (event.kind === 'session_meta' && p.phase === 'session_loaded') { state.replaying = true; state.cost = undefined; continue }
     if (event.kind === 'session_meta' && p.phase === 'session_replayed') { state.replaying = false; continue }
     if (state.replaying) continue
@@ -339,38 +232,27 @@ export function turnUsage(events: readonly RunEvent[], throughSeq = Infinity): T
       case 'process':
         if (p.phase === 'spawned') {
           finish(state, null, null)
-          state.previous = null
           state.cost = 0
         }
         break
       case 'session_meta':
-        if (p.phase === 'initialize') state.app = appOf(event)
-        else if (p.phase === 'session_new') { state.previous = null; state.cost = 0 }
+        if (p.phase === 'session_new') state.cost = 0
         else if (p.phase === 'turn_purpose') state.purpose = p.purpose === 'handover' || p.purpose === 'checkpoint' ? p.purpose : 'work'
-        else if (p.phase === 'turn_resumed' && raw.source === 'loomwatch') {
-          const response = object(raw.response) && object(raw.response.result) ? raw.response.result : {}
-          settle(state, open ?? begin(state, event, ''), reportedUsage(p.usage, response._meta))
-          state.resuming = true
-        }
         break
       case 'message':
         if (p.role === 'user') {
-          if (state.resuming && open) { state.resuming = false; break }
           // A new prompt before the last one was answered: that one never will be.
           finish(state, null, null)
           const content = object(p.content) ? p.content : {}
           begin(state, event, typeof content.text === 'string' ? content.text : '')
-        } else if (p.role === 'agent') open?.part.wrote()
-        break
-      case 'thought':
-      case 'tool_call':
-        open?.part.wrote()
+        }
         break
       case 'usage': {
-        if (typeof p.used === 'number') open?.part.read(p.used)
+        if (typeof p.used === 'number' && open) open.calls.push(count(p.used))
         const amount = object(p.cost) ? p.cost.amount : undefined
         if (typeof amount === 'number' && Number.isFinite(amount)) {
           if (open) open.costTo = amount
+          // The first reading after a resume gives the running cost to measure the next turn from.
           else state.cost = amount
         }
         break
@@ -378,7 +260,7 @@ export function turnUsage(events: readonly RunEvent[], throughSeq = Infinity): T
       case 'turn_end': {
         const result = object(raw.result) ? raw.result : {}
         if (!open) begin(state, event, '')
-        finish(state, typeof p.stopReason === 'string' ? p.stopReason : 'end_turn', reportedUsage(p.usage, result._meta))
+        finish(state, typeof p.stopReason === 'string' ? p.stopReason : 'end_turn', { ...result, usage: p.usage ?? result.usage })
         break
       }
       default:
@@ -390,11 +272,14 @@ export function turnUsage(events: readonly RunEvent[], throughSeq = Infinity): T
   return turns.sort((a, b) => a.startSeq - b.startSeq)
 }
 
-/** Whether every turn in `group` that used tokens was priced, and what that came to. */
-function priced(group: readonly TurnUsage[]): number | undefined {
+/** What the turns in `group` whose cost is known came to, and whether that is all of them. */
+function priced(group: readonly TurnUsage[]): { costUsd?: number; costComplete: boolean } {
   const spent = group.filter((turn) => turn.total > 0)
-  if (spent.length === 0 || spent.some((turn) => turn.costUsd === undefined)) return undefined
-  return spent.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0)
+  const known = spent.filter((turn) => turn.costUsd !== undefined)
+  return {
+    ...(known.length > 0 ? { costUsd: known.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) } : {}),
+    costComplete: known.length === spent.length,
+  }
 }
 
 function tally(group: readonly TurnUsage[]): TokenCounts & { turns: number; estimated: boolean } {
@@ -403,27 +288,26 @@ function tally(group: readonly TurnUsage[]): TokenCounts & { turns: number; esti
   return { ...total, turns: group.length, estimated: group.some((turn) => turn.estimated && turn.total > 0) }
 }
 
-/** The run's tokens: in all, by agent and by why each turn happened. */
+/** The run's tokens and cost: in all, by agent and by why each turn happened. */
 export function summarizeUsage(turns: readonly TurnUsage[]): TokenSummary {
   const all = tally(turns)
   const byAgent = new Map<string, TurnUsage[]>()
   for (const turn of turns) byAgent.set(turn.agentId, [...(byAgent.get(turn.agentId) ?? []), turn])
   const prompt = all.input + all.cacheRead + all.cacheWrite
-  const cost = priced(turns)
   return {
     ...all,
+    // A stopped turn's tokens are counted without their split, so they read as fresh input.
     cacheShare: prompt > 0 ? all.cacheRead / prompt : null,
     agents: [...byAgent].map(([agentId, group]) => {
-      const agentCost = priced(group)
-      return { agentId, app: group[0].app, ...tally(group), ...(agentCost === undefined ? {} : { costUsd: agentCost }) }
+      const { costUsd } = priced(group)
+      return { agentId, ...tally(group), ...(costUsd === undefined ? {} : { costUsd }) }
     }),
     purposes: PURPOSES.flatMap((purpose) => {
       const group = turns.filter((turn) => turn.purpose === purpose)
       return group.length > 0 ? [{ purpose, ...tally(group) }] : []
     }),
-    estimatedApps: [...new Set(turns.filter((turn) => turn.estimated && turn.stopReason !== null && turn.total > 0).map((turn) => turn.app))],
     stoppedTurns: turns.filter((turn) => turn.stopReason === null && turn.total > 0).length,
-    ...(cost === undefined ? {} : { costUsd: cost }),
+    ...priced(turns),
   }
 }
 
@@ -435,4 +319,12 @@ export function formatTokens(tokens: number): string {
   let unit = -1
   while (value >= 999.5 && unit < units.length - 1) { value /= 1000; unit += 1 }
   return `${Number(value.toPrecision(3))}${units[unit]}`
+}
+
+/** "$0.0123", "$1.24", "less than $0.0001": what OpenRouter charged, as the receipt prints it. */
+export function formatCost(dollars: number): string {
+  if (dollars <= 0) return '$0'
+  if (dollars < 0.0001) return 'less than $0.0001'
+  if (dollars < 1) return `$${Number(dollars.toPrecision(3))}`
+  return `$${dollars.toFixed(2)}`
 }

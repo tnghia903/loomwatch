@@ -259,9 +259,8 @@ describe('team file names', () => {
     expect(teamFileForAsk('brief.yaml', null)).toBe('brief.yaml')
   })
 
-  it('credits the app that made a proposal', () => {
+  it('credits Ask LoomWatch with a proposal, and names what an AI app connected earlier proposed', () => {
     expect(proposalSource('ask-123')).toBe('Ask LoomWatch')
-    expect(proposalSource('connection:opencode')).toBe('OpenCode')
-    expect(proposalSource('connection:claude')).toBe('Claude Code')
+    expect(proposalSource('connection:opencode')).toBe('opencode')
   })
 })

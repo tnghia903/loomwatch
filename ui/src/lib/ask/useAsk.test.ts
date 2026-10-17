@@ -1,6 +1,8 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { DEFAULT_MODEL } from '../ai/modelIds'
+import { forgetKeyStatus } from '../ai/useKeyStatus'
 import type { RunEvent } from '../watch/events'
 import { useAsk } from './useAsk'
 
@@ -16,17 +18,15 @@ let conversations: string[]
 let posts: Array<{ url: string; body: unknown }>
 let deletes: string[]
 let gone: Set<string>
-const APPS = [
-  { id: 'claude', name: 'Claude', available: true, reason: null },
-  { id: 'codex', name: 'Codex', available: true, reason: null },
-  { id: 'gemini', name: 'Gemini', available: false, reason: 'not signed in' },
-]
+let keyed: boolean
 
 beforeEach(() => {
   conversations = []
   posts = []
   deletes = []
   gone = new Set()
+  keyed = true
+  forgetKeyStatus()
   archive.events.clear()
   window.sessionStorage.clear()
   window.localStorage.clear()
@@ -35,14 +35,12 @@ beforeEach(() => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     if (init?.method === 'POST') posts.push({ url, body })
     if (init?.method === 'DELETE') { deletes.push(url); return json(204, null) }
-    if (url === '/api/ask/apps') return json(200, { apps: APPS, defaultApp: 'claude' })
-    if (url === '/api/ask/inbox') return json(200, { items: [] })
+    if (url === '/api/ai') return json(200, { openrouter: { connected: keyed } })
     if (url === '/api/ask/conversations' && init?.method === 'POST') {
       const id = `ask-${conversations.length + 1}`
       conversations.push(id)
-      const chosen = (body as { app?: string; model?: string } | undefined) ?? {}
-      const app = APPS.find((item) => item.id === (chosen.app ?? 'claude'))
-      return json(201, { id, app: app?.id, appName: app?.name, model: chosen.model ?? null, state: 'starting' })
+      const chosen = (body as { model?: string } | undefined) ?? {}
+      return json(201, { id, app: 'loomwatch', appName: 'LoomWatch', model: chosen.model ?? DEFAULT_MODEL, state: 'starting' })
     }
     const message = url.match(/^\/api\/ask\/conversations\/([^/]+)\/messages$/)
     if (message) return gone.has(message[1]) ? json(410, { error: 'This conversation has ended. Start a new one.' }) : json(202, { state: 'working' })
@@ -52,19 +50,19 @@ beforeEach(() => {
     return json(404, { error: `unexpected ${url}` })
   }))
 })
-// Without `globals`, Testing Library never unmounts on its own. A mounted useAsk keeps its inbox
-// timers running, and one firing after the test file's window is gone fails the run with
-// "window is not defined".
+// Without `globals`, Testing Library never unmounts on its own, and a hook left mounted can set
+// state after the test file's window is gone.
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('useAsk', () => {
-  it('starts a conversation on the first message and says where the person is', async () => {
+  it('starts a conversation on the default model with the first message, and says where the person is', async () => {
     const { result } = renderHook(() => useAsk(CONTEXT))
-    await waitFor(() => expect(result.current.apps?.defaultApp).toBe('claude'))
+    expect(result.current.selectedModel).toBe(DEFAULT_MODEL)
+    await waitFor(() => expect(posts).toEqual([]))
     expect(result.current.unavailable).toBeNull()
     await act(async () => { expect(await result.current.send('  Add a fact-checker  ')).toBe(true) })
     expect(posts).toEqual([
-      { url: '/api/ask/conversations', body: { askBeforeRun: true } },
+      { url: '/api/ask/conversations', body: { askBeforeRun: true, model: DEFAULT_MODEL } },
       { url: '/api/ask/conversations/ask-1/messages', body: { text: 'Add a fact-checker', context: CONTEXT } },
     ])
     expect(result.current.conversationId).toBe('ask-1')
@@ -104,54 +102,34 @@ describe('useAsk', () => {
     expect(again.result.current.askBeforeRun).toBe(false)
   })
 
-  it('says plainly when no AI app can host Ask', async () => {
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) =>
-      String(input) === '/api/ask/apps' ? json(200, { apps: [], defaultApp: null }) : json(200, { items: [] }))
+  it('needs an OpenRouter key, and says so', async () => {
+    keyed = false
     const { result } = renderHook(() => useAsk(CONTEXT))
-    await waitFor(() => expect(result.current.unavailable).toMatch(/needs Claude Code, Codex, Gemini CLI or OpenCode/))
+    await waitFor(() => expect(result.current.needsKey).toBe(true))
+    expect(result.current.unavailable).toMatch(/OpenRouter key/)
   })
 
-  it('starts the next conversation with the app and model the person chose, and remembers them', async () => {
+  it('starts the next conversation on the model the person chose, and remembers it', async () => {
     const { result } = renderHook(() => useAsk(CONTEXT))
-    await waitFor(() => expect(result.current.selectedApp?.id).toBe('claude'))
-    act(() => result.current.chooseApp('codex', { id: 'gpt-5.5', name: 'GPT-5.5' }))
-    expect(result.current.selectedApp?.name).toBe('Codex')
-    expect(result.current.selectedModel).toEqual({ id: 'gpt-5.5', name: 'GPT-5.5' })
+    act(() => result.current.chooseModel('openai/gpt-6.1-sol'))
+    expect(result.current.selectedModel).toBe('openai/gpt-6.1-sol')
     await act(async () => { await result.current.send('Hello') })
-    expect(posts[0]).toEqual({ url: '/api/ask/conversations', body: { askBeforeRun: true, app: 'codex', model: 'gpt-5.5' } })
+    expect(posts[0]).toEqual({ url: '/api/ask/conversations', body: { askBeforeRun: true, model: 'openai/gpt-6.1-sol' } })
     const again = renderHook(() => useAsk(CONTEXT))
-    await waitFor(() => expect(again.result.current.selectedApp?.id).toBe('codex'))
-    expect(again.result.current.selectedModel?.name).toBe('GPT-5.5')
+    expect(again.result.current.selectedModel).toBe('openai/gpt-6.1-sol')
   })
 
-  it('ends a conversation when the person switches to another app or model, and keeps it for the same one', async () => {
+  it('ends a conversation when the person switches to another model, and keeps it for the same one', async () => {
     const { result } = renderHook(() => useAsk(CONTEXT))
-    await waitFor(() => expect(result.current.apps).not.toBeNull())
     await act(async () => { await result.current.send('Hello') })
     expect(result.current.conversationId).toBe('ask-1')
-    act(() => result.current.chooseApp('claude', null))
+    act(() => result.current.chooseModel(DEFAULT_MODEL))
     expect(result.current.conversationId).toBe('ask-1')
     expect(deletes).toEqual([])
-    act(() => result.current.chooseApp('claude', { id: 'opus', name: 'Opus' }))
+    act(() => result.current.chooseModel('anthropic/claude-haiku-5.5'))
     expect(result.current.conversationId).toBeNull()
     await waitFor(() => expect(deletes).toEqual(['/api/ask/conversations/ask-1']))
     expect(window.sessionStorage.getItem('loomwatch:ask:conversation')).toBeNull()
-  })
-
-  it('falls back to the first app found when the chosen one cannot run here any more', async () => {
-    window.localStorage.setItem('loomwatch:ask:app', JSON.stringify({ app: 'gemini', model: { id: 'pro', name: 'Pro' } }))
-    const { result } = renderHook(() => useAsk(CONTEXT))
-    await waitFor(() => expect(result.current.apps).not.toBeNull())
-    expect(result.current.selectedApp?.id).toBe('claude')
-    expect(result.current.selectedModel).toBeNull()
-    await act(async () => { await result.current.send('Hello') })
-    expect(posts[0].body).toEqual({ askBeforeRun: true })
-  })
-
-  it('ignores a remembered choice it cannot read', async () => {
-    window.localStorage.setItem('loomwatch:ask:app', '{not json')
-    const { result } = renderHook(() => useAsk(CONTEXT))
-    await waitFor(() => expect(result.current.selectedApp?.id).toBe('claude'))
   })
 
   it('keeps the panel open across pages in the same tab', () => {

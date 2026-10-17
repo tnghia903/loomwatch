@@ -1,7 +1,7 @@
 import { Check, Copy, ExternalLink } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 
-import type { DetectedHarness } from '../../lib/harnesses'
+import { useKeyStatus } from '../../lib/ai/useKeyStatus'
 import {
   describeSystem,
   fetchAbout,
@@ -21,7 +21,7 @@ const KINDS: { kind: FeedbackKind; label: string; hint: string }[] = [
  * The app's one feedback dialog, opened from anywhere by `openFeedback()`: Home's Feedback
  * button, the team menu, and the command palette.
  */
-export function Feedback({ harnesses }: { harnesses: readonly DetectedHarness[] }) {
+export function Feedback() {
   const [context, setContext] = useState<FeedbackContext | null>(null)
   useEffect(() => {
     const open = (event: Event) => setContext((event as CustomEvent<FeedbackContext | undefined>).detail ?? {})
@@ -29,11 +29,10 @@ export function Feedback({ harnesses }: { harnesses: readonly DetectedHarness[] 
     return () => window.removeEventListener(FEEDBACK_EVENT, open)
   }, [])
   if (!context) return null
-  return <FeedbackDialog harnesses={harnesses} context={context} onClose={() => setContext(null)} />
+  return <FeedbackDialog context={context} onClose={() => setContext(null)} />
 }
 
 export interface FeedbackDialogProps {
-  harnesses: readonly DetectedHarness[]
   context: FeedbackContext
   onClose: () => void
 }
@@ -43,8 +42,9 @@ export interface FeedbackDialogProps {
  * new tab, where the operator writes and submits it. LoomWatch posts nothing itself. Someone
  * without a GitHub account can copy the same details instead.
  */
-export function FeedbackDialog({ harnesses, context, onClose }: FeedbackDialogProps) {
+export function FeedbackDialog({ context, onClose }: FeedbackDialogProps) {
   const titleId = useId()
+  const key = useKeyStatus()
   const [kind, setKind] = useState<FeedbackKind>('problem')
   const [about, setAbout] = useState<AboutLoomWatch | null>(null)
   const [checking, setChecking] = useState(true)
@@ -59,7 +59,7 @@ export function FeedbackDialog({ harnesses, context, onClose }: FeedbackDialogPr
     return () => controller.abort()
   }, [])
 
-  const details = describeSystem(checking ? null : about, harnesses, context)
+  const details = describeSystem(checking ? null : about, key, context)
   const href = issueUrl(kind, details)
 
   async function copy() {

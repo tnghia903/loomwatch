@@ -42,14 +42,10 @@ export function teamFileForAsk(docPath: string | null, teamsRoot: string | null)
   return docPath
 }
 
-const CONNECTED_APP_NAMES: Record<string, string> = {
-  claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', vscode: 'VS Code', opencode: 'OpenCode', 'claude-desktop': 'Claude Desktop',
-}
-
-/** Who made a proposal, in words: Ask LoomWatch, or the connected app (`connection:<app>`). */
+/** Who made a proposal, in words. Only Ask LoomWatch makes them now; a proposal an AI app
+    connected to LoomWatch's tools made (`connection:<app>`) is named by its app's id. */
 export function proposalSource(source: string): string {
-  const app = source.startsWith('connection:') ? source.slice('connection:'.length) : null
-  return app ? CONNECTED_APP_NAMES[app] ?? app : 'Ask LoomWatch'
+  return source.startsWith('connection:') ? source.slice('connection:'.length) : 'Ask LoomWatch'
 }
 
 function teamUrl(file: string, extra: Record<string, string> = {}): string {

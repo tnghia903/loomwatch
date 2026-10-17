@@ -63,13 +63,12 @@ describe('runLessons', () => {
     const merged = mergeFindings(checkup(team([scout])), lessons)
     expect(merged.filter((finding) => finding.id === 'needs-web:scout')).toEqual([lessons[0]])
     expect(runLessons(runs, team([{ ...scout, allow: { web: true } }]))).toEqual([])
-    expect(runLessons(runs, team([{ ...scout, spawn: { ...CLAUDE, cmd: 'opencode', args: ['acp'] } }]))).toEqual([])
   })
 
   it('says when an agent fails again, with the last reason the record gives', () => {
     const agents = [agent('coder', 'Fix the bug and run the tests, then reply with what changed.')]
     const runs = [run('a', 'team', ['coder'], [], [['coder', 'refusal']]), run('b', 'team', ['coder']), run('c', 'team', ['coder'], [], [['coder', null]])]
-    expect(runLessons(runs, team(agents))).toEqual([expect.objectContaining({ rule: 'keeps-failing', severity: 'fix', title: 'Coder failed in 2 of 3 runs', why: 'Last time: refusal. Check its AI app and model first, then its instructions.' })])
+    expect(runLessons(runs, team(agents))).toEqual([expect.objectContaining({ rule: 'keeps-failing', severity: 'fix', title: 'Coder failed in 2 of 3 runs', why: 'Last time: refusal. Check its model first, then its instructions.' })])
   })
 
   it('reads only the most recent runs', () => {
@@ -110,7 +109,7 @@ describe('lessonRun', () => {
         { agentId: 'w', kind: 'usage', payload: { used: 39_000, size: 200_000 } },
       ],
     )
-    expect([...reduced.failed]).toEqual([['r', 'its app exited with code 2']])
+    expect([...reduced.failed]).toEqual([['r', 'it stopped with exit code 2']])
     expect(reduced.succeeded).toBe(false)
     // The first reading is the opening cost; an agent that reported nothing has no entry.
     expect([...reduced.usage]).toEqual([['w', { tokens: 41_000, opening: 28_500 }]])

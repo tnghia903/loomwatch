@@ -1,53 +1,56 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createRef } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DetectedHarness } from '../../lib/harnesses'
+import { forgetModels } from '../../lib/ai/useModels'
 import { BLANK_DRAFT, type AgentDraft } from '../../lib/library/draft'
-import claude from '../../lib/models/fixtures/claude.json'
 import { ByHand } from './ByHand'
 
 // The bench's 3D figure is beside the point here.
 vi.mock('./AgentFigure', () => ({ default: () => null }))
 
-const harness: DetectedHarness = {
-  id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true,
-  spawn: { cmd: 'claude-agent-acp', args: [] },
-}
+const model = (id: string, name: string, reasoning = true) => ({ id, name, contextLength: 200_000, inputPrice: 2, outputPrice: 10, free: false, reasoning })
+const opus = model('anthropic/claude-opus-5.5', 'Anthropic: Claude Opus 5.5')
+const plain = model('acme/plain-1', 'Acme: Plain 1', false)
+const catalog = { fetchedAt: '2026-10-17T00:00:00Z', defaultModel: opus.id, recommended: [opus], models: [opus, plain] }
+
+beforeEach(() => {
+  forgetModels()
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(catalog), { headers: { 'Content-Type': 'application/json' } })))
+})
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function renderByHand(draft: Partial<AgentDraft>) {
   const set = vi.fn()
-  render(<ByHand draft={{ ...BLANK_DRAFT, appId: 'claude', ...draft }} set={set} harness={harness} harnesses={[harness]} harnessesLoading={false} models={claude} skills={[]} skillsLoading={false} tools={[]} toolsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />)
+  render(<ByHand draft={{ ...BLANK_DRAFT, ...draft }} set={set} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={null} />)
   return set
 }
 
-afterEach(cleanup)
-
-// Claude lists one effort option, for the model its session runs on, and nothing for any other.
-// Recorded from claude-agent-acp 0.85.1 running on Sonnet (lib/models/fixtures/claude.json).
-describe('By hand: thinking effort, on Claude’s recorded catalog', () => {
-  it('offers the efforts of the model Claude runs on', () => {
-    renderByHand({ model: '' })
-    expect(screen.getByRole('slider', { name: 'Thinking effort' })).toHaveAttribute('aria-valuetext', 'Xhigh')
+describe('By hand: its model and how hard it thinks', () => {
+  it('names the model it thinks with, and changes it from OpenRouter’s list', async () => {
+    const set = renderByHand({})
+    fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
+    fireEvent.click(screen.getByRole('option', { name: /Claude Opus 5\.5/ }))
+    expect(set).toHaveBeenCalledWith('model', opus.id)
   })
 
-  it('offers none on Haiku 4.5, which runs at its own default', () => {
-    renderByHand({ model: 'haiku' })
+  it('runs at the model’s own default until an effort is chosen, and goes up to high', () => {
+    const set = renderByHand({ effort: '' })
+    const slider = screen.getByRole('slider', { name: 'Thinking effort' })
+    expect(slider).toHaveAttribute('aria-valuetext', 'Model default')
+    fireEvent.change(slider, { target: { value: '3' } })
+    expect(set).toHaveBeenCalledWith('effort', 'high')
+  })
+
+  it('takes the effort out at the default', () => {
+    const set = renderByHand({ effort: 'medium' })
+    fireEvent.change(screen.getByRole('slider', { name: 'Thinking effort' }), { target: { value: '0' } })
+    expect(set).toHaveBeenCalledWith('effort', '')
+  })
+
+  it('offers no effort on a model that doesn’t reason separately', async () => {
+    renderByHand({ model: plain.id })
+    expect(await screen.findByText('This model doesn’t reason separately, so it has no effort setting.')).toBeInTheDocument()
     expect(screen.queryByRole('slider', { name: 'Thinking effort' })).not.toBeInTheDocument()
-    expect(screen.getByText('It runs at the model’s own default effort.')).toBeInTheDocument()
-  })
-
-  it('takes the effort out when Haiku 4.5 is picked', () => {
-    const set = renderByHand({ model: 'sonnet', effort: 'low' })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'haiku' } })
-    expect(set).toHaveBeenCalledWith('effort', '')
-    expect(set).toHaveBeenCalledWith('model', 'haiku')
-  })
-
-  it('says an effort a saved agent asks of Haiku is used only if it has one, and offers its default', () => {
-    const set = renderByHand({ model: 'haiku', effort: 'high' })
-    expect(screen.getByText(/Used only if this model has that setting/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Use its default' }))
-    expect(set).toHaveBeenCalledWith('effort', '')
   })
 })

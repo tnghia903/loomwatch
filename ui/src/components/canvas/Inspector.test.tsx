@@ -1,17 +1,28 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { forgetModels } from '../../lib/ai/useModels'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
-import claude from '../../lib/models/fixtures/claude.json'
 import { Inspector, type InspectorProps } from './Inspector'
+
+const model = (id: string, name: string, reasoning = true) => ({ id, name, contextLength: 200_000, inputPrice: 2, outputPrice: 10, free: false, reasoning })
+const sonnet = model('anthropic/claude-sonnet-5.5', 'Anthropic: Claude Sonnet 5.5')
+const opus = model('anthropic/claude-opus-5.5', 'Anthropic: Claude Opus 5.5')
+const plain = model('acme/plain-1', 'Acme: Plain 1', false)
+const catalog = { fetchedAt: '2026-10-17T00:00:00Z', defaultModel: opus.id, recommended: [opus, sonnet], models: [opus, sonnet, plain] }
+
+beforeEach(() => {
+  forgetModels()
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(catalog), { headers: { 'Content-Type': 'application/json' } })))
+})
 
 const node: AgentNode = {
   id: 'editor', type: 'agent', position: { x: 0, y: 0 },
   data: {
     label: 'News Editor', isEntrypoint: false,
     agent: {
-      id: 'editor', name: 'News Editor', role: 'Edit the digest.', model: 'claude-sonnet-5', status: 'idle',
-      spawn: { cmd: 'claude-agent-acp', args: [], env: {}, cwd: '.' },
+      id: 'editor', name: 'News Editor', role: 'Edit the digest.', model: 'anthropic/claude-sonnet-5.5', status: 'idle',
+      spawn: { cwd: '.' },
     },
   },
 }
@@ -21,11 +32,7 @@ function renderInspectorProps(overrides: Partial<InspectorProps> = {}): Inspecto
     node, onRename: vi.fn(), onModelChange: vi.fn(), onCwdChange: vi.fn(),
     onAllowRecruitingChange: vi.fn(), onPromoteEntrypoint: vi.fn(), onRemoveCapability: vi.fn(),
     onDelete: vi.fn(), onClose: vi.fn(), onFieldBlur: vi.fn(),
-    onMemoryBriefChange: vi.fn(), onDeliverAsChange: vi.fn(),
-    modelOptions: [
-      { id: 'claude-sonnet-5', name: 'Sonnet 5', thinkingEfforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High', description: 'More deliberate reasoning.' }], effortsKnown: true },
-      { id: 'claude-opus-5', name: 'Opus 5', thinkingEfforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], effortsKnown: true },
-    ], ...overrides,
+    onMemoryBriefChange: vi.fn(), onDeliverAsChange: vi.fn(), ...overrides,
   }
 }
 
@@ -35,123 +42,53 @@ function renderInspector(overrides: Partial<InspectorProps> = {}) {
   return props
 }
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-describe('Inspector model picker', () => {
-  it('selects a known model instead of accepting a typed model id', () => {
+const withModel = (agent: Partial<AgentNode['data']['agent']>): AgentNode => ({ ...node, data: { ...node.data, agent: { ...node.data.agent, ...agent } } })
+
+describe('Inspector model and thinking effort', () => {
+  it('shows the agent’s model and changes it from OpenRouter’s list', async () => {
     const props = renderInspector()
-    const picker = screen.getByRole('combobox', { name: 'Model' })
-    expect(picker).toHaveValue('claude-sonnet-5')
-    expect(screen.getByRole('option', { name: 'Opus 5' })).toBeInTheDocument()
-
-    fireEvent.change(picker, { target: { value: 'claude-opus-5' } })
-    fireEvent.blur(picker)
-
-    expect(props.onModelChange).toHaveBeenCalledWith('claude-opus-5')
+    const current = await screen.findByRole('button', { name: /Claude Sonnet 5\.5/ })
+    fireEvent.click(current)
+    fireEvent.click(screen.getByRole('option', { name: /Claude Opus 5\.5/ }))
+    expect(props.onModelChange).toHaveBeenCalledWith(opus.id)
     expect(props.onFieldBlur).toHaveBeenCalledWith('model')
   })
 
-  it('stores thinking effort separately using the harness choices', () => {
+  it('reads a model an AI app’s team file named as the OpenRouter model it maps to', async () => {
+    renderInspector({ node: withModel({ model: 'sonnet' }) })
+    expect(await screen.findByRole('button', { name: /Claude Sonnet 5\.5/ })).toBeInTheDocument()
+  })
+
+  it('sets how hard it thinks, from the model’s own default up to high, and takes it out at the default', () => {
     const onThinkingEffortChange = vi.fn()
-    renderInspector({ onThinkingEffortChange, defaultThinkingEffort: 'low' })
-
+    const { unmount } = render(<Inspector {...renderInspectorProps({ onThinkingEffortChange })} />)
     const slider = screen.getByRole('slider', { name: 'Thinking effort' })
-    expect(slider).toHaveAttribute('aria-valuetext', 'Low')
-    fireEvent.change(slider, { target: { value: '1' } })
-
+    expect(slider).toHaveAttribute('aria-valuetext', 'Model default')
+    fireEvent.change(slider, { target: { value: '3' } })
     expect(onThinkingEffortChange).toHaveBeenCalledWith('high')
+    unmount()
+    render(<Inspector {...renderInspectorProps({ node: withModel({ thinkingEffort: 'high' }), onThinkingEffortChange })} />)
+    fireEvent.change(screen.getByRole('slider', { name: 'Thinking effort' }), { target: { value: '0' } })
+    expect(onThinkingEffortChange).toHaveBeenLastCalledWith(undefined)
   })
 
-  it('keeps a custom value visible and disables the picker in read-only mode', () => {
-    renderInspector({
-      node: { ...node, data: { ...node.data, agent: { ...node.data.agent, model: 'company/custom-claude' } } },
-      readOnly: true,
-    })
-    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('company/custom-claude')
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeDisabled()
+  it('offers no effort for a model that doesn’t reason separately', async () => {
+    renderInspector({ node: withModel({ model: plain.id }), onThinkingEffortChange: vi.fn() })
+    expect(await screen.findByText('This model doesn’t reason separately, so it has no effort setting.')).toBeInTheDocument()
+    expect(screen.queryByRole('slider', { name: 'Thinking effort' })).not.toBeInTheDocument()
   })
 
-  it('shows discovery progress and offers a retry when the harness cannot be queried', () => {
-    const retry = vi.fn()
-    const { rerender } = render(<Inspector {...renderInspectorProps({ modelOptionsLoading: true })} />)
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeDisabled()
-    expect(screen.getByText('Loading models from this app…')).toBeInTheDocument()
-
-    rerender(<Inspector {...renderInspectorProps({ modelOptionsError: 'adapter unavailable', onRetryModelOptions: retry })} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(retry).toHaveBeenCalledOnce()
+  it('changes neither where the team can’t be changed', async () => {
+    renderInspector({ readOnly: true, onThinkingEffortChange: vi.fn() })
+    expect(await screen.findByRole('button', { name: /Claude Sonnet 5\.5/ })).toBeDisabled()
+    expect(screen.getByRole('slider', { name: 'Thinking effort' })).toBeDisabled()
   })
 
-  // Switching harness clears the model, so `model` is "Required" in exactly the state where the
-  // catalog could not be read. Reporting the field problem there left an empty picker, no reason
-  // for it, and no way back — the user saw only "Required" and no models to choose.
-  it('still names the discovery failure, and still offers Retry, while the model is unset', () => {
-    const retry = vi.fn()
-    const unset = { ...node, data: { ...node.data, agent: { ...node.data.agent, model: '' } } }
-    render(<Inspector {...renderInspectorProps({
-      node: unset,
-      modelOptions: [],
-      modelOptionsError: 'failed to load models from Claude: timed out after 20s',
-      fieldProblems: { model: { weight: 'error', message: 'Required' } },
-      onRetryModelOptions: retry,
-    })} />)
-    expect(screen.getByText(/Could not load this app's models: failed to load models from Claude/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(retry).toHaveBeenCalledOnce()
-  })
-
-  // The field problem is still the hint whenever the catalog itself is fine.
-  it('reports the field problem when the models loaded', () => {
-    const unset = { ...node, data: { ...node.data, agent: { ...node.data.agent, model: '' } } }
-    render(<Inspector {...renderInspectorProps({ node: unset, fieldProblems: { model: { weight: 'error', message: 'Required' } } })} />)
+  it('reports the field problem as the model’s hint', () => {
+    renderInspector({ node: withModel({ model: '' }), fieldProblems: { model: { weight: 'error', message: 'Required' } } })
     expect(screen.getByText('Required')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
-  })
-})
-
-// Claude lists one effort option, for the model its session runs on, and nothing for any other.
-// Recorded from claude-agent-acp 0.85.1 running on Sonnet (lib/models/fixtures/claude.json).
-describe('Inspector thinking effort, on Claude’s recorded catalog', () => {
-  const onClaude = (agent: Partial<AgentNode['data']['agent']>) => renderInspector({
-    node: { ...node, data: { ...node.data, agent: { ...node.data.agent, ...agent } } },
-    modelOptions: claude.models, defaultThinkingEffort: claude.currentThinkingEffort, onThinkingEffortChange: vi.fn(),
-  })
-
-  it('offers the efforts of the model Claude runs on', () => {
-    onClaude({ model: 'sonnet' })
-    const slider = screen.getByRole('slider', { name: 'Thinking effort' })
-    expect(slider).toHaveAttribute('aria-valuetext', 'Xhigh')
-    expect(slider).toHaveAttribute('max', '5')
-  })
-
-  it('offers none on Haiku 4.5, which runs at its own default', () => {
-    onClaude({ model: 'haiku' })
-    expect(screen.queryByRole('slider', { name: 'Thinking effort' })).not.toBeInTheDocument()
-    expect(screen.getByText('Model default')).toBeInTheDocument()
-    expect(screen.getByText('Runs at the model’s own default effort.')).toBeInTheDocument()
-  })
-
-  it('takes the effort out when the new model does not list it', () => {
-    const props = onClaude({ model: 'sonnet', thinkingEffort: 'low' })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'haiku' } })
-    expect(props.onThinkingEffortChange).toHaveBeenCalledWith(undefined)
-    expect(props.onModelChange).toHaveBeenCalledWith('haiku')
-  })
-
-  it('keeps the effort when the new model lists it too', () => {
-    const onThinkingEffortChange = vi.fn()
-    renderInspector({ node: { ...node, data: { ...node.data, agent: { ...node.data.agent, thinkingEffort: 'high' } } }, onThinkingEffortChange })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'claude-opus-5' } })
-    expect(onThinkingEffortChange).not.toHaveBeenCalled()
-  })
-
-  it('says an effort an older file asks of Haiku is used only if it has one, and offers its default', () => {
-    const props = onClaude({ model: 'haiku', thinkingEffort: 'high' })
-    expect(screen.queryByRole('slider', { name: 'Thinking effort' })).not.toBeInTheDocument()
-    expect(screen.getByText('High')).toBeInTheDocument()
-    expect(screen.getByText(/Used only if this model has that setting/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Use its default' }))
-    expect(props.onThinkingEffortChange).toHaveBeenCalledWith(undefined)
   })
 })
 
@@ -285,7 +222,7 @@ describe('Inspector memory toggles', () => {
     const props = renderInspector({ node: withMemory({ deliverAs: 'packet-only' }), briefCount: 1 })
     const toggle = screen.getByRole('button', { name: /Work in this folder/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
-    expect(toggle).toHaveTextContent('may summarise the Brief away')
+    expect(toggle).toHaveTextContent('the Brief may be summarised away')
     fireEvent.click(toggle)
     expect(props.onDeliverAsChange).toHaveBeenCalledWith('native-file')
   })
@@ -316,8 +253,8 @@ describe('Inspector memory toggles', () => {
   })
 })
 
-// Budgets are retired: a harness agent's settings have no spend limit or warn-at field to edit.
-it('offers no budget field for a harness agent', () => {
+// Budgets are retired: an agent's settings have no spend limit or warn-at field to edit.
+it('offers no budget field for an agent', () => {
   renderInspector()
   expect(screen.queryByLabelText('Budget limit in USD')).not.toBeInTheDocument()
   expect(screen.queryByLabelText('Warn at percent')).not.toBeInTheDocument()
@@ -328,7 +265,7 @@ it('edits a review question without offering a model or entrypoint', () => {
   const props = renderInspector({ node: { ...node, data: { label: 'You', agent: { kind: 'operator', id: 'review', name: 'You', role: 'Approve?' } } } })
   fireEvent.change(screen.getByLabelText('Review question'), { target: { value: 'What should change?' } })
   expect(props.onRename).toHaveBeenCalledWith('role', 'What should change?')
-  expect(screen.queryByRole('combobox', { name: 'Model' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('slider', { name: 'Thinking effort' })).not.toBeInTheDocument()
   expect(screen.queryByText(/Make entrypoint/)).not.toBeInTheDocument()
 })
 
@@ -338,7 +275,7 @@ describe('Inspector works in', () => {
     ...node, data: { ...node.data, agent: { ...node.data.agent, ...agent, spawn: { ...node.data.agent.spawn!, ...spawn } } },
   })
 
-  it('shows no command, arguments or environment', () => {
+  it('shows no command, arguments or environment an AI app’s team file left', () => {
     renderInspector({ node: withSpawn({ cmd: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'], env: { TOKEN: 'x' } }) })
     expect(screen.queryByRole('button', { name: /Process/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/claude-agent-acp/)).not.toBeInTheDocument()

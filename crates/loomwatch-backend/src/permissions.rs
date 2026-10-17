@@ -220,12 +220,14 @@ impl PermissionPolicy {
         if !path.starts_with(state) {
             return false;
         }
-        if self
-            .skills_folder
-            .as_ref()
-            .is_some_and(|skills| path.starts_with(skills))
+        if let Some(skills) = &self.skills_folder
+            && let Ok(inside) = path.strip_prefix(skills)
         {
-            return false;
+            // What the Skills page took away or is still unpacking stays LoomWatch's.
+            return inside
+                .components()
+                .next()
+                .is_some_and(|first| first.as_os_str().to_string_lossy().starts_with('.'));
         }
         path.parent() == Some(state.as_path())
             || !(path.starts_with(&self.folder) && self.folder.starts_with(state))
@@ -811,6 +813,11 @@ mod tests {
         assert!(!read(&reaching, &at("state/loomwatch.db")));
         assert!(!read(&reaching, &at("state/models/cache.json")));
         assert!(read(&reaching, &at("state/skills/notes/SKILL.md")));
+        assert!(!read(&reaching, &at("state/skills/.removed/old/SKILL.md")));
+        assert!(!read(
+            &reaching,
+            &at("state/skills/.staging/inspect-1/SKILL.md")
+        ));
         assert!(read(&reaching, &at("agent/notes.md")));
         // An agent working inside the state folder keeps its own folder, never the files beside it.
         let inside =

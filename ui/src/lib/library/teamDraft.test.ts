@@ -1,63 +1,58 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DetectedHarness } from '../harnesses'
 import type { AgentConfig } from '../team-file/types'
 import { draftFromTeamAgent, knowledgeForChat, readsOf, teamAgentEdit, teamKnowledge, toolsOf } from './teamDraft'
 
-const claude: DetectedHarness = { id: 'claude', name: 'Claude Code', command: 'claude-agent-acp', executablePath: '/bin/claude-agent-acp', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
-const codex: DetectedHarness = { id: 'codex', name: 'Codex', command: 'codex-acp', executablePath: '/bin/codex-acp', acpAvailable: true, spawn: { cmd: 'codex-acp', args: ['--quiet'] } }
 const writer: AgentConfig = {
   id: 'writer', name: 'Writer', role: 'Write the digest.', model: 'sonnet', thinkingEffort: 'high',
-  spawn: { cmd: 'claude-agent-acp', args: [], env: { KEEP: '1' }, cwd: 'work' },
+  spawn: { cwd: 'work' },
   capabilities: [{ kind: 'folder', name: 'notes', path: 'notes' } as never, { kind: 'skill', name: 'house-style' }],
   allow: { web: true },
 }
 
 describe('a team’s own agent on the workbench', () => {
   it('reads the team agent as the workbench shows it', () => {
-    expect(draftFromTeamAgent(writer, [claude, codex])).toEqual({
-      name: 'Writer', does: '', instructions: 'Write the digest.', appId: 'claude', model: 'sonnet', effort: 'high', skills: ['house-style'], tools: [], doneWhen: [], allow: { web: true }, figure: null,
+    expect(draftFromTeamAgent(writer)).toEqual({
+      // A model written for an AI app reads as the OpenRouter model it maps to.
+      name: 'Writer', does: '', instructions: 'Write the digest.', model: 'anthropic/claude-sonnet-5.5', effort: 'high', skills: ['house-style'], tools: [], doneWhen: [], allow: { web: true }, figure: null,
     })
   })
 
   it('writes done-when items to the team file, and none at all when every line is blank (ADR 0062)', () => {
-    expect(draftFromTeamAgent({ ...writer, doneWhen: ['Five stories'] }, [claude]).doneWhen).toEqual(['Five stories'])
-    expect(teamAgentEdit(writer, 'doneWhen', [' Five stories ', ' '], [claude])).toEqual({ kind: 'fields', fields: { doneWhen: ['Five stories'] } })
-    expect(teamAgentEdit(writer, 'doneWhen', ['  '], [claude])).toEqual({ kind: 'fields', fields: { doneWhen: undefined } })
+    expect(draftFromTeamAgent({ ...writer, doneWhen: ['Five stories'] }).doneWhen).toEqual(['Five stories'])
+    expect(teamAgentEdit(writer, 'doneWhen', [' Five stories ', ' '])).toEqual({ kind: 'fields', fields: { doneWhen: ['Five stories'] } })
+    expect(teamAgentEdit(writer, 'doneWhen', ['  '])).toEqual({ kind: 'fields', fields: { doneWhen: undefined } })
   })
 
   it('writes names and instructions as renames, so typing stays one undo step at a time like the canvas', () => {
-    expect(teamAgentEdit(writer, 'name', 'Editor', [claude])).toEqual({ kind: 'rename', field: 'name', value: 'Editor' })
-    expect(teamAgentEdit(writer, 'instructions', 'Edit it.', [claude])).toEqual({ kind: 'rename', field: 'role', value: 'Edit it.' })
-    expect(teamAgentEdit(writer, 'does', 'Palette line', [claude])).toBeNull()
+    expect(teamAgentEdit(writer, 'name', 'Editor')).toEqual({ kind: 'rename', field: 'name', value: 'Editor' })
+    expect(teamAgentEdit(writer, 'instructions', 'Edit it.')).toEqual({ kind: 'rename', field: 'role', value: 'Edit it.' })
+    expect(teamAgentEdit(writer, 'does', 'Palette line')).toBeNull()
   })
 
-  it('moves it to another app with that app’s command, keeping its folder and settings, and resets model and effort', () => {
-    expect(teamAgentEdit(writer, 'appId', 'codex', [claude, codex])).toEqual({ kind: 'fields', fields: {
-      spawn: { cmd: 'codex-acp', args: ['--quiet'], env: { KEEP: '1' }, cwd: 'work' }, model: '', thinkingEffort: undefined,
-    } })
-    expect(teamAgentEdit(writer, 'appId', 'missing', [claude])).toBeNull()
+  it('writes a model chosen on the workbench to the team file', () => {
+    expect(teamAgentEdit(writer, 'model', 'openai/gpt-6.1-sol')).toEqual({ kind: 'fields', fields: { model: 'openai/gpt-6.1-sol' } })
   })
 
-  it('changes only its skills among its sources, and clears an effort back to the app default', () => {
-    expect(teamAgentEdit(writer, 'skills', ['pdf'], [claude])).toEqual({ kind: 'fields', fields: { capabilities: [{ kind: 'folder', name: 'notes', path: 'notes' }, { kind: 'skill', name: 'pdf' }] } })
-    expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'skill', name: 'house-style' }] }, 'skills', [], [claude])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
-    expect(teamAgentEdit(writer, 'effort', '', [claude])).toEqual({ kind: 'fields', fields: { thinkingEffort: undefined } })
-    expect(teamAgentEdit(writer, 'allow', { web: false, commands: true }, [claude])).toEqual({ kind: 'fields', fields: { allow: { commands: true } } })
+  it('changes only its skills among its sources, and clears an effort back to the model’s default', () => {
+    expect(teamAgentEdit(writer, 'skills', ['pdf'])).toEqual({ kind: 'fields', fields: { capabilities: [{ kind: 'folder', name: 'notes', path: 'notes' }, { kind: 'skill', name: 'pdf' }] } })
+    expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'skill', name: 'house-style' }] }, 'skills', [])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
+    expect(teamAgentEdit(writer, 'effort', '')).toEqual({ kind: 'fields', fields: { thinkingEffort: undefined } })
+    expect(teamAgentEdit(writer, 'allow', { web: false, commands: true })).toEqual({ kind: 'fields', fields: { allow: { commands: true } } })
   })
 
   it('gives it tools from the workbench as capabilities the canvas draws, keeping its other sources', () => {
     const tooled: AgentConfig = { ...writer, capabilities: [...(writer.capabilities ?? []), { kind: 'tool', name: 'github' }] }
-    expect(draftFromTeamAgent(tooled, [claude]).tools).toEqual(['github'])
-    expect(teamAgentEdit(tooled, 'tools', ['github', 'linear'], [claude])).toEqual({ kind: 'fields', fields: { capabilities: [
+    expect(draftFromTeamAgent(tooled).tools).toEqual(['github'])
+    expect(teamAgentEdit(tooled, 'tools', ['github', 'linear'])).toEqual({ kind: 'fields', fields: { capabilities: [
       { kind: 'folder', name: 'notes', path: 'notes' }, { kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'github' }, { kind: 'tool', name: 'linear' },
     ] } })
-    expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'tool', name: 'github' }] }, 'tools', [], [claude])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
+    expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'tool', name: 'github' }] }, 'tools', [])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
     // Giving it a tool turned off for it on the canvas turns it back on, as drawing its line would.
     const off: AgentConfig = { ...writer, turnedOff: [{ kind: 'tool', name: 'Linear' }, { kind: 'skill', name: 'pdf' }] }
-    expect(teamAgentEdit(off, 'tools', ['linear'], [claude])).toMatchObject({ kind: 'fields', fields: { turnedOff: [{ kind: 'skill', name: 'pdf' }] } })
-    expect(teamAgentEdit({ ...writer, turnedOff: [{ kind: 'tool', name: 'linear' }] }, 'tools', ['linear'], [claude])).toMatchObject({ kind: 'fields', fields: { turnedOff: undefined } })
-    expect(teamAgentEdit(off, 'tools', ['github'], [claude])).not.toHaveProperty('fields.turnedOff')
+    expect(teamAgentEdit(off, 'tools', ['linear'])).toMatchObject({ kind: 'fields', fields: { turnedOff: [{ kind: 'skill', name: 'pdf' }] } })
+    expect(teamAgentEdit({ ...writer, turnedOff: [{ kind: 'tool', name: 'linear' }] }, 'tools', ['linear'])).toMatchObject({ kind: 'fields', fields: { turnedOff: undefined } })
+    expect(teamAgentEdit(off, 'tools', ['github'])).not.toHaveProperty('fields.turnedOff')
   })
 
   it('reads what the team gives it to read, for its drawer: folders, files and Notion pages, in order', () => {

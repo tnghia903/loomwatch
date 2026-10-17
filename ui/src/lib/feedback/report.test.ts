@@ -4,16 +4,11 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
-import type { DetectedHarness } from '../harnesses'
 import { browserName, DETAILS_FIELD, describeSystem, issueUrl, withoutHomeFolder, type AboutLoomWatch } from './report'
 
 const about: AboutLoomWatch = { version: '0.1.0', commit: 'b4e3373', os: 'macos', osVersion: '26.0', arch: 'aarch64' }
 const SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'
 const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
-
-function harness(id: string, name: string, extra: Partial<DetectedHarness> = {}): DetectedHarness {
-  return { id, name, command: id, executablePath: `/Users/someone/.local/bin/${id}`, acpAvailable: true, spawn: { cmd: id, args: [] }, ...extra }
-}
 
 describe('browserName', () => {
   it('tells Safari, Chrome, Edge and Firefox apart', () => {
@@ -25,33 +20,32 @@ describe('browserName', () => {
 })
 
 describe('describeSystem', () => {
-  it('names the build, system, browser, screen and which apps can start', () => {
-    const text = describeSystem(about, [
-      harness('claude', 'Claude'),
-      harness('gemini', 'Gemini', { health: 'error', healthReason: 'This client is no longer supported.' }),
-    ], { screen: 'run' }, SAFARI)
+  it('names the build, system, browser, screen and whether a key is added, never the key', () => {
+    const text = describeSystem(about, { connected: true, label: 'sk-or-v1-abc...xyz', freeTier: true }, { screen: 'run' }, SAFARI)
     expect(text).toBe([
       'LoomWatch: 0.1.0 (b4e3373)',
       'System: macOS 26.0 (aarch64)',
       'Browser: Safari 26.0',
       'Screen: Run (watching a run)',
-      "AI apps: Claude (ready); Gemini (can't start: This client is no longer supported.)",
+      'OpenRouter key: added, free models only',
     ].join('\n'))
+    expect(text).not.toContain('sk-or')
+    expect(describeSystem(about, { connected: false }, {}, SAFARI)).toContain('OpenRouter key: not added')
   })
 
-  it('never carries where an app is installed, and hides the home folder in an error', () => {
-    const text = describeSystem(about, [harness('claude', 'Claude')], { error: "ENOENT: no such file '/Users/someone/LoomWatch/teams/x.yaml'" }, SAFARI)
+  it('hides the home folder in an error', () => {
+    const text = describeSystem(about, { connected: true }, { error: "ENOENT: no such file '/Users/someone/LoomWatch/teams/x.yaml'" }, SAFARI)
     expect(text).not.toContain('someone')
     expect(text).toContain("Error: ENOENT: no such file '~/LoomWatch/teams/x.yaml'")
   })
 
-  it('still reports when the server is down or the apps were never checked', () => {
+  it('still reports when the server is down or the key was never checked', () => {
     const text = describeSystem(null, null, {}, CHROME)
     expect(text).toBe('LoomWatch: unknown (the LoomWatch server did not answer)\nBrowser: Chrome 140')
   })
 
   it('cuts a huge error so the link stays short enough for GitHub', () => {
-    const text = describeSystem(about, [], { error: 'x'.repeat(50_000) }, SAFARI)
+    const text = describeSystem(about, { connected: true }, { error: 'x'.repeat(50_000) }, SAFARI)
     expect(text.length).toBeLessThanOrEqual(3000)
   })
 })

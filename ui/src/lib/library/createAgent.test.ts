@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
+import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
 import type { AgentConfig } from '../team-file/types'
 import { buildAgentFromSource, DEFAULT_AGENT_ROLE } from './createAgent'
 import { ROLE_PRESETS, roleSource } from './roles'
 import type { LibrarySource } from './types'
 
-const harnessSource: LibrarySource = {
-  group: 'detected',
-  id: 'opencode',
-  label: 'OpenCode',
-  spawn: { cmd: 'opencode', args: ['acp'] },
+const blankSource: LibrarySource = {
+  group: 'agents',
+  id: 'blank',
+  label: 'Agent',
 }
 
 const presetSource: LibrarySource = {
@@ -17,8 +17,7 @@ const presetSource: LibrarySource = {
   id: 'reviewer',
   label: 'Reviewer',
   role: 'Reviewer',
-  model: 'claude-opus-5',
-  spawn: { cmd: 'claude-agent-acp', args: [] },
+  model: 'anthropic/claude-haiku-5.5',
 }
 
 function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -26,71 +25,66 @@ function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
     id: 'existing',
     name: 'Existing',
     role: 'Existing role',
-    model: 'existing/model',
-    spawn: { cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' },
+    model: DEFAULT_MODEL,
     allowRecruiting: true,
     ...overrides,
   }
 }
 
 describe('buildAgentFromSource', () => {
-  it('gives a bare harness source a general role and leaves the model for the catalog', () => {
-    const result = buildAgentFromSource(harnessSource, [])
+  it('gives a blank agent a general role on the default model', () => {
+    const result = buildAgentFromSource(blankSource, [])
     expect(result.role).toBe(DEFAULT_AGENT_ROLE)
-    expect(result.model).toBe('')
+    expect(result.model).toBe(DEFAULT_MODEL)
   })
 
   it('pre-fills role and model from a preset source', () => {
     const result = buildAgentFromSource(presetSource, [])
     expect(result.role).toBe('Reviewer')
-    expect(result.model).toBe('claude-opus-5')
+    expect(result.model).toBe('anthropic/claude-haiku-5.5')
   })
 
-  // ADR 0037: the Researcher job brings its web switch; a bare app brings none.
-  it('places the Researcher job allowed to search the web, and a bare app allowed nothing', () => {
-    const researcher = ROLE_PRESETS.find((preset) => preset.id === 'researcher')
-    const harness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'npx', args: ['claude-agent-acp'] } }
-    const source = researcher && roleSource(researcher, [harness])
-    expect(source && buildAgentFromSource(source, []).allow).toEqual({ web: true })
-    expect(buildAgentFromSource(harnessSource, []).allow).toBeUndefined()
+  // ADR 0037: the Researcher job brings its web switch; a blank agent brings none. ADR 0057: it
+  // gathers on the faster model.
+  it('places the Researcher job allowed to search the web, on the faster model, and a blank agent allowed nothing', () => {
+    const researcher = ROLE_PRESETS.find((preset) => preset.id === 'researcher')!
+    const placed = buildAgentFromSource(roleSource(researcher), [])
+    expect(placed).toMatchObject({ allow: { web: true }, model: FAST_MODEL, thinkingEffort: 'medium' })
+    expect(buildAgentFromSource(blankSource, []).allow).toBeUndefined()
     // The Checker opens the sources the work cites (ADR 0062); no other job starts with a switch on.
     expect(ROLE_PRESETS.filter((preset) => preset.allow).map((preset) => preset.id)).toEqual(['researcher', 'checker'])
   })
 
-  it('copies spawn verbatim plus env and cwd defaults', () => {
-    const result = buildAgentFromSource(harnessSource, [])
-    expect(result.spawn).toEqual({ cmd: 'opencode', args: ['acp'], env: {}, cwd: '.' })
+  it('works in the team file’s own folder, so it has no spawn', () => {
+    expect(buildAgentFromSource(blankSource, [])).not.toHaveProperty('spawn')
   })
 
   it('slugifies the label into the id', () => {
-    const result = buildAgentFromSource(
-      { ...harnessSource, label: 'Protocol Researcher' },
-      [],
-    )
+    const result = buildAgentFromSource({ ...blankSource, label: 'Protocol Researcher' }, [])
     expect(result.id).toBe('protocol-researcher')
   })
 
   it('falls back to "agent" when the label has no alphanumerics', () => {
-    const result = buildAgentFromSource({ ...harnessSource, label: '·' }, [])
+    const result = buildAgentFromSource({ ...blankSource, label: '·' }, [])
     expect(result.id).toBe('agent')
   })
 
   it('disambiguates a colliding id with a numeric suffix', () => {
-    const result = buildAgentFromSource(harnessSource, [
-      agent({ id: 'opencode' }),
-      agent({ id: 'opencode-2' }),
+    const result = buildAgentFromSource(blankSource, [
+      agent({ id: 'agent' }),
+      agent({ id: 'agent-2' }),
     ])
-    expect(result.id).toBe('opencode-3')
+    expect(result.id).toBe('agent-3')
   })
 
   // Budgets are retired: a new agent carries no spend limit, whatever its source or neighbours.
   it('writes no budget into the new agent', () => {
-    expect(buildAgentFromSource(harnessSource, [])).not.toHaveProperty('budget')
+    expect(buildAgentFromSource(blankSource, [])).not.toHaveProperty('budget')
     expect(buildAgentFromSource(presetSource, [agent({ id: 'a' })])).not.toHaveProperty('budget')
   })
 
   it('always sets allowRecruiting true and never writes status', () => {
-    const result = buildAgentFromSource(harnessSource, [])
+    const result = buildAgentFromSource(blankSource, [])
     expect(result.allowRecruiting).toBe(true)
     expect(result.status).toBeUndefined()
   })

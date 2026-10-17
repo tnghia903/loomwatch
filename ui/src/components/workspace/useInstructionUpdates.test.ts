@@ -27,7 +27,7 @@ function setup(overrides: Partial<InstructionUpdatesInput> = {}) {
   })
   const setRole = vi.fn((id: string, role: string) => { team.agents = team.agents.map((one) => one.id === id ? { ...one, role } : one) })
   const props = (): InstructionUpdatesInput => ({
-    agents: team.agents, teamPath: 'research.yaml', app: 'claude', model: null, unavailable: null,
+    agents: team.agents, teamPath: 'research.yaml', unavailable: null,
     isBack: () => team.cardBack, setRoles, setRole, rewrite, ...overrides,
   })
   const hook = renderHook(() => useInstructionUpdates(props()))
@@ -56,7 +56,7 @@ describe('useInstructionUpdates', () => {
     act(() => t.hook.result.current.rewrite())
     expect(t.rewrite).toHaveBeenCalledTimes(1)
     expect(t.rewrite.mock.calls[0][0]).toMatchObject({
-      app: 'claude', removed: { name: 'EKIS — SUTD Final Project Hub', kind: 'Notion page' },
+      removed: { name: 'EKIS — SUTD Final Project Hub', kind: 'Notion page' },
       agents: [{ id: 'scope', role: SCOPE }, { id: 'plan', role: PLAN }],
     })
     expect(t.hook.result.current.notes.get('scope')).toBe('Rewriting instructions…')

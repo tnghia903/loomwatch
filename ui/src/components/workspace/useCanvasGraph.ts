@@ -1,17 +1,15 @@
 import { useMemo } from 'react'
 
-import type { DetectedHarness } from '../../lib/harnesses'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
-import { appLabelForAgent } from '../../lib/models'
+import { modelLabelForAgent } from '../../lib/models'
 import { helperPositions, historicalRunPositions } from '../../lib/runs/runOverlay'
 import { buildCanvasGraph, type CanvasGraphInput } from './canvasGraph'
 
 interface CanvasGraphHookInput extends Omit<CanvasGraphInput, 'helperPlacements' | 'historicalPositions'> {
-  harnesses: DetectedHarness[]
+  /** The model list's own names by id, once it has arrived. */
+  modelNames?: ReadonlyMap<string, string>
   /** The planned deliverable, which Build names on the Output node. */
   outputPlan: { name: string; format: string } | undefined
-  /** Build only: agent id → why its app cannot start on this computer. */
-  appProblems?: ReadonlyMap<string, string>
   /** What LoomWatch did to an agent's instructions after a removal (ADR 0059), by agent id. */
   instructionNotes?: ReadonlyMap<string, string>
   /** Build only: where every answer also goes (ADR 0038), named on the Output node. */
@@ -26,7 +24,7 @@ interface CanvasGraphHookInput extends Omit<CanvasGraphInput, 'helperPlacements'
  * builder's input by `react-hooks/exhaustive-deps` rather than kept in step by hand.
  */
 export function useCanvasGraph(input: CanvasGraphHookInput) {
-  const { runView, doc, session, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge, harnesses, outputPlan, appProblems, instructionNotes, sendsTo = null } = input
+  const { runView, doc, session, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge, modelNames, outputPlan, instructionNotes, sendsTo = null } = input
 
   // §15.2.6: helpers a run reveals that the document has no node for. They are placed by the
   // existing seeded auto-layout around the entrypoint, as view state — node positions are not
@@ -81,22 +79,21 @@ export function useCanvasGraph(input: CanvasGraphHookInput) {
     selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge,
   }), [runView, doc.nodes, doc.edges, doc.mode, doc.entrypoint, session.mode, session.cursor, session.error, session.lastSeq, session.terminal, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, helperPlacements, historicalPositions, fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge])
 
-  // Both surfaces draw the same agent card, so both name the harness that card runs in — a run
-  // that cannot resolve one says so rather than falling back to the generic word. The Prompt node
+  // Both surfaces draw the same agent card, so both name the model that card runs on. The Prompt node
   // and the configured output name belong to Build alone: a run has an attempt to show instead of
   // a draft, and an answer to read instead of a promise.
   const canvasNodes = useMemo(() => {
     const named = graph.nodes.map((node) => node.type === 'agent'
-      ? { ...node, data: { ...node.data, harnessLabel: appLabelForAgent((node as AgentNode).data.agent, harnesses) } }
+      ? { ...node, data: { ...node.data, modelLabel: modelLabelForAgent((node as AgentNode).data.agent, modelNames) } }
       : node)
     if (runView) return named
     return named
       .filter((node) => node.id !== '__prompt' || allWiringEdges.some((edge) => edge.from === '__prompt'))
       .map((node) => node.type === 'response' ? { ...node, data: { ...node.data, outputName: outputPlan?.name, outputFormat: outputPlan?.format, sendsTo } }
-        : node.type === 'agent' && (appProblems?.has(node.id) || instructionNotes?.has(node.id))
-          ? { ...node, data: { ...node.data, appProblem: appProblems?.get(node.id), instructionNote: instructionNotes?.get(node.id) } }
+        : node.type === 'agent' && instructionNotes?.has(node.id)
+          ? { ...node, data: { ...node.data, instructionNote: instructionNotes.get(node.id) } }
           : node)
-  }, [graph.nodes, harnesses, runView, allWiringEdges, outputPlan, appProblems, instructionNotes, sendsTo])
+  }, [graph.nodes, modelNames, runView, allWiringEdges, outputPlan, instructionNotes, sendsTo])
 
   return { graph, canvasNodes }
 }

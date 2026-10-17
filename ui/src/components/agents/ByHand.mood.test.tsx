@@ -2,7 +2,6 @@ import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DetectedHarness } from '../../lib/harnesses'
 import { BLANK_DRAFT } from '../../lib/library/draft'
 import type { RunRecord } from '../../lib/runs/client'
 import type { AgentFigureProps } from './AgentFigure'
@@ -21,14 +20,13 @@ vi.mock('../../lib/watch/useSessionEvents', () => ({
   },
 }))
 
-const harness: DetectedHarness = { id: 'claude', name: 'Claude', command: 'claude', executablePath: '/bin/claude', acpAvailable: true, spawn: { cmd: 'claude-agent-acp', args: [] } }
 const run = (status: RunRecord['status'], eventCount: number | null = null): RunRecord => ({
   runId: 'run-1', sessionId: 'session-1', teamPath: '.jobs/.bench/reader.yaml', prompt: 'Check it', status, mode: 'team', entrypoint: 'reader', responder: 'reader',
   agentIds: ['reader'], createdAt: '2026-10-16T09:00:00.000Z', startedAt: '2026-10-16T09:00:00.000Z', finishedAt: null, error: null, exitCode: null, eventCount, reply: null,
 })
 
 function bench(record: RunRecord | null) {
-  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.', appId: 'claude' }} set={vi.fn()} harness={harness} harnesses={[harness]} harnessesLoading={false} models={null} skills={[]} skillsLoading={false} tools={[]} toolsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={record} />
+  return <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.' }} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={record} />
 }
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); shown.view = null; stream.asked = []; stream.count = 0 })

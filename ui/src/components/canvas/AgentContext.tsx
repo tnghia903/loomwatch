@@ -6,7 +6,6 @@ import { chosenKnowledge } from '../../lib/knowledge/chosen'
 import { addTeamFile } from '../../lib/knowledge/client'
 import type { AgentPlace, PlaceLink } from '../../lib/team-file/agentPlace'
 import type { AgentConfig, CapabilityRef, TurnedOff } from '../../lib/team-file/types'
-import { withheldByApp } from '../../lib/team-file/turnedOff'
 import { SectionHead } from '../ui/SectionHead'
 import { FolderPicker } from './FolderPicker'
 
@@ -31,9 +30,9 @@ export interface AgentContextProps {
   onAddKnowledge?: (added: CapabilityRef[]) => void
   /** Turn a skill or tool the operator turned off back on for this agent (ADR 0060). */
   onTurnBackOn?: (entry: TurnedOff) => void
-  /** What the agent's app has of its own, by the scan of this computer (ADR 0060). */
+  /** What the agent can choose from besides what it is given: LoomWatch's library (ADR 0060). */
   appHas?: { app: string; items: readonly TurnedOff[] } | null
-  /** Turn one of the app's own skills or tools off for this agent. */
+  /** Turn one of the library's skills off for this agent. */
   onTurnOff?: (entry: TurnedOff) => void
   /** The heading's look in the panel that shows it. */
   headClassName?: string
@@ -95,10 +94,6 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
   const fromApp = (appHas?.items ?? []).filter((entry) => !listed(entry)(capabilities) && !listed(entry)(turnedOff))
   const appTools = fromApp.filter((entry) => entry.kind === 'tool').length
   const appSkills = fromApp.length - appTools
-  // Only some apps' own copies can be withheld (ADR 0060): say so where one is not.
-  const spawned = [agent.spawn?.cmd ?? '', ...(agent.spawn?.args ?? [])].join(' ').toLowerCase()
-  const harness = spawned.includes('claude') ? 'claude' : spawned.includes('codex') ? 'codex' : 'other'
-  const ownCopyKept = turnedOff.some((entry) => !withheldByApp(harness, entry.kind))
   const entries = `${briefCount} ${briefCount === 1 ? 'entry' : 'entries'}`
   const broken = capabilities.filter((capability) => capability.kind === 'knowledge' && !capability.path && !capability.notion)
   return (
@@ -107,7 +102,7 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
         {place && <div>The agent is told its place in the team at the start of every run.</div>}
         <div>{briefCount > 0 ? `The team Brief (${entries}) is supplied at the start of every session. Switch it off to leave this agent out.` : 'No team Brief yet. Notes you add in Memory are supplied to every agent.'}</div>
         <div>Everything given is a card on the canvas. Drag a skill, tool, folder or file from the add panel onto this agent, or draw a line from another agent to a card to share it.</div>
-        <div>Besides what it is given, the agent can use what its own app has. Taking a skill or tool off the canvas turns it off, even the app's own copy, until it is wired again.</div>
+        <div>Besides what it is given, the agent can use any skill in LoomWatch’s library. Taking a skill off the canvas turns it off for this agent until it is wired again.</div>
       </>} />
       {place && (
         <div className="agent-context-place">
@@ -175,7 +170,7 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
             {turnedOff.map((entry) => {
               const Icon = entry.kind === 'skill' ? Puzzle : Wrench
               return (
-                <li key={`${entry.kind}:${entry.name}`} className="given-chip off" title={`${entry.name}\n${entry.kind === 'skill' ? 'Skill' : 'Tool'} · turned off, even its app's own copy`}>
+                <li key={`${entry.kind}:${entry.name}`} className="given-chip off" title={`${entry.name}\n${entry.kind === 'skill' ? 'Skill' : 'Tool'} · turned off for this agent`}>
                   <Icon size={12} aria-hidden="true" />
                   <span className="given-name">{entry.name}</span>
                   <span className="visually-hidden">{entry.kind}, turned off</span>
@@ -190,12 +185,12 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
       )}
       {appHas && fromApp.length > 0 && (
         <details className="context-app-has">
-          <summary className="t-meta">Also from {appHas.app}: {[appTools > 0 && `${appTools} ${appTools === 1 ? 'tool' : 'tools'}`, appSkills > 0 && `${appSkills} ${appSkills === 1 ? 'skill' : 'skills'}`].filter(Boolean).join(' · ')}</summary>
-          <ul className="given-chips" aria-label={`Also from ${appHas.app}`}>
+          <summary className="t-meta">Also in {appHas.app}’s library: {[appTools > 0 && `${appTools} ${appTools === 1 ? 'tool' : 'tools'}`, appSkills > 0 && `${appSkills} ${appSkills === 1 ? 'skill' : 'skills'}`].filter(Boolean).join(' · ')}</summary>
+          <ul className="given-chips" aria-label={`Also in ${appHas.app}’s library`}>
             {fromApp.map((entry) => {
               const Icon = entry.kind === 'skill' ? Puzzle : Wrench
               return (
-                <li key={`${entry.kind}:${entry.name}`} className="given-chip app" title={`${entry.name}\n${entry.kind === 'skill' ? 'Skill' : 'Tool'} · ${appHas.app} has it; the agent decides when to use it`}>
+                <li key={`${entry.kind}:${entry.name}`} className="given-chip app" title={`${entry.name}\n${entry.kind === 'skill' ? 'Skill' : 'Tool'} · in ${appHas.app}’s library; the agent decides when to use it`}>
                   <Icon size={12} aria-hidden="true" />
                   <span className="given-name">{entry.name}</span>
                   {onTurnOff && !readOnly && (
@@ -207,7 +202,6 @@ export function AgentContext({ agent, place, pipeline = false, briefCount = 0, i
           </ul>
         </details>
       )}
-      {ownCopyKept && <div className="t-meta agent-context-warning">{harness === 'codex' ? 'Codex can still use a tool from its own settings' : 'This app can still use its own copy'}: turning it off here only stops LoomWatch giving it.</div>}
       {broken.map((capability) => <div key={capability.name} className="t-meta agent-context-warning">{capability.name} names no folder or file. Disconnect it and add one.</div>)}
 
       {canAdd && !teamPath && <div className="t-meta agent-context-empty">Save the team to add a file: it is copied next to the team file.</div>}

@@ -1,7 +1,6 @@
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-import { ConnectAiApps } from './ask/ConnectAiApps'
 import { OpenRouterKey } from './connections/OpenRouterKey'
 
 type Page = { id: string; title: string }
@@ -94,7 +93,6 @@ export default function Connections() {
           <p className="t-body">Connect your tools and choose where your work belongs.</p>
         </div>
         <OpenRouterKey />
-        <ConnectAiApps />
         <section className="e1 lw-settings-section" aria-labelledby="notion-heading" aria-busy={busy}>
           <h2 id="notion-heading" className="t-title">Notion</h2>
           {error && <p role="alert" className="inline-error t-body"><span className="detail">{error}</span></p>}

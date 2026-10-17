@@ -2,7 +2,10 @@ import { Background, getNodesBounds, getViewportForBounds, ReactFlow, useNodesIn
 import '@xyflow/react/dist/style.css'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
-import type { DetectedHarness } from '../lib/harnesses'
+import { shortName } from '../lib/ai/client'
+import { OFFLINE_MODEL, openRouterId } from '../lib/ai/modelIds'
+import { useKeyStatus } from '../lib/ai/useKeyStatus'
+import { useModels } from '../lib/ai/useModels'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import { nodeFromDrop, type AgentNode } from '../lib/library/nodeFromDrop'
 import type { CapabilityInventory, DetectedCapability } from '../lib/library/client'
@@ -13,7 +16,7 @@ import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
 import { connectedServersByAgent } from '../lib/library/observed'
 import { approveTeam, isTerminalRun, runScheduleNow, scheduleForPath, useSchedules, type TeamReview } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
-import { appLabelForAgent, harnessIdForAgent, modelOptionsForAgent } from '../lib/models'
+import { modelLabelForAgent } from '../lib/models'
 import type { OutputNode } from '../lib/runs/graph'
 import { causalOrder, DOCK } from '../lib/runs/runOverlay'
 import { mergeHistory, teamRunIds } from '../lib/runs/history'
@@ -21,7 +24,6 @@ import { useRunHistory } from '../lib/runs/useRunHistory'
 import { useRunSession } from '../lib/runs/useRunSession'
 import { snapToGrid } from '../lib/grid'
 import { reviewProblems, yamlLineForPath, type ReviewProblem } from '../lib/team-file/problems'
-import { appProblemsFor, appProblemSummary, useAppChecks } from '../lib/team-file/appChecks'
 import { pipelineTerminal } from '../lib/team-file/pipelineOrder'
 import { agentPlace } from '../lib/team-file/agentPlace'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
@@ -94,13 +96,12 @@ import { useRunLessons } from './workspace/useRunLessons'
 import { useInstructionUpdates } from './workspace/useInstructionUpdates'
 import { InstructionUpdateBar } from './workspace/InstructionUpdateBar'
 import { removedSource, type RemovedSource } from '../lib/team-file/mentions'
-import { ownedByApp, turnedOffFor, withheldByApp } from '../lib/team-file/turnedOff'
-import { NotionOffer, TurnedOffNote, type TurnedOffNoteState } from './workspace/TurnedOffNote'
+import { inLibrary, turnedOffFor } from '../lib/team-file/turnedOff'
+import { TurnedOffNote, type TurnedOffNoteState } from './workspace/TurnedOffNote'
 import { capabilityEdgeId } from './workspace/canvasGraph'
 import { OutputEditor } from './workspace/OutputEditor'
 import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
 import { useCanvasGraph } from './workspace/useCanvasGraph'
-import { useModelCatalog } from './workspace/useModelCatalog'
 import { useRunController } from './workspace/useRunController'
 import { useWorkspaceShortcuts } from './workspace/useWorkspaceShortcuts'
 import { TeamStory } from './workspace/TeamStory'
@@ -109,7 +110,7 @@ import { useNeedsYou } from '../lib/story/useNeedsYou'
 import { matchTeam, parseIntent } from '../lib/story/intent'
 import { APPROVAL_TEXT } from '../lib/story/needsYou'
 import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
-import { harnessForRole, ROLE_PRESETS, roleSource } from '../lib/library/roles'
+import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
 import { SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
 import { savedJobPreset, useSavedJobs, versionOf, type SavedJob } from '../lib/library/jobs'
@@ -142,21 +143,13 @@ const nodeTypes = { agent: BuildAgentCard, schedule: ScheduleNodeCard, capabilit
 const edgeTypes = { warp: WarpEdgeView, weft: WeftEdgeView, prov: ProvEdgeView }
 // Before a run there is no answer to show, so the Output card is the planned one.
 const buildNodeTypes = { ...nodeTypes, response: BuildOutputCard }
-const EMPTY_CAPABILITY_INVENTORY: CapabilityInventory = { skills: [], tools: [], sources: [] }
+const EMPTY_CAPABILITY_INVENTORY: CapabilityInventory = { skills: [], sources: [] }
 const EMPTY_EVIDENCE: readonly Evidence[] = []
 /** Where this browser keeps the add panel's width. */
 const PALETTE_WIDTH_KEY = 'loomwatch.paletteWidth'
 const CHAT_WIDTH_KEY = 'loomwatch.chatWidth'
 
 interface WorkspaceProps {
-  harnesses: DetectedHarness[]
-  /** PATH entries the daemon actually scanned, for the Library's "Show search path". */
-  harnessSearchPath?: string[]
-  /** Harness ids the daemon looked for, so "Not installed" is the daemon's list, not the UI's. */
-  knownHarnessIds?: string[]
-  harnessesLoading: boolean
-  harnessesError: string | null
-  onRetryHarnesses: () => void
   capabilityInventory?: CapabilityInventory
   capabilitiesLoading?: boolean
   capabilitiesError?: string | null
@@ -267,7 +260,7 @@ function useWideScreen(): boolean {
   return wide
 }
 
-export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds = [], harnessesLoading, harnessesError, onRetryHarnesses, capabilityInventory = EMPTY_CAPABILITY_INVENTORY, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities = () => {}, onDocumentOpen, initialRunId }: WorkspaceProps) {
+export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities = () => {}, onDocumentOpen, initialRunId }: WorkspaceProps) {
   const doc = useTeamDocument()
   const flow = useReactFlow()
   // Semantic zoom: the canvas carries its depth so every card can say more or less (lib/story/depth.ts).
@@ -428,7 +421,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     : doc.entrypoint
   const responderFromDoc = doc.responder ?? inferredResponder
   const runLessons = useRunLessons(doc.saveState === 'new' ? null : doc.path)
-  const teamCheckup = useTeamCheckup(doc, responderFromDoc, setStatusAnnouncement, runLessons, harnesses)
+  const teamCheckup = useTeamCheckup(doc, responderFromDoc, setStatusAnnouncement, runLessons)
   const session = useRunSession(activeRunId, responderFromDoc)
   const record = session.record
   const waiting = record?.status === 'running' ? record.waitingOn ?? null : null
@@ -519,14 +512,14 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const stepById = useMemo(() => new Map(doc.pipelineSteps.map((step) => [step.id, { ...step, step: step.step + (doc.teamSchedule ? 1 : 0) }])), [doc.pipelineSteps, doc.teamSchedule])
   const nodeNames = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node.data.label])), [doc.nodes])
   const agentIds = useMemo(() => doc.nodes.map((node) => node.id), [doc.nodes])
-  // A valid team can still name an app this computer does not have — one shared by someone who uses
-  // another. The daemon is asked about the document as it is now, not the saved file: Run saves first.
   const docAgents = useMemo(() => doc.nodes.map((node) => node.data.agent), [doc.nodes])
-  const commandChecks = useAppChecks(docAgents)
-  const appProblems = useMemo(() => appProblemsFor(docAgents, commandChecks, nodeNames), [docAgents, commandChecks, nodeNames])
-  const appProblemByAgent = useMemo(() => new Map(appProblems.map((problem) => [problem.agentId, problem.sentence])), [appProblems])
-  const appProblemDetail = appProblems.length === 1 ? `${appProblems[0].sentence} ${appProblems[0].remedy}`
-    : appProblems.length > 1 ? `${appProblemSummary(appProblems, nodeNames)} Open the list at the top to see what to change.` : null
+  // Every agent thinks on the person's OpenRouter key, so a team can't run without one. The offline
+  // demo calls no model and runs without it.
+  const key = useKeyStatus()
+  const needsKey = key !== null && !key.connected && docAgents.some((agent) => agent.kind !== 'operator' && openRouterId(agent.model) !== OFFLINE_MODEL)
+  const keyProblem = needsKey ? 'Add your OpenRouter key so these agents can think. LoomWatch keeps it in this Mac’s Keychain.' : null
+  const { catalog: modelCatalog } = useModels()
+  const modelNames = useMemo(() => new Map((modelCatalog?.models ?? []).map((model) => [model.id, shortName(model)])), [modelCatalog])
   // Planned capability wiring lives in a sidecar, never in the team file the daemon runs.
   const composerLayout = useComposerLayout(doc.path, agentIds, doc.saveState !== 'new')
   // Starting, answering and stopping runs, and the composer text they consume.
@@ -693,37 +686,22 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         const id = cardId(card)
         // The id too: a sidecar card whose name differs only in case is the same card.
         if ([...composerLayout.nodes, ...memoryCards, ...cards].some((other) => other.id === id || capabilityIsCard(capability, other))) continue
-        const inventory = capability.kind === 'skill' ? capabilityInventory.skills : capability.kind === 'tool' ? capabilityInventory.tools : []
+        const inventory = capability.kind === 'skill' ? capabilityInventory.skills : []
         const installed = inventory.find((item) => item.name.toLowerCase() === capability.name.toLowerCase())
         const position = freeCapabilitySlot({ x: node.position.x, y: node.position.y + 220 }, taken)
         taken.push(position)
-        cards.push({ id, ...card, source: notion ? NOTION_PAGE_SOURCE : path ? chosenSource(path) : installed?.source ?? 'Not found on this computer', position })
+        cards.push({ id, ...card, source: notion ? NOTION_PAGE_SOURCE : path ? chosenSource(path) : installed?.source ?? (capability.kind === 'tool' ? 'From an AI app, not available' : 'Not in LoomWatch’s skills'), position })
       }
     }
     return cards
-  }, [capabilityInventory.skills, capabilityInventory.tools, composerLayout.nodes, doc.nodes, memoryCards])
+  }, [capabilityInventory.skills, composerLayout.nodes, doc.nodes, memoryCards])
   const capabilityCards = useMemo(() => [...composerLayout.nodes, ...memoryCards, ...teamFileCards], [composerLayout.nodes, memoryCards, teamFileCards])
   /** What the last removal turned off, said over the canvas until dismissed (ADR 0060). */
   const [turnedOffNote, setTurnedOffNote] = useState<TurnedOffNoteState | null>(null)
-  /** Claude agents that can still reach Notion through the claude.ai connector once the team's
-      last Notion page card is gone (ADR 0060). */
-  const [notionOffer, setNotionOffer] = useState<string[] | null>(null)
-  /** The apps whose agents keep their own copy of what the last removal turned off (ADR 0060). */
-  const stillOwnApps = useMemo(() => {
-    if (!turnedOffNote) return []
-    const apps = new Set<string>()
-    for (const id of turnedOffNote.agents) {
-      const agent = docAgents.find((candidate) => candidate.id === id)
-      if (!agent) continue
-      const harness = harnessIdForAgent(agent, harnesses)
-      if (!withheldByApp(harness, turnedOffNote.tools ? 'tool' : 'skill') || !withheldByApp(harness, 'skill')) apps.add(appLabelForAgent(agent, harnesses))
-    }
-    return [...apps]
-  }, [turnedOffNote, docAgents, harnesses])
-  // ADR 0059: instructions that name a card the operator takes away are rewritten by their Ask app
-  // and marked until the operator keeps the change or puts the old ones back.
+  // ADR 0059: instructions that name a card the operator takes away are rewritten by a model on
+  // their key and marked until the operator keeps the change or puts the old ones back.
   const instructionUpdates = useInstructionUpdates({
-    agents: docAgents, teamPath: doc.path, app: ask.selectedApp?.id ?? null, model: ask.selectedModel?.id ?? null, unavailable: ask.unavailable,
+    agents: docAgents, teamPath: doc.path, unavailable: ask.unavailable,
     isBack: (source: RemovedSource) => {
       const card = capabilityCards.find((candidate) => candidate.id === source.cardId)
       if (!source.from) return Boolean(card)
@@ -806,21 +784,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     }
     composerLayout.remove(ids)
     for (const card of going) if (teamFileKind(card) && !card.memory) instructionUpdates.removed(removedSource(card), docAgents)
-    // ADR 0060: taking a skill or tool off the canvas turns it off for the team, including the
-    // copy each agent's app has of its own. Wiring it to an agent again turns it back on.
+    // ADR 0060: taking a skill or tool off the canvas turns it off for the team, even from
+    // LoomWatch's library. Wiring it to an agent again turns it back on.
     const off = going.flatMap((card) => turnedOffFor(card) ?? [])
     const working = docAgents.filter((agent) => agent.kind !== 'operator')
-    const notion = (capabilityInventory.connectors ?? []).find((connector) => connector.name === 'claude.ai Notion')
-    const pagesLeft = capabilityCards.some((card) => card.notion && !ids.includes(card.id))
-    if (notion && going.some((card) => card.notion) && !pagesLeft) {
-      const reach = working.filter((agent) => harnessIdForAgent(agent, harnesses) === 'claude' && !(agent.turnedOff ?? []).some((entry) => entry.kind === 'tool' && entry.name === notion.name))
-      setNotionOffer(reach.length > 0 ? reach.map((agent) => agent.id) : null)
-    }
     if (off.length > 0 && working.length > 0) {
       doc.turnOff(new Map(working.map((agent) => [agent.id, off])))
-      setTurnedOffNote({ names: off.map((entry) => entry.name), agents: working.map((agent) => agent.id), tools: off.some((entry) => entry.kind === 'tool'), everyone: true })
+      setTurnedOffNote({ names: off.map((entry) => entry.name), agents: working.map((agent) => agent.id), everyone: true })
     }
-  }, [capabilityCards, composerLayout, doc, docAgents, instructionUpdates, capabilityInventory.connectors, harnesses])
+  }, [capabilityCards, composerLayout, doc, docAgents, instructionUpdates])
 
   /**
    * Edges into a memory card, read from `memory.inherits` — the team file, not the sidecar.
@@ -912,7 +884,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         const off = turnedOffFor(capability)
         if (off && agent.kind !== 'operator') {
           doc.turnOff(new Map([[source, [off]]]))
-          setTurnedOffNote({ names: [off.name], agents: [source], tools: off.kind === 'tool', everyone: false })
+          setTurnedOffNote({ names: [off.name], agents: [source], everyone: false })
         }
       }
       // Layouts from before the kind was executable may still hold the same edge in the sidecar.
@@ -930,7 +902,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     setStatusAnnouncement(`${owner} no longer ${RELATION[capability.kind]} ${capability.name}.`)
   }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames, instructionUpdates])
 
-  const problems = useMemo(() => reviewProblems(doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems), [doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames, appProblems])
+  const problems = useMemo(() => reviewProblems(doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames), [doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames])
   const scheduleProblems = useMemo(() => problems.filter((problem) => problem.yamlPath?.[0] === 'schedule'), [problems])
   const visibleSchedule = useMemo(() => doc.teamSchedule ?? (scheduleProblems.length > 0 ? { cron: '0 8 * * *', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, prompt: 'Run this team on schedule.', enabled: true } : null) ?? (scheduleEditorOpen ? draftSchedule : null), [doc.teamSchedule, scheduleProblems.length, scheduleEditorOpen, draftSchedule])
   // "Save schedule" means: write the four editable fields into the document model, regenerate the
@@ -1108,7 +1080,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText,
     provenanceOpen, composerText, visibleSchedule, scheduleInvalid: scheduleProblems.length > 0, scheduleEditorOpen, onOpenSchedule: openScheduleEditor,
     capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge,
-    harnesses, outputPlan: composerLayout.output, appProblems: appProblemByAgent, instructionNotes: instructionUpdates.notes,
+    modelNames, outputPlan: composerLayout.output, instructionNotes: instructionUpdates.notes,
     sendsTo: doc.teamDeliver?.notion ? 'Notion' : null,
   })
 
@@ -1283,10 +1255,10 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               setInspectedEvidenceId(null)
               setProvenanceOpen(false)
             } else if (capability) {
-              const inventory = capability.kind === 'skill' ? capabilityInventory.skills : capability.kind === 'tool' ? capabilityInventory.tools : capabilityInventory.sources
+              const inventory = capability.kind === 'skill' ? capabilityInventory.skills : capability.kind === 'tool' ? [] : capabilityInventory.sources
               // A card records the provenance the Library showed when it was placed, and provenance
-              // changes whenever another app turns out to hold the same skill. The Library lists one
-              // row per kind and name, so the name is the identity; the source only breaks a tie.
+              // can change since. The Library lists one row per kind and name, so the name is the
+              // identity; the source only breaks a tie.
               const item = inventory.find((candidate) => candidate.name === capability.name && candidate.source === capability.source)
                 ?? inventory.find((candidate) => candidate.name.toLowerCase() === capability.name.toLowerCase())
                 ?? { id: capability.id, name: capability.name, source: capability.source, detail: 'Planned capability on this canvas.', status: 'Compatible' as const }
@@ -1385,10 +1357,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   const inspectedNode = selectedDocNode
     ? ((runView ? graph.nodes.find((node) => node.id === selectedDocNode.id && node.type === 'agent') : undefined) as AgentNode | undefined) ?? selectedDocNode
     : null
-  const inspectedHarnessId = inspectedNode ? harnessIdForAgent(inspectedNode.data.agent, harnesses) : null
   const inspectedUpdate = inspectedNode && !runView ? instructionUpdates.forAgent(inspectedNode.id) : null
-  const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? ownedByApp(inspectedHarnessId, capabilityInventory) : null, [inspectedNode, inspectedHarnessId, capabilityInventory])
-  const { updateAgentModel, applyAgentFields } = doc
+  const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? inLibrary(capabilityInventory) : null, [inspectedNode, capabilityInventory])
+  const { applyAgentFields } = doc
   // A check step's panel says whose work it checks and holds its one switch (ADR 0062).
   const checkStepFor = (agent: AgentConfig) => {
     if (!agent.checks && !isCheckerRole(agent.role)) return undefined
@@ -1400,18 +1371,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       onSendBackOnce: (on: boolean) => applyAgentFields(agent.id, { sendBackOnce: on || undefined }),
     }
   }
-  const fillAgentModel = useCallback((agentId: string, model: string, thinkingEffort?: string) => {
-    if (thinkingEffort) applyAgentFields(agentId, { model, thinkingEffort })
-    else updateAgentModel(agentId, model)
-  }, [updateAgentModel, applyAgentFields])
-  const modelCatalog = useModelCatalog({
-    harnessId: inspectedHarnessId,
-    agentId: inspectedNode?.id ?? null,
-    agentNeedsModel: Boolean(inspectedNode && inspectedNode.data.agent.kind !== 'operator' && !inspectedNode.data.agent.model),
-    agentRole: inspectedNode?.data.agent.role ?? '',
-    editable,
-    updateAgentModel: fillAgentModel,
-  })
   const inspectedEvidence: Evidence | null = inspectedEvidenceId ? projection.evidence.find((item) => item.id === inspectedEvidenceId) ?? null : null
   // Who handed it over: the stage before this one in causal order, which is what the daemon
   // concatenated into this agent's first prompt.
@@ -1629,9 +1588,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       order: doc.mode === 'pipeline' ? chatAgents.map((agent) => agent.id) : [],
       operators: new Set(chatAgents.filter((agent) => agent.operator).map((agent) => agent.id)),
       configs: new Map(doc.nodes.map((node) => [node.id, node.data.agent])),
-      apps: new Map(doc.nodes.map((node) => [node.id, appLabelForAgent(node.data.agent, harnesses)])),
+      models: new Map(doc.nodes.map((node) => [node.id, modelLabelForAgent(node.data.agent, modelNames)])),
     }
-  }, [chatAgents, handedBy, doc.mode, doc.nodes, harnesses, agentFigures])
+  }, [chatAgents, handedBy, doc.mode, doc.nodes, modelNames, agentFigures])
   /** Work starts on an exact snapshot of the file, as Run always has: save first (TNG89 §1.4). */
   const prepareChat = useCallback(async (): Promise<Prepared> => {
     if (['dirty', 'new'].includes(doc.documentChipState)) {
@@ -2112,7 +2071,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
   // From the Agents tab: one of Your agents joins the team, linked to the version it is now, to the
   // right of the agents already there, and its workbench opens. Workflow is where it gets connected.
   const addSavedAgent = useCallback((job: SavedJob) => {
-    const source = editable && doc.path ? roleSource(savedJobPreset(job), harnesses) : null
+    const source = editable && doc.path ? roleSource(savedJobPreset(job)) : null
     if (!source) return
     const raw = JSON.stringify(source)
     const right = doc.nodes.reduce((furthest, node) => Math.max(furthest, node.position.x), -Infinity)
@@ -2122,7 +2081,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     placeJobSkills(raw, at)
     if (added) { setBenchAgentId(added.id); writeBuildViewToUrl(true, added.id) }
     setStatusAnnouncement(`${job.name} is in this team now. Connect it in Workflow, and save the team to keep it.`)
-  }, [doc, editable, harnesses, placeJobSkills])
+  }, [doc, editable, placeJobSkills])
 
   // ---- notifications + announcements -----------------------------------------------------
   const waitingAlert: Attention | null = useMemo(() => waiting ? { id: `waiting:${waiting.questionId ?? waiting.since}`, seq: session.lastSeq, agentId: waiting.node, message: waiting.question } : null, [waiting, session.lastSeq])
@@ -2248,15 +2207,15 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     if (!doc.path) return { kind: 'blocked', reason: 'Open or create a team first.' }
     if (doc.nodes.length === 0) return { kind: 'blocked', reason: 'Add an agent before running.' }
     if (!doc.isValid && problems.length > 0) return { kind: 'blocked', reason: `${problems.length} thing${problems.length === 1 ? '' : 's'} to fix before this team can run.`, action: { label: 'Review', run: () => setProblemsOpen(true) } }
-    // The run would fail the moment it started this agent, so it is not offered.
-    if (appProblems.length > 0) return { kind: 'blocked', reason: appProblemSummary(appProblems, nodeNames) ?? '', action: { label: 'Review', run: () => setProblemsOpen(true) } }
+    // The run would fail on its first model call, so it is not offered.
+    if (needsKey) return { kind: 'blocked', reason: 'Add your OpenRouter key to run this team.', action: { label: 'Add key', run: () => window.location.assign('/connections') } }
     if (doc.mode === 'pipeline' && terminals === 0) return { kind: 'blocked', reason: 'A pipeline run needs exactly one final agent. Every agent in this one hands off to another, so it has none.' }
     if (doc.mode === 'pipeline' && terminals !== 1) return { kind: 'blocked', reason: `A pipeline run needs exactly one final agent. This one has ${terminals}: ${terminalIds.map((id) => nodeNames.get(id) ?? id).join(', ')}.`, action: { label: 'Show on canvas', run: () => { doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: terminalIds.includes(node.id) }))); void flow.fitView({ nodes: doc.nodes.filter((node) => terminalIds.includes(node.id)), padding: 0.35, maxZoom: 1, duration: 300 }) } } }
     if (doc.readOnlyReason) return { kind: 'blocked', reason: doc.readOnlyReason }
     if (doc.documentChipState === 'saving') return { kind: 'saving', filename }
     if (['dirty', 'new'].includes(doc.documentChipState)) return { kind: 'dirty', filename }
     return { kind: 'ready' }
-  }, [waiting, answerSending, history.unavailable, runView, session.terminal, record, phase, starting, pendingPrompt, doc, problems.length, appProblems, terminals, terminalIds, nodeNames, filename, flow])
+  }, [waiting, answerSending, history.unavailable, runView, session.terminal, record, phase, starting, pendingPrompt, doc, problems.length, needsKey, terminals, terminalIds, nodeNames, filename, flow])
 
   // ---- commands + keys ----------------------------------------------------------------------
   // With a team open the dialog belongs to the workspace; on Home, Home owns it.
@@ -2286,6 +2245,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
     { label: 'Your agents…', run: () => window.location.assign('/agents') },
+    { label: 'Skills…', run: () => window.location.assign('/skills') },
     { label: 'Quests…', run: () => window.location.assign('/quests') },
     { label: 'Connections…', run: () => window.location.assign('/connections') },
     { label: 'Getting started guide', run: startTour },
@@ -2313,10 +2273,9 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       case 'add': {
         const own = intent.saved ? savedJobs.find((candidate) => candidate.id === intent.job) : undefined
         const preset = own ? savedJobPreset(own) : ROLE_PRESETS.find((candidate) => candidate.id === intent.job)
-        const source = preset ? roleSource(preset, harnesses) : null
-        const app = preset ? harnessForRole(preset, harnesses) : null
         if (!preset) return null
-        return { dialect, label: `Add a ${preset.label} to this team`, detail: !canEdit ? 'Open a team first' : app ? `${preset.does} · on ${app.name}` : 'No AI app on this computer can run it', disabled: !canEdit || !source, run: () => { if (source) addAgent(source) } }
+        const source = roleSource(preset)
+        return { dialect, label: `Add a ${preset.label} to this team`, detail: !canEdit ? 'Open a team first' : `${preset.does} · on ${modelLabelForAgent({ id: preset.id, name: preset.label, role: preset.role, model: modelForPreset(preset).model }, modelNames)}`, disabled: !canEdit, run: () => addAgent(source) }
       }
       case 'review-step':
         return { dialect, label: 'Add a review step for you', detail: canEdit ? 'The team pauses so you can approve or send work back' : 'Open a team first', disabled: !canEdit, run: () => addAgent(OPERATOR_SOURCE) }
@@ -2333,7 +2292,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
       case 'run':
         return { dialect, label: `Run: “${intent.request}”`, detail: doc.path ? 'Puts it in the request box so you can check it, then press Enter' : 'Open a team first', disabled: !doc.path, run: () => { setComposerText(intent.request); window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus(), 0) } }
     }
-  }, [doc.path, editable, harnesses, flow, needsYou, setComposerText, savedJobs])
+  }, [doc.path, editable, modelNames, flow, needsYou, setComposerText, savedJobs])
 
   useWorkspaceShortcuts({
     editable, doc, flow, theme, windowWidth, runView, layersVisible, session,
@@ -2457,10 +2416,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
     return (
       <Home
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
-        harnesses={harnesses}
-        harnessesLoading={harnessesLoading}
-        harnessesError={harnessesError}
-        onRetryHarnesses={onRetryHarnesses}
         onCreateBlank={(name, path) => { doc.createNewDocument(name, path); showAgents(null); onDocumentOpen() }}
         onPalette={() => setPaletteOpen(true)}
         // Home's way into Ask is "Describe the job", so the header has no Ask button here, and the
@@ -2556,8 +2511,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
                 <DeliveryLane
                   key={activeRunId ?? 'new-run'}
                   planned={runSetup}
-                  appProblems={appProblemByAgent}
-                  harnessLabels={new Map(doc.nodes.map((node) => [node.id, appLabelForAgent(node.data.agent, harnesses)]))}
+                  harnessLabels={new Map(doc.nodes.map((node) => [node.id, modelLabelForAgent(node.data.agent, modelNames)]))}
                   pipeline={(record?.mode ?? doc.mode) === 'pipeline'}
                   linearPipeline={doc.edges.length === doc.nodes.length - 1 && doc.nodes.every((node) => doc.edges.filter((edge) => edge.source === node.id).length <= 1 && doc.edges.filter((edge) => edge.target === node.id).length <= 1)}
                   onTrace={() => { if (runSetup) closeRun(); else setRunPresentation('trace') }}
@@ -2624,16 +2578,11 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               </div>
             )}
           </ReactFlow>
-          {!runView && <>{storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a node to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} rewriteWith={ask.selectedApp?.name ?? null} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} stillOwn={stillOwnApps} onDismiss={() => setTurnedOffNote(null)} />}{notionOffer && <NotionOffer agents={notionOffer} readOnly={!editable} onKeep={() => setNotionOffer(null)} onTurnOff={() => {
-            const connector = { kind: 'tool' as const, name: 'claude.ai Notion' }
-            doc.turnOff(new Map(notionOffer.map((id) => [id, [connector]])))
-            setTurnedOffNote({ names: [connector.name], agents: notionOffer, tools: true, everyone: notionOffer.length === docAgents.filter((agent) => agent.kind !== 'operator').length })
-            setNotionOffer(null)
-          }} />}</div>}</>}
+          {!runView && <>{storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a node to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}</>}
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={appProblemDetail} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); setStartTeam(true); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
+        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={keyProblem} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); setStartTeam(true); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -2641,13 +2590,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         <div className="bar-stack">
           {doc.externalChange && <ConflictBar filename={filename} onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} onCompare={() => setCompareOpen(true)} />}
           {doc.readOnlyReason && !doc.fileGone && <div role="status" className="bar halt"><ChipDot state="readonly" /><span className="msg t-body-m">{doc.readOnlyReason}</span><span className="sub t-meta">Read-only. Pan and inspect still work.</span></div>}
-          {harnessesError && !runView && <div role="status" className="bar halt"><ChipDot state="failed" /><span className="msg t-body-m">LoomWatch can't reach the daemon.</span><span className="sub t-mono-sm">{harnessesError}</span><span className="acts"><button type="button" className="btn" onClick={onRetryHarnesses}>Retry now</button></span></div>}
           {startError && <div role="alert" className="bar alert"><ChipDot state="failed" /><span className="msg t-body-m">{startError}</span><span className="acts"><button type="button" className="btn" onClick={() => setStartError(null)}>Dismiss</button></span></div>}
         </div>
 
         {(!runView && !runSetup && !agentsView || runPresentation === 'trace') && (
           // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette harnesses={harnesses} harnessSearchPath={harnessSearchPath} knownHarnessIds={knownHarnessIds} harnessesLoading={harnessesLoading} harnessesError={harnessesError} onRetry={onRetryHarnesses} capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={() => { onRetryCapabilities(); onRetryHarnesses() }} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
+          <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.
@@ -2668,15 +2616,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               teamName={doc.teamName || 'this team'}
               teamPath={doc.path}
               editable={editable}
-              harnesses={harnesses}
-              harnessesLoading={harnessesLoading}
               skills={capabilityInventory.skills}
-              tools={capabilityInventory.tools}
               skillsLoading={capabilitiesLoading}
               savedJobs={savedJobs}
               onEdit={(agentId, key, value) => {
                 const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
-                const change = agent && editable ? teamAgentEdit(agent, key, value, harnesses) : null
+                const change = agent && editable ? teamAgentEdit(agent, key, value) : null
                 if (!change) return
                 if (change.kind === 'rename') doc.renameAgent(agentId, change.field, change.value)
                 else doc.applyAgentFields(agentId, change.fields)
@@ -2684,7 +2629,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               onApplyVersion={(agentId, job) => {
                 const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
                 if (!agent || !editable) return
-                doc.applyAgentFields(agentId, fieldsForVersion(job, agent, harnesses))
+                doc.applyAgentFields(agentId, fieldsForVersion(job, agent))
                 setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
               }}
               onUnlink={(agentId) => {
@@ -2712,7 +2657,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           </nav>
           <DocumentSwitcher
             path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError} linesDiffer={differ}
-            entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames} appProblems={appProblems}
+            entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames}
             isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768}
             onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()} onShowYaml={() => setYamlOpen(true)}
             onNewTeam={openNewTeam} onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
@@ -2756,13 +2701,12 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
           <BuildInspector
             onOpenWorkbench={!runView && !runSetup && inspectedNode.data.agent.kind !== 'operator' ? () => { const id = inspectedNode.id; clearSelection(); showAgents(id) } : undefined}
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
-            harnesses={harnesses} harnessId={inspectedHarnessId ?? undefined} onHarnessChange={(id: string) => { const harness = harnesses.find(item => item.id === id); if (harness) doc.updateAgentSpawn(inspectedNode.id, { env: {}, cwd: '.', ...inspectedNode.data.agent.spawn, ...harness.spawn }) }}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
             link={{
               state: linkState(inspectedNode.data.agent, savedJobs),
               onApply: (job) => {
                 if (!editable) return
-                doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent, harnesses))
+                doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent))
                 setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
               },
               onUnlink: () => {
@@ -2793,7 +2737,6 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
               doc.setAgentCapabilities(inspectedNode.id, [...(inspectedNode.data.agent.capabilities ?? []), ...added])
               setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
-            modelOptions={modelOptionsForAgent(inspectedNode.data.agent, doc.nodes.map((node) => node.data.agent), harnesses, modelCatalog.models)} defaultThinkingEffort={modelCatalog.defaultThinkingEffort} modelOptionsLoading={modelCatalog.loading} modelOptionsError={modelCatalog.error} onRetryModelOptions={modelCatalog.retry}
             onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
@@ -2818,7 +2761,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
             {...inspectedCapability}
             placed={Boolean(inspectedCapabilityNode)}
             connectedAgents={inspectedCapabilityAgents}
-            agents={doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => ({ id: node.id, name: node.data.agent.name, harnessId: harnessIdForAgent(node.data.agent, harnesses), harness: appLabelForAgent(node.data.agent, harnesses), connected: (node.data.agent.capabilities ?? []).some(wiresInspected) }))}
+            agents={doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => ({ id: node.id, name: node.data.agent.name, model: modelLabelForAgent(node.data.agent, modelNames), connected: (node.data.agent.capabilities ?? []).some(wiresInspected) }))}
             onToggleAgent={(id, connected) => {
               const kind = inspectedTeamKind
               if (!editable || !kind || !inspectedCard) return
@@ -2976,7 +2919,7 @@ export function Workspace({ harnesses, harnessSearchPath = [], knownHarnessIds =
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
         {pendingNodeDelete.length > 0 && <InlineConfirm message={`Delete ${pendingNodeDelete.length === 1 ? `${nodeNames.has(pendingNodeDelete[0]) ? `“${nodeNames.get(pendingNodeDelete[0])}”` : 'this card'} and its connections` : `${pendingNodeDelete.length} cards and their connections`}?`} confirmLabel="Delete" onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
-        {newTeamSheet && <NewTeamSheet harnesses={harnesses} openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} onCreateBlank={(name, path) => { doc.createNewDocument(name, path); setNewTeamSheet(false); showRun(null); showAgents(null); onDocumentOpen() }} />}
+        {newTeamSheet && <NewTeamSheet openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} onCreateBlank={(name, path) => { doc.createNewDocument(name, path); setNewTeamSheet(false); showRun(null); showAgents(null); onDocumentOpen() }} />}
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
         {/* Home, not the deleted team's empty canvas, is where the operator goes next. */}
         {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? (doc.path.split('/').pop() ?? doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}

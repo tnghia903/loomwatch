@@ -1,11 +1,16 @@
 // Mirrors schemas/team.schema.yaml (schemaVersion 1). Keep in sync with
 // docs/TEAM_CONFIG.md's semantic rules and crates/loomwatch-backend/src/config.rs.
 
+/**
+ * Where an agent works. `cmd`, `args` and `env` are retired: they named the AI app an earlier
+ * LoomWatch started, and a file written then still has them. They are read and ignored, and
+ * nothing writes them again.
+ */
 export interface SpawnConfig {
-  cmd: string
-  args: string[]
-  env: Record<string, string>
   cwd: string
+  cmd?: string
+  args?: string[]
+  env?: Record<string, string>
 }
 
 export interface GuardsConfig {
@@ -125,8 +130,8 @@ export interface AgentConfig {
   memory?: { brief?: boolean; deliverAs?: 'native-file' | 'packet-only' }
   /** What it may do without asking (ADR 0037). Absent, or a switch left out, means off. */
   allow?: AgentAllow
-  /** Skills and tools of its app's own the operator turned off for it by taking them off the
-      canvas (ADR 0060). Absent means none: the agent chooses from everything its app has. */
+  /** Skills and tools the operator turned off for it by taking them off the canvas (ADR 0060).
+      Absent means none: the agent chooses from every skill in LoomWatch's library. */
   turnedOff?: TurnedOff[]
   /** The agent in Your agents this one was placed from, and the version its fields copy. Absent
       means the agent is this team's own. */

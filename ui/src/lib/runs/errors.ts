@@ -1,15 +1,12 @@
 /** What a run error needs to know about an agent to name it the way the operator does. */
 export interface ErrorAgent {
   name: string
-  /** The command its app is started with (`spawn.cmd`), when the team file has one. */
-  command?: string
 }
 
-// crates/loomwatch-backend/src/lib.rs wraps every harness spawn failure in this context.
+// Runs recorded while LoomWatch drove AI apps: an agent's app failed to start, or ended a turn as
+// usual but said it failed (Codex refusing a model the account can't use). The app's words are
+// the cause, whatever context wraps them; a pipeline stage's context names who stopped.
 const SPAWN_FAILURE = /failed to spawn ACP harness for (?:agent|pipeline node) ([^:\s]+): ([\s\S]*)$/
-// crates/loomwatch-backend/src/acp.rs `AppReportedError`: the app ended a turn as usual but said it
-// failed (Codex refusing a model the account can't use). The app's words are the cause, whatever
-// context wraps them; a pipeline stage's context names who stopped.
 const APP_ERROR = /Codex reported an error instead of an answer: (.*)/
 const STAGE_FAILURE = /^pipeline node ([^:\s]+) failed/
 
@@ -40,14 +37,5 @@ export function plainRunError(message: string, agents: ReadonlyMap<string, Error
   const spawn = SPAWN_FAILURE.exec(message.trim())
   if (!spawn) return message
   const [, id, cause] = spawn
-  const agent = agents.get(id)
-  const who = agent?.name || id
-  const app = agent?.command ? `“${agent.command}”` : 'its AI app'
-  if (/no such file or directory|os error 2\b|not found/i.test(cause)) {
-    return `${who} couldn’t start: ${app} isn’t installed on this computer, or LoomWatch can’t find it. Install it and restart LoomWatch from a terminal where it works, or choose another AI app for ${who} in Build.`
-  }
-  if (/permission denied|os error 13\b/i.test(cause)) {
-    return `${who} couldn’t start: this computer doesn’t allow LoomWatch to run ${app}.`
-  }
-  return `${who} couldn’t start: ${cause.trim()}`
+  return `${agents.get(id)?.name || id} couldn’t start: ${cause.trim()}`
 }

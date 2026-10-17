@@ -70,7 +70,7 @@ function ProposalView({ card, actions }: { card: ProposalCard; actions: CardActi
 function RunRequestView({ card, actions }: { card: RunRequestCard; actions: CardActions }) {
   const busy = actions.busyCard === card.id
   const error = actions.cardError?.id === card.id ? actions.cardError.message : null
-  const uses = [card.apps.length > 0 ? `Uses ${card.apps.join(', ')}` : null, card.steps > 0 ? `${card.steps} step${card.steps === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')
+  const uses = card.steps > 0 ? `${card.steps} step${card.steps === 1 ? '' : 's'}` : ''
   return (
     <article className={`ask-card ask-run-request ${card.decision ? `is-${card.decision}` : 'is-open'}`} aria-label={`Run ${card.name}?`}>
       <header className="ask-card-head"><span className="t-micro">{card.decision === 'started' ? 'Run started' : card.decision === 'declined' ? 'Not run' : 'Ready to run'}</span></header>

@@ -55,33 +55,7 @@ it('tells two teams with the same name apart by their files', async () => {
   expect(await within(list).findByText('trip-planner-2.yaml')).toBeInTheDocument()
 })
 
-const missingApp = {
-  agentId: 'helper', cmd: 'acme-agent-cli', status: 'not_found' as const,
-  sentence: 'Helper’s app “acme-agent-cli” isn’t installed on this computer.',
-  remedy: 'Install it, or choose another AI app for Helper.',
-}
-
-// A shared team opened clean and valid used to read as all well. Its file is fine, so the chip
-// does not call it a problem to fix — it is something to finish, with the agent named in Review.
-it('says a saved team with a missing app has something to finish, and lists it in Review', () => {
-  const onSelectProblem = vi.fn()
-  renderSwitcher({ appProblems: [missingApp], agentNames: new Map([['helper', 'Helper']]), problemsOpen: true, onSelectProblem })
-  expect(screen.getByRole('button', { name: /Trip planner, 1 thing to finish, open team switcher/ })).toBeInTheDocument()
-  const review = screen.getByRole('dialog', { name: 'Document problems' })
-  expect(within(review).getByText('1 thing to finish')).toBeInTheDocument()
-  fireEvent.click(within(review).getByRole('button', { name: /Helper · AI app/ }))
-  expect(onSelectProblem).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'helper', weight: 'incomplete' }))
-  expect(within(review).getByText('Helper’s app “acme-agent-cli” isn’t installed on this computer. Install it, or choose another AI app for Helper.')).toBeInTheDocument()
-})
-
-// The file itself still saves, so unsaved changes keep their Save button in front.
-it('keeps Save in front of a missing app while there are unsaved changes', () => {
-  renderSwitcher({ appProblems: [missingApp], saveState: 'dirty' })
-  expect(screen.getByRole('button', { name: /Unsaved changes, open team switcher/ })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: /Save/ })).toBeEnabled()
-})
-
-it('says nothing is left to finish when every app is here', () => {
+it('says nothing is left to finish on a valid saved team', () => {
   renderSwitcher()
   expect(screen.queryByText(/to finish/)).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument()

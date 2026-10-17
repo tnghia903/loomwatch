@@ -19,12 +19,11 @@
 }
 .ask-button:hover { color: var(--color-ink); }
 .ask-button.open { color: var(--color-accent); background: var(--color-accent-tint); border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
-.ask-button-live, .ask-button-new {
+.ask-button-live {
   position: absolute; top: 3px; right: 5px; width: 7px; height: 7px; border-radius: var(--r-full);
   box-shadow: 0 0 0 2px var(--color-panel-solid);
 }
 .ask-button-live { background: var(--color-live); }
-.ask-button-new { background: var(--color-accent-fill); }
 @media (max-width: 767px) {
   .ask-button { padding: 0 10px; }
   .ask-button-label { display: none; }
@@ -63,7 +62,7 @@
 .ask-head-text > p, .ask-app-line { margin: 2px 0 0; font: 400 12px/16px var(--font-sans); color: var(--color-ink-3); }
 .ask-head-text > p.unavailable { color: var(--color-alert); }
 
-/* ---- App picker: "Using [Claude ⌄] on this computer" ----------------------------- */
+/* ---- Model picker: "Using [Claude Opus 5.5 ⌄]" ----------------------------------- */
 
 .ask-app { display: inline; }
 .ask-app-toggle {
@@ -74,18 +73,16 @@
 .ask-app-toggle:hover, .ask-app-toggle[aria-expanded="true"] { background: var(--color-accent-tint); color: var(--color-ink); }
 .ask-app-toggle:disabled { cursor: default; opacity: .6; }
 .ask-app-name { min-width: 0; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Placed against the header, not the button, so it spans the panel whatever the app's name. */
+/* Placed against the header, not the button, so it spans the panel whatever the model's name. */
 .ask-app-pop {
   left: var(--sp-3); right: var(--sp-3); top: calc(100% - var(--sp-2));
   max-height: min(440px, 60vh); overflow-y: auto; overscroll-behavior: contain;
 }
-.ask-app-pop-label { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-1); color: var(--color-ink-3); }
-.ask-app-pop-list { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--sp-2) var(--sp-2); }
-.ask-app-pop .pop-row .aside { font-size: 12px; }
-.ask-app-check { flex: none; color: var(--color-accent); }
-.ask-app-finding { display: flex; align-items: center; gap: var(--sp-2); margin: 0; }
-.ask-app-pop p.pop-empty { margin: 0; padding: var(--sp-2) var(--sp-3); }
-.ask-app-note { margin: 0; padding: var(--sp-3) var(--sp-4); }
+.ask-model-pop { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); }
+.ask-model-pop .pop-list { padding: 0; }
+.ask-app-note { margin: 0; }
+/* The key card in place of the conversation, while no key is set. */
+.ask-key { margin: 0; }
 
 .ask-scroll {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -153,12 +150,6 @@
 
 /* ---- Inbox: what connected apps did --------------------------------------------- */
 
-.ask-inbox { padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel-solid); }
-.ask-inbox h3 { margin: 0 0 6px; color: var(--color-ink-3); }
-.ask-inbox ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.ask-inbox li { display: flex; align-items: baseline; gap: 8px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
-.ask-inbox li span { flex: 1; }
-.ask-inbox .link { font-size: 12px; }
 
 /* ---- Cards ------------------------------------------------------------------ */
 
@@ -305,7 +296,6 @@
   .ask-dots i:nth-child(2) { animation-delay: 160ms; }
   .ask-dots i:nth-child(3) { animation-delay: 320ms; }
   .ask-button-live { animation: breathe var(--t-breathe) ease-in-out infinite; }
-  .ask-button-new { animation: ask-check-pop var(--t-move) var(--ease-out) both; }
 
   /* A proposal's dashes travel round it until it is applied or discarded. */
   .ask-proposal.is-open .ask-dash rect { animation: ask-march var(--t-flow) linear infinite; }

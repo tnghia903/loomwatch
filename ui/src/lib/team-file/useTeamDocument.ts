@@ -177,21 +177,14 @@ function drawableParts(snapshot: TeamDocument): { agents: AgentConfig[]; configu
 }
 
 /**
- * Fills in what the daemon defaults when a file leaves it out (`config.rs` `RawAgent` and
- * `SpawnConfig`): an empty `name` and `role`, and no `spawn.args` or `spawn.env`. An agent the daemon
- * accepts must be one the canvas can draw — harness detection compares `args` as a list and the card
- * reads `role` as text, and a file that left either out blanked the workspace. The schema still
- * requires them, and validation reads the snapshot rather than these nodes, so the file is still
- * shown as needing a fix.
+ * Fills in what the daemon defaults when a file leaves it out (`config.rs` `RawAgent`): an empty
+ * `name` and `role`. An agent the daemon accepts must be one the canvas can draw — the card reads
+ * `role` as text, and a file that left it out blanked the workspace. The schema still requires
+ * them, and validation reads the snapshot rather than these nodes, so the file is still shown as
+ * needing a fix.
  */
 function withDaemonDefaults(agent: AgentConfig): AgentConfig {
-  const { spawn } = agent
-  return {
-    ...agent,
-    name: agent.name ?? '',
-    role: agent.role ?? '',
-    ...(spawn ? { spawn: { ...spawn, args: Array.isArray(spawn.args) ? spawn.args : [], env: spawn.env ?? {} } } : {}),
-  }
+  return { ...agent, name: agent.name ?? '', role: agent.role ?? '' }
 }
 
 function nodeFromAgent(
@@ -950,15 +943,6 @@ export function useTeamDocument() {
     markDirty()
   }, [markDirty, captureHistory])
 
-  const updateAgentSpawn = useCallback((id: string, value: SpawnConfig) => {
-    captureHistory()
-    modelRef.current?.setAgentField(id, 'spawn', value)
-    modelRef.current?.setAgentField(id, 'model', '')
-    modelRef.current?.setAgentField(id, 'thinkingEffort', undefined)
-    setNodes(current => current.map(node => node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn: value, model: '', thinkingEffort: undefined } } } : node))
-    markDirty()
-  }, [markDirty, captureHistory])
-
   const updateAgentModel = useCallback(
     (id: string, value: string) => {
       captureHistory()
@@ -997,7 +981,8 @@ export function useTeamDocument() {
       const target = nodes.find((node) => node.id === id)
       if (!target || target.data.agent.kind === 'operator') return
       captureHistory()
-      const spawn: SpawnConfig = { cmd: '', args: [], env: {}, ...target.data.agent.spawn, cwd }
+      // Only the folder: an AI app's command left from an earlier LoomWatch goes with this edit.
+      const spawn: SpawnConfig = { cwd }
       modelRef.current?.setAgentField(id, 'spawn', spawn)
       setNodes((current) =>
         current.map((node) => node.id === id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, spawn } } } : node),
@@ -1624,7 +1609,6 @@ export function useTeamDocument() {
     renameAgent,
     setAgentRoles,
     updateAgentModel,
-    updateAgentSpawn,
     updateAgentThinkingEffort,
     updateAgentCwd,
     updateAgentAllowRecruiting,

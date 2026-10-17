@@ -1,11 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
 
-import type { DetectedHarness } from '../../lib/harnesses'
 import { appendToRole, checkup, type CheckupFinding, type CheckupInput } from '../../lib/team-file/checkup'
 import { mergeFindings, runLessons, teamUsage, type LessonRun, type TeamUsage } from '../../lib/team-file/runLessons'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
-import { useTierCatalogs } from './useTierCatalogs'
 
 type TeamDocumentController = ReturnType<typeof useTeamDocument>
 
@@ -51,11 +49,10 @@ export interface TeamCheckup {
  * applied through the document's own edits, so each is one undo step and is saved with ⌘S like any
  * other change.
  */
-export function useTeamCheckup(doc: TeamDocumentController, responder: string | null, announce: (text: string) => void, lessons: readonly LessonRun[] = [], harnesses: readonly DetectedHarness[] = []): TeamCheckup {
+export function useTeamCheckup(doc: TeamDocumentController, responder: string | null, announce: (text: string) => void, lessons: readonly LessonRun[] = []): TeamCheckup {
   const teamKey = doc.path ?? ''
   const [hidden, setHidden] = useState(readHidden)
   const agents = useMemo(() => doc.nodes.map((node) => node.data.agent), [doc.nodes])
-  const catalogFor = useTierCatalogs(agents, harnesses)
   const usage = useMemo(() => teamUsage(lessons, agents), [lessons, agents])
   const input = useMemo<CheckupInput>(() => ({
     agents,
@@ -63,9 +60,8 @@ export function useTeamCheckup(doc: TeamDocumentController, responder: string | 
     entrypoint: doc.entrypoint,
     responder,
     scheduled: Boolean(doc.teamSchedule && doc.teamSchedule.enabled !== false),
-    catalogFor,
     usage,
-  }), [agents, doc.edges, doc.entrypoint, responder, doc.teamSchedule, catalogFor, usage])
+  }), [agents, doc.edges, doc.entrypoint, responder, doc.teamSchedule, usage])
   const all = useMemo(() => mergeFindings(checkup(input), runLessons(lessons, input)), [input, lessons])
   const hiddenHere = useMemo(() => new Set(hidden[teamKey] ?? []), [hidden, teamKey])
   const findings = useMemo(() => all.filter((finding) => !hiddenHere.has(finding.id)), [all, hiddenHere])

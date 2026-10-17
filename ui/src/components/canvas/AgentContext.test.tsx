@@ -111,19 +111,16 @@ describe('chosenKnowledge', () => {
 describe('AgentContext — turned off (ADR 0060)', () => {
   it('lists what was taken off the canvas, struck through, and turns each back on', () => {
     const onTurnBackOn = vi.fn()
-    const off: AgentConfig = { ...agent, turnedOff: [{ kind: 'skill', name: 'canvas-design' }, { kind: 'tool', name: 'claude.ai Notion' }] }
+    const off: AgentConfig = { ...agent, turnedOff: [{ kind: 'skill', name: 'canvas-design' }, { kind: 'tool', name: 'agentmemory' }] }
     render(<AgentContext agent={off} onTurnBackOn={onTurnBackOn} />)
     const list = screen.getByRole('list', { name: 'Turned off for this agent' })
-    expect(within(list).getAllByRole('listitem').map((item) => item.querySelector('.given-name')?.textContent)).toEqual(['canvas-design', 'claude.ai Notion'])
-    fireEvent.click(screen.getByRole('button', { name: 'Turn claude.ai Notion back on' }))
-    expect(onTurnBackOn).toHaveBeenCalledWith({ kind: 'tool', name: 'claude.ai Notion' })
-    expect(screen.queryByText(/Codex can still use/)).toBeNull()
+    expect(within(list).getAllByRole('listitem').map((item) => item.querySelector('.given-name')?.textContent)).toEqual(['canvas-design', 'agentmemory'])
+    fireEvent.click(screen.getByRole('button', { name: 'Turn agentmemory back on' }))
+    expect(onTurnBackOn).toHaveBeenCalledWith({ kind: 'tool', name: 'agentmemory' })
   })
 
-  it('says a Codex agent can still use a tool from its own settings, and shows nothing when none is off', () => {
-    const codex: AgentConfig = { ...agent, spawn: { cmd: 'npx', args: ['-y', '@agentclientprotocol/codex-acp@2.1.1'], env: {}, cwd: '.' }, turnedOff: [{ kind: 'tool', name: 'agentmemory' }] }
-    const { unmount } = render(<AgentContext agent={codex} readOnly />)
-    expect(screen.getByText(/Codex can still use a tool from its own settings/)).toBeInTheDocument()
+  it('cannot be turned back on where the team can’t be changed, and shows nothing when none is off', () => {
+    const { unmount } = render(<AgentContext agent={{ ...agent, turnedOff: [{ kind: 'skill', name: 'pdf' }] }} readOnly />)
     expect(screen.queryByRole('button', { name: /back on/ })).toBeNull()
     unmount()
     render(<AgentContext agent={agent} />)
@@ -131,19 +128,19 @@ describe('AgentContext — turned off (ADR 0060)', () => {
   })
 })
 
-describe('AgentContext — what the app has of its own (ADR 0060)', () => {
+describe('AgentContext — what LoomWatch’s library has (ADR 0060)', () => {
   it('lists what the agent can choose from besides what it is given, and turns one off', () => {
     const onTurnOff = vi.fn()
     const wired: AgentConfig = { ...agent, capabilities: [{ kind: 'skill', name: 'canvas-design' }], turnedOff: [{ kind: 'skill', name: 'notebooklm' }] }
-    const appHas = { app: 'Claude Code', items: [
-      { kind: 'tool' as const, name: 'claude.ai Notion' }, { kind: 'skill' as const, name: 'canvas-design' },
-      { kind: 'skill' as const, name: 'notebooklm' }, { kind: 'skill' as const, name: 'explain-like-im-5' },
+    const appHas = { app: 'LoomWatch', items: [
+      { kind: 'skill' as const, name: 'canvas-design' }, { kind: 'skill' as const, name: 'notebooklm' },
+      { kind: 'skill' as const, name: 'explain-like-im-5' }, { kind: 'skill' as const, name: 'pdf' },
     ] }
     render(<AgentContext agent={wired} appHas={appHas} onTurnOff={onTurnOff} />)
-    expect(screen.getByText('Also from Claude Code: 1 tool · 1 skill')).toBeInTheDocument()
-    const list = screen.getByRole('list', { name: 'Also from Claude Code', hidden: true })
-    expect(within(list).getAllByRole('listitem', { hidden: true }).map((item) => item.querySelector('.given-name')?.textContent)).toEqual(['claude.ai Notion', 'explain-like-im-5'])
-    fireEvent.click(within(list).getByRole('button', { name: 'Turn claude.ai Notion off', hidden: true }))
-    expect(onTurnOff).toHaveBeenCalledWith({ kind: 'tool', name: 'claude.ai Notion' })
+    expect(screen.getByText('Also in LoomWatch’s library: 2 skills')).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: 'Also in LoomWatch’s library', hidden: true })
+    expect(within(list).getAllByRole('listitem', { hidden: true }).map((item) => item.querySelector('.given-name')?.textContent)).toEqual(['explain-like-im-5', 'pdf'])
+    fireEvent.click(within(list).getByRole('button', { name: 'Turn pdf off', hidden: true }))
+    expect(onTurnOff).toHaveBeenCalledWith({ kind: 'skill', name: 'pdf' })
   })
 })

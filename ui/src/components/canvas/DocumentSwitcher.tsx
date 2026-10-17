@@ -1,7 +1,6 @@
 import { ChevronDown, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AppProblem } from '../../lib/team-file/appChecks'
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from '../../lib/team-file/client'
 import { reviewProblems, shortenDirectory, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
@@ -20,7 +19,6 @@ export interface DocumentSwitcherProps {
   fieldProblemsByAgent: ReadonlyMap<string, AgentFieldProblems>
   agentNames: ReadonlyMap<string, string>
   /** Agents whose app is not on this computer (`lib/team-file/appChecks`). The file is still valid. */
-  appProblems?: readonly AppProblem[]
   isValid: boolean
   readOnlyReason: string | null
   fileGone?: boolean
@@ -40,12 +38,11 @@ export interface DocumentSwitcherProps {
   onProblemsOpenChange: (open: boolean) => void
 }
 
-const NO_APP_PROBLEMS: readonly AppProblem[] = []
 
 // UX_REDESIGN §9.1: the canvas is a view over a file and the file is the truth. This chip is
 // the only place file state is expressed, and the only way to reach another file.
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, appProblems = NO_APP_PROBLEMS, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onShowYaml, onNewTeam, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onShowYaml, onNewTeam, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [files, setFiles] = useState<TeamSummary[] | null>(null)
   const [root, setRoot] = useState<string | null>(null)
@@ -56,7 +53,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const chipRef = useRef<HTMLDivElement>(null)
 
-  const problems = useMemo(() => reviewProblems(entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames, appProblems), [entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames, appProblems])
+  const problems = useMemo(() => reviewProblems(entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames), [entrypointProblem, fieldProblemsByAgent, documentProblems, agentNames])
   const errors = problems.filter((problem) => problem.weight === 'error')
   const incomplete = problems.filter((problem) => problem.weight === 'incomplete')
   const scheduleErrors = errors.filter((problem) => problem.yamlPath?.[0] === 'schedule')
@@ -104,9 +101,6 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   else if (!isValid && incomplete.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
   else if (saveState === 'new') { state = 'new'; l2 = 'Not saved yet'; action = primarySave }
   else if (saveState === 'dirty') { state = 'dirty'; l2 = 'Unsaved changes'; action = primarySave }
-  // A missing app does not make the file wrong, so Save keeps its place above; once saved, the
-  // chip stops saying all is well.
-  else if (appProblems.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
   else if (editingDisabled) { l2 = 'Editing needs a wider window' }
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''

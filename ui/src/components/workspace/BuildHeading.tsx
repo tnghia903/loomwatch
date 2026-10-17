@@ -28,7 +28,7 @@ interface BuildHeadingProps {
   proposal?: BuildProposal | null
   /** The team checkup (lib/team-file/checkup.ts), once the team is otherwise ready to run. */
   checkup?: HeadingCheckup | null
-  /** What the team's recent runs used, as their AI apps reported it; null before any did. */
+  /** What the team's recent runs used, as their model calls counted it; null before any did. */
   usage?: TeamUsage | null
 }
 
@@ -98,7 +98,7 @@ export function BuildHeading({ agentCount, isValid, checking, saveState, appProb
         <span>{saveState === 'new' ? 'Not saved yet' : ['dirty', 'conflict', 'error'].includes(saveState) ? 'Unsaved changes' : 'Saved'}</span>
         {/* What a run of this team costs, beside the choices that set it: how many agents, which
             apps and models. A fact, from its own runs, never an estimate. */}
-        {usage && <span className="build-usage" title={`Average over the last ${usage.runs === 1 ? 'run' : `${usage.runs} runs`}, as the AI apps reported it, cached tokens included.`}>About {formatTokens(usage.perRun)} tokens a run</span>}
+        {usage && <span className="build-usage" title={`Average over the last ${usage.runs === 1 ? 'run' : `${usage.runs} runs`}, as the model calls counted it, cached tokens included.`}>About {formatTokens(usage.perRun)} tokens a run</span>}
         {/* Only once the team is otherwise ready: a missing app or an invalid file comes first. */}
         {heading.title === 'Your team is ready' && undelivered > 0 && onDeliver ? (
           <p className="build-undelivered" role="status">
