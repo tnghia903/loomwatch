@@ -3,6 +3,8 @@
 #![forbid(unsafe_code)]
 
 pub mod acp;
+pub mod agent;
+pub mod ai;
 pub mod api;
 pub mod app_setup;
 pub mod approvals;

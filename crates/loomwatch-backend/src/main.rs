@@ -367,6 +367,11 @@ async fn main() -> Result<()> {
                 ));
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
+                // The OpenRouter key and the model list. Like Notion's connection, only on this
+                // computer's own address.
+                app = app.merge(loomwatch_backend::ai::router(
+                    loomwatch_backend::ai::Ai::new(&state_dir),
+                ));
             }
             // After "Update and restart": stop taking requests, give the open ones a moment (the
             // app's live streams never end by themselves), then exit with the status that has the

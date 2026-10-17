@@ -2,6 +2,7 @@ import { ArrowLeft } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { ConnectAiApps } from './ask/ConnectAiApps'
+import { OpenRouterKey } from './connections/OpenRouterKey'
 
 type Page = { id: string; title: string }
 /** `via`: `signIn` when the operator connected with their Notion account, `token` under Advanced. */
@@ -92,6 +93,7 @@ export default function Connections() {
           <h1 className="t-display">Connections</h1>
           <p className="t-body">Connect your tools and choose where your work belongs.</p>
         </div>
+        <OpenRouterKey />
         <ConnectAiApps />
         <section className="e1 lw-settings-section" aria-labelledby="notion-heading" aria-busy={busy}>
           <h2 id="notion-heading" className="t-title">Notion</h2>
