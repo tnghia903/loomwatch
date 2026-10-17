@@ -49,8 +49,8 @@ const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MISSING_CANONICAL_RESPONSE: &str = "missing_canonical_response";
 const PROCESS_CRASHED: &str = "process_crashed";
 const PROTOCOL_FAILURE: &str = "protocol_failure";
-/// The app ended a turn normally but reported it as failed (`acp::AppReportedError`), such as
-/// Codex refusing a model the signed-in account cannot use.
+/// A turn that could not finish, said in the operator's words (`engine::AppReportedError`): the
+/// `OpenRouter` key was refused, the account is out of credits, or no key is set.
 const APP_ERROR: &str = "app_error";
 const SPAWN_FAILED: &str = "spawn_failed";
 /// Stable pre-acceptance codes from `RUN_PROVENANCE_CONTRACT` §11.

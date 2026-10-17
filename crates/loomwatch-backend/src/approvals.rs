@@ -1,8 +1,9 @@
 //! Which team files the operator has approved to run on this computer (ADR 0048).
 //!
-//! A team file is a list of programs to start, so one that merely appears in the teams folder —
-//! downloaded, unzipped, or written there by an agent — must not run, on a schedule or otherwise,
-//! until the person at the keyboard has seen what it starts. This records, per team file, the exact
+//! A team file says what its agents are told, which models they run on, what they may do without
+//! asking and when they run, so one that merely appears in the teams folder — downloaded,
+//! unzipped, or written there by an agent — must not run, on a schedule or otherwise, until the
+//! person at the keyboard has seen what it starts. This records, per team file, the exact
 //! revision (`sha256:` of its bytes, as [`crate::runs`] names it) the operator approved: by saving
 //! it in `LoomWatch`'s editor, or by reviewing it before a run. Every run checks it in
 //! `runs::prepare_run`, which is the one path manual, scheduled and Control-started runs share.

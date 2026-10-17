@@ -206,6 +206,10 @@ impl PermissionPolicy {
     fn readable(&self, path: &Path) -> bool {
         !self.private(path)
             && (path.starts_with(&self.folder)
+                || self
+                    .skills_folder
+                    .as_ref()
+                    .is_some_and(|skills| path.starts_with(skills))
                 || self.readable.iter().any(|root| path.starts_with(root)))
     }
 
@@ -664,10 +668,15 @@ mod tests {
     struct Scratch(PathBuf);
 
     impl Scratch {
+        /// A folder of its own per test. The clock alone is not enough: on a Mac it counts in
+        /// microseconds, so two tests starting together shared a folder, and the first to finish
+        /// deleted it under the other.
         fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let path = std::env::temp_dir().join(format!(
-                "loomwatch-permissions-{}-{}",
+                "loomwatch-permissions-{}-{}-{}",
                 std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .expect("clock")
@@ -940,6 +949,13 @@ mod tests {
             &at("state/skills/.staging/inspect-1/SKILL.md")
         ));
         assert!(read(&reaching, &at("agent/notes.md")));
+        // Its instructions list the skills in LoomWatch's folder, so it reads them wherever it works,
+        // and still nothing else there.
+        let elsewhere =
+            PermissionPolicy::new(ALL, &scratch.0.join("agent"), [], []).keeping_private(&state);
+        assert!(read(&elsewhere, &at("state/skills/notes/SKILL.md")));
+        assert!(!read(&elsewhere, &at("state/skills/.removed/old/SKILL.md")));
+        assert!(!read(&elsewhere, &at("state/keys.json")));
         // An agent working inside the state folder keeps its own folder, never the files beside it.
         let inside =
             PermissionPolicy::new(ALL, &state.join("work"), [], []).keeping_private(&state);

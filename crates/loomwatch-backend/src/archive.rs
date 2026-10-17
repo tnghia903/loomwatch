@@ -136,8 +136,8 @@ impl EventArchive {
 
     /// Append one event and wait until it is written, enforcing the session sequence constraint.
     ///
-    /// A run's own events go through [`crate::acp::EventLog`], which hands them to the writer
-    /// without waiting; this is for a caller that has to know the row is there.
+    /// A run's own events go through `EventLog` (`engine/recorder.rs`), which hands them to the
+    /// writer without waiting; this is for a caller that has to know the row is there.
     ///
     /// # Errors
     ///

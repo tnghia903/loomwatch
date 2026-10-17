@@ -5468,7 +5468,7 @@ mod tests {
         assert!(started.elapsed() >= Duration::from_millis(600));
         assert_eq!(waiting.park, crate::operator::ParkTier::Reloadable);
         assert!(
-            waiting.park_note.contains("session/load"),
+            waiting.park_note.contains("carries on when you answer"),
             "{}",
             waiting.park_note
         );

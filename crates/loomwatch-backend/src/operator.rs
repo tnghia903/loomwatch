@@ -7,10 +7,10 @@
 //! `session_meta` with `phase: "awaiting_operator"`, and both are released by
 //! `POST /api/runs/{id}/answers`.
 //!
-//! The one thing neither may do is **block**. A tool call that waited for a person would trip the
-//! ten-minute ACP request timeout in [`crate::acp`]'s `read_response` and cancel the turn, so
-//! nothing is ever in flight while the operator thinks: the question is recorded, the turn ends,
-//! the session is parked (decision 7), and the answer arrives as the *next* turn.
+//! The one thing neither may do is **block**. A tool call that waited for a person would hold the
+//! agent's turn, and its model stream, open for as long as they think, so nothing is ever in
+//! flight while the operator thinks: the question is recorded, the turn ends, the session is
+//! parked (decision 7), and the answer arrives as the *next* turn.
 //!
 //! This module owns the rendezvous between the HTTP handler that accepts an answer and the run
 //! task waiting for one. The waiting room itself lives in [`crate::runs::RunRegistry`] — the
@@ -84,8 +84,8 @@ pub enum StopKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParkTier {
-    /// The harness advertised `agentCapabilities.loadSession`: the session was closed, the process
-    /// reaped, and the ACP session id kept. Answering reopens it with `session/load`.
+    /// The agent's conversation is parked as data, with nothing running; answering picks it up
+    /// where it stopped. Every built-in agent parks this way.
     Reloadable,
     /// The harness did not: the session idles, bounded by `conversation.stop.keepAliveMinutes`.
     KeptAlive,
@@ -103,7 +103,7 @@ impl ParkTier {
         let who = predecessor.unwrap_or("The stage before this");
         match self {
             Self::Reloadable => {
-                format!("{who} is parked · resumes with session/load · no process running")
+                format!("{who} is parked · carries on when you answer · nothing running")
             }
             Self::KeptAlive => format!(
                 "{who} is kept alive · checkpoints and releases after {keep_alive_minutes} minutes"

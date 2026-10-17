@@ -747,12 +747,11 @@ impl TeamBus {
     /// `ask_user`: record a question for the person at the keyboard, and **return immediately**.
     ///
     /// This is the one tool on the bus whose whole design is what it does *not* do. A call that
-    /// waited for a person would sit inside `session/prompt` until [`crate::acp`]'s ten-minute
-    /// request timeout fired, and the turn — the agent's work, not just the question — would be
-    /// cancelled. So nothing waits: the question is recorded, the run record says it is waiting,
-    /// the agent is told in the result to end its turn, and the answer arrives as the *next*
-    /// `session/prompt` on the same session (reopened with `session/load` where the harness allows
-    /// it). Nothing is in flight while the operator thinks, so nothing can time out.
+    /// waited for a person would hold the agent's turn open for as long as they think, and if it
+    /// timed out the turn — the agent's work, not just the question — would be lost. So nothing
+    /// waits: the question is recorded, the run record says it is waiting, the agent is told in the
+    /// result to end its turn, and the answer arrives as the *next* turn of the same session, parked
+    /// meanwhile. Nothing is in flight while the operator thinks, so nothing can time out.
     ///
     /// The refusal of a second open question is the storage's, not this function's: `open` writes
     /// against a partial unique index, so two calls racing from one agent cannot both be recorded.

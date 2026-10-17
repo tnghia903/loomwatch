@@ -1,7 +1,6 @@
 //! Knowledge the operator chose, rather than knowledge the Library found (ADR 0035).
 //!
-//! The Library lists knowledge it discovers: the project folder, the folders `OpenCode` ran in,
-//! team memory. An operator also wants to hand an agent a folder of their own, or one document
+//! The one kind of knowledge the Library finds is team memory (ADR 0036). An operator also wants to hand an agent a folder of their own, or one document
 //! such as a PDF, and the Library cannot discover those. Here a knowledge capability with a `path`
 //! is read straight from that path. There are two shapes:
 //!
