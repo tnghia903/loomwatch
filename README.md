@@ -6,6 +6,7 @@
 </p>
 
 <p align="center">
+  <a href="https://loomwatch.github.io"><strong>Website</strong></a> &middot;
   <a href="#quickstart"><strong>Quickstart</strong></a> &middot;
   <a href="#how-it-works"><strong>How it works</strong></a> &middot;
   <a href="#features"><strong>Features</strong></a> &middot;

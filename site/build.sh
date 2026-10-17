@@ -28,6 +28,19 @@ cp "$root"/scripts/install.ps1 "$out/install.ps1"
 cp "$root"/site/favicon.svg "$root"/site/favicon.ico "$root"/site/apple-touch-icon.png "$out/"
 # The link preview picture (og:image); site/social-card.html says how it is made.
 cp "$root"/site/social-card.jpg "$out/"
+# For search engines: robots.txt names the sitemap, and the sitemap names the page and the day it
+# last changed, the day of the commit this is built from (Pages builds only when the page changes).
+cp "$root"/site/robots.txt "$out/"
+lastmod=$(git -C "$root" log -1 --format=%cs 2>/dev/null || date -u +%F)
+cat >"$out/sitemap.xml" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://loomwatch.github.io/</loc>
+    <lastmod>$lastmod</lastmod>
+  </url>
+</urlset>
+EOF
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
 # The app's own screenshots for the page, the crew in the cold open, and the agent figures, read
 # from the app so the page shows the same faces the app does.

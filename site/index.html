@@ -21,6 +21,47 @@
   <meta name="twitter:image" content="https://loomwatch.github.io/social-card.jpg?v=8">
   <meta name="twitter:image:alt" content="LoomWatch: put AI agents to work as one team. Six friendly figures, a yarn ball, a spool, a button, a thimble, a pincushion and a thread cone, joined by one gold thread.">
   <link rel="canonical" href="https://loomwatch.github.io/">
+  <!-- Search results may show the link-preview picture full size. -->
+  <meta name="robots" content="max-image-preview:large">
+  <!-- What the page is, for search engines: the site's name (Google prints it above the result), the
+       app and who makes it. ui/src/site/seo.test.ts keeps it in step with the tags above. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://loomwatch.github.io/#website",
+        "name": "LoomWatch",
+        "url": "https://loomwatch.github.io/",
+        "publisher": { "@id": "https://loomwatch.github.io/#organization" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://loomwatch.github.io/#organization",
+        "name": "LoomWatch",
+        "url": "https://loomwatch.github.io/",
+        "logo": "https://loomwatch.github.io/apple-touch-icon.png",
+        "sameAs": ["https://github.com/tnghia903/loomwatch"]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://loomwatch.github.io/#app",
+        "name": "LoomWatch",
+        "url": "https://loomwatch.github.io/",
+        "description": "A free, open-source app for Mac and Windows that puts AI agents to work as one team, thinking with Claude, GPT, Gemini or any model on OpenRouter. See every step, and step in any time. No code needed.",
+        "image": "https://loomwatch.github.io/social-card.jpg",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "macOS, Windows",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "downloadUrl": "https://github.com/tnghia903/loomwatch/releases/latest",
+        "license": "https://github.com/tnghia903/loomwatch#license",
+        "publisher": { "@id": "https://loomwatch.github.io/#organization" }
+      }
+    ]
+  }
+  </script>
   <!-- Browsers keep a favicon by its address, long after the file changes: bump ?v= with the icons. -->
   <link rel="icon" href="favicon.ico?v=2" sizes="32x32">
   <link rel="icon" href="favicon.svg?v=2" type="image/svg+xml">
