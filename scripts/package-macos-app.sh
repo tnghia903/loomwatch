@@ -13,9 +13,18 @@
 #                        the first time (Privacy & Security, "Open Anyway").
 #   MACOS_NOTARY_PROFILE a `xcrun notarytool store-credentials` profile. With it (and an identity),
 #                        the .dmg is notarized and stapled, so it opens with no warning at all.
+#
+# The .dmg's window is laid out by dmgbuild (https://github.com/dmgbuild/dmgbuild), found on PATH or
+# given as DMGBUILD. Install the pinned copy with:
+#   python3 -m venv .dmgbuild && .dmgbuild/bin/pip install --require-hashes -r packaging/macos/dmgbuild-requirements.txt
 set -euo pipefail
 
 [ $# -eq 3 ] || { echo "usage: $0 LOOMWATCHD LOOMWATCH_APP OUT_DIR" >&2; exit 2; }
+dmgbuild=${DMGBUILD:-$(command -v dmgbuild || true)}
+[ -x "$dmgbuild" ] || {
+  echo "$0: needs dmgbuild; see packaging/macos/dmgbuild-requirements.txt, or set DMGBUILD" >&2
+  exit 2
+}
 daemon=$1
 app_program=$2
 out=$3
@@ -67,15 +76,18 @@ else
 fi
 codesign --verify --deep --strict "$app"
 
-# The window people see when they open the .dmg: the app beside a link to Applications.
-volume=$stage/volume
-mkdir -p "$volume"
-mv "$app" "$volume/"
-ln -s /Applications "$volume/Applications"
+# The window people see when they open the .dmg: the app on its patch, a thread to Applications, and
+# the crew below (packaging/macos/dmg-settings.py and dmg-background.html). Only an app that is
+# notarized skips the note on getting past macOS's first-open check.
+background=$root/packaging/macos/dmg/background.png
+if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
+  background=$root/packaging/macos/dmg/background-notarized.png
+fi
 mkdir -p "$out"
 dmg=$out/LoomWatch-macos.dmg
 rm -f "$dmg"
-hdiutil create -quiet -volname LoomWatch -srcfolder "$volume" -fs HFS+ -format UDZO "$dmg"
+"$dmgbuild" -s "$root/packaging/macos/dmg-settings.py" -D app="$app" -D background="$background" \
+  -D icon="$root/packaging/macos/AppIcon.icns" LoomWatch "$dmg"
 
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
   codesign --force --timestamp --sign "$MACOS_SIGN_IDENTITY" "$dmg"

@@ -4,6 +4,8 @@
 .env.*
 !.env.example
 target/
+# scripts/package-macos-app.sh's dmgbuild (packaging/macos/dmgbuild-requirements.txt)
+.dmgbuild/
 .build/
 *.xcuserstate
 node_modules/
