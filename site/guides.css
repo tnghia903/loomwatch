@@ -1,0 +1,84 @@
+/* The guides (site/<guide>/index.html): short pages that each answer one question, in the landing
+   page's look. They load styles.css for its tokens, header, buttons and footer, and this for the
+   article itself: one readable column, serif headings, gold for what you click. */
+
+.guide { max-width: 760px; margin: 0 auto; padding: 112px var(--gutter) 72px; }
+.top-nav a[aria-current="page"] { color: var(--ink); box-shadow: 0 2px 0 var(--accent); }
+
+.back { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font: 500 14px/1 var(--sans); text-decoration: none; }
+.back:hover { color: var(--accent); }
+
+.guide-head { margin: 28px 0 0; padding-bottom: 36px; border-bottom: 1px solid var(--hairline); }
+.guide h1 { font: 400 clamp(36px, 5.2vw, 56px)/1.06 var(--serif); letter-spacing: -.015em; margin: 16px 0 0; text-wrap: balance; }
+.guide h1 em { color: var(--accent); }
+.lede { margin: 22px 0 0; font-size: 18.5px; line-height: 1.6; color: var(--ink-2); text-wrap: pretty; }
+
+.guide section { margin-top: 56px; }
+.guide h2 { font: 400 clamp(26px, 3vw, 32px)/1.15 var(--serif); letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+.guide h3 { font: 600 17px/1.4 var(--sans); margin: 32px 0 0; }
+.guide p, .guide li { font-size: 16.5px; line-height: 1.7; color: var(--ink-2); text-wrap: pretty; }
+.guide p { margin: 16px 0 0; }
+.guide strong { font-weight: 600; color: var(--ink); }
+.guide section a:not(.btn), .lede a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-dim); text-underline-offset: 3px; }
+.guide section a:not(.btn):hover { text-decoration-color: var(--accent); }
+.guide ul { margin: 16px 0 0; padding-left: 22px; }
+.guide ul li { margin-top: 8px; }
+.guide ul li::marker { color: var(--accent); }
+.guide code { white-space: normal; }
+
+/* Numbered steps: the number in a gold ring, as the app counts a team's steps. */
+.steps-list { list-style: none; counter-reset: step; margin: 20px 0 0; padding: 0; display: grid; gap: 14px; }
+.steps-list li { counter-increment: step; position: relative; padding-left: 44px; margin: 0; }
+.steps-list li::before { content: counter(step); position: absolute; left: 0; top: 1px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--accent-dim); background: var(--accent-tint); color: var(--accent); font: 600 13px/1 var(--sans); }
+
+/* What might stop you, and what to click: a gold rule down the side. */
+.note { margin: 22px 0 0; padding: 14px 18px; border-left: 2px solid var(--accent); border-radius: 0 10px 10px 0; background: var(--accent-tint); }
+.note p { margin: 0; font-size: 15px; }
+.note p + p { margin-top: 8px; }
+
+.get-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 22px 0 0; }
+.get-row .start-meta { margin-left: 4px; }
+
+/* The app's own screenshots, one per theme: the page shows the one that matches. */
+.shot { margin: 28px 0 0; }
+.shot img { width: 100%; border-radius: 12px; border: 1px solid var(--hairline-2); box-shadow: var(--shadow); background: var(--panel-solid); }
+.shot figcaption { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--ink-3); }
+:root[data-theme="dark"] .shot .light, :root[data-theme="light"] .shot .dark { display: none; }
+
+.recipes { width: 100%; margin: 22px 0 0; border-collapse: collapse; font-size: 15px; }
+.recipes th, .recipes td { padding: 12px 14px 12px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--hairline); line-height: 1.55; }
+.recipes th { font: 600 11px/14px var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+.recipes td { color: var(--ink-2); }
+.recipes td:first-child { color: var(--ink); font-weight: 600; white-space: nowrap; }
+
+/* The FAQ: each question is a heading of its own, so a search can land on its answer. */
+.qa { padding-top: 28px; border-top: 1px solid var(--hairline); }
+.guide .qa { margin-top: 28px; }
+.qa h2 { font: 600 19px/1.4 var(--sans); letter-spacing: 0; }
+.qa p { margin-top: 10px; }
+
+/* The way on: the next guide, then all of them. */
+.next { display: block; margin: 64px 0 0; padding: 24px 26px; border: 1px solid var(--hairline-2); border-radius: 14px; background: var(--panel-solid); box-shadow: var(--shadow); text-decoration: none; transition: border-color .12s var(--ease); }
+.next:hover { border-color: var(--accent-dim); }
+.next .micro { display: block; }
+.next b { display: block; margin-top: 8px; font: 400 26px/1.2 var(--serif); color: var(--ink); }
+.next b::after { content: ' →'; color: var(--accent); }
+.next span:last-child { display: block; margin-top: 6px; font-size: 15px; color: var(--ink-2); }
+
+.more { margin: 48px 0 0; }
+.more ul { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.more li { margin: 0; }
+.more a { display: block; height: 100%; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 10px; text-decoration: none; color: var(--ink); font-weight: 600; font-size: 15px; }
+.more a:hover { border-color: var(--accent-dim); background: var(--accent-tint); }
+.more a span { display: block; margin-top: 4px; font-weight: 400; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+
+/* The footer: the landing page's, with the guides on a row of their own under the project's links. */
+.foot .foot-guides { flex-basis: 100%; align-items: baseline; gap: 18px; }
+.foot-guides a[aria-current="page"] { color: var(--ink); }
+
+@media (max-width: 640px) {
+  .guide { padding-top: 92px; }
+  .lede { font-size: 17px; }
+  .more ul { grid-template-columns: minmax(0, 1fr); }
+  .recipes td:first-child { white-space: normal; }
+}

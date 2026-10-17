@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -37,8 +37,11 @@ describe('every copy of the logo draws the masters', () => {
     drawsAll('ui/src/components/chat/TeamChat.tsx', mark)
   })
 
-  it('draws the same paths on the landing page and its social card', () => {
+  it('draws the same paths on the landing page, its guides and its social card', () => {
     drawsAll('site/index.html', [...small, ...wordmark])
+    const guides = readdirSync(path.join(repo, 'site')).filter((name) => existsSync(path.join(repo, 'site', name, 'index.html')))
+    expect(guides.length).toBeGreaterThan(0)
+    for (const guide of guides) drawsAll(`site/${guide}/index.html`, [...small, ...wordmark])
     drawsAll('site/social-card.html', [...mark, ...wordmark])
   })
 

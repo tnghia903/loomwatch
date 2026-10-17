@@ -20,6 +20,14 @@ mkdir -p "$out/assets/readme" "$out/assets/fonts"
 # a relative folder (_site).
 out=$(cd "$out" && pwd -P)
 cp "$root"/site/index.html "$root"/site/styles.css "$root"/site/main.js "$out/"
+# The guides: site/<guide>/index.html is served at https://loomwatch.github.io/<guide>/, in the
+# landing page's styles.css with guides.css and guides.js of their own.
+for page in "$root"/site/*/index.html; do
+  guide=$(basename "$(dirname "$page")")
+  mkdir -p "$out/$guide"
+  cp "$page" "$out/$guide/"
+done
+cp "$root"/site/guides.css "$root"/site/guides.js "$out/"
 # The installers the page tells people to run: curl -fsSL https://loomwatch.github.io/install.sh | bash
 # on macOS and Linux, irm https://loomwatch.github.io/install.ps1 | iex in Windows PowerShell.
 cp "$root"/scripts/install.sh "$out/install.sh"
@@ -28,19 +36,10 @@ cp "$root"/scripts/install.ps1 "$out/install.ps1"
 cp "$root"/site/favicon.svg "$root"/site/favicon.ico "$root"/site/apple-touch-icon.png "$out/"
 # The link preview picture (og:image); site/social-card.html says how it is made.
 cp "$root"/site/social-card.jpg "$out/"
-# For search engines: robots.txt names the sitemap, and the sitemap names the page and the day it
-# last changed, the day of the commit this is built from (Pages builds only when the page changes).
+# For search engines: robots.txt names the sitemap, and the sitemap names every page and the day it
+# last changed.
 cp "$root"/site/robots.txt "$out/"
-lastmod=$(git -C "$root" log -1 --format=%cs 2>/dev/null || date -u +%F)
-cat >"$out/sitemap.xml" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://loomwatch.github.io/</loc>
-    <lastmod>$lastmod</lastmod>
-  </url>
-</urlset>
-EOF
+"$root"/site/sitemap.sh "$out"
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
 # The app's own screenshots for the page, the crew in the cold open, and the agent figures, read
 # from the app so the page shows the same faces the app does.

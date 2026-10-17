@@ -129,7 +129,8 @@ describe('Home', () => {
     expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
     expect(await screen.findByRole('region', { name: 'Add your OpenRouter key' })).toBeInTheDocument()
     expect(screen.getByText('Add your OpenRouter key so your agents can run.')).toBeInTheDocument()
-    expect(screen.getByLabelText('OpenRouter key')).toHaveAttribute('type', 'password')
+    // The card asks for the key's state itself, so its field comes once that answer does.
+    expect(await screen.findByLabelText('OpenRouter key')).toHaveAttribute('type', 'password')
   })
 
   it('keeps the key card away once a key is added, and says the agents run on OpenRouter', async () => {

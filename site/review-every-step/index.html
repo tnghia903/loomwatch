@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- One of the guides: site/build.sh publishes it at https://loomwatch.github.io/review-every-step/ and site/sitemap.sh lists it
+       there; ui/src/site/seo.test.ts checks its title, description and address. -->
+  <title>Check AI work before the next agent uses it — LoomWatch</title>
+  <meta name="description" content="Put a review stop between AI agents: the team waits while you approve the work or send it back. Agents also ask before they use the web or run commands.">
+  <meta name="theme-color" content="#08080A">
+  <meta property="og:site_name" content="LoomWatch">
+  <meta property="og:title" content="Check AI work before the next agent uses it — LoomWatch">
+  <meta property="og:description" content="Put a review stop between AI agents: the team waits while you approve the work or send it back. Agents also ask before they use the web or run commands.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://loomwatch.github.io/review-every-step/">
+  <meta property="og:image" content="https://loomwatch.github.io/social-card.jpg?v=9">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="LoomWatch: put AI agents to work as one team. Six friendly figures, a yarn ball, a spool, a button, a thimble, a pincushion and a thread cone, joined by one gold thread.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://loomwatch.github.io/review-every-step/">
+  <meta name="robots" content="max-image-preview:large">
+  <link rel="icon" href="../favicon.ico?v=2" sizes="32x32">
+  <link rel="icon" href="../favicon.svg?v=2" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png?v=2">
+  <link rel="preload" href="../assets/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../assets/fonts/fonts.css">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../guides.css">
+  <script>
+    // The theme chosen on any page of the site, restored before the first paint.
+    try {
+      const t = localStorage.getItem('loomwatch-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+    } catch {}
+  </script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- docs/assets/brand/mark-small.svg and the wordmark; ui/src/site/brand.test.ts keeps them the same. -->
+  <symbol id="mark" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" stroke-width="26" stroke-linecap="round" stroke-dasharray="49.28 49.28" stroke-dashoffset="24.64"/><rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" stroke-width="40" stroke-linecap="round"/></symbol>
+  <symbol id="wordmark" viewBox="-6 14 501 92"><g fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><path stroke="currentColor" d="M0 20V100M13 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M74 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M138 50V100M138 67a16 16 0 0 1 32 0V100M170 67a16 16 0 0 1 32 0V100M215 50L231 100L247 56L263 100L279 50M291 75a25 25 0 1 0 50 0a25 25 0 1 0-50 0M341 50V100M361 28V86q0 14 14 14M430.73 56.42A25 25 0 1 0 430.73 93.58M449 20V100M449 70a20 20 0 0 1 40 0V100"/><path style="stroke: var(--accent)" d="M351 50H375"/></g></symbol>
+</svg>
+
+<header class="top">
+  <div class="top-row">
+    <a class="brand" href="../" aria-label="LoomWatch home"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
+    <nav class="top-nav" aria-label="Guides">
+      <a href="../get-started/">Get started</a>
+      <a href="../openrouter-key/">OpenRouter key</a>
+      <a href="../ai-agent-team/">Agent teams</a>
+      <a href="../review-every-step/" aria-current="page">Review every step</a>
+      <a href="../faq/">FAQ</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn top-get" href="../#start" aria-label="Get LoomWatch"><span class="long">Get LoomWatch</span><span class="short">Get it</span></a>
+      <a class="iconbtn" href="https://github.com/tnghia903/loomwatch" aria-label="LoomWatch on GitHub">
+        <svg viewBox="-1 -1 18 18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="iconbtn" type="button" id="theme" aria-label="Switch to the light theme">
+        <svg class="bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="bulb-rays" d="M12 1.2v1.6M4.4 4.4l1.1 1.1M19.6 4.4l-1.1 1.1M1.6 11.2h1.6M20.8 11.2h1.6"/><path class="bulb-glass" d="M12 4.4a6.6 6.6 0 0 0-4 11.86c.62.47.98 1.2.98 1.98v.26h6.04v-.26c0-.78.36-1.51.98-1.98A6.6 6.6 0 0 0 12 4.4z"/><path d="M9.6 20.8h4.8"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="guide">
+  <a class="back" href="../">← LoomWatch home</a>
+  <header class="guide-head">
+    <span class="act-tag"><b>Guide</b>Review every step</span>
+    <h1>Check AI work <em>before the next agent uses it.</em></h1>
+    <p class="lede">When AI agents pass work along, one weak step quietly shapes everything after it. LoomWatch puts you in the line: the team stops, shows you what it has so far, and waits until you decide.</p>
+  </header>
+
+  <section aria-labelledby="stop-h">
+    <h2 id="stop-h">Add a review stop</h2>
+    <p>In a team's <strong>Workflow</strong> tab, add <strong>You (review step)</strong> between two agents and connect it like any other step. In its <strong>What to check</strong> box, write what you want to look at, such as <em>"Are the sources real, and is anything missing?"</em> Add as many stops as you like.</p>
+    <p>Or start from the ready-made team <strong>Research, your approval, then writing</strong>, which already has one. A stop works on a schedule too: a team that runs every morning still waits for you.</p>
+  </section>
+
+  <section aria-labelledby="decide-h">
+    <h2 id="decide-h">When the team stops for you</h2>
+    <p>The handover waits in the team's chat, with two buttons under it. The bell at the top of LoomWatch tells you, on any screen, when something needs you.</p>
+    <ul>
+      <li><strong>Approve</strong> passes the work on. Type a note first and the button says <strong>Approve with your note</strong>: your note goes on with the work, as your direction.</li>
+      <li><strong>Send back</strong>: write what should change and send it back. The agent revises it and asks you again.</li>
+    </ul>
+    <figure class="shot">
+      <img class="dark" src="../assets/app/chat-dark.webp" width="2880" height="1600" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users, then the Researcher's handover to You, with Approve and Send back to Researcher waiting under it. Beside the chat, Details shows the live timeline with a replay slider, stage by stage, with the model each agent runs on." loading="lazy" decoding="async">
+      <img class="light" src="../assets/app/chat-light.webp" width="2880" height="1600" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users, then the Researcher's handover to You, with Approve and Send back to Researcher waiting under it. Beside the chat, Details shows the live timeline with a replay slider, stage by stage, with the model each agent runs on." loading="lazy" decoding="async">
+      <figcaption>The handover waits in the chat. Details, beside it, shows how the work was made.</figcaption>
+    </figure>
+    <p>Nothing moves on until you decide. LoomWatch's own helper, Ask, can draft a note for you, but only you click <strong>Approve</strong> or <strong>Send back</strong>.</p>
+  </section>
+
+  <section aria-labelledby="perm-h">
+    <h2 id="perm-h">Agents ask before they act</h2>
+    <p>Each agent has three switches under <strong>Allowed without asking</strong>: <strong>Search the web</strong>, <strong>Edit files</strong> (only in its own folder) and <strong>Run commands</strong>. They start off, except web search for researchers.</p>
+    <p>For anything it isn't allowed, the agent stops and asks in the chat, such as <em>"Asks to use the web"</em>. You answer right below it: <strong>Allow</strong>, <strong>Allow for this run</strong>, <strong>Allow for the whole team</strong>, <strong>Always allow</strong> or <strong>Deny</strong>. When it asks to run a command, you can change the command before it runs, or answer in its place so nothing runs at all.</p>
+    <p>If nobody answers within 10 minutes, the request is declined. A scheduled run declines straight away, because nobody is watching. The run's receipt says what an agent couldn't do, so you can allow it next time.</p>
+    <h3>Fewer questions, with Auto</h3>
+    <p>Switch the team to <strong>Auto</strong> beside the chat's message box. A command then runs without asking when it only reads, in the agent's own folder or the folders and files you gave it, or when it only downloads something for an agent allowed the web. Anything that deletes, publishes, needs administrator rights or touches passwords and keys still asks every time. LoomWatch decides this on your computer, from the command itself.</p>
+    <div class="note">
+      <p><strong>On Windows,</strong> commands an agent runs are not walled off from the rest of your computer: an agent you let run commands can change any of your files. Leave <strong>Run commands</strong> off unless you need it.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="record-h">
+    <h2 id="record-h">See what really happened</h2>
+    <p>Every message, every tool an agent used, every file it touched and every handover is recorded on your computer. Click <strong>Details</strong> beside the chat to see each step, and drag the timeline back to replay what happened, and when.</p>
+    <p>Each run ends with a <strong>receipt</strong>: how it ended, what it used and what it cost. A skill counts as read only when the agent really read it. Nothing is guessed from a title.</p>
+  </section>
+
+  <section aria-labelledby="redo-h">
+    <h2 id="redo-h">Redo just one step</h2>
+    <p>To change one agent's work, write <strong>@</strong> and its name in the chat, with what should change. Under its new version, <strong>Continue with the team</strong> runs the steps after it, so you don't start over.</p>
+  </section>
+
+  <a class="next" href="../faq/">
+    <span class="micro">Next</span>
+    <b>FAQ</b>
+    <span>Cost, privacy, keys, models, and what LoomWatch is not.</span>
+  </a>
+
+  <nav class="more" aria-label="More guides">
+    <span class="micro">More guides</span>
+    <ul>
+      <li><a href="../get-started/">Get started<span>Install LoomWatch and run the practice team, free.</span></a></li>
+      <li><a href="../openrouter-key/">One OpenRouter key<span>Make one key that reaches Claude, GPT, Gemini and more.</span></a></li>
+      <li><a href="../ai-agent-team/">Build an agent team<span>Give each agent one job, and let them pass the work along.</span></a></li>
+      <li><a href="../faq/">FAQ<span>Cost, privacy, keys, models, and what LoomWatch is not.</span></a></li>
+    </ul>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <a class="brand" href="../" aria-label="LoomWatch home"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><svg class="brand-name" aria-hidden="true"><use href="#wordmark"/></svg></a>
+    <nav aria-label="Project">
+      <a href="../">Home</a>
+      <a href="https://github.com/tnghia903/loomwatch">GitHub</a>
+      <a href="https://github.com/tnghia903/loomwatch/issues/new/choose">Report a problem</a>
+      <a href="https://github.com/tnghia903/loomwatch/discussions">Questions</a>
+    </nav>
+    <p class="foot-line">Woven with Rust and React. Watch every thread.</p>
+    <nav class="foot-guides" aria-label="Guides">
+      <span class="micro">Guides</span>
+      <a href="../get-started/">Get started</a>
+      <a href="../openrouter-key/">OpenRouter key</a>
+      <a href="../ai-agent-team/">Agent teams</a>
+      <a href="../review-every-step/" aria-current="page">Review every step</a>
+      <a href="../faq/">FAQ</a>
+    </nav>
+    <p class="foot-legal">An independent open-source project, not affiliated with or endorsed by Anthropic, OpenAI, Google or OpenRouter. Product names are their owners' trademarks.</p>
+  </div>
+</footer>
+
+<script src="../guides.js" defer></script>
+</body>
+</html>
