@@ -39,6 +39,9 @@ tokio = { version = "1.47", features = ["io-std", "io-util", "macros", "net", "p
 # LoomWatch's own Node.js download (connectors.rs) is a .tar.gz.
 flate2 = "1.1"
 tar = "0.4"
+# Skills installed from ClawHub arrive as a ZIP (marketplace.rs). Reading only: deflate through
+# the flate2 above, nothing else.
+zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2"] }
 uuid = { version = "1.18", features = ["v4", "v7"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 cron = "0.17"
