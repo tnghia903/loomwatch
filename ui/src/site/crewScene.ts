@@ -28,7 +28,7 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { benchMaterial, drawn, fitCanvas, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchScene'
+import { benchMaterial, drawn, fitCanvas, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
 import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { CrewGlow, easeTint, glowColor } from './crewGlow'
