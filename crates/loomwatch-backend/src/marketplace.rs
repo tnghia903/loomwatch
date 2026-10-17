@@ -57,8 +57,10 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 pub struct Endpoints {
     pub github_api: String,
     pub codeload: String,
-    /// GitHub's own pages, for links the person can open.
+    /// GitHub's own pages, for links the person can open, and `<login>.png` pictures.
     pub github: String,
+    /// GitHub's picture server, for pictures known by account number.
+    pub avatars: String,
     pub skills_sh: String,
     pub clawhub: String,
 }
@@ -70,6 +72,7 @@ impl Endpoints {
             github_api: "https://api.github.com".to_owned(),
             codeload: "https://codeload.github.com".to_owned(),
             github: "https://github.com".to_owned(),
+            avatars: "https://avatars.githubusercontent.com".to_owned(),
             skills_sh: "https://skills.sh".to_owned(),
             clawhub: "https://clawhub.ai".to_owned(),
         }
@@ -79,6 +82,8 @@ impl Endpoints {
         [
             &self.github_api,
             &self.codeload,
+            &self.github,
+            &self.avatars,
             &self.skills_sh,
             &self.clawhub,
         ]
@@ -142,6 +147,85 @@ pub struct SearchResult {
     /// What inspect takes, with `source`.
     #[serde(rename = "ref")]
     pub reference: String,
+    /// The publisher's picture, as this daemon serves it (`/api/skills/avatar/…`): the page never
+    /// loads it from GitHub itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
+}
+
+/// How a publisher's picture is known on GitHub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AvatarKind {
+    /// By account name: `github.com/<login>.png`.
+    Login,
+    /// By account number: `avatars.githubusercontent.com/u/<id>`.
+    Id,
+}
+
+impl AvatarKind {
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "github" => Some(Self::Login),
+            "github-id" => Some(Self::Id),
+            _ => None,
+        }
+    }
+
+    const fn segment(self) -> &'static str {
+        match self {
+            Self::Login => "github",
+            Self::Id => "github-id",
+        }
+    }
+}
+
+/// A picture kept this long is used as it is; an older one is fetched again.
+const AVATAR_FRESH_FOR: Duration = Duration::from_hours(24 * 7);
+const MAX_AVATAR: u64 = 1024 * 1024;
+
+/// A GitHub account name: letters, digits and single hyphens, at most 39.
+fn github_login(text: &str) -> bool {
+    (1..=39).contains(&text.len())
+        && !text.starts_with('-')
+        && !text.ends_with('-')
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn avatar_path(kind: AvatarKind, id: &str) -> String {
+    format!("/api/skills/avatar/{}/{id}", kind.segment())
+}
+
+fn avatar_for_login(login: &str) -> Option<String> {
+    github_login(login).then(|| avatar_path(AvatarKind::Login, login))
+}
+
+/// `https://avatars.githubusercontent.com/u/131568675?v=4`, the picture `ClawHub` gives a
+/// publisher, as this daemon's path for it. Any other address is left out.
+fn avatar_for_image(image: &str) -> Option<String> {
+    let url = url::Url::parse(image).ok()?;
+    if url.scheme() != "https" || url.host_str() != Some("avatars.githubusercontent.com") {
+        return None;
+    }
+    let id = url.path().strip_prefix("/u/")?;
+    (!id.is_empty() && id.len() <= 20 && id.chars().all(|c| c.is_ascii_digit()))
+        .then(|| avatar_path(AvatarKind::Id, id))
+}
+
+/// What a picture is, by its first bytes; anything else, an SVG or a page among them, is not
+/// served as one.
+fn image_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() > 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
 }
 
 /// One skill folder in an inspected download.
@@ -442,6 +526,75 @@ impl Marketplace {
             let _ = fs::remove_dir_all(staged.folder);
         }
         Ok(installed)
+    }
+
+    /// A publisher's picture, from the copy kept on this computer when it is under a week old,
+    /// otherwise fetched from GitHub and kept. A copy too old is still used when GitHub can't be
+    /// reached. Only PNG, JPEG, GIF and WebP pictures are kept or served.
+    ///
+    /// # Errors
+    /// When the name isn't a GitHub account, or there is no picture to be had.
+    pub async fn avatar(
+        &self,
+        store: &SkillsStore,
+        kind: AvatarKind,
+        id: &str,
+    ) -> Result<(Vec<u8>, &'static str), SkillsError> {
+        let usable = match kind {
+            AvatarKind::Login => github_login(id),
+            AvatarKind::Id => {
+                !id.is_empty() && id.len() <= 20 && id.chars().all(|c| c.is_ascii_digit())
+            }
+        };
+        if !usable {
+            return Err(SkillsError::Invalid(
+                "That isn’t a GitHub account.".to_owned(),
+            ));
+        }
+        let kept = store
+            .avatars()
+            .join(format!("{}-{}", kind.segment(), id.to_ascii_lowercase()));
+        let copy = fs::read(&kept)
+            .ok()
+            .and_then(|bytes| image_type(&bytes).map(|kind| (bytes, kind)));
+        let fresh = fs::metadata(&kept)
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age < AVATAR_FRESH_FOR));
+        if fresh && let Some(copy) = copy {
+            return Ok(copy);
+        }
+        match self.fetch_avatar(kind, id).await {
+            Ok((bytes, image)) => {
+                let _ = keep(&kept, &bytes);
+                Ok((bytes, image))
+            }
+            Err(error) => copy.ok_or(error),
+        }
+    }
+
+    async fn fetch_avatar(
+        &self,
+        kind: AvatarKind,
+        id: &str,
+    ) -> Result<(Vec<u8>, &'static str), SkillsError> {
+        let (url, query) = match kind {
+            AvatarKind::Login => (
+                format!("{}/{id}.png", self.endpoints.github),
+                ("size", "96"),
+            ),
+            AvatarKind::Id => (format!("{}/u/{id}", self.endpoints.avatars), ("s", "96")),
+        };
+        let response = self
+            .get(&url, &[query], "image/*", API_TIMEOUT, Source::GitHub)
+            .await?;
+        if !response.status().is_success() {
+            return Err(SkillsError::NotFound(
+                "GitHub has no picture for that account.".to_owned(),
+            ));
+        }
+        let bytes = read_capped(response, MAX_AVATAR, Source::GitHub).await?;
+        let image = image_type(&bytes).ok_or_else(|| unreadable(Source::GitHub))?;
+        Ok((bytes, image))
     }
 
     /// Drop inspects that expired, and staging folders a previous run of the daemon left behind.
@@ -776,6 +929,17 @@ impl Marketplace {
     }
 }
 
+/// Write a fetched picture beside the others, whole or not at all.
+fn keep(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let folder = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(folder)?;
+    let partial = folder.join(format!(".{}.partial", uuid::Uuid::new_v4().simple()));
+    fs::write(&partial, bytes)?;
+    fs::rename(&partial, path).inspect_err(|_| {
+        let _ = fs::remove_file(&partial);
+    })
+}
+
 /// Drop the oldest inspects past `keep`.
 fn evict(staged: &mut BTreeMap<String, Staged>, keep: usize) {
     while staged.len() > keep {
@@ -873,6 +1037,7 @@ fn skills_sh_results(answer: &Value, base: &str) -> Vec<SearchResult> {
                 installs: skill["installs"].as_u64(),
                 url: format!("{base}/{id}"),
                 reference: id.to_owned(),
+                avatar: id.split('/').next().and_then(avatar_for_login),
             })
         })
         .collect()
@@ -906,6 +1071,17 @@ fn clawhub_results(answer: &Value, endpoints: &Endpoints) -> Vec<SearchResult> {
                 .map(|path| format!("{}{path}", endpoints.clawhub))
                 .or_else(|| install["sourceUrl"].as_str().map(str::to_owned))
                 .unwrap_or_else(|| format!("{}/{reference}", endpoints.clawhub));
+            let avatar = if source == Source::SkillsSh {
+                reference.split('/').next().and_then(avatar_for_login)
+            } else {
+                [
+                    &result["owner"]["image"],
+                    &result["publisher"]["image"],
+                    &result["native"]["owner"]["image"],
+                ]
+                .into_iter()
+                .find_map(|image| image.as_str().and_then(avatar_for_image))
+            };
             Some(SearchResult {
                 source: source.id(),
                 id: result["id"].as_str().unwrap_or(reference).to_owned(),
@@ -921,6 +1097,7 @@ fn clawhub_results(answer: &Value, endpoints: &Endpoints) -> Vec<SearchResult> {
                 installs: result["downloads"].as_u64(),
                 url,
                 reference: reference.to_owned(),
+                avatar,
             })
         })
         .collect()
@@ -1763,6 +1940,7 @@ mod tests {
             github_api: format!("{base}/gh"),
             codeload: format!("{base}/codeload"),
             github: format!("{base}/web"),
+            avatars: format!("{base}/av"),
             skills_sh: format!("{base}/ss"),
             clawhub: format!("{base}/ch"),
         };
@@ -2119,10 +2297,13 @@ mod tests {
             serde_json::json!({"results": [
                 {"displayName": "Pdf", "summary": "PDF tools.", "downloads": 50, "id": "clawhub:k1",
                  "canonicalUrl": "/acme/skills/pdf", "trust": {"installability": "installable"},
+                 "owner": {"handle": "acme", "image": "https://avatars.githubusercontent.com/u/131568675?v=4"},
                  "install": {"kind": "clawhub", "reference": "acme/pdf", "sourceUrl": null}},
                 {"displayName": "react-pdf", "id": "skills-sh:x",
                  "install": {"kind": "skills-sh", "reference": "skills-sh:acme/skills/react-pdf",
                              "sourceUrl": "https://www.skills.sh/acme/skills/react-pdf"}},
+                {"displayName": "Elsewhere", "owner": {"image": "https://tracker.example/u/1"},
+                 "install": {"kind": "clawhub", "reference": "acme/elsewhere"}},
                 {"displayName": "Unknown kind", "install": {"kind": "npm", "reference": "x"}},
                 {"displayName": "Blocked", "trust": {"installability": "blocked"},
                  "install": {"kind": "clawhub", "reference": "acme/blocked"}}
@@ -2130,7 +2311,21 @@ mod tests {
             .to_string(),
         );
         let results = market.search("pdf", Source::ClawHub).await.expect("search");
-        assert_eq!(results.len(), 2, "{results:#?}");
+        assert_eq!(results.len(), 3, "{results:#?}");
+        assert_eq!(
+            results[0].avatar.as_deref(),
+            Some("/api/skills/avatar/github-id/131568675"),
+            "ClawHub's GitHub picture, served by this daemon"
+        );
+        assert_eq!(
+            results[1].avatar.as_deref(),
+            Some("/api/skills/avatar/github/acme"),
+            "a skills.sh skill's GitHub owner"
+        );
+        assert_eq!(
+            results[2].avatar, None,
+            "a picture anywhere else is left out"
+        );
         assert_eq!(results[0].source, "clawhub");
         assert_eq!(results[0].reference, "acme/pdf");
         assert_eq!(
@@ -2247,6 +2442,10 @@ mod tests {
             .expect("search");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].installs, Some(7));
+        assert_eq!(
+            results[0].avatar.as_deref(),
+            Some("/api/skills/avatar/github/acme")
+        );
         let inspection = market
             .inspect(&store, &results[0].reference, Some(Source::SkillsSh))
             .await
@@ -2269,6 +2468,74 @@ mod tests {
             installed[0].origin.reference.as_deref(),
             Some("acme/skills/react-pdf")
         );
+    }
+
+    #[tokio::test]
+    async fn skills_avatars_are_fetched_once_kept_and_only_ever_pictures() {
+        let (sites, endpoints) = fake_sites().await;
+        let state = Scratch::new("state");
+        let store = SkillsStore::new(state.path());
+        let market = Marketplace::new(endpoints);
+        let png = b"\x89PNG\r\n\x1a\nrest of a picture".to_vec();
+        sites.answer("/web/acme.png", "image/png", png.clone());
+        sites.answer(
+            "/av/u/42",
+            "image/jpeg",
+            vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3],
+        );
+        sites.answer("/web/evil.png", "text/html", "<script>alert(1)</script>");
+
+        let first = market
+            .avatar(&store, AvatarKind::Login, "acme")
+            .await
+            .expect("picture");
+        assert_eq!(first, (png.clone(), "image/png"));
+        let asked = sites.requests().len();
+        let again = market
+            .avatar(&store, AvatarKind::Login, "ACME")
+            .await
+            .expect("kept");
+        assert_eq!(again.0, png);
+        assert_eq!(
+            sites.requests().len(),
+            asked,
+            "a kept picture isn't fetched again"
+        );
+        assert!(sites.requests()[0].contains("size=96"));
+
+        let (_, kind) = market
+            .avatar(&store, AvatarKind::Id, "42")
+            .await
+            .expect("by number");
+        assert_eq!(kind, "image/jpeg");
+
+        assert!(
+            market
+                .avatar(&store, AvatarKind::Login, "evil")
+                .await
+                .is_err(),
+            "a page is no picture"
+        );
+        assert!(!store.avatars().join("github-evil").exists());
+        assert!(
+            market
+                .avatar(&store, AvatarKind::Login, "nobody")
+                .await
+                .is_err()
+        );
+        for bad in ["..", "a/b", "-x", "x".repeat(40).as_str()] {
+            assert!(
+                matches!(
+                    market.avatar(&store, AvatarKind::Login, bad).await,
+                    Err(SkillsError::Invalid(_))
+                ),
+                "{bad}"
+            );
+        }
+        assert!(matches!(
+            market.avatar(&store, AvatarKind::Id, "4a").await,
+            Err(SkillsError::Invalid(_))
+        ));
     }
 
     #[test]

@@ -1,72 +1,404 @@
 /* ===========================================================================
    LoomWatch — the Skills page (components/skills/).
-   A settings surface: it sits in settings.css's reading column and sections,
-   and adds only its own parts here — skill rows, their small labels, the
-   where-to-find switch and the confirm strip. Every class is `lw-skills-*`,
-   so nothing here can restyle another surface (a bare `.ghost` once did).
+   One of the Home pages: it wears home.css's header, ground and hero, and
+   adds its own parts here: the finder, topic tiles, result cards, the
+   review sheet, the Your skills shelf and the toast.
 
-   Built strictly on tokens.css: no hex values and no --lw-* primitives.
+   Every class is `lw-skills-*`, so nothing here can restyle another surface
+   (a bare `.ghost` once did). Built on tokens.css only: no hex values and
+   no --lw-* primitives, so both themes come for free. Motion runs only when
+   the person hasn't asked for less.
    =========================================================================== */
 
-/* A list of skills: rows stack with the section's rhythm. */
-.lw-skills-list {
+.lw-skills-main { gap: var(--sp-7); }
+.lw-skills-hero { gap: var(--sp-3); }
+
+/* Browse on the left, your shelf on the right; one column once it's narrow. */
+.lw-skills-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--sp-7);
+  align-items: start;
+}
+.lw-skills-browse { display: flex; flex-direction: column; gap: var(--sp-6); min-width: 0; }
+.lw-skills-rail { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+
+/* A section's name: the same small capitals Home's sections use. */
+.lw-skills-label {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: 600 12px/1.2 var(--font-sans);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+.lw-skills-label > span:not(.lw-skills-count) { letter-spacing: 0; font-weight: 500; }
+.lw-skills-quiet { margin: 0; font-size: 13px; line-height: 1.5; color: var(--color-ink-3); }
+
+/* ---- The finder ----------------------------------------------------------- */
+.lw-skills-finder { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-skills-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 56px;
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-lg);
+  background: var(--color-panel-solid);
+  box-shadow: var(--e2-shadow);
+  color: var(--color-ink-3);
+  transition: border-color var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+}
+.lw-skills-search:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: var(--e2-shadow), 0 0 0 3px var(--color-accent-tint);
+  color: var(--color-accent);
+}
+.lw-skills-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font: 400 16px/24px var(--font-sans);
+}
+.lw-skills-search input::placeholder { color: var(--color-ink-3); }
+.lw-skills-search input::-webkit-search-cancel-button { display: none; }
+.lw-skills-search .btn { height: 40px; padding: 0 var(--sp-5); border-radius: var(--r-md); font-size: 14px; }
+.lw-skills-hint { margin: 0 0 0 var(--sp-1); font-size: 12.5px; line-height: 1.45; color: var(--color-ink-3); }
+
+/* ---- Topics: where to start -------------------------------------------- */
+.lw-skills-topics { display: flex; flex-direction: column; gap: var(--sp-3); }
+.lw-skills-topics ul {
+  list-style: none;
   margin: 0;
   padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: var(--sp-2);
 }
+.lw-skills-topic {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 52px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: var(--color-panel-solid);
+  color: var(--color-ink);
+  font: 500 14px/1.2 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-quick) var(--ease-out), transform var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+}
+.lw-skills-topic svg { flex: none; color: var(--color-accent); }
+.lw-skills-topic:hover, .lw-skills-topic:focus-visible { border-color: var(--color-accent-dim); box-shadow: var(--e1-shadow); transform: translateY(-1px); }
+.lw-skills-topic:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
-/* One skill in the folder, or one search result: an e2 row. */
-.lw-skills-item {
-  padding: var(--sp-3) var(--sp-4);
+/* ---- Results ------------------------------------------------------------ */
+.lw-skills-results { display: flex; flex-direction: column; gap: var(--sp-4); }
+.lw-skills-results-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.lw-skills-back { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; }
+.lw-skills-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-3);
+}
+.lw-skills-card {
+  min-height: 176px;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
-  min-width: 0;
-}
-.lw-skills-item > p { margin: 0; }
-.lw-skills-item-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
   gap: var(--sp-3);
-  min-width: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-lg);
+  background: var(--color-panel-solid);
+  transition: border-color var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
 }
-.lw-skills-name { min-width: 0; overflow-wrap: anywhere; }
-
-/* Two lines of a description at most: the full text is the skill's own. */
-.lw-skills-desc {
+.lw-skills-card:hover { border-color: var(--color-accent-dim); box-shadow: var(--e1-shadow); }
+.lw-skills-card.added, .lw-skills-card.have { border-color: color-mix(in srgb, var(--color-ok) 35%, var(--color-hairline)); }
+.lw-skills-card-top { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.lw-skills-card-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lw-skills-card-who h3 { margin: 0; font: 600 15px/1.3 var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.lw-skills-card-who .lw-skills-by { font-size: 12.5px; color: var(--color-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The publisher's picture, small and round, the way GitHub shows it. */
+.lw-skills-by { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.lw-skills-by img { flex: none; width: 16px; height: 16px; border-radius: var(--r-full); background: var(--color-hairline); object-fit: cover; }
+.lw-skills-byline { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
+.lw-skills-card-desc {
+  flex: 1;
   margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--color-ink-2);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.lw-skills-card-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.lw-skills-card-meta { font-size: 12px; color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lw-skills-card-meta a { display: inline-flex; align-items: center; gap: 2px; color: inherit; text-decoration: none; }
+.lw-skills-card-meta a:hover { color: var(--color-ink); text-decoration: underline; text-underline-offset: 3px; }
+.lw-skills-add { flex: none; height: 30px; border-color: var(--color-accent-dim); color: var(--color-ink); gap: 4px; }
+.lw-skills-add:hover:not(:disabled) { background: var(--color-accent-fill); border-color: transparent; color: var(--color-accent-on-fill); }
+.lw-skills-more { align-self: center; }
 
-/* A row with a tick box: the box and name, then what it is beneath, aligned to the name. */
-.lw-skills-row {
-  padding: var(--sp-3) 0;
+/* A card's waiting shape while the search runs. */
+.lw-skills-card.ghost { pointer-events: none; }
+.lw-skills-card.ghost > span { display: block; height: 12px; border-radius: var(--r-xs); background: var(--color-hairline); }
+.lw-skills-card.ghost > span:first-child { width: 55%; height: 16px; }
+.lw-skills-card.ghost > span:nth-child(2) { width: 90%; }
+.lw-skills-card.ghost > span:nth-child(3) { width: 70%; }
+
+.lw-skills-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-full);
+  font: 500 12px/1 var(--font-sans);
+}
+.lw-skills-pill.ok { color: var(--color-ok); background: color-mix(in srgb, var(--color-ok) 10%, transparent); }
+.lw-skills-pill.stop { color: var(--color-ink-2); background: color-mix(in srgb, var(--color-alert) 8%, transparent); cursor: help; }
+.lw-skills-pill.stop svg { color: var(--color-alert); }
+
+/* A skill's mark: the icon of what it is about, on that topic's figure colour. */
+.lw-skills-glyph {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--glyph) 14%, var(--color-panel-solid));
+  border: 1px solid color-mix(in srgb, var(--glyph) 30%, transparent);
+  color: var(--glyph);
+}
+.lw-skills-glyph.sm { width: 28px; height: 28px; border-radius: var(--r-sm); }
+.lw-skills-glyph.lg { width: 48px; height: 48px; border-radius: var(--r-lg); }
+
+/* ---- Your skills ---------------------------------------------------------- */
+.lw-skills-shelf {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-lg);
+  background: var(--color-panel-solid);
+}
+.lw-skills-shelf-head { display: flex; align-items: center; justify-content: space-between; }
+.lw-skills-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: var(--r-full);
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+  font: 600 11px/1 var(--font-sans);
+  letter-spacing: 0;
+}
+.lw-skills-shelf-error { flex-direction: column; align-items: flex-start; padding: var(--sp-3); font-size: 13px; }
+.lw-skills-empty {
+  margin: 0;
+  padding: var(--sp-4);
+  border: 1px dashed var(--color-hairline);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+.lw-skills-shelf-list { list-style: none; margin: 0 calc(-1 * var(--sp-2)); padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.lw-skills-item { border-radius: var(--r-md); }
+.lw-skills-item.open { background: color-mix(in srgb, var(--color-ink) 3%, transparent); }
+.lw-skills-item-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lw-skills-item-row:hover { background: color-mix(in srgb, var(--color-ink) 4%, transparent); }
+.lw-skills-item-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.lw-skills-item-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lw-skills-item-name b { font: 500 13.5px/1.3 var(--font-sans); color: var(--color-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lw-skills-item-name span { font-size: 12px; color: var(--color-ink-3); }
+.lw-skills-chev { flex: none; color: var(--color-ink-3); transition: rotate var(--t-quick) var(--ease-out); }
+.lw-skills-item.open .lw-skills-chev { rotate: 180deg; }
+.lw-skills-item-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2) var(--sp-3) calc(28px + var(--sp-3) + var(--sp-2));
+}
+.lw-skills-item-more > p { margin: 0; font-size: 13px; line-height: 1.45; color: var(--color-ink-2); }
+.lw-skills-facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px var(--sp-3); font-size: 12.5px; }
+.lw-skills-facts dt { color: var(--color-ink-3); }
+.lw-skills-facts dd { margin: 0; color: var(--color-ink-2); min-width: 0; overflow-wrap: anywhere; }
+.lw-skills-mono { font-family: var(--font-mono); font-size: 11.5px; }
+.lw-skills-remove { align-self: flex-start; font-size: 12.5px; }
+.lw-skills-where { margin: 0; font-size: 11.5px; color: var(--color-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lw-skills-where span { font-family: var(--font-mono); }
+.lw-skills-error { margin: 0; font-size: 12.5px; color: var(--color-alert); }
+
+.lw-skills-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-sm);
+  background: var(--color-ground);
+  color: var(--color-ink-3);
+}
+.lw-skills-filter input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-ink); font: 400 13px/1 var(--font-sans); }
+.lw-skills-filter:focus-within { border-color: var(--color-accent); }
+
+/* "Remove this?": asked in place, never in a popup. */
+.lw-skills-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px dashed color-mix(in srgb, var(--color-alert) 45%, transparent);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-ink-2);
+}
+.lw-skills-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+/* The way to the skills other apps already have. */
+.lw-skills-bringin {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px dashed var(--color-accent-dim);
+  border-radius: var(--r-lg);
+  color: var(--color-accent);
+}
+.lw-skills-bringin svg { flex: none; margin-top: 1px; }
+.lw-skills-bringin > div { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.lw-skills-bringin h2 { margin: 0; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
+.lw-skills-bringin p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--color-ink-2); }
+
+/* ---- The review sheet ------------------------------------------------------ */
+.lw-skills-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: color-mix(in srgb, var(--color-ground) 60%, transparent);
+}
+.lw-skills-sheet {
+  width: min(560px, 100%);
+  max-height: min(760px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg);
+  outline: none;
+  overflow: hidden;
+}
+.lw-skills-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-5) var(--sp-5) var(--sp-3); }
+.lw-skills-sheet-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lw-skills-kicker { font: 600 11px/1.2 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-accent); }
+.lw-skills-sheet-head h2 { margin: 0; font: 600 21px/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); overflow-wrap: anywhere; }
+.lw-skills-sheet-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 0 var(--sp-5) var(--sp-5); }
+.lw-skills-sheet-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5);
   border-top: 1px solid var(--color-hairline);
 }
-.lw-skills-row:first-child { border-top: 0; padding-top: 0; }
-.lw-skills-row-body {
-  padding-left: calc(16px + var(--sp-3));
+.lw-skills-sheet-foot .btn { height: 34px; padding: 0 var(--sp-4); }
+.lw-skills-foot-note { flex: 1 1 200px; font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
+
+.lw-skills-intro { display: flex; gap: var(--sp-4); align-items: flex-start; }
+.lw-skills-intro > div { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.lw-skills-intro-desc { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--color-ink); }
+.lw-skills-out { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; }
+
+/* What to know, one line each, marked by how much it matters. */
+.lw-skills-notices {
+  list-style: none;
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
-  min-width: 0;
+  gap: var(--sp-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: var(--color-ground);
 }
-.lw-skills-row-body > p { margin: 0; }
-.lw-skills-row.locked .check .txt b { color: var(--color-ink-2); }
+.lw-skills-notices li { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: 13.5px; line-height: 1.45; color: var(--color-ink-2); }
+.lw-skills-notices svg { flex: none; margin-top: 2px; }
+.lw-skills-notices .ok svg { color: var(--color-ok); }
+.lw-skills-notices .note svg { color: var(--color-accent); }
+.lw-skills-notices .stop { color: var(--color-ink); }
+.lw-skills-notices .stop svg { color: var(--color-alert); }
 
-/* Small labels: license, Needs Node, what its instructions assume. */
-.lw-skills-tags { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.lw-skills-progress { height: 4px; border-radius: var(--r-full); background: var(--color-hairline); overflow: hidden; }
+.lw-skills-progress > span { display: block; width: 100%; height: 100%; background: var(--color-accent-fill); opacity: .5; }
+
+.lw-skills-files > summary { width: fit-content; cursor: pointer; font-size: 13px; color: var(--color-ink-2); }
+.lw-skills-files > ul {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-5);
+  max-height: 160px;
+  overflow-y: auto;
+  list-style: disc;
+  color: var(--color-ink-3);
+  font: 400 11.5px/1.6 var(--font-mono);
+}
+
+/* Many skills from one download, or from the apps on this computer. */
+.lw-skills-picker { display: flex; flex-direction: column; gap: var(--sp-2); }
+.lw-skills-picker-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.lw-skills-picker-head .lw-skills-filter { flex: 1; max-width: 260px; }
+.lw-skills-picker-head .link { margin-left: auto; font-size: 12.5px; }
+.lw-skills-group { display: flex; flex-direction: column; gap: var(--sp-1); }
+.lw-skills-picks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.lw-skills-picks > li { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-3) 0; border-top: 1px solid var(--color-hairline); }
+.lw-skills-picks > li:first-child { border-top: 0; }
+.lw-skills-picks .check .txt b { font-size: 14px; }
+.lw-skills-picks > li.locked .check .txt b { color: var(--color-ink-2); }
+.lw-skills-pick-desc { font-size: 12.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lw-skills-pick-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-left: calc(16px + var(--sp-3)); }
+.lw-skills-path { font: 400 11px/1.4 var(--font-mono); color: var(--color-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.lw-skills-locked { margin: 0 0 0 calc(16px + var(--sp-3)); display: flex; align-items: flex-start; gap: 4px; font-size: 12.5px; line-height: 1.4; color: var(--color-ink-2); }
+.lw-skills-locked svg { flex: none; margin-top: 2px; color: var(--color-ink-3); }
+
+.lw-skills-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .lw-skills-tag {
   display: inline-flex;
   align-items: center;
@@ -79,90 +411,73 @@
   white-space: nowrap;
 }
 .lw-skills-tag.needs { color: var(--color-live); border-color: color-mix(in srgb, var(--color-live) 35%, transparent); background: var(--color-live-tint); }
-.lw-skills-tag.alert { color: var(--color-alert); border-color: color-mix(in srgb, var(--color-alert) 40%, transparent); }
-.lw-skills-tag.quiet { color: var(--color-ink-3); }
+.lw-skills-tag.stop { color: var(--color-alert); border-color: color-mix(in srgb, var(--color-alert) 40%, transparent); }
+.lw-skills-tag.note { color: var(--color-accent); border-color: var(--color-accent-dim); background: var(--color-accent-tint); }
 
-/* Why a row can't be ticked. */
-.lw-skills-locked {
-  margin: 0;
-  display: inline-flex;
-  align-items: flex-start;
-  gap: var(--sp-1);
-  color: var(--color-ink-2);
-}
-.lw-skills-locked svg { flex: none; margin-top: 2px; color: var(--color-ink-3); }
-
-.lw-skills-conflict { color: var(--color-accent); }
-.lw-skills-error { margin: 0; color: var(--color-alert); }
-.lw-skills-path { font-family: var(--font-mono); font-size: 11.5px; overflow-wrap: anywhere; }
-
-.lw-skills-out { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; line-height: 16px; }
-
-/* Buttons that act on what's above them, left-aligned like .lw-settings-start. */
-.lw-skills-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-self: flex-start; }
-
-/* "Remove this?" and "Replace these?": asked in place, never in a popup. */
-.lw-skills-confirm {
-  margin-top: var(--sp-1);
-  padding: var(--sp-3);
-  border-radius: var(--r-md);
-  border: 1px dashed var(--color-hairline);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-/* What a bring-in did, and the skills it left out. */
 .lw-skills-done { display: flex; flex-direction: column; gap: var(--sp-2); }
-.lw-skills-done > p { margin: 0; }
-.lw-skills-skipped { margin: 0; padding-left: var(--sp-5); list-style: disc; color: var(--color-ink-2); }
+.lw-skills-done-line { margin: 0; display: flex; align-items: center; gap: var(--sp-2); font-size: 15px; color: var(--color-ink); }
+.lw-skills-done-line svg { color: var(--color-ok); }
+.lw-skills-skipped { margin: 0; padding-left: var(--sp-5); list-style: disc; font-size: 13px; line-height: 1.5; color: var(--color-ink-2); }
 .lw-skills-skipped b { font-weight: 500; color: var(--color-ink); }
 
-/* skills.sh · ClawHub · GitHub link: one choice, the depth dial's look. */
-.lw-skills-switch {
-  display: inline-flex;
-  align-self: flex-start;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--color-hairline);
-  background: var(--color-panel-solid);
+/* ---- What just happened --------------------------------------------------- */
+.lw-skills-toast {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--sp-5);
+  z-index: 210;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
+  margin: 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  border-radius: var(--r-lg);
+  font-size: 13.5px;
+  color: var(--color-ink);
 }
-.lw-skills-switch > button {
-  border: 0;
-  background: transparent;
-  padding: 4px var(--sp-3);
-  border-radius: 6px;
-  font: 500 12.5px/1.2 var(--font-sans);
-  color: var(--color-ink-3);
-  cursor: pointer;
+.lw-skills-toast > svg { flex: none; color: var(--color-ok); }
+.lw-skills-toast .link { font-size: 13.5px; }
+
+/* ---- Motion ----------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .lw-skills-card { animation: rise-in var(--t-entrance) var(--ease-out) both; }
+  .lw-skills-card.ghost > span { animation: lw-skills-wait 1.4s ease-in-out infinite; }
+  .lw-skills-sheet { animation: dialog-in var(--t-entrance) var(--ease-out) both; }
+  .lw-skills-scrim { animation: fade-in var(--t-quick) var(--ease-out) both; }
+  .lw-skills-toast { animation: pop-in-up var(--t-entrance) var(--ease-out) both; }
+  .lw-skills-progress > span { width: 40%; opacity: 1; animation: lw-skills-progress 1.2s var(--ease-out) infinite; }
+  /* A skill that just arrived on the shelf glows, then settles. */
+  .lw-skills-item.fresh { animation: lw-skills-arrive 4s var(--ease-out) both; }
 }
-.lw-skills-switch > button:hover { color: var(--color-ink); }
-.lw-skills-switch > button[aria-checked="true"] {
-  background: var(--color-accent-tint);
-  color: var(--color-accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+@keyframes lw-skills-wait { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes lw-skills-progress { from { translate: -100% 0; } to { translate: 250% 0; } }
+@keyframes lw-skills-arrive {
+  0%, 30% { background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px var(--color-accent-dim); }
+  100% { background: transparent; box-shadow: inset 0 0 0 1px transparent; }
+}
+/* Without motion, an arrival is still marked, just without the fade. */
+@media (prefers-reduced-motion: reduce) {
+  .lw-skills-item.fresh { background: var(--color-accent-tint); }
 }
 
-/* A download looked inside: what it is, its safety check, its skills. */
-.lw-skills-inside { display: flex; flex-direction: column; gap: var(--sp-3); }
-.lw-skills-inside > p { margin: 0; }
-.lw-skills-scan { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--color-ink-2); }
-.lw-skills-scan.ok svg { color: var(--color-ok); }
-
-.lw-skills-files > summary { width: fit-content; cursor: pointer; color: var(--color-ink-2); }
-.lw-skills-files > ul {
-  margin: var(--sp-1) 0 0;
-  padding-left: var(--sp-5);
-  max-height: 160px;
-  overflow-y: auto;
-  list-style: disc;
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+@media (max-width: 900px) {
+  .lw-skills-layout { grid-template-columns: minmax(0, 1fr); }
 }
-
-@media (max-width: 767px) {
-  .lw-skills-item-head { flex-wrap: wrap; }
-  .lw-skills-row-body { padding-left: 0; }
+@media (max-width: 560px) {
+  /* The mark goes home already; the header keeps room for Your agents and the theme. */
+  .lw-skills-teams-link { display: none; }
+}
+@media (max-width: 640px) {
+  .lw-skills-search { height: 52px; padding-left: var(--sp-3); }
+  .lw-skills-search .btn { padding: 0 var(--sp-3); }
+  .lw-skills-topics ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lw-skills-topic { height: 48px; padding: 0 var(--sp-3); font-size: 13.5px; }
+  /* The sheet rises from the bottom edge, where a thumb is. */
+  .lw-skills-scrim { place-items: end stretch; padding: 0; }
+  .lw-skills-sheet { width: 100%; max-height: 88vh; border-radius: var(--r-lg) var(--r-lg) 0 0; }
+  .lw-skills-toast { bottom: var(--sp-3); }
 }

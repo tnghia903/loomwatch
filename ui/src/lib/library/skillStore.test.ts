@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  bringIn, describeOrigin, fetchSkills, inspectInstall, installSkills, licenseLabel, needLabel, previewBringIn, removeSkill,
-  scanLabel, searchSkills, shortPath, SKILLS_UNAVAILABLE, SkillsApiError, undoBringIn,
+  bringIn, compactCount, describeOrigin, displayName, fetchSkills, inspectInstall, installedKeys, installSkills, licenseLabel, looksLikeLink,
+  mergeResults, needLabel, noticesFor, previewBringIn, topicOf, removeSkill, resultKey, scanLabel, searchEverywhere, searchSkills, shortPath,
+  SKILLS_UNAVAILABLE, SkillsApiError, undoBringIn, type InstallCandidate, type SearchResult, type SkillRecord,
 } from './skillStore'
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -100,5 +101,98 @@ describe('words for the page', () => {
     expect(needLabel('something new')).toBe('something new')
     expect(scanLabel({ status: 'clean', hasWarnings: true })).toBe('ClawHub’s safety check passed, with warnings.')
     expect(shortPath('/Users/me/.claude/skills/pdf')).toBe('~/.claude/skills/pdf')
+  })
+})
+
+describe('finding skills', () => {
+  const hit = (source: 'skills.sh' | 'clawhub', ref: string): SearchResult => ({ source, id: ref, name: ref, url: '', ref })
+
+  it('tells a pasted link from words', () => {
+    for (const link of ['github.com/acme/skills', 'https://github.com/acme/skills/tree/main/x', 'acme/skills', 'acme/skills/skills/pdf@v1', 'https://www.skills.sh/a/b/c', 'clawhub.ai/a/skills/b']) {
+      expect(looksLikeLink(link), link).toBe(true)
+    }
+    for (const words of ['pdf', 'pdf forms', 'data analysis', 'excel / sheets', '.hidden/x', '']) {
+      expect(looksLikeLink(words), words).toBe(false)
+    }
+  })
+
+  it('merges the two sites by taking turns, without repeats', () => {
+    const merged = mergeResults([
+      [hit('skills.sh', 'a/r/one'), hit('skills.sh', 'a/r/two'), hit('skills.sh', 'a/r/three')],
+      [hit('clawhub', 'b/one'), hit('skills.sh', 'A/R/One')],
+    ])
+    expect(merged.map(resultKey)).toEqual(['skills.sh:a/r/one', 'clawhub:b/one', 'skills.sh:a/r/two', 'skills.sh:a/r/three'])
+  })
+
+  it('searches both sites and says which didn’t answer', async () => {
+    const fetch = vi.fn((input: RequestInfo | URL) => Promise.resolve(String(input).includes('clawhub')
+      ? json({ error: 'Couldn’t reach ClawHub.' }, 502)
+      : json({ results: [hit('skills.sh', 'a/r/pdf')] })))
+    vi.stubGlobal('fetch', fetch)
+    expect(await searchEverywhere('pdf')).toEqual({ results: [hit('skills.sh', 'a/r/pdf')], missed: ['clawhub'] })
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ error: 'Couldn’t reach skills.sh.' }, 502))))
+    await expect(searchEverywhere('pdf')).rejects.toThrow('Couldn’t reach skills.sh.')
+  })
+
+  it('knows a result is yours only by where it came from, not its name', () => {
+    const mine = { name: 'pdf', origin: { kind: 'installed', source: 'clawhub', ref: 'AwSpace/pdf' } } as SkillRecord
+    const keys = installedKeys([mine, { name: 'notes', origin: { kind: 'brought_in', app: 'Codex' } } as SkillRecord])
+    expect([...keys]).toEqual(['clawhub:awspace/pdf'])
+    expect(keys.has(resultKey(hit('clawhub', 'awspace/pdf')))).toBe(true)
+    expect(keys.has(resultKey(hit('skills.sh', 'openai/skills/pdf')))).toBe(false)
+  })
+
+  it('reads names and counts at a glance', () => {
+    expect(displayName('remove-pdf-watermark')).toBe('Remove PDF watermark')
+    expect(displayName('Pdf')).toBe('PDF')
+    expect(displayName('brand_guidelines')).toBe('Brand guidelines')
+    expect(displayName('PDF Form Filler')).toBe('PDF Form Filler')
+    expect(compactCount(950)).toBe('950')
+    expect(compactCount(1143)).toBe('1.1k')
+    expect(compactCount(211908)).toBe('212k')
+    expect(compactCount(2_400_000)).toBe('2.4M')
+  })
+})
+
+describe('what a skill is about', () => {
+  it('tells its topic from its name first, then its description', () => {
+    expect(topicOf('pdf-to-docx')).toBe('pdf')
+    expect(topicOf('pdftk-server')).toBe('pdf')
+    expect(topicOf('spreadsheet-formula-helper')).toBe('sheet')
+    expect(topicOf('brand-guidelines')).toBe('design')
+    expect(topicOf('seo-audit')).toBe('marketing')
+    expect(topicOf('meeting-notes')).toBe('meeting')
+    expect(topicOf('house-style')).toBe('writing')
+    expect(topicOf('contract-review')).toBe('legal')
+    expect(topicOf('helper', 'Turns a call transcript into decisions and owners.')).toBe('meeting')
+    expect(topicOf('acme-thing', 'Does acme things.')).toBeNull()
+  })
+})
+
+describe('what to know before adding', () => {
+  const candidate = (extra: Partial<InstallCandidate> = {}): InstallCandidate => ({
+    path: '.', name: 'pdf', description: '', license: { id: 'MIT', restricted: false }, restricted: false, files: [], hasScripts: false, runtimes: [], needs: [], sizeBytes: 1, conflict: false, ...extra,
+  })
+
+  it('says only why, when it can’t be added', () => {
+    const reason = '“pdf”’s license says “All rights reserved”, so it can’t be copied into LoomWatch.'
+    expect(noticesFor(candidate({ reason, restricted: true, license: { restricted: true }, hasScripts: true, conflict: true }), { status: 'clean', hasWarnings: false }))
+      .toEqual([{ tone: 'stop', text: reason }])
+  })
+
+  it('marks what is fine and what is worth reading', () => {
+    expect(noticesFor(candidate(), { status: 'clean', hasWarnings: false })).toEqual([
+      { tone: 'ok', text: 'ClawHub’s safety check passed.' },
+      { tone: 'ok', text: 'Open license (MIT): free to use.' },
+      { tone: 'ok', text: 'Instructions only: no scripts.' },
+    ])
+    const notes = noticesFor(candidate({ license: { restricted: false }, hasScripts: true, runtimes: ['node', 'python'], conflict: true }), { status: 'suspicious', hasWarnings: true })
+    expect(notes.map((notice) => notice.tone)).toEqual(['note', 'note', 'note', 'note'])
+    expect(notes[0].text).toMatch(/found something suspicious/)
+    expect(notes[1].text).toMatch(/^You already have a skill called “pdf”/)
+    expect(notes[2].text).toBe('It names no license. Check its page before you use it for work.')
+    expect(notes[3].text).toMatch(/needs Node.js and Python for that/)
+    expect(noticesFor(candidate({ license: { id: 'Complete terms in LICENSE.txt', restricted: false } }))[0])
+      .toEqual({ tone: 'note', text: 'License: Complete terms in LICENSE.txt. Read it on its page if you’re not sure it covers your use.' })
   })
 })

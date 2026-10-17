@@ -1,31 +1,95 @@
-import { Lock } from 'lucide-react'
-import type { ReactNode } from 'react'
+import {
+  AudioLines, BookOpenText, CalendarDays, ChartColumn, CircleCheck, Clapperboard, Code, Database, FilePen, FileText, FlaskConical, Globe, Image,
+  Info, Languages, Lock, Mail, Megaphone, NotebookPen, OctagonX, Palette, PenLine, Presentation, Receipt, Scale, Sheet, ShieldCheck, Telescope,
+  type LucideIcon,
+} from 'lucide-react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 
-import { formatSize, licenseLabel, needLabel, RUNTIME_LABEL, type Runtime, type SkillLicense } from '../../lib/library/skillStore'
+import { glyphColor, needLabel, RUNTIME_LABEL, topicOf, type Notice, type Publisher, type Runtime, type SkillTopic } from '../../lib/library/skillStore'
+
+const TOPIC_ICON: Record<SkillTopic, LucideIcon> = {
+  pdf: FileText,
+  doc: FilePen,
+  sheet: Sheet,
+  slides: Presentation,
+  meeting: NotebookPen,
+  email: Mail,
+  research: Telescope,
+  data: ChartColumn,
+  marketing: Megaphone,
+  design: Palette,
+  image: Image,
+  video: Clapperboard,
+  audio: AudioLines,
+  translate: Languages,
+  calendar: CalendarDays,
+  finance: Receipt,
+  legal: Scale,
+  security: ShieldCheck,
+  database: Database,
+  test: FlaskConical,
+  code: Code,
+  web: Globe,
+  writing: PenLine,
+}
+
+/** A topic's icon; a skill whose topic can't be told is a book of instructions, which it is. */
+export function TopicIcon({ topic, size = 18 }: { topic: SkillTopic | null; size?: number }) {
+  const Icon = topic ? TOPIC_ICON[topic] : BookOpenText
+  return <Icon size={size} aria-hidden="true" />
+}
+
+const GLYPH_ICON_SIZE = { sm: 14, md: 18, lg: 24 }
 
 /**
- * What a skill is and needs, as small labels: its license, Needs Node or Needs Python, whether it
- * has scripts, what its instructions assume, and its size. Spans, so a row can hold it anywhere.
+ * A skill's mark: the icon of what it is about, on that topic's colour, so every PDF skill looks
+ * like one at a glance. Skills don't come with logos of their own; this is told from their name
+ * and description.
  */
-export function SkillTags({ license, runtimes, needs, hasScripts, sizeBytes }: {
-  license: SkillLicense
-  runtimes: Runtime[]
-  needs: string[]
-  hasScripts: boolean
-  sizeBytes: number
-}) {
-  // "Needs Node" already says it runs scripts; the need of the same name would say it twice.
-  const shownNeeds = needs.filter((need) => need !== 'scripts' || !hasScripts)
+export function Glyph({ name, description = '', size = 'md' }: { name: string; description?: string; size?: 'sm' | 'md' | 'lg' }) {
+  const topic = topicOf(name, description)
+  return (
+    <span className={`lw-skills-glyph ${size}`} style={{ '--glyph': glyphColor(topic ?? name) } as CSSProperties} aria-hidden="true">
+      <TopicIcon topic={topic} size={GLYPH_ICON_SIZE[size]} />
+    </span>
+  )
+}
+
+/** "by anthropics", with the publisher's picture when LoomWatch has one. */
+export function By({ publisher }: { publisher: Publisher }) {
+  const [missing, setMissing] = useState(false)
+  return (
+    <span className="lw-skills-by">
+      {publisher.avatar && !missing && <img src={publisher.avatar} alt="" width={16} height={16} loading="lazy" decoding="async" onError={() => setMissing(true)} />}
+      by {publisher.name}
+    </span>
+  )
+}
+
+/** What a skill needs to run and what its instructions assume, as small labels. */
+export function NeedTags({ runtimes, needs, hasScripts }: { runtimes: Runtime[]; needs: string[]; hasScripts: boolean }) {
+  // "Needs Python" already says it runs scripts; the need of the same name would say it twice.
+  const shown = needs.filter((need) => need !== 'scripts' || !hasScripts)
+  if (runtimes.length === 0 && shown.length === 0) return null
   return (
     <span className="lw-skills-tags">
-      <span className={`lw-skills-tag ${license.restricted ? 'alert' : ''}`}>
-        {license.restricted && <Lock size={11} aria-hidden="true" />}{licenseLabel(license)}
-      </span>
       {runtimes.map((runtime) => <span key={runtime} className="lw-skills-tag needs" title={RUNTIME_LABEL[runtime].hint}>{RUNTIME_LABEL[runtime].label}</span>)}
-      {hasScripts && runtimes.length === 0 && <span className="lw-skills-tag needs" title="It comes with scripts your agents can run when a task needs them.">Has scripts</span>}
-      {shownNeeds.map((need) => <span key={need} className="lw-skills-tag">{needLabel(need)}</span>)}
-      {sizeBytes > 0 && <span className="lw-skills-tag quiet">{formatSize(sizeBytes)}</span>}
+      {shown.map((need) => <span key={need} className="lw-skills-tag">{needLabel(need)}</span>)}
     </span>
+  )
+}
+
+const NOTICE_ICON = { ok: CircleCheck, note: Info, stop: OctagonX }
+
+/** What to know before adding, one line each, marked fine, worth reading, or in the way. */
+export function Notices({ notices }: { notices: Notice[] }) {
+  return (
+    <ul className="lw-skills-notices" aria-label="What to know">
+      {notices.map((notice) => {
+        const Icon = NOTICE_ICON[notice.tone]
+        return <li key={notice.text} className={notice.tone}><Icon size={15} aria-hidden="true" /><span>{notice.text}</span></li>
+      })}
+    </ul>
   )
 }
 
@@ -41,5 +105,5 @@ export function Tick({ checked, disabled = false, onToggle, children }: { checke
 
 /** Why a row can't be ticked, beside its lock. */
 export function Locked({ children }: { children: ReactNode }) {
-  return <p className="t-meta lw-skills-locked"><Lock size={12} aria-hidden="true" />{children}</p>
+  return <p className="lw-skills-locked"><Lock size={12} aria-hidden="true" />{children}</p>
 }

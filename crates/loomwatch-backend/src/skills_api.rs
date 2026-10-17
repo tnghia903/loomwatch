@@ -9,6 +9,8 @@
 //! - `GET /api/skills/search?q=&source=skills.sh|clawhub` → `{results}`
 //! - `POST /api/skills/install/inspect` `{ref, source?}` → `{token, candidates, …}`
 //! - `POST /api/skills/install` `{token, paths, replace?}` → `{installed}`
+//! - `GET /api/skills/avatar/{github|github-id}/{id}` → a publisher's picture, which this daemon
+//!   fetches and keeps, so the page never loads anything from GitHub itself
 //!
 //! Every route answers only this computer's own page, and every change needs the
 //! `X-LoomWatch-Request: 1` header a page from another site can't send without asking. Errors
@@ -18,7 +20,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{DefaultBodyLimit, OriginalUri, Path, Query, Request, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -26,7 +28,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::marketplace::{Endpoints, Marketplace, Source};
+use crate::marketplace::{AvatarKind, Endpoints, Marketplace, Source};
 use crate::skills_store::{self, SkillsError, SkillsStore};
 
 /// Bring-in keys are 16 characters each; this holds thousands of them.
@@ -70,6 +72,8 @@ fn router_with(store: Arc<SkillsStore>, market: Arc<Marketplace>, home: PathBuf)
         .route("/api/skills/search", get(search).delete(remove_fixed))
         .route("/api/skills/install", post(install).delete(remove_fixed))
         .route("/api/skills/install/inspect", post(inspect))
+        .route("/api/skills/avatar", delete(remove_fixed))
+        .route("/api/skills/avatar/{kind}/{id}", get(avatar))
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .route_layer(middleware::from_fn(protect))
         .route_layer(middleware::from_fn(crate::watch_api::local_evidence))
@@ -235,6 +239,28 @@ async fn inspect(State(state): State<SkillsState>, Json(body): Json<Inspect>) ->
         .inspect(&state.store, &body.reference, source)
         .await?;
     Ok(Json(inspection).into_response())
+}
+
+async fn avatar(
+    State(state): State<SkillsState>,
+    Path((kind, id)): Path<(String, String)>,
+) -> Answer {
+    let Some(kind) = AvatarKind::parse(&kind) else {
+        return Err(Failure(
+            StatusCode::NOT_FOUND,
+            "There’s no such picture.".to_owned(),
+        ));
+    };
+    let (bytes, image) = state.market.avatar(&state.store, kind, &id).await?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, image),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_SECURITY_POLICY, "default-src 'none'"),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -440,9 +466,29 @@ mod tests {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
         // A skill named like a fixed route can still be removed.
-        skill(&state.path().join("skills/search"), "search", "");
-        let (status, body) = send(&app, request("DELETE", "/api/skills/search", true, None)).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["removed"], "search");
+        for name in ["search", "avatar", "install", "bring-in"] {
+            skill(&state.path().join("skills").join(name), name, "");
+            let (status, body) = send(
+                &app,
+                request("DELETE", &format!("/api/skills/{name}"), true, None),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{name}: {body}");
+            assert_eq!(body["removed"], name);
+        }
+
+        // A picture is asked for by a GitHub account, nothing else, and needs no header.
+        for uri in [
+            "/api/skills/avatar/gitlab/acme",
+            "/api/skills/avatar/github/..",
+            "/api/skills/avatar/github/-bad-",
+            "/api/skills/avatar/github-id/12ab",
+        ] {
+            let (status, _) = send(&app, request("GET", uri, false, None)).await;
+            assert!(
+                status == StatusCode::NOT_FOUND || status == StatusCode::UNPROCESSABLE_ENTITY,
+                "{uri}: {status}"
+            );
+        }
     }
 }

@@ -307,6 +307,11 @@ impl SkillsStore {
         self.folder().join(STAGING_FOLDER)
     }
 
+    /// Publishers' pictures `marketplace.rs` fetched, kept apart from the skills agents read.
+    pub(crate) fn avatars(&self) -> PathBuf {
+        self.state_dir.join("cache").join("avatars")
+    }
+
     fn manifest_path(&self) -> PathBuf {
         self.state_dir.join(MANIFEST_FILE)
     }
