@@ -130,8 +130,9 @@ describe('Updates', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Copy the command' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('~/LoomWatch/app/loomwatch update'))
-    // Nothing in the app installs it: no request beyond reading what the daemon found.
-    expect(fetchMock.mock.calls.every(([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')).toBe(true)
+    // Nothing in the app installs it: no request beyond reading what the daemon found, and the
+    // check opening LoomWatch makes.
+    expect(fetchMock.mock.calls.every(([url, init]) => ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET' || url === '/api/updates/check')).toBe(true)
   })
 
   it('tells someone using LoomWatch.app to replace it with the new .dmg, with no Terminal step', async () => {
@@ -159,9 +160,40 @@ describe('Updates', () => {
     expect(JSON.parse(String(calls('PUT', '/api/updates/settings')[1][1].body))).toEqual({ skipped: null })
   })
 
+  it('asks GitHub each time LoomWatch opens, showing what the last check found meanwhile', async () => {
+    serve(newer)
+    let finish: (response: Response) => void = () => {}
+    routes['POST /api/updates/check'] = () => new Promise((resolve) => { finish = resolve })
+    app()
+    expect(await screen.findByRole('button', { name: /Update available/ })).toHaveAccessibleName(/0\.1\.6/)
+    await waitFor(() => expect(calls('POST', '/api/updates/check')).toHaveLength(1))
+    const newest = { ...newer, latest: { ...newer.latest!, version: '0.1.7', tag: 'v0.1.7' } }
+    await act(async () => finish(new Response(JSON.stringify(newest), { status: 200 })))
+    expect(await screen.findByRole('button', { name: /Update available/ })).toHaveAccessibleName(/0\.1\.7/)
+
+    // Opened again, it asks again.
+    cleanup()
+    app()
+    await waitFor(() => expect(calls('POST', '/api/updates/check')).toHaveLength(2))
+  })
+
+  it('asks nothing on opening when the operator or this computer turned checks off', async () => {
+    serve({ ...upToDate, automatic: false })
+    app()
+    await waitFor(() => expect(calls('GET', '/api/updates')).toHaveLength(1))
+    cleanup()
+    serve({ ...upToDate, turnedOffBy: 'LOOMWATCH_UPDATE_CHECK' })
+    app()
+    await waitFor(() => expect(calls('GET', '/api/updates')).toHaveLength(2))
+    await act(async () => { await Promise.resolve() })
+    expect(calls('POST', '/api/updates/check')).toHaveLength(0)
+  })
+
   it('checks now on request and shows what the daemon could not do', async () => {
     app()
     act(() => openUpdates())
+    // The check opening LoomWatch made, before the click's.
+    await waitFor(() => expect(calls('POST', '/api/updates/check')).toHaveLength(1))
     let finish: (response: Response) => void = () => {}
     routes['POST /api/updates/check'] = () => new Promise((resolve) => { finish = resolve })
     fireEvent.click(await screen.findByRole('button', { name: 'Check now' }))
@@ -174,14 +206,14 @@ describe('Updates', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The server is busy.')
   })
 
-  it('turns the daily check off and on, and says what it sends', async () => {
+  it('turns the check on opening off and on, and says what it sends', async () => {
     app()
     act(() => openUpdates())
-    const daily = await screen.findByRole('checkbox', { name: 'Check for new versions once a day' })
-    await waitFor(() => expect(daily).toBeChecked())
+    const onOpening = await screen.findByRole('checkbox', { name: 'Check for new versions each time LoomWatch opens' })
+    await waitFor(() => expect(onOpening).toBeChecked())
     expect(screen.getByText(/Nothing about you, your teams or your runs is sent/)).toBeInTheDocument()
-    fireEvent.click(daily)
-    await waitFor(() => expect(daily).not.toBeChecked())
+    fireEvent.click(onOpening)
+    await waitFor(() => expect(onOpening).not.toBeChecked())
     expect(JSON.parse(String(calls('PUT', '/api/updates/settings')[0][1].body))).toEqual({ automatic: false })
   })
 
@@ -189,9 +221,9 @@ describe('Updates', () => {
     serve({ ...upToDate, turnedOffBy: 'LOOMWATCH_UPDATE_CHECK', checkedAt: null, latest: null })
     app()
     act(() => openUpdates())
-    const daily = await screen.findByRole('checkbox', { name: 'Check for new versions once a day' })
-    await waitFor(() => expect(daily).toBeDisabled())
-    expect(daily).not.toBeChecked()
+    const onOpening = await screen.findByRole('checkbox', { name: 'Check for new versions each time LoomWatch opens' })
+    await waitFor(() => expect(onOpening).toBeDisabled())
+    expect(onOpening).not.toBeChecked()
     expect(screen.getByRole('button', { name: 'Check now' })).toBeDisabled()
     expect(screen.getByText(/Turned off on this computer by the LOOMWATCH_UPDATE_CHECK setting/)).toBeInTheDocument()
   })

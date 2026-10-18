@@ -1,9 +1,9 @@
-// New versions of LoomWatch (ADR 0052). The daemon asks GitHub once a day which release is the
-// newest; the app reads what it found. Installing is the launcher's: the operator runs the update
-// command in its terminal, or, for a ready-built copy whose launcher stays beside it, asks for
-// Update and restart here, and the launcher installs the release and starts LoomWatch again. The
-// Mac and Windows apps take the same hand-over: they download the release, put it in their own
-// place and open it.
+// New versions of LoomWatch (ADR 0052). Each time LoomWatch opens, the daemon asks GitHub which
+// release is the newest; the app reads what it found. Installing is the launcher's: the operator
+// runs the update command in its terminal, or, for a ready-built copy whose launcher stays beside
+// it, asks for Update and restart here, and the launcher installs the release and starts LoomWatch
+// again. The Mac and Windows apps take the same hand-over: they download the release, put it in
+// their own place and open it.
 import { useSyncExternalStore } from 'react'
 
 import { fetchAbout } from '../feedback/report'
@@ -32,7 +32,7 @@ export interface UpdateStatus {
   install: Install
   /** The command that updates this copy, such as `loomwatch update`. Null for `other`. */
   command: string | null
-  /** The daily check is on. */
+  /** LoomWatch asks GitHub each time it opens. */
   automatic: boolean
   /** The setting that turned every check off on this computer, which the app cannot change. */
   turnedOffBy: string | null
@@ -75,8 +75,8 @@ export async function fetchUpdateStatus(signal?: AbortSignal): Promise<UpdateSta
 }
 
 /** Ask GitHub now. The daemon answers with what it already has if it asked moments ago. */
-export async function checkForUpdates(): Promise<UpdateStatus> {
-  return answer(await daemonFetch('/api/updates/check', { method: 'POST' }))
+export async function checkForUpdates(signal?: AbortSignal): Promise<UpdateStatus> {
+  return answer(await daemonFetch('/api/updates/check', { method: 'POST', ...(signal ? { signal } : {}) }))
 }
 
 export async function saveUpdateSettings(settings: UpdateSettings): Promise<UpdateStatus> {

@@ -1,11 +1,12 @@
 //! New versions of `LoomWatch` (ADR 0052): whether one was released, what changed in it, and how
 //! to install it.
 //!
-//! Once a day, and again right after an update, the daemon asks GitHub for the newest published
-//! release and compares its version with its own. The request carries nothing about the operator:
+//! Each time `LoomWatch` opens, the daemon asks GitHub for the newest published release and
+//! compares its version with its own: once just after it starts, and again whenever a page of the
+//! app opens (it asks `POST /api/updates/check`). The request carries nothing about the operator:
 //! one `GET` naming this version in its `User-Agent`, plus the `ETag` of the answer already held,
 //! so an unchanged answer costs nothing against GitHub's hourly limit. The operator can turn the
-//! daily check off in the app, and `LOOMWATCH_UPDATE_CHECK=off` turns every check off on this
+//! check on opening off in the app, and `LOOMWATCH_UPDATE_CHECK=off` turns every check off on this
 //! computer.
 //!
 //! Installing is the launcher's job, or the desktop app's. In the terminal, `loomwatch update` stops
@@ -73,13 +74,10 @@ pub const EXIT_TO_UPDATE: i32 = 75;
 /// streams, before it exits anyway.
 pub const STOP_GRACE: Duration = Duration::from_secs(3);
 
-/// How often the daily check asks, and how soon it asks again after it could not.
-const CHECK_EVERY: Duration = Duration::from_hours(24);
-const RETRY_AFTER_FAILURE: Duration = Duration::from_hours(6);
-/// The first check waits until the daemon has started, and then wakes hourly to see if one is due.
-const FIRST_CHECK_AFTER: Duration = Duration::from_secs(30);
-const WAKE_EVERY: Duration = Duration::from_hours(1);
-/// "Check now" asks GitHub at most this often; a quicker click gets the answer just fetched.
+/// The check at start waits until the daemon has started.
+const START_CHECK_AFTER: Duration = Duration::from_secs(5);
+/// GitHub is asked at most this often; a quicker click, or a page opened just after another, gets
+/// the answer just fetched.
 const MANUAL_GAP: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// A release's JSON is a few kilobytes; anything near this is not an answer worth reading.
@@ -296,15 +294,13 @@ pub enum Install {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Saved {
-    /// The operator's choice: check once a day.
+    /// The operator's choice: check each time `LoomWatch` opens.
     automatic: bool,
     /// A version the operator chose not to be told about again. A newer one is told about.
     skipped: Option<String>,
     /// The last time GitHub answered, and the last time it was asked.
     checked_at: Option<DateTime<Utc>>,
     attempted_at: Option<DateTime<Utc>>,
-    /// The version that made the last attempt. `None` in a file saved before this was recorded.
-    checked_by: Option<String>,
     /// Why the last attempt failed, until one succeeds.
     error: Option<String>,
     latest: Option<Release>,
@@ -319,7 +315,6 @@ impl Default for Saved {
             skipped: None,
             checked_at: None,
             attempted_at: None,
-            checked_by: None,
             error: None,
             latest: None,
             etag: None,
@@ -336,7 +331,7 @@ pub struct Status {
     pub install: Install,
     /// The command that updates this copy, for a release or a copy of the source.
     pub command: Option<String>,
-    /// Whether the daily check is on.
+    /// Whether `LoomWatch` checks each time it opens.
     pub automatic: bool,
     /// The setting that turned every check off on this computer, which the app cannot change.
     pub turned_off_by: Option<&'static str>,
@@ -395,7 +390,7 @@ struct Inner {
     install: Install,
     command: Option<String>,
     saved: Mutex<Saved>,
-    /// One request at a time: a click and the daily check never both ask.
+    /// One request at a time: a click and the check on opening never both ask.
     checking: tokio::sync::Mutex<()>,
     /// The version last announced in the terminal, so each is announced once.
     announced: Mutex<Option<String>>,
@@ -580,34 +575,10 @@ impl Updates {
         self.inner.restart.borrow().is_some()
     }
 
-    /// Whether the daily check should ask now.
-    fn due(&self, now: DateTime<Utc>) -> bool {
-        if self.inner.turned_off_by.is_some() {
-            return false;
-        }
-        let saved = self.saved();
-        if !saved.automatic {
-            return false;
-        }
-        // Another version's answer, such as the one just updated from, can predate a release that
-        // came out since: ask at once rather than up to a day later.
-        let checked_by = saved.checked_by.as_deref().and_then(Version::parse);
-        if checked_by.as_ref() != Some(&self.inner.current) {
-            return true;
-        }
-        let Some(attempted_at) = saved.attempted_at else {
-            return true;
-        };
-        let wait = if saved.error.is_some() {
-            RETRY_AFTER_FAILURE
-        } else {
-            CHECK_EVERY
-        };
-        // A clock set back would otherwise postpone the next check by however far it moved.
-        attempted_at > now
-            || (now - attempted_at)
-                .to_std()
-                .is_ok_and(|elapsed| elapsed >= wait)
+    /// Whether `LoomWatch` asks GitHub each time it opens: the operator's choice, unless a
+    /// computer-wide setting turned every check off.
+    fn checks_on_open(&self) -> bool {
+        self.inner.turned_off_by.is_none() && self.saved().automatic
     }
 
     /// Ask GitHub now, unless a check just did. Waits for a check already under way.
@@ -634,7 +605,6 @@ impl Updates {
         {
             let mut saved = self.saved();
             saved.attempted_at = Some(now);
-            saved.checked_by = Some(self.inner.current.to_string());
             match outcome {
                 Ok(fetched) => {
                     if let Fetched::Release { release, etag } = fetched {
@@ -755,20 +725,23 @@ impl Updates {
         }
     }
 
-    /// Check once a day while the daemon runs, starting shortly after it starts.
-    pub fn spawn_checks(&self) {
+    /// Check shortly after the daemon starts, which is when `LoomWatch` opens. The app asks again
+    /// each time a page of it opens.
+    pub fn spawn_start_check(&self) {
         let updates = self.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(FIRST_CHECK_AFTER).await;
-            // What an earlier start found, said again: the next check may be most of a day away.
-            updates.announce();
-            loop {
-                if updates.due(Utc::now()) {
-                    updates.check().await;
-                }
-                tokio::time::sleep(WAKE_EVERY).await;
-            }
+            tokio::time::sleep(START_CHECK_AFTER).await;
+            updates.opened().await;
         });
+    }
+
+    /// `LoomWatch` opened: say again what an earlier start found, then ask GitHub, unless that
+    /// is turned off.
+    async fn opened(&self) {
+        self.announce();
+        if self.checks_on_open() {
+            self.check().await;
+        }
     }
 
     fn change(&self, change: SettingsChange) -> Result<(), ApiError> {
@@ -797,8 +770,8 @@ impl Updates {
             }
         }
         self.persist();
-        // Turned on after a long time off: check now rather than at the next hourly wake.
-        if change.automatic == Some(true) && self.due(Utc::now()) {
+        // Turned on: check now rather than the next time LoomWatch opens.
+        if change.automatic == Some(true) && self.checks_on_open() {
             let updates = self.clone();
             tokio::spawn(async move { updates.check().await });
         }
@@ -953,8 +926,9 @@ async fn get_status(State(updates): State<Updates>) -> Json<Status> {
     Json(updates.status())
 }
 
-/// A check the operator asked for. It asks even with the daily check off, since asking is the
-/// point of the click, but never when a computer-wide setting turned checks off.
+/// A check the operator asked for, or the app's as a page of it opens. It asks even with the check
+/// on opening off, since asking is the point of the click (the app asks on opening only when it is
+/// on), but never when a computer-wide setting turned checks off.
 async fn post_check(State(updates): State<Updates>) -> Result<Json<Status>, ApiError> {
     if let Some(setting) = updates.inner.turned_off_by {
         return Err(ApiError::new(
@@ -1355,7 +1329,6 @@ mod tests {
         let (github, url) = fake_github().await;
         github.answer(StatusCode::OK, Some("\"one\""), &release_json("v0.1.6"));
         let updates = updates(&url, None);
-        assert!(updates.due(Utc::now()), "never checked, so a check is due");
 
         updates.check().await;
         let status = updates.status();
@@ -1374,10 +1347,8 @@ mod tests {
                 .is_some_and(|agent| agent.starts_with("LoomWatch/0.1.5")),
             "GitHub wants a User-Agent, and it says only the version"
         );
-        assert!(!updates.due(Utc::now()), "checked just now");
 
         forget_last_attempt(&updates);
-        assert!(updates.due(Utc::now()), "a day later, a check is due again");
         updates.check().await;
         assert_eq!(github.requests(), 2);
         assert_eq!(
@@ -1412,7 +1383,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failures_are_explained_and_retried_sooner_without_losing_what_was_known() {
+    async fn failures_are_explained_without_losing_what_was_known() {
         let (github, url) = fake_github().await;
         github.answer(StatusCode::OK, Some("\"one\""), &release_json("v0.1.6"));
         let updates = updates(&url, None);
@@ -1436,60 +1407,44 @@ mod tests {
                 "a failed check keeps the release already known"
             );
         }
-
-        // Retried after hours, not the next day.
-        let now = Utc::now();
-        updates.saved().attempted_at = Some(now - chrono::Duration::hours(5));
-        assert!(!updates.due(now));
-        updates.saved().attempted_at = Some(now - chrono::Duration::hours(7));
-        assert!(updates.due(now));
-        // A clock set back does not postpone the check.
-        updates.saved().attempted_at = Some(now + chrono::Duration::days(3));
-        assert!(updates.due(now));
     }
 
     #[tokio::test]
-    async fn an_update_asks_again_at_once_instead_of_trusting_the_old_versions_answer() {
+    async fn each_opening_asks_github_however_recently_the_last_one_did() {
         let (github, url) = fake_github().await;
         let folder = TempDirectory::new();
         let file = folder.0.join("updates.json");
 
-        // 0.1.4 checked two hours ago and was the newest.
-        github.answer(StatusCode::OK, Some("\"old\""), &release_json("v0.1.4"));
-        let old = Updates::new(Options {
-            current: "0.1.4".to_owned(),
-            ..options(&url, Some(file.clone()))
-        });
-        old.check().await;
-        old.saved().attempted_at = Some(Utc::now() - chrono::Duration::hours(2));
-        old.persist();
-        assert!(!old.due(Utc::now()), "0.1.4 checked within the day");
+        // An hour ago, 0.1.5 was the newest.
+        github.answer(StatusCode::OK, Some("\"old\""), &release_json("v0.1.5"));
+        let first = updates(&url, Some(file.clone()));
+        first.opened().await;
+        assert!(!first.status().available);
+        first.saved().attempted_at = Some(Utc::now() - chrono::Duration::hours(1));
+        first.persist();
 
-        // Since then 0.1.6 came out, and the operator updated to 0.1.5.
+        // Since then 0.1.6 came out: opening LoomWatch again finds it at once.
         github.answer(StatusCode::OK, Some("\"new\""), &release_json("v0.1.6"));
-        let updated = updates(&url, Some(file.clone()));
-        assert!(!updated.status().available, "0.1.4's answer predates 0.1.6");
-        assert!(
-            updated.due(Utc::now()),
-            "another version's check is due at once"
-        );
-        updated.check().await;
-        assert!(updated.status().available);
+        let reopened = updates(&url, Some(file.clone()));
+        reopened.opened().await;
+        assert!(reopened.status().available);
         assert_eq!(github.requests(), 2);
 
-        let restarted = updates(&url, Some(file.clone()));
-        assert!(
-            !restarted.due(Utc::now()),
-            "this version checked within the day"
-        );
-        assert!(restarted.due(Utc::now() + chrono::Duration::days(1)));
+        // Opened again moments later, the answer just fetched stands.
+        let again = updates(&url, Some(file));
+        again.opened().await;
+        assert_eq!(github.requests(), 2);
 
-        // A file saved before the version was recorded counts as another version's.
-        let mut saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        assert_eq!(saved["checkedBy"], "0.1.5");
-        saved.as_object_mut().unwrap().remove("checkedBy");
-        std::fs::write(&file, saved.to_string()).unwrap();
-        assert!(updates(&url, Some(file)).due(Utc::now()));
+        // With the check on opening off, opening asks nothing.
+        again
+            .change(SettingsChange {
+                automatic: Some(false),
+                skipped: Skipped::Keep,
+            })
+            .unwrap();
+        forget_last_attempt(&again);
+        again.opened().await;
+        assert_eq!(github.requests(), 2);
     }
 
     #[tokio::test]
@@ -1549,10 +1504,7 @@ mod tests {
             status.latest.map(|latest| latest.version).as_deref(),
             Some("0.1.6")
         );
-        assert!(
-            !second.due(Utc::now() + chrono::Duration::days(30)),
-            "the daily check is off"
-        );
+        assert!(!second.checks_on_open(), "the check on opening is off");
 
         #[cfg(unix)]
         {
@@ -1664,7 +1616,7 @@ mod tests {
             install_error: None,
             install_blocked: None,
         });
-        assert!(!updates.due(Utc::now()));
+        updates.opened().await;
         let router = api(updates);
         let (status, body) = call(&router, "POST", "/api/updates/check", None).await;
         assert_eq!(status, StatusCode::CONFLICT);

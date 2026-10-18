@@ -571,7 +571,7 @@ and open it; it closes LoomWatch, puts the new version in its place, and opens i
 0.6.3 and older of the apps don't have **Update and restart**: update those once by hand. The rest
 of this section is about the Terminal install.
 
-LoomWatch checks once a day, and again right after you update, whether a newer release is out.
+Each time you open LoomWatch, it checks whether a newer release is out.
 When one is, Home shows **Update available** and the terminal running LoomWatch says so too. Click
 it to read what changed and how to install it; <kbd>⌘</kbd><kbd>K</kbd> → **Check for updates…**
 opens the same window at any time. Nothing is installed until you ask for it, in either of two ways:
@@ -602,8 +602,8 @@ version that kept the run history in Docker finds that history there, as the upd
 you ran since stays in the file. To install one particular release, run
 `LOOMWATCH_VERSION=v0.1.4 ~/LoomWatch/app/loomwatch update`.
 
-The daily check asks GitHub for the newest version number and sends nothing about you, your teams
-or your runs. Turn it off in the **Check for updates** window, or for good on this computer with
+The check asks GitHub for the newest version number and sends nothing about you, your teams or
+your runs. Turn it off in the **Check for updates** window, or for good on this computer with
 `LOOMWATCH_UPDATE_CHECK=off`. Running the install command again also updates LoomWatch, without
 the copy of the run history.
 
@@ -658,7 +658,7 @@ Manager under LoomWatch's name.
 | Install folder | `~/LoomWatch/app` | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_APP_DIR=~/Apps/LoomWatch bash` |
 | Version | The newest release | `curl -fsSL https://loomwatch.github.io/install.sh \| LOOMWATCH_VERSION=v0.1.0 bash` |
 | Copies of the run history saved by `update` | `~/LoomWatch/backups` | `LOOMWATCH_BACKUP_DIR=~/Backups/LoomWatch ~/LoomWatch/app/loomwatch update` |
-| Daily check for a newer version | On | `LOOMWATCH_UPDATE_CHECK=off ~/LoomWatch/app/loomwatch`, or turn it off in **Check for updates** |
+| Check for a newer version each time LoomWatch opens | On | `LOOMWATCH_UPDATE_CHECK=off ~/LoomWatch/app/loomwatch`, or turn it off in **Check for updates** |
 
 `loomwatch --no-open` starts without opening the browser, and `loomwatch help` lists everything.
 In PowerShell, set a setting for one start like this: `$env:LOOMWATCH_PORT=3001; loomwatch`.
