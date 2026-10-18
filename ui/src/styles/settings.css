@@ -125,26 +125,23 @@
   min-width: 280px;
 }
 .model-picker-pop .pop-list { padding: 0; max-height: 400px; }
-/* An on/off preference in a settings row: the track, then what it turns on. */
-.lw-settings-switch { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; user-select: none; }
-.lw-settings-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.lw-settings-switch-track { position: relative; flex: none; width: 26px; height: 15px; border-radius: 99px; background: var(--color-hairline); transition: background-color var(--t-quick) var(--ease-out); }
-.lw-settings-switch-track i { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 99px; background: var(--color-ink-3); box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: translate var(--t-quick) var(--ease-out), background-color var(--t-quick) var(--ease-out); }
-.lw-settings-switch input:checked + .lw-settings-switch-track { background: var(--color-accent-fill); }
-.lw-settings-switch input:checked + .lw-settings-switch-track i { translate: 11px 0; background: var(--color-panel-solid); }
-.lw-settings-switch input:focus-visible + .lw-settings-switch-track { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.lw-settings-switch input:disabled ~ * { opacity: .55; cursor: default; }
 
 /* The suggestion: a card of its own above the list, framed in the accent, so it reads apart from
-   the rows whether or not it is the model in use. The reading switch runs along its foot. */
+   the rows whether or not it is the model in use. How sure it is, and Sharpen, run along its foot. */
 .model-suggestion { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1); border: 1px solid color-mix(in srgb, var(--color-accent) 34%, transparent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
 .model-suggestion .model-group-head { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px var(--sp-2) 2px; color: var(--color-accent); }
-.model-reading { margin-top: 2px; padding: var(--sp-2) var(--sp-2) 6px; border-top: 1px solid var(--color-hairline); }
-.model-reading-switch { align-items: flex-start; }
-.model-reading-switch .lw-settings-switch-track { margin-top: 3px; }
-.model-reading-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.model-reading-text .t-meta { color: var(--color-ink-3); }
-.model-reading-text .t-meta.inline-error { color: var(--color-alert); }
+.model-sharpen { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; padding: var(--sp-2) var(--sp-2) 6px; border-top: 1px solid var(--color-hairline); }
+.model-sharpen p { margin: 0; }
+.model-sharpen-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-height: 26px; }
+.model-sharpen-line .t-meta { color: var(--color-ink-2); }
+.model-sharpen-line .t-meta.inline-error { color: var(--color-alert); flex: 1 1 200px; }
+/* How sure the suggestion is: four short bars, lit in the accent as it is read. */
+.model-sureness { display: inline-flex; gap: 3px; }
+.model-sureness i { width: 12px; height: 5px; border-radius: 3px; background: var(--color-hairline); transition: background-color var(--t-quick) var(--ease-out); }
+.model-sureness i.on { background: var(--color-accent); }
+.model-sharpen-button { margin-left: auto; height: 26px; gap: 6px; color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.model-sharpen-hint { color: var(--color-ink-3); }
+.model-sharpen-auto { display: inline-flex; align-items: center; gap: 6px; color: var(--color-ink-2); cursor: pointer; }
 
 /* "Suggested for this agent" and the rest, each under a small heading. */
 .model-group { display: flex; flex-direction: column; gap: 2px; }

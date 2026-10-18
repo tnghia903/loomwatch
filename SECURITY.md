@@ -87,9 +87,10 @@ LoomWatch does about that, so you can judge it for yourself.
   apps' skill folders only when you click it, and reads nothing there but skill folders.
 - **Collect nothing about you.** LoomWatch has no account and no telemetry. It contacts only:
   - OpenRouter, for the model calls your agents and Ask make, to check your key, and for its
-    public list of models. Once you turn on **More accurate suggestion** in an agent's model list
-    (it is off until you do), OpenRouter is also asked to read an agent whose job its name and
-    instructions don't make plain, when you open its model list.
+    public list of models. When you tap **Sharpen** under an agent's suggestion in its model
+    list, OpenRouter is also asked to read that agent; once you tick **Sharpen every unclear agent
+    on its own** (off until you do), it reads any agent whose job its name and instructions don't
+    make plain, when you open its model list.
     What is sent is that agent's name, instructions and Done when, and the names of its skills,
     tools and what it reads. Its instructions go as written, so anything they mention goes too.
     The reading model is TypeSafe's Jev;

@@ -8,7 +8,8 @@
 //! operator's own key: which kind of work the agent does. Each reading costs a little of their
 //! credit, so:
 //!
-//! - it is off until the operator turns it on, and every reading is refused while it is off;
+//! - the operator asks for one agent's reading by tapping Sharpen under its suggestion, or turns
+//!   on reading every unclear agent on its own; with that off, nothing is read unasked;
 //! - a setup is read once: the answer is kept in the state folder under a hash of exactly what was
 //!   sent, so the same agent in another team, or its picker opened again, costs nothing;
 //! - one reading at a time, so two pickers open on the same agent pay once;
@@ -20,7 +21,9 @@
 //!
 //! - `GET /api/models/reading` says whether it is on, how many setups it read and what that cost.
 //! - `PUT /api/models/reading` turns it on or off.
-//! - `POST /api/models/reading` reads one setup, or answers from what was kept.
+//! - `POST /api/models/reading` reads one setup, or answers from what was kept. `ask` says who
+//!   asked: `auto` (the default) only while reading on its own is on, `once` for a tap on Sharpen,
+//!   whether or not it is, and `kept` only looks at what was kept and never calls.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -311,6 +314,19 @@ fn cost_of(body: &Value) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Who asked for a reading, which decides whether one may be called for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Ask {
+    /// The app, on its own: only while reading every unclear agent on its own is on.
+    #[default]
+    Auto,
+    /// The operator, for this agent: a tap on Sharpen, whether or not that is on.
+    Once,
+    /// Only what was kept: free, so whether or not it is on, and never a call.
+    Kept,
+}
+
 /// Why a reading was not had, as the app reads it: `code` says which, `error` says it in words.
 #[derive(Debug)]
 pub(crate) struct Refusal {
@@ -332,7 +348,7 @@ impl Refusal {
         Self::new(
             StatusCode::CONFLICT,
             "off",
-            "Reading agents’ setups is off. Turn on More accurate suggestion in an agent’s model list.",
+            "Reading every unclear agent on its own is off. Tap Sharpen under an agent’s suggestion to read that one.",
         )
     }
 
@@ -489,15 +505,16 @@ impl Reader {
             Some(Instant::now() + REST_AFTER_FAILURE);
     }
 
-    /// Reads `setup`: the kept answer when there is one, else one call. Whether it came from what
-    /// was kept is the second value.
+    /// Reads `setup`: the kept answer when there is one, else one call, as `ask` allows. Whether it
+    /// came from what was kept is the second value.
     pub(crate) async fn read(
         &self,
         client: Option<&reqwest::Client>,
         key: impl AsyncFnOnce() -> anyhow::Result<Option<ApiKey>>,
         setup: &Setup,
+        ask: Ask,
     ) -> Result<(Reading, bool), Refusal> {
-        if !self.saved().enabled {
+        if ask == Ask::Auto && !self.saved().enabled {
             return Err(Refusal::off());
         }
         if setup.instructions.trim().is_empty() {
@@ -512,6 +529,13 @@ impl Reader {
         let _turn = self.inner.turn.lock().await;
         if let Some(kept) = self.kept().readings.get(&key_of_state) {
             return Ok((kept.reading.clone(), true));
+        }
+        if ask == Ask::Kept {
+            return Err(Refusal::new(
+                StatusCode::NOT_FOUND,
+                "not_kept",
+                "This setup hasn't been read yet.",
+            ));
         }
         if self.resting() {
             return Err(Refusal::new(
@@ -544,11 +568,11 @@ impl Reader {
                 "This computer can't make HTTPS requests.",
             ));
         };
-        // The call is counted before it is made, so one that fails counts too. Reading may have been
-        // turned off while the key was looked up: then nothing is called.
+        // The call is counted before it is made, so one that fails counts too. Reading on its own may
+        // have been turned off while the key was looked up: then the app's own ask calls nothing.
         let mut refused = None;
         self.update(|saved| {
-            if !saved.enabled {
+            if ask == Ask::Auto && !saved.enabled {
                 refused = Some(Refusal::off());
                 return false;
             }
@@ -652,6 +676,8 @@ pub(super) async fn change(
 #[derive(Deserialize)]
 pub(super) struct ReadRequest {
     setup: Setup,
+    #[serde(default)]
+    ask: Ask,
 }
 
 pub(super) async fn read(
@@ -665,6 +691,7 @@ pub(super) async fn read(
             ai.inner.client.as_ref(),
             async || ai.openrouter_key().await,
             &request.setup,
+            request.ask,
         )
         .await?;
     Ok(Json(json!({"reading": reading, "kept": kept})))
@@ -915,6 +942,7 @@ mod tests {
                     Ok(ApiKey::new("sk-or-v1-good"))
                 },
                 &setup,
+                Ask::Auto,
             )
             .await
             .unwrap_err();
@@ -923,6 +951,43 @@ mod tests {
         let status = reader.status();
         assert!(!status.enabled);
         assert_eq!(status.today, 0);
+    }
+
+    #[tokio::test]
+    async fn a_tap_on_sharpen_reads_one_setup_while_reading_on_its_own_is_off() {
+        let state = folder();
+        let (url, calls, _) = fake_decisions(StatusCode::OK, gathers()).await;
+        let app = app_with(&url, &state.0, Some("sk-or-v1-good")).await;
+        let mut kept_only = gatherer();
+        kept_only["ask"] = json!("kept");
+        let mut once = gatherer();
+        once["ask"] = json!("once");
+
+        // A look at what was kept is free and calls nothing; the app's own ask is refused.
+        let (status, body) = send(&app, "POST", Some(kept_only.clone())).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "not_kept");
+        let (status, body) = send(&app, "POST", Some(gatherer())).await;
+        assert_eq!(body["code"], "off", "{status}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        // The tap reads it, once, and counts it.
+        let (status, body) = send(&app, "POST", Some(once.clone())).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["kept"], false);
+        assert_eq!(body["reading"]["kind"], "gather");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let (_, body) = send(&app, "GET", None).await;
+        assert_eq!(body["enabled"], false);
+        assert_eq!(body["readings"], 1);
+
+        // Opened again, it is answered from what was kept, still with nothing called.
+        let (status, body) = send(&app, "POST", Some(kept_only)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["kept"], true);
+        let (_, body) = send(&app, "POST", Some(once)).await;
+        assert_eq!(body["kept"], true);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

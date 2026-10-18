@@ -36,7 +36,7 @@ export interface ModelSuggestionInput {
 }
 
 const maker = (id: string) => id.split('/')[0] ?? ''
-const READ = 'Its whole setup says'
+const READ = 'Its configuration says'
 
 export function suggestModel({ agent, team, reading }: ModelSuggestionInput): ModelSuggestion {
   const named = modelNameFromId
