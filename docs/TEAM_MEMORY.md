@@ -15,7 +15,7 @@ Four losses, each a line in the tree rather than a hypothesis.
 | Delegated helpers start blind | `team_bus.rs::run_agent_inner` | Its `role`, its wired skills, and the one string its caller typed into `dispatch`/`ask`. No goal, no constraints, no findings so far. It also skipped `workspace::materialise`, so it got no delivered capabilities either. |
 | Pipeline stages only see one hop back | `lib.rs::run_pipeline_nodes` | The original prompt plus the handover its direct predecessor wrote. Stage 3 never sees what stage 1 decided unless stage 2 restated it. |
 | Nothing survives the run | `migrations/`, `runs.rs` | The only table was append-only `run_events`; the run registry is in memory. |
-| Long sessions are summarised | `agent/session.rs::compact` | Near the model's context limit, the agent's conversation is replaced by a summary the model writes. Only its instructions and its current task are kept word for word. |
+| Long sessions are summarised | `agent/session.rs::compact` | Near the model's context limit, or at 160k tokens on a larger one, the agent's conversation is replaced by a summary the model writes. Only its instructions and its current task are kept word for word. |
 
 Two existing mechanisms point the way and are reused rather than duplicated. Pipelines stopped
 pasting transcripts between stages and instead asks the producing stage, in its still-warm

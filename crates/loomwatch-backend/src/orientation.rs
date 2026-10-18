@@ -117,11 +117,20 @@ pub fn for_stage(
             "\nAfter you: {}, which checks your reply as you write it against what it must satisfy.",
             names(&after, ids)
         );
-    } else if !after.is_empty() {
+    } else if !after.is_empty() && after.iter().any(|next| next.is_operator()) {
         let _ = write!(
             text,
             "\nAfter you: {}. When your work is done you will be asked for a handover, and that \
              handover is all they receive — they do not see this conversation.",
+            names(&after, ids)
+        );
+    } else if !after.is_empty() {
+        // A short reply is handed on as written, and a long one is summarised in a handover first
+        // (`reply_is_its_own_handover` in lib.rs).
+        let _ = write!(
+            text,
+            "\nAfter you: {}. They receive your reply as you write it, or, when it runs long, a \
+             shorter handover you will be asked for. They do not see this conversation.",
             names(&after, ids)
         );
     }
@@ -136,7 +145,7 @@ pub fn for_stage(
         let _ = write!(
             text,
             "
-You check {}'s work: it is in the sections above the task, with what it must              satisfy. {CHECK_BLOCK}",
+You check {}'s work: it is in the sections above the task, with what it must satisfy. {CHECK_BLOCK}",
             checked.name
         );
     }
@@ -321,7 +330,7 @@ fn sentence_list<T: AsRef<str>>(items: &[T]) -> String {
 }
 
 /// The first line of a role, cut on a character boundary.
-fn role_summary(role: &str) -> String {
+pub(crate) fn role_summary(role: &str) -> String {
     let line = role.lines().map(str::trim).find(|line| !line.is_empty());
     let Some(line) = line else {
         return String::new();
@@ -391,7 +400,13 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("After you: Writer (`write`)."), "{text}");
-        assert!(text.contains("they do not see this conversation"));
+        assert!(
+            text.contains(
+                "They receive your reply as you write it, or, when it runs long, a \
+                           shorter handover"
+            ) && text.contains("They do not see this conversation."),
+            "{text}"
+        );
         assert!(
             !text.contains("final answer"),
             "only the responder writes the answer: {text}"

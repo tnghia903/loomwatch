@@ -380,14 +380,224 @@ async fn a_full_context_is_summarised_and_the_task_kept() {
     let end = session.prompt("The task.").await.unwrap();
     assert_eq!(end.reply, "Finished.");
     let requests = demo.requests();
-    // The summary was asked for without tools, then the work carried on from it.
-    assert!(requests[1].tools.is_empty());
+    // The summary was asked for with the work's own tools, so the provider read the conversation
+    // from its cache, then the work carried on from it.
+    assert!(!requests[1].tools.is_empty());
+    assert_eq!(requests[1].tools, requests[0].tools);
+    assert_eq!(requests[1].messages.len(), requests[0].messages.len() + 3);
     let after = &requests[2].messages;
     assert_eq!(after.len(), 2);
     let Message::User { content } = &after[1] else {
         panic!("the summary should stand in for the conversation");
     };
     assert!(content.contains("Summary: listed the folder.") && content.contains("The task."));
+}
+
+/// A model that calls a tool instead of writing its summary is asked once more with no tools, and
+/// the conversation is replaced only by a summary that says something.
+#[tokio::test]
+async fn a_summary_written_as_a_tool_call_is_asked_for_again_without_tools() {
+    let folder = Folder::new();
+    let mut busy = Completion::calls("", vec![call("l", "list_files", &json!({}))]);
+    busy.usage = Usage {
+        input_tokens: 900,
+        ..Usage::default()
+    };
+    let demo = Demo::scripted(vec![
+        busy,
+        Completion::calls("", vec![call("again", "list_files", &json!({}))]),
+        Completion::text("Summary: listed the folder."),
+        Completion::text("Finished."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.context_window = Some(1000);
+    config.tools = ToolSet::all(true);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    assert_eq!(
+        session.prompt("The task.").await.unwrap().reply,
+        "Finished."
+    );
+    let requests = demo.requests();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[1].tools, requests[0].tools);
+    assert_eq!(requests[1].server_tools, requests[0].server_tools);
+    assert!(requests[0].server_tools.web_search);
+    assert!(requests[2].tools.is_empty() && !requests[2].server_tools.web_search);
+    let Message::User { content } = &requests[3].messages[1] else {
+        panic!("the summary should stand in for the conversation");
+    };
+    assert!(content.contains("Summary: listed the folder."));
+}
+
+/// A model with a million-token context is summarised at the same size as a 200k one, not left
+/// to fill its whole context with every call reading all of it again.
+#[tokio::test]
+async fn a_huge_context_is_summarised_at_the_cap_not_at_its_end() {
+    let folder = Folder::new();
+    let mut busy = Completion::calls("", vec![call("l", "list_files", &json!({}))]);
+    busy.usage = Usage {
+        cached_read_tokens: 165_000,
+        ..Usage::default()
+    };
+    let demo = Demo::scripted(vec![
+        busy,
+        Completion::text("Summary: listed the folder."),
+        Completion::text("Finished."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.context_window = Some(1_000_000);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    assert_eq!(
+        session.prompt("The task.").await.unwrap().reply,
+        "Finished."
+    );
+    let requests = demo.requests();
+    assert!(
+        requests[1].prompt().contains("Write a summary"),
+        "{}",
+        requests[1].prompt()
+    );
+    assert_eq!(requests[2].messages.len(), 2);
+}
+
+/// The tool list leads the prompt the provider caches, so it is the same on every call, even once
+/// a long output was set aside and `read_tool_output` has something to read.
+#[tokio::test]
+async fn the_tools_offered_never_change_within_a_session() {
+    let folder = Folder::new();
+    let long = "a line of the long file\n".repeat(2_000);
+    std::fs::write(folder.0.join("big.txt"), &long).unwrap();
+    let demo = Demo::scripted(vec![
+        Completion::calls(
+            "",
+            vec![call("big", "read_file", &json!({"path": "big.txt"}))],
+        ),
+        Completion::calls(
+            "",
+            vec![call("more", "read_tool_output", &json!({"id": "big"}))],
+        ),
+        Completion::text("Read it."),
+    ]);
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    session.prompt("Read big.txt").await.unwrap();
+    let requests = demo.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].tools.contains(&"read_tool_output".to_owned()));
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.tools == requests[0].tools)
+    );
+    let Some(Message::Tool { content, .. }) = requests[2].messages.last() else {
+        panic!("the second read's result should be last");
+    };
+    assert!(!content.contains("No set-aside output"), "{content}");
+}
+
+fn cut_off(content: &str) -> Completion {
+    Completion {
+        finish: Finish::Length,
+        ..Completion::text(content)
+    }
+}
+
+/// A reply the length limit cut off is carried on, and the parts join as the model wrote them,
+/// rather than the next stage being handed half a sentence.
+#[tokio::test]
+async fn a_reply_cut_off_at_the_length_limit_is_carried_on() {
+    let folder = Folder::new();
+    let demo = Demo::scripted(vec![
+        cut_off("The quick bro"),
+        Completion::text("wn fox jumps."),
+    ]);
+    let mut writer = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    let end = writer.prompt("Write a sentence.").await.unwrap();
+    assert_eq!(end.stop_reason, StopReason::EndTurn);
+    assert_eq!(end.reply, "The quick brown fox jumps.");
+    assert!(
+        demo.requests()[1]
+            .prompt()
+            .contains("Carry on from exactly where it stopped")
+    );
+
+    // Cut off again and again, the turn ends there instead of paying for more.
+    let demo = Demo::scripted(vec![
+        cut_off("One. "),
+        cut_off("Two. "),
+        cut_off("Three. "),
+        Completion::text("Never asked for."),
+    ]);
+    let mut counter = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    let end = counter.prompt("Count.").await.unwrap();
+    assert_eq!(end.stop_reason, StopReason::MaxTokens);
+    assert_eq!(end.reply, "One. Two. Three.");
+    assert_eq!(demo.requests().len(), 3);
+}
+
+/// A tool call the length limit cut off doesn't run, and the model is told why, so it makes the
+/// call smaller instead of the same call again.
+#[tokio::test]
+async fn a_tool_call_cut_off_at_the_length_limit_is_sent_back_with_the_reason() {
+    let folder = Folder::new();
+    let mut cut = Completion::calls(
+        "",
+        vec![
+            call("list", "list_files", &json!({})),
+            ToolCall {
+                id: "write".into(),
+                name: "write_file".into(),
+                arguments: "{\"path\":\"a.md\",\"content\":\"a very long docu".into(),
+            },
+        ],
+    );
+    cut.finish = Finish::Length;
+    let demo = Demo::scripted(vec![cut, Completion::text("Done.")]);
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    assert_eq!(session.prompt("Write a.md").await.unwrap().reply, "Done.");
+    let results: Vec<String> = demo.requests()[1]
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .collect();
+    // The finished call ran; the cut one says why it didn't.
+    assert!(!results[0].contains("Not run"), "{}", results[0]);
+    assert!(results[1].contains("length limit"), "{}", results[1]);
+    assert!(!folder.0.join("a.md").exists());
 }
 
 #[tokio::test]
@@ -547,6 +757,15 @@ async fn openrouter_streams_tool_calls_reasoning_and_the_exact_cost() {
     );
     assert_eq!(bodies[1]["messages"][3]["content"], "     1\thello\n");
     assert_eq!(bodies[0]["cache_control"], json!({"type": "ephemeral"}));
+    // What the provider caches is the same from call to call: the tools, the instructions, and
+    // the session that keeps the calls on one route.
+    assert_eq!(bodies[0]["tools"], bodies[1]["tools"]);
+    assert_eq!(bodies[0]["messages"][0], bodies[1]["messages"][0]);
+    assert_eq!(bodies[0]["session_id"], bodies[1]["session_id"]);
+    assert_eq!(
+        bodies[0]["tools"].as_array().unwrap().last().unwrap()["function"]["name"],
+        "read_tool_output"
+    );
     assert!(
         stand
             .auth
@@ -627,6 +846,62 @@ async fn openrouter_refusals_read_plainly_and_busy_answers_are_retried() {
     );
     assert_eq!(busy.prompt("Hi").await.unwrap().reply, "Hello.");
     assert_eq!(stand.bodies.lock().unwrap().len(), 3);
+}
+
+/// `OpenRouter` reports a busy model inside a stream it already answered `200` for. Before the
+/// model's first word that is tried again like any busy answer; after it, a retry would write the
+/// words twice, so it is not.
+#[tokio::test]
+async fn openrouter_retries_a_busy_model_reported_before_its_first_word() {
+    let folder = Folder::new();
+    let overloaded = || {
+        ok(&[
+            json!({"error": {"code": 503, "message": "Upstream error from Nvidia: Service temporarily overloaded"}}),
+        ])
+    };
+    let (first, base) = stand(vec![
+        overloaded(),
+        ok(&[json!({"choices": [{"index": 0, "delta": {"content": "Hello."}, "finish_reason": "stop"}]})]),
+    ])
+    .await;
+    let mut busy = session(
+        &folder,
+        openrouter(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    assert_eq!(busy.prompt("Hi").await.unwrap().reply, "Hello.");
+    assert_eq!(first.bodies.lock().unwrap().len(), 2);
+
+    // Busy on every try: it gives up after the same four tries as any busy answer.
+    let (always, base) = stand((0..6).map(|_| overloaded()).collect()).await;
+    let mut gone = session(
+        &folder,
+        openrouter(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    let said = gone.prompt("Hi").await.unwrap_err();
+    assert!(said.to_string().contains("overloaded"), "{said}");
+    assert_eq!(always.bodies.lock().unwrap().len(), 4);
+
+    // Part way through the reply, the error ends the call.
+    let (late, base) = stand(vec![
+        ok(&[
+            json!({"choices": [{"index": 0, "delta": {"content": "Hel"}}]}),
+            json!({"error": {"code": 503, "message": "Service temporarily overloaded"}}),
+        ]),
+        ok(&[json!({"choices": [{"index": 0, "delta": {"content": "Hello."}, "finish_reason": "stop"}]})]),
+    ])
+    .await;
+    let mut midway = session(
+        &folder,
+        openrouter(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    assert!(midway.prompt("Hi").await.is_err());
+    assert_eq!(late.bodies.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

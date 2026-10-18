@@ -66,7 +66,17 @@ pub(crate) fn system_prompt(
         prompt.push_str(
             "- For work with several steps, start by writing a short plan with update_plan, and \
              keep it current as you go: mark a step in_progress when you start it and completed \
-             when it is done.\n",
+             when it is done. Send update_plan in the same message as the step's other tool \
+             calls, not in a message of its own.\n",
+        );
+    }
+    if abilities.files || abilities.commands || abilities.web || abilities.plan {
+        // Every message re-reads the whole conversation, so one message asking for five things
+        // costs far less than five messages asking for one each.
+        prompt.push_str(
+            "- When you need several things that don't depend on each other, such as files to \
+             read or searches to run, ask for all of them in one message instead of one at a \
+             time.\n",
         );
     }
     if abilities.files {
@@ -166,6 +176,9 @@ mod tests {
         };
         let working = system_prompt(Path::new("/w"), all, &[], Some("Cite every source."), None);
         assert!(working.contains("update_plan") && working.contains("Your work folder is /w"));
+        assert!(working.contains("in the same message as the step's other tool calls"));
+        assert!(working.contains("ask for all of them in one message"));
+        assert!(!talking.contains("in one message"));
         assert!(working.contains("ask_user"));
         assert!(working.contains("From AGENTS.md in your work folder:\n\nCite every source.\n"));
     }

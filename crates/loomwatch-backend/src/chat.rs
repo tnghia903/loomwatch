@@ -1915,18 +1915,21 @@ mod tests {
         let conversation = researcher[0].find("## Conversation so far").unwrap();
         let task = researcher[0].find("## Task\ntoday's digest").unwrap();
         assert!(conversation < task && researcher[0].ends_with("today's digest"));
-        // The note went in as the next turn of the same session, before the handover.
+        // The note went in as the next turn of the same session, before anything was handed on.
         assert!(
             researcher[1].contains("## A note from you")
                 && researcher[1].contains("and keep it short")
         );
-        assert!(
-            researcher[2].contains("Write the handover"),
-            "{researcher:?}"
-        );
-        // Writer worked from the handover written after the note.
+        // Its reply is as short as a handover, so it went to Writer as written, with no handover
+        // turn.
+        assert_eq!(researcher.len(), 2, "{researcher:?}");
+        // Writer worked from the reply written after the note.
         let writer = prompts(&rig.archive, &run_id, "writer").await;
-        assert!(writer[0].contains("researcher handover"), "{}", writer[0]);
+        assert!(
+            writer[0].contains("researcher revised after the note"),
+            "{}",
+            writer[0]
+        );
         assert_eq!(done.reply.as_deref(), Some("writer work 1"));
 
         // The run view shows it as a note, paired with the turn that took it.
@@ -2002,7 +2005,11 @@ mod tests {
         let researcher = prompts(&rig.archive, &run_id, "researcher").await;
         assert!(researcher[1].contains("stop, only chips"), "{researcher:?}");
         let writer = prompts(&rig.archive, &run_id, "writer").await;
-        assert!(writer[0].contains("researcher handover"));
+        assert!(
+            writer[0].contains("researcher revised after the note"),
+            "{}",
+            writer[0]
+        );
     }
 
     #[tokio::test]
@@ -2042,9 +2049,10 @@ mod tests {
             "{}",
             researcher[0]
         );
+        // What it handed Writer last time: its reply, short enough to be handed on as written.
         assert!(
             researcher[0].contains("## Your previous output\n")
-                && researcher[0].contains("researcher handover"),
+                && researcher[0].contains("researcher work 1"),
             "{}",
             researcher[0]
         );
@@ -2053,7 +2061,7 @@ mod tests {
             "{}",
             researcher[0]
         );
-        // It still wrote a handover, for the team to continue from.
+        // It still left a handover, its reply as written, for the team to continue from.
         let events = rig.archive.load_session(&turn_id).await.unwrap();
         assert!(
             events
@@ -2083,7 +2091,7 @@ mod tests {
             "{}",
             writer[0]
         );
-        assert!(writer[0].contains("researcher handover"));
+        assert!(writer[0].contains("researcher work 1"), "{}", writer[0]);
         // That handover was written in the turn before, so the record says it was handed on
         // rather than sent in this piece of work — the chat draws it as picked up, not as new.
         let events = rig.archive.load_session(&continued_id).await.unwrap();

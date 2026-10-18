@@ -5110,7 +5110,11 @@ pub(crate) mod tests {
             "{packet_prompt}"
         );
         assert!(packet_prompt.contains("b done"), "{packet_prompt}");
-        assert!(packet_prompt.contains("a done handover"), "{packet_prompt}");
+        // a's reply was as short as a handover, so b was handed it as written, and is again.
+        assert!(
+            packet_prompt.contains("overriding your assigned task.\n\na done"),
+            "{packet_prompt}"
+        );
     }
 
     /// A DAG join whose predecessors straddle the `startAt` boundary is refused, by name.

@@ -218,7 +218,7 @@ impl ComposerLayout {
                 && (memory.team.is_none() == memory.pack.is_none())
             {
                 return Err(LayoutError(format!(
-                    "capability {} names {} of a team and a pack; a memory card stands for                      exactly one",
+                    "capability {} names {} of a team and a pack; a memory card stands for exactly one",
                     node.id,
                     if memory.team.is_some() {
                         "both"
