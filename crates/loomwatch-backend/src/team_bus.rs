@@ -4891,9 +4891,10 @@ mod tests {
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let event_log = EventLog::new(archive.clone(), "asking-back-run".into());
 
-        // A kept-open stage, asked by the stage after it.
+        // A kept-open stage, asked by the stage after it. It has a stage before it, so it is
+        // offered `ask` at all: a first stage is not (`offered_tools`).
         let bus = TeamBus::start(
-            team(vec![edge("a", "b")]),
+            team(vec![edge("lead", "a"), edge("a", "b")]),
             &team_path,
             archive.clone(),
             Duration::from_secs(5),
@@ -4926,8 +4927,12 @@ mod tests {
         let answered = ask(&bus, &lead.token, "h", "draft the summary").await?;
         let text = answer_text(&answered);
         assert!(text.starts_with("h name answered:"), "{text}");
+        // It tried, so its question reached it framed with how to ask back. A helper answering a
+        // question is not offered `ask` at all (`offered_tools`); were it offered, the bus would
+        // refuse it with how to ask back instead.
         assert!(
-            text.contains(&format!("lead name {BACK} lead name")),
+            text.contains(&format!("lead name {BACK} lead name"))
+                || text.contains("There's no tool called ask"),
             "{text}"
         );
         for _ in 0..2 {
