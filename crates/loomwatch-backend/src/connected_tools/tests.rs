@@ -22,6 +22,8 @@ enum Guard {
     Open,
     Token,
     SignIn,
+    /// Signs in like `SignIn`, but its metadata names no scopes it needs.
+    SignInNamingNoScopes,
 }
 
 #[derive(Clone)]
@@ -46,7 +48,7 @@ impl Fake {
         match self.guard {
             Guard::Open => None,
             Guard::Token => Some(TOKEN.to_owned()),
-            Guard::SignIn => Some(
+            Guard::SignIn | Guard::SignInNamingNoScopes => Some(
                 self.issued
                     .lock()
                     .unwrap()
@@ -95,7 +97,7 @@ async fn mcp(State(fake): State<Fake>, headers: HeaderMap, Json(message): Json<V
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix("Bearer "));
         if sent != Some(expected.as_str()) {
-            let challenge = if fake.guard == Guard::SignIn {
+            let challenge = if matches!(fake.guard, Guard::SignIn | Guard::SignInNamingNoScopes) {
                 format!(
                     "Bearer realm=\"OAuth\", resource_metadata=\"{}/.well-known/oauth-protected-resource/mcp\"",
                     fake.base()
@@ -146,16 +148,16 @@ async fn mcp(State(fake): State<Fake>, headers: HeaderMap, Json(message): Json<V
 }
 
 async fn protected_resource(State(fake): State<Fake>) -> Response {
-    if fake.guard != Guard::SignIn {
-        return StatusCode::NOT_FOUND.into_response();
-    }
     let base = fake.base();
-    Json(json!({"resource": format!("{base}/mcp"), "authorization_servers": [base]}))
-        .into_response()
+    match fake.guard {
+        Guard::SignIn => Json(json!({"resource": format!("{base}/mcp"), "authorization_servers": [base], "scopes_supported": ["issues:read"]})).into_response(),
+        Guard::SignInNamingNoScopes => Json(json!({"resource": format!("{base}/mcp"), "authorization_servers": [base]})).into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn authorization_server(State(fake): State<Fake>) -> Response {
-    if fake.guard != Guard::SignIn {
+    if !matches!(fake.guard, Guard::SignIn | Guard::SignInNamingNoScopes) {
         return StatusCode::NOT_FOUND.into_response();
     }
     let base = fake.base();
@@ -168,6 +170,8 @@ async fn authorization_server(State(fake): State<Fake>) -> Response {
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
+        // More than the tool needs, as Todoist's server offers: LoomWatch must not ask for it all.
+        "scopes_supported": ["issues:read", "issues:write", "billing:admin", "offline_access"],
     }))
     .into_response()
 }
@@ -387,6 +391,11 @@ async fn signs_in_through_the_tools_own_site() {
     };
     assert_eq!(param("client_id").as_deref(), Some("client-1"));
     assert_eq!(param("code_challenge_method").as_deref(), Some("S256"));
+    // Only what the tool names, plus a refresh token: never all its sign-in server could grant.
+    assert_eq!(
+        param("scope").as_deref(),
+        Some("issues:read offline_access")
+    );
     assert_eq!(
         param("redirect_uri").as_deref(),
         Some("http://127.0.0.1:3000/api/tools/sign-in/callback")
@@ -442,6 +451,29 @@ async fn signs_in_through_the_tools_own_site() {
     )
     .await;
     assert!(page.as_str().unwrap().contains("This sign-in has ended"));
+}
+
+/// A tool that names no scopes is signed in to with none asked for, never with every scope its
+/// sign-in server offers (least privilege).
+#[tokio::test]
+async fn a_tool_naming_no_scopes_asks_for_none() {
+    let (base, _fake) = start(Guard::SignInNamingNoScopes).await;
+    let folder = Folder::new();
+    let app = router(Tools::for_tests(&folder.0));
+    let (status, body) = ask(
+        &app,
+        "POST",
+        "/api/tools",
+        Some(json!({"url": format!("{base}/mcp")})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["needs"], "signIn");
+    let consent = url::Url::parse(body["url"].as_str().unwrap()).unwrap();
+    assert!(
+        !consent.query_pairs().any(|(key, _)| key == "scope"),
+        "{consent}"
+    );
 }
 
 #[tokio::test]

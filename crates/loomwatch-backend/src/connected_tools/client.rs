@@ -83,10 +83,10 @@ pub(super) async fn hello(http: &reqwest::Client, url: &str) -> Result<Hello, St
         return Ok(Hello::Challenge(challenge));
     }
     Err(match status.as_u16() {
-        403 => "That server refused LoomWatch. If the service lists approved apps, ask its admin to allow LoomWatch.".to_owned(),
-        404 | 405 | 406 | 415 => "That address doesn't answer as a tool server (MCP). Use the MCP address the service gives, which often ends in /mcp.".to_owned(),
-        429 => "That server is busy. Wait a minute and try again.".to_owned(),
-        _ => format!("That server answered with an error ({status}). Try again shortly."),
+        403 => "That tool refused LoomWatch. If the service lists approved apps, ask its admin to allow LoomWatch.".to_owned(),
+        404 | 405 | 406 | 415 => "That address isn't a tool's address. Use the one the service lists as its “MCP server” address, which often ends in /mcp.".to_owned(),
+        429 => "That tool is busy. Wait a minute and try again.".to_owned(),
+        _ => format!("That tool answered with an error ({status}). Try again shortly."),
     })
 }
 

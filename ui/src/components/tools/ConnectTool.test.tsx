@@ -94,10 +94,22 @@ describe('connecting a tool (ADR 0069)', () => {
     landing.close()
   })
 
+  it('shows the starter list under its headings, each with something to try', () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no daemon'))))
+    const grouped: CatalogEntry[] = [
+      { name: 'Kiwi.com', url: 'https://mcp.kiwi.com', does: 'Search flights by city and date', auth: 'none', group: 'travel', example: 'Find the cheapest flight from Hanoi to Tokyo.' },
+      { name: 'Todoist', url: 'https://ai.todoist.net/mcp', does: 'Add, find and finish your to-dos', auth: 'signIn', group: 'work', example: 'Add “Call the printer” for Friday.' },
+    ]
+    render(<ConnectTool catalog={grouped} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
+    expect(screen.getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)).toEqual(['Work', 'Travel and fun'])
+    expect(screen.getByRole('list', { name: 'Travel and fun tools to connect' })).toHaveTextContent('No sign-in needed')
+    expect(screen.getByRole('button', { name: /Kiwi\.com/ })).toHaveAttribute('title', 'Try asking: Find the cheapest flight from Hanoi to Tokyo.')
+  })
+
   it('refuses an address the daemon refuses, in its words', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ error: 'LoomWatch only connects to tools over https://, so nobody on the way can read what an agent sends.' }, 400))))
     render(<ConnectTool catalog={[]} connected={[]} keptIn="keychain" onConnected={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('Or paste a tool’s server address'), { target: { value: 'http://mcp.example.com/mcp' } })
+    fireEvent.change(screen.getByLabelText('Or paste a tool’s address'), { target: { value: 'http://mcp.example.com/mcp' } })
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('over https://')
   })

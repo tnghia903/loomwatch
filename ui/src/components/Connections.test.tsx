@@ -116,7 +116,7 @@ describe('Connections’ tools (ADR 0069)', () => {
     render(<Connections />)
     const list = await screen.findByRole('list', { name: 'Connected tools' })
     expect(list).toHaveTextContent('Linear')
-    expect(list).toHaveTextContent('2 calls · signed in')
+    expect(list).toHaveTextContent('2 actions · signed in')
     expect(list).toHaveTextContent('List teams · only reads')
     expect(screen.getByText(/Agents never get them/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Linear' }))

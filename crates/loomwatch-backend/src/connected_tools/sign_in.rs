@@ -89,8 +89,21 @@ pub(super) async fn start(
         // It signs in only apps it registered by hand, which LoomWatch can't be.
         return Ok(Begun::NoSignIn);
     }
-    manager.set_metadata(resolution.metadata);
+    // Least privilege: ask for the scopes the tool itself names (its challenge and its protected
+    // resource metadata), and never for everything its sign-in server can grant, which is what
+    // rmcp would ask for when the tool names none (Todoist's server offers billing and delete).
+    let needed = manager.select_scopes(None, &[]);
+    let mut granting = resolution.metadata;
+    if needed.is_empty() {
+        granting.scopes_supported = None;
+    }
+    manager.set_metadata(granting);
     let request = AuthorizationRequest::new(redirect_uri).with_client_name("LoomWatch");
+    let request = if needed.is_empty() {
+        request
+    } else {
+        request.with_scopes(needed)
+    };
     let session = AuthorizationSession::new(manager, request)
         .await
         .map_err(|_| couldnt_start(&tool.name))?;

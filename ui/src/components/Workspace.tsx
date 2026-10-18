@@ -119,7 +119,7 @@ import { savedJobPreset, toolAllowOf, useSavedJobs, versionOf, type SavedJob } f
 import { fieldsForVersion, linkState } from '../lib/library/link'
 import { teamAgentEdit } from '../lib/library/teamDraft'
 import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
-import { toolNamed, useConnectedTools, type ConnectedTool } from '../lib/tools/client'
+import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../lib/tools/client'
 import type { LibrarySource } from '../lib/library/types'
 import { OPERATOR_SOURCE } from '../lib/library/fixtures'
 import { teamSentence } from '../lib/story/teamSentence'
@@ -2967,5 +2967,5 @@ function toolCardSource(tools: readonly ConnectedTool[] | null, name: string): s
   if (!tools) return 'Tool'
   const tool = toolNamed(tools, name)
   if (!tool) return 'Not connected in LoomWatch'
-  return `Connected tool · ${tool.calls.length} call${tool.calls.length === 1 ? '' : 's'}`
+  return `Connected tool · ${actionCount(tool.calls.length)}`
 }

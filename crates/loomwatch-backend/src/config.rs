@@ -745,12 +745,12 @@ impl CapabilityRef {
         if !self.always_allow.is_empty() {
             if self.kind != CapabilityKind::Tool {
                 return Err(format!(
-                    "{name} is a {kind} with `alwaysAllow`, but only a tool's calls can be always allowed"
+                    "{name} is a {kind} with `alwaysAllow`, but only a tool's actions can be always allowed"
                 ));
             }
             if self.always_allow.len() > MAX_ALWAYS_ALLOWED {
                 return Err(format!(
-                    "{name} always allows {} calls; keep it to {MAX_ALWAYS_ALLOWED}",
+                    "{name} always allows {} actions; keep it to {MAX_ALWAYS_ALLOWED}",
                     self.always_allow.len()
                 ));
             }
@@ -760,7 +760,7 @@ impl CapabilityRef {
                 .find(|call| call.trim().is_empty() || call.chars().count() > 128)
             {
                 return Err(format!(
-                    "{name} always allows {bad:?}, which isn't the name of a call"
+                    "{name} always allows {bad:?}, which isn't the name of an action"
                 ));
             }
         }
@@ -1593,7 +1593,7 @@ mod tests {
             ))
         };
         let parsed = team("{kind: tool, name: Linear, alwaysAllow: [create_issue]}")
-            .expect("a tool's calls can be always allowed");
+            .expect("a tool's actions can be always allowed");
         assert_eq!(
             parsed.agents[0].capabilities[0].always_allow,
             ["create_issue"]
@@ -1601,11 +1601,11 @@ mod tests {
         for (capability, says) in [
             (
                 "{kind: skill, name: notes, alwaysAllow: [x]}",
-                "only a tool's calls",
+                "only a tool's actions",
             ),
             (
                 "{kind: tool, name: Linear, alwaysAllow: [' ']}",
-                "isn't the name of a call",
+                "isn't the name of an action",
             ),
         ] {
             let error = format!("{:#}", team(capability).expect_err(says));

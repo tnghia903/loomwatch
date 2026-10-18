@@ -31,7 +31,20 @@ export interface ConnectedTool {
   problem: string | null
   /** For a token: where to make one. */
   tokenHelp: string | null
+  /** For a tool from the starter list: something to ask an agent given it. */
+  example?: string | null
 }
+
+/** What a starter tool is for, for the headings the list is shown under (`catalog::Group`). */
+export type CatalogGroup = 'work' | 'create' | 'travel' | 'lookUp' | 'build'
+
+export const CATALOG_GROUPS: readonly { group: CatalogGroup; title: string }[] = [
+  { group: 'work', title: 'Work' },
+  { group: 'create', title: 'Create' },
+  { group: 'travel', title: 'Travel and fun' },
+  { group: 'lookUp', title: 'Look things up' },
+  { group: 'build', title: 'Build and sell' },
+]
 
 /** A tool to start from, checked to connect as its `auth` says. */
 export interface CatalogEntry {
@@ -39,6 +52,10 @@ export interface CatalogEntry {
   url: string
   does: string
   auth: ToolAuth
+  /** Absent from a daemon older than the groups: shown under no heading. */
+  group?: CatalogGroup
+  /** Something to ask an agent given it. */
+  example?: string
   tokenHelp?: string
 }
 
@@ -120,6 +137,15 @@ export async function checkTool(id: string): Promise<ConnectedTool> {
 export async function removeTool(id: string): Promise<void> {
   await request(`/api/tools/${encodeURIComponent(id)}`, { method: 'DELETE' })
   announceToolsChanged()
+}
+
+/**
+ * The words the app uses (ADR 0069): a **tool** is a service you connect, such as Linear or
+ * Kiwi.com; each thing a tool can do ("Create issue") is an **action**. "MCP" is said only where it
+ * helps find a tool's address, and "connection" names only the Connections page.
+ */
+export function actionCount(count: number): string {
+  return `${count} action${count === 1 ? '' : 's'}`
 }
 
 /** The connected tool called `name`, ignoring case, as the daemon finds it for a run. */

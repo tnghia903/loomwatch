@@ -2,7 +2,7 @@ import { Check, ExternalLink, KeyRound, LogIn, Plug } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
 import {
-  connectTool, fetchTools, keptInWords, onToolsMessage, sendToolToken, signInToToolAgain,
+  CATALOG_GROUPS, connectTool, fetchTools, keptInWords, onToolsMessage, sendToolToken, signInToToolAgain,
   type CatalogEntry, type ConnectedTool, type KeptIn, type SignInOutcome,
 } from '../../lib/tools/client'
 
@@ -29,7 +29,7 @@ interface ConnectToolProps {
 }
 
 /**
- * Connecting a tool (ADR 0069): one from the short list, or any by its server address. A tool that
+ * Connecting a tool (ADR 0069): one from the short list, or any by its address. A tool that
  * wants a sign-in sends you to its own site in a new tab, so nothing you were writing here is lost,
  * and this panel carries on when the site sends you back. One that wants a token takes the one you
  * paste. Either way the secret goes to the daemon, which keeps it out of your team files.
@@ -102,28 +102,33 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
       {error && <p role="alert" className="inline-error t-meta"><span className="detail">{error}</span></p>}
 
       {step.kind === 'pick' && <>
-        <ul className="connect-tool-list" aria-label="Tools to connect">
-          {catalog.map((entry) => {
-            const already = isConnected(entry)
-            return (
-              <li key={entry.url}>
-                <button type="button" disabled={Boolean(busy) || already} onClick={() => void act(entry.name, () => begin(entry.url, entry.name))}>
-                  <b>{entry.name}</b>
-                  <span>{entry.does}</span>
-                  <em>{already ? <><Check size={12} aria-hidden="true" /> Connected</> : busy === entry.name ? 'Connecting…' : entry.auth === 'signIn' ? 'Sign in' : entry.auth === 'token' ? 'Paste a token' : 'No sign-in needed'}</em>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+        {sections(catalog).map(({ title, entries }) => (
+          <div key={title ?? 'all'} className="connect-tool-group">
+            {title && <h5>{title}</h5>}
+            <ul className="connect-tool-list" aria-label={title ? `${title} tools to connect` : 'Tools to connect'}>
+              {entries.map((entry) => {
+                const already = isConnected(entry)
+                return (
+                  <li key={entry.url}>
+                    <button type="button" disabled={Boolean(busy) || already} title={entry.example ? `Try asking: ${entry.example}` : undefined} onClick={() => void act(entry.name, () => begin(entry.url, entry.name))}>
+                      <b>{entry.name}</b>
+                      <span>{entry.does}</span>
+                      <em>{already ? <><Check size={12} aria-hidden="true" /> Connected</> : busy === entry.name ? 'Connecting…' : entry.auth === 'signIn' ? 'Sign in' : entry.auth === 'token' ? 'Paste a token' : 'No sign-in needed'}</em>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
         <form className="connect-tool-address" onSubmit={(event) => { event.preventDefault(); const url = address; void act('address', async () => { await begin(url); setAddress('') }) }}>
           <label className="field">
-            <span className="t-meta">Or paste a tool’s server address</span>
+            <span className="t-meta">Or paste a tool’s address</span>
             <input className="input mono" value={address} maxLength={2048} spellCheck={false} autoComplete="off" inputMode="url" placeholder="https://mcp.example.com/mcp" onChange={(event) => setAddress(event.target.value)} />
           </label>
           <button className="btn" disabled={Boolean(busy) || !address.trim()}><Plug size={14} aria-hidden="true" />{busy === 'address' ? 'Connecting…' : 'Connect'}</button>
         </form>
-        <p className="t-meta connect-tool-quiet">The service gives this address for “MCP”. LoomWatch connects over https only, and nothing is installed on this computer.</p>
+        <p className="t-meta connect-tool-quiet">Services list it as their “MCP server” address; it often ends in /mcp. LoomWatch connects over https only, and nothing is installed on this computer.</p>
       </>}
 
       {step.kind === 'signIn' && <>
@@ -151,4 +156,11 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
       </form>}
     </div>
   )
+}
+
+/** The starter list under its headings, in their order; entries with no group last, under none. */
+function sections(catalog: readonly CatalogEntry[]): { title: string | null; entries: CatalogEntry[] }[] {
+  const grouped = CATALOG_GROUPS.map(({ group, title }) => ({ title, entries: catalog.filter((entry) => entry.group === group) }))
+  const loose = catalog.filter((entry) => !CATALOG_GROUPS.some(({ group }) => group === entry.group))
+  return [...grouped, { title: null, entries: loose }].filter((section) => section.entries.length > 0)
 }

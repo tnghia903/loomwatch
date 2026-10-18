@@ -15,7 +15,7 @@ import { useNow } from '../../lib/useNow'
 import { useSessionEvents } from '../../lib/watch/useSessionEvents'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
-import { toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
+import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
 import { appendToRole, INSTRUCTION_PARTS, instructionShape, PART_STARTERS } from '../../lib/team-file/checkup'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { DoneWhen } from '../canvas/DoneWhen'
@@ -296,7 +296,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
                         ? <em>{connected.state === 'loading' ? 'Looking for it…' : 'Not connected in LoomWatch, so it can’t use it yet.'}</em>
                         : tool.problem
                           ? <em className="problem">{tool.problem}</em>
-                          : <em>{allowed.length ? 'Asks you first, except for these, which it always may:' : `Asks you before each of its ${tool.calls.length} call${tool.calls.length === 1 ? '' : 's'}.`}</em>}
+                          : <em>{allowed.length ? 'Asks you before each action, except these, which it always may do:' : `Asks you before each of its ${actionCount(tool.calls.length)}.`}</em>}
+                      {tool?.example && !tool.problem && <em className="byhand-tool-try">Try asking: “{tool.example}”</em>}
                       {allowed.length > 0 && <ul className="byhand-tool-allowed" aria-label={`Always allowed for ${name}`}>
                         {allowed.map((call) => <li key={call}>{label(call)}<button type="button" className="iconbtn" aria-label={`Ask again before ${label(call)}`} onClick={() => set('toolAllow', withoutAllowed(draft.toolAllow, name, call))}><X size={11} aria-hidden="true" /></button></li>)}
                       </ul>}
@@ -313,7 +314,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             {toGive.length > 0 && !connecting && <div className="byhand-tools-give">
               <p className="t-meta">Give it a tool you connected</p>
               <ul className="connect-tool-list" aria-label="Tools you can give it">
-                {toGive.map((tool) => <li key={tool.id}><button type="button" onClick={() => giveTool(tool.name)}><b>{tool.name}</b><span>{tool.calls.length} call{tool.calls.length === 1 ? '' : 's'}</span><em><Plus size={12} aria-hidden="true" /> Give it {tool.name}</em></button></li>)}
+                {toGive.map((tool) => <li key={tool.id}><button type="button" onClick={() => giveTool(tool.name)}><b>{tool.name}</b><span>{actionCount(tool.calls.length)}</span><em><Plus size={12} aria-hidden="true" /> Give it {tool.name}</em></button></li>)}
               </ul>
             </div>}
             {connecting && connected.state === 'ready'
@@ -328,7 +329,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
               : connected.state === 'ready'
                 ? <button type="button" className="btn byhand-tools-connect" onClick={() => setConnecting('new')}><Plug size={14} aria-hidden="true" />Connect a new tool</button>
                 : connected.state === 'unavailable' && <p className="t-meta">{connected.message}</p>}
-            {givenTools.length > 0 && <p className="t-meta">A tool works in your own account on its site, so each call asks you first, and the card lets you always allow it. On a schedule nobody can answer, so calls you haven’t always allowed are declined.</p>}
+            {givenTools.length > 0 && <p className="t-meta">A tool works in your own account on its site, so it asks you before each action, and the card lets you always allow one. On a schedule nobody can answer, so actions you haven’t always allowed are declined.</p>}
           </>)}
 
           {block('keys', <ul className="byhand-keys">

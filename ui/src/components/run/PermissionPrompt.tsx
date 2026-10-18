@@ -163,7 +163,7 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
           <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_team')} title={`Allow ${request.title} for every agent in this run, without asking, until the run ends. Other tools still ask.`}>Allow for the whole team</button>
         )}
         {request.tool && onAlwaysAllow && (
-          <button type="button" className="btn" disabled={busy} onClick={always} title={`${request.name} may do “${request.title}” without asking from now on. Its other calls still ask. Take it back in its Tools block.`}>Always allow this</button>
+          <button type="button" className="btn" disabled={busy} onClick={always} title={`${request.name} may do “${request.title}” without asking from now on. Its other actions still ask. Take it back in its Tools block.`}>Always allow this</button>
         )}
         {!request.tool && request.switch && onAlwaysAllow && (
           <button type="button" className="btn" disabled={busy} onClick={always} title={`Switch on “${SWITCH_LABEL[request.switch]}” for ${request.name} in the team file, so later runs do not ask`}>Always allow {SWITCH_LABEL[request.switch]}</button>

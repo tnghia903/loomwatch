@@ -109,6 +109,7 @@ fn public(tool: &ConnectedTool) -> Value {
         "pending": tool.pending,
         "problem": tool.problem,
         "tokenHelp": catalog::at(&tool.url).and_then(|entry| entry.token_help),
+        "example": catalog::at(&tool.url).map(|entry| entry.example),
     })
 }
 
@@ -424,7 +425,7 @@ fn address(raw: &str) -> ApiResult<String> {
     if raw.is_empty() {
         return Err(failure(
             StatusCode::BAD_REQUEST,
-            "Paste the tool's server address.",
+            "Paste the tool's address.",
         ));
     }
     if raw.chars().count() > MAX_URL_CHARS {
