@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
 import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
-import { TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath } from './templates'
+import { agentsTeamYaml, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath } from './templates'
 import type { TeamDocument } from './types'
 import { teamIdForPath } from './useTeamDocument'
 import { compileTeamValidator } from './validation'
@@ -31,6 +31,24 @@ describe('team templates', () => {
       expect(agent.model).toMatch(/^[a-z-]+\/[a-z0-9.-]+$/)
       expect(agent.role.length).toBeGreaterThan(20)
     }
+  })
+
+  // A team made from Your agents is what the canvas would make placing each one: linked copies.
+  it('writes a schema-valid team of Your agents, each a linked copy of its saved version', () => {
+    const jobs = [
+      { id: 'reader', file: 'reader.yaml', name: 'Reader', instructions: 'Read every source you are given and list what each one says.', model: FAST_MODEL, skills: ['notebooklm'], allow: { web: true }, version: 3 },
+      { id: 'reader-2', file: 'reader-2.yaml', name: 'Reader', instructions: 'Read the second half of the sources and list what each one says.' },
+    ]
+    const doc = parse(agentsTeamYaml(jobs, ' Digest ', 'digest')) as TeamDocument
+    const result = validate(doc)
+    expect(result.documentProblems).toEqual([])
+    expect(result.valid).toBe(true)
+    expect(doc).toMatchObject({ id: 'digest', name: 'Digest', entrypoint: 'reader', edges: [], spend: { perRun: 1 } })
+    expect(doc.agents[0]).toMatchObject({ id: 'reader', model: FAST_MODEL, capabilities: [{ kind: 'skill', name: 'notebooklm' }], allow: { web: true }, from: { agent: 'reader', version: 3 } })
+    // Two agents with one name still get their own ids.
+    expect(doc.agents[1]).toMatchObject({ name: 'Reader', from: { agent: 'reader-2', version: 1 } })
+    expect(doc.agents[1].id).not.toBe('reader')
+    expect(() => agentsTeamYaml([], 'Nobody')).toThrow()
   })
 
   // ADR 0037: a researcher that cannot search the web can only guess, so it starts allowed to;
@@ -90,8 +108,8 @@ describe('team templates', () => {
     expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['researcher->review', 'review->writer'])
   })
 
-  it('offers a blank team and lists templates by plain title', () => {
-    expect(TEAM_TEMPLATES.map((template) => template.id)).toContain('blank')
+  it('lists templates by plain title, each starting with agents', () => {
+    for (const template of TEAM_TEMPLATES) expect((parse(templateTeamYaml(template.id, 'Starter')) as TeamDocument).agents.length).toBeGreaterThan(0)
     expect(TEAM_TEMPLATES.every((template) => !/harness|entrypoint|yaml/i.test(`${template.title} ${template.description}`))).toBe(true)
   })
 
