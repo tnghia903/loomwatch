@@ -185,6 +185,9 @@ async fn authorization_server(State(fake): State<Fake>) -> Response {
         "token_endpoint_auth_methods_supported": ["none"],
         // More than the tool needs, as Todoist's server offers: LoomWatch must not ask for it all.
         "scopes_supported": ["issues:read", "issues:write", "billing:admin", "offline_access"],
+        // It names itself in the browser's way back (RFC 9207), as Notion's does; the other
+        // stand-in is an older server that doesn't.
+        "authorization_response_iss_parameter_supported": fake.guard == Guard::SignIn,
     }))
     .into_response()
 }
@@ -479,14 +482,9 @@ async fn signs_in_through_the_tools_own_site() {
     .await;
     assert!(page.as_str().unwrap().contains("This sign-in has ended"));
 
-    // The site sends the browser back with a code: LoomWatch trades it for tokens.
-    let (status, page) = ask(
-        &app,
-        "GET",
-        &format!("/api/tools/sign-in/callback?state={state}&code=good-code"),
-        None,
-    )
-    .await;
+    // The site sends the browser back with a code and its own name: LoomWatch trades the code
+    // for tokens.
+    let (status, page) = ask(&app, "GET", &sent_back(&state, Some(&base)), None).await;
     assert_eq!(status, StatusCode::OK);
     let page = page.as_str().unwrap();
     assert!(page.contains("Linear is connected to LoomWatch"), "{page}");
@@ -510,14 +508,66 @@ async fn signs_in_through_the_tools_own_site() {
     assert_eq!((text.as_str(), failed), ("Created Ship it", false));
 
     // The same state can't finish twice.
+    let (_, page) = ask(&app, "GET", &sent_back(&state, Some(&base)), None).await;
+    assert!(page.as_str().unwrap().contains("This sign-in has ended"));
+}
+
+/// Where a tool's site sends the browser back: the one-time `state`, a code, and the `iss` naming
+/// the server that signed in, when it names one.
+fn sent_back(state: &str, iss: Option<&str>) -> String {
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    query
+        .append_pair("state", state)
+        .append_pair("code", "good-code");
+    if let Some(iss) = iss {
+        query.append_pair("iss", iss);
+    }
+    format!("/api/tools/sign-in/callback?{}", query.finish())
+}
+
+/// A server that names itself on the way back (RFC 9207) must name itself, and be the one
+/// `LoomWatch` started signing in with: a code sent back under another name, or under none, could
+/// come from another site, so it is never traded for tokens.
+#[tokio::test]
+async fn a_sign_in_sent_back_under_another_name_or_none_is_refused() {
+    let (base, _fake) = start(Guard::SignIn).await;
+    let folder = Folder::new();
+    let tools = Tools::for_tests(&folder.0);
+    let app = router(tools.clone());
+    let state_of = |body: &Value| {
+        url::Url::parse(body["url"].as_str().unwrap())
+            .unwrap()
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .unwrap()
+    };
+
+    let (status, body) = ask(
+        &app,
+        "POST",
+        "/api/tools",
+        Some(json!({"url": format!("{base}/mcp"), "name": "Linear"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let id = body["tool"]["id"].as_str().unwrap().to_owned();
     let (_, page) = ask(
         &app,
         "GET",
-        &format!("/api/tools/sign-in/callback?state={state}&code=good-code"),
+        &sent_back(&state_of(&body), Some("https://elsewhere.example")),
         None,
     )
     .await;
-    assert!(page.as_str().unwrap().contains("This sign-in has ended"));
+    assert!(page.as_str().unwrap().contains("Not connected"), "{page}");
+
+    let (status, body) = ask(&app, "POST", &format!("/api/tools/{id}/sign-in"), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, page) = ask(&app, "GET", &sent_back(&state_of(&body), None), None).await;
+    assert!(page.as_str().unwrap().contains("Not connected"), "{page}");
+
+    assert!(tools.named_now("Linear").is_none(), "not connected");
+    assert!(!tools.inner.vault.raw().unwrap_or_default().contains(ACCESS));
 }
 
 /// A tool that names no scopes is signed in to with none asked for, never with every scope its

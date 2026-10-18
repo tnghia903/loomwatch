@@ -364,6 +364,9 @@ struct Callback {
     code: Option<String>,
     #[serde(default)]
     error: Option<String>,
+    /// The server that signed in, when it names itself (RFC 9207), as Notion's does.
+    #[serde(default)]
+    iss: Option<String>,
 }
 
 async fn finish(State(tools): State<Tools>, Query(query): Query<Callback>) -> Html<String> {
@@ -371,6 +374,7 @@ async fn finish(State(tools): State<Tools>, Query(query): Query<Callback>) -> Ht
         &tools,
         &query.state,
         query.code.as_deref(),
+        query.iss.as_deref(),
         query.error.is_some(),
     )
     .await;
