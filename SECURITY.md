@@ -89,7 +89,8 @@ LoomWatch does about that, so you can judge it for yourself.
   - OpenRouter, for the model calls your agents and Ask make, to check your key, and for its
     public list of models;
   - Notion, when you connect it;
-  - GitHub, once a day, to see whether a new version is out (you can turn this off);
+  - GitHub, each time you open LoomWatch, to see whether a new version is out (you can turn this
+    off);
   - GitHub, skills.sh and ClawHub, when you search for or install a skill.
 
 **It doesn't:**

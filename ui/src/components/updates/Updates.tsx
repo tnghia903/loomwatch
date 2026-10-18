@@ -28,23 +28,29 @@ import {
 import { Markdown } from '../ui/Markdown'
 import { preloadMarkdown } from '../ui/preloadMarkdown'
 
-/** How often an open tab asks the daemon what its daily check found. Asking costs nothing. */
+/** How often an open tab asks the daemon what the last check found, such as another tab's. Asking costs nothing. */
 const REFRESH_MS = 60 * 60 * 1000
 
 /**
  * Keeps the app's idea of the newest release current, and opens the updates dialog when anything
- * calls `openUpdates()`. Mounted once, beside Send feedback.
+ * calls `openUpdates()`. Mounted once, beside Send feedback. Opening LoomWatch asks GitHub, unless
+ * the operator or this computer turned that off.
  */
 export function Updates() {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
-    const refresh = () => {
-      fetchUpdateStatus(controller.signal).then(setUpdateStatus).catch(() => {
-        // An older daemon, or one that is down, has no news to give: nothing to show.
-      })
+    const quietly = () => {
+      // An older daemon, or one that is down, has no news to give: nothing to show.
     }
-    refresh()
+    // What the last check found shows at once, while the daemon asks GitHub again.
+    fetchUpdateStatus(controller.signal)
+      .then((status) => {
+        setUpdateStatus(status)
+        if (status.automatic && !status.turnedOffBy) return checkForUpdates(controller.signal).then(setUpdateStatus)
+      })
+      .catch(quietly)
+    const refresh = () => { fetchUpdateStatus(controller.signal).then(setUpdateStatus).catch(quietly) }
     const timer = window.setInterval(refresh, REFRESH_MS)
     const show = () => setOpen(true)
     window.addEventListener(UPDATES_EVENT, show)
@@ -250,7 +256,7 @@ function UpdateAndRestart({ latest, app, command, rollback, installError, copyBu
 }
 
 /**
- * What the newest release changes and how to install it, with the daily check's switch. A
+ * What the newest release changes and how to install it, with the switch for checking on opening. A
  * ready-built copy whose launcher starts it again, and a Mac or Windows app that can replace
  * itself, offer Update and restart; any other copy shows the steps to install it by hand.
  */
@@ -398,7 +404,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
               disabled={!status || Boolean(status.turnedOffBy) || busy !== null}
               onChange={(event) => save({ automatic: event.target.checked })}
             />
-            Check for new versions once a day
+            Check for new versions each time LoomWatch opens
           </label>
           <p className="fb-note">
             {status?.turnedOffBy

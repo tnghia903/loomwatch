@@ -375,10 +375,11 @@ async fn main() -> Result<()> {
                 },
             );
             // ADR 0052: says when a newer LoomWatch is out and how to install it. The check runs
-            // once a day in the background. Installing is the launcher's: in its terminal, or when
-            // "Update and restart" has this daemon exit for it.
+            // each time LoomWatch opens: just after this start, and whenever the app's page opens.
+            // Installing is the launcher's: in its terminal, or when "Update and restart" has this
+            // daemon exit for it.
             let updates = loomwatch_backend::updates::Updates::from_env(&state_dir);
-            updates.spawn_checks();
+            updates.spawn_start_check();
             let updates_api = loomwatch_backend::updates::router(
                 updates.clone(),
                 registry.clone(),
