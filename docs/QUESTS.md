@@ -26,7 +26,11 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
 - **What happened, not what was typed.** A filled-in field earns nothing. A run that shows the
   practice does, so the only way to game a quest is to do the practice.
 - **Only a run that finished earns.** A run that failed, was stopped, or finished with gaps earns
-  nothing, and neither does a one-agent turn or a follow-up that started part-way.
+  nothing, and neither does a follow-up that started part-way.
+- **One agent alone earns what one agent shows.** A one-agent turn (an agent's own chat, or `@name`
+  in team chat) can earn the Crew vest, Tailor’s tape and Maker’s apron, judged on that agent
+  only: each is one agent's own practice. The rest need the whole team at work (a check step, a
+  teammate, a schedule, or the team's earlier runs), so only a whole-team run earns them.
 
 ## The quests
 

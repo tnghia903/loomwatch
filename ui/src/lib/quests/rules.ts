@@ -88,9 +88,9 @@ function chalk({ succeeded, agents, projection }: QuestFacts): Award | null {
 
 /** An agent asked you, not a teammate, and your answer came back: a question left unanswered, or a
     permission request, is not one. */
-function vest({ succeeded, agents, projection }: QuestFacts): Award | null {
+function vest({ succeeded, agents, projection, current }: QuestFacts): Award | null {
   if (!succeeded) return null
-  const asked = projection.messages.find((message) => message.kind === 'question' && !message.carried && message.state === 'answered' && message.from && message.from !== OPERATOR_ID && message.reply?.text.trim())
+  const asked = projection.messages.find((message) => message.kind === 'question' && !message.carried && message.state === 'answered' && message.from && message.from !== OPERATOR_ID && current.agentIds.includes(message.from) && message.reply?.text.trim())
   if (!asked?.from) return null
   return { item: 'vest', agentId: asked.from, line: `${nameOf(agents, asked.from)} asked you a question instead of guessing, and your answer saw the run through.` }
 }
@@ -274,11 +274,21 @@ function scissors({ succeeded, current, earlier }: QuestFacts): Award | null {
 
 const RULES = [chalk, vest, band, apron, pin, cushion, shuttle, overalls, tee, monocle, patch, scissors]
 
-/** Everything this run earned, in the catalog's order. A one-agent turn or a follow-up that started
-    part-way earns nothing: it is not the whole team at work. */
+/** The quests one agent shows on its own: asking you, reading only the folders it was given,
+    opening a skill. The rest need the whole team at work: a check step, a teammate, a schedule, or
+    the team's earlier runs. */
+const ONE_AGENT_RULES = [vest, band, apron]
+
+/** Everything this run earned, in the catalog's order. A one-agent turn (an agent's own chat, or
+    `@name` in team chat) earns only what one agent shows; a follow-up that started part-way earns
+    nothing, as it is neither one agent alone nor the whole team at work. */
 export function questsEarned(facts: QuestFacts): Award[] {
-  if (facts.run.onlyAgent || facts.run.startAt) return []
-  return RULES.flatMap((rule) => rule(facts) ?? [])
+  if (facts.run.startAt) return []
+  const only = facts.run.onlyAgent
+  if (!only) return RULES.flatMap((rule) => rule(facts) ?? [])
+  // The record names every agent of the team, but only this one ran.
+  const alone = { ...facts, current: { ...facts.current, agentIds: [only] } }
+  return ONE_AGENT_RULES.flatMap((rule) => rule(alone) ?? [])
 }
 
 /** Bobbin: the wardrobe, with what this run earned, holds an item from every part. */

@@ -46,12 +46,42 @@ describe('quests', () => {
     }
   })
 
-  it('earn nothing for a run that did not finish, or for one agent’s turn', () => {
+  it('earn nothing for a run that did not finish, or for a follow-up that started part-way', () => {
     const agents = [agent('writer', { doneWhen: ['Under 300 words'] }), agent('checker', { checks: 'writer' })]
     const checked = { agents: agents.map((one) => ran(one.id)), evidence: [], messages: [], checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [{ verdict: 'met' as const, item: 'Under 300 words', evidence: '212 words' }] }] }
     expect(items(facts({ agents, projection: checked, succeeded: false }))).toEqual([])
-    expect(items(facts({ agents, projection: checked, run: { runId: 'now', createdAt: '', onlyAgent: 'writer' } }))).toEqual([])
+    expect(items(facts({ agents, projection: checked, run: { runId: 'now', createdAt: '', startAt: 'writer' } }))).toEqual([])
     expect(items(facts({ agents, projection: checked }))).toEqual(['chalk'])
+  })
+
+  // An agent's own chat, or `@name` in team chat: one agent ran, so only its own practice can show.
+  it('a one-agent turn earns only what one agent shows, judged on that agent', () => {
+    const researcher = agent('researcher', {
+      doneWhen: ['Covers all four sections'],
+      capabilities: [{ kind: 'knowledge', name: 'Project', path: '/Users/me/project' }, { kind: 'skill', name: 'arxiv' }],
+    })
+    const team = [researcher, agent('checker', { checks: 'researcher' })]
+    const answer = { from: 'operator', text: 'The 2026 one.' } as TeamMessage['reply']
+    const projection = {
+      agents: [ran('researcher')],
+      evidence: [evidence('researcher', { locations: [{ path: '/Users/me/project/README.md' }] }), evidence('researcher', { kind: 'skill', relation: 'opened by the agent', name: 'arxiv' })],
+      messages: [message('question', 'researcher', 'operator', { reply: answer })],
+      checks: [{ checker: 'checker', checked: 'researcher', round: 1, items: [{ verdict: 'met' as const, item: 'Covers all four sections', evidence: 'All four' }] }],
+    }
+    const alone = { runId: 'now', createdAt: '', onlyAgent: 'researcher' }
+    expect(items(facts({ agents: team, projection }))).toEqual(['chalk', 'vest', 'band', 'apron'])
+    // A check step is a teammate at work, so Tailor’s chalk stays a whole-team quest.
+    expect(items(facts({ agents: team, projection, run: alone }))).toEqual(['vest', 'band', 'apron'])
+    expect(questsEarned(facts({ agents: team, projection, run: alone }))[1]).toMatchObject({ item: 'band', agentId: 'researcher', line: 'Researcher was given 1 folder and read from every one, 1 file in all.' })
+    // The record names the whole team, but a teammate's question or reads are not this turn's.
+    const scout = agent('scout', { capabilities: [{ kind: 'knowledge', name: 'Notes', path: '/Users/me/notes' }] })
+    const theirs = { agents: [ran('scout')], evidence: [evidence('scout', { locations: [{ path: '/Users/me/notes/a.md' }] })], messages: [message('question', 'scout', 'operator', { reply: answer })], checks: [] }
+    expect(items(facts({ agents: [researcher, scout], projection: theirs }))).toEqual(['vest', 'band'])
+    expect(items(facts({ agents: [researcher, scout], projection: theirs, run: alone }))).toEqual([])
+    // One agent asked alone, for fewer tokens than the whole team's last run, is not a smaller team.
+    const last = lesson('before', ['researcher', 'scout'], { usage: new Map([['researcher', { tokens: 900, opening: null }], ['scout', { tokens: 900, opening: null }]]) })
+    const now = lesson('now', ['researcher', 'scout'], { usage: new Map([['researcher', { tokens: 300, opening: null }]]) })
+    expect(items(facts({ agents: [researcher, scout], current: now, earlier: [last], run: alone }))).toEqual([])
   })
 
   it('chalk: a check step found every item of a Done when met on its first look, whatever the agent said', () => {
