@@ -291,6 +291,8 @@
 .byhand-reply { margin: 0; padding: var(--sp-3) var(--sp-4); border-left: 3px solid var(--color-accent); background: var(--color-ground); border-radius: var(--r-sm); font-size: 14px; color: var(--color-ink); }
 .byhand-shelf { display: flex; flex-direction: column; gap: var(--sp-2); }
 .byhand-shelf > .t-meta { margin: 0; color: var(--color-ink-3); }
+/* To the skills marketplace: under the cards, the size of its words (a typed search can be long). */
+.byhand-market { align-self: flex-start; max-width: 100%; height: auto; min-height: 28px; padding-block: 6px; line-height: 1.3; white-space: normal; text-align: left; }
 .byhand-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-2); }
 .byhand-cards li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--sp-2); padding: 12px 10px 10px 12px; border-radius: var(--r-md); background: #EFEAE0; color: #17150F; cursor: grab; box-shadow: 0 1px 0 rgba(0, 0, 0, .25), 0 6px 14px -8px rgba(0, 0, 0, .6); }
 .byhand-cards li:active { cursor: grabbing; }

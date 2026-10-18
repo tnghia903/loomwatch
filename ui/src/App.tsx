@@ -6,7 +6,7 @@ import { Updates } from './components/updates/Updates'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
 import { useKeyStatus } from './lib/ai/useKeyStatus'
-import { fetchCapabilities, type CapabilityInventory } from './lib/library/client'
+import { fetchCapabilities, SKILLS_CHANGED_EVENT, type CapabilityInventory } from './lib/library/client'
 import { useNeedsYou } from './lib/story/useNeedsYou'
 import { useTheme } from './lib/theme'
 
@@ -35,6 +35,12 @@ function useCapabilities() {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [generation])
+  // Skills added or taken away (the marketplace over the builder): read again, without "Looking…".
+  useEffect(() => {
+    const reread = () => setGeneration((value) => value + 1)
+    window.addEventListener(SKILLS_CHANGED_EVENT, reread)
+    return () => window.removeEventListener(SKILLS_CHANGED_EVENT, reread)
+  }, [])
   const retry = useCallback(() => { setLoading(true); setGeneration((value) => value + 1) }, [])
   return { inventory, loading, error, scannedAt, retry }
 }

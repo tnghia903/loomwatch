@@ -442,8 +442,18 @@
 .lw-skills-toast > svg { flex: none; color: var(--color-ok); }
 .lw-skills-toast .link { font-size: 13.5px; }
 
+/* ---- The marketplace over an agent's bench (SkillsMarket) -------------------- */
+/* The page's own frame, fixed over the builder; its sheets and toast stack inside it. */
+.lw-skills-market { position: fixed; z-index: 150; overscroll-behavior: contain; }
+.lw-skills-market:focus { outline: none; }
+.lw-skills-market-top { justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+/* A long name wraps rather than running off the edge. */
+.lw-skills-market-top .btn { height: auto; min-height: 32px; padding-block: 6px; line-height: 1.3; white-space: normal; text-align: left; }
+.lw-skills-market-says { margin: 0; font-size: 13px; line-height: 1.45; color: var(--color-ink-3); }
+
 /* ---- Motion ----------------------------------------------------------------- */
 @media (prefers-reduced-motion: no-preference) {
+  .lw-skills-market { animation: fade-in var(--t-quick) var(--ease-out) both; }
   .lw-skills-card { animation: rise-in var(--t-entrance) var(--ease-out) both; }
   .lw-skills-card.ghost > span { animation: lw-skills-wait 1.4s ease-in-out infinite; }
   .lw-skills-sheet { animation: dialog-in var(--t-entrance) var(--ease-out) both; }
