@@ -13,6 +13,7 @@ import { pipelineOrder, type PipelineStep } from './pipelineOrder'
 import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, SpawnConfig, TeamDocument, TurnedOff } from './types'
 import { withTurnedOff, withoutWired } from './turnedOff'
 import { isCheckerRole } from '../library/checker'
+import { checkStepFields } from './checkStep'
 import {
   loadTeamValidator,
   displayFieldProblems,
@@ -1366,12 +1367,16 @@ export function useTeamDocument() {
       captureHistory()
       modelRef.current?.addEdge(newEdge)
       setEdges((current) => [...current, edgeFromConfig(newEdge)])
-      // Work connected into a Checker that checks nothing yet is the work it checks (ADR 0062).
+      // Work connected into a Checker that checks nothing yet is the work it checks, and a
+      // missed check goes back to it once (ADR 0062).
       const target = nodes.find((node) => node.id === connection.target)?.data.agent
       const source = nodes.find((node) => node.id === connection.source)?.data.agent
       if (target && source && source.kind !== 'operator' && !target.checks && isCheckerRole(target.role)) {
-        modelRef.current?.setAgentField(target.id, 'checks', source.id)
-        setNodes((current) => current.map((node) => (node.id === target.id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, checks: source.id } } } : node)))
+        const fields = checkStepFields(target, source)
+        modelRef.current?.setAgentField(target.id, 'checks', fields.checks)
+        modelRef.current?.setAgentField(target.id, 'sendBackOnce', fields.sendBackOnce)
+        if (fields.thinkingEffort) modelRef.current?.setAgentField(target.id, 'thinkingEffort', fields.thinkingEffort)
+        setNodes((current) => current.map((node) => (node.id === target.id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, ...fields } } } : node)))
       }
       if (edges.length === 0) {
         setModeSwitchBanner(true)

@@ -10,7 +10,7 @@
 //
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
-import { DEFAULT_MODEL, OVERTHINKING_EFFORTS, modelForJob, modelNameFromId, openRouterId } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, OVERTHINKING_EFFORTS, modelForJob, modelNameFromId, openRouterId } from '../ai/modelIds'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
 import type { TeamUsage } from './runLessons'
 import type { AgentAllow, AgentConfig, AllowSwitch } from './types'
@@ -50,6 +50,10 @@ export type CheckupRule =
   | 'overthinking'
   | 'long-instructions'
   | 'strong-gatherer'
+  // A check step (ADR 0062).
+  | 'check-same-model'
+  | 'check-no-done-when'
+  | 'check-no-send-back'
   // Read from the team's recent runs (runLessons.ts).
   | 'heavy-agent'
   | 'idle-teammate'
@@ -65,6 +69,18 @@ export type CheckupFix =
   | { kind: 'effort'; agentId: string; value: string }
   /** A model to run the agent on, with the effort to run it at; none means the model's default. */
   | { kind: 'model'; agentId: string; model: string; thinkingEffort?: string }
+  /** A Done when list for the agent: what a check on its work checks against. */
+  | { kind: 'done-when'; agentId: string; items: readonly string[] }
+  /** A check step sends a missed check back once. */
+  | { kind: 'send-back'; agentId: string }
+
+/** The agent fields a fix sets, for a fix that is a plain field edit; `null` for any other. */
+export function fixFields(change: CheckupFix): Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'doneWhen' | 'sendBackOnce'>> | null {
+  if (change.kind === 'model') return { model: change.model, thinkingEffort: change.thinkingEffort }
+  if (change.kind === 'done-when') return { doneWhen: [...change.items] }
+  if (change.kind === 'send-back') return { sendBackOnce: true }
+  return null
+}
 
 export interface CheckupFinding {
   /** Stable across edits that do not change the finding, so a dismissal sticks. */
@@ -407,6 +423,44 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
         title: `${agent.name} isn't told to build on ${from}'s work`,
         why: `${from} hands it a handover, but its instructions read as if it starts from nothing, so it may redo that work.`,
         fix: { label: 'Start from the handover', change: { kind: 'append-role', agentId: agent.id, text: `Start from what ${from} handed you. Build on it rather than redoing it, and say if something you need is missing from it.` } },
+      })
+    }
+  }
+
+  // ── Check steps (ADR 0062): a check pays for a whole extra session, so it should be one that
+  // can find a problem and get it fixed. ──
+  const modelName = (id: string) => modelNames?.get(id) ?? modelNameFromId(id)
+  for (const checker of workers) {
+    const checked = checker.checks ? byId.get(checker.checks) : undefined
+    if (!checked || checked.kind === 'operator') continue
+    const theirs = openRouterId(checked.model)
+    if (theirs && openRouterId(checker.model) === theirs) {
+      // The other maker's model, as the model picker suggests it (modelSuggestion.ts).
+      const other = theirs.split('/')[0] === CHECK_MODEL.split('/')[0] ? DEFAULT_MODEL : CHECK_MODEL
+      add({
+        rule: 'check-same-model', severity: 'improve', agentId: checker.id, agentIds: [checker.id, checked.id],
+        title: `${checker.name} checks ${checked.name}’s work on the same model that wrote it`,
+        why: 'A model tends to agree with its own work, and to miss the same things twice. One from another maker reads it without sharing those blind spots.',
+        fix: { label: `Use ${modelName(other)}`, change: { kind: 'model', agentId: checker.id, model: other, ...(checker.thinkingEffort ? { thinkingEffort: checker.thinkingEffort } : {}) } },
+      })
+    }
+    if (!checked.doneWhen?.length) {
+      const job = jobFor(checked)
+      add({
+        rule: 'check-no-done-when', severity: 'improve', agentId: checked.id, agentIds: [checked.id, checker.id],
+        title: `${checker.name} has nothing to check ${checked.name}’s work against`,
+        why: `${checked.name} has no Done when, so ${checker.name} checks only that it does what the request asked, and ${checked.name} cannot check its own work before it replies.`,
+        ...(job?.doneWhen?.length
+          ? { fix: { label: `Use the ${job.label} job’s Done when`, change: { kind: 'done-when' as const, agentId: checked.id, items: job.doneWhen } } }
+          : { askPrompt: `Suggest two or three short, checkable things ${checked.name}’s finished result in this team must have, as its Done when, and propose the change.` }),
+      })
+    }
+    if (!checker.sendBackOnce) {
+      add({
+        rule: 'check-no-send-back', severity: 'improve', agentId: checker.id, agentIds: [checker.id, checked.id],
+        title: `What ${checker.name} finds is never fixed`,
+        why: `It shows beside the answer, but ${checked.name} never sees it, so the check costs about half a run and changes nothing in it. Sent back once, a missed check is fixed before you see the answer.`,
+        fix: { label: 'Send a missed check back once', change: { kind: 'send-back', agentId: checker.id } },
       })
     }
   }

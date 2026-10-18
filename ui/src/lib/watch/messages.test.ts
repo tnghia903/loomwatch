@@ -362,3 +362,69 @@ describe('messages between agents', () => {
     })])
   })
 })
+
+// ADR 0062: a check step's rounds are exchanges in the team's chat, built from what it recorded,
+// so a replayed run reads the same as a live one, and a loop of any length is one exchange a round.
+describe('a check step in the chat', () => {
+  const checked = (seconds: number, round: number, items: { verdict: string; item: string; evidence: string }[], recorded: Record<string, unknown> = {}) =>
+    event(seconds, 'checker', 'session_meta', { phase: 'check_result', checked: 'writer', round, items, readable: true, ...recorded }, loomwatch('check_result'))
+  const sentBack = (seconds: number, payload: Record<string, unknown>) =>
+    event(seconds, 'checker', 'session_meta', { phase: 'check_sent_back', to: 'writer', missed: 1, ...payload }, loomwatch('check_sent_back'))
+  const linked = { verdict: 'met', item: 'Every claim has a link', evidence: 'all four' }
+  const short = (verdict: string, evidence: string) => ({ verdict, item: 'Under 300 words', evidence })
+
+  function checkedRun(order: 'recorded before' | 'recorded after'): RunEvent[] {
+    seq = 0
+    const back = () => sentBack(52, order === 'recorded before'
+      ? { round: 1, findings: [short('not_met', '412 words')], problems: 'The piece runs long.' }
+      : {})
+    const revision = () => [prompt(52, 'writer', 'Sent back by Checker'), say(70, 'writer', 'Shorter draft.\n\n## Not changed\n- Kept the 2023 figure: the report says so'), event(71, 'writer', 'turn_end', { stopReason: 'end_turn' })]
+    const events = [
+      say(10, 'writer', 'Draft.'),
+      event(11, 'writer', 'turn_end', { stopReason: 'end_turn' }),
+      say(40, 'checker', 'The piece runs long.\n\n## Check\n1. Met — …'),
+      event(41, 'checker', 'turn_end', { stopReason: 'end_turn' }),
+      checked(42, 1, [linked, short('not_met', '412 words')]),
+    ]
+    // Numbered in the order they were recorded.
+    if (order === 'recorded before') events.push(back(), ...revision())
+    else events.push(...revision(), back())
+    events.push(
+      say(90, 'checker', '## Check\n2. Met — Under 300 words — 280 words'),
+      event(91, 'checker', 'turn_end', { stopReason: 'end_turn' }),
+      checked(92, 2, [linked, short('met', '280 words')]),
+    )
+    return events
+  }
+
+  it('shows each round, what was sent back, and the revised work as the reply', () => {
+    const checks = projectRun(checkedRun('recorded before')).messages.filter((message) => message.kind === 'check')
+    expect(checks.map(({ from, to, state, check }) => ({ from, to, state, round: check?.round, sentBack: check?.sentBack }))).toEqual([
+      { from: 'checker', to: 'writer', state: 'answered', round: 1, sentBack: true },
+      { from: 'checker', to: 'writer', state: 'delivered', round: 2, sentBack: false },
+    ])
+    expect(checks[0].text).toBe('The piece runs long.\n\n**Not met**\n- Under 300 words — 412 words')
+    expect(checks[0].reply).toMatchObject({ from: 'writer', text: 'Shorter draft.\n\n## Not changed\n- Kept the 2023 figure: the report says so', offsetMs: 61_000, source: 'open' })
+    expect(checks[1].text).toBe('All 2 met.')
+  })
+
+  it('reads a run recorded before the send-back came first the same way', () => {
+    const checks = projectRun(checkedRun('recorded after')).messages.filter((message) => message.kind === 'check')
+    expect(checks.map((message) => message.state)).toEqual(['answered', 'delivered'])
+    expect(checks[0].reply?.text).toContain('Shorter draft.')
+  })
+
+  it('says a check it could not read, and a send-back that found the agent finished', () => {
+    seq = 0
+    const messages = projectRun([
+      checked(1, 1, [short('not_sure', 'no block')], { readable: false }),
+      checked(2, 1, [short('not_met', '412 words')]),
+      sentBack(3, { round: 1, problems: '' }),
+      event(4, 'checker', 'session_meta', { phase: 'check_send_back_skipped', to: 'writer', round: 1 }, loomwatch('check_send_back_skipped')),
+    ]).messages
+    expect(messages[0]).toMatchObject({ kind: 'check', state: 'delivered', text: 'Its reply had no Check block LoomWatch could read, so nothing it checked is confirmed.' })
+    expect(messages[1]).toMatchObject({ kind: 'check', state: 'failed', text: '**Not met**\n- Under 300 words — 412 words' })
+    expect(messages[1].error).toContain('not revised')
+  })
+})
+

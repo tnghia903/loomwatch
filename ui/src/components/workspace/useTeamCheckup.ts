@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 
-import { appendToRole, checkup, type CheckupFinding, type CheckupInput } from '../../lib/team-file/checkup'
+import { appendToRole, checkup, fixFields, type CheckupFinding, type CheckupInput } from '../../lib/team-file/checkup'
 import { mergeFindings, runLessons, teamUsage, type LessonRun, type TeamUsage } from '../../lib/team-file/runLessons'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
@@ -74,11 +74,12 @@ export function useTeamCheckup(doc: TeamDocumentController, responder: string | 
     const change = finding.fix?.change
     if (!change) return
     const agent = nodes.find((node) => node.id === change.agentId)?.data.agent
-    if (change.kind === 'allow') updateAgentAllow(change.agentId, change.key, true)
+    const fields = fixFields(change)
+    if (fields) applyAgentFields(change.agentId, fields)
+    else if (change.kind === 'allow') updateAgentAllow(change.agentId, change.key, true)
     else if (change.kind === 'effort') updateAgentThinkingEffort(change.agentId, change.value)
-    else if (change.kind === 'model') applyAgentFields(change.agentId, { model: change.model, thinkingEffort: change.thinkingEffort })
     else if (change.kind === 'append-role') renameAgent(change.agentId, 'role', appendToRole(agent?.role ?? '', change.text))
-    else {
+    else if (change.kind === 'replace-role') {
       renameAgent(change.agentId, 'role', change.text)
       for (const [key, on] of Object.entries(change.allow ?? {})) if (on && !agent?.allow?.[key as AllowSwitch]) updateAgentAllow(change.agentId, key as AllowSwitch, true)
     }

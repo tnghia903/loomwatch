@@ -13,27 +13,58 @@ export interface CheckRound {
   checked: string
   round: number
   items: CheckItemResult[]
+  /** False when the check step's reply had no `## Check` block to read: its Not sure items say
+      nothing about the work. Absent when it could be, and on runs recorded before the daemon said. */
+  readable?: false
+  /** The first round's items, when a send-back made this a later one: what it found before the
+      work was sent back. */
+  first?: CheckItemResult[]
 }
 
 const VERDICTS = new Set(['met', 'not_met', 'not_sure'])
 
-/** The latest round of every check step in the run, in the order they first reported. */
+/** The items a check record lists, as far as they can be read. */
+export function checkItemsOf(items: unknown): CheckItemResult[] {
+  if (!Array.isArray(items)) return []
+  return items.flatMap((raw): CheckItemResult[] => {
+    if (typeof raw !== 'object' || raw === null) return []
+    const { verdict, item, evidence } = raw as Record<string, unknown>
+    return typeof verdict === 'string' && VERDICTS.has(verdict) && typeof item === 'string'
+      ? [{ verdict: verdict as CheckItemResult['verdict'], item, evidence: typeof evidence === 'string' ? evidence : '' }]
+      : []
+  })
+}
+
+/** The latest round of every check step in the run, in the order they first reported, with its first. */
 export function checkRounds(events: readonly Pick<RunEvent, 'agentId' | 'kind' | 'payload' | 'seq'>[], throughSeq = Infinity): CheckRound[] {
   const rounds = new Map<string, CheckRound>()
+  const firsts = new Map<string, CheckItemResult[]>()
   for (const event of events) {
     if (event.seq > throughSeq) break
     const payload = event.payload
     if (event.kind !== 'session_meta' || payload.phase !== 'check_result' || typeof payload.checked !== 'string' || !Array.isArray(payload.items)) continue
-    const items = payload.items.flatMap((raw): CheckItemResult[] => {
-      if (typeof raw !== 'object' || raw === null) return []
-      const { verdict, item, evidence } = raw as Record<string, unknown>
-      return typeof verdict === 'string' && VERDICTS.has(verdict) && typeof item === 'string'
-        ? [{ verdict: verdict as CheckItemResult['verdict'], item, evidence: typeof evidence === 'string' ? evidence : '' }]
-        : []
-    })
-    rounds.set(`${event.agentId}>${payload.checked}`, { checker: event.agentId, checked: payload.checked, round: typeof payload.round === 'number' ? payload.round : 1, items })
+    const key = `${event.agentId}>${payload.checked}`
+    const round = typeof payload.round === 'number' ? payload.round : 1
+    const items = checkItemsOf(payload.items)
+    if (round === 1) firsts.set(key, items)
+    rounds.set(key, { checker: event.agentId, checked: payload.checked, round, items, ...(payload.readable === false ? { readable: false as const } : {}) })
   }
-  return [...rounds.values()]
+  return [...rounds.entries()].map(([key, round]) => {
+    const first = round.round > 1 ? firsts.get(key) : undefined
+    return first ? { ...round, first } : round
+  })
+}
+
+/**
+ * What a send-back did: how many problems the first round found, and how many of those the last
+ * round met. `null` when the work was never sent back.
+ */
+export function checkProgress(round: CheckRound): { found: number; fixed: number } | null {
+  if (!round.first) return null
+  const missed = round.first.filter((item) => item.verdict === 'not_met')
+  if (missed.length === 0) return null
+  const met = new Set(round.items.filter((item) => item.verdict === 'met').map((item) => item.item))
+  return { found: missed.length, fixed: missed.filter((item) => met.has(item.item)).length }
 }
 
 /**

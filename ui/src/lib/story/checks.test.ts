@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { answerNotes, checkRounds } from './checks'
+import { answerNotes, checkProgress, checkRounds } from './checks'
 
 const meta = (seq: number, agentId: string, payload: Record<string, unknown>) => ({ seq, agentId, kind: 'session_meta' as const, payload: { phase: 'check_result', ...payload } })
 
@@ -11,8 +11,30 @@ describe('checkRounds', () => {
       meta(2, 'checker', { checked: 'writer', round: 2, items: [{ verdict: 'met', item: 'Every claim has a link', evidence: 'all linked' }, { verdict: 'maybe', item: 'x' }, 'junk'] }),
       { seq: 3, agentId: 'writer', kind: 'session_meta' as const, payload: { phase: 'stage_handover' } },
     ]
-    expect(checkRounds(events)).toEqual([{ checker: 'checker', checked: 'writer', round: 2, items: [{ verdict: 'met', item: 'Every claim has a link', evidence: 'all linked' }] }])
-    expect(checkRounds(events, 1)[0].round).toBe(1)
+    expect(checkRounds(events)).toEqual([{
+      checker: 'checker', checked: 'writer', round: 2,
+      items: [{ verdict: 'met', item: 'Every claim has a link', evidence: 'all linked' }],
+      // What the first round found stays with the last, so a send-back's fix can be shown.
+      first: [{ verdict: 'not_met', item: 'Every claim has a link', evidence: 'claim 2' }],
+    }])
+    expect(checkRounds(events, 1)).toEqual([{ checker: 'checker', checked: 'writer', round: 1, items: [{ verdict: 'not_met', item: 'Every claim has a link', evidence: 'claim 2' }] }])
+  })
+
+  it('says when a check step’s reply could not be read', () => {
+    const events = [meta(1, 'checker', { checked: 'writer', round: 1, readable: false, items: [{ verdict: 'not_sure', item: 'Linked', evidence: 'no block' }] })]
+    expect(checkRounds(events)[0].readable).toBe(false)
+    expect(checkRounds([meta(1, 'checker', { checked: 'writer', round: 1, readable: true, items: [] })])[0]).not.toHaveProperty('readable')
+  })
+})
+
+describe('checkProgress', () => {
+  const item = (verdict: 'met' | 'not_met' | 'not_sure', name: string) => ({ verdict, item: name, evidence: '' })
+  it('counts what the first round missed and the last round met', () => {
+    const round = { checker: 'checker', checked: 'writer', round: 2, first: [item('not_met', 'Linked'), item('not_met', 'Short'), item('not_sure', 'Dated'), item('met', 'Named')], items: [item('met', 'Linked'), item('not_met', 'Short'), item('met', 'Dated'), item('met', 'Named')] }
+    expect(checkProgress(round)).toEqual({ found: 2, fixed: 1 })
+    // Nothing was sent back: one round, or a first round that missed nothing.
+    expect(checkProgress({ ...round, round: 1, first: undefined })).toBeNull()
+    expect(checkProgress({ ...round, first: [item('met', 'Linked')] })).toBeNull()
   })
 })
 

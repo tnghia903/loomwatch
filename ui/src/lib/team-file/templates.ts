@@ -4,6 +4,7 @@ import { modelForJob, NEW_AGENT } from '../ai/modelIds'
 import { buildAgentFromSource } from '../library/createAgent'
 import { savedJobPreset, type SavedJob } from '../library/jobs'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../library/roles'
+import { checkStepFields } from './checkStep'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
 import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
@@ -57,8 +58,9 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     title: 'Research, write and check',
     description: 'A third agent checks the finished piece against what it must have, and says what it missed.',
     steps: ['Researcher', 'Writer', 'Checker'],
-    // Measured on a real run (ADR 0062): the checker re-opened every source, 188k of 393k tokens.
-    perRun: 'Three agents work on each run. The checker re-opens the writer’s sources, so it can cost as much as the research.',
+    // Measured on a real run (ADR 0062), the checker re-opened every source: 188k of 393k tokens.
+    // It is now handed what the writer was given, and opens at most five sources itself.
+    perRun: 'Three agents work on each run. The checker reads what the writer was given and opens only the sources the piece rests on. When a check is not met, the writer fixes it once before you see the answer.',
     example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Checks: every claim linked, 120 words'], note: 'Checked by the Checker before you read it' },
   },
   {
@@ -147,12 +149,11 @@ export function templateTeamYaml(template: TeamTemplateId, name: string, now = n
     agents = [agent('researcher', 'Researcher', jobRole('researcher')), agent('writer', 'Writer', jobRole('writer'))]
     edges = [sequence('researcher', 'writer', ts)]
   } else if (template === 'research-write-check') {
-    agents = [
-      agent('researcher', 'Researcher', jobRole('researcher')),
-      agent('writer', 'Writer', jobRole('writer')),
-      // The check step's answer is the writer's piece; its checks show beside it (ADR 0062).
-      { ...agent('checker', 'Checker', jobRole('checker')), checks: 'writer' },
-    ]
+    const writer = agent('writer', 'Writer', jobRole('writer'))
+    const checker = agent('checker', 'Checker', jobRole('checker'))
+    // The check step's answer is the writer's piece; its checks show beside it, and a missed one
+    // goes back to the writer once before the answer is shown (ADR 0062).
+    agents = [agent('researcher', 'Researcher', jobRole('researcher')), writer, { ...checker, ...checkStepFields(checker, writer) }]
     edges = [sequence('researcher', 'writer', ts), sequence('writer', 'checker', ts)]
   } else if (template === 'research') {
     // No edges, so the lead is the entrypoint and its reply is the answer; it reaches the others

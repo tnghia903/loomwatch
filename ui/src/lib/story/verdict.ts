@@ -1,5 +1,5 @@
 import type { RunPhase } from '../watch/events'
-import type { AnswerNotes, CheckRound } from './checks'
+import { checkProgress, type AnswerNotes, type CheckRound } from './checks'
 import { readPhrase, type ReadCount } from './reads'
 import type { Receipt, ReceiptLine } from './receipt'
 
@@ -55,13 +55,40 @@ export function findingsOf(receipt: Receipt | null): ReceiptLine[] {
     .filter((line) => !seen.has(line.text) && Boolean(seen.add(line.text)))
 }
 
-/** A check step's missed and unsure items, as findings: a missed check first, then an unsure one. */
+/**
+ * A check step's missed and unsure items, as findings: a missed check first, then an unsure one. A
+ * check whose reply could not be read is one finding: its items were never checked, and listing
+ * each as "not sure" would say they were looked at.
+ */
 export function checkFindings(checks: readonly CheckRound[] = []): ReceiptLine[] {
-  const items = checks.flatMap((round) => round.items.map((item) => ({ ...item, checker: round.checker })))
+  const read = checks.filter((round) => round.readable !== false)
+  const items = read.flatMap((round) => round.items.map((item) => ({ ...item, checker: round.checker })))
   return [
+    ...checks.filter((round) => round.readable === false).map((round) => ({ tone: 'warn' as const, text: 'The check could not be read, so nothing it checked is confirmed', agentId: round.checker })),
     ...items.filter((item) => item.verdict === 'not_met').map((item) => ({ tone: 'warn' as const, text: `Check not met: ${item.item}${item.evidence ? ` (${item.evidence})` : ''}`, agentId: item.checker })),
     ...items.filter((item) => item.verdict === 'not_sure').map((item) => ({ tone: 'warn' as const, text: `Check not sure: ${item.item}`, agentId: item.checker })),
   ]
+}
+
+/**
+ * What the check fixed before the answer was shown, in one sentence; empty when nothing was sent
+ * back. Only the last round decides the badge, so without this the problems a send-back fixed
+ * would never be seen.
+ */
+export function checkProgressSentence(checks: readonly CheckRound[] = []): string {
+  let found = 0
+  let fixed = 0
+  for (const round of checks) {
+    const progress = checkProgress(round)
+    if (!progress) continue
+    found += progress.found
+    fixed += progress.fixed
+  }
+  if (found === 0) return ''
+  const problems = plural(found, 'problem')
+  if (fixed === 0) return `The check found ${problems}, and none was fixed when the work was sent back.`
+  const which = fixed < found ? `${fixed} of them ${fixed === 1 ? 'was' : 'were'}` : found === 1 ? 'it was' : found === 2 ? 'both were' : 'all were'
+  return `The check found ${problems}, and ${which} fixed before you saw this answer.`
 }
 
 /** The notes the daemon took off the end of the answer, as findings: they are no longer in it. */
@@ -80,6 +107,8 @@ export function answerVerdict(input: VerdictInput): AnswerVerdict {
     .sort((a, b) => Number(b.tone === 'bad') - Number(a.tone === 'bad'))
   const allMet = Boolean(input.checks?.length) && input.checks!.every((round) => round.items.every((item) => item.verdict === 'met'))
   const first = findings[0] ? `${findings[0].text}.` : ''
+  const fixed = checkProgressSentence(input.checks)
+  const withFixed = (detail: string) => (fixed ? `${detail} ${fixed}` : detail)
   if (input.streaming) return { tone: 'live', label: 'Writing', detail: 'The team is still writing this answer.', findings, reviewable: false }
   if (!input.text) {
     return input.terminal
@@ -98,14 +127,14 @@ export function answerVerdict(input: VerdictInput): AnswerVerdict {
       reviewable: true,
     }
   }
-  if (findings.length) return { tone: 'look', label: `${plural(findings.length, 'thing')} to check`, detail: first, findings, reviewable: true }
+  if (findings.length) return { tone: 'look', label: `${plural(findings.length, 'thing')} to check`, detail: withFixed(first), findings, reviewable: true }
   const read = readPhrase(input.read)
   return {
     tone: 'ok',
     label: 'Nothing flagged',
-    detail: (read
+    detail: withFixed((read
       ? `Every step finished, reading ${read}, and nothing in the record was flagged.`
-      : 'Every step finished and nothing in the record was flagged.') + (allMet ? ' Every check was met.' : ''),
+      : 'Every step finished and nothing in the record was flagged.') + (allMet ? ' Every check was met.' : '')),
     findings,
     reviewable: true,
   }

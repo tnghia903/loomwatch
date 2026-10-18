@@ -66,7 +66,7 @@ Set agents up the way that works best, every time, without being asked; the pers
 - Make every line specific to this request (its audience, sources, length, format), and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
 - An agent that must search the web gets `allow: {web: true}`; leave `edits` and `commands` off unless the work is changing files or running commands.
 - Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five.
-- When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBackOnce: true` only if the person wants missed checks fixed before they see the answer. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
+- When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBackOnce: true`, so a missed check is fixed before the person sees the answer; leave it off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
 - Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates use: `jobs` lists the usual kinds, `tiers` says which model each kind of agent runs on, and `efforts` how hard it thinks. Use another recommended model only when the person asks for one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
 
 A team file is YAML. A complete pipeline with a review stop:
@@ -386,6 +386,9 @@ async fn propose_team(
             problems.join("; ")
         ));
     }
+    // A check step sends a missed check back unless the proposal says otherwise (ADR 0062), as one
+    // made from a template or on the canvas does.
+    let yaml = with_send_back(&yaml, &team);
     let existing = std::fs::read(&path).ok();
     let id = format!("proposal-{}", uuid::Uuid::new_v4());
     let Caller::Conversation(source) = caller.clone();
@@ -435,6 +438,66 @@ async fn propose_team(
         "status": "waiting_for_the_person",
         "message": message,
     }))
+}
+
+/// `yaml` with `sendBackOnce: true` under every check step that does not set it, written beside
+/// its `checks:` line so the rest of the file stays as it was written. A step that sets it either
+/// way, or whose `checks:` is not on a line of its own (flow style), is left as it is.
+fn with_send_back(yaml: &str, team: &TeamConfig) -> String {
+    let Ok(raw) = serde_yaml::from_str::<serde_yaml::Value>(yaml) else {
+        return yaml.to_owned();
+    };
+    let sets_it = |id: &str| {
+        raw.get("agents")
+            .and_then(serde_yaml::Value::as_sequence)
+            .and_then(|agents| {
+                agents
+                    .iter()
+                    .find(|agent| agent.get("id").and_then(serde_yaml::Value::as_str) == Some(id))
+            })
+            .is_some_and(|agent| agent.get("sendBackOnce").is_some())
+    };
+    let mut pending: Vec<(&str, &str)> = team
+        .agents
+        .iter()
+        .filter_map(|agent| Some((agent.id.as_str(), agent.checks.as_deref()?)))
+        .filter(|(id, _)| !sets_it(id))
+        .collect();
+    if pending.is_empty() {
+        return yaml.to_owned();
+    }
+    let mut out = String::with_capacity(yaml.len() + 32 * pending.len());
+    let mut agent: Option<&str> = None;
+    for line in yaml.split_inclusive('\n') {
+        out.push_str(line);
+        let trimmed = line.trim_start();
+        let body = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+        if let Some(id) = body.strip_prefix("id:") {
+            let id = id.trim().trim_matches(['"', '\'']);
+            agent = pending
+                .iter()
+                .map(|(agent, _)| *agent)
+                .find(|agent| *agent == id);
+        }
+        let Some(current) = agent else { continue };
+        if !body.starts_with("checks:") {
+            continue;
+        }
+        let indent = &line[..line.len() - trimmed.len()];
+        let indent = if trimmed.starts_with("- ") {
+            format!("{indent}  ")
+        } else {
+            indent.to_owned()
+        };
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&indent);
+        out.push_str("sendBackOnce: true\n");
+        pending.retain(|(id, _)| *id != current);
+        agent = None;
+    }
+    out
 }
 
 async fn start_run(control: &Control, caller: &Caller, arguments: &Value) -> Result<Value, String> {
@@ -647,5 +710,58 @@ mod tests {
                 agent.id
             );
         }
+    }
+
+    /// A check step Ask writes sends a missed check back by default (ADR 0062): without it, the
+    /// check costs about half a run and changes nothing in the answer. And it thinks only as hard
+    /// as the work it checks needs.
+    #[test]
+    fn ask_sets_check_steps_up_to_send_work_back_at_the_work_s_effort() {
+        let rule = INSTRUCTIONS
+            .lines()
+            .find(|line| line.contains("end with a check step"))
+            .expect("the instructions say when to add a check step");
+        assert!(rule.contains("Add `sendBackOnce: true`, so"), "{rule}");
+        assert!(!rule.contains("only if the person wants"), "{rule}");
+    }
+
+    /// And a check step Ask proposes without saying sends a miss back too, written into the file
+    /// beside its `checks:` line; one that says, either way, keeps what it says.
+    #[test]
+    fn a_proposed_check_step_sends_a_miss_back_unless_it_says_not_to() {
+        let file = |checker: &str| {
+            format!(
+                "schemaVersion: 1\nid: checked\nname: Checked\nentrypoint: writer\nagents:\n  - id: writer\n    \
+                 name: Writer\n    role: Write it.\n    model: anthropic/claude-sonnet-5.5\n  - id: \
+                 checker\n    name: Checker\n    role: Check it.\n    model: openai/gpt-6.1-sol\n{checker}\
+                 edges:\n  - {{ from: writer, to: checker, layer: configured, kind: sequence, ts: \
+                 \"2026-10-18T00:00:00Z\" }}\n"
+            )
+        };
+        let proposed = file("    checks: writer  # the writer's piece\n");
+        let written = super::with_send_back(&proposed, &TeamConfig::parse(&proposed).unwrap());
+        assert!(
+            written.contains("    checks: writer  # the writer's piece\n    sendBackOnce: true\n"),
+            "{written}"
+        );
+        let team = TeamConfig::parse(&written).unwrap();
+        assert!(team.agents[1].send_back_once);
+        assert!(
+            schema_problems(&written).is_empty(),
+            "{:?}",
+            schema_problems(&written)
+        );
+        // Said either way, it stands; and a team with no check step is left as written.
+        let kept = file("    checks: writer\n    sendBackOnce: false\n");
+        assert_eq!(
+            super::with_send_back(&kept, &TeamConfig::parse(&kept).unwrap()),
+            kept
+        );
+        let plain = file("");
+        let plain = plain.replace("edges:\n  - { from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-18T00:00:00Z\" }\n", "edges: []\n");
+        assert_eq!(
+            super::with_send_back(&plain, &TeamConfig::parse(&plain).unwrap()),
+            plain
+        );
     }
 }
