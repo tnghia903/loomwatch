@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 
 use super::catalog::{self, CATALOG};
 use super::client::{self, Hello};
+use super::icons;
 use super::sign_in::{self, Begun, Outcome};
 use super::vault::Secret;
 use super::{Auth, ConnectedTool, MAX_TOOLS, Tools, unique_name};
@@ -43,6 +44,7 @@ pub fn router(tools: Tools) -> Router {
         .route("/api/tools/{id}/token", post(token))
         .route("/api/tools/{id}/sign-in", post(sign_in_again))
         .route("/api/tools/{id}/check", post(check))
+        .route("/api/tools/icon/{host}", get(icon))
         .layer(DefaultBodyLimit::max(16 * 1024))
         .route_layer(middleware::from_fn(protect))
         .route_layer(middleware::from_fn(crate::watch_api::local_evidence))
@@ -110,6 +112,7 @@ fn public(tool: &ConnectedTool) -> Value {
         "problem": tool.problem,
         "tokenHelp": catalog::at(&tool.url).and_then(|entry| entry.token_help),
         "example": catalog::at(&tool.url).map(|entry| entry.example),
+        "icon": icons::site_for(tool).as_deref().and_then(icons::path),
     })
 }
 
@@ -117,7 +120,11 @@ async fn list(State(tools): State<Tools>) -> Json<Value> {
     let listed = tools.list().await;
     Json(json!({
         "tools": listed.iter().map(public).collect::<Vec<_>>(),
-        "catalog": CATALOG,
+        "catalog": CATALOG.iter().map(|entry| {
+            let mut shown = serde_json::to_value(entry).unwrap_or_default();
+            shown["icon"] = json!(icons::path(entry.site));
+            shown
+        }).collect::<Vec<_>>(),
         "keptIn": if !tools.inner.vault.available() {
             "nowhere"
         } else if crate::ai::keys_in_file() {
@@ -128,6 +135,22 @@ async fn list(State(tools): State<Tools>) -> Json<Value> {
             "keychain"
         },
     }))
+}
+
+/// A tool's icon, fetched from its own site and kept (`icons.rs`).
+async fn icon(State(tools): State<Tools>, Path(host): Path<String>) -> Response {
+    match icons::icon(&tools, &host).await {
+        Some((bytes, kind)) => (
+            [
+                (header::CONTENT_TYPE, kind),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                (header::CONTENT_SECURITY_POLICY, "default-src 'none'"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[derive(Deserialize)]

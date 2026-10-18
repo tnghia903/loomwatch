@@ -33,6 +33,8 @@ export interface ConnectedTool {
   tokenHelp: string | null
   /** For a tool from the starter list: something to ask an agent given it. */
   example?: string | null
+  /** Where LoomWatch serves its icon from (`icons.rs`). */
+  icon?: string | null
 }
 
 /** What a starter tool is for, for the headings the list is shown under (`catalog::Group`). */
@@ -56,6 +58,8 @@ export interface CatalogEntry {
   group?: CatalogGroup
   /** Something to ask an agent given it. */
   example?: string
+  /** Where LoomWatch serves its icon from (`icons.rs`). */
+  icon?: string | null
   tokenHelp?: string
 }
 

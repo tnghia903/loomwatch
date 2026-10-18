@@ -19,6 +19,7 @@ mod api;
 mod catalog;
 mod client;
 mod host;
+mod icons;
 mod sign_in;
 mod vault;
 
@@ -138,6 +139,8 @@ pub struct Tools {
 
 struct Inner {
     file: PathBuf,
+    /// Where the tools' icons are kept (`icons.rs`).
+    icons: PathBuf,
     vault: vault::Vault,
     http: reqwest::Client,
     /// Every read-modify-write of `tools.json` holds this.
@@ -179,6 +182,7 @@ impl Tools {
         Ok(Self {
             inner: Arc::new(Inner {
                 file: state_dir.join(TOOLS_FILE),
+                icons: state_dir.join(icons::ICONS_DIR),
                 vault,
                 http: client::http()?,
                 writes: Mutex::new(()),

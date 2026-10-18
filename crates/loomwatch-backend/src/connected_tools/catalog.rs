@@ -32,6 +32,8 @@ pub(super) enum Group {
 #[serde(rename_all = "camelCase")]
 pub(super) struct Entry {
     pub name: &'static str,
+    /// The service's home page, where its icon is found (`icons.rs`).
+    pub site: &'static str,
     pub url: &'static str,
     /// What it lets an agent do, in a few words.
     pub does: &'static str,
@@ -48,6 +50,7 @@ pub(super) const CATALOG: &[Entry] = &[
     // Work: the places your work already lives.
     Entry {
         name: "Notion",
+        site: "https://www.notion.so",
         url: "https://mcp.notion.com/mcp",
         does: "Search, read and write pages in your workspace",
         auth: Auth::SignIn,
@@ -57,6 +60,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Todoist",
+        site: "https://todoist.com",
         url: "https://ai.todoist.net/mcp",
         does: "Add, find and finish your to-dos",
         auth: Auth::SignIn,
@@ -66,6 +70,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Linear",
+        site: "https://linear.app",
         url: "https://mcp.linear.app/mcp",
         does: "Find, create and update issues and projects",
         auth: Auth::SignIn,
@@ -75,6 +80,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Airtable",
+        site: "https://airtable.com",
         url: "https://mcp.airtable.com/mcp",
         does: "Read and update records in your bases",
         auth: Auth::SignIn,
@@ -84,6 +90,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Cal.com",
+        site: "https://cal.com",
         url: "https://mcp.cal.com/mcp",
         does: "See your bookings and find free times",
         auth: Auth::SignIn,
@@ -94,6 +101,7 @@ pub(super) const CATALOG: &[Entry] = &[
     // Create: make something to look at.
     Entry {
         name: "Miro",
+        site: "https://miro.com",
         url: "https://mcp.miro.com/",
         does: "Read your whiteboards and add sticky notes",
         auth: Auth::SignIn,
@@ -103,6 +111,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Canva",
+        site: "https://www.canva.com",
         url: "https://mcp.canva.com/mcp",
         does: "Find and create designs",
         auth: Auth::SignIn,
@@ -112,6 +121,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Mermaid Chart",
+        site: "https://www.mermaidchart.com",
         url: "https://mcp.mermaidchart.com/mcp",
         does: "Draw flowcharts and diagrams",
         auth: Auth::SignIn,
@@ -121,6 +131,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Replicate",
+        site: "https://replicate.com",
         url: "https://mcp.replicate.com/mcp",
         does: "Make pictures with AI models, on your Replicate credits",
         auth: Auth::SignIn,
@@ -131,6 +142,7 @@ pub(super) const CATALOG: &[Entry] = &[
     // Travel and fun: no sign-in at all.
     Entry {
         name: "Kiwi.com",
+        site: "https://www.kiwi.com",
         url: "https://mcp.kiwi.com",
         does: "Search flights by city and date",
         auth: Auth::None,
@@ -140,6 +152,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Peek",
+        site: "https://www.peek.com",
         url: "https://mcp.peek.com",
         does: "Find tours and things to do in a city",
         auth: Auth::None,
@@ -149,6 +162,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Instant Domain Search",
+        site: "https://instantdomainsearch.com",
         url: "https://mcp.instantdomainsearch.com/mcp",
         does: "Check which website names are free",
         auth: Auth::None,
@@ -159,6 +173,7 @@ pub(super) const CATALOG: &[Entry] = &[
     // Look things up: read and research, no sign-in.
     Entry {
         name: "Jina Reader",
+        site: "https://jina.ai",
         url: "https://mcp.jina.ai/v1",
         does: "Read any web page or PDF, and take screenshots",
         auth: Auth::None,
@@ -168,6 +183,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "DeepWiki",
+        site: "https://deepwiki.com",
         url: "https://mcp.deepwiki.com/mcp",
         does: "Ask questions about any public GitHub project",
         auth: Auth::None,
@@ -177,6 +193,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Hugging Face",
+        site: "https://huggingface.co",
         url: "https://huggingface.co/mcp",
         does: "Search AI models, datasets and papers",
         auth: Auth::None,
@@ -186,6 +203,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Microsoft Learn",
+        site: "https://learn.microsoft.com",
         url: "https://learn.microsoft.com/api/mcp",
         does: "Search Microsoft's official documentation",
         auth: Auth::None,
@@ -195,6 +213,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Context7",
+        site: "https://context7.com",
         url: "https://mcp.context7.com/mcp",
         does: "Up-to-date documentation for code libraries",
         auth: Auth::None,
@@ -205,6 +224,7 @@ pub(super) const CATALOG: &[Entry] = &[
     // Build and sell: for people who make software or run a shop.
     Entry {
         name: "GitHub",
+        site: "https://github.com",
         url: "https://api.githubcopilot.com/mcp/",
         does: "Read code, issues and pull requests",
         auth: Auth::Token,
@@ -214,6 +234,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Stripe",
+        site: "https://stripe.com",
         url: "https://mcp.stripe.com",
         does: "Look up customers, payments and invoices",
         auth: Auth::SignIn,
@@ -223,6 +244,7 @@ pub(super) const CATALOG: &[Entry] = &[
     },
     Entry {
         name: "Sentry",
+        site: "https://sentry.io",
         url: "https://mcp.sentry.dev/mcp",
         does: "Look into errors and issues in your apps",
         auth: Auth::SignIn,
@@ -248,6 +270,7 @@ mod tests {
     fn every_entry_is_https_named_once_and_says_what_to_try() {
         for (index, entry) in CATALOG.iter().enumerate() {
             assert!(entry.url.starts_with("https://"), "{}", entry.name);
+            assert!(entry.site.starts_with("https://"), "{}", entry.name);
             assert!(
                 !entry.does.is_empty() && !entry.example.is_empty(),
                 "{}",

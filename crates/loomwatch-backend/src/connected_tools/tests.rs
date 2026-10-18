@@ -37,6 +37,8 @@ struct Fake {
 }
 
 const TOKEN: &str = "secret-token-123";
+/// The start of a PNG, which is all the icon check reads.
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\nfake-icon";
 const ACCESS: &str = "access-token-456";
 
 impl Fake {
@@ -81,6 +83,17 @@ async fn start(guard: Guard) -> (String, Fake) {
             get(authorization_server),
         )
         .route("/register", post(register))
+        // Its home page names its icon, as a real site's does.
+        .route(
+            "/",
+            get(|| async {
+                axum::response::Html(r#"<html><head><link rel="icon" href="/logo.svg"><link rel="apple-touch-icon" href="/icon.png"></head></html>"#)
+            }),
+        )
+        .route(
+            "/icon.png",
+            get(|| async { ([(header::CONTENT_TYPE, "image/png")], PNG.to_vec()) }),
+        )
         .route("/token", post(token))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -304,6 +317,60 @@ async fn connects_an_open_tool_and_an_agent_calls_it() {
     let (status, _) = ask(&app, "DELETE", &format!("/api/tools/{id}"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(tools.list().await.is_empty());
+}
+
+/// A tool's icon comes from its own site, is kept, and is served as a bitmap with nothing else
+/// allowed; a site `LoomWatch` doesn't show is never fetched.
+#[tokio::test]
+async fn serves_a_tools_icon_from_its_own_site() {
+    let (base, _fake) = start(Guard::Open).await;
+    let folder = Folder::new();
+    let tools = Tools::for_tests(&folder.0);
+    let app = router(tools.clone());
+    let (_, body) = ask(
+        &app,
+        "POST",
+        "/api/tools",
+        Some(json!({"url": format!("{base}/mcp")})),
+    )
+    .await;
+    let host = base.trim_start_matches("http://");
+    let icon = format!("/api/tools/icon/{host}");
+    assert_eq!(body["tool"]["icon"], icon.as_str());
+    let request = |uri: &str| {
+        Request::builder()
+            .uri(uri)
+            .header(header::HOST, "127.0.0.1:3000")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = app.clone().oneshot(request(&icon)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+    assert_eq!(
+        response.headers()[header::CONTENT_SECURITY_POLICY],
+        "default-src 'none'"
+    );
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], PNG);
+    // Kept, under the state folder.
+    let kept = folder.0.join("tool-icons").join(host.replace(':', "_"));
+    assert_eq!(std::fs::read(kept).unwrap(), PNG);
+    // Not a site LoomWatch shows: refused without a fetch.
+    let response = app
+        .oneshot(request("/api/tools/icon/evil.example"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // The starter list names each entry's icon.
+    let (_, listed) = ask(&router(tools), "GET", "/api/tools", None).await;
+    let kiwi = listed["catalog"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Kiwi.com")
+        .unwrap();
+    assert_eq!(kiwi["icon"], "/api/tools/icon/www.kiwi.com");
 }
 
 #[tokio::test]

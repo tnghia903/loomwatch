@@ -23,6 +23,7 @@ import { InstructionShape } from '../canvas/InstructionShape'
 import { EffortSlider } from '../models/EffortSlider'
 import { ModelPicker } from '../models/ModelPicker'
 import { ConnectTool } from '../tools/ConnectTool'
+import { ToolIcon } from '../tools/ToolIcon'
 import type { BenchLabel } from './AgentFigure'
 import type { BenchView } from './workbenchScene'
 
@@ -289,7 +290,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
                 const label = (call: string) => tool?.calls.find((item) => item.name === call)?.label ?? call
                 return (
                   <li key={name} className={tool ? '' : 'missing'}>
-                    <Wrench size={15} aria-hidden="true" />
+                    {tool ? <ToolIcon name={tool.name} icon={tool.icon} size={24} /> : <Wrench size={15} aria-hidden="true" />}
                     <span className="byhand-tool-text">
                       <b>{name}</b>
                       {!tool
@@ -314,7 +315,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             {toGive.length > 0 && !connecting && <div className="byhand-tools-give">
               <p className="t-meta">Give it a tool you connected</p>
               <ul className="connect-tool-list" aria-label="Tools you can give it">
-                {toGive.map((tool) => <li key={tool.id}><button type="button" onClick={() => giveTool(tool.name)}><b>{tool.name}</b><span>{actionCount(tool.calls.length)}</span><em><Plus size={12} aria-hidden="true" /> Give it {tool.name}</em></button></li>)}
+                {toGive.map((tool) => <li key={tool.id}><button type="button" onClick={() => giveTool(tool.name)}><span className="connect-tool-name"><ToolIcon name={tool.name} icon={tool.icon} size={24} /><b>{tool.name}</b></span><span>{actionCount(tool.calls.length)}</span><em><Plus size={12} aria-hidden="true" /> Give it {tool.name}</em></button></li>)}
               </ul>
             </div>}
             {connecting && connected.state === 'ready'

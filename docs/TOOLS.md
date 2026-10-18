@@ -21,6 +21,10 @@ Open an agent's **Tools it can use** block and click **Connect a new tool**, or 
 | Look things up | Jina Reader, DeepWiki, Hugging Face, Microsoft Learn, Context7 | No sign-in |
 | Build and sell | GitHub (token), Stripe, Sentry | Sign in or token |
 
+Each tool shows its own icon. LoomWatch fetches it from the service's own website the first time
+it's shown and keeps a copy for a week. The icons belong to their makers and aren't part of
+LoomWatch. A site that won't hand one over shows the tool's first letter instead.
+
 There are three ways a tool connects:
 
 - **No sign-in.** The tool answers anyone, so it connects at once.

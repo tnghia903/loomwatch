@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { actionCount, checkTool, keptInWords, removeTool, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
 import { ConnectTool } from '../tools/ConnectTool'
+import { ToolIcon } from '../tools/ToolIcon'
 
 /** The longest description of a call shown in the list. */
 const DESCRIPTION_CHARS = 140
@@ -38,7 +39,7 @@ export function ConnectedTools() {
         {listed.map((tool) => (
           <li key={tool.id}>
             <div className="tools-connected-head">
-              <b>{tool.name}</b>
+              <span className="tools-connected-name"><ToolIcon name={tool.name} icon={tool.icon} size={28} /><b>{tool.name}</b></span>
               <span className="t-meta">{tool.pending ? 'Not finished connecting' : `${actionCount(tool.calls.length)} · ${tool.auth === 'signIn' ? 'signed in' : tool.auth === 'token' ? 'with a token' : 'no sign-in'}`}</span>
             </div>
             <p className="t-meta">{tool.url}</p>

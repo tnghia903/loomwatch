@@ -5,6 +5,7 @@ import {
   CATALOG_GROUPS, connectTool, fetchTools, keptInWords, onToolsMessage, sendToolToken, signInToToolAgain,
   type CatalogEntry, type ConnectedTool, type KeptIn, type SignInOutcome,
 } from '../../lib/tools/client'
+import { ToolIcon } from './ToolIcon'
 
 const OUTCOME_SAID: Record<Exclude<SignInOutcome, 'connected'>, string> = {
   denied: 'You didn’t allow LoomWatch, so nothing was connected.',
@@ -111,7 +112,7 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
                 return (
                   <li key={entry.url}>
                     <button type="button" disabled={Boolean(busy) || already} title={entry.example ? `Try asking: ${entry.example}` : undefined} onClick={() => void act(entry.name, () => begin(entry.url, entry.name))}>
-                      <b>{entry.name}</b>
+                      <span className="connect-tool-name"><ToolIcon name={entry.name} icon={entry.icon} size={24} /><b>{entry.name}</b></span>
                       <span>{entry.does}</span>
                       <em>{already ? <><Check size={12} aria-hidden="true" /> Connected</> : busy === entry.name ? 'Connecting…' : entry.auth === 'signIn' ? 'Sign in' : entry.auth === 'token' ? 'Paste a token' : 'No sign-in needed'}</em>
                     </button>
