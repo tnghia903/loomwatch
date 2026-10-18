@@ -12,8 +12,12 @@
 // prints the table. Each setup is read once; running it again is answered from what was kept.
 //
 //   LOOMWATCH_EVAL_URL=http://127.0.0.1:3000 pnpm vitest run src/lib/team-file/modelSuggestion.eval.test.ts
+//
+// LOOMWATCH_EVAL_ALL=1 also reads the agents the gate skips, to measure the reading itself: the
+// suggestion still uses only the readings the app would ask for. LOOMWATCH_EVAL_OUT=<file> keeps
+// every row and reading as JSON, so thresholds can be tried again without reading again.
 
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
@@ -60,14 +64,18 @@ describe('model suggestion, measured', () => {
   })
 
   const url = process.env.LOOMWATCH_EVAL_URL?.replace(/\/$/, '')
+  const readAll = process.env.LOOMWATCH_EVAL_ALL === '1'
+  const out = process.env.LOOMWATCH_EVAL_OUT
   it.runIf(Boolean(url))('compares the suggestion with and without reading, through a running LoomWatch', async () => {
     const rows: string[] = []
+    const records: { source: string; label: string; want: Tier; keywords: Tier | null; read: Tier | null; gated: boolean; reading: SetupReading | null }[] = []
     const totals: Record<string, { n: number; keywords: number; read: number; readings: number; unsure: number }> = {}
     for (const one of cases) {
       const before = got(one)
       let reading: SetupReading | null = null
       let note = ''
-      if (needsReading(one.agent)) {
+      const gated = needsReading(one.agent)
+      if (gated || readAll) {
         const response = await fetch(`${url}/api/models/reading`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-LoomWatch-Request': '1' },
@@ -76,20 +84,26 @@ describe('model suggestion, measured', () => {
         const body = await response.json() as { reading?: SetupReading; code?: string; error?: string }
         if (!response.ok) throw new Error(`${one.label}: ${body.code} ${body.error}`)
         reading = body.reading ?? null
-        note = reading ? `${reading.kind} ${(reading.probabilities[reading.kind] ?? 0).toFixed(2)}` : 'no answer'
+        note = reading ? `${reading.kind} ${(reading.probabilities[reading.kind] ?? 0).toFixed(2)}${reading.confidence === undefined ? '' : ` c${reading.confidence.toFixed(2)}`}${gated ? '' : ' (not gated)'}` : 'no answer'
       }
-      const after = got(one, reading)
+      const after = got(one, gated ? reading : null)
+      records.push({ source: one.source, label: one.label, want: one.want, keywords: before, read: after, gated, reading })
       const total = (totals[one.source] ??= { n: 0, keywords: 0, read: 0, readings: 0, unsure: 0 })
       total.n += 1
       if (before === one.want) total.keywords += 1
       if (after === one.want) total.read += 1
-      if (reading) total.readings += 1
-      if (reading && after === before && reading.kind !== KIND_FOR[before ?? 'strong']) total.unsure += 1
+      if (reading && gated) total.readings += 1
+      if (reading && gated && after === before && reading.kind !== KIND_FOR[before ?? 'strong']) total.unsure += 1
       rows.push(`${one.source.padEnd(8)} ${one.label.padEnd(44)} want ${one.want.padEnd(6)} keywords ${String(before).padEnd(6)} read ${String(after).padEnd(6)} ${note}`)
     }
     const all = Object.values(totals).reduce((sum, each) => ({ n: sum.n + each.n, keywords: sum.keywords + each.keywords, read: sum.read + each.read, readings: sum.readings + each.readings, unsure: sum.unsure + each.unsure }), { n: 0, keywords: 0, read: 0, readings: 0, unsure: 0 })
     const line = (name: string, each: typeof all) => `${name.padEnd(8)} right with keywords ${each.keywords}/${each.n}, with reading ${each.read}/${each.n}, setups read ${each.readings}, readings not sure enough to act on ${each.unsure}`
-    console.log(['', ...rows, '', ...Object.entries(totals).map(([name, each]) => line(name, each)), line('all', all)].join('\n'))
+    // The reading itself, gate aside: its kind against the label's, on every agent it read.
+    const answered = records.filter((each) => each.reading)
+    const agrees = answered.filter((each) => each.reading?.kind === KIND_FOR[each.want]).length
+    const agreement = `reading's kind matches the label on ${agrees}/${answered.length} agents read`
+    console.log(['', ...rows, '', ...Object.entries(totals).map(([name, each]) => line(name, each)), line('all', all), agreement].join('\n'))
+    if (out) writeFileSync(out, JSON.stringify(records, null, 2))
     expect(all.n).toBe(cases.length)
   }, 120_000)
 })
