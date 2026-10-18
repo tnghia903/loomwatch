@@ -6,10 +6,10 @@ import { YamlSheet } from './YamlSheet'
 describe('YamlSheet', () => {
   afterEach(cleanup)
 
-  it('renders the ordinary YAML preview with only a close control', () => {
-    render(<YamlSheet title="YAML preview" yaml="agents: []" onClose={vi.fn()} />)
+  it('renders the YAML with only a close control when given no footer', () => {
+    render(<YamlSheet title="Disk ↔ in-memory YAML" yaml="agents: []" onClose={vi.fn()} />)
 
-    expect(screen.getByRole('dialog', { name: 'YAML preview' })).toHaveTextContent('agents: []')
+    expect(screen.getByRole('dialog', { name: 'Disk ↔ in-memory YAML' })).toHaveTextContent('agents: []')
     expect(screen.getByRole('button', { name: 'Close YAML' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Keep mine' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Use disk' })).not.toBeInTheDocument()
@@ -27,12 +27,5 @@ describe('YamlSheet', () => {
     expect(screen.getByRole('dialog', { name: 'Disk ↔ in-memory YAML' })).toHaveTextContent('Keep mine')
     expect(screen.getByRole('button', { name: 'Keep mine' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Use disk' })).toBeInTheDocument()
-  })
-
-  it('focuses and marks a requested problem line', () => {
-    render(<YamlSheet title="YAML preview · line 2" yaml={'name: Demo\nunexpected: true\n'} highlightLine={2} onClose={vi.fn()} />)
-
-    expect(screen.getByLabelText('Problem at YAML line 2')).toHaveTextContent('unexpected: true')
-    expect(screen.getByLabelText('Problem at YAML line 2')).toHaveFocus()
   })
 })

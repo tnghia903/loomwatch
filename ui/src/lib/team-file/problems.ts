@@ -1,5 +1,3 @@
-import { LineCounter, parseDocument } from 'yaml'
-
 import type { EntrypointProblem } from './useTeamDocument'
 import type { AgentField, AgentFieldProblems, DocumentProblem } from './validation'
 
@@ -12,7 +10,7 @@ const SCHEDULE_FIELD_COPY: Record<string, Pick<ReviewProblem, 'title' | 'message
   timezone: { title: 'Schedule · Timezone', message: 'Choose a recognized timezone.' },
   prompt: { title: 'Schedule · Task', message: 'Add what the team should do each time it runs.' },
   enabled: { title: 'Schedule · On or off', message: 'A schedule is either on or off and cannot hold anything else. Saving the schedule resets it.' },
-  deliver: { title: 'Schedule · Delivery', message: 'The delivery settings are incomplete. Saving the schedule clears them; Advanced YAML keeps them.' },
+  deliver: { title: 'Schedule · Delivery', message: 'The delivery settings are incomplete. Saving the schedule clears them.' },
 }
 
 function friendlyDocumentProblem(problem: DocumentProblem): Pick<ReviewProblem, 'title' | 'message'> {
@@ -69,17 +67,4 @@ export function reviewProblems(entrypointProblem: EntrypointProblem | null, fiel
       return { ...problem, message: friendly.message, weight: 'error' as const, title: problem.agentId && problem.yamlPath?.[0] !== 'schedule' ? (agentNames.get(problem.agentId) ?? friendly.title) : friendly.title }
     }),
   ]
-}
-
-/** Resolve a validation path against the CST so Review can take the operator to source. */
-export function yamlLineForPath(yaml: string, path: readonly (string | number)[] | undefined): number {
-  if (!yaml.trim()) return 1
-  const lineCounter = new LineCounter()
-  const document = parseDocument(yaml, { lineCounter })
-  let target = path && path.length > 0 ? document.getIn(path, true) : document.contents
-  if (!target && path && path.length > 1) target = document.getIn(path.slice(0, -1), true)
-  const range = target && typeof target === 'object' && 'range' in target
-    ? (target as { range?: readonly number[] }).range
-    : document.contents?.range
-  return range?.[0] !== undefined ? lineCounter.linePos(range[0]).line : 1
 }

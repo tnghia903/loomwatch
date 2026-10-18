@@ -156,9 +156,9 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
           </>
         )}
         {/* Trace depth: what the agent panel would tell, without opening it (ADR 0039): its model,
-            what it may do without asking, what it is given and a folder chosen for it. The command
-            and id stay in Show YAML and the panel's header. Hidden by CSS at the other depths, so
-            it is never announced twice. */}
+            what it may do without asking, what it is given and a folder chosen for it. The id stays in
+            the panel's header and the command in the team file. Hidden by CSS at the other depths,
+            so it is never announced twice. */}
         {depth === 'trace' && <dl className="depth-trace-facts">
           <dt>Model</dt><dd>{modelLine(agent)}</dd>
           <dt>Allowed</dt><dd>{allowedSummary(agent)}</dd>

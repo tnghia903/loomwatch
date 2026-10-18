@@ -29,7 +29,6 @@ export interface DocumentSwitcherProps {
   onSaveCopy: () => void
   onReload: () => void
   onDiscard: () => void
-  onShowYaml: () => void
   onNewTeam: () => void
   /** Rename the open team; absent while it cannot be edited. */
   onRename?: (name: string) => void
@@ -44,7 +43,7 @@ export interface DocumentSwitcherProps {
 // UX_REDESIGN §9.1: the canvas is a view over a file and the file is the truth. This chip is
 // the only place file state is expressed, and the only way to reach another file.
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onShowYaml, onNewTeam, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onNewTeam, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [files, setFiles] = useState<TeamSummary[] | null>(null)
   const [root, setRoot] = useState<string | null>(null)
@@ -190,7 +189,6 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
               {onRename && <button type="button" className="link" onClick={() => setRenaming(teamName ?? filename.replace(/\.ya?ml$/i, ''))}>Rename</button>}
               {onDelete && <button type="button" className="link alert" onClick={() => { setSwitcherOpen(false); onDelete() }} disabled={unsaved} title={unsaved ? 'Save or discard your changes first' : undefined}>Delete team…</button>}
               <button type="button" className="link" onClick={() => void navigator.clipboard?.writeText(path)}>Copy path</button>
-              <button type="button" className="link" onClick={onShowYaml}>Show YAML</button>
               {/* Both read the file again (ADR 0043): with changes it is Discard, which asks first;
                   without, it is Reload, which picks up an edit made outside LoomWatch. */}
               {dirty && saveState !== 'new'

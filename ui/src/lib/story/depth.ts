@@ -10,7 +10,7 @@ import { verbFor } from './teamSentence'
  * - **Team** (around 100%): today's card — app, name, instructions, run state.
  * - **Trace** (zoomed in): the same card plus what the agent panel would tell — its model, what it
  *   may do without asking, what it is given, a folder chosen for it — and the full instructions.
- *   The id and command it showed until ADR 0039 are in the panel's header and Show YAML.
+ *   The id it showed until ADR 0039 is in the panel's header, and the command in the team file.
  *
  * Nothing is hidden behind a mode: depth is a place on the zoom slider, so a newcomer never has to
  * find a setting and an expert reaches the detail with the gesture they already use.

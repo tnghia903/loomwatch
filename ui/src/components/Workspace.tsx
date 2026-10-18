@@ -23,7 +23,7 @@ import { mergeHistory, teamRunIds } from '../lib/runs/history'
 import { useRunHistory } from '../lib/runs/useRunHistory'
 import { useRunSession } from '../lib/runs/useRunSession'
 import { snapToGrid } from '../lib/grid'
-import { reviewProblems, yamlLineForPath, type ReviewProblem } from '../lib/team-file/problems'
+import { reviewProblems, type ReviewProblem } from '../lib/team-file/problems'
 import { pipelineTerminal } from '../lib/team-file/pipelineOrder'
 import { agentPlace } from '../lib/team-file/agentPlace'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
@@ -286,8 +286,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const [outputEditorOpen, setOutputEditorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [problemsOpen, setProblemsOpen] = useState(false)
-  const [yamlOpen, setYamlOpen] = useState(false)
-
   const [compareOpen, setCompareOpen] = useState(false)
   const [openPathOpen, setOpenPathOpen] = useState(false)
   const [newTeamSheet, setNewTeamSheet] = useState(false)
@@ -356,7 +354,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
    * field being sent to, and the operator arrives with no idea why they are looking at it.
    */
   const [forcedInspectorField, setForcedInspectorField] = useState<{ agentId: string; field: AgentField; hint: string } | null>(null)
-  const [yamlHighlightLine, setYamlHighlightLine] = useState<number | null>(null)
   const [scheduleEditorOpen, setScheduleEditorOpen] = useState(false)
   /** The Schedule button's not-yet-saved schedule: drawn on the canvas only while its editor is open. */
   const [draftSchedule, setDraftSchedule] = useState<ScheduleConfig | null>(null)
@@ -939,11 +936,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       setStatusAnnouncement('Schedule updated. Save the team file to finish.')
     }
   }
-  const showScheduleYaml = useCallback(() => {
-    setScheduleEditorOpen(false)
-    setYamlHighlightLine(yamlLineForPath(doc.yamlPreview, ['schedule']))
-    setYamlOpen(true)
-  }, [doc.yamlPreview])
   const openScheduleEditor = useCallback(() => setScheduleEditorOpen(true), [])
   // The Schedule button: the card appears where it will live and the editor opens on it, but nothing
   // reaches the team file until "Save schedule" — closing the editor leaves the team as it was.
@@ -1887,12 +1879,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       if (problemFieldRef.current) setProblemFocusRequest((request) => request + 1)
       return
     }
-    if (!problem.yamlPath && targets.length > 0) {
-      void flow.fitView({ nodes: targets, padding: 0.35, maxZoom: 1, duration: 300 })
-      return
-    }
-    setYamlHighlightLine(yamlLineForPath(doc.yamlPreview, problem.yamlPath))
-    setYamlOpen(true)
+    if (targets.length > 0) void flow.fitView({ nodes: targets, padding: 0.35, maxZoom: 1, duration: 300 })
   }, [doc, flow])
   useEffect(() => {
     const problemField = problemFieldRef.current
@@ -2293,7 +2280,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     { label: 'Follow system appearance', run: () => setThemeMode('system') },
     { label: notificationsOn ? 'Disable notifications' : 'Enable notifications', run: () => void enableNotifications() },
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
-    { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
     { label: 'My agents…', run: () => window.location.assign('/agents') },
     { label: 'Skills…', run: () => window.location.assign('/skills') },
     { label: 'Quests…', run: () => window.location.assign('/quests') },
@@ -2355,7 +2341,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeRun, closeDetails: detailsOpen ? closeDetails : undefined, organize, fitCanvas,
     pendingNodeDelete, setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm,
     paletteOpen, setPaletteOpen, problemsOpen, setProblemsOpen,
-    yamlOpen, setYamlOpen, compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
+    compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen, setMemoryOpen,
     fannedAgentId, setFannedAgentId, setSolo, setSweeping,
     selectedNodes, selectedEdges, selectedCapabilities, selectedCapabilityEdgeIds, capabilityCards, capabilityEdgeById,
@@ -2714,7 +2700,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError} linesDiffer={differ}
             entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames}
             isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768}
-            onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()} onShowYaml={() => setYamlOpen(true)}
+            onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()}
             onNewTeam={openNewTeam} onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
             onSelectProblem={selectProblem} problemsOpen={problemsOpen} onProblemsOpenChange={setProblemsOpen}
           />
@@ -2857,7 +2843,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             savedInEditor={scheduleSaved}
             onSave={saveSchedule}
             onSaveFile={() => void doc.save()}
-            onAdvanced={showScheduleYaml}
             onClose={() => setScheduleEditorOpen(false)}
             onRemove={editable && doc.teamSchedule ? removeSchedule : undefined}
             isNew={!doc.teamSchedule && scheduleProblems.length === 0}
@@ -2982,7 +2967,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
         {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
         {chatReview && <TeamReviewDialog review={chatReview.review} onTrust={async () => { await approveTeam(chatReview.review.teamPath, chatReview.review.teamRevision); const { retry } = chatReview; setChatReview(null); retry() }} onClose={() => setChatReview(null)} />}
-        {yamlOpen && <YamlSheet title={yamlHighlightLine ? `YAML preview · line ${yamlHighlightLine}` : 'YAML preview'} yaml={doc.yamlPreview} highlightLine={yamlHighlightLine} onClose={() => { setYamlOpen(false); setYamlHighlightLine(null) }} />}
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />
         )}

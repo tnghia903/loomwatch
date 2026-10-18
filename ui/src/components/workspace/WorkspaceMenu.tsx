@@ -13,8 +13,7 @@ interface WorkspaceMenuProps {
 /**
  * The workspace's overflow menu: only what has no other control on the screen (ADR 0043). All
  * teams is the brand, Organize and its undo are in the view bar, the full trace is in the run's
- * heading, Show YAML is with the team's file in the switcher, and a routine runs from its
- * schedule. Past work is in each team's chat (ADR 0051), which retired the run history list. Its open state lives here rather than in the workspace, so opening and closing it
+ * heading, and a routine runs from its schedule. Past work is in each team's chat (ADR 0051), which retired the run history list. Its open state lives here rather than in the workspace, so opening and closing it
  * re-renders the menu alone.
  */
 export function WorkspaceMenu({ runView, onMemory }: WorkspaceMenuProps) {

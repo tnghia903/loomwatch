@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronDown, ChevronRight, Clock3, Globe2, Save, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, Clock3, Globe2, Save, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
 import { cronFor, normalizeSchedule, scheduleParts, unsupportedScheduleKeys, type ScheduleFrequency } from '../../lib/team-file/schedule'
@@ -20,7 +20,6 @@ export interface SchedulePanelProps {
   savedInEditor: boolean
   onSave: (schedule: ScheduleConfig) => void
   onSaveFile: () => void
-  onAdvanced: () => void
   onClose: () => void
   /** Take the schedule off the team. Absent for a schedule not added yet, and when read-only. */
   onRemove?: () => void
@@ -31,7 +30,7 @@ export interface SchedulePanelProps {
   status?: ReactNode
 }
 
-export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onAdvanced, onClose, onRemove, isNew = false, status }: SchedulePanelProps) {
+export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onClose, onRemove, isNew = false, status }: SchedulePanelProps) {
   const initial = scheduleParts(schedule.cron)
   const [frequency, setFrequency] = useState<ScheduleFrequency>(initial.frequency)
   const [time, setTime] = useState(initial.time)
@@ -114,7 +113,7 @@ export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile
 
         <label className="schedule-field"><span className="t-ui">What should the team do?</span><textarea className="input" value={prompt} onChange={(event) => edit(setPrompt)(event.target.value)} placeholder="Describe the task for each scheduled run" aria-label="Scheduled task" /></label>
 
-        {dropped.length > 0 && <small className="t-meta schedule-note">Saving removes {dropped.join(', ')} — {dropped.length === 1 ? 'a setting' : 'settings'} this team file's format does not allow. Use Advanced YAML to keep {dropped.length === 1 ? 'it' : 'them'}.</small>}
+        {dropped.length > 0 && <small className="t-meta schedule-note">Saving removes {dropped.join(', ')} — {dropped.length === 1 ? 'a setting' : 'settings'} this team file's format does not allow.</small>}
 
         <button type="submit" className="btn btn-primary schedule-save" disabled={readOnly || !cron.trim() || !prompt.trim()}><Clock3 size={16} aria-hidden="true" /> Save schedule</button>
 
@@ -133,7 +132,7 @@ export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile
           <button type="button" className="btn schedule-save-file" onClick={onSaveFile} disabled={!canSaveFile}><Save size={15} aria-hidden="true" /> Save team file <kbd className="t-mono-sm">{keys('⌘S')}</kbd></button>
         )}
 
-        <footer><button type="button" className="link" onClick={onAdvanced}>Advanced YAML <ChevronRight size={14} aria-hidden="true" /></button>{onRemove && <button type="button" className="link muted" onClick={onRemove}>Remove schedule</button>}<button type="button" className="link muted" onClick={onClose}>Close</button></footer>
+        <footer>{onRemove && <button type="button" className="link muted" onClick={onRemove}>Remove schedule</button>}<button type="button" className="link muted" onClick={onClose}>Close</button></footer>
       </form>
       </div>
     </aside>

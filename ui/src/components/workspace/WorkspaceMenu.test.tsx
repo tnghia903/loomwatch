@@ -6,8 +6,8 @@ import { WorkspaceMenu } from './WorkspaceMenu'
 afterEach(cleanup)
 
 // ADR 0043: the menu holds only what has no other control on the screen. All teams is the brand,
-// Organize is in the view bar, Full trace in the run's heading, Show YAML in the team switcher,
-// and a routine runs from its schedule. Past work is in each team's chat (ADR 0051), so the run
+// Organize is in the view bar, Full trace in the run's heading, and a routine runs from its
+// schedule. Past work is in each team's chat (ADR 0051), so the run
 // history list it used to open is gone.
 it('lists only what no other control on the screen does', () => {
   render(<WorkspaceMenu runView onMemory={vi.fn()} />)

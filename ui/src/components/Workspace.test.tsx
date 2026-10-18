@@ -750,7 +750,9 @@ describe('Workspace', () => {
     expect(screen.queryByRole('complementary', { name: /cargo test/ })).not.toBeInTheDocument()
   })
 
-  it('opens a document-level problem at its exact YAML line', async () => {
+  // A newcomer never meets the team file's raw YAML: there is no Show YAML in the team switcher or
+  // the palette, and a problem with nothing on the canvas to point at no longer opens it.
+  it('never shows the team file as YAML', async () => {
     Object.assign(documentState, {
       isValid: false,
       documentChipState: 'invalid',
@@ -758,10 +760,18 @@ describe('Workspace', () => {
       yamlPreview: 'schemaVersion: 1\nunexpected: true\nagents: []\n',
     })
     renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+    expect(screen.getByRole('dialog', { name: 'Team switcher' })).toHaveTextContent('Copy path')
+    expect(screen.queryByRole('button', { name: 'Show YAML' })).not.toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    expect(screen.getByRole('button', { name: /Copy file path/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show YAML/ })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
     fireEvent.click(screen.getAllByRole('button', { name: 'Review' }).find((button) => button.hasAttribute('aria-controls'))!)
     fireEvent.click(screen.getByRole('button', { name: /Team.*must NOT have additional properties/ }))
-    expect(await screen.findByRole('dialog', { name: 'YAML preview · line 2' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Problem at YAML line 2')).toHaveFocus()
+    expect(screen.queryByRole('dialog', { name: /YAML/ })).not.toBeInTheDocument()
     Object.assign(documentState, { isValid: true, documentChipState: 'clean', documentProblems: [], yamlPreview: 'a: 1' })
   })
 

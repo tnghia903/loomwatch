@@ -34,9 +34,6 @@ code, kbd, pre { font-family: var(--font-mono); }
   clip-path: inset(50%); overflow: hidden; white-space: nowrap;
 }
 
-.yaml-line { display: block; min-width: max-content; margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); border-left: 2px solid transparent; }
-.yaml-line.problem-line { color: var(--color-ink); background: color-mix(in srgb, var(--color-alert) 12%, transparent); border-left-color: var(--color-alert); outline: 0; }
-
 /* ---------------------------------------------------------------------------
    SHELL + CANVAS GROUND — UX_REDESIGN §3, §7
    --------------------------------------------------------------------------- */
@@ -316,6 +313,7 @@ kbd.key {
 .schedule-editor footer { padding-top: var(--sp-3); display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--color-hairline); }
 .schedule-editor footer .link { display: inline-flex; align-items: center; gap: 6px; }
 .schedule-editor footer .link.muted { color: var(--color-ink-3); }
+.schedule-editor footer > :last-child { margin-left: auto; }
 .node.has-task.st-failed { border-color: var(--color-alert); }
 .node.has-task.st-stopped { border-color: var(--color-halt); border-style: dashed; }
 @keyframes live-border { 50% { box-shadow: 0 0 0 1px var(--color-live-tint), 0 0 0 6px color-mix(in srgb, var(--color-live) 12%, transparent); } }
