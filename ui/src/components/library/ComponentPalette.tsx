@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Bot, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, Wrench, type LucideIcon } from 'lucide-react'
+import { BookmarkCheck, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, UserRound, Wrench, type LucideIcon } from 'lucide-react'
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { usedInRun, type UsedInRun } from '../../lib/library/observed'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
-import { modelForPreset, ROLE_PRESETS, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
+import { modelForPreset, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
 import type { CapabilityDragPayload, CapabilityKind } from '../../lib/composer-layout/types'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
@@ -22,8 +22,8 @@ import { keys } from '../../lib/platform'
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
 const USED = 'Used in this run'
-const BUILT_IN = 'Hire by job'
 const YOURS = 'Your agents'
+const STEPS = 'Workflow steps'
 const SKILLS = 'Skills'
 const CONNECTIONS = 'Connections'
 const FILES = 'Folders & files'
@@ -53,6 +53,8 @@ export interface LibraryProps {
   onRevealSource?: (id: string) => void
   /** Notion as this daemon is connected to it, and the pages this team reads (ADR 0050). */
   notion?: NotionPanel
+  /** The open team's file, so "Build a new agent" comes back to it. */
+  teamPath?: string | null
   /** The panel's width in pixels, and how dragging its edge changes it. Absent: it cannot be resized. */
   width?: number
   onResize?: (width: number) => void
@@ -122,8 +124,8 @@ function jobItem(preset: RolePreset, jobId?: string): PaletteItem {
   return { name: preset.label, detail: preset.does, engine: `on ${modelNameFromId(modelForPreset(preset).model)}`, Icon: preset.icon ? ROLE_ICONS[preset.icon] : BookmarkCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: roleSource(preset) as object, ...(jobId ? { jobId } : {}) }
 }
 
-/** An agent with no job yet: the default model and a general brief, for writing its own. */
-const BLANK_AGENT: PaletteItem = { name: 'Blank agent', detail: 'You write its instructions', Icon: Bot, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: { group: 'agents', id: 'blank', label: 'Agent' } }
+/** "You": the review step that pauses the team for the operator's approval. It is a step, not an agent. */
+const REVIEW_STEP: PaletteItem = { name: 'You (review step)', detail: 'Pause so you can approve the work', Icon: UserCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: OPERATOR_SOURCE as object }
 
 function capabilityItem(item: DetectedCapability, kind: CapabilityKind): PaletteItem {
   const payload: CapabilityDragPayload = { kind, name: item.name, source: item.source, ...(item.memory ? { memory: { team: item.memory.team, pack: item.memory.pack } } : {}) }
@@ -211,12 +213,12 @@ function usedRefusal(row: UsedInRun, name: (id: string) => string): string | nul
  * when a group is empty; these sentences are for whoever wonders why.
  */
 const EXPLAIN: Record<string, ReactNode> = {
-  [BUILT_IN]: 'Each job is placed with working instructions, on the model its kind of work suits. A blank agent starts on the default model with a general brief.',
+  [STEPS]: 'Steps of the workflow that are not agents. You (review step) pauses the team so you can approve the work or send it back.',
   [SKILLS]: <>LoomWatch’s skills, and the ones this team’s project folder has. Drag one onto an agent to supply its instructions there. Add, bring in or install skills on the <a href="/skills">Skills</a> page. Web search, commands and file edits need no skill: switch them on per agent, under <b>Allowed without asking</b>.</>,
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
-  [YOURS]: <>Agents you built or kept. A team keeps the version it was given until you choose <b>Update</b> in that agent’s panel. Build and try them in <a href="/agents">Your agents</a>.</>,
+  [YOURS]: <>A team’s agents come from here: the ones you built or kept. A team keeps the version it was given until you choose <b>Update</b> in that agent’s panel. Build one in <a href="/agents">Your agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
 }
 
 /**
@@ -225,7 +227,7 @@ const EXPLAIN: Record<string, ReactNode> = {
  * second "Library" that the trace drew with other groups, other rows and other words for the
  * same skills and tools.
  */
-export function ComponentPalette({ capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, width, onResize }: LibraryProps) {
+export function ComponentPalette({ capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, teamPath = null, width, onResize }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -260,19 +262,13 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
       window.removeEventListener('loomwatch:toggle-library', toggle)
     }
   }, [])
-  const builtIn = { name: BUILT_IN, items: [
-    // Jobs first: a newcomer knows they need a researcher, not which model to run one on. Each job
-    // is placed with working instructions on its kind of work's model, which stays changeable in
-    // its settings. "You" is the review step that pauses the team for the operator's approval.
-    ...ROLE_PRESETS.map(preset => jobItem(preset)),
-    BLANK_AGENT,
-    { name: 'You (review step)', detail: 'Pause so you can approve the work', Icon: UserCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: OPERATOR_SOURCE as object },
-  ] }
-  // The operator's own jobs, saved from agents that worked (ADR 0030). Once there are any they lead
-  // the list: someone who saved a job comes back for it more than for a built-in one.
+  // A team's agents are Your agents (ADR 0030), each placed as the version you saved. The built-in
+  // jobs are templates for building one in Your agents, not agents to hire here: an agent is built
+  // and tried on its own before a team depends on it.
   const yours = { name: YOURS, items: saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}`, figure: figureFor(job.id, job.figure) } }) }
   const groups: { name: string; items: PaletteItem[] }[] = [
-    ...(yours.items.length || saved.problems.length ? [yours, builtIn] : [builtIn]),
+    yours,
+    { name: STEPS, items: [REVIEW_STEP] },
     { name: SKILLS, items: (capabilityInventory?.skills ?? []).map(item => capabilityItem(item, 'skill')) },
     // Services connected in Connections, and the pages this team reads from them (ADR 0050).
     ...(notion ? [{ name: CONNECTIONS, items: [notionServiceItem(notion), ...notion.pages.map(page => notionPageItem(page, onRevealSource))] }] : []),
@@ -283,7 +279,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   ]
   // The agent lists are short and are what a new team needs, so they are shown whole; the
   // capability groups can run to hundreds of entries and fold to three.
-  const limitFor = (group: string) => (group === BUILT_IN ? 10 : group === YOURS ? 6 : group === USED || group === FILES ? 6 : group === CONNECTIONS ? 7 : 3)
+  const limitFor = (group: string) => (group === YOURS ? 8 : group === USED || group === FILES ? 6 : group === CONNECTIONS ? 7 : 3)
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase())
   const remove = (item: PaletteItem) => {
     if (!item.jobId) return
@@ -354,14 +350,15 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
         ...visible(group.name, items).map(row),
       ], items.length, <>
         {group.name === YOURS && saved.problems.map(problem => <p key={problem.file} className="palette-hint palette-problem" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
-        {group.name === YOURS && !query && <a className="palette-hint palette-build-agent" href="/agents/new">Build a new agent</a>}
+        {group.name === YOURS && !query && group.items.length === 0 && saved.loaded && <p className="palette-empty"><UserRound size={13} aria-hidden="true" />None yet</p>}
+        {group.name === YOURS && !query && <a className="palette-hint palette-build-agent" href={`/agents/new${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}>Build a new agent</a>}
         {/* An empty group is one dashed slot, the shape its first row will fill; why it is empty is behind the heading's "?". */}
         {group.name === FILES && !query && group.items.length === 0 && <p className="palette-empty"><Folder size={13} aria-hidden="true" />None yet</p>}
         {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Box size={13} aria-hidden="true" />None yet</p>}
         {group.name === SKILLS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Puzzle size={13} aria-hidden="true" />None yet</p>}
         {group.name === SKILLS && !query && <a className="palette-hint palette-build-agent" href="/skills">Manage skills</a>}
-      </>, group.name === BUILT_IN && saved.available
-        ? <><div>{EXPLAIN[BUILT_IN]}</div><div>To reuse an agent that worked, select it and choose <b>Add to Your agents</b>, or build one in <a href="/agents">Your agents</a>.</div></>
+      </>, group.name === YOURS
+        ? <><div>{EXPLAIN[YOURS]}</div><div>To reuse an agent this team made, select it and choose <b>Add to Your agents</b>.</div></>
         : EXPLAIN[group.name])
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}

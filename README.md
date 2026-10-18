@@ -348,9 +348,9 @@ to the model you chose, through OpenRouter.
 
 ## Teams you can build
 
-Every team below is made from the jobs under **Hire by job** in Workflow's add panel, each on the
-model its kind of work suits, or from agents you built in **Your agents**. Start from **New team**, then add, connect
-and rename agents to match. To run a team on a schedule, ask
+Every team below is made of agents you build in **Your agents**, each starting from a job such as
+Researcher or Writer, on the model its kind of work suits. Start from **New team** with the agents
+you built, then add, connect and rename agents to match. To run a team on a schedule, ask
 [Ask LoomWatch](#ask-loomwatch-to-set-up-a-team) to add one, or see [Routines](docs/WATCH.md#routines).
 
 | Team | The steps | Good for |
@@ -739,7 +739,10 @@ with what should change; under its new version, **Continue with the team** runs 
    hard it thinks, pin up the skills it needs and hand it the keys it may use without asking. Pick it
    a face, then **Try it** with a real request: it runs on your key, and asks you before it uses a
    key it wasn't given. **Save to Your agents** when it does the job.
-3. Click **New team**, give it a name and choose how it should start:
+3. Click **New team**, give it a name and choose the agents it starts with. A team always starts
+   with at least one:
+   - **Your agents** — tick the agents you built; each joins as the version you saved (recommended
+     once you have one).
    - **One assistant** — a single agent that does the whole task (recommended to begin with).
    - **Researcher and writer** — one agent gathers facts, a second writes the result.
    - **Research, write and check** — a third agent, on another company's model, checks the finished
@@ -747,14 +750,13 @@ with what should change; under its new version, **Continue with the team** runs 
    - **Research, your approval, then writing** — the team pauses so you can approve the research.
    - **Research team** — a lead splits your question, researchers look into each part at the same
      time, and a writer turns what they found into a report that cites every source.
-   - **Empty team** — build it yourself from the library on the left.
 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
 4. A team has three tabs: **Agents**, **Workflow** and **Chat**. On **Agents**, click **Add an
-   agent** to bring in one from Your agents. On **Workflow**, add more from the panel on the left:
-   **Your agents**, or a job under **Hire by job**, such as Researcher or Writer, which starts on the
-   model its kind of work suits. Select a card to edit its name, instructions, model and how hard it
+   agent** to bring in one from Your agents. On **Workflow**, add more from **Your agents** in the
+   panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
+   Researcher or Writer. Select a card to edit its name, instructions, model and how hard it
    thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
    add **You (review step)** wherever you want to approve work before the team continues.
 5. Click **Run team**, or open **Chat**, describe what you want in plain words, and press

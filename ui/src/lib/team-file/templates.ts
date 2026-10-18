@@ -1,7 +1,9 @@
 import { stringify } from 'yaml'
 
 import { DEFAULT_MODEL } from '../ai/modelIds'
-import { modelForPreset, ROLE_PRESETS } from '../library/roles'
+import { buildAgentFromSource } from '../library/createAgent'
+import { savedJobPreset, type SavedJob } from '../library/jobs'
+import { modelForPreset, ROLE_PRESETS, roleSource } from '../library/roles'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
 import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
@@ -12,10 +14,10 @@ import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
  * A first-time operator should reach a runnable team in one step, not by learning what an
  * entrypoint, a model id or a configured edge is. Each template is a complete, schema-valid team
  * file: it is written to disk as-is and opened, so the very first thing the operator can do is
- * type a request and press Enter. `blank` is the one exception — it has no agents, so it cannot be
- * saved yet and opens as an unsaved document instead.
+ * type a request and press Enter. There is no empty team: a team always starts with agents, from a
+ * template or from Your agents (`agentsTeamYaml`).
  */
-export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research' | 'blank'
+export type TeamTemplateId = 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research'
 
 export interface TeamTemplate {
   id: TeamTemplateId
@@ -77,12 +79,6 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     perRun: 'Four to six agents work on each run: the lead, a researcher for each part of the question, and the writer. It costs the most, and suits a question that needs many sources.',
     example: { title: 'Report: should we move to a four-day week?', lines: ['What the trials measured, and what changed [1][2]', 'Where the results disagree, and why [3]', 'Sources: 12, each cited beside its claim'], note: 'Three researchers worked on it at the same time' },
   },
-  {
-    id: 'blank',
-    title: 'Empty team',
-    description: 'Start with no agents, and choose its agents yourself.',
-    steps: [],
-  },
 ]
 
 /**
@@ -136,11 +132,11 @@ function sequence(from: string, to: string, ts: string): EdgeConfig {
 }
 
 /**
- * The team file for a non-blank template, as YAML text ready to save. Each agent runs on its job's
- * model. `id` should come from the file the team is saved as (`teamIdForPath`), so a second team
- * with the same name does not share the first one's id, and with it the first one's Notebook.
+ * The team file for a template, as YAML text ready to save. Each agent runs on its job's model.
+ * `id` should come from the file the team is saved as (`teamIdForPath`), so a second team with the
+ * same name does not share the first one's id, and with it the first one's Notebook.
  */
-export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, name: string, now = new Date(), id = slugifyTeamName(name)): string {
+export function templateTeamYaml(template: TeamTemplateId, name: string, now = new Date(), id = slugifyTeamName(name)): string {
   const ts = now.toISOString()
   let agents: AgentConfig[]
   let edges: EdgeConfig[]
@@ -177,4 +173,17 @@ export function templateTeamYaml(template: Exclude<TeamTemplateId, 'blank'>, nam
     edges = [sequence('researcher', 'review', ts), sequence('review', 'writer', ts)]
   }
   return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: agents[0].id, agents, edges }, { lineWidth: 0 })
+}
+
+/**
+ * A team of some of Your agents, as YAML text ready to save. Each joins as the canvas places one:
+ * a copy of its current version, linked to it, so the team keeps that version until Update. The
+ * first is where a request starts; connecting the rest is the Workflow's job, as it is for agents
+ * added later. `agents` must not be empty: a team always starts with agents.
+ */
+export function agentsTeamYaml(agents: readonly SavedJob[], name: string, id = slugifyTeamName(name)): string {
+  if (agents.length === 0) throw new Error('a team starts with at least one agent')
+  const placed: AgentConfig[] = []
+  for (const job of agents) placed.push(buildAgentFromSource(roleSource(savedJobPreset(job)), placed))
+  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: placed[0].id, agents: placed, edges: [] }, { lineWidth: 0 })
 }

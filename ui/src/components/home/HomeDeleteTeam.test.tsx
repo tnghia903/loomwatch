@@ -16,17 +16,23 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function renderHome(onCreateBlank = vi.fn()) {
-  render(<Home onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
-  return { onCreateBlank }
+function renderHome() {
+  render(<Home onPalette={vi.fn()} />)
 }
 
-function createEmptyTeam(name: string) {
+/** Creates a team from the dialog's first template and says where it was filed. */
+async function createTeam(name: string): Promise<string> {
   fireEvent.click(screen.getByRole('button', { name: 'New team' }))
   const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-  fireEvent.click(within(dialog).getByRole('radio', { name: /Empty team/ }))
+  fireEvent.click(within(dialog).getByRole('radio', { name: /One assistant/ }))
   fireEvent.change(within(dialog).getByLabelText('Team name'), { target: { value: name } })
   fireEvent.click(within(dialog).getByRole('button', { name: 'Create team' }))
+  const put = await waitFor(() => {
+    const call = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && (init as RequestInit | undefined)?.method === 'PUT')
+    if (!call) throw new Error('no team saved yet')
+    return call
+  })
+  return (JSON.parse(String((put[1] as RequestInit).body)) as { path: string }).path
 }
 
 describe('Deleting a team from Home', () => {
@@ -47,7 +53,7 @@ describe('Deleting a team from Home', () => {
       }
       return respond({ error: 'unexpected' }, 404)
     })
-    const { onCreateBlank } = renderHome()
+    renderHome()
     await screen.findByRole('button', { name: /Old desk/ })
 
     // Every card's menu is "More actions"; the team it belongs to is its description.
@@ -69,16 +75,14 @@ describe('Deleting a team from Home', () => {
     expect(screen.getByText(/Deleted “Old desk”\. Its files are in/)).toHaveTextContent('.trash/2026-10-01T090000Z-old-desk inside your teams folder')
 
     // Its name stays taken: a new "Old desk" would otherwise inherit the deleted one's history.
-    createEmptyTeam('Old desk')
-    expect(onCreateBlank).toHaveBeenCalledWith('Old desk', 'old-desk-2.yaml')
+    expect(await createTeam('Old desk')).toBe('old-desk-2.yaml')
   })
 
   it('never files a new team where a deleted team used to live', async () => {
     fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [], trashed: ['blog-writer.yaml'] }))
-    const { onCreateBlank } = renderHome()
+    renderHome()
     await screen.findByText(/No teams yet/)
-    createEmptyTeam('Blog writer')
-    expect(onCreateBlank).toHaveBeenCalledWith('Blog writer', 'blog-writer-2.yaml')
+    expect(await createTeam('Blog writer')).toBe('blog-writer-2.yaml')
   })
 
   it('closes a card menu on Escape and hands the focus back', async () => {

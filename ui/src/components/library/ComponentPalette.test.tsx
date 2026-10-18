@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { FAST_MODEL } from '../../lib/ai/modelIds'
 import type { CapabilityInventory } from '../../lib/library/client'
 import { projectRun, type RunEvent } from '../../lib/watch/events'
 import { ComponentPalette } from './ComponentPalette'
@@ -33,13 +32,19 @@ const palette = () => render(<ComponentPalette />)
 const section = (name: string) => screen.getByRole('heading', { name }).closest('section') as HTMLElement
 
 describe('ComponentPalette jobs', () => {
-  it('shows the built-in jobs on their models, a blank agent, and, before any is saved, how to save one', async () => {
-    palette()
-    expect(within(section('Hire by job')).getByRole('button', { name: /^Researcher.*Finds and checks sources.*on Claude Sonnet 5\.5/ })).toBeInTheDocument()
-    expect(within(section('Hire by job')).getByRole('button', { name: /^Blank agent.*You write its instructions/ })).toBeInTheDocument()
-    fireEvent.click(within(section('Hire by job')).getByRole('button', { name: 'About Hire by job' }))
+  // The built-in jobs are templates in Your agents now: a team's agents are built and tried there first.
+  it('hires no built-in jobs, and before any agent is saved says where to build one', async () => {
+    render(<ComponentPalette teamPath="desk/research.yaml" />)
+    expect(screen.queryByRole('heading', { name: 'Hire by job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Researcher/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Blank agent/ })).toBeNull()
+    const yours = section('Your agents')
+    expect(await within(yours).findByText('None yet')).toBeInTheDocument()
+    expect(within(yours).getByRole('link', { name: 'Build a new agent' })).toHaveAttribute('href', '/agents/new?team=desk%2Fresearch.yaml')
+    fireEvent.click(within(yours).getByRole('button', { name: 'About Your agents' }))
     expect(await screen.findByText(/select it and choose/)).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Your agents' })).toBeNull()
+    // The review step is a step of the workflow, not an agent, so it stays here.
+    expect(within(section('Workflow steps')).getByRole('button', { name: /^You \(review step\)/ })).toBeInTheDocument()
   })
 
   it('lists saved jobs first and places one with its skills, as the built-in jobs are placed', async () => {
@@ -49,7 +54,7 @@ describe('ComponentPalette jobs', () => {
     palette()
     const yours = await waitFor(() => section('Your agents'))
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent)
-    expect(headings.indexOf('Your agents')).toBeLessThan(headings.indexOf('Hire by job'))
+    expect(headings.indexOf('Your agents')).toBeLessThan(headings.indexOf('Workflow steps'))
     fireEvent.click(within(yours).getByRole('button', { name: /^Release notes/ }))
     const payload = JSON.parse((added.mock.calls[0][0] as CustomEvent<string>).detail)
     expect(payload).toMatchObject({ label: 'Release notes', role: 'Write the notes.', model: 'openai/gpt-6.1-sol', capabilities: [{ kind: 'skill', name: 'release-style' }], from: { agent: 'release-notes', version: 1 } })
@@ -65,7 +70,7 @@ describe('ComponentPalette jobs', () => {
     expect(removed).toEqual([])
     fireEvent.click(screen.getByRole('button', { name: 'Confirm removing Release notes' }))
     await waitFor(() => expect(removed).toEqual(['release-notes']))
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Your agents' })).toBeNull())
+    expect(await within(section('Your agents')).findByText('None yet')).toBeInTheDocument()
   })
 
   it('says which job file it could not read instead of hiding it', async () => {
@@ -97,8 +102,7 @@ describe('ComponentPalette in Build and in a run', () => {
     const dragState = vi.fn()
     render(<ComponentPalette capabilityInventory={capabilities} onDragStateChange={dragState} />)
     for (const [name, mime, payload] of [
-      [/^Researcher/, LIBRARY_DRAG_MIME, `"model":"${FAST_MODEL}"`],
-      [/^Blank agent/, LIBRARY_DRAG_MIME, '"id":"blank"'],
+      [/^You \(review step\)/, LIBRARY_DRAG_MIME, '"kind":"operator"'],
       [/^notebooklm/, CAPABILITY_DRAG_MIME, '"kind":"skill"'],
       [/^Research team · memory/, CAPABILITY_DRAG_MIME, '"memory":{"team":"research-team"}'],
     ] as const) {

@@ -119,13 +119,21 @@ export const TOUR_STEPS: readonly TourStep[] = [
           advance: 'next',
           dim: true,
         }
-      : {
-          title: 'Start a new agent',
-          body: 'Press New agent, then pick a job to start from, or Blank to write its instructions yourself.',
-          target: ['[data-tour="agent-start"]', '[data-tour="new-agent"]'],
-          sides: ['bottom', 'right', 'top'],
-          advance: 'action',
-        },
+      : present('[data-tour="agent-start"]')
+        ? {
+            title: 'Start from a job',
+            body: 'Pick a job to start from: it comes with working instructions you can change. Or pick Blank to write them yourself.',
+            target: ['[data-tour="agent-start"]'],
+            sides: ['bottom', 'right', 'top'],
+            advance: 'action',
+          }
+        : {
+            title: 'Start a new agent',
+            body: 'Press New agent, then pick a job to start from, or Blank to write its instructions yourself.',
+            target: ['[data-tour="new-agent"]'],
+            sides: ['bottom', 'right', 'top'],
+            advance: 'action',
+          },
   },
   {
     id: 'try',
@@ -183,8 +191,8 @@ export const TOUR_STEPS: readonly TourStep[] = [
     // Creating the team opens it, where the guide carries on by itself.
     view: () => present('[data-tour="new-team-dialog"]')
       ? {
-          title: 'Start it empty',
-          body: 'Type any name, choose Empty team, and press Create team. You choose its agents next.',
+          title: 'Start it with your agent',
+          body: 'Type any name, tick the agent you built under Your agents, and press Create team. A team always starts with at least one agent.',
           target: ['[data-tour="new-team-dialog"]'],
           sides: ['right', 'left'],
           advance: 'action',

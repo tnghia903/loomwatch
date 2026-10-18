@@ -29,8 +29,6 @@ import { dollars } from '../../lib/runs/spend'
 export interface HomeProps {
   /** Something the operator must know before choosing a team, e.g. a link that did not open. */
   notice?: string | null
-  /** Open an unsaved, empty team at `path` (the "Empty team" choice). */
-  onCreateBlank: (name: string, path: string) => void
   onPalette: () => void
   /** Header actions owned by the workspace, e.g. the needs-you tray. */
   topActions?: ReactNode
@@ -89,7 +87,7 @@ function describeTeam(team: TeamSummary): string {
  * it is done. First your agents (build each one and chat with it on its own), then your teams (put agents
  * in a workflow, then give the team work in its chat). One obvious way to start: build an agent.
  */
-export function Home({ notice = null, onCreateBlank, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
+export function Home({ notice = null, onPalette, topActions, runs = [], mark, ask, children }: HomeProps) {
   const { resolved, toggle } = useTheme()
   const { teams, trashed, error, retry: retryTeams, forget } = useTeamList()
   const [creating, setCreating] = useState(false)
@@ -227,7 +225,6 @@ export function Home({ notice = null, onCreateBlank, onPalette, topActions, runs
       {creating && (
         <NewTeamDialog
           existingPaths={[...(teams?.map((team) => team.path) ?? []), ...trashed]}
-          onCreateBlank={onCreateBlank}
           onClose={() => setCreating(false)}
         />
       )}
