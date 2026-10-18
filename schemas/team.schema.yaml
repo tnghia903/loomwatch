@@ -470,6 +470,40 @@ $defs:
         description: The most one run may spend, in US dollars.
         type: number
         exclusiveMinimum: 0
+      web:
+        $ref: "#/$defs/WebLimits"
+
+  WebLimits:
+    description: >-
+      How much web reading one model call may do, for an agent allowed the web. A page read stays in
+      the conversation and is read again on every later call. By default only the page length is
+      held; how many pages, searches and steps a call takes is left to OpenRouter (30 steps) unless
+      set here. On an agent, each figure it leaves out is the team's. A model whose provider refuses
+      the limits reads the web without them rather than failing.
+    type: object
+    additionalProperties: false
+    properties:
+      maxPageTokens:
+        description: How much of one page is read, in tokens (about three quarters of a word each). A longer page is cut.
+        type: integer
+        minimum: 500
+        maximum: 100000
+        default: 16000
+      maxPages:
+        description: Pages one model call may read. Absent leaves it to OpenRouter.
+        type: integer
+        minimum: 1
+        maximum: 50
+      maxSearches:
+        description: Searches one model call may run. Absent leaves it to OpenRouter.
+        type: integer
+        minimum: 1
+        maximum: 25
+      maxSteps:
+        description: Searches and page reads together in one model call. Absent leaves it to OpenRouter's 30.
+        type: integer
+        minimum: 1
+        maximum: 30
 
   RetiredBudget:
     description: >-

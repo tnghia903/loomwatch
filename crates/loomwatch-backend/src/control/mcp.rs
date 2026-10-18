@@ -67,8 +67,7 @@ Set agents up the way that works best, every time, without being asked; the pers
 - An agent that must search the web gets `allow: {web: true}`; leave `edits` and `commands` off unless the work is changing files or running commands.
 - Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five.
 - When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBackOnce: true` only if the person wants missed checks fixed before they see the answer. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
-- Set `thinkingEffort` by how hard the job is: `low` for tidying, formatting or simple lookups, `medium` for most work, `high` for checking, analysis and code. Only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink.
-- Choose each agent's model by its job: the default for hard work, a cheaper recommended model for simple lookups and formatting. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
+- Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates use: `jobs` lists the usual kinds, `tiers` says which model each kind of agent runs on, and `efforts` how hard it thinks. Use another recommended model only when the person asks for one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
 
 A team file is YAML. A complete pipeline with a review stop:
 
@@ -83,9 +82,9 @@ agents:
       You find today's AI news for the brief. Don't write the brief; the Writer does.
       How to work:
       - Use primary sources (company posts, papers, filings) from the last 24 hours.
-      - Before you reply, open each link again and check it says what you claim.
+      - Before you reply, check each claim against the page you read it on. What you read stays in your conversation, so don't open a page twice.
       Reply with up to eight stories: a one-line headline, two sentences on why it matters, and its link.
-    model: anthropic/claude-sonnet-5.5               # a model from list_models
+    model: anthropic/claude-opus-5.5                 # the model `choosing` gives this kind of work
     thinkingEffort: medium
     doneWhen: ["Every story links to a source you opened", "No story is older than 24 hours"]
     allow: {web: true}
@@ -255,6 +254,7 @@ async fn list_models() -> Result<Value, String> {
         .map_err(|error| format!("The model list isn't available right now: {error:#}"))?;
     Ok(json!({
         "defaultModel": catalog.default_model,
+        "choosing": choosing(),
         "recommended": catalog.recommended.iter().map(|model| json!({
             "id": model.id,
             "name": model.name,
@@ -266,6 +266,33 @@ async fn list_models() -> Result<Value, String> {
         })).collect::<Vec<_>>(),
         "otherModels": "Any other OpenRouter model id that can use tools works too, if the person names one.",
     }))
+}
+
+/// The model table (`schemas/model-tiers.json`) as Ask chooses from it: what each tier runs on and
+/// is for, what each effort tier is for, and the model and effort of each usual kind of agent.
+pub(super) fn choosing() -> Value {
+    let tiers = &*crate::ai::MODEL_TIERS;
+    let pick = |needs: &crate::ai::JobNeeds| {
+        let (model, effort) = tiers.choose(needs);
+        json!({"model": model, "thinkingEffort": effort})
+    };
+    json!({
+        "tiers": tiers.models.iter().map(|(tier, model)| json!({
+            "tier": tier,
+            "model": model,
+            "for": tiers.tiers.get(tier),
+        })).collect::<Vec<_>>(),
+        "efforts": tiers.efforts.iter().map(|(tier, effort)| json!({
+            "thinkingEffort": effort,
+            "for": tiers.effort_for.get(tier),
+        })).collect::<Vec<_>>(),
+        "jobs": tiers.jobs.iter().map(|(job, needs)| {
+            let mut choice = pick(needs);
+            choice["job"] = json!(job);
+            choice
+        }).collect::<Vec<_>>(),
+        "anyOtherAgent": pick(&tiers.new_agent),
+    })
 }
 
 /// The models a team's agents run on, for the "Start this run?" card.

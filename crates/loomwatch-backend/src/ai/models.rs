@@ -4,8 +4,9 @@
 //! kept an hour, and the last copy is saved in the state folder so the list still shows when the
 //! computer is offline. Nothing is fetched at startup.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -23,11 +24,59 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_CATALOG_BYTES: usize = 10 * 1024 * 1024;
 const MAX_DESCRIPTION_CHARS: usize = 400;
 
-/// The model new agents get.
+/// The model an agent falls back to: the strong tier's in [`MODEL_TIERS`].
 pub const DEFAULT_MODEL: &str = "anthropic/claude-opus-5.5";
 /// The step down from the default, for `LoomWatch`'s own short jobs: rewriting instructions after
-/// a removal. The same step-down the fast tier takes in `ui/src/lib/ai/modelIds.ts`.
+/// a removal. The fast tier's in [`MODEL_TIERS`].
 pub const FAST_MODEL: &str = "anthropic/claude-sonnet-5.5";
+
+/// `schemas/model-tiers.json`, the one table of which model and thinking effort each kind of agent
+/// starts on. The app reads the same file (`ui/src/lib/ai/modelIds.ts`) for templates, the builder
+/// and new agents; Ask reads it here, through `list_models`.
+pub static MODEL_TIERS: LazyLock<ModelTiers> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../../../schemas/model-tiers.json"))
+        .expect("schemas/model-tiers.json is the model table")
+});
+
+/// The model table: a model per tier, an effort per effort tier, and each job's two tiers.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelTiers {
+    /// `strong`, `fast`, `check` → the `OpenRouter` id.
+    pub models: BTreeMap<String, String>,
+    /// What each model tier is for, in a few words.
+    pub tiers: BTreeMap<String, String>,
+    /// `light`, `standard`, `deep` → the thinking effort.
+    pub efforts: BTreeMap<String, String>,
+    /// What each effort tier is for.
+    pub effort_for: BTreeMap<String, String>,
+    /// An agent made from nothing.
+    pub new_agent: JobNeeds,
+    /// Each built-in job, by id.
+    pub jobs: BTreeMap<String, JobNeeds>,
+}
+
+/// One kind of agent's model tier and effort tier.
+#[derive(Debug, Clone, Deserialize)]
+pub struct JobNeeds {
+    pub tier: String,
+    pub effort: String,
+}
+
+impl ModelTiers {
+    /// The model and thinking effort `needs` comes to.
+    #[must_use]
+    pub fn choose(&self, needs: &JobNeeds) -> (&str, &str) {
+        (
+            self.models
+                .get(&needs.tier)
+                .map_or(DEFAULT_MODEL, String::as_str),
+            self.efforts
+                .get(&needs.effort)
+                .map_or("medium", String::as_str),
+        )
+    }
+}
 
 /// The `OpenRouter` id for a team file's `model`, written for an app `LoomWatch` no longer runs or
 /// already an `OpenRouter` id.
@@ -390,6 +439,27 @@ fn model_from(entry: &Value) -> Option<Model> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The daemon's own model names are the table's, and every job in it comes to a model and an
+    /// effort the table has.
+    #[test]
+    fn the_model_table_is_whole_and_agrees_with_the_daemon() {
+        let tiers = &*MODEL_TIERS;
+        assert_eq!(tiers.models["strong"], DEFAULT_MODEL);
+        assert_eq!(tiers.models["fast"], FAST_MODEL);
+        let jobs = tiers.jobs.iter().map(|(job, needs)| (job.as_str(), needs));
+        for (job, needs) in jobs.chain([("new agent", &tiers.new_agent)]) {
+            assert!(tiers.models.contains_key(&needs.tier), "{job}");
+            assert!(tiers.efforts.contains_key(&needs.effort), "{job}");
+            assert!(
+                tiers.tiers.contains_key(&needs.tier)
+                    && tiers.effort_for.contains_key(&needs.effort),
+                "{job}"
+            );
+        }
+        assert_eq!(tiers.choose(&tiers.jobs["editor"]), (DEFAULT_MODEL, "low"));
+        assert_eq!(tiers.choose(&tiers.new_agent), (DEFAULT_MODEL, "medium"));
+    }
     use serde_json::json;
 
     fn listed() -> Value {

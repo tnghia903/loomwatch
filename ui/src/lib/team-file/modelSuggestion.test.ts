@@ -1,28 +1,47 @@
 import { describe, expect, it } from 'vitest'
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, type ModelTier } from '../ai/modelIds'
 import { CHECKER_ROLE } from '../library/checker'
+import { ROLE_PRESETS } from '../library/roles'
 import { suggestModel } from './modelSuggestion'
 
 const researcher = { id: 'researcher', name: 'Researcher', role: 'Find sources on the topic and pass them on.' }
 const writer = { id: 'writer', name: 'Writer', role: 'Write the article from what you are handed.', model: DEFAULT_MODEL }
 
+// No built-in job is on the fast tier while quality comes first (schemas/model-tiers.json). The
+// gatherer cases are for when the table moves the Researcher there, so these move it meanwhile.
+const onTheFastTier = (check: () => void) => () => {
+  const job = ROLE_PRESETS.find((candidate) => candidate.id === 'researcher') as { tier?: ModelTier }
+  const tier = job.tier
+  job.tier = 'fast'
+  try {
+    check()
+  } finally {
+    job.tier = tier
+  }
+}
+
 describe('suggestModel', () => {
-  it('puts a gatherer on the faster model when another agent writes the answer', () => {
+  it('keeps a researcher on the strongest model while its job is on the strong tier', () => {
+    const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher, writer], responder: 'writer' } })
+    expect(suggestion).toEqual({ model: DEFAULT_MODEL, why: 'A researcher finds and checks sources. That work decides the result, so it gets the strongest model.' })
+  })
+
+  it('puts a gatherer on the faster model when another agent writes the answer', onTheFastTier(() => {
     const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher, writer], responder: 'writer' } })
     expect(suggestion.model).toBe(FAST_MODEL)
     expect(suggestion.why).toBe('It gathers facts for Writer to write up. A faster model does that well, for less, and leaves the strongest one for the step that writes.')
-  })
+  }))
 
-  it('keeps a gatherer on the strongest model when its reply is the team’s answer', () => {
+  it('keeps a gatherer on the strongest model when its reply is the team’s answer', onTheFastTier(() => {
     const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher], responder: 'researcher' } })
     expect(suggestion.model).toBe(DEFAULT_MODEL)
     expect(suggestion.why).toContain('Its reply is the team’s answer')
-  })
+  }))
 
-  it('follows the job alone while the agent is built on its own', () => {
+  it('follows the job alone while the agent is built on its own', onTheFastTier(() => {
     expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, why: expect.stringContaining('for another agent to write up') })
-  })
+  }))
 
   it('reads a check on another maker’s model than the work it checks', () => {
     const checker = { id: 'checker', name: 'Checker', role: CHECKER_ROLE, checks: 'writer' }

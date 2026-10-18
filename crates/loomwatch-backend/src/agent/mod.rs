@@ -49,12 +49,14 @@ pub use error::AgentError;
 pub use events::{EventSink, ToolKind, ToolStatus};
 pub use openrouter::{BASE_URL_ENV, DEFAULT_BASE_URL, OpenRouter, base_url, is_loopback_http};
 pub use permission::{AllowAll, Decision, DenyAll, PermissionRequest, Permissions};
-pub use provider::{Completion, Finish, Message, Provider, ServerTools, ToolCall, ToolSpec, Usage};
+pub use provider::{
+    Completion, Finish, Message, Provider, ServerTools, ToolCall, ToolSpec, Usage, WebLimits,
+};
 pub use session::{
     CancelHandle, HostAsk, HostTools, NoHostTools, Session, SessionConfig, Snapshot, StopReason,
-    ToolSet, TurnEnd,
+    ToolSet, TurnEnd, WORK,
 };
-pub use skills::{SkillEntry, index_skills};
+pub use skills::{SkillEntry, SkillIndex, index_skills};
 pub use spend::{Go, Spend, Unmetered};
 pub use store::SessionStore;
 

@@ -62,6 +62,62 @@ pub struct ToolSpec {
 pub struct ServerTools {
     pub web_search: bool,
     pub web_fetch: bool,
+    /// How much of the web one call may read.
+    pub limits: WebLimits,
+}
+
+/// How much web reading one model call may do (a team file's `spend.web`). Every page read stays
+/// in the conversation, and every later call reads the conversation again, so a page costs far
+/// more than once. Only the page length is held by default: how many pages and searches a call
+/// may make is left to `OpenRouter` (30 steps) until a quality benchmark shows a lower figure
+/// keeps the work as good.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebLimits {
+    /// How much of one page is read, in tokens. A longer page is cut.
+    pub page_tokens: u32,
+    /// Pages one call may read. `None`: `OpenRouter`'s own limit.
+    pub pages: Option<u32>,
+    /// Searches one call may run. `None`: `OpenRouter`'s own limit.
+    pub searches: Option<u32>,
+    /// Searches and page reads together in one call. `None`: `OpenRouter`'s own limit.
+    pub steps: Option<u32>,
+}
+
+impl ServerTools {
+    /// Whether any is offered.
+    #[must_use]
+    pub const fn any(self) -> bool {
+        self.web_search || self.web_fetch
+    }
+}
+
+impl WebLimits {
+    /// About 12,000 words: a long article, a documentation page or most reports whole; a book-length
+    /// page cut.
+    pub const PAGE_TOKENS: u32 = 16_000;
+
+    /// About how many words of a page are read: a token is about three quarters of a word.
+    #[must_use]
+    pub fn page_words(self) -> u32 {
+        let words = self.page_tokens / 4 * 3;
+        // Rounded to a figure a person would say.
+        if words >= 1_000 {
+            (words + 500) / 1_000 * 1_000
+        } else {
+            (words + 50) / 100 * 100
+        }
+    }
+}
+
+impl Default for WebLimits {
+    fn default() -> Self {
+        Self {
+            page_tokens: Self::PAGE_TOKENS,
+            pages: None,
+            searches: None,
+            steps: None,
+        }
+    }
 }
 
 /// Everything one model call needs.
@@ -103,6 +159,12 @@ pub struct Usage {
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
     pub cost_usd: f64,
+    /// Web searches and page reads the provider ran for the call. Zero for a provider that says
+    /// nothing of them and a session parked before they were counted.
+    #[serde(default)]
+    pub web_searches: u64,
+    #[serde(default)]
+    pub web_fetches: u64,
 }
 
 impl Usage {
@@ -113,6 +175,8 @@ impl Usage {
         self.output_tokens += other.output_tokens;
         self.reasoning_tokens += other.reasoning_tokens;
         self.cost_usd += other.cost_usd;
+        self.web_searches += other.web_searches;
+        self.web_fetches += other.web_fetches;
     }
 
     /// Every prompt token, cached or not: how full the model's context was for this call.

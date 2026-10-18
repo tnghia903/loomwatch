@@ -180,6 +180,22 @@ depend on the document as a whole:
   while the rest of the team carries on. Operator nodes spend nothing and may not set it. The
   monthly cap, which also covers Ask LoomWatch and every schedule, is a limit on the OpenRouter
   key itself, set at openrouter.ai.
+- `spend.web` (team or agent level) is how much web reading one model call may do, for an agent
+  allowed the web. A page read stays in the conversation and is read again on every later call.
+  - `maxPageTokens` (default 16000, about 12,000 words): how much of one page is read. A longer page
+    is cut.
+  - `maxPages`: pages one call may read.
+  - `maxSearches`: searches one call may run.
+  - `maxSteps`: searches and page reads together in one call.
+
+  The last three have no default: absent leaves them to OpenRouter (30 steps a call). Quality
+  comes first, so a lower figure waits for a quality benchmark to show the work stays as good. On
+  an agent, each figure it leaves out is the team's, and one left out everywhere is the default,
+  so a file without the block behaves as described. A figure outside the schema's range refuses
+  the file. The daemon sends them as OpenRouter's server-tool `parameters` (`max_content_tokens`,
+  `max_uses`) and `max_tool_calls`. A model whose provider refuses them is asked again without
+  them, and reads the web without them for as long as the daemon runs, so a run never fails over a
+  limit.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
   add it. `spend` replaced it.

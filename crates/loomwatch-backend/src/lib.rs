@@ -3151,6 +3151,12 @@ const OWN_OUTPUT_HEADING: &str = "## Your previous output";
 /// material: it is the agent's own words, and the operator's message is what says what to change.
 const OWN_OUTPUT_SECTION: &str = "\n\n## Your previous output\nWhat you produced the last time you worked on this. Start from it, and change only what the task below asks for.\n\n";
 const CONVERSATION_HEADING: &str = "## Conversation so far";
+
+/// Whether an opening prompt was handed `## Conversation so far`, so its agent is offered
+/// `earlier_work` to read a piece of it in full.
+pub(crate) fn has_conversation(prompt: &str) -> bool {
+    prompt.contains(CONVERSATION_SECTION)
+}
 /// The recent chat between the operator and this team (ADR 0051). Context, not instruction: the
 /// operator's old messages were requests about earlier work, and the task below is the one that
 /// applies now. The trust caution is the same one every other handed section carries.
@@ -4943,6 +4949,7 @@ mod tests {
             permissions: crate::config::TeamPermissions::default(),
             spend: crate::spend::SpendConfig {
                 per_run: Some(0.05),
+                ..crate::spend::SpendConfig::default()
             },
             memory: None,
             guards: GuardsConfig::default(),

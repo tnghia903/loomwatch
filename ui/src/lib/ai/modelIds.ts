@@ -5,15 +5,21 @@
 // `gpt-5.5`); `openRouterId` reads them the way the daemon does (`crates/loomwatch-backend/src/ai/
 // models.rs`, `openrouter_id`), with the same test cases, because the app reads team files itself.
 
-/** The model new agents get. */
-export const DEFAULT_MODEL = 'anthropic/claude-opus-5.5'
+import tiers from '../../../../schemas/model-tiers.json'
+
+// `schemas/model-tiers.json` is the one table of which model and effort each kind of agent starts
+// on. The daemon reads the same file for Ask, so templates, the builder, new agents and the teams
+// Ask writes all choose alike.
+
+/** The strong tier's model, and the model an agent falls back to (ADR 0057). */
+export const DEFAULT_MODEL: string = tiers.models.strong
 /** The step down from it, for work that only gathers for another agent (ADR 0057). */
-export const FAST_MODEL = 'anthropic/claude-sonnet-5.5'
+export const FAST_MODEL: string = tiers.models.fast
 /**
  * What a check step runs on (ADR 0062): another maker's model, so the work is read by a model that
  * did not write it and does not share its blind spots.
  */
-export const CHECK_MODEL = 'openai/gpt-6.1-sol'
+export const CHECK_MODEL: string = tiers.models.check
 /** The offline demo: answers with fixed text and calls no model. */
 export const OFFLINE_MODEL = 'fake/offline'
 
@@ -84,12 +90,22 @@ export interface JobNeeds {
 
 /** The effort an effort tier asks of a model that reasons. */
 export function effortFor(tier: EffortTier | undefined): Effort | undefined {
-  return tier === 'light' ? 'low' : tier === 'standard' ? 'medium' : tier === 'deep' ? 'high' : undefined
+  return tier ? (tiers.efforts[tier] as Effort) : undefined
 }
 
 /** The model a tier runs on. */
 export function modelForTier(tier: ModelTier | undefined): string {
-  return tier === 'fast' ? FAST_MODEL : tier === 'check' ? CHECK_MODEL : DEFAULT_MODEL
+  return tiers.models[tier ?? 'strong']
+}
+
+/** What an agent made from nothing needs: the strong tier, at the standard effort. */
+export const NEW_AGENT: JobNeeds = tiers.newAgent as JobNeeds
+
+/** What a built-in job needs, from the table. Every built-in job is in it. */
+export function jobNeeds(job: string): Required<JobNeeds> {
+  const needs = (tiers.jobs as Record<string, Required<JobNeeds> | undefined>)[job]
+  if (!needs) throw new Error(`schemas/model-tiers.json has no job ${job}`)
+  return needs
 }
 
 /** The model and effort a built-in job starts on. */

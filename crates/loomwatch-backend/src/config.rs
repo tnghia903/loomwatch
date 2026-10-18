@@ -1281,9 +1281,24 @@ impl TeamConfig {
     /// Returns an error when the document cannot be parsed, uses an unknown version, or
     /// fails the runtime's semantic checks.
     pub fn parse(source: &str) -> Result<Self> {
-        let team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
+        let mut team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
+        }
+        // `spend.web` on an agent is the team's with the agent's own figures over it, settled here
+        // once so every place that runs the agent holds it to the same limits.
+        team.spend
+            .web
+            .validate("the team's")
+            .map_err(anyhow::Error::msg)?;
+        let team_web = team.spend.web;
+        for agent in &mut team.agents {
+            agent
+                .spend
+                .web
+                .validate(&format!("agent {:?}'s", agent.id))
+                .map_err(anyhow::Error::msg)?;
+            agent.spend.web = agent.spend.web.over(team_web);
         }
         // The schema's `Identifier`, enforced here too and not only in the editor: ids name the
         // agents' folders under `.loomwatch/`, and a team file can come from anyone. An agent id of
@@ -1984,6 +1999,64 @@ mod tests {
         )
         .expect_err("an operator node spends nothing");
         assert!(format!("{error:#}").contains("no spend"), "{error:#}");
+    }
+
+    /// `spend.web` on the team, and on an agent figure by figure over it; a team that says nothing
+    /// reads the web within the built-in limits, as every team file written before them does.
+    #[test]
+    fn web_limits_load_at_team_and_agent_level() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 1\n  web:\n    maxPageTokens: 12000\n    maxSteps: 6\nagents:\n  - id: a\n    model: m\n    spend:\n      web:\n        maxPages: 2\n  - id: b\n    model: m\n",
+        )
+        .expect("valid config");
+        let a = team.agents[0].spend.web.limits();
+        assert_eq!(
+            (a.page_tokens, a.pages, a.searches, a.steps),
+            (12_000, Some(2), None, Some(6))
+        );
+        let b = team.agents[1].spend.web.limits();
+        assert_eq!((b.page_tokens, b.pages, b.steps), (12_000, None, Some(6)));
+        assert_eq!(
+            team.agents[0].spend.per_run, None,
+            "only the web figures are the team's"
+        );
+
+        let silent = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .expect("valid config");
+        assert_eq!(
+            silent.agents[0].spend.web.limits(),
+            crate::agent::WebLimits::default()
+        );
+
+        for (block, said) in [
+            (
+                "spend:\n  web:\n    maxPages: 0\n",
+                "the team's spend.web.maxPages is 0",
+            ),
+            ("spend:\n  web:\n    maxSteps: 31\n", "between 1 and 30"),
+            (
+                "spend:\n  web:\n    maxPageTokens: 100\n",
+                "maxPageTokens is 100",
+            ),
+        ] {
+            let error = TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\n{block}agents:\n  - id: a\n    model: m\n"
+            ))
+            .expect_err(said);
+            assert!(format!("{error:#}").contains(said), "{error:#}");
+        }
+        let error = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n    spend:\n      web:\n        maxSearches: 99\n",
+        )
+        .expect_err("out of range on an agent");
+        assert!(format!("{error:#}").contains("agent \"a\"'s spend.web.maxSearches is 99"));
+        let error = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  web:\n    pages: 3\nagents:\n  - id: a\n    model: m\n",
+        )
+        .expect_err("an unknown figure is a mistake, not a default");
+        assert!(format!("{error:#}").contains("pages"), "{error:#}");
     }
 
     /// Budgets were retired by ADR 0027. A team file written before then still says `budget:` at

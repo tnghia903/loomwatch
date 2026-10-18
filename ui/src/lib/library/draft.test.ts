@@ -1,7 +1,7 @@
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { DEFAULT_MODEL } from '../ai/modelIds'
 import { agentFromDraft, BLANK_DRAFT, chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
 import { ROLE_PRESETS } from './roles'
 
@@ -52,7 +52,8 @@ describe('the agent builder’s draft', () => {
     expect(makesNewVersion({ ...saved, model: DEFAULT_MODEL }, saved)).toBe(true)
     // With no model of its own, there is no effort to keep: efforts belong to one model.
     expect(specFromDraft({ ...saved, model: '' })).not.toHaveProperty('thinkingEffort')
-    expect(draftFromJob({ name: 'Reader', instructions: 'Check.', thinkingEffort: 'high' })).toMatchObject({ model: DEFAULT_MODEL, effort: '' })
+    // A job that names no model starts as a new agent does, at the table's effort, not its own.
+    expect(draftFromJob({ name: 'Reader', instructions: 'Check.', thinkingEffort: 'high' })).toMatchObject({ model: DEFAULT_MODEL, effort: 'medium' })
   })
 
   // ADR 0062: done-when travels with the agent: saved, a new version when it changes, copied
@@ -73,7 +74,7 @@ describe('the agent builder’s draft', () => {
   it('starts a new agent from a built-in job on its job’s model, at its job’s effort', () => {
     const researcher = ROLE_PRESETS.find((preset) => preset.id === 'researcher')!
     const draft = draftFromPreset(researcher)
-    expect(draft).toMatchObject({ name: 'Researcher', model: FAST_MODEL, effort: 'medium', instructions: researcher.role })
+    expect(draft).toMatchObject({ name: 'Researcher', model: DEFAULT_MODEL, effort: 'medium', instructions: researcher.role })
     expect(draft.allow.web).toBe(true)
   })
 

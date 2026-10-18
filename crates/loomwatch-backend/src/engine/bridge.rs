@@ -278,9 +278,10 @@ pub(crate) struct BusTools {
 }
 
 impl BusTools {
-    pub(crate) fn new(connection: TeamBusConnection) -> Self {
+    /// `conversation` says the agent's opening message holds `## Conversation so far`.
+    pub(crate) fn new(connection: TeamBusConnection, conversation: bool) -> Self {
         let specs = connection
-            .tool_definitions()
+            .tool_definitions(conversation)
             .iter()
             .filter_map(tool_spec)
             .collect();

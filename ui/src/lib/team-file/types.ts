@@ -113,6 +113,20 @@ export interface TeamPermissions {
 /** What one run may spend on model calls, in US dollars (ADR 0068). */
 export interface SpendConfig {
   perRun?: number
+  /** How much web reading one model call may do; each figure left out is the team's, then the default. */
+  web?: WebLimitsConfig
+}
+
+/** `spend.web`: what one model call may read from the web (`schemas/team.schema.yaml` `WebLimits`). */
+export interface WebLimitsConfig {
+  /** How much of one page is read, in tokens. Default 16000. */
+  maxPageTokens?: number
+  /** Pages one model call may read. Absent: OpenRouter's own limit. */
+  maxPages?: number
+  /** Searches one model call may run. Absent: OpenRouter's own limit. */
+  maxSearches?: number
+  /** Searches and page reads together in one model call. Absent: OpenRouter's 30. */
+  maxSteps?: number
 }
 
 export interface AgentConfig {

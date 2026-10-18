@@ -773,3 +773,49 @@ async fn list_models_never_invents_a_model() {
         assert!(answer.contains("model list isn't available"), "{answer}");
     }
 }
+
+/// Ask chooses each agent's model and effort from the same table as the app's templates and new
+/// agents, so a researcher it writes runs on the model the template's does, and nothing tells
+/// an agent to open its sources a second time.
+#[test]
+fn ask_chooses_models_from_the_shared_table() {
+    let choosing = super::mcp::choosing();
+    let job = |id: &str| {
+        choosing["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|job| job["job"] == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("no job {id}: {choosing}"))
+    };
+    let tiers = &*crate::ai::MODEL_TIERS;
+    assert_eq!(
+        job("researcher")["model"],
+        tiers.models[&tiers.jobs["researcher"].tier]
+    );
+    assert_eq!(
+        job("researcher")["model"],
+        tiers.models["strong"],
+        "quality first"
+    );
+    assert_eq!(job("researcher")["thinkingEffort"], "medium");
+    assert_eq!(job("checker")["model"], tiers.models["check"]);
+    assert_eq!(job("editor")["thinkingEffort"], "low");
+    assert_eq!(
+        choosing["anyOtherAgent"],
+        json!({"model": tiers.models["strong"], "thinkingEffort": "medium"})
+    );
+    assert_eq!(choosing["jobs"].as_array().unwrap().len(), tiers.jobs.len());
+    assert!(
+        choosing["tiers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tier| tier["for"].is_string())
+    );
+    let instructions = super::mcp::INSTRUCTIONS;
+    assert!(instructions.contains("`list_models`' `choosing`"));
+    assert!(!instructions.contains("open each link again"));
+    assert!(!instructions.contains("the default for hard work"));
+}
