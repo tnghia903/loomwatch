@@ -6192,7 +6192,7 @@ mod tests {
         assert!(
             offline
                 .to_string()
-                .contains("Open Connections and sign in to Notion"),
+                .contains("Open Connections and connect Notion under Tools"),
             "{offline}"
         );
     }

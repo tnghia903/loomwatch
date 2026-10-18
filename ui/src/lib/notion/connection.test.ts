@@ -5,7 +5,7 @@ import { useNotionConnection } from './connection'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-const answer = (connected: boolean) => new Response(JSON.stringify(connected ? { connected: true, name: 'Acme', destination: null } : { connected: false }), { headers: { 'Content-Type': 'application/json' } })
+const answer = (connected: boolean) => new Response(JSON.stringify(connected ? { connected: true, name: 'Notion', destination: null, problem: null } : { connected: false }), { headers: { 'Content-Type': 'application/json' } })
 
 it('asks the daemon once for every view that reads the connection at the same time', async () => {
   const fetchMock = vi.fn().mockImplementation(async () => answer(true))

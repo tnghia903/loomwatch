@@ -1,6 +1,7 @@
 // The canvas's read of the Notion connection (docs/NOTION.md), so the Team response can say where
-// an answer will land without sending the operator to Connections to find out. Connections itself
-// stays the one place that changes it.
+// an answer will land without sending the operator to Connections to find out. Notion is
+// connected as a tool, and its sign-in also sends answers and reads pages (ADR 0070); its card in
+// Connections stays the one place that changes it.
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
@@ -10,7 +11,11 @@ export type NotionConnection =
   /** The daemon mounts the Notion API on loopback only, or could not be asked. */
   | { state: 'unavailable'; message: string }
   | { state: 'disconnected' }
-  | { state: 'connected'; workspace: string; destination: { id: string; title: string } | null }
+  /**
+   * `name`: what the Notion tool is called, "Notion" unless you named it. `problem`: what went
+   * wrong the last time the tool was used, such as a sign-in that has ended.
+   */
+  | { state: 'connected'; name: string; destination: { id: string; title: string } | null; problem: string | null }
 
 export const NOTION_UNAVAILABLE = 'Notion can be connected only when LoomWatch runs on this computer.'
 
@@ -19,8 +24,11 @@ export const DEFAULT_RUN_NOTION_TITLE = '{{team}} — {{date}} {{time}}'
 /** A routine's default — `DEFAULT_NOTION_TITLE` in config.rs: one page a day. */
 export const DEFAULT_ROUTINE_NOTION_TITLE = '{{team}} — {{date}}'
 
-/** Where to connect Notion or pick its page; opened beside the canvas so no edit is left behind. */
-export const CONNECTIONS_HREF = '/connections'
+/**
+ * Where to connect Notion or pick its page, opened beside the canvas so no edit is left behind:
+ * Connections, at the Notion tool's card, or connecting it when it isn't yet.
+ */
+export const CONNECT_NOTION_HREF = '/connections?tool=notion'
 
 /** What a Notion page card says it is, under its title — `NOTION_SOURCE` in delivery.rs. */
 export const NOTION_PAGE_SOURCE = 'Notion page'
@@ -49,17 +57,46 @@ export async function searchNotionPages(query: string, cursor?: string | null, s
   return { pages: body.pages ?? [], nextCursor: body.nextCursor ?? null }
 }
 
+/** Make page `pageId` the one answers go under, once Notion says it can hold pages. */
+export async function chooseNotionDestination(pageId: string): Promise<NotionConnection> {
+  const response = await daemonFetch('/api/notion/destination', {
+    method: 'PUT',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', 'X-LoomWatch-Request': '1' },
+    body: JSON.stringify({ pageId }),
+  })
+  if (response.status === 404) throw new Error(NOTION_UNAVAILABLE)
+  const body = (await response.json().catch(() => null)) as ConnectionBody | null
+  if (!response.ok || !body) throw new Error(body?.error ?? 'That page couldn’t be chosen. Try again.')
+  return connectionFrom(body)
+}
+
 /** The page's address in Notion, from its id — `page_url` in notion/mod.rs. */
 export function notionPageUrl(page: string): string {
   return `https://www.notion.so/${page.replace(/-/g, '')}`
 }
 
+/** What `/api/notion/connection` answers, and choosing the page does too. */
+interface ConnectionBody {
+  connected?: boolean
+  name?: string
+  destination?: { id: string; title: string } | null
+  problem?: string | null
+  error?: string
+}
+
+function connectionFrom(body: ConnectionBody): NotionConnection {
+  return body.connected
+    ? { state: 'connected', name: body.name ?? 'Notion', destination: body.destination ?? null, problem: body.problem ?? null }
+    : { state: 'disconnected' }
+}
+
 export async function fetchNotionConnection(signal?: AbortSignal): Promise<NotionConnection> {
   const response = await daemonFetch('/api/notion/connection', { signal, cache: 'no-store', headers: { 'X-LoomWatch-Request': '1' } })
   if (response.status === 404) return { state: 'unavailable', message: NOTION_UNAVAILABLE }
-  const body = (await response.json().catch(() => null)) as { connected?: boolean; name?: string; destination?: { id: string; title: string } | null; error?: string } | null
+  const body = (await response.json().catch(() => null)) as ConnectionBody | null
   if (!response.ok || !body) return { state: 'unavailable', message: body?.error ?? NOTION_UNAVAILABLE }
-  return body.connected ? { state: 'connected', workspace: body.name ?? 'Notion', destination: body.destination ?? null } : { state: 'disconnected' }
+  return connectionFrom(body)
 }
 
 let inFlight: { read: Promise<NotionConnection>; startedAt: number } | null = null

@@ -51,8 +51,9 @@ pub(super) const CATALOG: &[Entry] = &[
     Entry {
         name: "Notion",
         site: "https://www.notion.so",
-        url: "https://mcp.notion.com/mcp",
-        does: "Search, read and write pages in your workspace",
+        // Its sign-in also sends teams' answers to Notion and reads pages for agents (ADR 0070).
+        url: crate::notion::MCP_URL,
+        does: "Search, read and write pages, and keep your teams’ answers",
         auth: Auth::SignIn,
         group: Group::Work,
         example: "Find my meeting notes from last week and list the decisions.",

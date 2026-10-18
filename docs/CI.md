@@ -128,10 +128,10 @@ have been tried.
      (`/tmp/lw-try/app/.loomwatch/loomwatch.db`).
    - `LOOMWATCH_STATE_DIR` puts the rest of its state (approved team files, skills, what
      Connections shows) in `/tmp/lw-try/state` instead of `~/Library/Application Support/LoomWatch`.
-   - `LOOMWATCH_KEY_STORE=file` keeps an OpenRouter key and a Notion connection in private files
-     in that folder (`keys.json`, `notion-credentials.json`). The Keychain items
-     `LoomWatch.OpenRouter` and `LoomWatch.Notion` are never read or written, so the trial starts
-     with no key and Notion not connected.
+   - `LOOMWATCH_KEY_STORE=file` keeps an OpenRouter key and connected tools' sign-ins, Notion's
+     among them, in private files in that folder (`keys.json`, `tool-credentials.json`). The
+     Keychain items `LoomWatch.OpenRouter`, `LoomWatch.Tools` and the old `LoomWatch.Notion` are
+     never read or written, so the trial starts with no key and no tools connected.
 
    The launcher passes both settings on to `loomwatchd`. Without them a trial reads and writes the
    installed app's state folder and Keychain items. They are exported so that starting the trial

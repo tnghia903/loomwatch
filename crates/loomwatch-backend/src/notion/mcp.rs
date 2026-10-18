@@ -9,8 +9,8 @@ use reqwest::{Client, header};
 use serde_json::{Value, json};
 
 use super::{
-    ApiError, ApiResult, BLOCKS_PER_REQUEST, Page, PublishError, Published, failure,
-    markdown_blocks, page_url, sign_in::SIGN_IN_AGAIN, unreachable, unreadable,
+    ApiError, ApiResult, BLOCKS_PER_REQUEST, Page, PublishError, Published, SIGN_IN_AGAIN, failure,
+    markdown_blocks, page_url, unreachable, unreadable,
 };
 use crate::config::NotionPage;
 
@@ -30,8 +30,7 @@ const NOT_PAGES: [&str; 5] = [
 ];
 
 /// What a tool's "not found" refusal says. Reading a page an agent is given says it differently.
-pub(super) const PAGE_NOT_FOUND: &str =
-    "Notion cannot open that page. Open Connections and choose the destination page again.";
+pub(super) const PAGE_NOT_FOUND: &str = "Notion cannot open that page. Open Connections and choose the page answers go under again, under Notion in Tools.";
 
 /// One conversation with Notion's MCP server.
 pub(super) struct Session<'a> {
@@ -145,7 +144,7 @@ impl<'a> Session<'a> {
             StatusCode::UNAUTHORIZED => Err(failure(StatusCode::UNAUTHORIZED, SIGN_IN_AGAIN)),
             StatusCode::FORBIDDEN => Err(failure(
                 StatusCode::FORBIDDEN,
-                "Notion refused LoomWatch. If your workspace only allows approved AI apps, ask an admin to approve LoomWatch, or connect with an integration token under Advanced.",
+                "Notion refused LoomWatch. If your workspace only allows approved AI apps, ask an admin to approve LoomWatch.",
             )),
             StatusCode::TOO_MANY_REQUESTS => Err(failure(
                 StatusCode::TOO_MANY_REQUESTS,

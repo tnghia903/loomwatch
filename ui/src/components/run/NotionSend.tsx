@@ -43,7 +43,7 @@ export function NotionOutcome({ notion }: { notion: NotionSendState }) {
 /** The offer to send an answer that has gone nowhere yet, as an item of a menu. */
 export function NotionOffer({ notion, onSent }: { notion: NotionSendState; onSent?: () => void }) {
   if (notion.hidden || outcome(notion)) return null
-  if (notion.disconnected) return <span className="notion-send-note notion-send-connect">To send answers to Notion, connect it in Connections, from the menu.</span>
+  if (notion.disconnected) return <span className="notion-send-note notion-send-connect">To send answers to Notion, connect it under Tools in Connections, from the menu.</span>
   return (
     <button type="button" disabled={notion.sending || notion.connection.state === 'loading'} onClick={() => void notion.send().then(onSent)}>
       <Send size={13} aria-hidden="true" />{notion.sending ? 'Sending…' : 'Send to Notion'}
@@ -64,7 +64,7 @@ function outcome({ pending, delivery, disconnected, connection, sending, send }:
     return <>
       <span className="notion-send-note alert" title={delivery.message}>Not sent to Notion — {connection.state === 'disconnected' ? 'Notion isn’t connected yet.' : 'no page is chosen for answers yet.'}</span>
       {/* Connections opens from the menu, its one way in (ADR 0043). */}
-      <span className="notion-send-note">{connection.state === 'disconnected' ? 'Connect Notion' : 'Choose a page'} in Connections, from the menu.</span>
+      <span className="notion-send-note">{connection.state === 'disconnected' ? 'Connect Notion under Tools' : 'Choose a page'} in Connections, from the menu.</span>
     </>
   }
   if (delivery?.status === 'failed') {
@@ -77,6 +77,6 @@ function outcome({ pending, delivery, disconnected, connection, sending, send }:
 }
 
 function offer({ disconnected, sending, connection, send }: NotionSendState) {
-  if (disconnected) return <span className="notion-send-note notion-send-connect">To send this answer, connect Notion in Connections, from the menu.</span>
+  if (disconnected) return <span className="notion-send-note notion-send-connect">To send this answer, connect Notion under Tools in Connections, from the menu.</span>
   return <button type="button" className="btn notion-send-button" onClick={() => void send()} disabled={sending || connection.state === 'loading'}><Send size={13} aria-hidden="true" />{sending ? 'Sending…' : 'Send to Notion'}</button>
 }

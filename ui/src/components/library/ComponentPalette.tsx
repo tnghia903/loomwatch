@@ -13,7 +13,7 @@ import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { Evidence } from '../../lib/watch/events'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
-import { CONNECTIONS_HREF, NOTION_PAGE_SOURCE, type NotionConnection } from '../../lib/notion/connection'
+import { CONNECT_NOTION_HREF, NOTION_PAGE_SOURCE, type NotionConnection } from '../../lib/notion/connection'
 import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
 import { PaletteResizer } from './PaletteResizer'
 import { SectionHead } from '../ui/SectionHead'
@@ -162,10 +162,10 @@ function sourceItem(source: TeamSource, reveal?: (id: string) => void): PaletteI
  */
 function notionServiceItem(panel: NotionPanel): PaletteItem {
   const base = { name: 'Notion', Icon: Plug, mime: CONNECTION_DRAG_MIME, event: '', payload: { service: 'notion' } }
-  const openConnections = () => { window.open(CONNECTIONS_HREF, '_blank', 'noopener') }
+  const openConnections = () => { window.open(CONNECT_NOTION_HREF, '_blank', 'noopener') }
   switch (panel.connection.state) {
     case 'connected':
-      return { ...base, detail: 'Drag onto an agent, then choose a page', engine: panel.connection.workspace, quiet: true, disabled: !panel.onChoosePage, ...(panel.onChoosePage ? { onActivate: panel.onChoosePage } : {}) }
+      return { ...base, detail: 'Drag onto an agent, then choose a page', engine: panel.connection.name, quiet: true, disabled: !panel.onChoosePage, ...(panel.onChoosePage ? { onActivate: panel.onChoosePage } : {}) }
     case 'disconnected':
       return { ...base, detail: 'Not connected · click to connect', disabled: false, draggable: false, onActivate: openConnections, Trailing: ExternalLink }
     case 'loading':

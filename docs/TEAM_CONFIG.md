@@ -110,7 +110,7 @@ depend on the document as a whole:
   reject the document otherwise. See `WATCH.md` → *Routines*.
 - An optional top-level `deliver` block (`$defs.Deliver`) sends every successful run's answer
   somewhere besides the Run view, whoever started the run. Today that is `notion: {title?}`, a new
-  child page of the Notion destination chosen in Connections. The default title is
+  child page of the page chosen on the Notion tool's card in Connections. The default title is
   `{{team}} — {{date}} {{time}}`, and a blank `title` is rejected. A routine's own
   `schedule.deliver` wins for scheduled runs. The canvas writes it from the Team response's
   **Send every answer to Notion**. See `NOTION.md`.

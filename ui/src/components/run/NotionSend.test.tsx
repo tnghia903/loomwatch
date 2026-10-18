@@ -6,7 +6,7 @@ import type { Delivery } from '../../lib/runs/client'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
-const connected = { connected: true, name: 'Acme', destination: { id: 'p1', title: 'Team answers' } }
+const connected = { connected: true, name: 'Notion', destination: { id: 'p1', title: 'Team answers' }, problem: null }
 const delivery = (status: Delivery['status'], extra: Partial<Delivery> = {}): Delivery => ({
   target: 'notion', status, url: status === 'failed' ? null : 'https://www.notion.so/abc', pageId: null, message: 'Published "x".', deliveredAt: '2026-10-03T08:00:00Z', ...extra,
 })
@@ -49,7 +49,7 @@ describe('the answer’s Notion line (ADR 0038)', () => {
     render(<NotionSend run={run({ delivery: delivery('failed', { message: 'Notion is not connected. Open Connections and choose a destination page.' }) })} answered />)
     expect(await screen.findByText('Not sent to Notion — Notion isn’t connected yet.')).toBeInTheDocument()
     // Connections opens from the menu, its one way in (ADR 0043): the line says where, not a second link.
-    expect(screen.getByText('Connect Notion in Connections, from the menu.')).toBeInTheDocument()
+    expect(screen.getByText('Connect Notion under Tools in Connections, from the menu.')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Connect Notion/ })).toBeNull()
     cleanup()
 
@@ -66,7 +66,7 @@ describe('the answer’s Notion line (ADR 0038)', () => {
     cleanup()
     daemon({ connection: { connected: true, name: 'Acme', destination: null } })
     render(<NotionSend run={run()} answered />)
-    expect(await screen.findByText('To send this answer, connect Notion in Connections, from the menu.')).toBeInTheDocument()
+    expect(await screen.findByText('To send this answer, connect Notion under Tools in Connections, from the menu.')).toBeInTheDocument()
     expect(screen.queryByRole('link')).toBeNull()
   })
 })

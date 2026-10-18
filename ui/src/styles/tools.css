@@ -59,3 +59,7 @@
 .tools-connected .problem { color: var(--color-alert); }
 .tools-connected details > summary { cursor: pointer; font-size: 12.5px; color: var(--color-ink-3); }
 .tools-connected details ul { margin: var(--sp-2) 0 0; padding-left: var(--sp-4); font-size: 12.5px; color: var(--color-ink-2); }
+/* Notion's card also chooses the page teams' answers go under (ADR 0070): a part of the card of its own. */
+.notion-answers { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-2) 0; padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
+.notion-answers h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--color-ink); }
+.tools-connected .notion-answers-quiet { color: var(--color-ink-3); }

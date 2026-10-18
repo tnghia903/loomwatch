@@ -323,12 +323,70 @@ async fn keychain_write(value: Option<String>) -> Result<(), String> {
     .map_err(|_| storage_error())?
 }
 
-/// Credential Manager refuses a secret over 2,560 bytes, so a long one is kept in parts, the way
-/// the Notion connection is (`notion::split_secret`).
+/// The most bytes kept in one saved credential: Windows Credential Manager refuses more than
+/// 2,560, and the first part also carries [`SECRET_PARTS_MARKER`].
+#[cfg(any(windows, test))]
+const SECRET_PART_BYTES: usize = 2_400;
+/// How many saved credentials one secret may take, 24 KB in all: far more than every tool's
+/// sign-in together is.
+#[cfg(any(windows, test))]
+pub(crate) const MAX_SECRET_PARTS: usize = 10;
+/// How the first of several parts begins: never the start of what is kept, which is JSON.
+#[cfg(any(windows, test))]
+const SECRET_PARTS_MARKER: &str = "loomwatch-parts:";
+
+/// `value` cut into parts no longer than [`SECRET_PART_BYTES`], on character boundaries. One part
+/// is `value` itself; the first of several starts with [`SECRET_PARTS_MARKER`], the count, and a
+/// newline.
+#[cfg(any(windows, test))]
+pub(crate) fn split_secret(value: &str) -> Vec<String> {
+    if value.len() <= SECRET_PART_BYTES {
+        return vec![value.to_owned()];
+    }
+    let mut parts = Vec::new();
+    let mut rest = value;
+    while !rest.is_empty() {
+        let mut cut = rest.len().min(SECRET_PART_BYTES - 64);
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let (part, after) = rest.split_at(cut);
+        parts.push(part.to_owned());
+        rest = after;
+    }
+    let count = parts.len();
+    parts[0] = format!("{SECRET_PARTS_MARKER}{count}\n{}", parts[0]);
+    parts
+}
+
+/// The value [`split_secret`] cut into parts, given its first part and a way to read part `n`.
+/// `None` when a part it names is missing, or it names more than [`MAX_SECRET_PARTS`].
+#[cfg(any(windows, test))]
+pub(crate) fn join_secret(
+    first: &str,
+    mut part: impl FnMut(usize) -> Option<String>,
+) -> Option<String> {
+    let Some(rest) = first.strip_prefix(SECRET_PARTS_MARKER) else {
+        return Some(first.to_owned());
+    };
+    let (count, head) = rest.split_once('\n')?;
+    let count: usize = count.parse().ok()?;
+    if !(2..=MAX_SECRET_PARTS).contains(&count) {
+        return None;
+    }
+    let mut value = head.to_owned();
+    for index in 1..count {
+        value.push_str(&part(index)?);
+    }
+    Some(value)
+}
+
+/// Credential Manager refuses a secret over 2,560 bytes, so a long one is kept in several saved
+/// credentials, `connected-tools`, `connected-tools#2`, …, the first of which says how many there
+/// are ([`split_secret`]).
 #[cfg(windows)]
 mod credential_manager {
-    use super::{ACCOUNT, SERVICE, storage_error};
-    use crate::notion::{MAX_SECRET_PARTS, join_secret, split_secret};
+    use super::{ACCOUNT, MAX_SECRET_PARTS, SERVICE, join_secret, split_secret, storage_error};
 
     fn entry(part: usize) -> Result<keyring::Entry, String> {
         let account = if part == 0 {
@@ -376,5 +434,36 @@ mod credential_manager {
             delete(part)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A secret longer than one Windows credential holds is kept in several and read back whole,
+    /// on character boundaries; a short one is kept exactly as it was.
+    #[test]
+    fn a_long_secret_is_kept_in_parts_and_read_back_whole() {
+        let short = r#"{"token":"secret_abc","name":"Team"}"#;
+        assert_eq!(split_secret(short), vec![short.to_owned()]);
+        assert_eq!(join_secret(short, |_| None).as_deref(), Some(short));
+
+        let long = format!(r#"{{"token":"{}","name":"Tài liệu"}}"#, "é".repeat(4_000));
+        let parts = split_secret(&long);
+        assert!(parts.len() > 1);
+        assert!(parts.iter().all(|part| part.len() <= SECRET_PART_BYTES));
+        assert!(parts[0].starts_with(SECRET_PARTS_MARKER));
+        let read = join_secret(&parts[0], |index| parts.get(index).cloned());
+        assert_eq!(read.as_deref(), Some(long.as_str()));
+        assert_eq!(
+            join_secret(&parts[0], |_| None),
+            None,
+            "a missing part is an error"
+        );
+        assert_eq!(
+            join_secret(&format!("{SECRET_PARTS_MARKER}99\nx"), |_| None),
+            None
+        );
     }
 }

@@ -14,6 +14,10 @@
 //!
 //! Only servers reached over HTTPS (or this computer's own address) are connected; nothing here
 //! starts a program.
+//!
+//! Notion is one of them, and its sign-in is also the one `LoomWatch` itself uses to send answers
+//! to Notion and to read the pages agents are given (ADR 0070): `crate::notion` asks for it here
+//! ([`Tools::at`], [`Tools::bearer`]).
 
 mod api;
 mod catalog;
@@ -26,7 +30,9 @@ mod vault;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use rmcp::transport::auth::AuthorizationMetadata;
+use rmcp::transport::auth::{
+    AuthError, AuthorizationManager, AuthorizationMetadata, StoredCredentials,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -34,6 +40,8 @@ use tokio::sync::Mutex;
 pub use api::router;
 pub(crate) use host::OutsideTools;
 pub(crate) use vault::CREDENTIALS_FILE;
+#[cfg(windows)]
+pub(crate) use vault::{MAX_SECRET_PARTS, join_secret};
 
 /// The list of connected tools, in the state folder.
 pub(crate) const TOOLS_FILE: &str = "tools.json";
@@ -124,6 +132,31 @@ impl ToolCall {
     }
 }
 
+/// Why [`Tools::bearer`] has nothing to send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unusable {
+    /// The sign-in has ended, or there never was one: the operator signs in again.
+    SignInAgain,
+    /// The tool's site couldn't be reached to renew it.
+    Unreachable,
+    /// Where secrets are kept can't be read: a locked Keychain, or a refused one.
+    Unavailable,
+}
+
+/// What [`Tools::adopt_sign_in`] kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Adopted {
+    /// The sign-in, as the tool there. Its `problem` says why what it offers couldn't be listed.
+    Kept,
+    /// Nothing: a tool was already connected there, with its own sign-in.
+    AlreadyConnected,
+}
+
+/// Whether two tool addresses are the same, ignoring a final `/`.
+pub(crate) fn same_address(one: &str, other: &str) -> bool {
+    one.trim_end_matches('/') == other.trim_end_matches('/')
+}
+
 /// `tools.json`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ToolsFile {
@@ -197,6 +230,52 @@ impl Tools {
         Self::with(state_dir, vault::Vault::memory()).expect("an HTTP client")
     }
 
+    /// A tool at `url` taking `token`, kept as connected without asking its server, for tests of
+    /// code that uses connected tools.
+    #[cfg(test)]
+    pub(crate) async fn connected_for_tests(
+        &self,
+        name: &str,
+        url: &str,
+        token: &str,
+    ) -> ConnectedTool {
+        let tool = ConnectedTool {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            name: name.to_owned(),
+            url: url.to_owned(),
+            auth: Auth::Token,
+            calls: Vec::new(),
+            checked_at: None,
+            metadata: None,
+            pending: false,
+            problem: None,
+        };
+        self.inner
+            .vault
+            .set(
+                &tool.id,
+                Some(vault::Secret::Token {
+                    token: token.to_owned(),
+                }),
+            )
+            .await
+            .expect("kept in memory");
+        let kept = tool.clone();
+        self.change(move |tools| {
+            tools.push(kept);
+            Ok(())
+        })
+        .await
+        .expect("listed");
+        tool
+    }
+
+    /// Everything the vault keeps, as it keeps it, for tests that show where a secret went.
+    #[cfg(test)]
+    pub(crate) fn secrets_for_tests(&self) -> String {
+        self.inner.vault.raw().unwrap_or_default()
+    }
+
     /// Every connected tool, in the order they were connected.
     pub async fn list(&self) -> Vec<ConnectedTool> {
         self.read().await.tools
@@ -221,6 +300,135 @@ impl Tools {
         file.tools
             .into_iter()
             .find(|tool| !tool.pending && tool.name.eq_ignore_ascii_case(name))
+    }
+
+    /// The tool connected at `url`, ignoring a final `/`, once it has finished connecting. One
+    /// address is connected once at most.
+    pub(crate) async fn at(&self, url: &str) -> Option<ConnectedTool> {
+        self.list()
+            .await
+            .into_iter()
+            .find(|tool| !tool.pending && same_address(&tool.url, url))
+    }
+
+    /// What `tool`'s server is sent to prove who is calling, for code that speaks to it itself
+    /// rather than through an agent's session ([`client::open`]): a sign-in's access token,
+    /// renewed first when it is about to lapse, or the token pasted for it.
+    ///
+    /// # Errors
+    /// Why there is none to send, which says what the operator can do.
+    pub(crate) async fn bearer(&self, tool: &ConnectedTool) -> Result<String, Unusable> {
+        match tool.auth {
+            Auth::None => Err(Unusable::SignInAgain),
+            Auth::Token => match self.inner.vault.get(&tool.id).await {
+                Ok(Some(vault::Secret::Token { token })) => Ok(token),
+                Ok(_) => Err(Unusable::SignInAgain),
+                Err(_) => Err(Unusable::Unavailable),
+            },
+            Auth::SignIn => {
+                let mut manager = AuthorizationManager::new(tool.url.as_str())
+                    .await
+                    .map_err(|_| Unusable::Unreachable)?;
+                manager.set_credential_store(self.sign_in_store(&tool.id));
+                if let Some(metadata) = &tool.metadata {
+                    manager.set_metadata(metadata.clone());
+                }
+                let unusable = |error: AuthError| match error {
+                    AuthError::AuthorizationRequired | AuthError::TokenRefreshRejected(_) => {
+                        Unusable::SignInAgain
+                    }
+                    AuthError::CredentialStoreError(_) => Unusable::Unavailable,
+                    _ => Unusable::Unreachable,
+                };
+                if !manager.initialize_from_store().await.map_err(unusable)? {
+                    return Err(Unusable::SignInAgain);
+                }
+                manager.get_access_token().await.map_err(unusable)
+            }
+        }
+    }
+
+    /// Keep a sign-in made before this tool existed as the tool `name` at `url` (ADR 0070: the
+    /// Notion sign-in Connections made is moved here). A tool already connected there keeps its
+    /// own sign-in, and `credentials` are dropped. Then what the tool offers is listed, when it
+    /// can be: a tool that can't be reached yet is kept all the same, and listed when checked.
+    ///
+    /// # Errors
+    /// Where secrets are kept can't keep this one, or `tools.json` can't be written.
+    pub(crate) async fn adopt_sign_in(
+        &self,
+        name: &str,
+        url: &str,
+        metadata: AuthorizationMetadata,
+        credentials: StoredCredentials,
+    ) -> Result<Adopted, String> {
+        let listed = self.list().await;
+        if listed
+            .iter()
+            .any(|tool| !tool.pending && same_address(&tool.url, url))
+        {
+            return Ok(Adopted::AlreadyConnected);
+        }
+        // One waiting for its sign-in is finished by this one.
+        let waiting = listed
+            .iter()
+            .find(|tool| same_address(&tool.url, url))
+            .cloned();
+        let tool = ConnectedTool {
+            id: waiting.as_ref().map_or_else(
+                || uuid::Uuid::new_v4().simple().to_string(),
+                |tool| tool.id.clone(),
+            ),
+            name: waiting.map_or_else(|| unique_name(name, &listed), |tool| tool.name),
+            url: url.to_owned(),
+            auth: Auth::SignIn,
+            calls: Vec::new(),
+            checked_at: None,
+            metadata: Some(metadata),
+            pending: false,
+            problem: None,
+        };
+        // The secret first, so the list never names a tool with no way in.
+        self.inner
+            .vault
+            .set(
+                &tool.id,
+                Some(vault::Secret::SignIn {
+                    credentials: Box::new(credentials),
+                }),
+            )
+            .await?;
+        let kept = tool.clone();
+        self.change(move |tools| {
+            tools.retain(|other| other.id != kept.id);
+            tools.push(kept);
+            Ok(())
+        })
+        .await?;
+        // Noted either way: what it offers, or why that couldn't be listed yet.
+        let _ = self.recheck(&tool).await;
+        Ok(Adopted::Kept)
+    }
+
+    /// List what `tool` offers now and note it, or note what went wrong.
+    async fn recheck(&self, tool: &ConnectedTool) -> Result<Vec<ToolCall>, String> {
+        let listed = match client::open(self, tool).await {
+            Ok(session) => {
+                let listed = client::calls(&session, &tool.name).await;
+                let _ = session.cancel().await;
+                listed
+            }
+            Err(said) => Err(said),
+        };
+        self.note(
+            &tool.id,
+            listed
+                .as_ref()
+                .map(|calls| Some(calls.clone()))
+                .map_err(String::as_str),
+        )
+        .await;
+        listed
     }
 
     async fn get(&self, id: &str) -> Option<ConnectedTool> {

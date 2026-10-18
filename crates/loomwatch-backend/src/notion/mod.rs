@@ -1,370 +1,174 @@
-//! User-owned Notion connections. Secrets live in the OS credential store only, except in a trial
-//! copy started with `LOOMWATCH_KEY_STORE=file`, which keeps them in a private file of its own
-//! state folder and never touches the Keychain ([`install`]).
+//! Sending teams' answers to Notion, and reading the Notion pages agents are given, through the
+//! Notion tool's sign-in (ADR 0070). Notion is connected like any other tool, in Connections'
+//! Tools section (`crate::connected_tools`); this module asks that tool for an access token and
+//! speaks to Notion's hosted MCP server itself ([`mcp`]), so only the daemon ever holds it.
 //!
-//! There are two ways in. Notion sign-in ([`sign_in`]) is the default: the operator allows
-//! `LoomWatch` on Notion's own page, and every call then goes through Notion's hosted MCP server
-//! ([`mcp`]). An integration token pasted under Advanced reaches the REST API instead, for
-//! workspaces whose admins only allow approved AI apps. [`Publisher`] is the delivery side either
-//! way: it turns a reply's Markdown into a child page of the connected destination (see
-//! `docs/decisions/0010-routines-and-notion-delivery.md` and `0049-sign-in-to-notion.md`).
+//! [`Publisher`] turns a reply's Markdown into a child page of the page answers go under, which is
+//! kept, with no credential, in the state folder ([`Destination`]). [`Reader`] reads the pages
+//! agents are given (ADR 0050). A Notion sign-in made in Connections before Notion was a tool
+//! (ADR 0049) is moved to the Notion tool once, at startup ([`move_to_tools`]).
 mod mcp;
-mod sign_in;
+mod moved;
+
+pub use moved::move_to_tools;
 
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock, OnceLock},
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header, uri::Authority},
+    http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
-use reqwest::{Client, Method};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
-#[cfg(any(target_os = "macos", windows))]
-const SERVICE: &str = "LoomWatch.Notion";
-#[cfg(any(target_os = "macos", windows))]
-const ACCOUNT: &str = "local-workspace";
-/// The connection [`Store::File`] keeps, in the state folder: the JSON the Keychain item holds.
-const CREDENTIALS_FILE: &str = "notion-credentials.json";
-const VERSION: &str = "2026-03-11";
-/// Upstream bodies larger than this are refused, including ones without `Content-Length`.
-const MAX_RESPONSE_BYTES: usize = 2_000_000;
+use crate::connected_tools::{ConnectedTool, Tools, Unusable};
 
-/// Every read-modify-write of the stored connection holds this, in the router and in
-/// [`Publisher`] alike. Notion retires a refresh token as it answers with the next one, so two
-/// tasks renewing the same stored grant would leave one of them holding a retired token.
-static WRITES: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+/// Notion's hosted MCP server: where the Notion tool is connected (`connected_tools::catalog`).
+pub(crate) const MCP_URL: &str = "https://mcp.notion.com/mcp";
+/// The page answers go under, in the state folder.
+const DESTINATION_FILE: &str = "notion-destination.json";
+/// What every place that meets a lapsed sign-in tells the operator.
+pub(crate) const SIGN_IN_AGAIN: &str =
+    "Your Notion sign-in has expired. Open Connections and sign in to Notion again under Tools.";
 
-/// Notion's addresses. Tests point them at a local stand-in.
-#[derive(Clone)]
-struct Endpoints {
-    /// The REST API, for integration tokens.
-    api: String,
-    /// Notion's hosted MCP server, which is also the `resource` a sign-in asks access to.
-    mcp: String,
-    authorize: String,
-    token: String,
-    register: String,
-    revoke: String,
-}
+/// Where [`Publisher`] finds the page answers go under, set once at startup ([`install`]).
+static INSTALLED: OnceLock<PathBuf> = OnceLock::new();
 
-impl Endpoints {
-    /// The addresses Notion publishes in its authorization server metadata
-    /// (`https://mcp.notion.com/.well-known/oauth-authorization-server`).
-    fn notion() -> Self {
-        Self {
-            api: "https://api.notion.com/v1".into(),
-            mcp: "https://mcp.notion.com/mcp".into(),
-            authorize: "https://mcp.notion.com/authorize".into(),
-            token: "https://mcp.notion.com/token".into(),
-            register: "https://mcp.notion.com/register".into(),
-            revoke: "https://mcp.notion.com/token".into(),
-        }
-    }
-}
-
-/// What this process holds of the Keychain item: read once, then kept up to date by every write
-/// made here.
-///
-/// macOS asks the person to allow each read of the item by a program it does not already trust,
-/// and the daemon reads it for many things: each send, each search, each page a run reads. Read
-/// every time, one run could ask several times over. One read per process, shared by everything in
-/// it, asks once. The connection status never reads it at all ([`Shown`]). The item is this
-/// program's: a change made to it by another program shows after a restart.
-static KEYCHAIN: LazyLock<Remembered> = LazyLock::new(Remembered::default);
-
-#[derive(Default)]
-struct Remembered(Mutex<Cached>);
-
-#[derive(Default)]
-enum Cached {
-    #[default]
-    Unread,
-    Known(Option<String>),
-    /// The read was refused: the person chose Deny, or the Keychain is locked. A status check does
-    /// not ask again, or a dialog dismissed with Deny would come straight back each time the
-    /// window takes focus; something the person does with Notion does ask.
-    Refused,
-}
-
-impl Remembered {
-    /// `ask` is false for a status check, which never brings the dialog back after a refusal.
-    async fn load<F, R>(&self, ask: bool, read: F) -> ApiResult<Option<String>>
-    where
-        F: FnOnce() -> R,
-        R: Future<Output = ApiResult<Option<String>>>,
-    {
-        // Held across the read, so requests that arrive together wait for the one dialog.
-        let mut cached = self.0.lock().await;
-        match &*cached {
-            Cached::Known(value) => return Ok(value.clone()),
-            Cached::Refused if !ask => return Err(storage_error()),
-            Cached::Unread | Cached::Refused => {}
-        }
-        let read = read().await;
-        *cached = match &read {
-            Ok(value) => Cached::Known(value.clone()),
-            Err(_) => Cached::Refused,
-        };
-        read
-    }
-
-    async fn save<F, W>(&self, value: Option<String>, write: F) -> ApiResult<()>
-    where
-        F: FnOnce(Option<String>) -> W,
-        W: Future<Output = ApiResult<()>>,
-    {
-        let mut cached = self.0.lock().await;
-        let written = write(value.clone()).await;
-        // A write that failed leaves the item in a state this process does not know.
-        *cached = if written.is_ok() {
-            Cached::Known(value)
-        } else {
-            Cached::Unread
-        };
-        written
-    }
-}
-
-/// Where [`Publisher`] and [`Reader`] find the connection, chosen once at startup ([`install`]).
-static INSTALLED: OnceLock<Store> = OnceLock::new();
-
-/// Chooses where this process keeps the Notion connection: the Keychain (Credential Manager on
-/// Windows), or with `LOOMWATCH_KEY_STORE=file` ([`crate::ai::KEY_STORE_ENV`]) a private file in
-/// `state_dir`, so a trial copy never reads or writes the item the installed app keeps. The daemon
-/// calls this once, at startup, before anything can send or read; a second call is ignored.
+/// Names the state folder the page answers go under is kept in. The daemon calls this once, at
+/// startup, before anything can send; a second call is ignored.
 pub fn install(state_dir: &Path) {
-    let _ = INSTALLED.set(Store::chosen(state_dir, crate::ai::keys_in_file()));
+    let _ = INSTALLED.set(state_dir.join(DESTINATION_FILE));
 }
 
-/// Where the connection is kept: the macOS Keychain or Windows Credential Manager (`Keychain`), a
-/// file in the state folder, or memory in tests.
+/// The page answers go under, kept in the state folder with no credential: `{"page": {id,
+/// title}}`. It outlives the Notion tool being removed, so connecting Notion again sends answers
+/// to the same page; one the new sign-in can't open says to choose another.
 #[derive(Clone)]
-enum Store {
-    Keychain,
-    /// `<state dir>/notion-credentials.json`, readable by this account only, for a trial copy that
-    /// must not touch the Keychain. It holds what the Keychain item would.
-    File(PathBuf),
-    #[cfg(test)]
-    Memory(Arc<std::sync::Mutex<Option<String>>>),
-    /// A Keychain that refuses every read and write, for tests that show something never reads it.
-    #[cfg(test)]
-    Refusing,
+struct Destination {
+    /// `None` keeps nothing: tests and one-off commands with no state folder.
+    path: Option<PathBuf>,
 }
 
-impl Store {
-    /// The Keychain (Credential Manager on Windows), or the file in `state_dir` when `in_file`.
-    fn chosen(state_dir: &Path, in_file: bool) -> Self {
-        if in_file {
-            Self::File(state_dir.join(CREDENTIALS_FILE))
-        } else {
-            Self::Keychain
-        }
-    }
-
-    /// The store [`install`] chose. Before that, the Keychain, unless the file store was asked
-    /// for: then there is no folder to keep a file in, and nothing is kept rather than reach the
-    /// Keychain.
-    fn installed() -> anyhow::Result<Self> {
-        match INSTALLED.get() {
-            Some(store) => Ok(store.clone()),
-            None if crate::ai::keys_in_file() => anyhow::bail!(
-                "{} is file, but no state folder was given for the Notion connection",
-                crate::ai::KEY_STORE_ENV
-            ),
-            None => Ok(Self::Keychain),
-        }
-    }
-
-    /// Whether a connection can be kept here at all. Linux has no system store, so only the file
-    /// keeps one there.
-    fn available(&self) -> bool {
-        match self {
-            Self::Keychain => cfg!(any(target_os = "macos", windows)),
-            Self::File(_) => true,
-            #[cfg(test)]
-            Self::Memory(_) | Self::Refusing => true,
-        }
-    }
-
-    /// What a store that cannot be read or written says, in its own words.
-    fn unavailable(&self) -> ApiError {
-        if matches!(self, Self::File(_)) {
-            file_error()
-        } else {
-            storage_error()
-        }
-    }
-
-    /// The connection, for something the person is doing with Notion: it may ask macOS for the
-    /// item again after a refusal.
-    async fn load(&self) -> ApiResult<Option<Connection>> {
-        self.read(true).await
-    }
-
-    /// The connection, for a status check with nothing [`Shown`] yet: it never asks again after a
-    /// refusal.
-    async fn status(&self) -> ApiResult<Option<Connection>> {
-        self.read(false).await
-    }
-
-    async fn read(&self, ask: bool) -> ApiResult<Option<Connection>> {
-        let stored = match self {
-            Self::Keychain => KEYCHAIN.load(ask, keychain_read).await?,
-            Self::File(path) => file_read(path.clone()).await?,
-            #[cfg(test)]
-            Self::Memory(slot) => slot.lock().map_err(|_| storage_error())?.clone(),
-            #[cfg(test)]
-            Self::Refusing => return Err(storage_error()),
-        };
-        stored
-            .map(|value| serde_json::from_str(&value).map_err(|_| self.unavailable()))
-            .transpose()
-    }
-
-    async fn save(&self, connection: Option<&Connection>) -> ApiResult<()> {
-        let value = connection
-            .map(|connection| serde_json::to_string(connection).map_err(|_| storage_error()))
-            .transpose()?;
-        match self {
-            Self::Keychain => KEYCHAIN.save(value, keychain_write).await,
-            Self::File(path) => file_write(path.clone(), value).await,
-            #[cfg(test)]
-            Self::Memory(slot) => {
-                *slot.lock().map_err(|_| storage_error())? = value;
-                Ok(())
-            }
-            #[cfg(test)]
-            Self::Refusing => Err(storage_error()),
-        }
-    }
+#[derive(Serialize, Deserialize)]
+struct DestinationFile {
+    page: Page,
 }
 
-/// What the connection status shows, kept in `LoomWatch`'s state folder: whether a workspace is
-/// connected, its name, how, and the page answers go under. None of it is a credential.
-///
-/// Connections, the team editor and the Run view all show the status, on every page load and
-/// whenever the window takes focus, and on a Mac that does not yet trust this build every read of
-/// the Keychain is a dialog. So the status is read from here, and the Keychain only when
-/// `LoomWatch` is about to use the connection. The Keychain item still holds all of it, the
-/// destination included, and is what every send and read uses: this file only changes what is
-/// shown.
-struct Shown {
-    path: PathBuf,
-}
-
-impl Shown {
+impl Destination {
     fn in_folder(state_dir: &Path) -> Self {
         Self {
-            path: state_dir.join("notion-connection.json"),
+            path: Some(state_dir.join(DESTINATION_FILE)),
         }
     }
 
-    /// What was last saved, or `None` when nothing has been (the connection was made by a
-    /// `LoomWatch` from before this file) or the file cannot be read as one.
-    async fn read(&self) -> Option<Option<Public>> {
-        let bytes = tokio::fs::read(&self.path).await.ok()?;
-        let status: Value = serde_json::from_slice(&bytes).ok()?;
-        if status.get("connected")?.as_bool()? {
-            serde_json::from_value(status).ok().map(Some)
-        } else {
-            Some(None)
+    fn installed() -> Self {
+        Self {
+            path: INSTALLED.get().cloned(),
         }
     }
 
-    /// Callers hold [`WRITES`]. A status that cannot be written is removed instead, so the next
-    /// check reads the Keychain rather than show an old one.
-    async fn write(&self, public: Option<&Public>) {
-        let path = self.path.clone();
-        let text = status_of(public).to_string();
-        let written = tokio::task::spawn_blocking(move || {
-            crate::approvals::write_private(&path, text.as_bytes()).inspect_err(|_| {
-                let _ = std::fs::remove_file(&path);
-            })
+    /// The page, or `None` when none is chosen or the file can't be read as one.
+    async fn read(&self) -> Option<Page> {
+        let bytes = tokio::fs::read(self.path.as_ref()?).await.ok()?;
+        serde_json::from_slice::<DestinationFile>(&bytes)
+            .ok()
+            .map(|file| file.page)
+    }
+
+    async fn write(&self, page: &Page) -> ApiResult<()> {
+        let path = self.path.clone().ok_or_else(destination_unsaved)?;
+        let text = serde_json::to_vec(&DestinationFile { page: page.clone() })
+            .map_err(|_| destination_unsaved())?;
+        tokio::task::spawn_blocking(move || crate::approvals::write_private(&path, &text))
+            .await
+            .map_err(|_| destination_unsaved())?
+            .map_err(|_| destination_unsaved())
+    }
+}
+
+fn destination_unsaved() -> ApiError {
+    failure(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "LoomWatch can't write notion-destination.json in its state folder. Check that folder and retry.",
+    )
+}
+
+/// Notion as everything here reaches it: the Notion tool among the connected ones, and the
+/// address that is Notion's. Tests point both at a stand-in.
+#[derive(Clone)]
+struct Notion {
+    client: Client,
+    tools: Option<Tools>,
+    mcp: Arc<str>,
+}
+
+impl Notion {
+    /// The tools the daemon installed, which it does before anything here is made.
+    fn installed() -> anyhow::Result<Self> {
+        Ok(Self {
+            client: build_client()?,
+            tools: crate::connected_tools::installed().cloned(),
+            mcp: MCP_URL.into(),
         })
-        .await;
-        if let Ok(Err(error)) = written {
-            eprintln!(
-                "warning: could not keep the Notion connection status in {}: {error}",
-                self.path.display()
-            );
+    }
+
+    #[cfg(test)]
+    fn with(tools: Option<Tools>, mcp: &str) -> Self {
+        Self {
+            client: build_client().expect("HTTPS client"),
+            tools,
+            mcp: mcp.into(),
         }
+    }
+
+    /// The Notion tool, once it has finished connecting.
+    async fn tool(&self) -> Option<ConnectedTool> {
+        self.tools.as_ref()?.at(&self.mcp).await
+    }
+
+    /// A session with Notion's MCP server, signed in as the Notion tool is.
+    async fn session(&self) -> ApiResult<mcp::Session<'_>> {
+        let (Some(tools), Some(tool)) = (self.tools.as_ref(), self.tool().await) else {
+            return Err(not_connected());
+        };
+        let bearer = tools.bearer(&tool).await.map_err(unusable)?;
+        mcp::Session::open(&self.client, &self.mcp, bearer).await
     }
 }
 
 #[derive(Clone)]
 struct NotionState {
-    client: Client,
+    notion: Notion,
+    destination: Destination,
+    /// One search or choice at a time.
     gate: Arc<Mutex<()>>,
-    store: Store,
-    shown: Arc<Shown>,
-    endpoints: Arc<Endpoints>,
-    /// The sign-in the operator started and Notion has not sent back yet.
-    pending: Arc<Mutex<Option<sign_in::Pending>>>,
 }
 
 impl NotionState {
-    /// A session with Notion's MCP server for the stored sign-in.
-    async fn session(&self) -> ApiResult<mcp::Session<'_>> {
-        let bearer = sign_in::bearer(&self.client, &self.endpoints, &self.store).await?;
-        mcp::Session::open(&self.client, &self.endpoints.mcp, bearer).await
-    }
-
-    /// Save the connection, then what the status shows of it. Callers hold [`WRITES`].
-    async fn save(&self, connection: Option<&Connection>) -> ApiResult<()> {
-        self.store.save(connection).await?;
-        self.shown.write(connection.map(Public::of).as_ref()).await;
-        Ok(())
-    }
-
-    /// The stored connection, for something the person is doing with Notion. When the Keychain
-    /// has none, the status stops showing one: the item was removed outside `LoomWatch`, or by
-    /// a build from before [`Shown`].
-    async fn connection(&self) -> ApiResult<Connection> {
-        if let Some(connection) = self.store.load().await? {
-            return Ok(connection);
+    /// `GET /api/notion/connection`'s answer: from `tools.json` and the destination file, so it
+    /// never reads where the sign-in is kept, and never holds a credential.
+    async fn shown(&self) -> Value {
+        match self.notion.tool().await {
+            Some(tool) => json!({
+                "connected": true,
+                "name": tool.name,
+                "destination": self.destination.read().await,
+                "problem": tool.problem,
+            }),
+            None => json!({"connected": false}),
         }
-        let _writes = WRITES.lock().await;
-        if self.store.load().await?.is_none() {
-            self.shown.write(None).await;
-        }
-        Err(not_connected())
     }
-}
-
-// Deliberately no Debug implementation: these structures contain credentials.
-#[derive(Clone, Serialize, Deserialize)]
-struct Connection {
-    #[serde(flatten)]
-    access: Access,
-    name: String,
-    #[serde(default)]
-    destination: Option<Page>,
-}
-
-/// How `LoomWatch` reaches the workspace. A pasted integration token keeps the JSON it was always
-/// stored as (`{"token": …}`); a Notion sign-in is stored as `{"signIn": …}`.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum Access {
-    SignIn {
-        #[serde(rename = "signIn")]
-        sign_in: sign_in::Grant,
-    },
-    Token {
-        token: String,
-    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -373,77 +177,36 @@ struct Page {
     title: String,
 }
 
-/// What the status shows of a connection: never a credential.
-#[derive(Serialize, Deserialize)]
-struct Public {
-    name: String,
-    via: Via,
-    #[serde(default)]
-    destination: Option<Page>,
-}
-
-#[derive(Clone, Copy, Serialize, Deserialize)]
-enum Via {
-    #[serde(rename = "signIn")]
-    SignIn,
-    #[serde(rename = "token")]
-    Token,
-}
-
-impl Public {
-    fn of(connection: &Connection) -> Self {
-        Self {
-            name: connection.name.clone(),
-            via: match connection.access {
-                Access::SignIn { .. } => Via::SignIn,
-                Access::Token { .. } => Via::Token,
-            },
-            destination: connection.destination.clone(),
-        }
-    }
-}
-
-/// The caller must only mount this router on a loopback listener. What the connection status
-/// shows is kept in `state_dir` ([`Shown`]), and with `LOOMWATCH_KEY_STORE=file` the connection
-/// too ([`install`]).
+/// The caller must only mount this router on a loopback listener. The page answers go under is
+/// kept in `state_dir`; the sign-in is the Notion tool's, in `tools`.
 ///
 /// # Errors
 /// Returns an error if the HTTPS client cannot be initialized.
-pub fn router(state_dir: &Path) -> anyhow::Result<Router> {
+pub fn router(state_dir: &Path, tools: Tools) -> anyhow::Result<Router> {
     Ok(router_with(NotionState {
-        client: build_client()?,
-        gate: Arc::new(Mutex::new(())),
-        store: Store::chosen(state_dir, crate::ai::keys_in_file()),
-        shown: Arc::new(Shown::in_folder(state_dir)),
-        endpoints: Arc::new(Endpoints::notion()),
-        pending: Arc::new(Mutex::new(None)),
+        notion: Notion {
+            client: build_client()?,
+            tools: Some(tools),
+            mcp: MCP_URL.into(),
+        },
+        destination: Destination::in_folder(state_dir),
+        gate: Arc::default(),
     }))
 }
 
 fn router_with(state: NotionState) -> Router {
-    let managed = Router::new()
-        .route(
-            "/api/notion/connection",
-            get(status).post(connect).delete(disconnect),
-        )
-        .route("/api/notion/sign-in", post(sign_in::start))
+    Router::new()
+        .route("/api/notion/connection", get(status))
         .route("/api/notion/pages", post(pages))
         .route("/api/notion/destination", put(destination))
         .layer(DefaultBodyLimit::max(8192))
         .route_layer(middleware::from_fn(protect))
         .route_layer(middleware::from_fn(crate::watch_api::local_evidence))
-        .with_state(state.clone());
-    // Notion sends the browser back here from its own site, so this one route cannot ask for a
-    // same-origin request. The one-time state it has to echo is what proves the visit.
-    let callback = Router::new()
-        .route(sign_in::CALLBACK, get(sign_in::finish))
-        .route_layer(middleware::from_fn(loopback_only))
-        .with_state(state);
-    managed.merge(callback)
+        .with_state(state)
 }
 
-/// The HTTPS client both the connection router and the publisher use: no redirects,
-/// bounded connect and request times.
+/// The HTTPS client the routes, the publisher and the reader use: no redirects, bounded connect
+/// and request times.
 fn build_client() -> anyhow::Result<Client> {
     Ok(Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -466,33 +229,6 @@ async fn protect(request: Request, next: Next) -> Response {
         .into_response();
     }
     next.run(request).await
-}
-
-/// The `Host` a request named, when it is this computer. A name that resolves here only by DNS
-/// rebinding names another host, so it never reaches the sign-in routes.
-pub(crate) fn loopback_host(headers: &HeaderMap) -> Option<&str> {
-    let host = headers.get(header::HOST)?.to_str().ok()?;
-    let authority = host.parse::<Authority>().ok()?;
-    matches!(
-        authority.host(),
-        "localhost" | "127.0.0.1" | "[::1]" | "::1"
-    )
-    .then_some(host)
-}
-
-async fn loopback_only(request: Request, next: Next) -> Response {
-    if loopback_host(request.headers()).is_none() {
-        return failure(
-            StatusCode::FORBIDDEN,
-            "Open LoomWatch on this computer to connect Notion.",
-        )
-        .into_response();
-    }
-    let mut response = next.run(request).await;
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
 }
 
 #[derive(Debug)]
@@ -522,462 +258,66 @@ fn unreadable() -> ApiError {
         "Notion returned an unreadable response. Retry.",
     )
 }
-
-/// The rest of `response`'s body, refused past `limit` bytes.
-async fn read_bounded(response: &mut reqwest::Response, limit: usize) -> ApiResult<Vec<u8>> {
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| {
-        failure(
-            StatusCode::BAD_GATEWAY,
-            "Notion returned an incomplete response. Retry.",
-        )
-    })? {
-        if bytes.len() + chunk.len() > limit {
-            return Err(failure(
-                StatusCode::BAD_GATEWAY,
-                "Notion's response was too large. Use a more specific search.",
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
-}
-
-#[cfg(target_os = "macos")]
-fn credential() -> ApiResult<keyring::Entry> {
-    keyring::Entry::new(SERVICE, ACCOUNT).map_err(|_| storage_error())
-}
 fn storage_error() -> ApiError {
     failure(
         StatusCode::SERVICE_UNAVAILABLE,
         if cfg!(windows) {
-            "Windows Credential Manager is unavailable. Sign in to Windows with your own account and retry. Nothing is saved in project files."
+            "Windows Credential Manager is unavailable, so LoomWatch can't use your Notion sign-in. Sign in to Windows with your own account and retry."
         } else {
-            "The secure credential store is unavailable. Unlock your macOS Keychain and retry. Nothing is saved in project files."
+            "The macOS Keychain is unavailable or locked, so LoomWatch can't use your Notion sign-in. Unlock it and retry."
         },
     )
 }
 
-fn file_error() -> ApiError {
-    failure(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "LoomWatch can't read or write notion-credentials.json in its state folder. Check that folder and retry.",
-    )
-}
-
-async fn keychain_read() -> ApiResult<Option<String>> {
-    #[cfg(test)]
-    tests::never_the_keychain();
-    tokio::task::spawn_blocking(|| {
-        #[cfg(target_os = "macos")]
-        {
-            match credential()?.get_password() {
-                Ok(value) => Ok(Some(value)),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(_) => Err(storage_error()),
-            }
-        }
-        #[cfg(windows)]
-        {
-            credential_manager::read()
-        }
-        #[cfg(not(any(target_os = "macos", windows)))]
-        {
-            Err(storage_error())
-        }
-    })
-    .await
-    .map_err(|_| storage_error())?
-}
-
-async fn keychain_write(value: Option<String>) -> ApiResult<()> {
-    #[cfg(test)]
-    tests::never_the_keychain();
-    tokio::task::spawn_blocking(move || {
-        #[cfg(target_os = "macos")]
-        {
-            let entry = credential()?;
-            if let Some(value) = value {
-                entry.set_password(&value).map_err(|_| storage_error())
-            } else {
-                match entry.delete_credential() {
-                    Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                    Err(_) => Err(storage_error()),
-                }
-            }
-        }
-        #[cfg(windows)]
-        {
-            credential_manager::write(value.as_deref())
-        }
-        #[cfg(not(any(target_os = "macos", windows)))]
-        {
-            let _ = value;
-            Err(storage_error())
-        }
-    })
-    .await
-    .map_err(|_| storage_error())?
-}
-
-/// The connection in Windows Credential Manager, which keeps at most 2,560 bytes in one saved
-/// credential. A longer connection is kept in several, `local-workspace`, `local-workspace#2`, …,
-/// the first of which says how many there are (see [`split_secret`]).
-#[cfg(windows)]
-mod credential_manager {
-    use super::{
-        ACCOUNT, ApiResult, MAX_SECRET_PARTS, SERVICE, join_secret, split_secret, storage_error,
-    };
-
-    fn entry(part: usize) -> ApiResult<keyring::Entry> {
-        let account = if part == 0 {
-            ACCOUNT.to_owned()
-        } else {
-            format!("{ACCOUNT}#{}", part + 1)
-        };
-        keyring::Entry::new(SERVICE, &account).map_err(|_| storage_error())
+/// Why the Notion tool's sign-in can't be used, in the words every surface uses.
+fn unusable(reason: Unusable) -> ApiError {
+    match reason {
+        Unusable::SignInAgain => failure(StatusCode::UNAUTHORIZED, SIGN_IN_AGAIN),
+        Unusable::Unreachable => unreachable(),
+        Unusable::Unavailable => storage_error(),
     }
-
-    fn get(part: usize) -> ApiResult<Option<String>> {
-        match entry(part)?.get_secret() {
-            Ok(bytes) => String::from_utf8(bytes)
-                .map(Some)
-                .map_err(|_| storage_error()),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err(storage_error()),
-        }
-    }
-
-    fn delete(part: usize) -> ApiResult<()> {
-        match entry(part)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err(storage_error()),
-        }
-    }
-
-    pub(super) fn read() -> ApiResult<Option<String>> {
-        let Some(first) = get(0)? else {
-            return Ok(None);
-        };
-        join_secret(&first, |part| get(part).ok().flatten())
-            .map(Some)
-            .ok_or_else(storage_error)
-    }
-
-    pub(super) fn write(value: Option<&str>) -> ApiResult<()> {
-        let parts = value.map(split_secret).unwrap_or_default();
-        for (part, text) in parts.iter().enumerate() {
-            entry(part)?
-                .set_secret(text.as_bytes())
-                .map_err(|_| storage_error())?;
-        }
-        for part in parts.len()..MAX_SECRET_PARTS {
-            delete(part)?;
-        }
-        Ok(())
-    }
-}
-
-/// The most bytes kept in one saved credential: Windows Credential Manager refuses more than
-/// 2,560, and the first part also carries [`SECRET_PARTS_MARKER`].
-#[cfg_attr(not(windows), allow(dead_code))]
-const SECRET_PART_BYTES: usize = 2_400;
-/// How many saved credentials one connection may take, 24 KB in all: far more than a sign-in is.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) const MAX_SECRET_PARTS: usize = 10;
-/// How the first of several parts begins: never the start of a stored connection, which is JSON.
-#[cfg_attr(not(windows), allow(dead_code))]
-const SECRET_PARTS_MARKER: &str = "loomwatch-parts:";
-
-/// `value` cut into parts no longer than [`SECRET_PART_BYTES`], on character boundaries. One part
-/// is `value` itself; the first of several starts with [`SECRET_PARTS_MARKER`], the count, and a
-/// newline.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) fn split_secret(value: &str) -> Vec<String> {
-    if value.len() <= SECRET_PART_BYTES {
-        return vec![value.to_owned()];
-    }
-    let mut parts = Vec::new();
-    let mut rest = value;
-    while !rest.is_empty() {
-        let mut cut = rest.len().min(SECRET_PART_BYTES - 64);
-        while !rest.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        let (part, after) = rest.split_at(cut);
-        parts.push(part.to_owned());
-        rest = after;
-    }
-    let count = parts.len();
-    parts[0] = format!("{SECRET_PARTS_MARKER}{count}\n{}", parts[0]);
-    parts
-}
-
-/// The value [`split_secret`] cut into parts, given its first part and a way to read part `n`.
-/// `None` when a part it names is missing, or it names more than [`MAX_SECRET_PARTS`].
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) fn join_secret(
-    first: &str,
-    mut part: impl FnMut(usize) -> Option<String>,
-) -> Option<String> {
-    let Some(rest) = first.strip_prefix(SECRET_PARTS_MARKER) else {
-        return Some(first.to_owned());
-    };
-    let (count, head) = rest.split_once('\n')?;
-    let count: usize = count.parse().ok()?;
-    if !(2..=MAX_SECRET_PARTS).contains(&count) {
-        return None;
-    }
-    let mut value = head.to_owned();
-    for index in 1..count {
-        value.push_str(&part(index)?);
-    }
-    Some(value)
-}
-
-/// What [`Store::File`] keeps at `path`, or `None` when nothing is connected.
-async fn file_read(path: PathBuf) -> ApiResult<Option<String>> {
-    tokio::task::spawn_blocking(move || match std::fs::read_to_string(&path) {
-        Ok(value) => Ok(Some(value)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(file_error()),
-    })
-    .await
-    .map_err(|_| file_error())?
-}
-
-/// Keeps `value` at `path`, readable by this account only, as `keys.json` is. Forgetting the
-/// connection removes the file, as it removes the Keychain item.
-async fn file_write(path: PathBuf, value: Option<String>) -> ApiResult<()> {
-    tokio::task::spawn_blocking(move || {
-        match value {
-            Some(value) => crate::approvals::write_private(&path, value.as_bytes()),
-            None => match std::fs::remove_file(&path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                removed => removed,
-            },
-        }
-        .map_err(|_| file_error())
-    })
-    .await
-    .map_err(|_| file_error())?
-}
-
-fn public_status(connection: Option<&Connection>) -> Value {
-    status_of(connection.map(Public::of).as_ref())
-}
-
-fn status_of(public: Option<&Public>) -> Value {
-    public.map_or_else(
-        || json!({"connected": false}),
-        |p| json!({"connected": true, "name": p.name, "destination": p.destination, "via": p.via}),
-    )
-}
-
-/// `GET /api/notion/connection`, from what [`Shown`] kept. Only when nothing is kept yet does it
-/// read the Keychain, once, and keep what it found.
-async fn status(State(state): State<NotionState>) -> ApiResult<Json<Value>> {
-    let _guard = state.gate.lock().await;
-    if let Some(public) = state.shown.read().await {
-        return Ok(Json(status_of(public.as_ref())));
-    }
-    let _writes = WRITES.lock().await;
-    let public = state.store.status().await?.as_ref().map(Public::of);
-    state.shown.write(public.as_ref()).await;
-    Ok(Json(status_of(public.as_ref())))
-}
-
-async fn request(
-    client: &Client,
-    api: &str,
-    token: &str,
-    method: Method,
-    path: &str,
-    body: Option<Value>,
-) -> ApiResult<Value> {
-    let mut request = client.request(method, format!("{api}/{path}"));
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-    let mut response = request
-        .bearer_auth(token)
-        .header("Notion-Version", VERSION)
-        .send()
-        .await
-        .map_err(|_| unreachable())?;
-    if !response.status().is_success() {
-        return Err(match response.status().as_u16() {
-            401 => failure(
-                StatusCode::UNAUTHORIZED,
-                "Notion rejected this token. Reconnect with a valid token.",
-            ),
-            403 | 404 => failure(
-                StatusCode::FORBIDDEN,
-                "Notion cannot access this page. Open the page in Notion, choose ••• → Connections, and add your integration.",
-            ),
-            429 => failure(
-                StatusCode::TOO_MANY_REQUESTS,
-                "Notion is rate limiting requests. Wait a minute and retry.",
-            ),
-            _ => failure(
-                StatusCode::BAD_GATEWAY,
-                "Notion could not complete the request. Retry shortly.",
-            ),
-        });
-    }
-    let bytes = read_bounded(&mut response, MAX_RESPONSE_BYTES).await?;
-    serde_json::from_slice(&bytes).map_err(|_| unreadable())
-}
-
-#[derive(Deserialize)]
-struct Connect {
-    token: String,
-}
-/// `POST /api/notion/connection`: connect with an integration token, the Advanced way in.
-async fn connect(
-    State(state): State<NotionState>,
-    Json(input): Json<Connect>,
-) -> ApiResult<Json<Value>> {
-    let token = input.token.trim();
-    if !(20..=4096).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) {
-        return Err(failure(
-            StatusCode::BAD_REQUEST,
-            "Paste a complete Notion integration token.",
-        ));
-    }
-    let _guard = state.gate.lock().await;
-    let bot = request(
-        &state.client,
-        &state.endpoints.api,
-        token,
-        Method::GET,
-        "users/me",
-        None,
-    )
-    .await?;
-    let name = bot
-        .pointer("/bot/workspace_name")
-        .or_else(|| bot.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or("Notion workspace");
-    let connection = Connection {
-        access: Access::Token {
-            token: token.to_owned(),
-        },
-        name: name.to_owned(),
-        destination: None,
-    };
-    let status = public_status(Some(&connection));
-    let _writes = WRITES.lock().await;
-    state.save(Some(&connection)).await?;
-    Ok(Json(status))
-}
-
-/// `DELETE /api/notion/connection`: forget the connection here, then ask Notion to forget a
-/// sign-in too. That second step is best effort, so an offline Mac can still disconnect.
-async fn disconnect(State(state): State<NotionState>) -> ApiResult<Json<Value>> {
-    let _guard = state.gate.lock().await;
-    let _writes = WRITES.lock().await;
-    // An entry that no longer reads must still be removable.
-    let previous = state.store.load().await.ok().flatten();
-    state.save(None).await?;
-    if let Some(Connection {
-        access: Access::SignIn { sign_in },
-        ..
-    }) = previous
-    {
-        sign_in::revoke(&state.client, &state.endpoints, &sign_in).await;
-    }
-    Ok(Json(public_status(None)))
 }
 
 fn not_connected() -> ApiError {
-    failure(StatusCode::CONFLICT, "Connect your Notion workspace first.")
+    failure(
+        StatusCode::CONFLICT,
+        "Connect Notion first: open Connections and connect it under Tools.",
+    )
+}
+
+/// `GET /api/notion/connection`.
+async fn status(State(state): State<NotionState>) -> Json<Value> {
+    Json(state.shown().await)
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct Search {
     #[serde(default)]
     query: String,
-    cursor: Option<String>,
 }
+/// `POST /api/notion/pages`: pages whose title matches, or recent ones for a blank search.
+/// Notion's search tool has no cursor: one answer holds every page it will show.
 async fn pages(
     State(state): State<NotionState>,
     Json(input): Json<Search>,
 ) -> ApiResult<Json<Value>> {
-    if input.query.len() > 200 || input.cursor.as_ref().is_some_and(|c| c.len() > 200) {
+    if input.query.len() > 200 {
         return Err(failure(StatusCode::BAD_REQUEST, "Search text is too long."));
     }
     let _guard = state.gate.lock().await;
-    let token = match state.connection().await?.access {
-        Access::Token { token } => token,
-        Access::SignIn { .. } => {
-            // Notion's search tool has no cursor: one answer holds every page it will show.
-            let pages = mcp::search(&mut state.session().await?, input.query.trim()).await?;
-            return Ok(Json(json!({"pages": pages, "nextCursor": null})));
-        }
-    };
-    let mut body = json!({"query": input.query, "filter": {"value": "page", "property": "object"}, "page_size": 50});
-    if let Some(cursor) = input.cursor {
-        body["start_cursor"] = json!(cursor);
-    }
-    let result = request(
-        &state.client,
-        &state.endpoints.api,
-        &token,
-        Method::POST,
-        "search",
-        Some(body),
-    )
-    .await?;
-    let pages: Vec<Page> = result
-        .get("results")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(page)
-        .collect();
-    Ok(Json(
-        json!({"pages": pages, "nextCursor": result.get("next_cursor")}),
-    ))
+    let pages = mcp::search(&mut state.notion.session().await?, input.query.trim()).await?;
+    Ok(Json(json!({"pages": pages, "nextCursor": null})))
 }
-fn page(value: &Value) -> Option<Page> {
-    if value.get("archived") == Some(&json!(true)) || value.get("in_trash") == Some(&json!(true)) {
-        return None;
-    }
-    let id = uuid::Uuid::parse_str(value.get("id")?.as_str()?)
-        .ok()?
-        .to_string();
-    let title: String = value
-        .get("properties")?
-        .as_object()?
-        .values()
-        .filter_map(|v| v.get("title").and_then(Value::as_array))
-        .flatten()
-        .filter_map(|v| {
-            v.get("plain_text")
-                .or_else(|| v.pointer("/text/content"))
-                .and_then(Value::as_str)
-        })
-        .collect();
-    Some(Page {
-        id,
-        title: if title.is_empty() {
-            "Untitled page".into()
-        } else {
-            title
-        },
-    })
-}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Destination {
+struct Chosen {
     page_id: String,
 }
+/// `PUT /api/notion/destination`: the page answers go under, once Notion says it can hold pages.
 async fn destination(
     State(state): State<NotionState>,
-    Json(input): Json<Destination>,
+    Json(input): Json<Chosen>,
 ) -> ApiResult<Json<Value>> {
     let id = uuid::Uuid::parse_str(&input.page_id).map_err(|_| {
         failure(
@@ -986,42 +326,24 @@ async fn destination(
         )
     })?;
     let _guard = state.gate.lock().await;
-    let chosen = match state.connection().await?.access {
-        Access::Token { token } => page(
-            &request(
-                &state.client,
-                &state.endpoints.api,
-                &token,
-                Method::GET,
-                &format!("pages/{id}"),
-                None,
+    let chosen = mcp::page(&mut state.notion.session().await?, &id.to_string())
+        .await?
+        .ok_or_else(|| {
+            failure(
+                StatusCode::BAD_REQUEST,
+                "This page is unavailable. Choose another page.",
             )
-            .await?,
-        ),
-        Access::SignIn { .. } => mcp::page(&mut state.session().await?, &id.to_string()).await?,
-    }
-    .ok_or_else(|| {
-        failure(
-            StatusCode::BAD_REQUEST,
-            "This page is unavailable. Choose another page.",
-        )
-    })?;
-    let _writes = WRITES.lock().await;
-    // Read again: renewing the sign-in may have rotated its grant since the read above.
-    let mut connection = state.store.load().await?.ok_or_else(not_connected)?;
-    connection.destination = Some(chosen);
-    let status = public_status(Some(&connection));
-    state.save(Some(&connection)).await?;
-    Ok(Json(status))
+        })?;
+    state.destination.write(&chosen).await?;
+    Ok(Json(state.shown().await))
 }
 
 // ---------------------------------------------------------------------------------------
 // Publishing
 // ---------------------------------------------------------------------------------------
 
-/// What the delivery reports when no workspace or destination page is connected.
-pub(crate) const NOT_CONNECTED_MESSAGE: &str =
-    "Notion is not connected. Open Connections and choose a destination page.";
+/// What the delivery reports when Notion isn't connected, or no page is chosen for answers.
+pub(crate) const NOT_CONNECTED_MESSAGE: &str = "Notion is not connected yet. Open Connections, connect Notion under Tools, and choose the page answers go under.";
 /// Notion accepts at most this many children per create or append request.
 const BLOCKS_PER_REQUEST: usize = 100;
 /// Notion rejects a `rich_text` item whose content exceeds this many characters.
@@ -1052,46 +374,37 @@ impl From<ApiError> for PublishError {
     }
 }
 
-/// Publishes Markdown as a child page of the operator's chosen destination.
+/// Publishes Markdown as a child page of the page answers go under.
 pub(crate) struct Publisher {
-    client: Client,
-    store: Store,
-    endpoints: Arc<Endpoints>,
+    notion: Notion,
+    destination: Destination,
 }
 
 impl Publisher {
-    /// A publisher reading the stored connection, wherever [`install`] keeps it, with its own
-    /// HTTPS client.
+    /// A publisher through the installed tools' Notion sign-in, to the page [`install`] keeps,
+    /// with its own HTTPS client.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTPS client cannot be initialized, or if the file store was asked
-    /// for before [`install`] named its folder.
+    /// Returns an error if the HTTPS client cannot be initialized.
     pub(crate) fn new() -> anyhow::Result<Self> {
         Ok(Self {
-            client: build_client()?,
-            store: Store::installed()?,
-            endpoints: Arc::new(Endpoints::notion()),
+            notion: Notion::installed()?,
+            destination: Destination::installed(),
         })
     }
 
-    /// A publisher that is never connected, for tests that must not reach the keychain.
+    /// A publisher that is never connected, for tests.
     #[cfg(test)]
     pub(crate) fn disconnected() -> Self {
-        Self::with(Store::Memory(Arc::default()), Endpoints::notion())
-    }
-
-    #[cfg(test)]
-    fn with(store: Store, endpoints: Endpoints) -> Self {
         Self {
-            client: build_client().expect("HTTPS client"),
-            store,
-            endpoints: Arc::new(endpoints),
+            notion: Notion::with(None, MCP_URL),
+            destination: Destination { path: None },
         }
     }
 
-    /// Create `title` under the connected destination holding `markdown`, unless a child
-    /// page with that exact title already exists.
+    /// Create `title` under the page answers go under holding `markdown`, unless a child page
+    /// with that exact title already exists.
     ///
     /// # Errors
     ///
@@ -1102,141 +415,13 @@ impl Publisher {
         title: &str,
         markdown: &str,
     ) -> Result<Published, PublishError> {
-        let connection = self.store.load().await?;
-        self.publish_with(connection, title, markdown).await
-    }
-
-    async fn publish_with(
-        &self,
-        connection: Option<Connection>,
-        title: &str,
-        markdown: &str,
-    ) -> Result<Published, PublishError> {
-        let Some(Connection {
-            access,
-            destination: Some(destination),
-            ..
-        }) = connection
-        else {
-            return Err(PublishError::Failed(NOT_CONNECTED_MESSAGE.to_owned()));
-        };
-        match access {
-            Access::Token { token } => {
-                self.publish_with_token(&token, &destination, title, markdown)
-                    .await
-            }
-            Access::SignIn { .. } => {
-                let bearer = sign_in::bearer(&self.client, &self.endpoints, &self.store).await?;
-                let mut session =
-                    mcp::Session::open(&self.client, &self.endpoints.mcp, bearer).await?;
-                mcp::publish(&mut session, &destination, title, markdown).await
-            }
+        let not_connected = || PublishError::Failed(NOT_CONNECTED_MESSAGE.to_owned());
+        if self.notion.tool().await.is_none() {
+            return Err(not_connected());
         }
-    }
-
-    async fn publish_with_token(
-        &self,
-        token: &str,
-        destination: &Page,
-        title: &str,
-        markdown: &str,
-    ) -> Result<Published, PublishError> {
-        if let Some((page_id, url)) = self.existing_child(token, &destination.id, title).await? {
-            return Err(PublishError::Duplicate { page_id, url });
-        }
-        let blocks = markdown_blocks(markdown);
-        let mut chunks = blocks.chunks(BLOCKS_PER_REQUEST);
-        let first = chunks.next().map(<[Value]>::to_vec).unwrap_or_default();
-        let created = request(
-            &self.client,
-            &self.endpoints.api,
-            token,
-            Method::POST,
-            "pages",
-            Some(json!({
-                "parent": {"page_id": destination.id},
-                "properties": {"title": {"title": [text_item(title)]}},
-                "children": first,
-            })),
-        )
-        .await?;
-        let page_id = created
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                PublishError::Failed("Notion created the page but returned no id.".to_owned())
-            })?
-            .to_owned();
-        let url = created
-            .get("url")
-            .and_then(Value::as_str)
-            .map_or_else(|| page_url(&page_id), str::to_owned);
-        for chunk in chunks {
-            request(
-                &self.client,
-                &self.endpoints.api,
-                token,
-                Method::PATCH,
-                &format!("blocks/{page_id}/children"),
-                Some(json!({"children": chunk})),
-            )
-            .await?;
-        }
-        Ok(Published { page_id, url })
-    }
-
-    /// The id and URL of a `child_page` of `parent` titled exactly `title`, following
-    /// pagination to the end.
-    async fn existing_child(
-        &self,
-        token: &str,
-        parent: &str,
-        title: &str,
-    ) -> Result<Option<(String, String)>, PublishError> {
-        let mut cursor: Option<String> = None;
-        loop {
-            let mut path = format!("blocks/{parent}/children?page_size=100");
-            if let Some(cursor) = &cursor {
-                path.push_str("&start_cursor=");
-                path.push_str(cursor);
-            }
-            let page = request(
-                &self.client,
-                &self.endpoints.api,
-                token,
-                Method::GET,
-                &path,
-                None,
-            )
-            .await?;
-            let found = page
-                .get("results")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter(|block| block.get("type").and_then(Value::as_str) == Some("child_page"))
-                .find(|block| {
-                    block.pointer("/child_page/title").and_then(Value::as_str) == Some(title)
-                })
-                .and_then(|block| block.get("id").and_then(Value::as_str))
-                .map(|id| (id.to_owned(), page_url(id)));
-            if found.is_some() {
-                return Ok(found);
-            }
-            cursor = page
-                .get("next_cursor")
-                .and_then(Value::as_str)
-                .filter(|next| {
-                    !next.is_empty()
-                        && next
-                            .bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-                })
-                .map(str::to_owned);
-            if cursor.is_none() {
-                return Ok(None);
-            }
-        }
+        let destination = self.destination.read().await.ok_or_else(not_connected)?;
+        let mut session = self.notion.session().await?;
+        mcp::publish(&mut session, &destination, title, markdown).await
     }
 }
 
@@ -1244,9 +429,9 @@ impl Publisher {
 // Reading pages an agent is given
 // ---------------------------------------------------------------------------------------
 
-/// What a run says when an agent is given a Notion page and nothing is connected.
+/// What a run says when an agent is given a Notion page and Notion isn't connected.
 pub(crate) const READ_NOT_CONNECTED: &str =
-    "Notion is not connected. Open Connections and sign in to Notion.";
+    "Notion is not connected. Open Connections and connect Notion under Tools.";
 
 /// Why the pages a team is given could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1274,37 +459,22 @@ impl ReadError {
     }
 }
 
-/// Reads the Notion pages agents are given (ADR 0050) through the stored connection. Like
-/// [`Publisher`], only the daemon holds the connection: an agent is handed the text.
+/// Reads the Notion pages agents are given (ADR 0050) through the Notion tool's sign-in. Like
+/// [`Publisher`], only the daemon holds the sign-in: an agent is handed the text.
 pub(crate) struct Reader {
-    client: Client,
-    store: Store,
-    endpoints: Arc<Endpoints>,
+    notion: Notion,
 }
 
 impl Reader {
-    /// A reader for the stored connection, wherever [`install`] keeps it, with its own HTTPS
-    /// client.
+    /// A reader through the installed tools' Notion sign-in, with its own HTTPS client.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTPS client cannot be initialized, or if the file store was asked
-    /// for before [`install`] named its folder.
+    /// Returns an error if the HTTPS client cannot be initialized.
     pub(crate) fn new() -> anyhow::Result<Self> {
         Ok(Self {
-            client: build_client()?,
-            store: Store::installed()?,
-            endpoints: Arc::new(Endpoints::notion()),
+            notion: Notion::installed()?,
         })
-    }
-
-    #[cfg(test)]
-    fn with(store: Store, endpoints: Endpoints) -> Self {
-        Self {
-            client: build_client().expect("HTTPS client"),
-            store,
-            endpoints: Arc::new(endpoints),
-        }
     }
 
     /// Every page in `ids`, each read once, through one session with Notion.
@@ -1316,83 +486,30 @@ impl Reader {
         &self,
         ids: &[String],
     ) -> Result<BTreeMap<String, crate::config::NotionPage>, ReadError> {
-        let connection = self
-            .store
-            .load()
-            .await
-            .map_err(|error| ReadError::connection(&error))?
-            .ok_or_else(|| ReadError {
+        if self.notion.tool().await.is_none() {
+            return Err(ReadError {
                 page: None,
                 message: READ_NOT_CONNECTED.to_owned(),
-            })?;
+            });
+        }
+        let mut session = self
+            .notion
+            .session()
+            .await
+            .map_err(|error| ReadError::connection(&error))?;
         let mut pages = BTreeMap::new();
-        match connection.access {
-            Access::Token { token } => {
-                for id in ids {
-                    pages.insert(id.clone(), self.read_with_token(&token, id).await?);
+        for id in ids {
+            let page = match mcp::read(&mut session, id).await {
+                Ok(Some(page)) => page,
+                Ok(None) => return Err(ReadError::page(id, NOT_A_PAGE)),
+                Err(error) if error.message == mcp::PAGE_NOT_FOUND => {
+                    return Err(ReadError::page(id, PAGE_GONE));
                 }
-            }
-            Access::SignIn { .. } => {
-                let bearer = sign_in::bearer(&self.client, &self.endpoints, &self.store)
-                    .await
-                    .map_err(|error| ReadError::connection(&error))?;
-                let mut session = mcp::Session::open(&self.client, &self.endpoints.mcp, bearer)
-                    .await
-                    .map_err(|error| ReadError::connection(&error))?;
-                for id in ids {
-                    let page = match mcp::read(&mut session, id).await {
-                        Ok(Some(page)) => page,
-                        Ok(None) => return Err(ReadError::page(id, NOT_A_PAGE)),
-                        Err(error) if error.message == mcp::PAGE_NOT_FOUND => {
-                            return Err(ReadError::page(id, PAGE_GONE));
-                        }
-                        Err(error) => return Err(ReadError::page(id, error.message)),
-                    };
-                    pages.insert(id.clone(), page);
-                }
-            }
+                Err(error) => return Err(ReadError::page(id, error.message)),
+            };
+            pages.insert(id.clone(), page);
         }
         Ok(pages)
-    }
-
-    /// One page through the REST API, for a connection made with an integration token.
-    async fn read_with_token(
-        &self,
-        token: &str,
-        id: &str,
-    ) -> Result<crate::config::NotionPage, ReadError> {
-        let failed = |error: ApiError| ReadError::page(id, error.message);
-        let (client, api) = (&self.client, self.endpoints.api.as_str());
-        let about = request(
-            client,
-            api,
-            token,
-            Method::GET,
-            &format!("pages/{id}"),
-            None,
-        )
-        .await
-        .map_err(failed)?;
-        let Some(Page { title, .. }) = page(&about) else {
-            return Err(ReadError::page(id, PAGE_GONE));
-        };
-        let markdown = format!("pages/{id}/markdown");
-        let body = request(client, api, token, Method::GET, &markdown, None)
-            .await
-            .map_err(failed)?;
-        let text = body
-            .get("markdown")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ReadError::page(id, unreadable().message))?;
-        Ok(crate::config::NotionPage {
-            title,
-            url: about
-                .get("url")
-                .and_then(Value::as_str)
-                .map_or_else(|| page_url(id), str::to_owned),
-            text: text.trim().to_owned(),
-            truncated: body.get("truncated") == Some(&json!(true)),
-        })
     }
 }
 
@@ -1645,153 +762,13 @@ fn styled_item(content: &str, style: &Style) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    /// Test builds never reach the Keychain item the installed app keeps. Every test gives the
-    /// connection a store of its own, and one that would read or write the real item fails here
-    /// first.
-    pub(super) fn never_the_keychain() {
-        panic!(
-            "a test reached the real Keychain: give it a Store::Memory, Store::File or Store::Refusing"
-        );
-    }
-
-    /// The Keychain, as [`Remembered`] sees it: how often it was read, and whether it refuses.
-    #[derive(Clone, Default)]
-    struct Keychain {
-        reads: Arc<std::sync::atomic::AtomicUsize>,
-        refuse: Arc<std::sync::atomic::AtomicBool>,
-    }
-
-    impl Keychain {
-        fn read(&self) -> impl Future<Output = ApiResult<Option<String>>> + use<> {
-            let this = self.clone();
-            async move {
-                this.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                // Long enough that requests arriving together are all waiting on this one.
-                tokio::time::sleep(Duration::from_millis(20)).await;
-                if this.refuse.load(std::sync::atomic::Ordering::SeqCst) {
-                    Err(storage_error())
-                } else {
-                    Ok(Some("stored".to_owned()))
-                }
-            }
-        }
-
-        fn reads(&self) -> usize {
-            self.reads.load(std::sync::atomic::Ordering::SeqCst)
-        }
-    }
-
-    /// Every read is a dialog on a Mac that does not yet trust this program, so the daemon reads
-    /// once: a page load's three status checks, a send and a run's page reads all share it.
-    #[tokio::test]
-    async fn the_keychain_is_read_once_however_many_ask_at_once() {
-        let keychain = Keychain::default();
-        let remembered = Remembered::default();
-        let asks = (0..3).map(|_| remembered.load(false, || keychain.read()));
-        let answers = futures_util::future::join_all(asks).await;
-        assert!(
-            answers
-                .iter()
-                .all(|answer| answer.as_ref().ok() == Some(&Some("stored".to_owned())))
-        );
-        assert_eq!(
-            remembered.load(true, || keychain.read()).await.ok(),
-            Some(Some("stored".to_owned()))
-        );
-        assert_eq!(keychain.reads(), 1);
-    }
-
-    /// What this process wrote is what it knows: a renewed token is not read back from the Keychain.
-    #[tokio::test]
-    async fn a_write_is_remembered_without_reading_it_back() {
-        let keychain = Keychain::default();
-        let remembered = Remembered::default();
-        remembered
-            .save(Some("renewed".to_owned()), |_| async { Ok(()) })
-            .await
-            .expect("written");
-        assert_eq!(
-            remembered.load(false, || keychain.read()).await.ok(),
-            Some(Some("renewed".to_owned()))
-        );
-        remembered
-            .save(None, |_| async { Ok(()) })
-            .await
-            .expect("forgotten");
-        assert_eq!(
-            remembered.load(false, || keychain.read()).await.ok(),
-            Some(None)
-        );
-        assert_eq!(keychain.reads(), 0);
-        // A write that failed leaves the item unknown, so the next load reads it.
-        let failed = remembered
-            .save(Some("half".to_owned()), |_| async { Err(storage_error()) })
-            .await;
-        assert!(failed.is_err());
-        let _ = remembered.load(false, || keychain.read()).await;
-        assert_eq!(keychain.reads(), 1);
-    }
-
-    /// Deny must stay denied for the checks nobody asked for: the run view checks the connection
-    /// whenever the window takes focus, and the dialog itself takes focus away. Only something the
-    /// person does with Notion asks again.
-    #[tokio::test]
-    async fn after_a_refusal_only_something_the_person_does_asks_again() {
-        let keychain = Keychain::default();
-        keychain
-            .refuse
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        let remembered = Remembered::default();
-        assert!(remembered.load(false, || keychain.read()).await.is_err());
-        assert!(remembered.load(false, || keychain.read()).await.is_err());
-        assert_eq!(
-            keychain.reads(),
-            1,
-            "a status check after a refusal must not ask again"
-        );
-        keychain
-            .refuse
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(
-            remembered.load(true, || keychain.read()).await.ok(),
-            Some(Some("stored".to_owned()))
-        );
-        assert_eq!(keychain.reads(), 2);
-    }
-    use axum::{
-        body::Body,
-        http::{Request, header},
-    };
     use std::fmt::Write as _;
+
+    use axum::body::Body;
+    use axum::http::{HeaderMap, Request, header};
     use tower::ServiceExt;
 
-    /// A connection longer than one Windows credential holds is kept in several and read back
-    /// whole, on character boundaries; a short one is kept exactly as it was.
-    #[test]
-    fn a_long_connection_is_kept_in_parts_and_read_back_whole() {
-        let short = r#"{"token":"secret_abc","name":"Team"}"#;
-        assert_eq!(split_secret(short), vec![short.to_owned()]);
-        assert_eq!(join_secret(short, |_| None).as_deref(), Some(short));
-
-        let long = format!(r#"{{"token":"{}","name":"Tài liệu"}}"#, "é".repeat(4_000));
-        let parts = split_secret(&long);
-        assert!(parts.len() > 1);
-        assert!(parts.iter().all(|part| part.len() <= SECRET_PART_BYTES));
-        assert!(parts[0].starts_with(SECRET_PARTS_MARKER));
-        let read = join_secret(&parts[0], |index| parts.get(index).cloned());
-        assert_eq!(read.as_deref(), Some(long.as_str()));
-        assert_eq!(
-            join_secret(&parts[0], |_| None),
-            None,
-            "a missing part is an error"
-        );
-        assert_eq!(
-            join_secret(&format!("{SECRET_PARTS_MARKER}99\nx"), |_| None),
-            None
-        );
-    }
+    use super::*;
 
     fn kinds(blocks: &[Value]) -> Vec<&str> {
         blocks
@@ -1945,81 +922,42 @@ mod tests {
             publisher.publish("Title", "body").await,
             Err(PublishError::Failed(NOT_CONNECTED_MESSAGE.to_owned()))
         );
-        let no_destination = Connection {
-            access: Access::Token {
-                token: "test-token".into(),
-            },
-            name: "Workspace".into(),
-            destination: None,
+        // Connected, with no page chosen for answers: nothing reaches Notion either.
+        let folder = Folder::new();
+        let tools = Tools::for_tests(&folder.0);
+        tools
+            .connected_for_tests("Notion", "http://127.0.0.1:9/mcp", "test-token")
+            .await;
+        let publisher = Publisher {
+            notion: Notion::with(Some(tools), "http://127.0.0.1:9/mcp"),
+            destination: Destination::in_folder(&folder.0),
         };
         assert_eq!(
-            publisher
-                .publish_with(Some(no_destination), "Title", "body")
-                .await,
+            publisher.publish("Title", "body").await,
             Err(PublishError::Failed(NOT_CONNECTED_MESSAGE.to_owned()))
         );
     }
-    #[test]
-    fn status_never_discloses_a_token() {
-        let token = Connection {
-            access: Access::Token {
-                token: "test-super-secret".into(),
-            },
-            name: "Workspace".into(),
-            destination: None,
-        };
-        let signed_in: Connection = serde_json::from_value(json!({
-            "signIn": {"clientId": "client-secret-id", "accessToken": "access-secret", "refreshToken": "refresh-secret", "expiresAt": 0},
-            "name": "Workspace",
-        }))
-        .unwrap();
-        for (connection, via) in [(token, "token"), (signed_in, "signIn")] {
-            let status = public_status(Some(&connection));
-            assert!(!status.to_string().contains("secret"), "{status}");
-            assert_eq!(status["connected"], true);
-            assert_eq!(status["via"], via);
-        }
-    }
-    #[test]
-    fn a_token_saved_before_sign_in_existed_still_loads() {
-        let stored = r#"{"token":"secret_abc","name":"Team space","destination":{"id":"550e8400-e29b-41d4-a716-446655440000","title":"Daily"}}"#;
-        let connection: Connection = serde_json::from_str(stored).unwrap();
-        assert!(matches!(&connection.access, Access::Token { token } if token == "secret_abc"));
-        assert_eq!(connection.destination.as_ref().unwrap().title, "Daily");
-        let saved: Value = serde_json::to_value(&connection).unwrap();
-        assert_eq!(saved, serde_json::from_str::<Value>(stored).unwrap());
 
-        let signed_in = json!({
-            "signIn": {"clientId": "c", "accessToken": "a", "refreshToken": "r", "expiresAt": 7, "workspaceId": "w"},
-            "name": "Team space",
-            "destination": null,
-        });
-        let connection: Connection = serde_json::from_value(signed_in.clone()).unwrap();
-        assert!(matches!(connection.access, Access::SignIn { .. }));
-        assert_eq!(serde_json::to_value(&connection).unwrap(), signed_in);
-    }
-    #[test]
-    fn page_titles_support_custom_title_properties_and_exclude_deleted_pages() {
-        let mut input = json!({"id":"550e8400-e29b-41d4-a716-446655440000", "properties":{"Name":{"title":[{"plain_text":"Tech "},{"text":{"content":"News"}}]}}});
-        assert_eq!(page(&input).unwrap().title, "Tech News");
-        input["in_trash"] = json!(true);
-        assert!(page(&input).is_none());
-    }
     #[tokio::test]
-    async fn rejects_cross_origin_and_simple_mutations_before_touching_keychain() {
+    async fn rejects_cross_origin_and_simple_mutations() {
         for (origin, marker) in [("https://evil.example", true), ("http://localhost", false)] {
             let mut request = Request::builder()
-                .uri("/api/notion/connection")
-                .method("DELETE")
+                .uri("/api/notion/destination")
+                .method("PUT")
                 .header(header::HOST, "localhost")
-                .header(header::ORIGIN, origin);
+                .header(header::ORIGIN, origin)
+                .header(header::CONTENT_TYPE, "application/json");
             if marker {
                 request = request.header("x-loomwatch-request", "1");
             }
             let folder = Folder::new();
-            let response = router(&folder.0)
+            let response = router(&folder.0, Tools::for_tests(&folder.0))
                 .unwrap()
-                .oneshot(request.body(Body::empty()).unwrap())
+                .oneshot(
+                    request
+                        .body(Body::from(json!({"pageId": DESTINATION}).to_string()))
+                        .unwrap(),
+                )
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -2027,10 +965,10 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------------------
-    // Notion sign-in, end to end against a stand-in for Notion's authorization and MCP server
+    // End to end against a stand-in for Notion's MCP server and its token endpoint
     // -----------------------------------------------------------------------------------
 
-    const DESTINATION: &str = "550e8400-e29b-41d4-a716-446655440000";
+    pub(super) const DESTINATION: &str = "550e8400-e29b-41d4-a716-446655440000";
     const DATABASE: &str = "650e8400-e29b-41d4-a716-446655440000";
     const EXISTING: &str = "750e8400-e29b-41d4-a716-446655440000";
     const CREATED: &str = "850e8400-e29b-41d4-a716-446655440000";
@@ -2042,22 +980,36 @@ mod tests {
 
     /// What the stand-in has been asked and what it will accept next.
     #[derive(Default)]
-    struct Fake {
-        mcp: String,
-        redirect_uri: String,
-        challenge: String,
-        access: String,
-        refresh: String,
-        revoked: Vec<String>,
-        tools: Vec<(String, Value)>,
+    pub(super) struct Fake {
+        /// The bearer its MCP server takes.
+        pub(super) access: String,
+        /// The refresh token its token endpoint takes.
+        pub(super) refresh: String,
+        pub(super) refreshed: usize,
+        pub(super) revoked: Vec<String>,
+        pub(super) tools: Vec<(String, Value)>,
     }
-    type Shared = Arc<std::sync::Mutex<Fake>>;
+    pub(super) type Shared = Arc<std::sync::Mutex<Fake>>;
 
-    async fn fake_register(State(fake): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
-        assert_eq!(body["token_endpoint_auth_method"], "none");
-        assert_eq!(body["client_name"], "LoomWatch");
-        fake.lock().unwrap().redirect_uri = body["redirect_uris"][0].as_str().unwrap().to_owned();
-        Json(json!({"client_id": "client-1"}))
+    /// The stand-in, running.
+    pub(super) struct Stand {
+        pub(super) base: String,
+        pub(super) fake: Shared,
+    }
+
+    impl Stand {
+        pub(super) fn mcp(&self) -> String {
+            format!("{}/mcp", self.base)
+        }
+
+        pub(super) fn endpoints(&self) -> moved::Endpoints {
+            moved::Endpoints {
+                mcp: self.mcp(),
+                authorize: format!("{}/authorize", self.base),
+                token: format!("{}/token", self.base),
+                register: format!("{}/register", self.base),
+            }
+        }
     }
 
     async fn fake_token(State(fake): State<Shared>, body: String) -> Response {
@@ -2066,30 +1018,12 @@ mod tests {
                 .into_owned()
                 .collect();
         let mut fake = fake.lock().unwrap();
-        assert_eq!(form["client_id"], "client-1");
         match form.get("grant_type").map(String::as_str) {
-            Some("authorization_code") => {
-                assert_eq!(form["code"], "code-1");
-                assert_eq!(form["redirect_uri"], fake.redirect_uri);
-                assert_eq!(form["resource"], fake.mcp);
-                // PKCE: only the holder of the verifier behind the challenge gets a token.
-                let digest =
-                    <sha2::Sha256 as sha2::Digest>::digest(form["code_verifier"].as_bytes());
-                assert_eq!(
-                    base64::Engine::encode(
-                        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-                        digest
-                    ),
-                    fake.challenge
-                );
-                "access-1".clone_into(&mut fake.access);
-                "refresh-1".clone_into(&mut fake.refresh);
-                Json(json!({"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": 3600, "workspace_name": "Acme", "workspace_id": "ws-1"})).into_response()
-            }
             Some("refresh_token") if form["refresh_token"] == fake.refresh => {
+                fake.refreshed += 1;
                 "access-2".clone_into(&mut fake.access);
                 "refresh-2".clone_into(&mut fake.refresh);
-                Json(json!({"access_token": "access-2", "refresh_token": "refresh-2", "expires_in": 3600})).into_response()
+                Json(json!({"access_token": "access-2", "token_type": "Bearer", "refresh_token": "refresh-2", "expires_in": 3600})).into_response()
             }
             Some(_) => (
                 StatusCode::BAD_REQUEST,
@@ -2124,9 +1058,15 @@ mod tests {
         match message["method"].as_str().unwrap() {
             "initialize" => (
                 [("mcp-session-id", "session-1")],
-                Json(answer(json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake"}}))),
+                Json(answer(json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "1"}}))),
             )
                 .into_response(),
+            // What an agent given the Notion tool is offered.
+            "tools/list" => Json(answer(json!({"tools": [
+                {"name": "notion-search", "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": true}},
+                {"name": "notion-create-pages", "inputSchema": {"type": "object"}},
+            ]})))
+            .into_response(),
             "tools/call" => {
                 assert_eq!(headers["mcp-session-id"], "session-1");
                 assert_eq!(headers["mcp-protocol-version"], "2025-06-18");
@@ -2181,72 +1121,28 @@ mod tests {
         }
     }
 
-    /// The REST API as an integration token reaches it: only `test-token`, only `DESTINATION`.
-    fn rest_refusal(headers: &HeaderMap, id: &str) -> Option<Response> {
-        let authorized = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            == Some("Bearer test-token");
-        if !authorized {
-            return Some(StatusCode::UNAUTHORIZED.into_response());
-        }
-        (id != DESTINATION).then(|| StatusCode::NOT_FOUND.into_response())
-    }
-
-    async fn fake_rest_page(
-        headers: HeaderMap,
-        axum::extract::Path(id): axum::extract::Path<String>,
-    ) -> Response {
-        rest_refusal(&headers, &id).unwrap_or_else(|| {
-            Json(json!({
-                "object": "page",
-                "id": DESTINATION,
-                "url": notion_url(DESTINATION),
-                "properties": {"Name": {"title": [{"plain_text": "Daily"}]}},
-            }))
-            .into_response()
-        })
-    }
-
-    async fn fake_rest_markdown(
-        headers: HeaderMap,
-        axum::extract::Path(id): axum::extract::Path<String>,
-    ) -> Response {
-        rest_refusal(&headers, &id).unwrap_or_else(|| {
-            Json(json!({"object": "page_markdown", "id": DESTINATION, "markdown": "# Goals\nShip it.\n", "truncated": true, "unknown_block_ids": []}))
-                .into_response()
-        })
-    }
-
-    async fn fake_notion() -> (Endpoints, Shared) {
+    /// Starts the stand-in, taking `access` as its bearer.
+    pub(super) async fn fake_notion(access: &str) -> Stand {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let fake: Shared = Arc::default();
-        format!("{base}/mcp").clone_into(&mut fake.lock().unwrap().mcp);
+        access.clone_into(&mut fake.lock().unwrap().access);
         let app = Router::new()
-            .route("/register", post(fake_register))
+            .route(
+                "/mcp",
+                post(fake_mcp).get(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+            )
             .route("/token", post(fake_token))
-            .route("/mcp", post(fake_mcp))
-            .route("/v1/pages/{id}", get(fake_rest_page))
-            .route("/v1/pages/{id}/markdown", get(fake_rest_markdown))
             .with_state(fake.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let endpoints = Endpoints {
-            api: format!("{base}/v1"),
-            mcp: format!("{base}/mcp"),
-            authorize: format!("{base}/authorize"),
-            token: format!("{base}/token"),
-            register: format!("{base}/register"),
-            revoke: format!("{base}/token"),
-        };
-        (endpoints, fake)
+        Stand { base, fake }
     }
 
     async fn send(
         router: &Router,
         request: axum::http::request::Builder,
         body: Option<Value>,
-    ) -> (StatusCode, HeaderMap, Value) {
+    ) -> (StatusCode, Value) {
         let request = request.header(header::HOST, "127.0.0.1:3000");
         let request = match body {
             Some(body) => request
@@ -2262,7 +1158,6 @@ mod tests {
             .to_bytes();
         (
             parts.status,
-            parts.headers,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
     }
@@ -2276,41 +1171,19 @@ mod tests {
             .header("sec-fetch-site", "same-origin")
     }
 
-    /// Notion sending the browser back: a top-level navigation from another site.
-    fn from_notion(query: &str) -> axum::http::request::Builder {
-        Request::builder()
-            .uri(format!("{}?{query}", sign_in::CALLBACK))
-            .header("sec-fetch-site", "cross-site")
-    }
-
-    async fn start(router: &Router, fake: &Shared) -> String {
-        let (status, _, body) = send(router, from_ui("POST", "/api/notion/sign-in"), None).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        let consent = url::Url::parse(body["url"].as_str().unwrap()).unwrap();
-        let query: std::collections::HashMap<String, String> =
-            consent.query_pairs().into_owned().collect();
-        assert_eq!(query["client_id"], "client-1");
-        assert_eq!(
-            query["redirect_uri"],
-            "http://127.0.0.1:3000/api/notion/sign-in/callback"
-        );
-        assert_eq!(query["code_challenge_method"], "S256");
-        assert_eq!(query["resource"], fake.lock().unwrap().mcp);
-        fake.lock().unwrap().challenge = query["code_challenge"].clone();
-        query["state"].clone()
-    }
-
     /// `LoomWatch`'s state folder for one test, removed after it.
-    struct Folder(PathBuf);
+    pub(super) struct Folder(pub(super) PathBuf);
 
     impl Folder {
-        fn new() -> Self {
-            Self(std::env::temp_dir().join(format!("loomwatch-notion-{}", uuid::Uuid::new_v4())))
+        pub(super) fn new() -> Self {
+            let path =
+                std::env::temp_dir().join(format!("loomwatch-notion-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
         }
 
-        /// The status kept there, as written.
-        fn shown(&self) -> String {
-            std::fs::read_to_string(self.0.join("notion-connection.json")).unwrap_or_default()
+        pub(super) fn destination(&self) -> String {
+            std::fs::read_to_string(self.0.join(DESTINATION_FILE)).unwrap_or_default()
         }
     }
 
@@ -2320,99 +1193,66 @@ mod tests {
         }
     }
 
-    fn state_with(store: Store, endpoints: Endpoints, folder: &Folder) -> NotionState {
-        NotionState {
-            client: build_client().unwrap(),
-            gate: Arc::default(),
-            store,
-            shown: Arc::new(Shown::in_folder(&folder.0)),
-            endpoints: Arc::new(endpoints),
-            pending: Arc::default(),
-        }
+    /// The routes, the publisher and the reader, all through `tools`' Notion tool at `mcp`.
+    pub(super) fn notion_with(
+        tools: &Tools,
+        mcp: &str,
+        folder: &Folder,
+    ) -> (Router, Publisher, Reader) {
+        let notion = Notion::with(Some(tools.clone()), mcp);
+        let destination = Destination::in_folder(&folder.0);
+        (
+            router_with(NotionState {
+                notion: notion.clone(),
+                destination: destination.clone(),
+                gate: Arc::default(),
+            }),
+            Publisher {
+                notion: notion.clone(),
+                destination,
+            },
+            Reader { notion },
+        )
     }
 
-    async fn shown_by(router: &Router) -> (StatusCode, Value) {
-        let (status, _, body) = send(router, from_ui("GET", "/api/notion/connection"), None).await;
-        (status, body)
+    pub(super) async fn shown_by(router: &Router) -> Value {
+        send(router, from_ui("GET", "/api/notion/connection"), None)
+            .await
+            .1
     }
 
-    fn stored(slot: &Arc<std::sync::Mutex<Option<String>>>) -> Value {
-        slot.lock()
-            .unwrap()
-            .as_deref()
-            .map_or(Value::Null, |value| serde_json::from_str(value).unwrap())
-    }
-
+    /// Search, choose the page answers go under, publish and read pages, all through the Notion
+    /// tool's sign-in; the status says so from `tools.json` and the page file alone.
     #[tokio::test]
-    #[allow(clippy::too_many_lines)] // one story, told in order: sign in, renew, search, publish, disconnect
-    async fn signing_in_renews_searches_publishes_and_disconnects_through_notion_mcp() {
-        let (endpoints, fake) = fake_notion().await;
-        let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
-        let store = Store::Memory(slot.clone());
+    #[allow(clippy::too_many_lines)] // one story, told in order: search, choose, publish, read
+    async fn the_notion_tool_searches_chooses_publishes_and_reads() {
+        let stand = fake_notion("access-1").await;
         let folder = Folder::new();
-        let router = router_with(state_with(store.clone(), endpoints.clone(), &folder));
-
-        // Starting is the UI's call alone; finishing is open to Notion's redirect, but only
-        // on this computer, and only with the state of the sign-in in progress.
-        let (status, _, _) = send(
+        let tools = Tools::for_tests(&folder.0);
+        let (router, publisher, reader) = notion_with(&tools, &stand.mcp(), &folder);
+        assert_eq!(shown_by(&router).await, json!({"connected": false}));
+        let (status, body) = send(
             &router,
-            Request::builder().method("POST").uri("/api/notion/sign-in"),
-            None,
+            from_ui("POST", "/api/notion/pages"),
+            Some(json!({"query": ""})),
         )
         .await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
-        let state = start(&router, &fake).await;
-        let (status, _, _) = send(
-            &router,
-            from_notion(&format!("state={state}&code=code-1")).header(header::HOST, "evil.example"),
-            None,
-        )
-        .await;
-        assert_eq!(
-            status,
-            StatusCode::FORBIDDEN,
-            "a rebound host never reaches the callback"
-        );
-        let (status, headers, _) =
-            send(&router, from_notion("state=forged&code=code-1"), None).await;
-        assert_eq!(status, StatusCode::SEE_OTHER);
-        assert_eq!(headers[header::LOCATION], "/connections?notion=expired");
-        let (status, headers, _) = send(
-            &router,
-            from_notion(&format!("state={state}&code=code-1")),
-            None,
-        )
-        .await;
-        assert_eq!(
-            status,
-            StatusCode::SEE_OTHER,
-            "the forged visit left the real sign-in waiting"
-        );
-        assert_eq!(headers[header::LOCATION], "/connections?notion=connected");
-        assert_eq!(headers[header::CACHE_CONTROL], "no-store");
-        assert_eq!(headers[header::REFERRER_POLICY], "no-referrer");
-        let (_, headers, _) = send(
-            &router,
-            from_notion(&format!("state={state}&code=code-1")),
-            None,
-        )
-        .await;
-        assert_eq!(
-            headers[header::LOCATION],
-            "/connections?notion=expired",
-            "a state is used once"
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(
+            body["error"].as_str().unwrap().contains("under Tools"),
+            "{body}"
         );
 
-        let (_, _, connection) =
-            send(&router, from_ui("GET", "/api/notion/connection"), None).await;
+        tools
+            .connected_for_tests("Notion", &stand.mcp(), "access-1")
+            .await;
         assert_eq!(
-            connection,
-            json!({"connected": true, "name": "Acme", "destination": null, "via": "signIn"})
+            shown_by(&router).await,
+            json!({"connected": true, "name": "Notion", "destination": null, "problem": null})
         );
-        assert_eq!(stored(&slot)["signIn"]["refreshToken"], "refresh-1");
 
         // Search goes through Notion's tool and keeps only pages.
-        let (status, _, found) = send(
+        let (status, found) = send(
             &router,
             from_ui("POST", "/api/notion/pages"),
             Some(json!({"query": " dai "})),
@@ -2424,7 +1264,7 @@ mod tests {
             json!({"pages": [{"id": DESTINATION, "title": "Daily"}], "nextCursor": null})
         );
         // Notion refuses an empty query on its own; browsing narrows by a filter every plan has.
-        let (status, _, _) = send(
+        let (status, _) = send(
             &router,
             from_ui("POST", "/api/notion/pages"),
             Some(json!({"query": ""})),
@@ -2432,13 +1272,15 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
 
-        // A lapsed access token is renewed, and the rotated grant is saved, before use.
-        {
-            let mut connection = stored(&slot);
-            connection["signIn"]["expiresAt"] = json!(0);
-            *slot.lock().unwrap() = Some(connection.to_string());
-        }
-        let (status, _, chosen) = send(
+        // A database can't hold the answers; a page can, and is kept with no credential.
+        let (status, _) = send(
+            &router,
+            from_ui("PUT", "/api/notion/destination"),
+            Some(json!({"pageId": DATABASE})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, chosen) = send(
             &router,
             from_ui("PUT", "/api/notion/destination"),
             Some(json!({"pageId": DESTINATION})),
@@ -2449,13 +1291,12 @@ mod tests {
             chosen["destination"],
             json!({"id": DESTINATION, "title": "Daily"})
         );
-        let saved = stored(&slot);
-        assert_eq!(saved["signIn"]["refreshToken"], "refresh-2");
-        assert_eq!(saved["signIn"]["accessToken"], "access-2");
-        assert_eq!(saved["destination"]["id"], DESTINATION);
+        assert!(!folder.destination().contains("access-1"));
+        // A daemon started later shows the same.
+        let (later, _, _) = notion_with(&tools, &stand.mcp(), &folder);
+        assert_eq!(shown_by(&later).await, chosen);
 
         // Publishing: the duplicate guard, then an answer whose tags arrive escaped, in chunks.
-        let publisher = Publisher::with(store.clone(), endpoints.clone());
         assert_eq!(
             publisher.publish("Existing", "hello").await,
             Err(PublishError::Duplicate {
@@ -2474,8 +1315,8 @@ mod tests {
         let page = publisher.publish("Report", &answer).await.unwrap();
         assert_eq!(page.page_id, CREATED);
         assert_eq!(page.url, notion_url(CREATED));
-        let tools = std::mem::take(&mut fake.lock().unwrap().tools);
-        let names: Vec<&str> = tools.iter().map(|(name, _)| name.as_str()).collect();
+        let called = std::mem::take(&mut stand.fake.lock().unwrap().tools);
+        let names: Vec<&str> = called.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(
             names,
             [
@@ -2484,20 +1325,21 @@ mod tests {
                 "notion-fetch",
                 "notion-fetch",
                 "notion-fetch",
+                "notion-fetch",
                 "notion-create-pages",
                 "notion-update-page"
             ]
         );
         assert_eq!(
-            tools[0].1,
+            called[0].1,
             json!({"query": "dai", "query_type": "internal", "page_size": 50, "max_highlight_length": 0})
         );
-        assert_eq!(tools[1].1["query"], "");
+        assert_eq!(called[1].1["query"], "");
         assert_eq!(
-            tools[1].1["filters"],
+            called[1].1["filters"],
             json!({"created_date_range": {"start_date": "1990-01-01"}})
         );
-        let create = &tools[5].1;
+        let create = &called[6].1;
         assert_eq!(
             create["parent"],
             json!({"type": "page_id", "page_id": DESTINATION})
@@ -2521,237 +1363,15 @@ mod tests {
             100,
             "one request carries at most 100 blocks"
         );
-        let append = &tools[6].1;
+        let append = &called[7].1;
         assert_eq!(append["page_id"], CREATED);
         assert_eq!(append["command"], "insert_content");
         assert_eq!(append["position"], json!({"type": "end"}));
         assert_eq!(append["allow_async"], false, "chunks land in order");
         assert_eq!(append["content"].as_str().unwrap().lines().count(), 52);
 
-        // Disconnecting forgets the grant here and asks Notion to revoke it.
-        let (_, _, connection) =
-            send(&router, from_ui("DELETE", "/api/notion/connection"), None).await;
-        assert_eq!(connection, json!({"connected": false}));
-        assert_eq!(stored(&slot), Value::Null);
-        assert_eq!(fake.lock().unwrap().revoked, ["refresh-2"]);
-    }
-
-    /// macOS asks to allow every read of the Keychain by a build it does not trust yet, and the
-    /// status is checked on every page load and whenever the window takes focus. So a daemon
-    /// started later shows what the last one saved without reading the Keychain at all, and what
-    /// it keeps to do that holds no credential.
-    #[tokio::test]
-    async fn the_status_shows_without_reading_the_keychain() {
-        let (endpoints, fake) = fake_notion().await;
-        let folder = Folder::new();
-        let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
-        let router = router_with(state_with(
-            Store::Memory(slot.clone()),
-            endpoints.clone(),
-            &folder,
-        ));
-        let later = router_with(state_with(Store::Refusing, endpoints, &folder));
-
-        let state = start(&router, &fake).await;
-        send(
-            &router,
-            from_notion(&format!("state={state}&code=code-1")),
-            None,
-        )
-        .await;
-        let (_, signed_in) = shown_by(&router).await;
-        assert_eq!(signed_in["connected"], true);
-        assert_eq!(shown_by(&later).await, (StatusCode::OK, signed_in));
-        let grant = stored(&slot)["signIn"].clone();
-        for secret in ["accessToken", "refreshToken", "clientId"] {
-            let secret = grant[secret].as_str().unwrap();
-            assert!(!folder.shown().contains(secret), "{}", folder.shown());
-        }
-
-        // Choosing the page answers go under, and disconnecting, show the same way.
-        let (_, _, chosen) = send(
-            &router,
-            from_ui("PUT", "/api/notion/destination"),
-            Some(json!({"pageId": DESTINATION})),
-        )
-        .await;
-        assert_eq!(shown_by(&later).await, (StatusCode::OK, chosen));
-        send(&router, from_ui("DELETE", "/api/notion/connection"), None).await;
-        assert_eq!(
-            shown_by(&later).await,
-            (StatusCode::OK, json!({"connected": false}))
-        );
-    }
-
-    /// The Keychain stays where a connection is kept unless the file store is asked for.
-    #[test]
-    fn only_the_file_store_keeps_the_connection_in_the_state_folder() {
-        let folder = Folder::new();
-        assert!(matches!(Store::chosen(&folder.0, false), Store::Keychain));
-        assert!(matches!(
-            Store::chosen(&folder.0, true),
-            Store::File(path) if path == folder.0.join(CREDENTIALS_FILE)
-        ));
-    }
-
-    /// `LOOMWATCH_KEY_STORE=file`: a trial copy with its own state folder signs in, shows, uses and
-    /// forgets the connection there. A read or write of the real Keychain fails any test
-    /// ([`never_the_keychain`]), so the first status, made with nothing kept yet, shows it never
-    /// reads the item the installed app keeps.
-    #[tokio::test]
-    async fn a_trial_copy_keeps_the_connection_in_its_own_state_folder() {
-        let (endpoints, fake) = fake_notion().await;
-        let folder = Folder::new();
-        let store = Store::chosen(&folder.0, true);
-        let credentials = folder.0.join(CREDENTIALS_FILE);
-        let router = router_with(state_with(store.clone(), endpoints.clone(), &folder));
-        assert_eq!(
-            shown_by(&router).await,
-            (StatusCode::OK, json!({"connected": false}))
-        );
-        assert!(!credentials.exists());
-
-        let state = start(&router, &fake).await;
-        send(
-            &router,
-            from_notion(&format!("state={state}&code=code-1")),
-            None,
-        )
-        .await;
-        let (_, signed_in) = shown_by(&router).await;
-        assert_eq!(
-            signed_in,
-            json!({"connected": true, "name": "Acme", "destination": null, "via": "signIn"})
-        );
-        let kept: Value = serde_json::from_slice(&std::fs::read(&credentials).unwrap()).unwrap();
-        assert_eq!(kept["signIn"]["refreshToken"], "refresh-1");
-        assert!(!folder.shown().contains("refresh-1"), "{}", folder.shown());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&credentials)
-                .unwrap()
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o777, 0o600, "readable by this account only");
-        }
-
-        // A run reads its pages through the same file.
-        let reader = Reader::with(store, endpoints);
-        assert!(reader.read(&[DESTINATION.to_owned()]).await.is_ok());
-
-        let (_, _, connection) =
-            send(&router, from_ui("DELETE", "/api/notion/connection"), None).await;
-        assert_eq!(connection, json!({"connected": false}));
-        assert!(!credentials.exists(), "disconnecting removes the file");
-        assert_eq!(fake.lock().unwrap().revoked, ["refresh-1"]);
-    }
-
-    /// A connection saved by a `LoomWatch` from before the status was kept is read once, and shown
-    /// from then on; one removed from the Keychain outside `LoomWatch` stops showing as soon as
-    /// something done with Notion finds it gone.
-    #[tokio::test]
-    async fn a_connection_saved_before_the_status_was_kept_is_read_once() {
-        let folder = Folder::new();
-        std::fs::create_dir_all(&folder.0).unwrap();
-        // Something else's file, or half of one: read the Keychain instead.
-        std::fs::write(folder.0.join("notion-connection.json"), "{").unwrap();
-        let slot = Arc::new(std::sync::Mutex::new(Some(format!(
-            r#"{{"token":"secret_abc","name":"Team space","destination":{{"id":"{DESTINATION}","title":"Daily"}}}}"#
-        ))));
-        let router = router_with(state_with(
-            Store::Memory(slot.clone()),
-            Endpoints::notion(),
-            &folder,
-        ));
-        let later = router_with(state_with(Store::Refusing, Endpoints::notion(), &folder));
-        let shown = json!({"connected": true, "name": "Team space", "destination": {"id": DESTINATION, "title": "Daily"}, "via": "token"});
-        assert_eq!(shown_by(&router).await, (StatusCode::OK, shown.clone()));
-        assert_eq!(shown_by(&later).await, (StatusCode::OK, shown));
-        assert!(!folder.shown().contains("secret_abc"), "{}", folder.shown());
-
-        *slot.lock().unwrap() = None;
-        let (status, _, body) = send(
-            &router,
-            from_ui("POST", "/api/notion/pages"),
-            Some(json!({"query": ""})),
-        )
-        .await;
-        assert_eq!(status, StatusCode::CONFLICT);
-        assert_eq!(body["error"], "Connect your Notion workspace first.");
-        assert_eq!(
-            shown_by(&later).await,
-            (StatusCode::OK, json!({"connected": false}))
-        );
-    }
-
-    #[tokio::test]
-    async fn a_declined_or_lapsed_sign_in_says_so_and_keeps_nothing() {
-        let (endpoints, fake) = fake_notion().await;
-        let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
-        let folder = Folder::new();
-        let router = router_with(state_with(Store::Memory(slot.clone()), endpoints, &folder));
-        let state = start(&router, &fake).await;
-        let (_, headers, _) = send(
-            &router,
-            from_notion(&format!("state={state}&error=access_denied")),
-            None,
-        )
-        .await;
-        assert_eq!(headers[header::LOCATION], "/connections?notion=denied");
-        assert_eq!(stored(&slot), Value::Null);
-
-        // Notion refusing the renewal means signing in again, in the words every surface uses.
-        let state = start(&router, &fake).await;
-        send(
-            &router,
-            from_notion(&format!("state={state}&code=code-1")),
-            None,
-        )
-        .await;
-        {
-            let mut connection = stored(&slot);
-            connection["signIn"]["expiresAt"] = json!(0);
-            connection["signIn"]["refreshToken"] = json!("retired");
-            *slot.lock().unwrap() = Some(connection.to_string());
-        }
-        let (status, _, body) = send(
-            &router,
-            from_ui("POST", "/api/notion/pages"),
-            Some(json!({"query": ""})),
-        )
-        .await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(body["error"], sign_in::SIGN_IN_AGAIN);
-    }
-
-    /// ADR 0050: a run reads every page its agents are given through the sign-in, in one session,
-    /// as the page's body; a database, a page Notion can no longer open, and no connection at all
-    /// each say what to do instead.
-    #[tokio::test]
-    async fn pages_given_to_agents_are_read_through_the_sign_in() {
-        let (endpoints, fake) = fake_notion().await;
-        let slot: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
-        let store = Store::Memory(slot.clone());
-        let reader = Reader::with(store.clone(), endpoints.clone());
-        assert_eq!(
-            reader.read(&[DESTINATION.to_owned()]).await,
-            Err(ReadError {
-                page: None,
-                message: READ_NOT_CONNECTED.to_owned()
-            })
-        );
-
-        let folder = Folder::new();
-        let router = router_with(state_with(store, endpoints, &folder));
-        let state = start(&router, &fake).await;
-        send(
-            &router,
-            from_notion(&format!("state={state}&code=code-1")),
-            None,
-        )
-        .await;
-        fake.lock().unwrap().tools.clear();
+        // ADR 0050: a run reads every page its agents are given, in one session, as the page's
+        // body; a database and a page Notion can no longer open each say what to do instead.
         let pages = reader
             .read(&[DESTINATION.to_owned()])
             .await
@@ -2769,53 +1389,52 @@ mod tests {
             }
         );
         assert_eq!(
-            fake.lock().unwrap().tools,
+            std::mem::take(&mut stand.fake.lock().unwrap().tools),
             vec![("notion-fetch".to_owned(), json!({"id": DESTINATION}))],
             "only a fetch: reading changes nothing in Notion"
         );
-
         for (id, expected) in [(DATABASE, NOT_A_PAGE), (MISSING, PAGE_GONE)] {
             assert_eq!(
                 reader.read(&[DESTINATION.to_owned(), id.to_owned()]).await,
                 Err(ReadError::page(id, expected))
             );
         }
+        // The status never carries the sign-in.
+        assert!(!shown_by(&router).await.to_string().contains("access-1"));
     }
 
-    /// An integration token reads a page through the REST API's Markdown endpoint, and a page not
-    /// shared with the integration says how to share it.
+    /// With no Notion tool, a run that reads a page says where to connect it, and so does
+    /// sending an answer; a token Notion no longer takes says to sign in again.
     #[tokio::test]
-    async fn pages_given_to_agents_are_read_with_an_integration_token() {
-        let (endpoints, _) = fake_notion().await;
-        let connection = Connection {
-            access: Access::Token {
-                token: "test-token".into(),
-            },
-            name: "Acme".into(),
-            destination: None,
-        };
-        let slot = Arc::new(std::sync::Mutex::new(Some(
-            serde_json::to_string(&connection).unwrap(),
-        )));
-        let reader = Reader::with(Store::Memory(slot), endpoints);
-        let pages = reader
-            .read(&[DESTINATION.to_owned()])
-            .await
-            .expect("a shared page reads");
+    async fn without_a_working_notion_tool_each_place_says_what_to_do() {
+        let stand = fake_notion("access-1").await;
+        let folder = Folder::new();
+        let tools = Tools::for_tests(&folder.0);
+        let (router, _, reader) = notion_with(&tools, &stand.mcp(), &folder);
         assert_eq!(
-            pages[DESTINATION],
-            crate::config::NotionPage {
-                title: "Daily".to_owned(),
-                url: notion_url(DESTINATION),
-                text: "# Goals\nShip it.".to_owned(),
-                truncated: true,
-            }
+            reader.read(&[DESTINATION.to_owned()]).await,
+            Err(ReadError {
+                page: None,
+                message: READ_NOT_CONNECTED.to_owned()
+            })
         );
-        let error = reader
-            .read(&[EXISTING.to_owned()])
-            .await
-            .expect_err("not shared with the integration");
-        assert_eq!(error.page.as_deref(), Some(EXISTING));
-        assert!(error.message.contains("add your integration"), "{error:?}");
+        tools
+            .connected_for_tests("Notion", &stand.mcp(), "retired")
+            .await;
+        let (status, body) = send(
+            &router,
+            from_ui("POST", "/api/notion/pages"),
+            Some(json!({"query": ""})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"], SIGN_IN_AGAIN);
+        assert_eq!(
+            reader.read(&[DESTINATION.to_owned()]).await,
+            Err(ReadError {
+                page: None,
+                message: SIGN_IN_AGAIN.to_owned()
+            })
+        );
     }
 }
