@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use super::error::{AgentError, CallError};
-use super::provider::{ChatRequest, Completion, DeltaSink, Message};
+use super::provider::{ChatRequest, Completion, DeltaSink, Message, ServerTools};
 
 /// The model name team files use for the offline demo.
 pub const OFFLINE_MODEL: &str = "fake/offline";
@@ -98,6 +98,8 @@ pub struct SeenRequest {
     pub messages: Vec<Message>,
     /// The names of the tools offered.
     pub tools: Vec<String>,
+    /// The tools the provider would run itself.
+    pub server_tools: ServerTools,
 }
 
 impl SeenRequest {
@@ -240,6 +242,7 @@ impl Demo {
                     effort: request.effort.map(str::to_owned),
                     messages: request.messages.to_vec(),
                     tools: request.tools.iter().map(|tool| tool.name.clone()).collect(),
+                    server_tools: request.server_tools,
                 };
                 script
                     .seen

@@ -11,7 +11,8 @@
 //! - exact `usage.cost`, in dollars, in the stream's last chunk.
 //!
 //! Requests are retried only before anything has streamed: once text has reached the operator, a
-//! retry would write it twice.
+//! retry would write it twice. That covers a busy model reported inside the stream, as `OpenRouter`
+//! does once it has answered `200`, as long as it comes before the model's first word.
 
 use std::time::Duration;
 
@@ -162,7 +163,16 @@ impl OpenRouter {
             };
             let status = response.status();
             if status.is_success() {
-                return read_stream(response, request.model, deltas, cancel).await;
+                match read_stream(response, request.model, deltas, cancel).await? {
+                    Streamed::Whole(completion) => return Ok(completion),
+                    Streamed::Refused { status, said } => {
+                        if attempt < ATTEMPTS && retryable(status) {
+                            self.wait(attempt, None, cancel).await?;
+                            continue;
+                        }
+                        return Err(status_error(status, &said, request.model).into());
+                    }
+                }
             }
             let retry_after = response
                 .headers()
@@ -306,6 +316,25 @@ struct Assembled {
     usage: Usage,
     /// Whether anything has reached the operator yet.
     streamed: bool,
+    /// An error the stream reported before the model wrote anything.
+    refused: Option<(StatusCode, String)>,
+}
+
+impl Assembled {
+    /// Whether the model has written anything at all: text, reasoning or part of a tool call.
+    fn begun(&self) -> bool {
+        self.streamed || !self.calls.is_empty() || !self.reasoning_details.is_empty()
+    }
+}
+
+/// How a stream that `OpenRouter` accepted ended.
+enum Streamed {
+    Whole(Completion),
+    /// It reported an error before the model wrote anything, so trying again repeats nothing.
+    Refused {
+        status: StatusCode,
+        said: String,
+    },
 }
 
 #[derive(Default)]
@@ -321,7 +350,7 @@ async fn read_stream(
     model: &str,
     deltas: &dyn DeltaSink,
     cancel: &Cancel,
-) -> Result<Completion, CallError> {
+) -> Result<Streamed, CallError> {
     let mut decoder = SseDecoder::default();
     let mut message = Assembled::default();
     loop {
@@ -337,20 +366,26 @@ async fn read_stream(
         };
         for event in decoder.push(&chunk) {
             if event.trim() == "[DONE]" {
-                return Ok(finish(message));
+                return Ok(Streamed::Whole(finish(message)));
             }
             take_event(&event, &mut message, model, deltas).await?;
+            if let Some((status, said)) = message.refused.take() {
+                return Ok(Streamed::Refused { status, said });
+            }
         }
     }
     if let Some(event) = decoder.finish()
         && event.trim() != "[DONE]"
     {
         take_event(&event, &mut message, model, deltas).await?;
+        if let Some((status, said)) = message.refused.take() {
+            return Ok(Streamed::Refused { status, said });
+        }
     }
     if message.finish.is_none() && message.content.is_empty() && message.calls.is_empty() {
         return Err(AgentError::Stalled.into());
     }
-    Ok(finish(message))
+    Ok(Streamed::Whole(finish(message)))
 }
 
 async fn take_event(
@@ -373,6 +408,10 @@ async fn take_event(
             .ok()
             .and_then(|code| StatusCode::from_u16(code).ok())
             .unwrap_or(StatusCode::BAD_GATEWAY);
+        if !message.begun() {
+            message.refused = Some((status, said.to_owned()));
+            return Ok(());
+        }
         return Err(status_error(status, said, model).into());
     }
     if let Some(usage) = chunk.get("usage").filter(|usage| usage.is_object()) {

@@ -449,7 +449,9 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
     assert_eq!(status, 200);
     assert_eq!(stored["yaml"], yaml.as_str());
 
-    // Its only tools are the Control tools: no files, no commands, no web.
+    // Its only tools are the Control tools: no files, no commands, no web. `read_tool_output`
+    // reads only a long answer of these tools that was set aside, and is offered from the start so
+    // the tool list never changes.
     let offered = &demo.requests()[0].tools;
     assert_eq!(
         offered,
@@ -460,7 +462,8 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
             "propose_team",
             "start_run",
             "get_run",
-            "draft_review_note"
+            "draft_review_note",
+            "read_tool_output"
         ],
         "no tool answers a review stop, saves a file, or deletes anything"
     );

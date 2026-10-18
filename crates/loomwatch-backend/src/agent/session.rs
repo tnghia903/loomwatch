@@ -6,10 +6,13 @@
 //! 3. Every tool call it asks for is worked out, allowed or declined by [`Permissions`], run, and
 //!    its result goes back to the model.
 //! 4. That repeats until the model replies without a tool call, the turn hits its tool-call cap,
-//!    the run's spool says no more ([`Spend`]), or someone cancels it.
+//!    the run's spool says no more ([`Spend`]), or someone cancels it. A reply the length limit cut
+//!    off is carried on instead of ending the turn.
 //!
-//! The conversation is append-only (see [`Message`]). A long output is set aside rather than put
-//! in it whole, and a conversation that nears the model's context limit is replaced by a summary.
+//! The conversation is append-only (see [`Message`]), and the tools offered never change, so the
+//! provider's prompt cache holds for the whole session. A long output is set aside rather than put
+//! in it whole, and a conversation that nears the model's context limit, or 160k tokens, is
+//! replaced by a summary.
 //! [`Session::snapshot`] and [`Session::resume`] keep a parked agent as data: nothing runs while
 //! it waits.
 
@@ -38,6 +41,14 @@ use super::tools::{Builtin, CommandSettings, Context, Output};
 const DEFAULT_CONTEXT: u64 = 128_000;
 /// Summarise once a call used this share of the context.
 const COMPACT_AT: f64 = 0.8;
+/// The largest context counted for [`COMPACT_AT`], however large the model's. Every call reads the
+/// whole conversation again, cached or not, so one left to fill a million-token context costs
+/// several times as much per call as one summarised at 160k, and models follow a very long
+/// conversation less well.
+const COMPACT_WINDOW_CAP: u64 = 200_000;
+/// How many replies in a row the length limit may cut off with the turn still going on: a cut reply
+/// is carried on, and a cut tool call is sent back to be made smaller. One more ends the turn.
+const MAX_CUT_OFFS: usize = 2;
 /// A tool result longer than this is set aside, and the model sees its start.
 const SET_ASIDE_CHARS: usize = 24_000;
 const SET_ASIDE_PREVIEW_CHARS: usize = 6_000;
@@ -273,6 +284,8 @@ pub struct Session {
     usage: Usage,
     last_prompt_tokens: u64,
     messages_written: u64,
+    /// The prompt of the turn under way, which a summary keeps word for word.
+    task: String,
     cancel: Arc<watch::Sender<bool>>,
 }
 
@@ -316,6 +329,7 @@ impl Session {
             usage: Usage::default(),
             last_prompt_tokens: 0,
             messages_written: 0,
+            task: String::new(),
             cancel: Arc::new(watch::Sender::new(false)),
             config,
             provider,
@@ -345,6 +359,7 @@ impl Session {
             usage: snapshot.usage,
             last_prompt_tokens: 0,
             messages_written: snapshot.messages_written,
+            task: String::new(),
             cancel: Arc::new(watch::Sender::new(false)),
             config,
             provider,
@@ -401,12 +416,16 @@ impl Session {
     pub async fn prompt(&mut self, text: &str) -> Result<TurnEnd, AgentError> {
         self.cancel.send_replace(false);
         let cancel = Cancel::new(self.cancel.subscribe());
+        text.clone_into(&mut self.task);
         self.history.push(Message::User {
             content: text.to_owned(),
         });
         let mut turn = Usage::default();
         let mut reply: Vec<String> = Vec::new();
         let mut calls_made = 0usize;
+        // Replies the length limit cut off in a row, and whether the last one was text to carry on.
+        let mut cut_offs = 0usize;
+        let mut carrying_on = false;
         loop {
             if cancel.is_cancelled() {
                 return Ok(ended(StopReason::Cancelled, turn, &reply));
@@ -427,7 +446,7 @@ impl Session {
                     return Ok(ended(stopped(&cancel), turn, &reply));
                 }
             }
-            let completion = match self.call_model(&cancel, true).await {
+            let completion = match self.call_model(&cancel, Call::Work).await {
                 Ok(completion) => completion,
                 Err(CallError::Cancelled) => {
                     return Ok(ended(StopReason::Cancelled, turn, &reply));
@@ -437,9 +456,9 @@ impl Session {
             self.count(&completion.usage, &mut turn).await?;
             self.record_server_tools(&completion.server_tool_calls)
                 .await?;
-            if !completion.content.trim().is_empty() {
-                reply.push(completion.content.trim().to_owned());
-            }
+            let cut = completion.finish == Finish::Length;
+            take_reply(&mut reply, &completion.content, carrying_on, cut);
+            let wrote_nothing = completion.content.trim().is_empty();
             let calls = completion.tool_calls.clone();
             let finish = completion.finish;
             self.history.push(Message::Assistant {
@@ -447,11 +466,23 @@ impl Session {
                 reasoning_details: completion.reasoning_details,
                 tool_calls: completion.tool_calls,
             });
+            cut_offs = if cut { cut_offs + 1 } else { 0 };
+            carrying_on = false;
+            if cut_offs > MAX_CUT_OFFS {
+                return Ok(ended(StopReason::MaxTokens, turn, &reply));
+            }
             if calls.is_empty() {
+                if cut {
+                    // Carried on, so the next stage isn't handed a reply that stops mid-sentence.
+                    carrying_on = !wrote_nothing;
+                    self.history.push(Message::User {
+                        content: carry_on(wrote_nothing).to_owned(),
+                    });
+                    continue;
+                }
                 let reason = match finish {
-                    Finish::Length => StopReason::MaxTokens,
                     Finish::ContentFilter => StopReason::Refusal,
-                    Finish::Stop | Finish::ToolCalls => StopReason::EndTurn,
+                    Finish::Stop | Finish::ToolCalls | Finish::Length => StopReason::EndTurn,
                 };
                 return Ok(ended(reason, turn, &reply));
             }
@@ -462,7 +493,7 @@ impl Session {
                     "Not run: the turn was cancelled.".to_owned()
                 } else {
                     calls_made += 1;
-                    self.run_tool(call, &cancel).await?
+                    self.run_tool(call, cut, &cancel).await?
                 };
                 self.history.push(Message::Tool {
                     tool_call_id: call.id.clone(),
@@ -475,7 +506,9 @@ impl Session {
         }
     }
 
-    /// The tools offered to the model this turn.
+    /// The tools offered to the model. The same list on every call of the session: it leads the
+    /// prompt the provider caches, so a list that changed part way would make the next call pay
+    /// for the whole conversation again.
     fn tool_specs(&self) -> Vec<ToolSpec> {
         let set = self.config.tools;
         let mut specs: Vec<ToolSpec> = Builtin::ALL
@@ -488,8 +521,8 @@ impl Session {
                 | Builtin::EditFile => set.files,
                 Builtin::RunCommand => set.commands,
                 Builtin::UpdatePlan => set.plan,
-                // Offered once there is something set aside to read.
-                Builtin::ReadToolOutput => !self.outputs.is_empty(),
+                // Added last, with the daemon's tools.
+                Builtin::ReadToolOutput => false,
             })
             .map(Builtin::spec)
             .collect();
@@ -500,13 +533,19 @@ impl Session {
                 .into_iter()
                 .filter(|spec| !builtin.contains(&spec.name)),
         );
+        // Offered from the first call, before anything is set aside, so the list never changes.
+        let read_output = Builtin::ReadToolOutput.name();
+        if !specs.is_empty() && !specs.iter().any(|spec| spec.name == read_output) {
+            specs.push(Builtin::ReadToolOutput.spec());
+        }
         specs
     }
 
-    async fn call_model(&mut self, cancel: &Cancel, stream: bool) -> Result<Completion, CallError> {
+    async fn call_model(&mut self, cancel: &Cancel, call: Call) -> Result<Completion, CallError> {
         self.messages_written += 1;
         let message_id = format!("{}-{}", self.config.session_id, self.messages_written);
-        let tools = if stream {
+        let offered = call != Call::BareSummary;
+        let tools = if offered {
             self.tool_specs()
         } else {
             Vec::new()
@@ -517,7 +556,7 @@ impl Session {
             effort,
             messages: &self.history,
             tools: &tools,
-            server_tools: if stream && self.config.tools.web {
+            server_tools: if offered && self.config.tools.web {
                 ServerTools {
                     web_search: true,
                     web_fetch: true,
@@ -532,7 +571,7 @@ impl Session {
         let deltas = Streaming {
             sink: self.sink.as_ref(),
             message_id: &message_id,
-            quiet: !stream,
+            quiet: call != Call::Work,
         };
         self.provider.complete(&request, &deltas, cancel).await
     }
@@ -611,13 +650,31 @@ impl Session {
         Ok(())
     }
 
-    /// Runs one tool call and gives back what goes into the conversation.
-    async fn run_tool(&mut self, call: &ToolCall, cancel: &Cancel) -> Result<String, AgentError> {
+    /// Runs one tool call and gives back what goes into the conversation. `cut` says the length
+    /// limit cut the model's message off, so a call with broken arguments was never finished.
+    async fn run_tool(
+        &mut self,
+        call: &ToolCall,
+        cut: bool,
+        cancel: &Cancel,
+    ) -> Result<String, AgentError> {
         let Ok(input @ Value::Object(_)) = serde_json::from_str::<Value>(&call.arguments) else {
-            let said = format!(
-                "The arguments for {} weren't a JSON object. Call it again with valid arguments.",
-                call.name
-            );
+            // Told why, or the model makes the same call again and is cut off at the same place.
+            let said = if cut {
+                format!(
+                    "Not run: your message reached the length limit of one reply before this call \
+                     to {} was complete. Make it smaller: split the work into several calls (write \
+                     a long file in parts, the first with write_file and the rest with edit_file), \
+                     and keep your thinking short.",
+                    call.name
+                )
+            } else {
+                format!(
+                    "The arguments for {} weren't a JSON object. Call it again with valid \
+                     arguments.",
+                    call.name
+                )
+            };
             self.emit(events::tool_call(
                 &call.id,
                 &call.name,
@@ -896,38 +953,53 @@ impl Session {
     }
 
     fn needs_compacting(&self) -> bool {
-        let window = self.config.context_window.unwrap_or(DEFAULT_CONTEXT);
+        let window = self
+            .config
+            .context_window
+            .unwrap_or(DEFAULT_CONTEXT)
+            .min(COMPACT_WINDOW_CAP);
         #[allow(clippy::cast_precision_loss)]
         let used = self.last_prompt_tokens as f64 / window as f64;
         used >= COMPACT_AT && self.history.len() > 3
     }
 
-    /// Replaces the conversation with a summary of it, keeping the instructions and the current
-    /// task. The model writes the summary, so it keeps what matters for the work.
-    async fn compact(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<(), CallError> {
-        let task = self
-            .history
-            .iter()
-            .rev()
-            .find_map(|message| match message {
-                Message::User { content } => Some(content.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
+    /// One request for a summary, which is not part of the work whatever happens.
+    async fn summarise(
+        &mut self,
+        cancel: &Cancel,
+        call: Call,
+        turn: &mut Usage,
+    ) -> Result<Completion, CallError> {
         self.history.push(Message::User {
-            content: "Your conversation is nearly too long for your memory. Write a summary of it \
+            content: "Your conversation is getting too long to work with. Write a summary of it \
                       for yourself to carry on from: what the task is, what you have done and \
                       found (with file names and sources), what you decided and why, and what is \
-                      left to do. Be complete but brief. Reply with the summary only."
+                      left to do. Be complete but brief. Don't call any tools: reply with the \
+                      summary only."
                 .to_owned(),
         });
-        let completion = self.call_model(cancel, false).await;
-        // Whatever happens, the request for a summary is not part of the work.
+        let completion = self.call_model(cancel, call).await;
         self.history.pop();
         let completion = completion?;
         self.count(&completion.usage, turn)
             .await
             .map_err(CallError::Failed)?;
+        Ok(completion)
+    }
+
+    /// Replaces the conversation with a summary of it, keeping the instructions and the current
+    /// task. The model writes the summary, so it keeps what matters for the work.
+    async fn compact(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<(), CallError> {
+        let task = self.task.clone();
+        // The conversation plus one more message: everything before it is read from the cache.
+        let mut completion = self.summarise(cancel, Call::Summary, turn).await?;
+        if completion.content.trim().is_empty() && self.may_call(cancel).await {
+            completion = self.summarise(cancel, Call::BareSummary, turn).await?;
+        }
+        if completion.content.trim().is_empty() {
+            // No summary to carry on from: the conversation stays as it was.
+            return Ok(());
+        }
         let Some(Message::System { content: system }) = self.history.first().cloned() else {
             return Ok(());
         };
@@ -963,8 +1035,51 @@ fn ended(stop_reason: StopReason, usage: Usage, reply: &[String]) -> TurnEnd {
     TurnEnd {
         stop_reason,
         usage,
-        reply: reply.join("\n\n"),
+        reply: reply.join("\n\n").trim_end().to_owned(),
     }
+}
+
+/// Adds a message's words to the turn's reply: a paragraph of its own, or, when `carrying_on`,
+/// the rest of the paragraph the length limit cut off. A `cut` message keeps its last space, and a
+/// carried-on one its first, so the two join as the model wrote them.
+fn take_reply(reply: &mut Vec<String>, content: &str, carrying_on: bool, cut: bool) {
+    let mut text = content;
+    if !carrying_on {
+        text = text.trim_start();
+    }
+    if !cut {
+        text = text.trim_end();
+    }
+    if text.trim().is_empty() {
+        return;
+    }
+    match reply.last_mut() {
+        Some(last) if carrying_on => last.push_str(text),
+        _ => reply.push(text.to_owned()),
+    }
+}
+
+/// What the agent is told when the length limit cut its reply off.
+fn carry_on(wrote_nothing: bool) -> &'static str {
+    if wrote_nothing {
+        "Your reply was cut off before you wrote any of it: your thinking used up the length limit \
+         of one message. Think less this time, and write your reply."
+    } else {
+        "Your reply was cut off: it reached the length limit of one message. Carry on from exactly \
+         where it stopped, without repeating anything or saying that you are carrying on."
+    }
+}
+
+/// What a model call is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Call {
+    /// The agent's work, streamed to the operator as it is written.
+    Work,
+    /// A summary the agent writes for itself, with the same tools offered as for the work, so the
+    /// provider reads the whole conversation from its cache.
+    Summary,
+    /// The same summary with no tools, for a model that called one instead of writing it.
+    BareSummary,
 }
 
 /// The provider's name for a team file's effort. `default` leaves it to the model, and the
