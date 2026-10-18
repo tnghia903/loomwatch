@@ -16,6 +16,8 @@ anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Checks an update's download against its release's checksum.
+sha2 = "0.10"
 
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 tao = "0.37"

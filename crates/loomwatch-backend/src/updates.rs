@@ -8,12 +8,16 @@
 //! daily check off in the app, and `LOOMWATCH_UPDATE_CHECK=off` turns every check off on this
 //! computer.
 //!
-//! Installing is the launcher's job. In the terminal, `loomwatch update` stops nothing without
-//! asking, backs the database up, and keeps the version it replaces for `loomwatch rollback`. A
-//! ready-built copy whose launcher stays beside it ([`SUPERVISED_ENV`]) can also be updated from
+//! Installing is the launcher's job, or the desktop app's. In the terminal, `loomwatch update` stops
+//! nothing without asking, backs the database up, and keeps the version it replaces for `loomwatch
+//! rollback`. A copy whose launcher stays beside it ([`SUPERVISED_ENV`]) can also be updated from
 //! the app: `POST /api/updates/install` names the release in a file the launcher reads, and the
 //! daemon exits with [`EXIT_TO_UPDATE`]. The launcher then runs that same update and starts
 //! `LoomWatch` again in its terminal, or starts this version again when the update did not finish.
+//! `LoomWatch.app` and `LoomWatch.exe` take the same hand-over: they download the release's `.dmg`
+//! or installer, put it in their own place and open it, or start this version again and say why.
+//! An app that cannot replace itself, such as one opened from the `.dmg`, says why instead
+//! ([`BLOCKED_ENV`]), and the app shows the steps to do it by hand.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -52,12 +56,16 @@ pub const INSTALL_ENV: &str = "LOOMWATCH_INSTALL";
 pub const COMMAND_ENV: &str = "LOOMWATCH_UPDATE_COMMAND";
 /// `1` from a launcher that stays beside the daemon: when the daemon exits with
 /// [`EXIT_TO_UPDATE`], it installs the release named in [`REQUEST_ENV`]'s file and starts the
-/// daemon again. `./loomwatch` sets it for a ready-built copy.
+/// daemon again. `./loomwatch` sets it for a ready-built copy, and the desktop app when it can
+/// replace itself.
 pub const SUPERVISED_ENV: &str = "LOOMWATCH_SUPERVISED";
 /// The file, an absolute path, where the daemon names the release for that launcher to install.
 pub const REQUEST_ENV: &str = "LOOMWATCH_UPDATE_REQUEST";
 /// Set by that launcher when an update did not finish and it started this version again: why.
 pub const FAILED_ENV: &str = "LOOMWATCH_UPDATE_FAILED";
+/// Set by the desktop app when it cannot replace itself, such as `LoomWatch.app` opened from the
+/// `.dmg`: why, in a sentence the app shows beside the steps to update by hand.
+pub const BLOCKED_ENV: &str = "LOOMWATCH_UPDATE_BLOCKED";
 /// The exit status that asks the launcher to update: sysexits' `EX_TEMPFAIL`, which nothing else
 /// in `LoomWatch` exits with. Any other status ends the launcher, as it always has.
 pub const EXIT_TO_UPDATE: i32 = 75;
@@ -277,7 +285,8 @@ pub enum Install {
     /// A copy of the source code: `./loomwatch update` pulls it with Git and builds it.
     Source,
     /// `LoomWatch.app`, opened from Applications, or `LoomWatch.exe` from the Start menu: the next
-    /// one is the release's `.dmg`, or its `LoomWatch-windows-setup.exe`.
+    /// one is the release's `.dmg`, or its `LoomWatch-windows-setup.exe`, which the app installs
+    /// itself when it can.
     App,
     /// Started some other way, such as in a container: the releases page says what changed.
     Other,
@@ -339,11 +348,13 @@ pub struct Status {
     pub skipped: Option<String>,
     pub releases_url: String,
     /// The app can install the newest release itself: a ready-built copy whose launcher starts it
-    /// again afterwards.
+    /// again afterwards, or a desktop app that can replace itself.
     pub can_install: bool,
     /// Why the last update asked for in the app did not finish, when the launcher started this
     /// version again instead.
     pub install_error: Option<String>,
+    /// Why a desktop app cannot replace itself, so the dialog shows the steps by hand.
+    pub install_blocked: Option<String>,
 }
 
 /// How [`Updates`] is set up. [`Updates::from_env`] reads it from the daemon's environment.
@@ -364,6 +375,8 @@ pub struct Options {
     pub handoff: Option<PathBuf>,
     /// Why the update that launcher last tried did not finish ([`FAILED_ENV`]).
     pub install_error: Option<String>,
+    /// Why the desktop app cannot replace itself ([`BLOCKED_ENV`]).
+    pub install_blocked: Option<String>,
 }
 
 /// The update check, shared by its background task and the API.
@@ -388,6 +401,7 @@ struct Inner {
     announced: Mutex<Option<String>>,
     handoff: Option<PathBuf>,
     install_error: Option<String>,
+    install_blocked: Option<String>,
     /// Claimed by the first "Update and restart", so a second click never stops runs again.
     installing: AtomicBool,
     /// The version being installed, once the daemon should stop serving and exit.
@@ -448,6 +462,10 @@ impl Updates {
             .ok()
             .map(|text| failure_text(&text))
             .filter(|text| !text.is_empty());
+        let install_blocked = std::env::var(BLOCKED_ENV)
+            .ok()
+            .map(|text| failure_text(&text))
+            .filter(|text| !text.is_empty());
         Self::new(Options {
             current: env!("CARGO_PKG_VERSION").to_owned(),
             url,
@@ -457,6 +475,7 @@ impl Updates {
             command,
             handoff,
             install_error,
+            install_blocked,
         })
     }
 
@@ -497,6 +516,7 @@ impl Updates {
                 announced: Mutex::new(None),
                 handoff: options.handoff,
                 install_error: options.install_error,
+                install_blocked: options.install_blocked,
                 installing: AtomicBool::new(false),
                 restart: tokio::sync::watch::Sender::new(None),
             }),
@@ -532,8 +552,10 @@ impl Updates {
             available,
             skipped: saved.skipped,
             releases_url: format!("https://github.com/{REPOSITORY}/releases"),
-            can_install: self.inner.install == Install::Release && self.inner.handoff.is_some(),
+            can_install: self.inner.handoff.is_some()
+                && matches!(self.inner.install, Install::Release | Install::App),
             install_error: self.inner.install_error.clone(),
+            install_blocked: self.inner.install_blocked.clone(),
         }
     }
 
@@ -705,6 +727,9 @@ impl Updates {
                 "Update it in the app with Update and restart, or stop LoomWatch and run: {command}"
             ),
             Some(command) => format!("Stop LoomWatch, then run: {command}"),
+            None if status.can_install => {
+                "Update it in the app with Update and restart.".to_owned()
+            }
             None => format!("Get it from {}", latest.url),
         };
         println!(
@@ -958,9 +983,45 @@ fn refusal(code: &str, error: &str) -> Response {
         .into_response()
 }
 
+/// The file to name the release in for whatever installs it, or why nothing here can (a refusal's
+/// code and words): a copy of the source, or one started without a launcher or an app that can
+/// install a release.
+fn installer(updates: &Updates, status: &Status) -> Result<PathBuf, (&'static str, String)> {
+    if !matches!(status.install, Install::Release | Install::App) {
+        return Err((
+            "not_release",
+            "Only a ready-built LoomWatch, or the LoomWatch app, can update itself from the app. Update this copy in its terminal.".to_owned(),
+        ));
+    }
+    if let Some(handoff) = &updates.inner.handoff {
+        return Ok(handoff.clone());
+    }
+    if status.install == Install::App {
+        let why = status
+            .install_blocked
+            .as_deref()
+            .unwrap_or("This LoomWatch app cannot replace itself.");
+        return Err((
+            "not_supervised",
+            format!("{why} Download the new version from its release page instead."),
+        ));
+    }
+    let how = status.command.as_deref().map_or_else(
+        || "Stop LoomWatch, then update it the way you installed it.".to_owned(),
+        |command| format!("Stop LoomWatch, then run: {command}"),
+    );
+    Err((
+        "not_supervised",
+        format!(
+            "This LoomWatch was started in a way that cannot start it again after updating. {how}"
+        ),
+    ))
+}
+
 /// "Update and restart": name the newest release for the launcher, stop the runs the operator
 /// agreed to stop, and have the daemon exit with [`EXIT_TO_UPDATE`] once this answer is sent. The
-/// launcher saves the run history, installs the release and starts `LoomWatch` again.
+/// launcher, or the desktop app, saves the run history, installs the release and starts `LoomWatch`
+/// again.
 async fn post_install(
     State(state): State<InstallState>,
     Json(request): Json<InstallRequest>,
@@ -971,23 +1032,9 @@ async fn post_install(
         archive,
     } = state;
     let status = updates.status();
-    if status.install != Install::Release {
-        return refusal(
-            "not_release",
-            "Only a ready-built LoomWatch can update itself from the app. Update this copy in its terminal.",
-        );
-    }
-    let Some(handoff) = updates.inner.handoff.clone() else {
-        let how = status.command.as_deref().map_or_else(
-            || "Stop LoomWatch, then update it the way you installed it.".to_owned(),
-            |command| format!("Stop LoomWatch, then run: {command}"),
-        );
-        return refusal(
-            "not_supervised",
-            &format!(
-                "This LoomWatch was started in a way that cannot start it again after updating. {how}"
-            ),
-        );
+    let handoff = match installer(&updates, &status) {
+        Ok(handoff) => handoff,
+        Err((code, error)) => return refusal(code, &error),
     };
     let Some(latest) = status.latest.filter(|_| status.available) else {
         return refusal(
@@ -1041,8 +1088,13 @@ async fn post_install(
         1 => " and the run in progress".to_owned(),
         count => format!(" and the {count} runs in progress"),
     };
+    let then = if status.install == Install::App {
+        "The app installs it and opens LoomWatch again."
+    } else {
+        "This window starts LoomWatch again when the update is done."
+    };
     println!(
-        "Stopping LoomWatch {}{and_runs} to install {}, as asked in the app. This window starts LoomWatch again when the update is done.",
+        "Stopping LoomWatch {}{and_runs} to install {}, as asked in the app. {then}",
         status.current, latest.version
     );
     updates
@@ -1280,6 +1332,7 @@ mod tests {
             command: Some("loomwatch update".to_owned()),
             handoff: None,
             install_error: None,
+            install_blocked: None,
         }
     }
 
@@ -1609,6 +1662,7 @@ mod tests {
             command: Some("loomwatch update".to_owned()),
             handoff: None,
             install_error: None,
+            install_blocked: None,
         });
         assert!(!updates.due(Utc::now()));
         let router = api(updates);
@@ -1751,6 +1805,89 @@ mod tests {
             assert!(!refused.restarting());
         }
         assert!(!handoff.exists(), "no release was named for the launcher");
+    }
+
+    #[tokio::test]
+    async fn a_desktop_app_that_cannot_replace_itself_says_why_and_stops_nothing() {
+        let (github, url) = fake_github().await;
+        let blocked = Updates::new(Options {
+            install: Install::App,
+            command: None,
+            install_blocked: Some(failure_text(
+                "LoomWatch can\u{2019}t update itself while it runs from the disk image.",
+            )),
+            ..options(&url, None)
+        });
+        github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
+        blocked.check().await;
+        assert!(blocked.status().available);
+        assert!(!blocked.status().can_install);
+        let (_, shown) = call(&api(blocked.clone()), "GET", "/api/updates", None).await;
+        assert_eq!(shown["canInstall"], false);
+        assert_eq!(
+            shown["installBlocked"],
+            "LoomWatch can\u{2019}t update itself while it runs from the disk image."
+        );
+        let (status, body) = call(
+            &api(blocked.clone()),
+            "POST",
+            "/api/updates/install",
+            Some(json!({ "stopRuns": true })),
+        )
+        .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("not_supervised")),
+            "{body}"
+        );
+        assert!(
+            body["error"].as_str().unwrap().starts_with(
+                "LoomWatch can\u{2019}t update itself while it runs from the disk image."
+            ),
+            "it says why: {body}"
+        );
+
+        assert!(!blocked.restarting());
+    }
+
+    #[tokio::test]
+    async fn the_desktop_app_takes_the_same_hand_over_as_the_launcher() {
+        let (github, url) = fake_github().await;
+        github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
+        let folder = TempDirectory::new();
+        let handoff = folder.0.join("update-request");
+        let updates = Updates::new(Options {
+            install: Install::App,
+            command: None,
+            handoff: Some(handoff.clone()),
+            ..options(&url, None)
+        });
+        updates.check().await;
+        let router = api(updates.clone());
+        let (_, shown) = call(&router, "GET", "/api/updates", None).await;
+        assert_eq!(shown["install"], "app");
+        assert_eq!(shown["canInstall"], true);
+        assert_eq!(shown["command"], Value::Null);
+        assert_eq!(shown["installBlocked"], Value::Null);
+
+        let (status, body) = call(
+            &router,
+            "POST",
+            "/api/updates/install",
+            Some(json!({ "stopRuns": false })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        assert_eq!(body["to"], "0.1.6");
+        assert_eq!(
+            std::fs::read_to_string(&handoff).unwrap(),
+            "v0.1.6\n",
+            "the app downloads exactly the release whose notes were shown"
+        );
+        let version = tokio::time::timeout(Duration::from_secs(1), updates.restart_requested())
+            .await
+            .expect("the daemon is told to stop");
+        assert_eq!(version, "0.1.6");
     }
 
     #[tokio::test]

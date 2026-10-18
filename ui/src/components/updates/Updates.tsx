@@ -88,6 +88,11 @@ function sentence(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+/** Where the Mac or Windows app's icon, and its Show log, are. */
+function appIconPlace(): string {
+  return isWindows() ? 'beside the clock' : 'in the menu bar'
+}
+
 function headline(status: UpdateStatus | null, checking: boolean, progress: InstallProgress): string {
   if (progress.phase === 'updating') return `Updating to ${progress.to}…`
   if (progress.phase === 'updated') return `Updated to ${progress.version}`
@@ -99,13 +104,18 @@ function headline(status: UpdateStatus | null, checking: boolean, progress: Inst
   return 'LoomWatch updates'
 }
 
-/** Where Update and restart got to, once LoomWatch agreed to stop. */
-function Progress({ progress }: { progress: Exclude<InstallProgress, { phase: 'idle' }> }) {
+/**
+ * Where Update and restart got to, once LoomWatch agreed to stop. The Mac and Windows apps update
+ * themselves, with no terminal to keep open or look in.
+ */
+function Progress({ progress, app }: { progress: Exclude<InstallProgress, { phase: 'idle' }>; app: boolean }) {
   switch (progress.phase) {
     case 'updating':
       return (
         <p role="status" className="up-progress">
-          LoomWatch is saving a copy of your run history, installing {progress.to} and starting again. Keep its terminal window open. This page says when it is back.
+          {app
+            ? `LoomWatch is saving a copy of your run history, downloading ${progress.to} and opening it in place of this version. This page says when it is back.`
+            : `LoomWatch is saving a copy of your run history, installing ${progress.to} and starting again. Keep its terminal window open. This page says when it is back.`}
         </p>
       )
     case 'updated':
@@ -113,22 +123,33 @@ function Progress({ progress }: { progress: Exclude<InstallProgress, { phase: 'i
     case 'failed':
       return (
         <p role="alert" className="up-error">
-          LoomWatch {progress.version} was started again instead of {progress.to}. {progress.error ? sentence(progress.error) : 'The terminal window running LoomWatch says why.'}
+          LoomWatch {progress.version} was started again instead of {progress.to}. {progress.error
+            ? sentence(progress.error)
+            : app ? `Show log, in the menu of LoomWatch’s icon ${appIconPlace()}, says why.` : 'The terminal window running LoomWatch says why.'}
         </p>
       )
     case 'lost':
-      return <p role="alert" className="up-error">LoomWatch didn’t answer for ten minutes after it stopped to install {progress.to}. Look in the terminal window running it.</p>
+      return (
+        <p role="alert" className="up-error">
+          LoomWatch didn’t answer for ten minutes after it stopped to install {progress.to}. {app
+            ? `Click LoomWatch’s icon ${appIconPlace()} and choose Show log, or open LoomWatch again.`
+            : 'Look in the terminal window running it.'}
+        </p>
+      )
   }
 }
 
 const FINISHED = new Set(['succeeded', 'failed', 'cancelled'])
 
 /**
- * Update and restart, for a ready-built copy whose launcher starts it again. It asks first, naming
- * the teams at work that updating would stop. The command stays beside it for the terminal.
+ * Update and restart, for a ready-built copy whose launcher starts it again, or the Mac or Windows
+ * app, which replaces itself. It asks first, naming the teams at work that updating would stop. A
+ * terminal copy's command stays beside it.
  */
-function UpdateAndRestart({ latest, command, rollback, installError, copyButton }: {
+function UpdateAndRestart({ latest, app, command, rollback, installError, copyButton }: {
   latest: Release
+  /** The Mac or Windows app, which downloads the release and opens it in its own place. */
+  app: boolean
   command: string | null
   rollback: string | null
   /** Why the last update did not finish, unless the dialog already says so. */
@@ -208,7 +229,11 @@ function UpdateAndRestart({ latest, command, rollback, installError, copyButton 
         </div>
       ) : (
         <>
-          <p>LoomWatch saves a copy of your run history, installs {latest.version} and starts again in its terminal window. It takes a minute or two.</p>
+          <p>
+            {app
+              ? `LoomWatch saves a copy of your run history, downloads ${latest.version}, puts it in place of this version and opens it again. It takes a minute or two.`
+              : `LoomWatch saves a copy of your run history, installs ${latest.version} and starts again in its terminal window. It takes a minute or two.`}
+          </p>
           <div className="up-acts">
             <button type="button" className="btn btn-primary" onClick={() => void ask()}>Update and restart</button>
           </div>
@@ -226,8 +251,8 @@ function UpdateAndRestart({ latest, command, rollback, installError, copyButton 
 
 /**
  * What the newest release changes and how to install it, with the daily check's switch. A
- * ready-built copy whose launcher starts it again offers Update and restart; any other copy shows
- * the steps for the terminal LoomWatch runs in.
+ * ready-built copy whose launcher starts it again, and a Mac or Windows app that can replace
+ * itself, offer Update and restart; any other copy shows the steps to install it by hand.
  */
 export function UpdatesDialog({ onClose }: { onClose: () => void }) {
   const titleId = useId()
@@ -302,7 +327,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
           </p>
         )}
         {error && <p role={problem ? 'alert' : 'status'} className="up-error">{error}</p>}
-        {progress.phase !== 'idle' && <Progress progress={progress} />}
+        {progress.phase !== 'idle' && <Progress progress={progress} app={status?.install === 'app'} />}
 
         {!following && latest && skipped && (
           <p className="fb-note">You chose to skip this version, so LoomWatch doesn’t point it out. <button type="button" className="link" onClick={() => save({ skipped: null })} disabled={busy !== null}>Point it out again</button></p>
@@ -322,7 +347,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
           <section className="up-how" aria-label="How to update">
             <span className="nt-label">How to update</span>
             {status?.canInstall ? (
-              <UpdateAndRestart latest={latest} command={command} rollback={rollback} installError={progress.phase === 'failed' ? null : status.installError ?? null} copyButton={copyButton} />
+              <UpdateAndRestart latest={latest} app={status.install === 'app'} command={command} rollback={rollback} installError={progress.phase === 'failed' ? null : status.installError ?? null} copyButton={copyButton} />
             ) : command ? (
               <>
                 <ol>
@@ -342,17 +367,23 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                   {rollback && <> If the new version gives you trouble, <code className="t-mono-sm">{rollback}</code> goes back to this one.</>}
                 </p>
               </>
-            ) : status?.install === 'app' && isWindows() ? (
-              <ol>
-                <li>Download <strong>LoomWatch-windows-setup.exe</strong> from the release page above and open it.</li>
-                <li>It closes LoomWatch, puts the new version in its place, and opens it again. Your teams and history stay.</li>
-              </ol>
             ) : status?.install === 'app' ? (
-              <ol>
-                <li>Download <strong>LoomWatch-macos.dmg</strong> from the release page above and open it.</li>
-                <li>Quit LoomWatch: click its icon in the menu bar, then <strong>Quit LoomWatch</strong>.</li>
-                <li>Drag LoomWatch to Applications and choose <strong>Replace</strong>, then open it again. Your teams and history stay.</li>
-              </ol>
+              <>
+                {/* Why this app can't replace itself, such as one opened from the disk image. */}
+                {status.installBlocked && <p className="fb-note">{status.installBlocked}</p>}
+                {isWindows() ? (
+                  <ol>
+                    <li>Download <strong>LoomWatch-windows-setup.exe</strong> from the release page above and open it.</li>
+                    <li>It closes LoomWatch, puts the new version in its place, and opens it again. Your teams and history stay.</li>
+                  </ol>
+                ) : (
+                  <ol>
+                    <li>Download <strong>LoomWatch-macos.dmg</strong> from the release page above and open it.</li>
+                    <li>Quit LoomWatch: click its icon in the menu bar, then <strong>Quit LoomWatch</strong>.</li>
+                    <li>Drag LoomWatch to Applications and choose <strong>Replace</strong>, then open it again. Your teams and history stay.</li>
+                  </ol>
+                )}
+              </>
             ) : (
               <p>Download it from the release page above, or update LoomWatch the way you installed it.</p>
             )}
