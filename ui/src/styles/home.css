@@ -126,6 +126,16 @@
   border: 1.5px solid var(--color-ink-3); border-radius: var(--r-full); color: var(--color-accent-on-fill);
 }
 .nt-option.on .nt-check { background: var(--color-accent-fill); border-color: var(--color-accent-fill); }
+/* Your agents, ticked under their option: a team starts with at least one. */
+.nt-agents { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: 0 0 var(--sp-2) calc(var(--sp-4) + 18px + var(--sp-3)); }
+.nt-agent { display: inline-flex; align-items: center; gap: var(--sp-2); padding: 6px 12px 6px 6px; border: 1px solid var(--color-hairline); border-radius: var(--r-full); cursor: pointer; font-size: 13.5px; color: var(--color-ink); }
+.nt-agent:hover { border-color: var(--color-accent-dim); }
+.nt-agent.on { border-color: var(--color-accent); background: var(--color-accent-tint); }
+.nt-agent input { accent-color: var(--color-accent-fill); margin: 0 0 0 6px; }
+.nt-agent span { font: 500 11px var(--font-mono); color: var(--color-ink-3); }
+.nt-agent-figure { width: 28px; height: 28px; margin: -4px 0; object-fit: contain; }
+.nt-build { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; margin: 0 0 var(--sp-2) calc(var(--sp-4) + 18px + var(--sp-3)); font-size: 13px; }
+@media (max-width: 600px) { .nt-agents, .nt-build { padding-left: 0; margin-left: 0; } }
 .nt-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .nt-title { display: inline-flex; align-items: center; gap: var(--sp-2); font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
 .nt-title em { font-style: normal; font: 600 10px/1 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--color-accent); border: 1px solid var(--color-accent-dim); border-radius: var(--r-full); padding: 3px 6px; }

@@ -1,9 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parse } from 'yaml'
 
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { readTourState, resetTourForTests } from '../../lib/tour/store'
+import type { TeamDocument } from '../../lib/team-file/types'
 import { Home } from './Home'
 
 let assign: ReturnType<typeof vi.fn>
@@ -22,9 +24,8 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function renderHome(onCreateBlank = vi.fn()) {
-  render(<Home onCreateBlank={onCreateBlank} onPalette={vi.fn()} />)
-  return { onCreateBlank }
+function renderHome() {
+  render(<Home onPalette={vi.fn()} />)
 }
 
 /** The daemon with no teams and the OpenRouter key as `key` says. */
@@ -60,6 +61,27 @@ describe('Home', () => {
     renderHome()
     const chip = await screen.findByRole('link', { name: /Review reply helper/ })
     expect(chip).toHaveAttribute('href', '/agents/reply-helper?view=chat')
+  })
+
+  // A newcomer whose teams were made first saw "Build your first agent" over teams full of agents.
+  it('lists the agents written into a team with their team, and opens each one there', async () => {
+    const yaml = [
+      'schemaVersion: 1', 'id: rag', 'name: Enterprise RAG research', 'entrypoint: researcher', 'agents:',
+      '  - id: researcher', '    name: RAG researcher', '    role: Research.',
+      '  - id: review', '    kind: operator', '    name: You', '    role: Approve it.',
+    ].join('\n')
+    fetchMock.mockImplementation((url: string) => respond(
+      url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: [], problems: [] }
+        : url.startsWith('/api/team?') ? { path: 'research/rag.yaml', yaml, revision: 'r1' }
+          : { root: '/teams', files: ['research/rag.yaml'], teams: [{ path: 'research/rag.yaml', name: 'Enterprise RAG research', agentCount: 2 }] }))
+    renderHome()
+    const chip = await screen.findByRole('link', { name: /RAG researcher/ })
+    expect(chip).toHaveTextContent('in Enterprise RAG research')
+    expect(chip).toHaveAttribute('href', '/?path=research%2Frag.yaml&view=agents&agent=researcher')
+    // The operator's stop is a step of the workflow, not an agent.
+    expect(screen.queryByRole('link', { name: /^You/ })).toBeNull()
+    expect(screen.queryByText(/Build your first agent/)).toBeNull()
+    expect(screen.getByRole('link', { name: /All agents/ })).toHaveAttribute('href', '/agents')
   })
 
   // The work in the order it is done: build agents, put them in a team's workflow, then chat with it.
@@ -104,7 +126,7 @@ describe('Home', () => {
       entrypoint: 'a', responder: 'b', agentIds: ['a', 'b'], createdAt: '2026-10-06T02:00:00.000Z', startedAt: '2026-10-06T02:00:00.000Z',
       finishedAt: '2026-10-06T02:04:00.000Z', error: null, exitCode: 0, eventCount: 3, reply: '# Today’s AI digest\nChips lead.',
     }]
-    render(<Home onCreateBlank={vi.fn()} onPalette={vi.fn()} runs={runs} />)
+    render(<Home onPalette={vi.fn()} runs={runs} />)
     const cards = await screen.findAllByRole('button', { name: /desk/ })
     expect(cards.map((card) => within(card).getByText(/desk$/).textContent)).toEqual(['News desk', 'Quiet desk'])
     expect(within(cards[0]).getByText('Today’s AI digest')).toBeInTheDocument()
@@ -209,16 +231,51 @@ describe('Home', () => {
     expect(await screen.findByRole('button', { name: /Research desk/ })).toBeInTheDocument()
   })
 
-  it('opens an empty team without touching the disk', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
-    const { onCreateBlank } = renderHome()
+  // A team always starts with agents: the ones you built, or a template's. There is no empty team.
+  it('starts a team with the agents you tick, linked to the versions you saved, and never with none', async () => {
+    const reader = { id: 'reader', file: 'reader.yaml', name: 'Reader', instructions: 'Read the sources.', version: 2 }
+    const writer = { id: 'writer', file: 'writer.yaml', name: 'Writer', instructions: 'Write the brief.', version: 1 }
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/jobs') return respond({ folder: '/teams/.jobs', jobs: [reader, writer], problems: [] })
+      if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'digest.yaml', yaml: '', revision: 'r1' })
+      return respond({ root: '/teams', files: [], teams: [] })
+    })
+    renderHome()
     await screen.findByText(/No teams yet/)
     fireEvent.click(screen.getByRole('button', { name: 'New team' }))
-    fireEvent.click(screen.getByRole('radio', { name: /Empty team/ }))
-    fireEvent.change(screen.getByLabelText('Team name'), { target: { value: 'Scratch' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create team' }))
-    expect(onCreateBlank).toHaveBeenCalledWith('Scratch', 'scratch.yaml')
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
+    expect(await within(dialog).findByRole('radio', { name: /Your agents/ })).toBeChecked()
+    expect(within(dialog).queryByRole('radio', { name: /Empty team/ })).toBeNull()
+    fireEvent.change(within(dialog).getByLabelText('Team name'), { target: { value: 'Digest' } })
+    // Two agents, none ticked yet: nothing to start with, so nothing is created.
+    const create = within(dialog).getByRole('button', { name: 'Create team' })
+    expect(create).toBeDisabled()
+    expect(within(dialog).getByText('Tick at least one agent.')).toBeInTheDocument()
+    const agents = within(dialog).getByRole('group', { name: 'Agents to start with' })
+    fireEvent.click(within(agents).getByRole('checkbox', { name: /Writer/ }))
+    fireEvent.click(within(agents).getByRole('checkbox', { name: /Reader/ }))
+    fireEvent.click(create)
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=digest.yaml'))
+    const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
+    const doc = parse(JSON.parse(String(put?.[1]?.body)).yaml as string) as TeamDocument
+    // In the order they are listed in Your agents, each a copy of the version saved.
+    expect(doc.agents.map((agent) => [agent.id, agent.role, agent.from])).toEqual([
+      ['reader', 'Read the sources.', { agent: 'reader', version: 2 }],
+      ['writer', 'Write the brief.', { agent: 'writer', version: 1 }],
+    ])
+    expect(doc.entrypoint).toBe('reader')
+  })
+
+  it('offers a template, and a way to build an agent, to someone who has none', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: [], problems: [] } : { root: '/teams', files: [], teams: [] }))
+    renderHome()
+    await screen.findByText(/No teams yet/)
+    fireEvent.click(screen.getByRole('button', { name: 'New team' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create a team' })
+    expect(await within(dialog).findByRole('link', { name: /Build your first agent/ })).toHaveAttribute('href', '/agents/new')
+    expect(within(dialog).getByRole('radio', { name: /Your agents/ })).toBeDisabled()
+    expect(within(dialog).getByRole('radio', { name: /One assistant/ })).toBeChecked()
   })
 
 })
@@ -248,7 +305,7 @@ describe('Home and the getting-started guide', () => {
   it('takes the job in plain words for Ask LoomWatch, and says why when it cannot', async () => {
     fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
     const onAsk = vi.fn()
-    const { unmount } = render(<Home onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
+    const { unmount } = render(<Home onPalette={vi.fn()} ask={{ unavailable: null, onAsk }} />)
     const box = screen.getByRole('textbox', { name: /Or describe the job/ })
     fireEvent.change(box, { target: { value: '  Brief me on chip news every weekday  ' } })
     fireEvent.keyDown(box, { key: 'Enter' })
@@ -258,7 +315,7 @@ describe('Home and the getting-started guide', () => {
     expect(screen.getByRole('button', { name: 'Ask' })).not.toHaveClass('btn-primary')
     unmount()
 
-    render(<Home onCreateBlank={vi.fn()} onPalette={vi.fn()} ask={{ unavailable: 'Ask runs on your OpenRouter key. Add it to start.', onAsk }} />)
+    render(<Home onPalette={vi.fn()} ask={{ unavailable: 'Ask runs on your OpenRouter key. Add it to start.', onAsk }} />)
     expect(screen.getByRole('textbox', { name: /Or describe the job/ })).toBeDisabled()
     expect(screen.getByText(/Ask runs on your OpenRouter key/)).toBeInTheDocument()
   })

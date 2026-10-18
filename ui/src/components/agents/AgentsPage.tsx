@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Moon, Plus, Sun, UserRound } from 'lucide-react'
 
+import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
 import { figureFor } from '../../lib/library/figures'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
-import { ROLE_PRESETS } from '../../lib/library/roles'
-import { useAgentUses } from '../../lib/library/uses'
+import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
+import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
 import { QuestsLink } from '../quests/QuestsLink'
@@ -14,6 +15,7 @@ import { SkillsLink } from '../skills/SkillsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
+import { FigureStill } from './FigureStill'
 import { navigate, useAgentsRoute } from './route'
 
 export interface AgentsPageProps {
@@ -46,16 +48,44 @@ export function AgentsPage(props: AgentsPageProps) {
       <main className="home-main agents-main">
         {route.kind === 'list'
           ? <AgentsList />
-          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} {...props} />}
+          : route.kind === 'new' && !route.from
+            ? <AgentTemplates team={route.team} />
+            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} {...props} />}
       </main>
     </div>
   )
 }
 
+/**
+ * Where building an agent starts: a job to start from, with working instructions on the model its
+ * kind of work suits, or Blank. The jobs are templates for Your agents. A team's canvas has none of
+ * its own, so an agent is built and tried here before a team depends on it.
+ */
+function AgentTemplates({ team }: { team: string | null }) {
+  const start = (from: string) => navigate(`/agents/new?${new URLSearchParams({ from, ...(team ? { team } : {}) })}`)
+  return (
+    <>
+      <section className="home-hero agents-hero">
+        <h1 className="t-display">Build an agent</h1>
+        <p>Start from a job: it comes with working instructions, on the model its kind of work suits, and you can change all of it. Or start blank and write your own.</p>
+        {team && <a className="link agent-back" href={`/?path=${encodeURIComponent(team)}&view=agents`}>Back to the team</a>}
+      </section>
+      <section className="agents-start" aria-labelledby="agents-start-title" data-tour="agent-start">
+        <h2 id="agents-start-title">Start from a job</h2>
+        <ul className="agents-start-grid">
+          {ROLE_PRESETS.map((preset) => (
+            <li key={preset.id}><button type="button" className="agents-start-card" onClick={() => start(preset.id)}><b>{preset.label}</b><span>{preset.does}</span><em>on {modelNameFromId(modelForPreset(preset).model)}</em></button></li>
+          ))}
+          <li><button type="button" className="agents-start-card blank" onClick={() => start('blank')}><b>Blank</b><span>Write the instructions yourself</span></button></li>
+        </ul>
+      </section>
+    </>
+  )
+}
+
 function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
-  const { uses } = useAgentUses()
-  const [choosing, setChoosing] = useState(false)
+  const { uses, own } = useAgentUses()
   const usage = useMemo(() => {
     const byAgent = new Map<string, { teams: number; scheduled: number; behind: number }>()
     for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0, behind: 0 })
@@ -76,30 +106,20 @@ function AgentsList() {
         <h1 className="t-display">Your agents</h1>
         <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the version it was given until you update it there.</p>
         <div className="home-hero-acts">
-          <button type="button" className="btn btn-primary btn-lg" onClick={() => setChoosing((value) => !value)} aria-expanded={choosing} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
+          <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
         </div>
       </section>
 
-      {choosing && (
-        <section className="agents-start" aria-label="Start a new agent" data-tour="agent-start">
-          <h2>Start from a job</h2>
-          <p className="t-meta">Each job comes with working instructions you can change. Or start blank and write your own.</p>
-          <ul className="agents-start-grid">
-            {ROLE_PRESETS.map((preset) => (
-              <li key={preset.id}><button type="button" className="agents-start-card" onClick={() => open(`/agents/new?from=${encodeURIComponent(preset.id)}`)}><b>{preset.label}</b><span>{preset.does}</span></button></li>
-            ))}
-            <li><button type="button" className="agents-start-card blank" onClick={() => open('/agents/new')}><b>Blank</b><span>Write the instructions yourself</span></button></li>
-          </ul>
-        </section>
-      )}
 
       <section className="home-teams" aria-labelledby="agents-title">
         <div className="home-teams-head"><h2 id="agents-title">Your agents</h2></div>
         {!available && <p role="alert" className="home-empty alert">This LoomWatch server is older than Your agents. Restart it to use them.</p>}
         {error && <p role="alert" className="home-empty alert">Couldn’t list your agents. {error}</p>}
         {available && !loaded && <p role="status" className="home-empty">Loading your agents…</p>}
-        {available && loaded && jobs.length === 0 && (
-          <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Start from a job above, or keep an agent that worked: select it in a team and choose <b>Add to Your agents</b>.</span></div>
+        {available && loaded && jobs.length === 0 && own !== null && (
+          own.length > 0
+            ? <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>None kept here yet. Press <b>New agent</b> to start from a job, or keep one of the agents in your teams below.</span></div>
+            : <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Press <b>New agent</b> to start from a job such as Researcher or Writer, or from a blank page.</span></div>
         )}
         {jobs.length > 0 && (
           <ul className="home-grid agents-grid">
@@ -114,6 +134,18 @@ function AgentsList() {
         )}
         {problems.map((problem) => <p key={problem.file} className="home-empty alert" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
       </section>
+
+      {own && own.length > 0 && (
+        <section className="home-teams" aria-labelledby="agents-in-teams-title">
+          <div className="home-teams-head"><h2 id="agents-in-teams-title">In your teams<span className="home-section-says">Each works in its own team</span></h2></div>
+          <p className="agents-in-teams-note">These agents were made inside a team, so each one is changed there. To use one in other teams too, keep it: select it in its team’s Workflow and choose <b>Add to Your agents</b>.</p>
+          <ul className="home-agents-row">
+            {own.map((agent) => (
+              <li key={`${agent.teamPath}#${agent.agentId}`}><a className="home-agent-chip" href={teamAgentHref(agent)} title={`Open ${agent.agentName} in ${agent.teamName}`}><FigureStill className="home-agent-figure" figure={figureFor(agent.agentId)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{agent.agentName}</b><span className="home-agent-team">in {agent.teamName}</span></a></li>
+            ))}
+          </ul>
+        </section>
+      )}
     </>
   )
 }

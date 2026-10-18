@@ -95,6 +95,13 @@ export const STALE_DETAILS_DAEMON = 'This daemon is older than the app it is ser
 /** A current daemon answering 404 with its own error: the capability is not on this machine now. */
 export const CAPABILITY_NOT_FOUND = 'LoomWatch can’t find this on this computer any more. It may have been uninstalled or renamed; search the Library for it.'
 
+/**
+ * Said on `window` after LoomWatch's skills folder changes (an add, a bring-in, a removal), so the
+ * skills a page was given are read again: the builder's recipe cards, after the marketplace was
+ * open over it. JOBS_CHANGED_EVENT does the same for Your agents.
+ */
+export const SKILLS_CHANGED_EVENT = 'loomwatch:skills-changed'
+
 export async function fetchCapabilities(): Promise<CapabilityInventory> {
   const response = await daemonFetch('/api/capabilities')
   if (response.status === 404) throw new Error(STALE_DAEMON)

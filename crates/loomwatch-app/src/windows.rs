@@ -12,6 +12,11 @@
 //! `LoomWatch.exe` again while it runs opens the browser instead of starting a second one.
 //! `LoomWatch.exe --quit` asks the running one to quit as its menu would, and waits until it has:
 //! what the installer runs before it replaces the files, and the uninstaller before it removes them.
+//!
+//! Update and restart in the app has `loomwatchd` stop for this app, which downloads the release's
+//! `LoomWatch-windows-setup.exe` and runs it silently (`crate::update`). The installer quits this
+//! app, replaces its files and opens the new one; or, when it could not, opens this one again with
+//! `--update-failed`, for the app to say so.
 
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
@@ -30,6 +35,7 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, Predefin
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 use crate::progress::{self, Progress, Row};
+use crate::update;
 
 /// The port a `LoomWatch` started from a terminal uses too, so the address people know keeps
 /// working.
@@ -74,6 +80,7 @@ struct Paths {
     log: PathBuf,
     /// What `/api/about` reports as the commit, from `VERSION` beside this program.
     commit: Option<String>,
+    home: PathBuf,
 }
 
 impl Paths {
@@ -109,7 +116,18 @@ impl Paths {
             log: state.join("Logs").join("loomwatchd.log"),
             state,
             commit,
+            home,
         })
+    }
+
+    /// Where `loomwatchd` names the release Update and restart installs.
+    fn update_request(&self) -> PathBuf {
+        self.state.join("app-update-request")
+    }
+
+    /// Where an update's installer is downloaded. Emptied first.
+    fn update_work(&self) -> PathBuf {
+        self.state.join("app-update")
     }
 
     /// Make the teams folder the first time, with the offline demo team in it.
@@ -423,6 +441,13 @@ fn supervise(
     }
     let path = sign_in_path();
     let mut stops: Vec<Instant> = Vec::new();
+    // Why the last Update and restart did not finish, for the next start to say: the installer
+    // opens this app with `--update-failed` when it could not put the new version in place.
+    let mut failed = std::env::args().any(|arg| arg == "--update-failed").then(|| {
+        "LoomWatch-windows-setup.exe could not put the new version in place, so this one was opened again.".to_owned()
+    });
+    // The installer an update downloaded may still be finishing: what can't go now goes next time.
+    let _ = std::fs::remove_dir_all(paths.update_work());
     loop {
         // One LoomWatch per run history: one started from a terminal on another port holds it.
         if history_in_use(&paths.state) {
@@ -433,7 +458,12 @@ fn supervise(
             say("Can’t start: ports 3000–3020 are all in use");
             return;
         };
-        let child = match start_daemon(paths, port, path.as_deref()) {
+        let request = paths.update_request();
+        let _ = std::fs::remove_file(&request);
+        // Update and restart is offered only when the installer can put the new version in place.
+        let handoff = update::windows::installed_by_setup(&paths.program).map(|()| request);
+        let started = start_daemon(paths, port, path.as_deref(), &handoff, failed.take());
+        let child = match started {
             Ok(child) => child,
             Err(error) => {
                 say("Can’t start LoomWatch: see Show log");
@@ -447,23 +477,46 @@ fn supervise(
         } else if !stopping.load(Ordering::SeqCst) {
             say("Still starting… (see Show log)");
         }
-        // Wait for it to stop.
-        loop {
+        // Wait for it to stop, and see how it ended.
+        let exit = loop {
             if stopping.load(Ordering::SeqCst) {
                 return;
             }
-            let exited = slot
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_mut()
-                .is_none_or(|child| matches!(child.try_wait(), Ok(Some(_)) | Err(_)));
-            if exited {
-                break;
+            {
+                let mut child = slot.lock().unwrap_or_else(PoisonError::into_inner);
+                match child.as_mut().map(Child::try_wait) {
+                    Some(Ok(None)) => {}
+                    Some(Ok(Some(status))) => {
+                        child.take();
+                        break status.code();
+                    }
+                    None | Some(Err(_)) => {
+                        child.take();
+                        break None;
+                    }
+                }
             }
             std::thread::sleep(Duration::from_millis(500));
-        }
+        };
         if stopping.load(Ordering::SeqCst) {
             return;
+        }
+        // Update and restart: loomwatchd stopped for this app to install the release it named.
+        if exit == Some(update::EXIT_TO_UPDATE) {
+            let log = |line: &str| append_log(&paths.log, &format!("LoomWatch.exe: {line}\n"));
+            match update_app(paths, &say, &log) {
+                // The installer quits this app and opens the new one.
+                Ok(()) => {
+                    let _ = proxy.send_event(UserEvent::Quit);
+                    return;
+                }
+                Err(why) => {
+                    log(&format!("the update did not finish: {why}"));
+                    failed = Some(why);
+                }
+            }
+            say("Restarting…");
+            continue;
         }
         let now = Instant::now();
         stops.retain(|stop| now.duration_since(*stop) < CRASH_WINDOW);
@@ -578,7 +631,51 @@ fn history_in_use(state: &Path) -> bool {
         .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
 }
 
-fn start_daemon(paths: &Paths, port: u16, path: Option<&OsStr>) -> Result<Child> {
+/// After `loomwatchd` stopped for Update and restart: downloads the installer of the release it
+/// named, saves a copy of the run history, and starts the installer. Returns why nothing was
+/// changed when a step fails.
+fn update_app(
+    paths: &Paths,
+    say: &dyn Fn(&str),
+    log: &dyn Fn(&str),
+) -> std::result::Result<(), String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let release = update::requested(&paths.update_request(), current)?;
+    update::windows::installed_by_setup(&paths.program)?;
+    let base = update::download_base(&release)?;
+    log(&format!(
+        "updating {current} to {} from {base}",
+        release.version
+    ));
+    let work = paths.update_work();
+    let _ = std::fs::remove_dir_all(&work);
+    say(&format!("Downloading LoomWatch {}…", release.version));
+    let setup = update::download(&base, "LoomWatch-windows-setup.exe", &work, log)?;
+    say("Saving a copy of the run history…");
+    let backups = update::backup_folder(&paths.home);
+    if let Some(copy) = update::back_up(&paths.daemon, &backups, current, log)? {
+        log(&format!(
+            "saved a copy of the run history in {}",
+            copy.display()
+        ));
+    }
+    say(&format!("Installing LoomWatch {}…", release.version));
+    update::windows::run_setup(&setup, current)?;
+    log(&format!(
+        "started {} to install {}",
+        setup.display(),
+        release.version
+    ));
+    Ok(())
+}
+
+fn start_daemon(
+    paths: &Paths,
+    port: u16,
+    path: Option<&OsStr>,
+    handoff: &std::result::Result<PathBuf, String>,
+    failed: Option<String>,
+) -> Result<Child> {
     if let Some(folder) = paths.log.parent() {
         std::fs::create_dir_all(folder)?;
     }
@@ -601,8 +698,22 @@ fn start_daemon(paths: &Paths, port: u16, path: Option<&OsStr>) -> Result<Child>
         .creation_flags(CREATE_NO_WINDOW)
         // If this app ends, LoomWatch stops too instead of running on unseen.
         .env("LOOMWATCH_EXIT_WITH_PARENT", "1")
-        // So the update notice says how this copy is updated: a new installer.
+        // So the update notice says how this copy is updated: by this app, or a new installer.
         .env("LOOMWATCH_INSTALL", "app");
+    match handoff {
+        Ok(request) => command
+            .env(update::SUPERVISED_ENV, "1")
+            .env(update::REQUEST_ENV, request)
+            .env_remove(update::BLOCKED_ENV),
+        Err(why) => command
+            .env_remove(update::SUPERVISED_ENV)
+            .env_remove(update::REQUEST_ENV)
+            .env(update::BLOCKED_ENV, why),
+    };
+    match failed {
+        Some(why) => command.env(update::FAILED_ENV, why),
+        None => command.env_remove(update::FAILED_ENV),
+    };
     if let Some(path) = path {
         command.env("PATH", path);
     }

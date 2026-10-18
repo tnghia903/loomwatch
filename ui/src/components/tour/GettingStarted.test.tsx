@@ -174,7 +174,7 @@ describe('GettingStarted', () => {
 
     showPage(HOME + '<div data-tour="new-team-dialog"></div>')
     tick(250)
-    expect(screen.getByRole('heading', { name: 'Start it empty' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Start it with your agent' })).toBeInTheDocument()
 
     showPage(HOME)
     tick(250)

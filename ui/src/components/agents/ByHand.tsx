@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { FileText, Folder, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Wrench, X } from 'lucide-react'
+import { FileText, Folder, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
 import { modelNameFromId } from '../../lib/ai/modelIds'
@@ -28,6 +28,7 @@ import type { BenchLabel } from './AgentFigure'
 import type { BenchView } from './workbenchScene'
 
 const AgentFigure = lazy(() => import('./AgentFigure'))
+const SkillsMarket = lazy(() => import('../skills/SkillsMarket'))
 
 /**
  * BUILD BY HAND: every setting of the agent as a block of plain words and controls, always open,
@@ -99,7 +100,18 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const [flash, setFlash] = useState<{ part: FigurePart; at: number } | null>(null)
   const [dragging, setDragging] = useState<'skill' | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  // The skills marketplace, open over the page (with what was typed in the shelf), and what it pinned up.
+  const [market, setMarket] = useState<{ query: string } | null>(null)
+  const [fromMarket, setFromMarket] = useState<readonly string[]>([])
   const blocks = useRef(new Map<FigurePart, HTMLElement>())
+  // Back from it, you carry on at its button: Safari never focuses a button you click, so what had
+  // focus when it opened can't be trusted to say where you were.
+  const backFrom = useRef(false)
+  useEffect(() => {
+    if (market || !backFrom.current) return
+    backFrom.current = false
+    blocks.current.get('skills')?.querySelector<HTMLElement>('.byhand-market')?.focus()
+  }, [market])
   // Picked on the bench while chatting: its block is shown once Build is back on screen.
   const picked = useRef<FigurePart | null>(null)
   useEffect(() => {
@@ -115,6 +127,17 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key])
   const giveKey = (key: AllowSwitch, on: boolean) => set('allow', { ...draft.allow, [key]: on })
   const addSkill = (name: string) => { if (!draft.skills.includes(name)) set('skills', [...draft.skills, name]) }
+  /** Back from the marketplace: what was added there for this agent goes on its pegboard. */
+  const backFromMarket = (added: readonly string[]) => {
+    backFrom.current = true
+    setMarket(null)
+    const fresh = added.filter((skill) => !draft.skills.includes(skill))
+    setFromMarket(fresh)
+    if (!fresh.length) return
+    set('skills', [...draft.skills, ...fresh])
+    setFocus('skills')
+    setFlash((current) => ({ part: 'skills', at: (current?.at ?? 0) + 1 }))
+  }
   const { catalog } = useModels()
   const listed = catalog?.models.find((item) => item.id === draft.model)
   const model = listed ? shortName(listed) : modelNameFromId(draft.model)
@@ -268,7 +291,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             <p className="t-meta">A bigger model can think more through, and costs more per run. The price is per million tokens, the way OpenRouter shows it.</p>
           </>)}
 
-          {block('skills', <Shelf kind="skill" chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} />)}
+          {block('skills', <Shelf kind="skill" chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} onMarket={readOnly ? undefined : (query) => setMarket({ query })} fromMarket={fromMarket.filter((skill) => draft.skills.includes(skill))} />)}
 
           {block('reads', !reads ? <p className="t-meta">A folder, file or Notion page is given in a team: draw a line from it to this agent in the team’s Workflow.</p> : <>
             {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file drawer">
@@ -353,6 +376,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           </>)}
         </div>
       </div>
+      {market && <Suspense fallback={null}><SkillsMarket agentName={draft.name.trim() || 'your new agent'} query={market.query} onClose={backFromMarket} /></Suspense>}
     </div>
   )
 }
@@ -387,20 +411,25 @@ const SHELF = {
     Icon: Puzzle,
     chosen: 'Recipe cards on its pegboard',
     none: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. Press + on one below, or drag it onto the bench.',
+    noneToGive: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. LoomWatch has none to give yet, so find some in the marketplace.',
     looking: 'Looking for recipe cards…',
     find: (count: number) => `Find a recipe card (${count} in LoomWatch)`,
     findLabel: 'Find a skill',
     list: 'Recipe cards you can add',
     take: (name: string) => `Take ${name} down`,
     give: (name: string) => `Pin ${name} up`,
+    market: 'Find skills in the marketplace',
+    marketFor: (query: string) => `Search the marketplace for “${query}”`,
+    fromMarket: (names: readonly string[]) => `Pinned up ${listNames(names)} from the marketplace.`,
   },
 } as const
 
 /**
  * The skills it has, each with a way to take it off, and the others LoomWatch has to give it. They
- * can also be dragged onto the bench, where they are pinned up as recipe cards.
+ * can also be dragged onto the bench, where they are pinned up as recipe cards. LoomWatch gets more
+ * from the marketplace (`onMarket`, with what was typed when nothing here matches it).
  */
-function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag }: { kind: 'skill'; chosen: readonly string[]; available: readonly DetectedCapability[]; loading: boolean; onAdd: (name: string) => void; onRemove: (name: string) => void; onDrag?: (kind: 'skill' | null) => void }) {
+function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag, onMarket, fromMarket = [] }: { kind: 'skill'; chosen: readonly string[]; available: readonly DetectedCapability[]; loading: boolean; onAdd: (name: string) => void; onRemove: (name: string) => void; onDrag?: (kind: 'skill' | null) => void; onMarket?: (query: string) => void; fromMarket?: readonly string[] }) {
   const words = SHELF[kind]
   const [query, setQuery] = useState('')
   const found = useMemo(() => {
@@ -412,7 +441,8 @@ function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag }: { 
     <div className="byhand-shelf">
       {chosen.length > 0
         ? <ul className="skill-picker-chosen" aria-label={words.chosen}>{chosen.map((name) => <li key={name}><words.Icon size={12} aria-hidden="true" />{name}<button type="button" className="iconbtn" aria-label={words.take(name)} onClick={() => onRemove(name)}><X size={12} aria-hidden="true" /></button></li>)}</ul>
-        : <p className="t-meta">{words.none}</p>}
+        : <p className="t-meta">{onMarket && !loading && available.length === 0 ? words.noneToGive : words.none}</p>}
+      {fromMarket.length > 0 && <p className="t-meta byhand-shelf-news" role="status">{words.fromMarket(fromMarket)}</p>}
       <label className="skill-picker-find"><Search size={13} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={loading ? words.looking : words.find(available.length)} aria-label={words.findLabel} /></label>
       <ul className={`byhand-cards${onDrag ? '' : ' still'}`} aria-label={words.list}>
         {found.map((item) => (
@@ -424,6 +454,7 @@ function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag }: { 
           </li>
         ))}
       </ul>
+      {onMarket && <button type="button" className="btn byhand-market" onClick={() => { const typed = found.length ? '' : query.trim(); if (typed) setQuery(''); onMarket(typed) }}><Store size={14} aria-hidden="true" />{query.trim() && !found.length ? words.marketFor(query.trim()) : words.market}</button>}
     </div>
   )
 }

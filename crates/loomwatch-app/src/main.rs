@@ -21,6 +21,8 @@ mod windows;
 // and without the face's moods by the Windows one.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod progress;
+// Update and restart: the app downloading the next release and putting it in its own place.
+mod update;
 
 #[cfg(target_os = "macos")]
 fn main() -> anyhow::Result<()> {

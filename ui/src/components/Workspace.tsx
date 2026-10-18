@@ -2299,8 +2299,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     switch (intent.kind) {
       case 'add': {
         const own = intent.saved ? savedJobs.find((candidate) => candidate.id === intent.job) : undefined
-        const preset = own ? savedJobPreset(own) : ROLE_PRESETS.find((candidate) => candidate.id === intent.job)
-        if (!preset) return null
+        if (!own) {
+          // A team's agents are Your agents; a built-in job is the template one is built from, and
+          // tried on its own, before a team depends on it.
+          const job = ROLE_PRESETS.find((candidate) => candidate.id === intent.job)
+          if (!job) return null
+          return { dialect, label: `Build a ${job.label} agent`, detail: `${job.does} · starts from the ${job.label} job in Your agents`, disabled: false, run: () => window.location.assign(`/agents/new?from=${encodeURIComponent(job.id)}${doc.path ? `&team=${encodeURIComponent(doc.path)}` : ''}`) }
+        }
+        const preset = savedJobPreset(own)
         const source = roleSource(preset)
         return { dialect, label: `Add a ${preset.label} to this team`, detail: !canEdit ? 'Open a team first' : `${preset.does} · on ${modelLabelForAgent({ id: preset.id, name: preset.label, role: preset.role, model: modelForPreset(preset).model }, modelNames)}`, disabled: !canEdit, run: () => addAgent(source) }
       }
@@ -2443,7 +2449,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return (
       <Home
         notice={requestedPath && doc.saveState === 'error' ? `Couldn't open “${requestedPath}”. ${/no such file|not found/i.test(doc.saveError ?? '') ? 'It may have been moved, renamed or deleted — pick a team below.' : doc.saveError ?? ''}` : null}
-        onCreateBlank={(name, path) => { doc.createNewDocument(name, path); showAgents(null); onDocumentOpen() }}
         onPalette={() => setPaletteOpen(true)}
         // Home's way into Ask is "Describe the job", so the header has no Ask button here, and the
         // box steps aside while the panel is open: one place to type to Ask (ADR 0043).
@@ -2620,7 +2625,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
         {(!runView && !runSetup && !agentsView || runPresentation === 'trace') && (
           // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
+          <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} teamPath={doc.path} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.
@@ -2944,7 +2949,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
         {pendingNodeDelete.length > 0 && <InlineConfirm message={`Delete ${pendingNodeDelete.length === 1 ? `${nodeNames.has(pendingNodeDelete[0]) ? `“${nodeNames.get(pendingNodeDelete[0])}”` : 'this card'} and its connections` : `${pendingNodeDelete.length} cards and their connections`}?`} confirmLabel="Delete" onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
-        {newTeamSheet && <NewTeamSheet openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} onCreateBlank={(name, path) => { doc.createNewDocument(name, path); setNewTeamSheet(false); showRun(null); showAgents(null); onDocumentOpen() }} />}
+        {newTeamSheet && <NewTeamSheet openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} />}
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}
         {/* Home, not the deleted team's empty canvas, is where the operator goes next. */}
         {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}

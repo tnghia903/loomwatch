@@ -27,12 +27,14 @@ describe('getting-started guide steps', () => {
 
   it('says what is on screen: a builder or the list, a dialog or its button', () => {
     expect(step('agent').view(ready).title).toBe('Start a new agent')
+    document.body.innerHTML = '<section data-tour="agent-start"></section>'
+    expect(step('agent').view(ready)).toMatchObject({ title: 'Start from a job', target: ['[data-tour="agent-start"]'] })
     document.body.innerHTML = '<div data-tour="agent-blocks"></div>'
     expect(step('agent').view(ready)).toMatchObject({ title: 'Give it a name and a job', advance: 'next' })
 
     expect(step('new-team').view(ready).title).toBe('Put it in a team')
     document.body.innerHTML = '<div data-tour="new-team-dialog"></div>'
-    expect(step('new-team').view(ready)).toMatchObject({ title: 'Start it empty', keepClear: true })
+    expect(step('new-team').view(ready)).toMatchObject({ title: 'Start it with your agent', keepClear: true })
   })
 
   it('waits for an agent to join the team, then shows it in Workflow', () => {

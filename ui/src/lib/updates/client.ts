@@ -1,7 +1,9 @@
 // New versions of LoomWatch (ADR 0052). The daemon asks GitHub once a day which release is the
 // newest; the app reads what it found. Installing is the launcher's: the operator runs the update
 // command in its terminal, or, for a ready-built copy whose launcher stays beside it, asks for
-// Update and restart here, and the launcher installs the release and starts LoomWatch again.
+// Update and restart here, and the launcher installs the release and starts LoomWatch again. The
+// Mac and Windows apps take the same hand-over: they download the release, put it in their own
+// place and open it.
 import { useSyncExternalStore } from 'react'
 
 import { fetchAbout } from '../feedback/report'
@@ -45,11 +47,13 @@ export interface UpdateStatus {
   releasesUrl: string
   /**
    * The app can install the newest release itself: a ready-built copy whose launcher starts it
-   * again. Absent from daemons that cannot.
+   * again, or a Mac or Windows app that can replace itself. Absent from daemons that cannot.
    */
   canInstall?: boolean
   /** Why the last update asked for here did not finish, when the launcher started this version again. */
   installError?: string | null
+  /** Why the Mac or Windows app cannot replace itself, such as one opened from the disk image. */
+  installBlocked?: string | null
 }
 
 export interface UpdateSettings {

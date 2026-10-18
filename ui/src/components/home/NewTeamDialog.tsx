@@ -1,9 +1,12 @@
 import { ArrowRight, Check } from 'lucide-react'
 import { useId, useState } from 'react'
 
+import { figureFor } from '../../lib/library/figures'
+import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { saveTeamFile } from '../../lib/team-file/client'
 import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
-import { TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
+import { agentsTeamYaml, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
+import { FigureStill } from '../agents/FigureStill'
 
 export interface NewTeamDialogProps {
   /**
@@ -11,33 +14,49 @@ export interface NewTeamDialogProps {
    * used to live, whose run history and Notebook notes a new team there would inherit.
    */
   existingPaths: readonly string[]
-  onCreateBlank: (name: string, path: string) => void
   onClose: () => void
   /** The open team has unsaved changes that creating a new team would discard. */
   openTeamUnsaved?: boolean
 }
 
+/** Where a new team starts: some of Your agents, or a template. */
+type Start = 'agents' | TeamTemplateId
+
 /**
- * Name, starting point, done. A template is written to disk as a complete team and opened, so the
- * first screen after this dialog is one where typing a request and pressing Enter runs it. Each
- * agent runs on its job's model, which team setup can change.
+ * Name, starting point, done. A team always starts with agents: the ones you built in Your agents,
+ * or a template's. Either way it is written to disk as a complete team and opened, so the first
+ * screen after this dialog is one where typing a request and pressing Enter runs it. Each agent
+ * runs on its own model, which team setup can change.
  */
-export function NewTeamDialog({ existingPaths, onCreateBlank, onClose, openTeamUnsaved = false }: NewTeamDialogProps) {
+export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false }: NewTeamDialogProps) {
   const [name, setName] = useState('')
-  const [template, setTemplate] = useState<TeamTemplateId>('single')
+  const saved = useSavedJobs()
+  const hasAgents = saved.available && saved.jobs.length > 0
+  // Until a choice is made, someone who built agents starts with them (the work goes agents first),
+  // and someone who has none with the one-assistant template.
+  const [chosen, setChosen] = useState<Start | null>(null)
+  const start: Start = chosen ?? (hasAgents ? 'agents' : 'single')
+  // With one agent there is nothing to choose, so it is ticked; with more, you tick the ones you want.
+  const [ticked, setTicked] = useState<string[] | null>(null)
+  const picked = saved.jobs.filter((job) => (ticked ?? (saved.jobs.length === 1 ? [saved.jobs[0].id] : [])).includes(job.id))
+  const tick = (id: string, on: boolean) => setTicked((current) => {
+    const now = current ?? picked.map((job) => job.id)
+    return on ? [...now.filter((other) => other !== id), id] : now.filter((other) => other !== id)
+  })
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const titleId = useId()
   const trimmed = name.trim()
+  const needsAgent = start === 'agents' && picked.length === 0
 
   async function create() {
-    if (!trimmed || busy) return
+    if (!trimmed || busy || needsAgent) return
     const path = uniqueTeamPath(trimmed, existingPaths)
-    if (template === 'blank') { onCreateBlank(trimmed, path); onClose(); return }
     setError(null)
     setBusy('Setting up the team…')
     try {
-      await saveTeamFile(path, templateTeamYaml(template, trimmed, undefined, teamIdForPath(path)), null)
+      const yaml = start === 'agents' ? agentsTeamYaml(picked, trimmed, teamIdForPath(path)) : templateTeamYaml(start, trimmed, undefined, teamIdForPath(path))
+      await saveTeamFile(path, yaml, null)
       window.location.assign(`/?path=${encodeURIComponent(path)}`)
     } catch (caught) {
       setBusy(null)
@@ -56,14 +75,39 @@ export function NewTeamDialog({ existingPaths, onCreateBlank, onClose, openTeamU
           </label>
 
           <fieldset className="nt-templates" disabled={Boolean(busy)}>
-            <legend className="nt-label">How should it start?</legend>
+            <legend className="nt-label">Which agents does it start with?</legend>
+            {saved.available && (
+              <label className={`nt-option ${start === 'agents' ? 'on' : ''} ${hasAgents ? '' : 'off'}`}>
+                <input type="radio" name="template" value="agents" checked={start === 'agents'} disabled={!hasAgents} onChange={() => setChosen('agents')} />
+                <span className="nt-check" aria-hidden="true">{start === 'agents' && <Check size={12} />}</span>
+                <span className="nt-body">
+                  <span className="nt-title">Your agents{hasAgents && <em>Recommended</em>}</span>
+                  <span className="nt-desc">{!saved.loaded ? 'Loading your agents…' : hasAgents ? 'The agents you built and tried. Each joins as the version you saved.' : 'You have no agents yet. Build one first, or start from a template below.'}</span>
+                </span>
+              </label>
+            )}
+            {saved.loaded && !hasAgents && saved.available && <a className="link nt-build" href="/agents/new">Build your first agent<ArrowRight size={13} aria-hidden="true" /></a>}
+            {start === 'agents' && hasAgents && (
+              <div className="nt-agents" role="group" aria-label="Agents to start with" data-tour="new-team-agents">
+                {saved.jobs.map((job) => {
+                  const on = picked.some((candidate) => candidate.id === job.id)
+                  return (
+                    <label key={job.id} className={`nt-agent ${on ? 'on' : ''}`}>
+                      <input type="checkbox" checked={on} onChange={(event) => tick(job.id, event.target.checked)} />
+                      <FigureStill className="nt-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={28} height={28} loading="lazy" decoding="async" />
+                      <b>{job.name}</b><span>v{versionOf(job)}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
             {TEAM_TEMPLATES.map((option) => {
               return (
-                <label key={option.id} className={`nt-option ${template === option.id ? 'on' : ''}`}>
-                  <input type="radio" name="template" value={option.id} checked={template === option.id} onChange={() => setTemplate(option.id)} />
-                  <span className="nt-check" aria-hidden="true">{template === option.id && <Check size={12} />}</span>
+                <label key={option.id} className={`nt-option ${start === option.id ? 'on' : ''}`}>
+                  <input type="radio" name="template" value={option.id} checked={start === option.id} onChange={() => setChosen(option.id)} />
+                  <span className="nt-check" aria-hidden="true">{start === option.id && <Check size={12} />}</span>
                   <span className="nt-body">
-                    <span className="nt-title">{option.title}{option.id === 'single' && <em>Recommended</em>}</span>
+                    <span className="nt-title">{option.title}{option.id === 'single' && !hasAgents && <em>Recommended</em>}</span>
                     <span className="nt-desc">{option.description}</span>
                     {option.steps.length > 0 && (
                       <span className="nt-steps" aria-hidden="true">
@@ -94,9 +138,9 @@ export function NewTeamDialog({ existingPaths, onCreateBlank, onClose, openTeamU
           <div className="nt-foot">
             {error && <p role="alert" className="nt-error">{error}</p>}
             <div className="nt-acts">
-              <span role="status" className="nt-busy">{busy}</span>
+              <span role="status" className="nt-busy">{busy ?? (needsAgent ? 'Tick at least one agent.' : null)}</span>
               <button type="button" className="btn" onClick={onClose} disabled={Boolean(busy)}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={!trimmed || Boolean(busy)}>{busy ? 'Creating…' : 'Create team'}</button>
+              <button type="submit" className="btn btn-primary" disabled={!trimmed || Boolean(busy) || needsAgent}>{busy ? 'Creating…' : 'Create team'}</button>
             </div>
           </div>
         </form>

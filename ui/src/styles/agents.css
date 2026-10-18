@@ -17,6 +17,7 @@
 .agents-start-card b { font-size: 14px; }
 .agents-start-card span { font-size: 12.5px; color: var(--color-ink-3); }
 .agents-start-card.blank { border-style: dashed; }
+.agents-start-card em { margin-top: auto; padding-top: 4px; font: 500 11px var(--font-mono); font-style: normal; color: var(--color-ink-3); }
 
 /* ---------- the ID card ---------- */
 .agents-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
@@ -113,6 +114,9 @@
 .home-agent-chip:has(.home-agent-figure) { padding-left: 6px; }
 .home-agent-figure { width: 30px; height: 30px; margin: -6px 0; object-fit: contain; }
 .home-agent-chip.new { border-style: dashed; color: var(--color-ink-2); }
+/* A team's own agent says which team, in words rather than a version number. */
+.home-agent-chip .home-agent-team { font: 400 12px var(--font-sans); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-in-teams-note { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--color-ink-3); }
 
 /* ---------- the agent panel: From Your agents ---------- */
 .linked-agent { display: flex; flex-direction: column; gap: 8px; padding: var(--sp-3); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline)); border-radius: var(--r-md); background: var(--color-accent-tint); }
@@ -291,6 +295,8 @@
 .byhand-reply { margin: 0; padding: var(--sp-3) var(--sp-4); border-left: 3px solid var(--color-accent); background: var(--color-ground); border-radius: var(--r-sm); font-size: 14px; color: var(--color-ink); }
 .byhand-shelf { display: flex; flex-direction: column; gap: var(--sp-2); }
 .byhand-shelf > .t-meta { margin: 0; color: var(--color-ink-3); }
+/* To the skills marketplace: under the cards, the size of its words (a typed search can be long). */
+.byhand-market { align-self: flex-start; max-width: 100%; height: auto; min-height: 28px; padding-block: 6px; line-height: 1.3; white-space: normal; text-align: left; }
 .byhand-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-2); }
 .byhand-cards li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--sp-2); padding: 12px 10px 10px 12px; border-radius: var(--r-md); background: #EFEAE0; color: #17150F; cursor: grab; box-shadow: 0 1px 0 rgba(0, 0, 0, .25), 0 6px 14px -8px rgba(0, 0, 0, .6); }
 .byhand-cards li:active { cursor: grabbing; }
