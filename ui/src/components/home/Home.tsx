@@ -179,7 +179,8 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
               <label className="home-filter"><Search size={14} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a team" aria-label="Find a team" /></label>
             )}
           </div>
-          {deleted && <p role="status" className="home-empty">Deleted “{deleted.name ?? teamDisplayName(deleted)}”. Its files are in <code>{deleted.trash}</code> inside your teams folder.</p>}
+          {/* The card leaving is the confirmation; only a screen reader hears it said. */}
+          {deleted && <p role="status" className="visually-hidden">Deleted “{deleted.name ?? teamDisplayName(deleted)}”.</p>}
           {error && <p role="alert" className="home-empty alert">Couldn't list your teams. {error} <button type="button" className="link" onClick={retryTeams}>Try again</button></p>}
           {!error && teams === null && <p role="status" className="home-empty">Loading your teams…</p>}
           {!error && teams?.length === 0 && (
