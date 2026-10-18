@@ -91,7 +91,8 @@ LoomWatch does about that, so you can judge it for yourself.
     suggestions** in Connections (it is off until you do), OpenRouter is also asked to read an
     agent whose job its name and instructions don't make plain, when you open its model list.
     What is sent is that agent's name, instructions and Done when, and the names of its skills,
-    tools and what it reads. The reading model is TypeSafe's Jev;
+    tools and what it reads. Its instructions go as written, so anything they mention goes too.
+    The reading model is TypeSafe's Jev;
   - Notion, when you connect it;
   - GitHub, each time you open LoomWatch, to see whether a new version is out (you can turn this
     off);

@@ -70,6 +70,19 @@ describe('setupOf', () => {
     // A folder's path never leaves: only its label does.
     expect(JSON.stringify(setupOf(agent))).not.toContain('/Users/ada')
   })
+
+  it('sends a label that is a path as its last name only', () => {
+    const agent: SuggestedAgent = {
+      id: 'scout', name: 'Scout', role: 'Find sources.',
+      capabilities: [
+        { kind: 'knowledge', name: '/Users/ada/Clients/Acme', path: '/Users/ada/Clients/Acme' },
+        { kind: 'knowledge', name: 'C:\\Users\\ada\\Q3 notes.md', path: 'C:\\Users\\ada\\Q3 notes.md' },
+        { kind: 'knowledge', name: 'team.files/brief.md', path: 'team.files/brief.md' },
+      ],
+    }
+    expect(setupOf(agent).reads).toEqual(['Acme', 'Q3 notes.md', 'brief.md'])
+    expect(JSON.stringify(setupOf(agent))).not.toMatch(/Users|ada|team\.files/)
+  })
 })
 
 describe('trustedKind', () => {
@@ -80,5 +93,11 @@ describe('trustedKind', () => {
     expect(trustedKind({ kind: 'gather', probabilities: { gather: 0.7, produce: 0.3 } })).toBeUndefined()
     expect(trustedKind({ kind: 'gather', probabilities: { gather: 0.8, produce: 0.2 } })).toBe('gather')
     expect(trustedKind({ kind: 'check', probabilities: { check: 0.9 }, confidence: 0.3 })).toBeUndefined()
+  })
+
+  it('reads how sure a reading is from its confidence when it gives no probabilities', () => {
+    expect(trustedKind({ kind: 'produce', probabilities: {}, confidence: 0.8 })).toBe('produce')
+    expect(trustedKind({ kind: 'gather', probabilities: {}, confidence: 0.7 })).toBeUndefined()
+    expect(trustedKind({ kind: 'check', probabilities: {} })).toBeUndefined()
   })
 })
