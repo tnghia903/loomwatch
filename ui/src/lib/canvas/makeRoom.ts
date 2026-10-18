@@ -1,3 +1,7 @@
+import type { Edge, Node } from '@xyflow/react'
+
+import { assignPorts } from './ports'
+
 export interface RoomCard { id: string; x: number; y: number; width?: number; height?: number }
 
 /** The space kept between a card and one pushed down under it, room for an edge's label. */
@@ -31,4 +35,22 @@ export function makeRoom(cards: readonly RoomCard[], gap = ROOM_GAP): Map<string
     drawn.push({ card, top })
   }
   return shifts
+}
+
+/**
+ * The canvas as Trace draws it: each card moved down as `makeRoom` says, and each line's sides
+ * chosen again from where the cards are drawn (lib/canvas/ports.ts). The builder chose them where
+ * the cards are saved, and there a folder under a card that grew still sits under its foot, so its
+ * line bridged up over the card and back down through it instead of dropping straight to it.
+ *
+ * `sizes` are the sizes measured for the cards the document does not own; the rest carry their own.
+ */
+export function withRoom<N extends Node, E extends Edge>(nodes: N[], edges: E[], sizes: Readonly<Record<string, { width: number; height: number }>>): { nodes: N[]; edges: E[] } {
+  const shifts = makeRoom(nodes.filter((node) => !node.hidden).map((node) => ({ id: node.id, ...node.position, ...(sizes[node.id] ?? node.measured) })))
+  if (shifts.size === 0) return { nodes, edges }
+  const moved = nodes.map((node) => {
+    const down = shifts.get(node.id)
+    return down ? { ...node, position: { x: node.position.x, y: node.position.y + down } } : node
+  })
+  return { nodes: moved, edges: assignPorts(edges, moved) }
 }

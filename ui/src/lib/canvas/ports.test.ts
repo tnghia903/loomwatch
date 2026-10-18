@@ -57,18 +57,24 @@ describe('choosePorts', () => {
 })
 
 describe('assignPorts', () => {
-  it('turns several cards stacked under one card into a tree off a single trunk', () => {
-    const nodes = [node('agent', card(0, 0)), node('skill', card(0, 200, 240, 72)), node('event', card(0, 320, 190, 90))]
-    const routed = assignPorts([edge('agent', 'skill'), edge('agent', 'event')], nodes)
-    expect(routed.map((item) => [item.sourceHandle, item.targetHandle])).toEqual([[PORT.down, null], [PORT.down, null]])
-    // One trunk for the whole column: 20 left of it, 16 below the agent (half the gap would be 50).
-    expect(routed.map((item) => item.data?.trunk)).toEqual([{ x: -20, y: 116 }, { x: -20, y: 116 }])
+  it('drops straight to the nearest of several cards stacked under one card, and reaches the rest by a tree', () => {
+    const nodes = [node('agent', card(0, 0)), node('skill', card(0, 200, 240, 72)), node('event', card(0, 320, 190, 90)), node('note', card(0, 450, 190, 90))]
+    const routed = assignPorts([edge('agent', 'skill'), edge('agent', 'event'), edge('agent', 'note')], nodes)
+    expect(routed.map((item) => [item.sourceHandle, item.targetHandle])).toEqual([[PORT.down, PORT.top], [PORT.down, null], [PORT.down, null]])
+    // One trunk for the rest of the column: 20 left of it, 16 below the agent (half the gap would be 50).
+    expect(routed.map((item) => item.data?.trunk)).toEqual([undefined, { x: -20, y: 116 }, { x: -20, y: 116 }])
+  })
+
+  it('finds the nearest card by where it is, not by which line was drawn first', () => {
+    const nodes = [node('agent', card(0, 0)), node('skill', card(0, 320)), node('folder', card(0, 200))]
+    const routed = assignPorts([edge('agent', 'skill'), edge('agent', 'folder')], nodes)
+    expect(routed.map((item) => item.targetHandle)).toEqual([null, PORT.top])
   })
 
   it('runs one trunk down a column whose cards do not quite line up', () => {
-    const nodes = [node('agent', card(0, 0)), node('a', card(12, 200)), node('b', card(0, 320))]
-    const routed = assignPorts([edge('agent', 'a'), edge('agent', 'b')], nodes)
-    expect(new Set(routed.map((item) => JSON.stringify(item.data?.trunk)))).toEqual(new Set([JSON.stringify({ x: -20, y: 116 })]))
+    const nodes = [node('agent', card(0, 0)), node('a', card(12, 200)), node('b', card(0, 320)), node('c', card(6, 440))]
+    const routed = assignPorts([edge('agent', 'a'), edge('agent', 'b'), edge('agent', 'c')], nodes)
+    expect(routed.map((item) => item.data?.trunk)).toEqual([undefined, { x: -20, y: 116 }, { x: -20, y: 116 }])
   })
 
   it('drops to each card below when they are not one column', () => {
