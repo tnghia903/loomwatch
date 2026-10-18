@@ -1,8 +1,10 @@
-import { useId, useMemo, useState } from 'react'
+import { Check, ChevronDown } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { type Model, contextSize, price, shortName } from '../../lib/ai/client'
 import { OFFLINE_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { useModels } from '../../lib/ai/useModels'
+import type { ModelSuggestion } from '../../lib/team-file/modelSuggestion'
 
 const MAX_RESULTS = 40
 
@@ -10,29 +12,40 @@ function vendor(id: string): string {
   return id.split('/')[0] ?? ''
 }
 
-function Row({ model, selected, onPick }: { model: Model; selected: boolean; onPick: (id: string) => void }) {
+function Row({ id, model, selected, active, why, onPoint, onPick }: {
+  id: string
+  model: Model
+  selected: boolean
+  active: boolean
+  /** In place of the model's own note: why it suits this agent. */
+  why?: string
+  onPoint: () => void
+  onPick: (id: string) => void
+}) {
   return (
-    <li>
-      <button type="button" role="option" aria-selected={selected} className={`pop-row model-row ${selected ? 'current' : ''}`} onClick={() => onPick(model.id)}>
-        <span className="name t-body">{shortName(model)}</span>
-        <span className="aside t-meta">
-          {model.free ? <span className="badge">Free</span> : `${price(model.inputPrice)} in · ${price(model.outputPrice)} out`}
-        </span>
-        <span className="t-meta model-row-detail">
-          {model.note ? `${model.note} · ` : ''}{vendor(model.id)} · {contextSize(model.contextLength)} context
-        </span>
-      </button>
-    </li>
+    <button id={id} type="button" role="option" aria-selected={selected} className={`pop-row model-row ${selected ? 'current' : ''} ${active ? 'active' : ''}`} onMouseMove={onPoint} onClick={() => onPick(model.id)}>
+      <span className="model-row-tick" aria-hidden="true">{selected && <Check size={14} />}</span>
+      <span className="name t-body">{shortName(model)}</span>
+      <span className="aside t-meta">
+        {model.free ? <span className="badge">Free</span> : `${price(model.inputPrice)} in · ${price(model.outputPrice)} out`}
+      </span>
+      <span className={`t-meta model-row-detail ${why ? 'model-row-why' : ''}`}>
+        {why ?? <>{model.note ? `${model.note} · ` : ''}{vendor(model.id)} · {contextSize(model.contextLength)} context</>}
+      </span>
+    </button>
   )
 }
 
 /**
- * The models to choose from: the recommended few first, with why, and everything OpenRouter lists
- * that can use tools a search away. Prices are per million tokens, the way OpenRouter shows them.
+ * The models to choose from: the one suggested for this agent first, with why, then the
+ * recommended few, and everything OpenRouter lists that can use tools a search away. The arrow keys
+ * move through them and Enter picks, as in the command palette. Prices are per million tokens, the
+ * way OpenRouter shows them.
  */
-export function ModelChoices({ value, onPick }: { value: string; onPick: (id: string) => void }) {
+export function ModelChoices({ value, suggestion, onPick }: { value: string; suggestion?: ModelSuggestion; onPick: (id: string) => void }) {
   const { catalog, error } = useModels()
   const [query, setQuery] = useState('')
+  const listId = useId()
   const found = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
     if (!catalog || words.length === 0) return []
@@ -40,11 +53,41 @@ export function ModelChoices({ value, onPick }: { value: string; onPick: (id: st
       .filter((model) => words.every((word) => `${model.id} ${model.name}`.toLowerCase().includes(word)))
       .slice(0, MAX_RESULTS)
   }, [catalog, query])
+  // Shown only when the list has it: a suggestion is a price and a pick, never a dead row.
+  const suggested = suggestion && catalog?.models.find((model) => model.id === suggestion.model)
+  const others = catalog ? catalog.recommended.filter((model) => model.id !== suggested?.id) : []
+  const rows = query ? found : [...(suggested ? [suggested] : []), ...others]
+  const startAt = (list: readonly Model[]) => Math.max(0, list.findIndex((model) => model.id === value))
+  const [activeIndex, setActiveIndex] = useState(() => startAt(rows))
+  // The list arrives after the picker opens the first time, so the chosen model is found then.
+  const [startedOn, setStartedOn] = useState(catalog)
+  if (startedOn !== catalog) { setStartedOn(catalog); setActiveIndex(startAt(rows)) }
+  const optionId = (index: number) => `${listId}-${index}`
 
   function pick(id: string) {
     onPick(id)
     setQuery('')
   }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (rows.length === 0) return
+      const next = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length
+      setActiveIndex(next)
+      document.getElementById(optionId(next))?.scrollIntoView?.({ block: 'nearest' })
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      const model = rows[activeIndex]
+      if (model) pick(model.id)
+    }
+  }
+
+  const row = (model: Model, index: number, why?: string) => (
+    <Row key={model.id} id={optionId(index)} model={model} selected={model.id === value} active={index === activeIndex} why={why} onPoint={() => setActiveIndex(index)} onPick={pick} />
+  )
 
   return (
     <>
@@ -53,11 +96,30 @@ export function ModelChoices({ value, onPick }: { value: string; onPick: (id: st
       {catalog && <>
         <label className="field">
           <span className="t-meta">Search all {catalog.models.length} models</span>
-          <input className="input" value={query} placeholder="claude, gpt, gemini, free…" onChange={(event) => setQuery(event.target.value)} autoFocus />
+          <input
+            className="input" value={query} placeholder="claude, gpt, gemini, free…" autoFocus
+            role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list"
+            aria-activedescendant={rows[activeIndex] ? optionId(activeIndex) : undefined}
+            onChange={(event) => {
+              const next = event.target.value
+              setQuery(next)
+              setActiveIndex(next.trim() ? 0 : startAt([...(suggested ? [suggested] : []), ...others]))
+            }}
+            onKeyDown={onKeyDown}
+          />
         </label>
-        <ul className="pop-list" role="listbox" aria-label={query ? 'Models found' : 'Recommended models'}>
-          {(query ? found : catalog.recommended).map((model) => <Row key={model.id} model={model} selected={model.id === value} onPick={pick} />)}
-        </ul>
+        <div className="pop-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'}>
+          {query ? found.map((model, index) => row(model, index)) : suggested ? <>
+            <div className="model-group" role="group" aria-labelledby={`${listId}-suggested`}>
+              <p className="model-group-head t-micro" id={`${listId}-suggested`}>Suggested for this agent</p>
+              {row(suggested, 0, suggestion?.why)}
+            </div>
+            <div className="model-group" role="group" aria-labelledby={`${listId}-others`}>
+              <p className="model-group-head t-micro" id={`${listId}-others`}>Other good models</p>
+              {others.map((model, index) => row(model, index + 1))}
+            </div>
+          </> : others.map((model, index) => row(model, index))}
+        </div>
         {query && found.length === 0 && <p className="t-meta lw-settings-quiet">No model matches. Try another word.</p>}
         {!query && <p className="t-meta lw-settings-quiet">Free models are limited per day, and their makers may learn from what you send. Keep private work on a paid model.</p>}
       </>}
@@ -67,26 +129,43 @@ export function ModelChoices({ value, onPick }: { value: string; onPick: (id: st
 
 /**
  * Chooses the model an agent runs on. `field` marks the button as that team-file field, so a
- * problem with it can take the operator straight there.
+ * problem with it can take the operator straight there. `suggestion` is the model this agent's job
+ * and place suit (modelSuggestion.ts), listed first with why.
  */
-export function ModelPicker({ value, onChange, label = 'Model', disabled = false, field }: { value: string; onChange: (id: string) => void; label?: string; disabled?: boolean; field?: string }) {
+export function ModelPicker({ value, onChange, label = 'Model', disabled = false, field, suggestion }: { value: string; onChange: (id: string) => void; label?: string; disabled?: boolean; field?: string; suggestion?: ModelSuggestion }) {
   const { catalog } = useModels()
   const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const toggle = useRef<HTMLButtonElement>(null)
   const listId = useId()
   const labelId = useId()
   const nameId = useId()
   const current = catalog?.models.find((model) => model.id === value)
 
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: MouseEvent) {
+      if (root.current && !root.current.contains(event.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    return () => window.removeEventListener('mousedown', onPointerDown)
+  }, [open])
+
+  const close = () => { setOpen(false); toggle.current?.focus() }
+
   return (
-    <div className="model-picker field">
+    <div ref={root} className="model-picker field" onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close() } }}>
       <span className="t-meta" id={labelId}>{label}</span>
-      <button type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
-        <span className="t-body" id={nameId}>{current ? shortName(current) : value ? modelNameFromId(value) : 'Choose a model'}</span>
-        {current && <span className="t-meta lw-settings-quiet">{current.free ? 'Free' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}</span>}
-        {!current && value && value !== OFFLINE_MODEL && catalog && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
+      <button ref={toggle} type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
+        <span className="model-picker-text">
+          <span className="t-body" id={nameId}>{current ? shortName(current) : value ? modelNameFromId(value) : 'Choose a model'}</span>
+          {current && <span className="t-meta lw-settings-quiet">{current.free ? 'Free' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}</span>}
+          {!current && value && value !== OFFLINE_MODEL && catalog && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
+        </span>
+        <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />
       </button>
       {open && <div className="e2 model-picker-pop" id={listId}>
-        <ModelChoices value={value} onPick={(id) => { onChange(id); setOpen(false) }} />
+        <ModelChoices value={value} suggestion={suggestion} onPick={(id) => { onChange(id); close() }} />
       </div>}
     </div>
   )
