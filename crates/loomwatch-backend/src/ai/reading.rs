@@ -332,7 +332,7 @@ impl Refusal {
         Self::new(
             StatusCode::CONFLICT,
             "off",
-            "Reading agents’ setups is off. Turn on Read its setup in an agent’s model list.",
+            "Reading agents’ setups is off. Turn on More accurate suggestion in an agent’s model list.",
         )
     }
 

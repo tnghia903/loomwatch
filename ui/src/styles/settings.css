@@ -136,13 +136,15 @@
 .lw-settings-switch input:disabled ~ * { opacity: .55; cursor: default; }
 
 /* The suggestion: a card of its own above the list, framed in the accent, so it reads apart from
-   the rows whether or not it is the model in use. Its header holds the reading switch. */
+   the rows whether or not it is the model in use. The reading switch runs along its foot. */
 .model-suggestion { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1); border: 1px solid color-mix(in srgb, var(--color-accent) 34%, transparent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
-.model-suggestion-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-1) var(--sp-3); padding: 4px var(--sp-2) 2px; }
-.model-suggestion .model-group-head { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0; color: var(--color-accent); }
-.model-suggestion-head .inline-error { flex-basis: 100%; margin: 0; }
-.model-suggestion > .t-meta { margin: 0; padding: 2px var(--sp-2) 4px; }
-.model-reading-switch .t-meta { color: var(--color-ink-2); }
+.model-suggestion .model-group-head { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px var(--sp-2) 2px; color: var(--color-accent); }
+.model-reading { margin-top: 2px; padding: var(--sp-2) var(--sp-2) 6px; border-top: 1px solid var(--color-hairline); }
+.model-reading-switch { align-items: flex-start; }
+.model-reading-switch .lw-settings-switch-track { margin-top: 3px; }
+.model-reading-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.model-reading-text .t-meta { color: var(--color-ink-3); }
+.model-reading-text .t-meta.inline-error { color: var(--color-alert); }
 
 /* "Suggested for this agent" and the rest, each under a small heading. */
 .model-group { display: flex; flex-direction: column; gap: 2px; }
