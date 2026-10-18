@@ -41,7 +41,7 @@ use crate::agent::{ApiKey, OPENROUTER_REFERER, OPENROUTER_TITLE};
 
 /// The model that reads. Pinned: a new version answers differently, so moving to one is a change
 /// to make and test on purpose, not one that arrives on its own.
-pub const READING_MODEL: &str = "typesafe/jev-1.13";
+pub const READING_MODEL: &str = "typesafe/jev-1.14";
 /// What is asked and sent. A change to either changes every answer, so kept answers start over.
 const QUESTION_VERSION: u32 = 1;
 const SETTINGS_FILE: &str = "model-reading.json";
@@ -100,7 +100,9 @@ pub struct Setup {
 pub struct Reading {
     /// `gather`, `produce` or `check`.
     pub kind: String,
-    /// Each kind's probability, together about 1.
+    /// Each kind's probability, together about 1, when the model says: the Decisions API may leave
+    /// them out.
+    #[serde(default)]
     pub probabilities: BTreeMap<String, f64>,
     /// How sure the reading is overall, when the model says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,8 +158,11 @@ struct ReaderInner {
     url: String,
     settings_file: PathBuf,
     kept_file: PathBuf,
-    /// One reading at a time, and the two files with it.
+    /// One reading at a time, and the kept answers with it.
     turn: tokio::sync::Mutex<()>,
+    /// Each change to the settings file, so turning reading off while a reading is under way is
+    /// never written back on.
+    settings: std::sync::Mutex<()>,
     resting_until: std::sync::Mutex<Option<Instant>>,
 }
 
@@ -262,9 +267,9 @@ fn request_body(state: &str) -> Value {
     })
 }
 
-/// The answer to the `job` question, read leniently: `answers` at the top or under `data`, and a
-/// confidence that may be missing. A choice that isn't one of the kinds, or comes without its
-/// probability, is no answer.
+/// The answer to the `job` question, read leniently: `answers` at the top or under `data`, and
+/// probabilities and a confidence that may be missing, as the Decisions API allows. A choice that
+/// isn't one of the kinds is no answer.
 fn read_answer(body: &Value) -> Option<Reading> {
     let answer = body
         .get("answers")
@@ -276,8 +281,9 @@ fn read_answer(body: &Value) -> Option<Reading> {
     }
     let probabilities: BTreeMap<String, f64> = answer
         .get("probabilities")
-        .and_then(Value::as_object)?
-        .iter()
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
         .filter(|(name, _)| KINDS.iter().any(|(known, _)| known == name))
         .filter_map(|(name, value)| {
             value
@@ -286,7 +292,6 @@ fn read_answer(body: &Value) -> Option<Reading> {
                 .map(|p| (name.clone(), p.clamp(0.0, 1.0)))
         })
         .collect();
-    probabilities.get(kind)?;
     Some(Reading {
         kind: kind.to_owned(),
         probabilities,
@@ -296,6 +301,14 @@ fn read_answer(body: &Value) -> Option<Reading> {
             .filter(|c| c.is_finite())
             .map(|c| c.clamp(0.0, 1.0)),
     })
+}
+
+/// What a call cost, in dollars, as `OpenRouter` reports it; 0 when it doesn't say.
+fn cost_of(body: &Value) -> f64 {
+    body.pointer("/usage/cost")
+        .and_then(Value::as_f64)
+        .filter(|cost| cost.is_finite() && *cost >= 0.0)
+        .unwrap_or(0.0)
 }
 
 /// Why a reading was not had, as the app reads it: `code` says which, `error` says it in words.
@@ -313,6 +326,24 @@ impl Refusal {
             code,
             error: error.into(),
         }
+    }
+
+    fn off() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "off",
+            "Reading agents’ setups is off. Turn it on in Connections.",
+        )
+    }
+
+    fn limit() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "limit",
+            format!(
+                "LoomWatch has read {DAILY_LIMIT} setups today, the most it reads in a day. It reads again tomorrow."
+            ),
+        )
     }
 }
 
@@ -336,6 +367,7 @@ impl Reader {
                 settings_file: state_dir.join(SETTINGS_FILE),
                 kept_file: state_dir.join(KEPT_FILE),
                 turn: tokio::sync::Mutex::new(()),
+                settings: std::sync::Mutex::new(()),
                 resting_until: std::sync::Mutex::new(None),
             }),
         }
@@ -359,6 +391,20 @@ impl Reader {
             .and_then(|text| crate::approvals::write_private(&self.inner.settings_file, &text));
         if let Err(error) = written {
             eprintln!("warning: could not keep the model reading setting: {error}");
+        }
+    }
+
+    /// Changes the settings, one change at a time, so two never undo each other. Nothing is written
+    /// when `change` says false.
+    fn update(&self, change: impl FnOnce(&mut Saved) -> bool) {
+        let _settings = self
+            .inner
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut saved = self.saved();
+        if change(&mut saved) {
+            self.save(&saved);
         }
     }
 
@@ -411,9 +457,10 @@ impl Reader {
 
     /// Turns reading on or off. What was read stays kept either way.
     pub fn set_enabled(&self, enabled: bool) -> ReadingStatus {
-        let mut saved = self.saved();
-        saved.enabled = enabled;
-        self.save(&saved);
+        self.update(|saved| {
+            saved.enabled = enabled;
+            true
+        });
         self.status()
     }
 
@@ -451,11 +498,7 @@ impl Reader {
         setup: &Setup,
     ) -> Result<(Reading, bool), Refusal> {
         if !self.saved().enabled {
-            return Err(Refusal::new(
-                StatusCode::CONFLICT,
-                "off",
-                "Reading agents’ setups is off. Turn it on in Connections.",
-            ));
+            return Err(Refusal::off());
         }
         if setup.instructions.trim().is_empty() {
             return Err(Refusal::new(
@@ -477,15 +520,8 @@ impl Reader {
                 "Reading failed a moment ago, so LoomWatch is waiting a few minutes before it tries again.",
             ));
         }
-        let mut saved = self.saved();
-        if saved.today >= DAILY_LIMIT {
-            return Err(Refusal::new(
-                StatusCode::CONFLICT,
-                "limit",
-                format!(
-                    "LoomWatch has read {DAILY_LIMIT} setups today, the most it reads in a day. It reads again tomorrow."
-                ),
-            ));
+        if self.saved().today >= DAILY_LIMIT {
+            return Err(Refusal::limit());
         }
         let key = key().await.map_err(|error| {
             Refusal::new(
@@ -508,14 +544,38 @@ impl Reader {
                 "This computer can't make HTTPS requests.",
             ));
         };
-        saved.today += 1;
-        self.save(&saved);
-        match self.ask(client, &key, &state).await {
-            Ok((reading, cost)) => {
-                let mut saved = self.saved();
-                saved.readings += 1;
-                saved.spent += cost;
-                self.save(&saved);
+        // The call is counted before it is made, so one that fails counts too. Reading may have been
+        // turned off while the key was looked up: then nothing is called.
+        let mut refused = None;
+        self.update(|saved| {
+            if !saved.enabled {
+                refused = Some(Refusal::off());
+                return false;
+            }
+            if saved.today >= DAILY_LIMIT {
+                refused = Some(Refusal::limit());
+                return false;
+            }
+            saved.today += 1;
+            true
+        });
+        if let Some(refused) = refused {
+            return Err(refused);
+        }
+        let answer = self.ask(client, &key, &state).await;
+        // A call OpenRouter answered was paid for, whether or not its answer can be read.
+        let cost = answer.as_ref().map_or(0.0, cost_of);
+        let reading = answer.and_then(|body| {
+            read_answer(&body)
+                .ok_or_else(|| "OpenRouter's answer didn't say what the agent does.".to_owned())
+        });
+        self.update(|saved| {
+            saved.spent += cost;
+            saved.readings += u64::from(reading.is_ok());
+            true
+        });
+        match reading {
+            Ok(reading) => {
                 self.keep(key_of_state, &reading);
                 Ok((reading, false))
             }
@@ -526,12 +586,13 @@ impl Reader {
         }
     }
 
+    /// One call: the answer's body, or why there is none in words.
     async fn ask(
         &self,
         client: &reqwest::Client,
         key: &ApiKey,
         state: &str,
-    ) -> Result<(Reading, f64), String> {
+    ) -> Result<Value, String> {
         let response = client
             .post(&self.inner.url)
             .bearer_auth(key.expose())
@@ -567,16 +628,8 @@ impl Reader {
         if bytes.len() > MAX_ANSWER_BYTES {
             return Err("OpenRouter's answer was too long to be a reading.".to_owned());
         }
-        let body: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| "OpenRouter's answer couldn't be read.".to_owned())?;
-        let reading = read_answer(&body)
-            .ok_or_else(|| "OpenRouter's answer didn't say what the agent does.".to_owned())?;
-        let cost = body
-            .pointer("/usage/cost")
-            .and_then(Value::as_f64)
-            .filter(|cost| cost.is_finite() && *cost >= 0.0)
-            .unwrap_or(0.0);
-        Ok((reading, cost))
+        serde_json::from_slice(&bytes)
+            .map_err(|_| "OpenRouter's answer couldn't be read.".to_owned())
     }
 }
 
@@ -678,8 +731,8 @@ mod tests {
     fn gathers() -> Value {
         json!({
             "id": "dec-1", "model": READING_MODEL, "provider": "TypeSafe",
-            "answers": {"job": {"choice": "gather", "probabilities": {"gather": 0.86, "produce": 0.11, "check": 0.03}, "confidence": 0.9}},
-            "usage": {"prompt_tokens": 420, "completion_tokens": 0, "cost": 0.000_017_6},
+            "answers": {"job": {"type": "choice", "choice": "gather", "probabilities": {"gather": 0.86, "produce": 0.11, "check": 0.03}, "confidence": 0.9}},
+            "usage": {"input_tokens": 420, "output_tokens": 0, "cost": 0.000_017_6},
         })
     }
 
@@ -846,6 +899,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn turning_reading_off_while_a_reading_starts_calls_nothing_and_stays_off() {
+        let state = folder();
+        let (url, calls, _) = fake_decisions(StatusCode::OK, gathers()).await;
+        let reader = Reader::new(&state.0, &decisions_url(url.trim_end_matches("/key")));
+        reader.set_enabled(true);
+        let setup: Setup = serde_json::from_value(gatherer()["setup"].clone()).unwrap();
+        let client = reqwest::Client::new();
+        let refused = reader
+            .read(
+                Some(&client),
+                async || {
+                    // The operator turns it off in Connections while the key is looked up.
+                    reader.set_enabled(false);
+                    Ok(ApiKey::new("sk-or-v1-good"))
+                },
+                &setup,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, "off");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let status = reader.status();
+        assert!(!status.enabled);
+        assert_eq!(status.today, 0);
+    }
+
+    #[tokio::test]
+    async fn a_paid_answer_that_names_no_kind_still_counts_what_it_cost() {
+        let state = folder();
+        let (url, calls, _) = fake_decisions(
+            StatusCode::OK,
+            json!({
+                "answers": {"job": {"type": "choice", "choice": "write"}},
+                "usage": {"input_tokens": 476, "output_tokens": 0, "cost": 0.000_02},
+            }),
+        )
+        .await;
+        let app = app_with(&url, &state.0, Some("sk-or-v1-good")).await;
+        send(&app, "PUT", Some(json!({"enabled": true}))).await;
+        let (status, body) = send(&app, "POST", Some(gatherer())).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["code"], "failed");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let (_, body) = send(&app, "GET", None).await;
+        assert_eq!(body["readings"], 0);
+        assert_eq!(body["today"], 1);
+        assert!((body["spent"].as_f64().unwrap() - 0.000_02).abs() < 1e-12);
+    }
+
+    #[tokio::test]
     async fn without_a_key_or_instructions_nothing_is_called() {
         let state = folder();
         let (url, calls, _) = fake_decisions(StatusCode::OK, gathers()).await;
@@ -894,8 +997,17 @@ mod tests {
         let unknown =
             json!({"answers": {"job": {"choice": "write", "probabilities": {"write": 1.0}}}});
         assert_eq!(read_answer(&unknown), None);
-        let bare = json!({"answers": {"job": {"choice": "gather"}}});
-        assert_eq!(read_answer(&bare), None);
+        // Probabilities and confidence are optional in the Decisions API: the choice alone is an
+        // answer, which the app then trusts only as far as it says it is sure.
+        let bare = json!({"answers": {"job": {"type": "choice", "choice": "gather"}}});
+        assert_eq!(
+            read_answer(&bare),
+            Some(Reading {
+                kind: "gather".into(),
+                probabilities: BTreeMap::new(),
+                confidence: None,
+            })
+        );
         assert_eq!(read_answer(&json!({"choices": []})), None);
     }
 

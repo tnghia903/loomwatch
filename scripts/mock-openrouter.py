@@ -67,7 +67,7 @@ def read_setup(state):
                                          "hand them on", "tag it", "return them raw")):
         kind = "gather"
     others = [other for other in ("gather", "produce", "check") if other != kind]
-    return {"choice": kind, "probabilities": {kind: 0.88, others[0]: 0.08, others[1]: 0.04},
+    return {"type": "choice", "choice": kind, "probabilities": {kind: 0.88, others[0]: 0.08, others[1]: 0.04},
             "confidence": 0.85}
 
 
@@ -232,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
             tokens = len(state) // 4 + 200
             return self.send_json(200, {"id": f"dec-{number}", "model": body.get("model"), "provider": "Mock",
                                         "answers": {"job": read_setup(state)},
-                                        "usage": {"prompt_tokens": tokens, "completion_tokens": 0,
+                                        "usage": {"input_tokens": tokens, "output_tokens": 0,
                                                   "cost": round(tokens * 0.000000042, 9)}})
         if not self.path.startswith("/api/v1/chat/completions"):
             return self.send_json(404, {"error": {"code": 404, "message": "not found"}})

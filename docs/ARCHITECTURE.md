@@ -103,14 +103,15 @@ the state folder so the list still shows offline. `GET /api/models` serves it.
 turns that on in Connections; it is off by default. The app suggests a model from an agent's name
 and a few words of its instructions, for free (`ui/src/lib/team-file/modelSuggestion.ts`). When
 those can't place an agent (`agentSetup.ts`, `needsReading`) and its model picker is open, the
-app asks `POST /api/models/reading`. The daemon then asks TypeSafe's Jev (`typesafe/jev-1.13`,
+app asks `POST /api/models/reading`. The daemon then asks TypeSafe's Jev (`typesafe/jev-1.14`,
 pinned) on OpenRouter's Decisions API, with the operator's key, which kind of work the agent
 does: gather, produce or check. The app's rules still apply after it: the team's answer stays on
 the strongest model, and a check step uses another maker's model. Each answer is kept in
 `model-readings.json` under a hash of exactly what was sent, so a setup is paid for once. The
 daemon makes one call at a time, at most 50 a day, and none for ten minutes after one fails.
 `model-reading.json` holds the switch and what readings have cost. Only the agent's own setup is
-sent, by name: never a skill's text, a file, a folder's path, the Brief or its teammates.
+sent, by name: never a skill's text, a file, a folder's path, the Brief or its teammates. Its
+instructions go as written, up to 6,000 characters, so whatever they mention goes with them.
 `modelSuggestion.eval.test.ts` measures the suggestion with and without readings.
 
 ---

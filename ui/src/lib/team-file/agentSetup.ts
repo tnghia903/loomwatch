@@ -9,6 +9,7 @@
 // says the job plainly answers for free. Pure, so every case is testable.
 
 import { OFFLINE_MODEL } from '../ai/modelIds'
+import { baseName } from '../files/paths'
 import { isCheckerRole } from '../library/checker'
 import type { AgentDraft } from '../library/draft'
 import { THIN_WORDS, jobByName, keptJob, words } from './checkup'
@@ -56,7 +57,9 @@ export function setupOf(agent: SuggestedAgent): AgentSetup {
     doneWhen: (agent.doneWhen ?? []).map((item) => item.trim()).filter(Boolean),
     skills: named('skill'),
     tools: named('tool'),
-    reads: named('knowledge'),
+    // A label is a name, but a team file can hold any text there: one that is a path goes as its
+    // last name, so no folder's path leaves this computer.
+    reads: named('knowledge').map((label) => (/[\\/]/.test(label) ? baseName(label) : label)),
     allow: Object.entries(agent.allow ?? {}).filter(([, on]) => on === true).map(([key]) => key).sort(),
     recruits: agent.allowRecruiting === true,
   }
@@ -83,7 +86,8 @@ export const GATHER_MIN = 0.75
 /** The kind a reading is sure enough of to act on; undefined when it is not. */
 export function trustedKind(reading: SetupReading | null | undefined): JobKind | undefined {
   if (!reading) return undefined
-  const probability = reading.probabilities[reading.kind] ?? 0
+  // The Decisions API may leave the probabilities out; then how sure it is overall stands in.
+  const probability = reading.probabilities[reading.kind] ?? reading.confidence ?? 0
   if (probability < (reading.kind === 'gather' ? GATHER_MIN : READING_MIN)) return undefined
   if (reading.confidence !== undefined && reading.confidence < 0.5) return undefined
   return reading.kind
