@@ -1,6 +1,6 @@
 import { Handle, Position, useConnection, useNodeId } from '@xyflow/react'
 
-import { BRIDGE_IN_AT, BRIDGE_OUT_AT, PORT } from '../../lib/canvas/ports'
+import { PORT } from '../../lib/canvas/ports'
 
 /** The id of the card-sized handles that catch a line dropped anywhere on a card. No drawn line
  *  attaches to them (`lib/canvas/ports.ts` picks those), so a connection's handle ids never matter. */
@@ -18,10 +18,11 @@ interface CardPortsProps {
 }
 
 /**
- * The one set of connection points every canvas card carries (`lib/canvas/ports.ts` decides which
- * a line uses). Only the left and right points, and an agent's bottom point in Build, can start a
- * connection; the rest exist so a line can meet a card from the side that faces the other card,
- * and are invisible until a line uses them.
+ * The four connection points every canvas card carries, one on each side (`lib/canvas/ports.ts`
+ * decides which a line uses). Each point has a receiving and a sending handle in the same place, so
+ * a line can arrive or leave by any side. A card shows only the points it can start or take a line
+ * from: in Build an agent's four (in at the left and top, out at the right and bottom), a resource's
+ * or the Output's two (left and top). The rest are invisible until a line uses them.
  *
  * A line being drawn can be dropped anywhere on a card, not only on its dot: the last two handles
  * cover the whole card. They cannot start a line, so React Flow leaves them without pointer events
@@ -39,13 +40,12 @@ export function CardPorts({ input = true, output = true, connectIn = false, conn
     <>
       {input && <Handle type="target" position={Position.Left} isConnectable={connectIn} />}
       {output && <Handle type="source" position={Position.Right} isConnectable={connectOut} />}
+      {input && <Handle id={PORT.top} type="target" position={Position.Top} isConnectable={connectIn} />}
       {output && <Handle id={PORT.down} type="source" position={Position.Bottom} isConnectable={connectDown} />}
-      {output && <Handle id={PORT.trunk} type="source" position={Position.Left} isConnectable={false} style={{ top: 'auto', bottom: 6 }} />}
-      {output && <Handle id={PORT.bridgeOut} type="source" position={Position.Top} isConnectable={false} style={{ left: `${BRIDGE_OUT_AT * 100}%` }} />}
-      {output && <Handle id={PORT.underOut} type="source" position={Position.Bottom} isConnectable={false} style={{ left: `${BRIDGE_OUT_AT * 100}%` }} />}
-      {input && <Handle id={PORT.top} type="target" position={Position.Top} isConnectable={false} />}
-      {input && <Handle id={PORT.bridgeIn} type="target" position={Position.Top} isConnectable={false} style={{ left: `${BRIDGE_IN_AT * 100}%` }} />}
-      {input && <Handle id={PORT.underIn} type="target" position={Position.Bottom} isConnectable={false} style={{ left: `${BRIDGE_IN_AT * 100}%` }} />}
+      {output && <Handle id={PORT.leftOut} type="source" position={Position.Left} isConnectable={false} />}
+      {input && <Handle id={PORT.rightIn} type="target" position={Position.Right} isConnectable={false} />}
+      {output && <Handle id={PORT.topOut} type="source" position={Position.Top} isConnectable={false} />}
+      {input && <Handle id={PORT.bottomIn} type="target" position={Position.Bottom} isConnectable={false} />}
       {input && <Handle id={CARD_CATCH} className="card-catch" type="target" position={Position.Left} isConnectable={connectIn} isConnectableStart={false} isConnectableEnd={catches} />}
       {output && <Handle id={CARD_CATCH} className="card-catch" type="source" position={Position.Right} isConnectable={connectOut} isConnectableStart={false} isConnectableEnd={catches} />}
     </>

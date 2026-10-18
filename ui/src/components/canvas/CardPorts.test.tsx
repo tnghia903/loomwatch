@@ -16,7 +16,7 @@ const nodes: Node[] = [
   { id: 'ada', type: 'card', position: { x: 0, y: 0 }, data: {} },
   { id: 'bea', type: 'card', position: { x: 400, y: 0 }, data: {} },
 ]
-const nodeTypes = { card: () => <article><CardPorts connectIn connectOut /></article> }
+const nodeTypes = { card: () => <article><CardPorts connectIn connectOut connectDown /></article> }
 
 function Store({ onStore }: { onStore: (store: ReturnType<typeof useStoreApi>) => void }) {
   const store = useStoreApi()
@@ -46,6 +46,24 @@ function dragFrom(store: ReturnType<typeof useStoreApi>, nodeId: string) {
     },
   }))
 }
+
+describe('CardPorts: four points, one on each side', () => {
+  it('shows an agent one dot per side: in at the left and top, out at the right and bottom', () => {
+    const { container } = renderCanvas()
+    const card = container.querySelector('.react-flow__node[data-id="ada"]')!
+    const dots = [...card.querySelectorAll('.react-flow__handle.connectable:not(.card-catch)')]
+    expect(dots.map((dot) => `${dot.getAttribute('data-handlepos')} ${dot.classList.contains('source') ? 'out' : 'in'}`).sort()).toEqual(['bottom out', 'left in', 'right out', 'top in'])
+  })
+
+  it('can take a line in or send one out by any side, so a line meets the side that faces its other card', () => {
+    const { container } = renderCanvas()
+    const card = container.querySelector('.react-flow__node[data-id="ada"]')!
+    for (const type of ['source', 'target']) {
+      const sides = [...card.querySelectorAll(`.react-flow__handle.${type}:not(.card-catch)`)].map((handle) => handle.getAttribute('data-handlepos')).sort()
+      expect(sides).toEqual(['bottom', 'left', 'right', 'top'])
+    }
+  })
+})
 
 describe('CardPorts: a line can be dropped anywhere on a card', () => {
   it('puts a card-sized handle of each type after the dots, so a line with no handle id meets the dot', () => {

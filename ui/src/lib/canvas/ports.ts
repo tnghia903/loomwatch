@@ -1,29 +1,36 @@
-import { Position, type Edge, type Node, type XYPosition } from '@xyflow/react'
+import { Position, type Edge, type Node } from '@xyflow/react'
 
 /**
  * Where every canvas line attaches, decided in one place from where the two cards actually are.
  *
- * Every card exposes the same connection points (`components/canvas/CardPorts.tsx`), and no
- * section of the graph builder picks one. That used to be decided edge by edge — a resource lane
- * here, an "over the row" flag there, a fan handle for evidence — and each new kind of edge brought
- * a new way to cut through a card. The rules below are the whole policy:
+ * Every card has four connection points, one on each side (`components/canvas/CardPorts.tsx`): the
+ * middle of its top and bottom, and on its left and right at `HANDLE_Y`, the height of the card's
+ * name, so a row of top-aligned cards of different heights still draws a straight line. No section
+ * of the graph builder picks one. The rules below are the whole policy:
  *
- * 1. **Stack** — two or more cards hanging below a card, in one column, are reached from a trunk
- *    on the source's left side, one short branch each (a tree, like a file list).
- * 2. **Drop** — a single card below is reached by a vertical line, bottom to top.
- * 3. Otherwise the line takes whichever shape crosses the fewest other cards, preferring the
- *    simpler on a tie: a **relay** (right side to left side — straight, since rows are top-aligned
- *    and both sides sit at `HANDLE_Y`), a **bridge** over the row (top to top), or one under it
- *    (bottom to bottom). A target to the left can only be bridged.
+ * 1. **Stack** — two or more cards hanging below a card, in one column, are reached by a tree: out of
+ *    the source's bottom, down a trunk to the left of the column, one short branch into each card's
+ *    left side, like a file list.
+ * 2. Otherwise a line joins the two points that face each other, the shape that crosses the fewest
+ *    other cards winning, and the earlier on a tie: a **relay** to a card on the right (right side to
+ *    left side), a **drop** to a card below (bottom to top), a **bridge** over the row (top to top)
+ *    or under it (bottom to bottom), and last the two that run backwards (left side to right side,
+ *    top to bottom). So a line comes out of a card's right or bottom and goes into its left or top,
+ *    and one that would run back through the row bridges over it instead.
  */
 export const PORT = {
-  down: 'down',
+  /** Top, receiving. */
   top: 'top',
-  trunk: 'trunk',
-  bridgeOut: 'bridge-out',
-  bridgeIn: 'bridge-in',
-  underOut: 'under-out',
-  underIn: 'under-in',
+  /** Top, sending. */
+  topOut: 'top-out',
+  /** Bottom, sending: dragging down from an agent attaches a resource below it. */
+  down: 'down',
+  /** Bottom, receiving. */
+  bottomIn: 'bottom-in',
+  /** Left, sending. The left side's receiving point is the handle with no id. */
+  leftOut: 'left-out',
+  /** Right, receiving. The right side's sending point is the handle with no id. */
+  rightIn: 'right-in',
 } as const
 
 /** How far a bridge rises above (or dips below) the cards it joins: longer bridges go further,
@@ -32,35 +39,64 @@ export function bridgeLift(span: number): number {
   return Math.max(59, 48 + Math.abs(span) * 0.16)
 }
 
-/** Where on a card's top or bottom edge a bridge leaves and lands (fractions of its width). */
-export const BRIDGE_OUT_AT = 0.62
-export const BRIDGE_IN_AT = 0.38
-
 /** The height of every left and right connection point, from the card's top (`--lw-handle-y`). */
 export const HANDLE_Y = 44
 
 export interface Box { x: number; y: number; width: number; height: number }
 
-/**
- * Where a line from `from` meets the edge of `box`, aimed at its centre, and the side it enters by:
- * the end of the line drawn while connecting, over a card (components/canvas/CardConnectionLine.tsx).
- * A point inside the box (or at its centre) meets the edge in the same direction, so the line never
- * stops partway into a card.
- */
-export function cardEdgePoint(from: XYPosition, box: Box): XYPosition & { position: Position } {
-  const cx = box.x + box.width / 2
-  const cy = box.y + box.height / 2
-  const dx = from.x - cx
-  const dy = from.y - cy
-  const across = Math.abs(dx) / (box.width / 2)
-  const down = Math.abs(dy) / (box.height / 2)
-  if (across === 0 && down === 0) return { x: box.x, y: cy, position: Position.Left }
-  const scale = 1 / Math.max(across, down)
-  const position = across >= down ? (dx < 0 ? Position.Left : Position.Right) : (dy < 0 ? Position.Top : Position.Bottom)
-  return { x: cx + dx * scale, y: cy + dy * scale, position }
-}
+export type Point = readonly [number, number]
+
+/** Where a stack's trunk runs: down at `x`, after leaving the source's bottom at height `y`. */
+export interface Trunk { x: number; y: number }
 
 type Ports = { sourceHandle: string | null; targetHandle: string | null }
+
+const SOURCE_SIDE: Readonly<Record<string, Position>> = { '': Position.Right, [PORT.down]: Position.Bottom, [PORT.topOut]: Position.Top, [PORT.leftOut]: Position.Left }
+const TARGET_SIDE: Readonly<Record<string, Position>> = { '': Position.Left, [PORT.top]: Position.Top, [PORT.bottomIn]: Position.Bottom, [PORT.rightIn]: Position.Right }
+
+/** The side a handle sits on, and its point on `box`. */
+export function portAt(box: Box, handle: string | null | undefined, type: 'source' | 'target'): { point: Point; side: Position } {
+  const side = (type === 'source' ? SOURCE_SIDE : TARGET_SIDE)[handle ?? ''] ?? (type === 'source' ? Position.Right : Position.Left)
+  const point: Point = side === Position.Left ? [box.x, box.y + HANDLE_Y]
+    : side === Position.Right ? [box.x + box.width, box.y + HANDLE_Y]
+    : side === Position.Top ? [box.x + box.width / 2, box.y]
+    : [box.x + box.width / 2, box.y + box.height]
+  return { point, side }
+}
+
+const TRUNK_GAP = 20
+const TRUNK_DROP = 16
+
+/**
+ * The corners a line passes through, from the side it leaves by to the side it enters by: straight
+ * runs only, which the renderer rounds (components/canvas/route.ts) and the chooser below tests for
+ * crossings, so what is tested is what is drawn. `null` for a pair of sides no rule above produces.
+ */
+export function linePoints(from: Point, out: Position, to: Point, into: Position, trunk?: Trunk): Point[] | null {
+  const [fx, fy] = from
+  const [tx, ty] = to
+  if ((out === Position.Right && into === Position.Left) || (out === Position.Left && into === Position.Right)) {
+    const mid = (fx + tx) / 2
+    return [from, [mid, fy], [mid, ty], to]
+  }
+  if ((out === Position.Bottom && into === Position.Top) || (out === Position.Top && into === Position.Bottom)) {
+    const mid = (fy + ty) / 2
+    return [from, [fx, mid], [tx, mid], to]
+  }
+  if (out === Position.Top && into === Position.Top) {
+    const apex = Math.min(fy, ty) - bridgeLift(tx - fx)
+    return [from, [fx, apex], [tx, apex], to]
+  }
+  if (out === Position.Bottom && into === Position.Bottom) {
+    const base = Math.max(fy, ty) + bridgeLift(tx - fx)
+    return [from, [fx, base], [tx, base], to]
+  }
+  if (out === Position.Bottom && into === Position.Left) {
+    const { x, y } = trunk ?? { x: tx - TRUNK_GAP, y: fy + TRUNK_DROP }
+    return [from, [fx, y], [x, y], [x, ty], to]
+  }
+  return null
+}
 
 const GAP = 8
 const COLUMN = 12
@@ -76,53 +112,40 @@ function crosses(box: Box, x1: number, y1: number, x2: number, y2: number): bool
   return box.x - MARGIN < right && box.x + box.width + MARGIN > left && box.y - MARGIN < bottom && box.y + box.height + MARGIN > top
 }
 
-/**
- * Would the relay from `s` to `t` run through another card? Tested on the path the relay actually
- * draws — out along the source's spine height, down or up at the midpoint, in along the target's —
- * so a card merely near the line never forces a detour.
- */
-type Segment = [number, number, number, number]
-
-function relay(s: Box, t: Box): Segment[] {
-  const sx = s.x + s.width
-  const sy = s.y + HANDLE_Y
-  const tx = t.x
-  const ty = t.y + HANDLE_Y
-  const mid = (sx + tx) / 2
-  return [[sx, sy, mid, sy], [mid, sy, mid, ty], [mid, ty, tx, ty]]
+/** How many other cards the line through these corners runs through. */
+function crossings(points: readonly Point[], others: readonly Box[]): number {
+  return others.filter((box) => points.some((point, i) => i > 0 && crosses(box, points[i - 1][0], points[i - 1][1], point[0], point[1]))).length
 }
 
-function over(s: Box, t: Box): Segment[] {
-  const sx = s.x + s.width * BRIDGE_OUT_AT
-  const tx = t.x + t.width * BRIDGE_IN_AT
-  const apex = Math.min(s.y, t.y) - bridgeLift(tx - sx)
-  return [[sx, s.y, sx, apex], [sx, apex, tx, apex], [tx, apex, tx, t.y]]
-}
-
-function under(s: Box, t: Box): Segment[] {
-  const sx = s.x + s.width * BRIDGE_OUT_AT
-  const tx = t.x + t.width * BRIDGE_IN_AT
-  const sb = s.y + s.height
-  const tb = t.y + t.height
-  const base = Math.max(sb, tb) + bridgeLift(tx - sx)
-  return [[sx, sb, sx, base], [sx, base, tx, base], [tx, base, tx, tb]]
-}
-
-/** How many other cards a path made of these segments runs through. */
-function crossings(path: readonly Segment[], others: readonly Box[]): number {
-  return others.filter((box) => path.some(([x1, y1, x2, y2]) => crosses(box, x1, y1, x2, y2))).length
-}
+/** The tree's ports (rule 1). Its trunk depends on the whole column, so `assignPorts` places it. */
+const STACK: Ports = { sourceHandle: PORT.down, targetHandle: null }
 
 export function choosePorts(s: Box, t: Box, others: readonly Box[], stacked: boolean): Ports {
-  if (stacked) return { sourceHandle: PORT.trunk, targetHandle: null }
-  if (below(s, t)) return { sourceHandle: PORT.down, targetHandle: PORT.top }
-  const shapes: { ports: Ports; path: Segment[] }[] = [
-    ...(t.x + t.width > s.x + GAP ? [{ ports: { sourceHandle: null, targetHandle: null }, path: relay(s, t) }] : []),
-    { ports: { sourceHandle: PORT.bridgeOut, targetHandle: PORT.bridgeIn }, path: over(s, t) },
-    { ports: { sourceHandle: PORT.underOut, targetHandle: PORT.underIn }, path: under(s, t) },
+  if (stacked) return STACK
+  const sRight = s.x + s.width
+  const tRight = t.x + t.width
+  const sBottom = s.y + s.height
+  const tBottom = t.y + t.height
+  const shapes: Ports[] = [
+    ...(t.x >= sRight + GAP ? [{ sourceHandle: null, targetHandle: null }] : []),
+    ...(t.y >= sBottom + GAP ? [{ sourceHandle: PORT.down, targetHandle: PORT.top }] : []),
+    { sourceHandle: PORT.topOut, targetHandle: PORT.top },
+    { sourceHandle: PORT.down, targetHandle: PORT.bottomIn },
+    ...(tRight <= s.x - GAP ? [{ sourceHandle: PORT.leftOut, targetHandle: PORT.rightIn }] : []),
+    ...(tBottom <= s.y - GAP ? [{ sourceHandle: PORT.topOut, targetHandle: PORT.bottomIn }] : []),
   ]
-  // Fewest cards crossed wins; on a tie the earlier (simpler) shape does.
-  return shapes.reduce((best, shape) => (crossings(shape.path, others) < crossings(best.path, others) ? shape : best)).ports
+  const crossed = (ports: Ports) => {
+    const from = portAt(s, ports.sourceHandle, 'source')
+    const to = portAt(t, ports.targetHandle, 'target')
+    return crossings(linePoints(from.point, from.side, to.point, to.side) ?? [], others)
+  }
+  // Fewest cards crossed wins; on a tie the earlier shape does.
+  return shapes.reduce((best, ports) => (crossed(ports) < crossed(best) ? ports : best))
+}
+
+/** The trunk an edge's data carries when it is a branch of a stack (rule 1). */
+export function trunkOf(data: unknown): Trunk | undefined {
+  return (data as { trunk?: Trunk } | undefined)?.trunk
 }
 
 /** A node's box from what React Flow measured, else what the builder declared. */
@@ -140,22 +163,29 @@ export function assignPorts<E extends Edge>(edges: readonly E[], nodes: readonly
     const box = boxOf(node)
     if (box) boxes.set(node.id, box)
   }
-  // Rule 1 needs to see every edge leaving a card at once: a stack is a property of the group.
-  const stackedEdges = new Set<string>()
+  // Rule 1 needs to see every edge leaving a card at once: a stack is a property of the group, and
+  // so is its trunk, which runs left of the whole column and leaves the source above its top card.
+  const trunks = new Map<string, Trunk>()
   const bySource = new Map<string, E[]>()
   for (const edge of edges) bySource.set(edge.source, [...(bySource.get(edge.source) ?? []), edge])
   for (const [source, group] of bySource) {
     const s = boxes.get(source)
     if (!s) continue
     const hanging = group.filter((edge) => { const t = boxes.get(edge.target); return t && below(s, t) })
-    const xs = hanging.map((edge) => (boxes.get(edge.target) as Box).x)
-    if (hanging.length >= 2 && Math.max(...xs) - Math.min(...xs) <= COLUMN) hanging.forEach((edge) => stackedEdges.add(edge.id))
+    const column = hanging.map((edge) => boxes.get(edge.target) as Box)
+    const xs = column.map((box) => box.x)
+    if (hanging.length < 2 || Math.max(...xs) - Math.min(...xs) > COLUMN) continue
+    const bottom = s.y + s.height
+    const trunk = { x: Math.min(...xs) - TRUNK_GAP, y: bottom + Math.min(TRUNK_DROP, (Math.min(...column.map((box) => box.y)) - bottom) / 2) }
+    hanging.forEach((edge) => trunks.set(edge.id, trunk))
   }
   return edges.map((edge) => {
     const s = boxes.get(edge.source)
     const t = boxes.get(edge.target)
     if (!s || !t) return edge
+    const trunk = trunks.get(edge.id)
     const others = [...boxes].filter(([id]) => id !== edge.source && id !== edge.target).map(([, box]) => box)
-    return { ...edge, ...choosePorts(s, t, others, stackedEdges.has(edge.id)) }
+    const routed = { ...edge, ...choosePorts(s, t, others, trunk !== undefined) }
+    return trunk ? { ...routed, data: { ...edge.data, trunk } } : routed
   })
 }

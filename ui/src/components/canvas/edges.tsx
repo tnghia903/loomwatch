@@ -1,5 +1,6 @@
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 
+import { trunkOf } from '../../lib/canvas/ports'
 import { routeEdge } from './route'
 
 import type { ProvEdge, WeftEdge } from '../../lib/runs/graph'
@@ -13,7 +14,7 @@ function cx(...classes: Array<string | false | null | undefined>): string {
 // Where an observed edge coincides with it, no second line is drawn: the warp gains a 24 px
 // gold shuttle per event and a ×n count badge.
 export function WarpEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data, selected }: EdgeProps<ConfiguredEdge>) {
-  const { path, labelX, labelY } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
+  const { path, labelX, labelY } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, trunk: trunkOf(data) })
   const extra = data as (ConfiguredEdge['data'] & { shuttle?: boolean; count?: number; anomaly?: boolean }) | undefined
   return (
     <>
@@ -31,7 +32,7 @@ export function WarpEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
 // Observed (weft): gold, dashed, travelling. dispatch 6 4; ask 2 3 both ends; handoff 10 4 heavy.
 export function WeftEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, markerStart, data }: EdgeProps<WeftEdge>) {
   // Observed calls take the same straight, rounded-corner route as the planned lines.
-  const { path, labelX, labelY } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
+  const { path, labelX, labelY } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, trunk: trunkOf(data) })
   const kind = data?.kind ?? 'dispatch'
   return (
     <>
@@ -52,7 +53,7 @@ const PLAIN_RELATION: Readonly<Record<string, string>> = { 'uses skill': 'requir
 // now may use the animated blue live stroke (§12.3). The relationship word rides the edge.
 export function ProvEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data, selected }: EdgeProps<ProvEdge>) {
   // Every provenance line takes its shape from the sides its ports chose (lib/canvas/ports.ts).
-  const { path, labelX, labelY, kind } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
+  const { path, labelX, labelY, kind } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, trunk: trunkOf(data) })
   // A drop's word sits beside the line and a tree branch's left of the trunk, so lines stay unbroken.
   const beside = kind === 'drop'
   const before = kind === 'tree'
