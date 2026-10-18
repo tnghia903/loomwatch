@@ -29,6 +29,7 @@ import { agentPlace } from '../lib/team-file/agentPlace'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
+import { makeRoom } from '../lib/canvas/makeRoom'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
 import { RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, notionPageKey, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
 import { chosenIsFile, chosenName, chosenSource } from '../lib/knowledge/chosen'
@@ -1100,6 +1101,19 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return mark ? { ...node, className: [node.className, `ask-${mark}`].filter(Boolean).join(' ') } : node
   })), [canvasNodes, askMarks, runView])
 
+  // Trace makes a card several times taller where it stands, so whatever is under it is drawn
+  // lower until it clears it (lib/canvas/makeRoom.ts). Only the drawing moves: a card dragged here
+  // is saved where it is seen, and Team and Story keep the arrangement as it was.
+  const roomyNodes = useMemo(() => {
+    if (depth !== 'trace') return markedNodes
+    const shifts = makeRoom(markedNodes.filter((node) => !node.hidden).map((node) => ({ id: node.id, ...node.position, ...(synthMeasurements[node.id] ?? node.measured) })))
+    if (shifts.size === 0) return markedNodes
+    return markedNodes.map((node) => {
+      const down = shifts.get(node.id)
+      return down ? { ...node, position: { x: node.position.x, y: node.position.y + down } } : node
+    })
+  }, [depth, markedNodes, synthMeasurements])
+
   const observedCount = projection.delegations.length
   // UX_REDESIGN §6.7: solo is conditional chrome — the legend is its only readout and click-path
   // back, so the cycle control may act only while the legend is on screen. Observed (weft) edges
@@ -1940,12 +1954,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   /** The agent whose card a flow-space point lands on, or null. A review stop takes nothing. */
   const agentAt = useCallback((point: { x: number; y: number }) => doc.nodes.find((node) => {
     if (node.data.agent.kind === 'operator') return false
-    // Before React Flow has measured it, an agent card is `.build-node`'s own size.
-    const measured = flow.getNode(node.id)?.measured
-    const width = measured?.width ?? 220
-    const height = measured?.height ?? 76
-    return point.x >= node.position.x && point.x <= node.position.x + width
-      && point.y >= node.position.y && point.y <= node.position.y + height
+    // Before React Flow has measured it, an agent card is `.build-node`'s own size. Where it is
+    // drawn, which at Trace can be lower than where it is saved.
+    const drawn = flow.getNode(node.id)
+    const { x, y } = drawn?.position ?? node.position
+    const width = drawn?.measured?.width ?? 220
+    const height = drawn?.measured?.height ?? 76
+    return point.x >= x && point.x <= x + width && point.y >= y && point.y <= y + height
   })?.id ?? null, [doc.nodes, flow])
 
   /**
@@ -2573,7 +2588,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         ) : (
         <div ref={canvasRef} role="application" aria-label={runView ? 'Run graph' : 'Team canvas'} className="lw-canvas" data-depth={depth}>
           <ReactFlow
-            nodes={markedNodes}
+            nodes={roomyNodes}
             edges={runView ? visibleEdges : visibleEdges.filter(edge => edge.source !== '__prompt' || allWiringEdges.some(wire => wire.from === '__prompt'))}
             nodeTypes={runView ? nodeTypes : buildNodeTypes}
             edgeTypes={edgeTypes}
