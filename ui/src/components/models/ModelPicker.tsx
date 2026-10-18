@@ -2,15 +2,13 @@ import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { type Model, contextSize, price, shortName } from '../../lib/ai/client'
+import { makerOf } from '../../lib/ai/makers'
 import { OFFLINE_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { useModels } from '../../lib/ai/useModels'
 import type { ModelSuggestion } from '../../lib/team-file/modelSuggestion'
+import { MakerMark } from './MakerMark'
 
 const MAX_RESULTS = 40
-
-function vendor(id: string): string {
-  return id.split('/')[0] ?? ''
-}
 
 function Row({ id, model, selected, active, why, onPoint, onPick }: {
   id: string
@@ -22,15 +20,19 @@ function Row({ id, model, selected, active, why, onPoint, onPick }: {
   onPoint: () => void
   onPick: (id: string) => void
 }) {
+  const maker = makerOf(model.id)
   return (
     <button id={id} type="button" role="option" aria-selected={selected} className={`pop-row model-row ${selected ? 'current' : ''} ${active ? 'active' : ''}`} onMouseMove={onPoint} onClick={() => onPick(model.id)}>
-      <span className="model-row-tick" aria-hidden="true">{selected && <Check size={14} />}</span>
+      <span className="model-row-mark">
+        <MakerMark maker={maker} />
+        {selected && <span className="model-row-tick" aria-hidden="true"><Check size={10} strokeWidth={3} /></span>}
+      </span>
       <span className="name t-body">{shortName(model)}</span>
       <span className="aside t-meta">
         {model.free ? <span className="badge">Free</span> : `${price(model.inputPrice)} in · ${price(model.outputPrice)} out`}
       </span>
       <span className={`t-meta model-row-detail ${why ? 'model-row-why' : ''}`}>
-        {why ?? <>{model.note ? `${model.note} · ` : ''}{vendor(model.id)} · {contextSize(model.contextLength)} context</>}
+        {why ?? <>{model.note ? `${model.note} · ` : ''}{maker.name} · {contextSize(model.contextLength)} context</>}
       </span>
     </button>
   )
@@ -108,7 +110,7 @@ export function ModelChoices({ value, suggestion, onPick }: { value: string; sug
             onKeyDown={onKeyDown}
           />
         </label>
-        <div className="pop-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'}>
+        <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'}>
           {query ? found.map((model, index) => row(model, index)) : suggested ? <>
             <div className="model-group" role="group" aria-labelledby={`${listId}-suggested`}>
               <p className="model-group-head t-micro" id={`${listId}-suggested`}>Suggested for this agent</p>
@@ -157,6 +159,7 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
     <div ref={root} className="model-picker field" onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close() } }}>
       <span className="t-meta" id={labelId}>{label}</span>
       <button ref={toggle} type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
+        {value.includes('/') && value !== OFFLINE_MODEL && <MakerMark maker={makerOf(value)} />}
         <span className="model-picker-text">
           <span className="t-body" id={nameId}>{current ? shortName(current) : value ? modelNameFromId(value) : 'Choose a model'}</span>
           {current && <span className="t-meta lw-settings-quiet">{current.free ? 'Free' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}</span>}

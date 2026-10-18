@@ -537,9 +537,63 @@ select.input, .inspector-fields label > select { appearance: none; -webkit-appea
 .thinking-label { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
 .thinking-label label { color: var(--color-ink-2); }
 .thinking-label output { color: var(--color-ink); }
-.thinking-slider { width: 100%; height: 18px; accent-color: var(--color-accent); cursor: pointer; }
-.thinking-slider:disabled { cursor: default; opacity: .5; }
-.thinking-scale { display: flex; justify-content: space-between; color: var(--color-ink-3); }
+/* The effort slider: a thin track filled in gold up to the thumb, a dot at every stop, each stop
+   named under its dot, and a line under that saying what the chosen stop is good for. The stops
+   and names sit half a thumb in from each end, where the thumb's middle stops. */
+.thinking-field { --thinking-thumb: 18px; }
+.thinking-track { position: relative; display: block; height: var(--thinking-thumb); }
+/* The track is drawn here, under the dots, so the input on top shows only its thumb. */
+.thinking-track::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 4px; transform: translateY(-50%);
+  border-radius: var(--r-full);
+  background: linear-gradient(to right, var(--color-accent) var(--thinking-fill), color-mix(in srgb, var(--color-ink) 16%, transparent) var(--thinking-fill));
+}
+.thinking-field input.thinking-slider {
+  -webkit-appearance: none; appearance: none; position: relative; z-index: 1; display: block; width: 100%; height: 100%;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: none; cursor: pointer;
+}
+.thinking-slider::-webkit-slider-runnable-track { height: 4px; background: none; }
+.thinking-slider::-moz-range-track { height: 4px; background: none; }
+.thinking-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: var(--thinking-thumb); height: var(--thinking-thumb); margin-top: calc((4px - var(--thinking-thumb)) / 2);
+  border-radius: 50%; background: var(--color-panel-solid); border: 2px solid var(--color-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform 120ms var(--ease-out);
+}
+.thinking-slider::-moz-range-thumb {
+  width: var(--thinking-thumb); height: var(--thinking-thumb); box-sizing: border-box;
+  border-radius: 50%; background: var(--color-panel-solid); border: 2px solid var(--color-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+}
+.thinking-slider:hover:not(:disabled)::-webkit-slider-thumb, .thinking-slider:active:not(:disabled)::-webkit-slider-thumb { transform: scale(1.1); }
+.thinking-field input.thinking-slider:focus { outline: none; }
+.thinking-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 35%, transparent); }
+.thinking-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 35%, transparent); }
+.thinking-field input.thinking-slider:disabled { cursor: default; opacity: 1; }
+.thinking-track:has(.thinking-slider:disabled) { opacity: .5; }
+.thinking-stops { position: absolute; inset: 0 calc(var(--thinking-thumb) / 2); pointer-events: none; }
+.thinking-stops i {
+  position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%);
+  background: var(--color-panel-solid); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-ink) 28%, transparent);
+}
+/* A passed stop keeps its hollow middle, so it still shows on the gold. */
+.thinking-stops i.on { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.thinking-scale { position: relative; display: block; height: 16px; margin: 0 calc(var(--thinking-thumb) / 2); color: var(--color-ink-3); }
+.thinking-scale > span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.thinking-scale > span:first-child { transform: translateX(calc(var(--thinking-thumb) / -2)); }
+.thinking-scale > span:last-child { transform: translateX(calc(-100% + var(--thinking-thumb) / 2)); }
+.thinking-scale > span.on { color: var(--color-ink); font-weight: 500; }
+.thinking-about {
+  display: flex; flex-direction: column; gap: var(--sp-2); margin-top: 2px; padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+.thinking-about > .t-meta { color: var(--color-ink-2); }
+.thinking-meters { display: flex; flex-wrap: wrap; gap: var(--sp-4); color: var(--color-ink-3); }
+.thinking-meter { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.thinking-pips { display: inline-flex; gap: 3px; }
+.thinking-pips i { width: 14px; height: 4px; border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 16%, transparent); }
+.thinking-pips i.on { background: var(--color-accent); }
 .input::placeholder { color: var(--color-ink-3); }
 .input:focus { outline: 0; border-color: var(--color-accent); }
 .input:read-only { color: var(--color-ink-2); }
@@ -743,6 +797,9 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
   min-height: 34px; padding: 0 var(--sp-3);
   border-radius: var(--r-sm); color: var(--color-ink-2);
   cursor: pointer; background: none; border: 0; width: 100%; text-align: left;
+  /* A row keeps its height when the list scrolls. A flex column squeezes its items down to
+     min-height, and a two-line row's second line would spill out under the next row. */
+  flex-shrink: 0;
 }
 .pop-row.current { background: var(--color-accent-tint); }
 /* accent-tint is about the panel's own value in dark (#1A1508 on #131316), so the row under the

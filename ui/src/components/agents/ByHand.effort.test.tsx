@@ -48,6 +48,19 @@ describe('By hand: its model and how hard it thinks', () => {
     expect(set).toHaveBeenCalledWith('effort', '')
   })
 
+  it('names every stop, and says what the chosen one is good for and what thinking costs on this model', async () => {
+    renderByHand({ effort: 'low' })
+    const slider = screen.getByRole('slider', { name: 'Thinking effort' })
+    expect(slider).toHaveAccessibleDescription(/quick think: the fastest and cheapest/)
+    expect(await screen.findByText('Thinking is paid for like writing: $10 per million tokens on Claude Opus 5.5.')).toBeInTheDocument()
+    cleanup()
+    renderByHand({ effort: 'high' })
+    expect(screen.getByRole('slider', { name: 'Thinking effort' })).toHaveAccessibleDescription(/long think: the slowest, and it costs the most/)
+    cleanup()
+    renderByHand({ effort: '' })
+    expect(screen.getByRole('slider', { name: 'Thinking effort' })).toHaveAccessibleDescription(/Left to the model/)
+  })
+
   it('offers no effort on a model that doesn’t reason separately', async () => {
     renderByHand({ model: plain.id })
     expect(await screen.findByText('This model doesn’t reason separately, so it has no effort setting.')).toBeInTheDocument()
