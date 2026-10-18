@@ -314,6 +314,8 @@
 .byhand-cards li b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .byhand-cards li span:not(.byhand-card-tab) { grid-column: 1; font-size: 11.5px; color: #56524A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .byhand-cards li .iconbtn { position: relative; z-index: 1; grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #17150F; }
+/* The card is paper in both themes, so its + darkens the paper on hover rather than taking the theme's tint (near-black in dark). */
+.byhand-cards li .iconbtn:hover { background: rgba(23, 21, 15, .1); color: #17150F; }
 /* A card's words open it to be read, and the whole card is their button: all but its +. */
 .byhand-card-open { grid-column: 1; grid-row: 1 / span 2; display: grid; gap: 2px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .byhand-card-open::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-md); }

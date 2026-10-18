@@ -222,9 +222,10 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const toolsOff = draft.tools.length > TOOL_SLOTS ? ` (${draft.tools.length - TOOL_SLOTS} not in the drawer)` : ''
   const readsText = !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : readsOff ? `Reads · ${reads.length}${readsOff}` : `Reads · ${readCount(reads)}`
   const toolsText = !draft.tools.length ? 'Tools · none yet' : draft.tools.length === 1 ? `Tools · ${draft.tools[0]}` : `Tools · ${draft.tools.length}${toolsOff}`
-  // What each setting adds up to, in words: the line under each block's title.
+  // What each setting adds up to, in words: the line under each block's title. Name has none: its
+  // boxes already say all of it, and a line above them said the name twice.
   const says: Record<Exclude<FigurePart, 'app'>, string> = {
-    name: hideDoes || !draft.does.trim() ? name : `${name} · ${draft.does.trim()}`,
+    name: '',
     job: draft.instructions.trim() ? `Says ${parts} of the ${INSTRUCTION_PARTS.length} things good instructions say: its job, how to work, how it checks its work, and what it replies with` : 'Nothing written yet',
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
@@ -266,7 +267,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           <h3 id={`${ids}-${part}`}>{meta.title}</h3>
           <span className="byhand-block-where">{meta.where}</span>
         </header>
-        <p className="byhand-block-says">{says[part]}</p>
+        {says[part] && <p className="byhand-block-says">{says[part]}</p>}
         {body}
         {extra}
       </section>
@@ -299,7 +300,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
         {/* Kept while chatting, only hidden: what you were writing in a block is there when you come back. */}
         <div className="byhand-blocks" data-tour="agent-blocks" hidden={chatting}>
           {block('name', <div className="agent-field-row">
-            <label className="agent-field">Name<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
+            {/* Its only box is under the block's own "Name", so that word isn't shown twice. */}
+            <label className="agent-field">{hideDoes ? <span className="visually-hidden">Name</span> : 'Name'}<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
             {!hideDoes && <label className="agent-field"><span>What it does <span className="optional">optional</span></span><input value={draft.does} maxLength={120} onChange={(event) => set('does', event.target.value)} placeholder="Shown under its name" /></label>}
           </div>)}
 
@@ -487,7 +489,7 @@ function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag, onMa
               <b>{item.name}</b>
               <span id={`${ids}-${item.id}`}>{item.detail || item.source}</span>
             </button>
-            <button type="button" className="iconbtn" aria-label={words.give(item.name)} onClick={() => onAdd(item.name)}><Plus size={13} aria-hidden="true" /></button>
+            <button type="button" className="iconbtn" aria-label={words.give(item.name)} title={words.give(item.name)} onClick={() => onAdd(item.name)}><Plus size={13} aria-hidden="true" /></button>
           </li>
         ))}
       </ul>
