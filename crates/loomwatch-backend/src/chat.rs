@@ -234,7 +234,9 @@ impl ChatStore {
         rows.iter().map(decode_message).collect()
     }
 
-    /// Every note and team note before `before`, newest first: what the conversation reads.
+    /// Every note and team note up to `before`, newest first: what the conversation reads.
+    /// Timestamps have millisecond resolution, so a note sent the same millisecond the run was
+    /// created counts as before it; the caller leaves out the run's own messages by run id.
     async fn notes(
         &self,
         team: &TeamRef,
@@ -244,7 +246,7 @@ impl ChatStore {
         let rows = sqlx::query(
             "SELECT * FROM chat_messages
              WHERE (team_key = $1 OR team_path = $2) AND route IN ('note', 'team_note')
-               AND created_at < $3
+               AND created_at <= $3
              ORDER BY created_at DESC, id DESC LIMIT $4",
         )
         .bind(&team.key)
