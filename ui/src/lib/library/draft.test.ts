@@ -7,7 +7,7 @@ import { ROLE_PRESETS } from './roles'
 
 describe('the agent builder’s draft', () => {
   it('saves what it shows and reads back the same', () => {
-    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', model: 'sonnet', effort: '', skills: ['source-check'], tools: ['github'], toolAllow: {}, doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
+    const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', model: 'sonnet', effort: '', skills: ['source-check'], tools: ['github'], toolAllow: {}, reads: [], doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
     const spec = specFromDraft(draft, 'First cut')
     expect(spec).toEqual({ name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', icon: 'review', figure: { kind: 'button', color: 'sage' }, model: 'sonnet', skills: ['source-check'], tools: ['github'], allow: { web: true }, note: 'First cut' })
     expect(draftFromJob(spec)).toEqual({ ...draft, allow: { web: true } })
@@ -78,13 +78,13 @@ describe('the agent builder’s draft', () => {
   })
 
   it('chats with it at its thinking effort', () => {
-    const draft = { name: 'Reader', does: '', instructions: 'Check.', model: 'opus', effort: 'max', skills: [], tools: [], toolAllow: {}, doneWhen: [], allow: {}, figure: null }
+    const draft = { name: 'Reader', does: '', instructions: 'Check.', model: 'opus', effort: 'max', skills: [], tools: [], toolAllow: {}, reads: [], doneWhen: [], allow: {}, figure: null }
     const team = parse(chatTeamYaml(draft, 'opus', 'reader')) as { agents: Record<string, unknown>[] }
     expect(team.agents[0]).toMatchObject({ model: 'opus', thinkingEffort: 'max' })
   })
 
   it('chats with it as a team of one, on its model, in the team file’s own folder', () => {
-    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', model: '', effort: '', skills: ['house-style'], tools: ['github'], toolAllow: {}, doneWhen: [], allow: { web: true }, figure: null }
+    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', model: '', effort: '', skills: ['house-style'], tools: ['github'], toolAllow: {}, reads: [], doneWhen: [], allow: { web: true }, figure: null }
     const team = parse(chatTeamYaml(draft, 'anthropic/claude-sonnet-5.5', 'release-notes-writer')) as Record<string, unknown>
     expect(team).toEqual({
       schemaVersion: 1,
@@ -103,18 +103,43 @@ describe('the agent builder’s draft', () => {
   })
 
   it('chats inside a team with what the team gives it to read, beside its own skills and tools', () => {
-    const draft = { name: 'Researcher', does: '', instructions: 'Find sources.', model: '', effort: '', skills: ['source-check'], tools: ['github'], toolAllow: {}, doneWhen: [], allow: {}, figure: null }
+    const draft = { name: 'Researcher', does: '', instructions: 'Find sources.', model: '', effort: '', skills: ['source-check'], tools: ['github'], toolAllow: {}, reads: [], doneWhen: [], allow: {}, figure: null }
     const knowledge = [{ kind: 'knowledge' as const, name: 'notes', path: '/Users/me/notes' }, { kind: 'knowledge' as const, name: 'Hub', notion: { page: 'abc' } }]
     const team = parse(chatTeamYaml(draft, 'sonnet', 'researcher', knowledge)) as { agents: Record<string, unknown>[] }
     expect(team.agents[0].capabilities).toEqual([...knowledge, { kind: 'skill', name: 'source-check' }, { kind: 'tool', name: 'github' }])
     const bare = parse(chatTeamYaml({ ...draft, skills: [], tools: [] }, 'sonnet', 'researcher', knowledge)) as typeof team
     expect(bare.agents[0].capabilities).toEqual(knowledge)
-    // In Your agents it reads nothing: that is a team's to give (ADR 0042).
+    // Given nothing to read in Your agents, its chat reads nothing.
     expect(parse(chatTeamYaml({ ...draft, skills: [], tools: [] }, 'sonnet', 'researcher'))).not.toHaveProperty('agents.0.capabilities')
   })
 
+  it('reads in its chat what it reads in every team, and each folder, file or page once', () => {
+    const reads = [{ name: 'Brand', path: '/Users/me/brand' }, { name: 'Roadmap', notion: { page: 'ABC-1' } }]
+    const draft = { ...BLANK_DRAFT, name: 'Writer', instructions: 'Write.', reads }
+    const own = parse(chatTeamYaml(draft, 'sonnet', 'writer')) as { agents: Record<string, unknown>[] }
+    expect(own.agents[0].capabilities).toEqual([{ kind: 'knowledge', name: 'Brand', path: '/Users/me/brand' }, { kind: 'knowledge', name: 'Roadmap', notion: { page: 'ABC-1' } }])
+    // In a team that copied them, and gives it one more, each is read once.
+    const knowledge = [{ kind: 'knowledge' as const, name: 'Brand', path: '/Users/me/brand' }, { kind: 'knowledge' as const, name: 'Road map', notion: { page: 'abc1' } }, { kind: 'knowledge' as const, name: 'notes', path: 'team.files/notes.md' }]
+    const inTeam = parse(chatTeamYaml(draft, 'sonnet', 'writer', knowledge)) as typeof own
+    expect(inTeam.agents[0].capabilities).toEqual(knowledge)
+  })
+
+  it('saves what it reads, and a change to it is a new version', () => {
+    const draft = { ...BLANK_DRAFT, name: 'Writer', instructions: 'Write.', reads: [{ name: 'Brand', path: '/Users/me/brand' }] }
+    const spec = specFromDraft(draft)
+    expect(spec.reads).toEqual([{ name: 'Brand', path: '/Users/me/brand' }])
+    expect(specFromDraft({ ...draft, reads: [] })).not.toHaveProperty('reads')
+    const saved = draftFromJob(spec)
+    expect(saved.reads).toEqual(draft.reads)
+    expect(makesNewVersion({ ...saved, reads: [] }, saved)).toBe(true)
+    expect(makesNewVersion({ ...saved, reads: [{ name: 'Brand', path: '/Users/me/other' }] }, saved)).toBe(true)
+    expect(makesNewVersion({ ...saved, reads: [{ name: 'Brand', path: '/Users/me/brand' }] }, saved)).toBe(false)
+    // A built-in job starts reading nothing.
+    expect(draftFromPreset(ROLE_PRESETS[0]).reads).toEqual([])
+  })
+
   it('keeps its chat’s agent under the chat’s id, whatever the agent is called', () => {
-    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', model: '', effort: '', skills: [], tools: [], toolAllow: {}, doneWhen: [], allow: {}, figure: null }
+    const draft = { name: 'Release notes writer', does: '', instructions: 'Write the notes.', model: '', effort: '', skills: [], tools: [], toolAllow: {}, reads: [], doneWhen: [], allow: {}, figure: null }
     const before = parse(chatTeamYaml(draft, 'sonnet', 'notes')) as { id: string; name: string; entrypoint: string; agents: { id: string; name: string }[] }
     const renamed = parse(chatTeamYaml({ ...draft, name: 'Changelog writer' }, 'sonnet', 'notes')) as typeof before
     expect(before).toMatchObject({ id: 'bench-notes', name: 'Release notes writer · chat', entrypoint: 'notes', agents: [{ id: 'notes', name: 'Release notes writer' }] })

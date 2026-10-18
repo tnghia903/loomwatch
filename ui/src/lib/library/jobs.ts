@@ -5,13 +5,14 @@ import { daemonFetch } from '../daemonFetch'
 import { safeFileStem } from '../files/paths'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
 import type { FigureChoice } from './figures'
+import type { AgentRead } from './reads'
 import { ROLE_ICON_IDS, type RoleIcon, type RolePreset } from './roles'
 
 /**
  * Your agents: agents the operator built or saved for reuse (ADR 0030 began them as saved jobs).
  *
- * Each is its instructions, the model it runs on, its skills and tools, and what it may do
- * without asking. The daemon stores each one as `<teams root>/.jobs/<id>.yaml` and numbers its versions;
+ * Each is its instructions, the model it runs on, its skills and tools, what it reads, and what it
+ * may do without asking. The daemon stores each one as `<teams root>/.jobs/<id>.yaml` and numbers its versions;
  * the palette lists them under "Your agents". Placing one copies its current version's fields into
  * the team with a `from: {agent, version}` link (lib/library/link.ts), so the team runs exactly
  * what it was approved with until the operator chooses Update there.
@@ -37,6 +38,9 @@ export interface JobSpec {
   /** Calls of those tools it may make without asking, by tool name (ADR 0069). A team copies each
       list into the tool's `alwaysAllow`. */
   toolAllow?: Record<string, string[]>
+  /** The folders, files and Notion pages it reads in every team it joins; a team copies each into
+      its capabilities as knowledge, and can give it more. */
+  reads?: AgentRead[]
   /** What the finished result must satisfy (ADR 0062), copied into a team with the rest. */
   doneWhen?: string[]
   /** What it may do without asking (ADR 0037); only switches that are on are written. */
@@ -231,6 +235,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     ...(job.skills?.length ? { skills: job.skills } : {}),
     ...(job.tools?.length ? { tools: job.tools } : {}),
     ...(job.toolAllow && Object.keys(job.toolAllow).length ? { toolAllow: job.toolAllow } : {}),
+    ...(job.reads?.length ? { reads: job.reads } : {}),
     ...(job.doneWhen?.length ? { doneWhen: job.doneWhen } : {}),
     ...(allow ? { allow } : {}),
     from: { agent: job.id, version: versionOf(job) },

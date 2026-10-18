@@ -288,11 +288,18 @@
 .byhand-keys li span { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; color: var(--color-ink); }
 .byhand-keys li em { font-style: normal; font-size: 12.5px; color: var(--color-ink-2); }
 .byhand-reads { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
-.byhand-reads li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-3); align-items: center; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--color-hairline); color: var(--color-ink-2); }
+.byhand-reads li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--color-hairline); color: var(--color-ink-2); }
+/* What a team gives it besides its own, changed in that team's Workflow: dashed, like a given card. */
+.byhand-reads li.team { border-style: dashed; }
 .byhand-reads li span { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13.5px; color: var(--color-ink); }
 .byhand-reads li b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .byhand-reads li em { font-style: normal; font-size: 12.5px; color: var(--color-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.byhand-reply { margin: 0; padding: var(--sp-3) var(--sp-4); border-left: 3px solid var(--color-accent); background: var(--color-ground); border-radius: var(--r-sm); font-size: 14px; color: var(--color-ink); }
+.byhand-reads li em.byhand-reads-team { color: var(--color-ink-3); }
+/* Give it a folder, a file or a Notion page: a row of buttons under what it reads. */
+.byhand-reads-give { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.byhand-reads-give .btn { text-decoration: none; }
+/* What it hands back: the reply part of its instructions, written here as well as there. */
+.agent-instructions.byhand-reply-field { min-height: 72px; }
 .byhand-shelf { display: flex; flex-direction: column; gap: var(--sp-2); }
 .byhand-shelf > .t-meta { margin: 0; color: var(--color-ink-3); }
 /* To the skills marketplace: under the cards, the size of its words (a typed search can be long). */

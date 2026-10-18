@@ -1,13 +1,18 @@
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { FileText, Folder, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
+import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import { useModels } from '../../lib/ai/useModels'
+import { uniqueLabel } from '../../lib/composer-layout/types'
 import { listNames, middleTruncate } from '../../lib/format'
+import { addAgentFile } from '../../lib/knowledge/client'
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
-import { replyLine } from '../../lib/library/desk'
+import { replyLine, replySays, replySection, withReply } from '../../lib/library/desk'
+import { knowledgeOf, readKey, type AgentRead } from '../../lib/library/reads'
+import { readsOf } from '../../lib/library/teamDraft'
+import { CONNECT_NOTION_HREF, useNotionConnection } from '../../lib/notion/connection'
 import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, READ_SLOTS, TOOL_SLOTS, type FigurePart, type ReadSource } from '../../lib/library/figure'
 import type { FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
@@ -16,9 +21,11 @@ import { useSessionEvents } from '../../lib/watch/useSessionEvents'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
-import { appendToRole, INSTRUCTION_PARTS, instructionShape, PART_STARTERS } from '../../lib/team-file/checkup'
+import { INSTRUCTION_PARTS, instructionShape } from '../../lib/team-file/checkup'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { DoneWhen } from '../canvas/DoneWhen'
+import { FolderPicker } from '../canvas/FolderPicker'
+import { NotionPagePicker } from '../canvas/NotionPagePicker'
 import { InstructionShape } from '../canvas/InstructionShape'
 import { EffortSlider } from '../models/EffortSlider'
 import { ModelPicker } from '../models/ModelPicker'
@@ -38,7 +45,7 @@ const SkillsMarket = lazy(() => import('../skills/SkillsMarket'))
  * The blocks are the way in: each says what its setting does, in words, so nobody needs to learn
  * the bench first. The bench is the picture of the same settings: the laptop shows the model it
  * thinks with, the nameplate the name, the clipboard the job, the cards on the pegboard the skills, the folders in
- * the file drawer what its team gives it to read, the wrenches in the tool drawer its tools,
+ * the file drawer what it reads, the wrenches in the tool drawer its tools,
  * the keys on the hooks what it may do without
  * asking (the ones in your dish ask you first), and the tray what it hands back. Clicking anything
  * on the bench takes you to its block, and working in a block lights its thing on the bench. While
@@ -62,12 +69,17 @@ export interface ByHandProps {
   /** Changes can't be kept here (a team you can't edit): every control shows, none applies. */
   readOnly?: boolean
   /**
-   * In a team: the folders, files and Notion pages the team gives it to read (teamDraft.ts
-   * readsOf), filed in the bench's file drawer. Absent in Your agents, where its file drawer stays
-   * shut and its block says each team it joins gives it what it reads.
+   * In a team: the folders, files and Notion pages the team's agent reads (teamDraft.ts readsOf).
+   * The drawer files them with its own (`draft.reads`), each once; absent in Your agents.
    */
   reads?: readonly ReadSource[]
-  /** In a team: open its Workflow, where what it reads is given with a line. */
+  /**
+   * A team's own agent: everything it reads is the team's to give, with a line in Workflow, so
+   * the block lists `reads` and gives it nothing itself. One of Your agents is given what it reads
+   * in every team (`draft.reads`) right in the block.
+   */
+  teamGivesReads?: boolean
+  /** In a team: open its Workflow, where the team gives it more to read with a line. */
   onShowWorkflow?: () => void
   /**
    * Its chat (its Chat tab), shown beside the bench instead of the blocks: the figure
@@ -92,7 +104,7 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamGivesReads = false, onShowWorkflow, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -121,7 +133,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   }, [chatting])
   const ids = useId()
   const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
-  const reply = replyLine(draft.instructions)
+  const replyPart = replySection(draft.instructions)
   const { mood, events } = useFigureMood(record)
   const given = FIGURE_KEYS.filter(({ key }) => draft.allow[key])
   const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key])
@@ -153,6 +165,18 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const givenTools = draft.tools.map((name) => ({ name, tool: toolNamed(connectedTools, name) }))
   const toGive = connectedTools.filter((tool) => !tool.pending && !draft.tools.some((name) => name.trim().toLowerCase() === tool.name.trim().toLowerCase()))
   const giveTool = (name: string) => { if (!draft.tools.some((given) => given.trim().toLowerCase() === name.trim().toLowerCase())) set('tools', [...draft.tools, name]) }
+  // What it reads: its own, in every team it joins, and in a team what that team gives it besides.
+  const ownReads = useMemo(() => (teamGivesReads ? [] : readsOf({ capabilities: knowledgeOf(draft.reads) })), [teamGivesReads, draft.reads])
+  const teamGiven = useMemo(() => {
+    const own = new Set(ownReads.map((source) => source.key))
+    return (teamReads ?? []).filter((source) => !source.key || !own.has(source.key))
+  }, [ownReads, teamReads])
+  const reads = useMemo(() => [...ownReads, ...teamGiven], [ownReads, teamGiven])
+  const giveRead = (read: AgentRead) => {
+    if (draft.reads.some((had) => readKey(had) === readKey(read))) return
+    set('reads', [...draft.reads, { ...read, name: uniqueLabel(read.name, new Set(draft.reads.map((had) => had.name))) }])
+    setFocus('reads')
+  }
 
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.model, model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },
@@ -166,8 +190,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     asked,
     open: focus,
     dropping: dragging === 'skill',
-    // Outside a team its file drawer stays shut: what it reads is given by each team it joins.
-    reads: reads ?? [],
+    reads,
     tools: draft.tools,
   }), [draft, figure, model, mood, events, asked, focus, dragging, reads])
 
@@ -194,9 +217,9 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   // More than a drawer has room for still count, as skills past the pegboard's do: the label says
   // how many aren't in it. It gives only the total then, so the two drawers' labels stay short
   // enough to sit side by side.
-  const readsOff = reads && reads.length > READ_SLOTS ? ` (${reads.length - READ_SLOTS} not in the drawer)` : ''
+  const readsOff = reads.length > READ_SLOTS ? ` (${reads.length - READ_SLOTS} not in the drawer)` : ''
   const toolsOff = draft.tools.length > TOOL_SLOTS ? ` (${draft.tools.length - TOOL_SLOTS} not in the drawer)` : ''
-  const readsText = !reads ? 'Reads · what a team gives' : !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : readsOff ? `Reads · ${reads.length}${readsOff}` : `Reads · ${readCount(reads)}`
+  const readsText = !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : readsOff ? `Reads · ${reads.length}${readsOff}` : `Reads · ${readCount(reads)}`
   const toolsText = !draft.tools.length ? 'Tools · none yet' : draft.tools.length === 1 ? `Tools · ${draft.tools[0]}` : `Tools · ${draft.tools.length}${toolsOff}`
   // What each setting adds up to, in words: the line under each block's title.
   const says: Record<Exclude<FigurePart, 'app'>, string> = {
@@ -204,10 +227,10 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     job: draft.instructions.trim() ? `Says ${parts} of the ${INSTRUCTION_PARTS.length} things good instructions say: its job, how to work, how it checks its work, and what it replies with` : 'Nothing written yet',
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
-    reads: !reads ? 'Each team it joins gives it what it reads' : reads.length ? `Reads ${readCount(reads)} the team gives it` : 'The team gives it nothing to read yet',
+    reads: readsSay(ownReads, teamGiven, teamGivesReads),
     tools: toolsSay(givenTools, connected.state === 'loading'),
     keys: given.length ? `Goes ahead with ${given.map((item) => item.word.toLowerCase()).join(' and ')}${kept.length ? `; asks you first for ${kept.map((item) => item.word.toLowerCase()).join(' and ')}` : ''}` : 'Asks you before it searches the web, changes files or runs a command',
-    reply: reply ?? 'Its instructions don’t say yet',
+    reply: replyPart ? replySays(replyPart.text) : 'Its instructions don’t say yet',
   }
   const labels: BenchLabel[] = [
     { anchor: 'mind', part: 'mind', place: 'right', text: <>Thinks with <b>{model}</b>{effort && <> · {effort.name.toLowerCase()}</>}</>, short: <b>{model}</b>, label: `The figure, the model it thinks with: ${thinks}` },
@@ -215,9 +238,9 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     { anchor: 'skills', part: 'skills', place: 'above', text: `Skills · ${draft.skills.length || 'none yet'}${more}`, short: `Skills · ${draft.skills.length}`, label: `The recipe cards: ${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'}` },
     { anchor: 'keys', part: 'keys', place: 'above', text: keysText, short: `Keys · ${given.length}`, label: `The key hooks: ${keysText}` },
     { anchor: 'dish', part: 'keys', place: 'below', text: dishText, short: asking ? `Asking for ${asking}` : `You keep ${kept.length}`, label: `Your dish: ${dishText}` },
-    { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${reply ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
+    { anchor: 'reply', part: 'reply', place: 'above', text: `Hands back · ${replyPart ? 'see the tray' : 'not said yet'}`, short: 'Hands back', label: 'The tray: what it hands back' },
     // Under the bench's two drawers, on its face: what it works with, apart from the work on top.
-    { anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads?.length ?? 0}`, label: `The file drawer: ${says.reads}${readsOff}` },
+    { anchor: 'reads', part: 'reads', place: 'below', text: readsText, short: `Reads · ${reads.length}`, label: `The file drawer: ${says.reads}${readsOff}` },
     { anchor: 'tools', part: 'tools', place: 'below', text: toolsText, short: `Tools · ${draft.tools.length}`, label: `The tool drawer: ${says.tools}${toolsOff}` },
     { anchor: 'name', part: 'name', place: 'plate', label: `The nameplate: ${name}` },
     { anchor: 'app', part: 'app', place: 'plate', label: `The laptop, the model it thinks with: ${model}` },
@@ -293,17 +316,17 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
 
           {block('skills', <Shelf kind="skill" chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} onMarket={readOnly ? undefined : (query) => setMarket({ query })} fromMarket={fromMarket.filter((skill) => draft.skills.includes(skill))} />)}
 
-          {block('reads', !reads ? <p className="t-meta">A folder, file or Notion page is given in a team: draw a line from it to this agent in the team’s Workflow.</p> : <>
-            {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file drawer">
-              {reads.map((source, index) => {
-                const Icon = source.kind === 'page' ? NotebookText : source.kind === 'file' ? FileText : Folder
-                return <li key={`${source.kind}:${source.where}:${index}`}><Icon size={15} aria-hidden="true" /><span><b>{source.name}</b><em title={source.where}>{source.kind === 'page' ? source.where : `${source.kind === 'file' ? 'File' : 'Folder'} · ${middleTruncate(source.where, 64)}`}</em></span></li>
-              })}
-            </ul>}
-            {reads.length > READ_SLOTS && <p className="t-meta">The drawer has room for {READ_SLOTS}, so {listNames(reads.slice(READ_SLOTS).map((source) => source.name))} {reads.length - READ_SLOTS === 1 ? 'isn’t' : 'aren’t'} in it. It still reads {reads.length - READ_SLOTS === 1 ? 'it' : 'them'}.</p>}
-            <p className="t-meta">What it reads is the team’s to give: draw a line from a folder, file or Notion page to this agent in Workflow.</p>
-            {onShowWorkflow && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{reads.length ? 'Change it in Workflow' : 'Give it something in Workflow'}</button>}
-          </>)}
+          {block('reads', <Reads
+            reads={reads}
+            own={ownReads.length}
+            teamGives={teamGivesReads}
+            inTeam={teamReads !== undefined}
+            readOnly={readOnly}
+            agentName={draft.name.trim() || 'your new agent'}
+            onGive={giveRead}
+            onTakeAway={(key) => set('reads', draft.reads.filter((read) => readKey(read) !== key))}
+            onShowWorkflow={onShowWorkflow}
+          />)}
 
           {block('tools', <>
             <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as its keys below allow.</p>
@@ -370,10 +393,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             })}
           </ul>)}
 
-          {block('reply', <>
-            {reply && <blockquote className="byhand-reply">{reply}</blockquote>}
-            <button type="button" className="btn" onClick={() => { if (!shape.reply) set('instructions', appendToRole(draft.instructions, PART_STARTERS.reply)); goTo('job'); window.setTimeout(() => { const field = roleField.current; if (field) { field.focus(); field.setSelectionRange(field.value.length, field.value.length) } }, 0) }}>{reply ? 'Change it in the instructions' : 'Say what it replies with'}</button>
-          </>)}
+          {block('reply', <ReplyField role={draft.instructions} readOnly={readOnly} onChange={(role) => set('instructions', role)} />)}
         </div>
       </div>
       {market && <Suspense fallback={null}><SkillsMarket agentName={draft.name.trim() || 'your new agent'} query={market.query} onClose={backFromMarket} /></Suspense>}
@@ -460,13 +480,147 @@ function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag, onMa
 }
 
 /** The bench in one sentence, for anyone who reads rather than looks, and for screen readers. */
-function sentence(draft: AgentDraft, model: string, reads?: readonly ReadSource[]): ReactNode {
+function sentence(draft: AgentDraft, model: string, reads: readonly ReadSource[]): ReactNode {
   const name = draft.name.trim() || 'This agent'
   const has = FIGURE_KEYS.filter(({ key }) => draft.allow[key]).map(({ word }) => word.toLowerCase())
   const keys = has.length ? `It has the ${has.join(' and ')} key${has.length === 1 ? '' : 's'}; for anything else it asks you first.` : 'It has no keys, so it asks you before it searches the web, changes files or runs a command.'
   const skills = draft.skills.length ? `${draft.skills.length} recipe card${draft.skills.length === 1 ? '' : 's'}` : 'no recipe cards yet'
-  if (reads) return <><b>{name}</b> thinks with {model}, has {skills}, and reads {reads.length ? readCount(reads) : 'nothing yet'}. {keys}</>
-  return <><b>{name}</b> thinks with {model} and has {skills}. {keys}</>
+  return <><b>{name}</b> thinks with {model}, has {skills}, and reads {reads.length ? readCount(reads) : 'nothing yet'}. {keys}</>
+}
+
+/**
+ * What it reads, in words, for the line under the block's title: what it reads in every team, and
+ * in a team what that team gives it besides. A team's own agent reads only what the team gives it.
+ */
+function readsSay(own: readonly ReadSource[], teamGives: readonly ReadSource[], teamOnly: boolean): string {
+  if (teamOnly) return teamGives.length ? `Reads ${readCount(teamGives)} the team gives it` : 'The team gives it nothing to read yet'
+  if (!own.length) return teamGives.length ? `Reads ${readCount(teamGives)} this team gives it` : 'Nothing yet'
+  const everywhere = `Reads ${readCount(own)} in every team it joins`
+  return teamGives.length ? `${everywhere}, and ${readCount(teamGives)} this team gives it` : everywhere
+}
+
+/**
+ * The file drawer's block: what it reads, each with where it is. One of Your agents is given a
+ * folder, a file or a Notion page right here, and reads it in every team it joins; a file is kept
+ * in the teams folder's `.jobs/.files/`, so every team reads the same one. What a team gives it
+ * besides is listed after, and is changed in that team's Workflow. A team's own agent is given
+ * everything there (`teamGives`).
+ */
+function Reads({ reads, own, teamGives, inTeam, readOnly, agentName, onGive, onTakeAway, onShowWorkflow }: { reads: readonly ReadSource[]; own: number; teamGives: boolean; inTeam: boolean; readOnly: boolean; agentName: string; onGive: (read: AgentRead) => void; onTakeAway: (key: string) => void; onShowWorkflow?: () => void }) {
+  const [picking, setPicking] = useState<'folder' | 'page' | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [notes, setNotes] = useState<{ text: string; failed: boolean }[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
+  const giving = !teamGives && !readOnly
+  // Notion is asked about only once the agent can be given something here.
+  const notion = useNotionConnection(giving)
+
+  const addFiles = async (files: readonly File[]) => {
+    if (!files.length) return
+    setAdding(true)
+    const next: { text: string; failed: boolean }[] = []
+    for (const file of files) {
+      try {
+        const stored = await addAgentFile(file)
+        onGive({ name: stored.name, path: stored.path })
+        if (stored.note) next.push({ text: `${stored.name}: ${stored.note}`, failed: false })
+      } catch (caught) {
+        next.push({ text: `${file.name} wasn’t added: ${caught instanceof Error ? caught.message : String(caught)}`, failed: true })
+      }
+    }
+    setNotes(next)
+    setAdding(false)
+  }
+
+  const workflowLabel = teamGives || !own ? (reads.length ? 'Change it in Workflow' : 'Give it something in Workflow') : 'Give it more in Workflow'
+  return (
+    <>
+      {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file drawer">
+        {reads.map((source, index) => {
+          const Icon = source.kind === 'page' ? NotebookText : source.kind === 'file' ? FileText : Folder
+          const mine = !teamGives && index < own
+          return (
+            <li key={`${source.key ?? `${source.kind}:${source.where}`}:${index}`} className={!mine && !teamGives ? 'team' : undefined}>
+              <Icon size={15} aria-hidden="true" />
+              <span>
+                <b>{source.name}</b>
+                <em title={source.where}>{source.kind === 'page' ? source.where : `${source.kind === 'file' ? 'File' : 'Folder'} · ${middleTruncate(source.where, 64)}`}</em>
+                {!mine && !teamGives && <em className="byhand-reads-team">This team gives it</em>}
+              </span>
+              {mine && giving && source.key && <button type="button" className="iconbtn" aria-label={`Stop reading ${source.name}`} onClick={() => onTakeAway(source.key!)}><X size={12} aria-hidden="true" /></button>}
+            </li>
+          )
+        })}
+      </ul>}
+      {reads.length > READ_SLOTS && <p className="t-meta">The drawer has room for {READ_SLOTS}, so {listNames(reads.slice(READ_SLOTS).map((source) => source.name))} {reads.length - READ_SLOTS === 1 ? 'isn’t' : 'aren’t'} in it. It still reads {reads.length - READ_SLOTS === 1 ? 'it' : 'them'}.</p>}
+      {giving && <>
+        <div className="byhand-reads-give" role="group" aria-label="Give it something to read">
+          <button type="button" className="btn" onClick={() => setPicking('folder')}><FolderPlus size={14} aria-hidden="true" />Folder</button>
+          <button type="button" className="btn" disabled={adding} onClick={() => fileInput.current?.click()}><FilePlus2 size={14} aria-hidden="true" />{adding ? 'Adding…' : 'File'}</button>
+          {notion.state === 'connected'
+            ? <button type="button" className="btn" onClick={() => setPicking('page')}><NotebookText size={14} aria-hidden="true" />Notion page</button>
+            : notion.state === 'disconnected'
+              ? <a className="btn" href={CONNECT_NOTION_HREF} target="_blank" rel="noopener" title="Connect Notion first, then choose a page"><NotebookText size={14} aria-hidden="true" />Notion page<ExternalLink size={12} aria-hidden="true" /></a>
+              : <button type="button" className="btn" disabled title={notion.state === 'unavailable' ? notion.message : 'Checking the Notion connection…'}><NotebookText size={14} aria-hidden="true" />Notion page</button>}
+          <input ref={fileInput} type="file" multiple hidden aria-label="Files it reads" onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files) }} />
+        </div>
+        {notes.length > 0 && <ul className="agent-context-notes" aria-live="polite">
+          {notes.map((note) => <li key={note.text} className={`t-meta ${note.failed ? 'failed' : ''}`} role={note.failed ? 'alert' : undefined}>{note.text}</li>)}
+        </ul>}
+      </>}
+      <p className="t-meta">{teamGives
+        ? 'What it reads is the team’s to give: draw a line from a folder, file or Notion page to this agent in Workflow.'
+        : inTeam
+          ? 'What you give it here, it reads in every team it joins. This team can give it more with a line in Workflow.'
+          : 'What you give it here, it reads in every team it joins. A folder is linked where it is; a file is copied into your teams folder. A team can give it more in its Workflow.'}</p>
+      {onShowWorkflow && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{workflowLabel}</button>}
+      {picking === 'folder' && <FolderPicker
+        onClose={() => setPicking(null)}
+        title={`Give ${agentName} a folder`}
+        note="It is given the folder’s list of files and its README, and may open the files in it, in every team it joins. The folder is linked, not copied, so every run sees what is in it then."
+        onChoose={(folder) => { setPicking(null); onGive({ name: folder.name, path: folder.path }) }}
+      />}
+      {picking === 'page' && <NotionPagePicker
+        agentName={agentName}
+        given={new Set(reads.flatMap((source) => source.key?.startsWith('notion:') ? [source.key.slice('notion:'.length)] : []))}
+        onClose={() => setPicking(null)}
+        onChoose={(page) => { setPicking(null); onGive({ name: page.title || 'Notion page', notion: { page: page.id } }) }}
+      />}
+    </>
+  )
+}
+
+/**
+ * What it hands back, written right here: the part of its instructions that says it (desk.ts
+ * `replySection`), so a change here is a change there. While you write in it, it keeps to the
+ * part you started in, even once it no longer reads like a reply; with none yet, what you write
+ * is added after the rest of its instructions.
+ */
+function ReplyField({ role, readOnly, onChange }: { role: string; readOnly: boolean; onChange: (role: string) => void }) {
+  const [held, setHeld] = useState<{ role: string; start: number; text: string } | null>(null)
+  // The part being written in, as long as nothing else has changed the instructions since.
+  const part = held?.role === role ? held : replySection(role)
+  const text = part?.text ?? ''
+  const write = (next: string) => {
+    if (readOnly) return
+    const written = withReply(role, part, next)
+    setHeld({ role: written.role, ...written.section })
+    onChange(written.role)
+  }
+  return (
+    <>
+      <textarea
+        className="agent-instructions byhand-reply-field"
+        rows={Math.min(10, Math.max(3, text.split('\n').length + 1))}
+        value={text}
+        readOnly={readOnly}
+        onChange={(event) => write(event.target.value)}
+        placeholder="e.g. Reply with a three-line summary, then each source as a link."
+        aria-label="What it hands back"
+      />
+      <p className="t-meta">Part of its instructions. Say what it replies with, and in what shape: the next agent, or you, gets exactly that.</p>
+    </>
+  )
 }
 
 /** What it reads, counted in words: "1 folder", "2 folders and 1 Notion page". */

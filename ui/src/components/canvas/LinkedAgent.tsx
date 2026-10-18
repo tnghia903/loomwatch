@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowUpCircle, ExternalLink, Unlink } from 'lucide-react'
 
-import { fetchJobVersions, type JobVersion, type SavedJob } from '../../lib/library/jobs'
+import { fetchJobVersions, type JobSpec, type JobVersion, type SavedJob } from '../../lib/library/jobs'
 import { changedHere, type AgentLinkState } from '../../lib/library/link'
 import type { AgentConfig } from '../../lib/team-file/types'
 
@@ -9,8 +9,9 @@ export interface LinkedAgentProps {
   agent: AgentConfig
   link: AgentLinkState
   readOnly?: boolean
-  /** Write that version of the agent into this team: Update, or putting back the version it has. */
-  onApply: (job: SavedJob) => void
+  /** Write that version of the agent into this team: Update, or putting back the version it has.
+      `previous` is the version it has, when known, so what only that version read is taken away. */
+  onApply: (job: SavedJob, previous: JobSpec | null) => void
   /** Drop the link: the agent becomes this team's own, exactly as it is now. */
   onUnlink: () => void
   /** The open team, so Your agents can offer the way back to it. */
@@ -42,7 +43,7 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
   const newer = (versions ?? []).filter((version) => version.version > link.version)
   const notes = newer.map((version) => version.note?.trim()).filter((note): note is string => Boolean(note))
   const name = link.job?.name ?? id
-  const putBack = pinned && link.job ? () => onApply({ ...pinned.spec, id, file: link.job!.file }) : null
+  const putBack = pinned && link.job ? () => onApply({ ...pinned.spec, id, file: link.job!.file }, pinned.spec) : null
 
   return (
     <section className="build-context linked-agent" aria-label="From Your agents">
@@ -52,7 +53,7 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
       {link.behind && link.latest !== null && (
         <div className="linked-agent-update">
           <p><b>v{link.latest} is ready.</b>{notes.length > 0 ? ` ${notes.join(' · ')}` : ''}</p>
-          <button type="button" className="btn btn-primary" disabled={readOnly} onClick={() => link.job && onApply(link.job)}><ArrowUpCircle size={13} aria-hidden="true" />Update to v{link.latest}</button>
+          <button type="button" className="btn btn-primary" disabled={readOnly} onClick={() => link.job && onApply(link.job, pinned?.spec ?? null)}><ArrowUpCircle size={13} aria-hidden="true" />Update to v{link.latest}</button>
         </div>
       )}
       {changed.length > 0 && (

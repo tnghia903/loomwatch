@@ -16,7 +16,7 @@ import { SaveAsJob } from './SaveAsJob'
 import { ModelPicker } from '../models/ModelPicker'
 import { StatusGlyph } from '../ui/glyphs'
 import { openRouterId } from '../../lib/ai/modelIds'
-import type { SavedJob } from '../../lib/library/jobs'
+import type { JobSpec, SavedJob } from '../../lib/library/jobs'
 import type { AgentLinkState } from '../../lib/library/link'
 import type { AgentLink } from '../../lib/team-file/types'
 
@@ -24,7 +24,7 @@ import type { AgentLink } from '../../lib/team-file/types'
 export interface BuildInspectorLink {
   /** `null` for an agent that is this team's own. */
   state: AgentLinkState | null
-  onApply: (job: SavedJob) => void
+  onApply: (job: SavedJob, previous: JobSpec | null) => void
   onUnlink: () => void
   /** "Add to Your agents" made a version of this agent: link to it. */
   onLink: (link: AgentLink) => void

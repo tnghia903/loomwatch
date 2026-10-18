@@ -56,8 +56,9 @@ export interface BenchView {
   /** A skill card is being dragged over the bench. */
   dropping: boolean
   /**
-   * What it reads, filed in the bench's file drawer. What an agent reads is the team's to give, so
-   * in Your agents it is empty and the drawer stays shut; the landing page's bench has no drawer.
+   * What it reads, filed in the bench's file drawer: what it is given in its builder, and in a team
+   * what that team gives it besides. With nothing the drawer stays shut; the landing page's bench
+   * has no drawer.
    */
   reads?: readonly ReadSource[] | null
   /**

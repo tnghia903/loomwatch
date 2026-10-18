@@ -58,4 +58,37 @@ describe('the versioned link to Your agents', () => {
     expect(changedHere(tooled, pinned)).toEqual(['tools'])
     expect(changedHere(tooled, { ...pinned, tools: ['github'] })).toEqual([])
   })
+
+  it('brings what the version reads into the team, beside what the team gives it', () => {
+    const reading = { ...job, reads: [{ name: 'Brand', path: '/Users/me/brand' }, { name: 'sources.md', notion: { page: 'abc' } }] }
+    const fields = fieldsForVersion(reading, placed)
+    expect(fields.capabilities).toEqual([
+      // The team's own stays, and a version's read with a label the team uses takes another.
+      { kind: 'knowledge', name: 'sources.md', path: 'sources.md' },
+      { kind: 'knowledge', name: 'Brand', path: '/Users/me/brand' },
+      { kind: 'knowledge', name: 'sources.md (2)', notion: { page: 'abc' } },
+      { kind: 'skill', name: 'source-check' },
+    ])
+    // Already in the team, it is the version's entry, once.
+    const updated: AgentConfig = { ...placed, capabilities: fields.capabilities }
+    expect(fieldsForVersion(reading, updated).capabilities?.filter((capability) => capability.kind === 'knowledge')).toHaveLength(3)
+  })
+
+  it('takes away what only the version it leaves read, and nothing the team gave it', () => {
+    const was = { reads: [{ name: 'Brand', path: '/Users/me/brand' }, { name: 'Old notes', path: '/Users/me/old' }] }
+    const inTeam: AgentConfig = { ...placed, capabilities: [...(placed.capabilities ?? []), { kind: 'knowledge', name: 'Brand', path: '/Users/me/brand' }, { kind: 'knowledge', name: 'Old notes', path: '/Users/me/old' }] }
+    const next = { ...job, reads: [{ name: 'Brand', path: '/Users/me/brand' }] }
+    expect(fieldsForVersion(next, inTeam, was).capabilities?.filter((capability) => capability.kind === 'knowledge')).toEqual([
+      { kind: 'knowledge', name: 'sources.md', path: 'sources.md' },
+      { kind: 'knowledge', name: 'Brand', path: '/Users/me/brand' },
+    ])
+    // Without the version it leaves, nothing it had is taken away.
+    expect(fieldsForVersion(next, inTeam).capabilities?.filter((capability) => capability.kind === 'knowledge')).toHaveLength(3)
+  })
+
+  it('names a read of its version the team took away, but not one the team added', () => {
+    const pinned = { ...job, version: 2, reads: [{ name: 'sources.md', path: 'sources.md' }] }
+    expect(changedHere(placed, pinned)).toEqual([])
+    expect(changedHere({ ...placed, capabilities: [{ kind: 'skill', name: 'source-check' }] }, pinned)).toEqual(['what it reads'])
+  })
 })

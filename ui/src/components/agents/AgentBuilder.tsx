@@ -8,7 +8,7 @@ import type { DetectedCapability } from '../../lib/library/client'
 import { BLANK_DRAFT, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
-import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobVersion, type SavedJob } from '../../lib/library/jobs'
+import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobSpec, type JobVersion, type SavedJob } from '../../lib/library/jobs'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import type { TeamKnowledge } from '../../lib/library/teamDraft'
 import { useAgentUses } from '../../lib/library/uses'
@@ -35,12 +35,12 @@ export interface AgentBuilderProps {
   view?: AgentView
   /**
    * Shown inside a team's Agents tab, for an agent placed from Your agents: there is no page to
-   * go back to, and every save is followed by moving that team to the version just saved. What it
-   * reads stays the team's own (lib/library/link.ts), so its file drawer shows the team's, and
-   * what its chat sends from here reads the same (`knowledge`); its tools are the version's, like
-   * its skills.
+   * go back to, and every save is followed by moving that team to the version just saved, from the
+   * version it had (`previous`). What the team gives it to read besides its own stays the team's
+   * (lib/library/link.ts), so its file drawer shows both, and what its chat sends from here reads
+   * the same (`knowledge`); its tools are the version's, like its skills.
    */
-  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
+  inTeam?: { name: string; onSaved: (job: SavedJob, previous: Pick<JobSpec, 'reads'> | null) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
 }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
@@ -135,7 +135,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       setDraft(next)
       setNote('')
       setSave({ kind: 'saved', version: versionOf(result), bumped: Boolean(saved) && versionOf(result) > versionOf(saved!) })
-      inTeam?.onSaved(result)
+      inTeam?.onSaved(result, base ? { reads: base.reads } : null)
       if (!saved) {
         setStartedFor(result.id)
         const query = new URLSearchParams(cameFrom ? { team: cameFrom } : {})
