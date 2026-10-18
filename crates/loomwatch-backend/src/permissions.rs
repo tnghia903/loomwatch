@@ -49,6 +49,9 @@ pub struct PermissionPolicy {
     state_dir: Option<PathBuf>,
     /// `LoomWatch`'s skills folder inside it, which every agent reads its skills from.
     skills_folder: Option<PathBuf>,
+    /// Calls of connected tools the operator always allows this agent (ADR 0069), as
+    /// `tool.call` in lowercase. Every other call of a connected tool asks.
+    always: Vec<String>,
 }
 
 impl PermissionPolicy {
@@ -68,7 +71,24 @@ impl PermissionPolicy {
             turned_off: Vec::new(),
             state_dir: installed.map(|ai| resolve(&ai.state_dir())),
             skills_folder: installed.map(|ai| resolve(&ai.skills_folder())),
+            always: Vec::new(),
         }
+    }
+
+    /// This policy letting the calls the operator always allows for the agent's connected tools
+    /// through without asking (ADR 0069).
+    #[must_use]
+    pub fn always_allowing(mut self, tools: &[crate::delivery::WiredTool]) -> Self {
+        self.always = tools
+            .iter()
+            .filter(|tool| tool.connected)
+            .flat_map(|tool| {
+                tool.always_allow
+                    .iter()
+                    .map(move |call| format!("{}.{}", tool.name.trim(), call.trim()).to_lowercase())
+            })
+            .collect();
+        self
     }
 
     /// This policy keeping `state_dir` private, with its `skills` folder readable.
@@ -90,6 +110,7 @@ impl PermissionPolicy {
             .map(PathBuf::from)
             .chain(delivery.copies.clone());
         Self::new(allow, folder, readable, [RESERVED_SERVER.to_owned()])
+            .always_allowing(&delivery.tools)
     }
 
     /// The policy for one of a run's agents: [`Self::for_agent`] with what the operator turned off
@@ -150,6 +171,13 @@ impl PermissionPolicy {
     /// names no kind, or a kind no switch covers (`delete`, `move`, `other`), is declined.
     #[must_use]
     pub fn approves(&self, request: &Value) -> bool {
+        // A connected tool's call goes ahead only when the operator always allows it (ADR 0069):
+        // no switch covers acting in someone's own accounts.
+        if let Some(tool) = connected_tool(request) {
+            return self
+                .always
+                .contains(&format!("{}.{}", tool.server, tool.call).to_lowercase());
+        }
         let kind = request
             .pointer("/params/toolCall/kind")
             .and_then(Value::as_str)
@@ -171,7 +199,12 @@ impl PermissionPolicy {
         let Some(state) = &self.state_dir else {
             return false;
         };
-        let key = state.join(crate::ai::KEY_FILE);
+        // The key, and the connected tools' secrets and list (ADR 0069).
+        let secrets = [
+            state.join(crate::ai::KEY_FILE),
+            state.join(crate::connected_tools::CREDENTIALS_FILE),
+            state.join(crate::connected_tools::TOOLS_FILE),
+        ];
         request
             .pointer("/params/toolCall/locations")
             .and_then(Value::as_array)
@@ -180,7 +213,7 @@ impl PermissionPolicy {
                     location
                         .get("path")
                         .and_then(Value::as_str)
-                        .is_some_and(|path| self.locate(path) == key)
+                        .is_some_and(|path| secrets.contains(&self.locate(path)))
                 })
             })
     }
@@ -296,6 +329,10 @@ pub struct PermissionRequest {
     /// The `allow:` switch that would let it through without asking: `web`, `commands` or `edits`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub switch: Option<String>,
+    /// For a connected tool's call (ADR 0069): which tool and call, which "Always allow" lets
+    /// through for this agent from then on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolAsk>,
     /// The query, command, address or path, when the request names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -474,6 +511,33 @@ fn mcp_tool(request: &Value) -> Option<String> {
     (flagged || titled).then(|| title.to_owned())
 }
 
+/// A connected tool's call (ADR 0069), as the built-in agent asks for one: its `rawInput` is
+/// `{server, tool, arguments}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAsk {
+    /// The tool, as the team file names it: "Linear".
+    pub server: String,
+    /// Its own name for the call: `create_issue`.
+    pub call: String,
+}
+
+fn connected_tool(request: &Value) -> Option<ToolAsk> {
+    let input = request.pointer("/params/toolCall/rawInput")?;
+    let text = |key: &str| {
+        input
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    };
+    input.get("arguments")?;
+    Some(ToolAsk {
+        server: text("server")?.to_owned(),
+        call: text("tool")?.to_owned(),
+    })
+}
+
 /// What "Allow for this run" covers for this request: the tool kind for the app's own tools — every
 /// web search, every command — but one MCP tool exactly, so allowing a tool never allows every
 /// command that happens to share its kind.
@@ -504,7 +568,16 @@ pub fn describe(request: &Value) -> (String, String, Option<String>) {
     };
     let kind = text("/kind").unwrap_or("other").to_owned();
     let title = text("/title").unwrap_or("An action").to_owned();
-    let detail = [
+    // A connected tool's call shows what it would send, in one line.
+    let arguments = call
+        .and_then(|call| call.pointer("/rawInput/arguments"))
+        .filter(|arguments| {
+            arguments
+                .as_object()
+                .is_some_and(|fields| !fields.is_empty())
+        })
+        .map(Value::to_string);
+    let named = [
         "/rawInput/command",
         "/rawInput/query",
         "/rawInput/url",
@@ -514,14 +587,17 @@ pub fn describe(request: &Value) -> (String, String, Option<String>) {
     ]
     .iter()
     .find_map(|pointer| text(pointer))
-    .filter(|detail| !title.contains(detail))
-    .map(|detail| {
-        if detail.chars().count() > DETAIL_CHARS {
-            format!("{}…", detail.chars().take(DETAIL_CHARS).collect::<String>())
-        } else {
-            detail.to_owned()
-        }
-    });
+    .map(str::to_owned);
+    let detail = arguments
+        .or(named)
+        .filter(|detail| !title.contains(detail.as_str()))
+        .map(|detail| {
+            if detail.chars().count() > DETAIL_CHARS {
+                format!("{}…", detail.chars().take(DETAIL_CHARS).collect::<String>())
+            } else {
+                detail
+            }
+        });
     (title, kind, detail)
 }
 
@@ -623,6 +699,7 @@ impl PermissionAsker {
                 .flatten()
                 .map(str::to_owned),
             scope: grant_scope(request),
+            tool: connected_tool(request),
             title,
             kind,
             detail,
@@ -761,6 +838,58 @@ mod tests {
         })
     }
 
+    /// ADR 0069: a connected tool's call asks, whatever the switches say, unless the operator
+    /// always allows that one call for that agent; the card knows which tool and call it is, and
+    /// shows what it would send.
+    #[test]
+    fn a_connected_tools_call_goes_ahead_only_when_always_allowed() {
+        let scratch = Scratch::new();
+        let call = |tool: &str| {
+            json!({"params": {"sessionId": "s", "toolCall": {
+                "toolCallId": "c1",
+                "title": "Linear: Create issue",
+                "kind": "other",
+                "rawInput": {"server": "Linear", "tool": tool, "arguments": {"title": "Fix login"}},
+            }}})
+        };
+        let wired = |connected: bool| crate::delivery::WiredTool {
+            name: "linear".to_owned(),
+            connected,
+            always_allow: vec!["create_issue".to_owned()],
+        };
+        assert!(!policy(&scratch, ALL).approves(&call("create_issue")));
+        let always = policy(&scratch, ALL).always_allowing(&[wired(true)]);
+        assert!(
+            always.approves(&call("create_issue")),
+            "names compare ignoring case"
+        );
+        assert!(!always.approves(&call("delete_issue")));
+        let gone = policy(&scratch, ALL).always_allowing(&[wired(false)]);
+        assert!(
+            !gone.approves(&call("create_issue")),
+            "a tool no longer connected allows nothing"
+        );
+
+        assert_eq!(
+            connected_tool(&call("create_issue")),
+            Some(ToolAsk {
+                server: "Linear".into(),
+                call: "create_issue".into()
+            })
+        );
+        assert_eq!(
+            grant_scope(&call("create_issue")),
+            "mcp:Linear.create_issue"
+        );
+        assert_eq!(switch_for("other"), None);
+        let (title, kind, detail) = describe(&call("create_issue"));
+        assert_eq!(
+            (title.as_str(), kind.as_str()),
+            ("Linear: Create issue", "other")
+        );
+        assert_eq!(detail.as_deref(), Some(r#"{"title":"Fix login"}"#));
+    }
+
     fn policy(scratch: &Scratch, allow: AgentAllow) -> PermissionPolicy {
         PermissionPolicy::new(
             allow,
@@ -877,6 +1006,7 @@ mod tests {
             name: "canvas-design".to_owned(),
             path: None,
             notion: None,
+            always_allow: Vec::new(),
         };
         let policy = PermissionPolicy::new(
             AgentAllow::default(),

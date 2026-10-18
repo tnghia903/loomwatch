@@ -18,7 +18,8 @@ import type { Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
-import type { AgentConfig, AllowSwitch } from '../../lib/team-file/types'
+import type { AgentConfig } from '../../lib/team-file/types'
+import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
 import { Markdown } from '../ui/Markdown'
@@ -79,7 +80,7 @@ interface WorkPieceProps {
   onContinue: (runId: string) => Promise<void>
   /** A decision was sent with the draft as its note: the box is cleared. */
   onDecided: () => void
-  onAlwaysAllow?: (agentId: string, key: AllowSwitch) => void
+  onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
   /** A finding of the answer's review: its record, or the agent's work, opened in Details. */
   onOpenFinding: (runId: string, line: ReceiptLine) => void
 }

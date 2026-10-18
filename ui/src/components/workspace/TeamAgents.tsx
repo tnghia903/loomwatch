@@ -16,6 +16,7 @@ import { AgentBuilder, AgentViewTabs } from '../agents/AgentBuilder'
 import { ByHand } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
 import { LinkedAgent } from '../canvas/LinkedAgent'
+import { withAllowed } from '../../lib/tools/allow'
 
 export interface TeamAgentsProps {
   /** The team's agents, in its order; the review step is not one of them. */
@@ -152,7 +153,7 @@ function OwnAgent({ agent, teamPath, editable, skills, skillsLoading, onEdit, re
       </div>
       <ByHand
         draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} reads={reads} onShowWorkflow={onShowWorkflow}
-        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(key) => onEdit(agent.id, 'allow', { ...draft.allow, [key]: true })} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
+        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
       />

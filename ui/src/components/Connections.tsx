@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { ConnectedTools } from './connections/ConnectedTools'
 import { OpenRouterKey } from './connections/OpenRouterKey'
 import { credentialStore, isWindows } from '../lib/platform'
 
@@ -155,6 +156,7 @@ export default function Connections() {
             </details>
           </>}
         </section>
+        <ConnectedTools />
       </div>
     </main>
   )

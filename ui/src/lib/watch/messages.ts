@@ -90,6 +90,8 @@ export interface PermissionAsk {
   requestId: string
   /** The `allow:` switch that would have let it through: `web`, `commands` or `edits`. */
   switch: string | null
+  /** For a connected tool's call (ADR 0069): which tool, by name. */
+  tool?: string | null
   /** The query, command, address or path, when the request named one. */
   detail: string | null
   /** Why Auto mode left this command to you, when the team was in Auto mode (ADR 0061). */
@@ -141,6 +143,11 @@ const BUS_KINDS: Record<string, MessageKind> = { ask: 'ask', dispatch: 'dispatch
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** The connected tool a recorded ask names (`{server, call}`), by name. */
+function toolOf(value: unknown): string | null {
+  return value && typeof value === 'object' ? words((value as { server?: unknown }).server) : null
 }
 
 function words(value: unknown): string | null {
@@ -258,7 +265,7 @@ export class Correspondence {
     this.add(event, {
       id: `permission:${requestId}`, kind: 'permission', from: event.agentId, to: OPERATOR_ID, text: words(p.title) ?? 'An action',
       evidenceId, state: 'pending',
-      permission: { requestId, switch: words(p.switch), detail: words(p.detail), auto: words(p.autoNote), outcome: null, settled: null },
+      permission: { requestId, switch: words(p.switch), tool: toolOf(p.tool), detail: words(p.detail), auto: words(p.autoNote), outcome: null, settled: null },
     })
   }
 

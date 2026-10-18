@@ -667,6 +667,7 @@ mod tests {
             name: name.to_owned(),
             path: None,
             notion: None,
+            always_allow: Vec::new(),
         }
     }
 
@@ -686,6 +687,7 @@ mod tests {
             name: "demo project".to_owned(),
             path: Some(project.clone()),
             notion: None,
+            always_allow: Vec::new(),
         }];
         let old = workspace_root(&team, "team", "writer").expect("root");
         fs::create_dir_all(old.join(".claude/skills/stale")).expect("old skills");
@@ -738,6 +740,7 @@ mod tests {
             name: name.to_owned(),
             path: Some(path.to_path_buf()),
             notion: None,
+            always_allow: Vec::new(),
         };
         let wired = vec![
             chosen("reports", &reports),
@@ -1129,6 +1132,7 @@ mod tests {
                         name: "memo.md".to_owned(),
                         path: Some(PathBuf::from("team.files/memo.md")),
                         notion: None,
+                        always_allow: Vec::new(),
                     },
                 ],
             );

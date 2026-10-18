@@ -140,10 +140,14 @@ pub(crate) struct JobSpec {
     /// Skill names, delivered with the job.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) skills: Vec<String>,
-    /// Tools it is given: MCP servers on this computer, by the name the capability scan lists. A
-    /// team copies them into the agent's capabilities like its skills (ADR 0029 delivers them).
+    /// Tools it is given, by the name of a tool connected in `LoomWatch` (ADR 0069). A team copies
+    /// them into the agent's capabilities like its skills.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) tools: Vec<String>,
+    /// Calls of those tools the operator always allows it to make without asking, by tool name
+    /// (ADR 0069). A team copies each into the tool's `alwaysAllow`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub(crate) tool_allow: std::collections::BTreeMap<String, Vec<String>>,
     /// What the finished result must satisfy (ADR 0062), copied into the team with the rest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) done_when: Vec<String>,
@@ -172,6 +176,7 @@ impl JobSpec {
             || self.thinking_effort != other.thinking_effort
             || self.skills != other.skills
             || self.tools != other.tools
+            || self.tool_allow != other.tool_allow
             || self.done_when != other.done_when
             || self.allow != other.allow
     }
@@ -350,6 +355,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
     let skills = normalize_names(spec.skills, "skill")?;
     let tools = normalize_names(spec.tools, "tool")?;
     let done_when = normalize_done_when(spec.done_when)?;
+    let tool_allow = normalize_tool_allow(spec.tool_allow, &tools)?;
     if skills.len() > MAX_LIST || tools.len() > MAX_LIST {
         return Err(format!(
             "A job can name at most {MAX_LIST} skills and {MAX_LIST} tools."
@@ -372,12 +378,40 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         thinking_effort,
         skills,
         tools,
+        tool_allow,
         done_when,
         allow: spec.allow,
         version: spec.version.max(1),
         note,
         saved_at: spec.saved_at,
     })
+}
+
+/// Always-allowed calls as a job keeps them: only for a tool it is given (by that tool's name as
+/// the job writes it), each call trimmed and once, tools with none left out.
+fn normalize_tool_allow(
+    allowed: std::collections::BTreeMap<String, Vec<String>>,
+    tools: &[String],
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+    let mut kept = std::collections::BTreeMap::new();
+    for (tool, calls) in allowed {
+        let Some(given) = tools
+            .iter()
+            .find(|given| given.eq_ignore_ascii_case(tool.trim()))
+        else {
+            continue;
+        };
+        let calls = normalize_names(calls, "call")?;
+        if calls.len() > MAX_LIST {
+            return Err(format!(
+                "A job can always allow at most {MAX_LIST} calls of {given}."
+            ));
+        }
+        if !calls.is_empty() {
+            kept.insert(given.clone(), calls);
+        }
+    }
+    Ok(kept)
 }
 
 /// Names as a job keeps them: trimmed, each once, none blank or too long.
@@ -758,6 +792,7 @@ mod tests {
             thinking_effort: None,
             skills: vec!["release-style".into()],
             tools: Vec::new(),
+            tool_allow: std::collections::BTreeMap::new(),
             done_when: Vec::new(),
             allow: JobAllow::default(),
             version: 1,
@@ -1096,6 +1131,34 @@ mod tests {
         // A job saved before tools existed has none, and reads back unchanged.
         let old = spec("Notes");
         assert!(serde_yaml::to_string(&old).is_ok_and(|text| !text.contains("tools")));
+    }
+
+    /// ADR 0069: a call always allowed is kept for a tool the job is given, and only for one.
+    #[test]
+    fn always_allowed_calls_are_kept_for_tools_it_is_given() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let mut allowed = spec("Notes");
+        allowed.tools = vec!["Linear".into()];
+        allowed.tool_allow = [
+            (
+                "linear".to_owned(),
+                vec![" create_issue ".to_owned(), "create_issue".to_owned()],
+            ),
+            ("Gone".to_owned(), vec!["anything".to_owned()]),
+        ]
+        .into_iter()
+        .collect();
+        let second = save_job(root.path(), "notes", allowed, false, Some(1)).expect("second");
+        assert_eq!(second.spec.version, 2);
+        assert_eq!(
+            second.spec.tool_allow,
+            [("Linear".to_owned(), vec!["create_issue".to_owned()])]
+                .into_iter()
+                .collect()
+        );
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(text.contains("toolAllow:"), "{text}");
     }
 
     #[test]

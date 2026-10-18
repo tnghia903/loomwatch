@@ -67,6 +67,9 @@ export interface CapabilityRef {
   /** Knowledge only, instead of `path` (ADR 0050): a Notion page the run reads through the
       operator's own Notion connection when it starts. `name` is the page's title when chosen. */
   notion?: NotionPageRef
+  /** Tool only (ADR 0069): the calls of this connected tool the agent may make without asking, by
+      the tool's own name for each. Every other call asks you first. */
+  alwaysAllow?: string[]
 }
 
 /** A skill or tool the agent's app has of its own, turned off for the agent (ADR 0060). A tool is

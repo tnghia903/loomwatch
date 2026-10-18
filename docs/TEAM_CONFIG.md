@@ -309,10 +309,20 @@ instructions over 128 KiB for one agent: they are never shortened to fit. The ar
 each skill came from, the fingerprint of the delivered file, how it was delivered, and a receipt
 once the prompt is sent. This verifies delivery, not whether every instruction was followed.
 
-**Tools** (`kind: tool`) were MCP servers configured in another AI app's settings. They are no
-longer delivered: LoomWatch's agents don't take servers from other apps' settings. A team file that
-still wires one loads and runs. The agent is told it doesn't have that tool and asked to say in its
-reply what the tool would have let it do, and the run records the tool as unavailable.
+**Tools** (`kind: tool`) name a tool connected in LoomWatch (Connections → Tools, or the agent's
+Tools block; see [Give agents tools](TOOLS.md)), ignoring case. The agent is offered that tool's
+calls, and each call asks you first unless the entry's `alwaysAllow` names it:
+
+```yaml
+capabilities:
+  - kind: tool
+    name: Linear
+    alwaysAllow: [list_teams]   # every other Linear call asks first
+```
+
+A name with no connected tool, such as an MCP server from another AI app's settings, still loads
+and runs: the agent is told it doesn't have that tool and asked to say in its reply what the tool
+would have let it do, and the run records the tool as unavailable.
 
 ### Where an agent starts
 
@@ -357,13 +367,17 @@ Every agent in a run works with LoomWatch's own tools:
   switch has no web tools.
 - **Its plan**: `update_plan`, plus `read_tool_output` for reading the rest of a long output that
   was set aside.
+- **Tools you connected and gave it** (`kind: tool`): each call named `<tool>__<call>`, such as
+  `linear__create_issue`. LoomWatch makes the call with the sign-in or token it keeps; the agent
+  never holds it. Each call asks you first unless always allowed.
 - **The Team Bus**: `roster`, `ask`, `report` and `ask_user`. In team mode it also gets `dispatch`
   and `handoff`. With a notebook it also gets `memory_search`, `memory_read`, `memory_write` and
   `checkpoint`, and in a run started from the app it gets `earlier_work`. These are calls straight
   into the daemon, made as that agent; the agent connects to no server for them.
 
-No agent has a tool for publishing, posting or sending anything outside the run. A team's answer
-leaves through its review and its delivery (`deliver:`). A command can do anything you can, which is
+No built-in tool publishes, posts or sends anything outside the run; a tool you connected can, in
+your account on that service, which is why each of its calls asks first. A team's answer leaves
+through its review and its delivery (`deliver:`). A command can do anything you can, which is
 why commands ask first unless switched on.
 
 ### Permissions

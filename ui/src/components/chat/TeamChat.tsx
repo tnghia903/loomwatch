@@ -12,7 +12,7 @@ import { DaemonUnreachableError } from '../../lib/daemonFetch'
 import { failedAgent } from '../../lib/runs/errors'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
-import type { AllowSwitch } from '../../lib/team-file/types'
+import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { AgentFacesContext, type AgentFaces } from '../../lib/chat/faces'
 import { batonWords, sameBaton, type Baton } from '../../lib/chat/baton'
 import { usePieceLine } from '../../lib/chat/pieceLine'
@@ -53,7 +53,7 @@ interface TeamChatProps {
   /** A team from outside LoomWatch starts nothing until you have seen what it runs (ADR 0048). */
   onTeamReview: (review: TeamReview, retry: () => void) => void
   onStale: () => void
-  onAlwaysAllow?: (agentId: string, key: AllowSwitch) => void
+  onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
   /** Who decides the commands agents ask to run, the switch beside the message box (ADR 0061). */
   autoMode?: AutoModeControl
   /** What one run of the team may spend (ADR 0068): the chip beside Auto mode. */

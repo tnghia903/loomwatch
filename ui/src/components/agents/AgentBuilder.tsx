@@ -20,6 +20,7 @@ import { AgentAnswer, AgentChat } from './AgentChat'
 import { ByHand } from './ByHand'
 import { FigurePicker } from './FigurePicker'
 import { navigate, withView, type AgentView } from './route'
+import { withAllowed } from '../../lib/tools/allow'
 
 export interface AgentBuilderProps {
   /** The saved agent's id, or `null` for a new one. */
@@ -199,7 +200,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
       <ByHand
         draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
-        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(key) => set('allow', { ...draft.allow, [key]: true })} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} /> : undefined}
+        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} /> : undefined}
         onBuild={() => showView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
       />

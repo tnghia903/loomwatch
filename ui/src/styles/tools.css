@@ -1,0 +1,48 @@
+/* Tools you connect (ADR 0069): connecting one (ConnectTool, in an agent's Tools block and in
+   Connections), and the tools an agent is given, in its Tools block. */
+.connect-tool { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-ground); }
+.connect-tool-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.connect-tool-head h4 { margin: 0; font: 600 13.5px/1.3 var(--font-sans); color: var(--color-ink); }
+.connect-tool p { margin: 0; }
+.connect-tool .inline-error { margin: 0; }
+.connect-tool-quiet { color: var(--color-ink-3); }
+.connect-tool-start { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.connect-tool-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: var(--sp-2); }
+.connect-tool-list button { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--r-md); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s ease; }
+.connect-tool-list button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-hairline)); }
+.connect-tool-list button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.connect-tool-list button:disabled { cursor: default; opacity: .7; }
+.connect-tool-list b { font-size: 13px; font-weight: 600; }
+.connect-tool-list span { font-size: 12px; line-height: 1.35; color: var(--color-ink-2); }
+.connect-tool-list em { margin-top: auto; padding-top: 4px; display: inline-flex; align-items: center; gap: 4px; font-style: normal; font-size: 11.5px; color: var(--color-ink-3); }
+.connect-tool-address { display: flex; gap: var(--sp-2); align-items: flex-end; }
+.connect-tool-address .field { flex: 1; min-width: 0; }
+.connect-tool-address .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; }
+@media (max-width: 520px) { .connect-tool-address { flex-direction: column; align-items: stretch; } }
+
+/* The tools an agent is given: each says whether it asks first, and which calls it may make without asking. */
+.byhand-tools { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.byhand-tools > li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-3); align-items: start; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--color-hairline); color: var(--color-ink-2); }
+.byhand-tools > li.missing { border-style: dashed; }
+.byhand-tools > li > svg { margin-top: 2px; }
+.byhand-tool-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13.5px; color: var(--color-ink); }
+.byhand-tool-text b { font-weight: 600; overflow-wrap: anywhere; }
+.byhand-tool-text em { font-style: normal; font-size: 12.5px; color: var(--color-ink-2); }
+.byhand-tool-text em.problem { color: var(--color-alert); }
+.byhand-tool-allowed { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.byhand-tool-allowed li { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 8px; border-radius: 999px; background: var(--color-accent-tint); color: var(--color-accent); font-size: 12px; }
+.byhand-tool-allowed .iconbtn { width: 20px; height: 20px; color: inherit; }
+.byhand-tool-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.byhand-tools-give { display: flex; flex-direction: column; gap: var(--sp-2); }
+.byhand-tools-give > .t-meta { margin: 0; color: var(--color-ink-3); }
+.byhand-tools-connect { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+
+/* Connections: each connected tool, what it offers, and its actions. */
+.tools-connected { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.tools-connected > li { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
+.tools-connected-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px var(--sp-3); }
+.tools-connected-head b { font-size: 14px; font-weight: 600; color: var(--color-ink); }
+.tools-connected .t-meta { margin: 0; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.tools-connected .problem { color: var(--color-alert); }
+.tools-connected details > summary { cursor: pointer; font-size: 12.5px; color: var(--color-ink-3); }
+.tools-connected details ul { margin: var(--sp-2) 0 0; padding-left: var(--sp-4); font-size: 12.5px; color: var(--color-ink-2); }

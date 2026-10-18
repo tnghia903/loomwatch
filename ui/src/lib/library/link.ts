@@ -1,6 +1,7 @@
 import type { AgentAllow, AgentConfig } from '../team-file/types'
-import { onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
+import { onlyOn, toolAllowOf, versionOf, type JobSpec, type SavedJob } from './jobs'
 import { capabilitiesOf } from './roles'
+import { sameAllow } from '../tools/allow'
 
 /**
  * A team's side of the versioned link to Your agents.
@@ -35,7 +36,7 @@ export function linkState(agent: AgentConfig, jobs: readonly SavedJob[]): AgentL
  */
 export function fieldsForVersion(job: SavedJob, agent: AgentConfig): Partial<AgentConfig> {
   const own = (agent.capabilities ?? []).filter((capability) => capability.kind === 'knowledge')
-  const capabilities = [...own, ...capabilitiesOf(job.skills ?? [], job.tools ?? [])]
+  const capabilities = [...own, ...capabilitiesOf(job.skills ?? [], job.tools ?? [], job.toolAllow ?? {})]
   const fields: Partial<AgentConfig> = {
     name: job.name,
     role: job.instructions,
@@ -71,6 +72,6 @@ export function changedHere(agent: AgentConfig, pinned: JobSpec): string[] {
   if ((agent.doneWhen ?? []).join('\n') !== (pinned.doneWhen ?? []).join('\n')) changed.push('done when')
   const mine = onlyOn(agent.allow) ?? {}
   const theirs = onlyOn(pinned.allow) ?? {}
-  if (SWITCHES.some((key) => Boolean(mine[key]) !== Boolean(theirs[key]))) changed.push('what it may do without asking')
+  if (SWITCHES.some((key) => Boolean(mine[key]) !== Boolean(theirs[key])) || !sameAllow(toolAllowOf(agent), pinned.toolAllow ?? {}, tools)) changed.push('what it may do without asking')
   return changed
 }

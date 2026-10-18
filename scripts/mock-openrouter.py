@@ -7,6 +7,8 @@ scripted from what the request says, so a run exercises real tool calls:
 - "MOCK-RUN: <command>" in the task  -> a run_command call, then a summary
 - "MOCK-WRITE: <path>" in the task    -> a write_file call, then a summary
 - "MOCK-READ: <path>" in the task     -> a read_file call, then a summary
+- "MOCK-TOOL: <call> <json>" in the task -> a call of any offered tool whose name is <call> or ends
+  in "__<call>" (a connected tool's, such as deepwiki__ask_question), then a summary
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - a Research lead (its role says so)  -> two dispatch calls at once, then ask the Writer
 - a Researcher / a Writer             -> findings / a cited report
@@ -126,6 +128,15 @@ def plan(body):
     if "MOCK-READ:" in task:
         path = task.rsplit("MOCK-READ:", 1)[1].strip().split()[0]
         return ("calls", [(find_tool(names, "read_file") or "read_file", {"path": path})])
+
+    if "MOCK-TOOL:" in task:
+        line = task.rsplit("MOCK-TOOL:", 1)[1].strip().splitlines()[0]
+        call, _, arguments = line.partition(" ")
+        try:
+            args = json.loads(arguments) if arguments.strip() else {}
+        except ValueError:
+            args = {}
+        return ("calls", [(find_tool(names, call) or call, args)])
 
     dispatch = find_tool(names, "dispatch")
     ask = find_tool(names, "ask")

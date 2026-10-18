@@ -31,6 +31,9 @@ const scoper: AgentConfig = {
 beforeEach(() => { vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no daemon')))) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
+/** The tools in a list of the ones it was given, by name. */
+const names = (list: HTMLElement) => within(list).getAllByRole('listitem').filter((item) => item.parentElement === list).map((item) => item.querySelector('b')?.textContent)
+
 function renderTeamAgents(extra: Partial<TeamAgentsProps> = {}) {
   const props: TeamAgentsProps = {
     agents: [], selected: null, onSelect: vi.fn(), teamName: 'Digest', teamPath: 'digest.yaml', editable: true,
@@ -85,31 +88,51 @@ describe('a team’s agents, the first of its views', () => {
     expect(within(block).getByRole('button', { name: 'Give it something in Workflow' })).toBeInTheDocument()
   })
 
-  it('lists the tools an AI app’s team file gave it as ones it can’t use here, and takes one out', () => {
+  it('says which tools it was given aren’t connected in LoomWatch, and takes one away', async () => {
     const props = renderTeamAgents({ agents: [scoper], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
-    expect(block).toHaveTextContent('2 tools from an AI app it can’t use here')
-    const has = within(block).getByRole('list', { name: 'Tools from an AI app' })
-    expect(within(has).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['github', 'notion'])
-    fireEvent.click(within(has).getByRole('button', { name: 'Take github out' }))
+    expect(await within(block).findByText('Files, the web and commands; 2 tools aren’t connected')).toBeInTheDocument()
+    const has = within(block).getByRole('list', { name: 'Tools you gave it' })
+    expect(names(has)).toEqual(['github', 'notion'])
+    expect(has).toHaveTextContent('Not connected in LoomWatch, so it can’t use it yet.')
+    fireEvent.click(within(has).getByRole('button', { name: 'Take github away' }))
     expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'tools', ['notion'])
+  })
+
+  it('shows a connected tool’s calls it always may make, takes one back, and gives it another tool (ADR 0069)', async () => {
+    const tool = (name: string, calls: string[]) => ({ id: name.toLowerCase(), name, url: `https://mcp.${name.toLowerCase()}.test/mcp`, auth: 'signIn', calls: calls.map((call) => ({ name: call, label: call.replace('_', ' ').replace(/^./, (first) => first.toUpperCase()), description: '', readOnly: false })), checkedAt: null, pending: false, problem: null, tokenHelp: null })
+    vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).startsWith('/api/tools')
+      ? Promise.resolve(new Response(JSON.stringify({ tools: [tool('Linear', ['create_issue', 'list_teams']), tool('DeepWiki', ['ask_question'])], catalog: [], keptIn: 'keychain' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      : Promise.reject(new Error('no daemon')))))
+    const linear: AgentConfig = { ...scoper, capabilities: [{ kind: 'tool', name: 'Linear', alwaysAllow: ['create_issue'] }] }
+    const props = renderTeamAgents({ agents: [linear], selected: 'scope' })
+    const block = screen.getByRole('region', { name: 'Tools it can use' })
+    expect(await within(block).findByText('Files, the web and commands, plus Linear')).toBeInTheDocument()
+    const allowed = within(block).getByRole('list', { name: 'Always allowed for Linear' })
+    expect(allowed).toHaveTextContent('Create issue')
+    fireEvent.click(within(allowed).getByRole('button', { name: 'Ask again before Create issue' }))
+    expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'toolAllow', {})
+    const offered = within(block).getByRole('list', { name: 'Tools you can give it' })
+    fireEvent.click(within(offered).getByRole('button', { name: /DeepWiki/ }))
+    expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'tools', ['Linear', 'DeepWiki'])
+    expect(within(block).getByRole('button', { name: 'Connect a new tool' })).toBeInTheDocument()
   })
 
   it('says what every agent can do without a tool', () => {
     renderTeamAgents({ agents: [{ ...scoper, capabilities: [{ kind: 'skill', name: 'algorithmic-art' }] }], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'Tools it can use' })
     expect(block).toHaveTextContent('Files, the web and commands, as its keys allow')
-    expect(within(block).queryByRole('list', { name: 'Tools from an AI app' })).toBeNull()
+    expect(within(block).queryByRole('list', { name: 'Tools you gave it' })).toBeNull()
   })
 
   it('says on the bench which tools don’t fit in the tool drawer', async () => {
     const many = (count: number): AgentConfig => ({ ...scoper, capabilities: ['github', 'notion', 'linear', 'memory', 'browser', 'sentry'].slice(0, count).map((name) => ({ kind: 'tool' as const, name })) })
     renderTeamAgents({ agents: [many(6)], selected: 'scope' })
-    expect(await screen.findByRole('button', { name: 'The tool drawer: 6 tools from an AI app it can’t use here (2 not in the drawer)' })).toHaveTextContent('Tools · 6 (2 not in the drawer)')
+    expect(await screen.findByRole('button', { name: 'The tool drawer: Files, the web and commands; 6 tools aren’t connected (2 not in the drawer)' })).toHaveTextContent('Tools · 6 (2 not in the drawer)')
     cleanup()
     // Four fit: every one is in the drawer, and nothing is said.
     renderTeamAgents({ agents: [many(4)], selected: 'scope' })
-    expect(await screen.findByRole('button', { name: 'The tool drawer: 4 tools from an AI app it can’t use here' })).toHaveTextContent(/^Tools · 4$/)
+    expect(await screen.findByRole('button', { name: 'The tool drawer: Files, the web and commands; 4 tools aren’t connected' })).toHaveTextContent(/^Tools · 4$/)
   })
 
   it('says on the bench, and in its block, what doesn’t fit in the file drawer', async () => {
@@ -196,7 +219,7 @@ describe('a team’s agents, the first of its views', () => {
     renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader', version: 1 } }], selected: 'scope', savedJobs: [tooled] })
     const block = await screen.findByRole('region', { name: 'Tools it can use' })
     // Its tools are the version's, like its skills: saving there moves this team to them.
-    expect(within(within(block).getByRole('list', { name: 'Tools from an AI app' })).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['linear'])
+    expect(names(within(block).getByRole('list', { name: 'Tools you gave it' }))).toEqual(['linear'])
     expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page the team gives it')
     // It has its Chat here too: the one it has in Your agents.
     expect(within(screen.getByRole('navigation', { name: 'Agent view' })).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'false')

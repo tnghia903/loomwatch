@@ -67,7 +67,7 @@ impl DeliveredKnowledge {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Delivery {
     pub knowledge: Vec<DeliveredKnowledge>,
-    /// Tools wired to the agent, none of which it can use ([`WiredTool`]).
+    /// Tools given to the agent ([`WiredTool`]).
     pub tools: Vec<WiredTool>,
     /// `LoomWatch`'s folder for this agent, which holds the copies the prompt points at (skills,
     /// full texts). Readable wherever the agent works (ADR 0042). `None` before `materialise`.
@@ -81,14 +81,20 @@ impl Delivery {
     }
 }
 
-/// A tool wired to an agent: an MCP server the operator had configured for another AI app.
-/// `LoomWatch`'s agents don't take servers from other apps' settings, so the agent is told it
-/// doesn't have it and the run goes on without it.
+/// A tool given to an agent. When `LoomWatch` has a connected tool by that name (ADR 0069) its
+/// calls are offered to the agent; otherwise (a tool from another AI app's settings, or one since
+/// removed) the agent is told it doesn't have it and the run goes on without it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WiredTool {
-    /// The Library name the team file wires.
+    /// The name the team file gives it.
     pub name: String,
+    /// `LoomWatch` has a connected tool by this name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub connected: bool,
+    /// Its calls the operator always allows this agent to make without asking.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub always_allow: Vec<String>,
 }
 
 /// What a turned-off tool may never be named: the Team Bus, which is how a team hands work on.
@@ -263,8 +269,16 @@ pub fn prepare_for(
             }
             CapabilityKind::Tool => {
                 if !delivery.tools.iter().any(|tool| tool.name == name) {
+                    let connected = crate::connected_tools::installed()
+                        .is_some_and(|tools| tools.named_now(name).is_some());
                     delivery.tools.push(WiredTool {
                         name: name.to_owned(),
+                        connected,
+                        always_allow: capability
+                            .always_allow
+                            .iter()
+                            .map(|call| call.trim().to_owned())
+                            .collect(),
                     });
                 }
             }
@@ -333,6 +347,7 @@ mod tests {
                 name: (*name).to_owned(),
                 path: None,
                 notion: None,
+                always_allow: Vec::new(),
             })
             .collect();
         agent
@@ -414,7 +429,9 @@ mod tests {
         assert_eq!(
             delivery.tools,
             [WiredTool {
-                name: "Agent Memory".to_owned()
+                name: "Agent Memory".to_owned(),
+                connected: false,
+                always_allow: Vec::new(),
             }],
             "a wired tool is named, not delivered: no app's settings are read for it"
         );
@@ -581,7 +598,7 @@ mod tests {
         assert!(
             composed
                 .text
-                .contains("## Tool: Agent Memory\nThe operator connected this tool to you, but")
+                .contains("## Tool: Agent Memory\nThe operator gave you this tool, but it isn't connected in LoomWatch")
         );
         assert!(composed.text.contains("so you don't have it"));
         let meta = composed.meta();

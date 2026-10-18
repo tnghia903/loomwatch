@@ -14,8 +14,24 @@ describe('a team’s own agent on the workbench', () => {
   it('reads the team agent as the workbench shows it', () => {
     expect(draftFromTeamAgent(writer)).toEqual({
       // A model written for an AI app reads as the OpenRouter model it maps to.
-      name: 'Writer', does: '', instructions: 'Write the digest.', model: 'anthropic/claude-sonnet-5.5', effort: 'high', skills: ['house-style'], tools: [], doneWhen: [], allow: { web: true }, figure: null,
+      name: 'Writer', does: '', instructions: 'Write the digest.', model: 'anthropic/claude-sonnet-5.5', effort: 'high', skills: ['house-style'], tools: [], toolAllow: {}, doneWhen: [], allow: { web: true }, figure: null,
     })
+  })
+
+  it('keeps a tool’s always-allowed calls with it, and changes only those (ADR 0069)', () => {
+    const tooled = { ...writer, capabilities: [{ kind: 'skill' as const, name: 'house-style' }, { kind: 'tool' as const, name: 'Linear', alwaysAllow: ['create_issue'] }] }
+    expect(draftFromTeamAgent(tooled).toolAllow).toEqual({ Linear: ['create_issue'] })
+    // Giving it another tool keeps what Linear always may do.
+    expect(teamAgentEdit(tooled, 'tools', ['Linear', 'DeepWiki'])).toEqual({ kind: 'fields', fields: { capabilities: [
+      { kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'Linear', alwaysAllow: ['create_issue'] }, { kind: 'tool', name: 'DeepWiki' },
+    ] } })
+    // Allowing a call (named in any case) writes it on that tool; taking the last one back drops the list.
+    expect(teamAgentEdit(tooled, 'toolAllow', { linear: ['create_issue', 'list_teams'] })).toEqual({ kind: 'fields', fields: { capabilities: [
+      { kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'Linear', alwaysAllow: ['create_issue', 'list_teams'] },
+    ] } })
+    expect(teamAgentEdit(tooled, 'toolAllow', {})).toEqual({ kind: 'fields', fields: { capabilities: [
+      { kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'Linear' },
+    ] } })
   })
 
   it('writes done-when items to the team file, and none at all when every line is blank (ADR 0062)', () => {

@@ -80,7 +80,8 @@ impl ToolSet {
     }
 }
 
-/// Tools the daemon serves itself: the Team Bus, Ask's tools.
+/// Tools the daemon serves itself: the Team Bus, Ask's tools, and the tools the operator connected
+/// (ADR 0069).
 pub trait HostTools: Send + Sync {
     fn specs(&self) -> Vec<ToolSpec>;
 
@@ -90,8 +91,25 @@ pub trait HostTools: Send + Sync {
         false
     }
 
+    /// For a call the operator must allow first, what to ask: a connected tool's calls do. `None`
+    /// for the daemon's own tools, which never ask.
+    fn asks(&self, _name: &str) -> Option<HostAsk> {
+        None
+    }
+
     /// The tool's answer, and whether it failed.
     fn call<'a>(&'a self, name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)>;
+}
+
+/// What a host tool's call asks the operator (ADR 0069).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostAsk {
+    /// What the card and the run record say: "Linear: Create issue".
+    pub title: String,
+    /// The connected tool, as the team file names it: "Linear".
+    pub server: String,
+    /// The tool's own name for the call: `create_issue`.
+    pub call: String,
 }
 
 /// No daemon tools.
@@ -646,16 +664,53 @@ impl Session {
     }
 
     async fn run_host(&self, call: &ToolCall, input: Value) -> Result<Output, AgentError> {
+        let ask = self.host.asks(&call.name);
         let recorded = !self.host.records_own_calls(&call.name);
         if recorded {
+            let title = ask
+                .as_ref()
+                .map_or(call.name.as_str(), |ask| ask.title.as_str());
             self.emit(events::tool_call(
                 &call.id,
-                &call.name,
+                title,
                 ToolKind::Other,
                 &input,
                 &[],
             ))
             .await?;
+        }
+        if let Some(ask) = ask {
+            // A connected tool's call reaches the operator's own accounts: it asks first (ADR 0069),
+            // with what it would send. The operator's change, offered for a command, isn't here.
+            let request = PermissionRequest {
+                session_id: self.config.session_id.clone(),
+                tool_call_id: call.id.clone(),
+                title: ask.title,
+                kind: ToolKind::Other,
+                input: json!({"server": ask.server, "tool": ask.call, "arguments": input}),
+                locations: Vec::new(),
+            };
+            let refused = match self.permissions.request(&request).await {
+                Decision::Allow | Decision::AllowEdited(_) => None,
+                Decision::Deny => Some(Output::failed(
+                    "The person declined this. Carry on without it, or say what you need and why.",
+                )),
+                Decision::Answer(answer) => Some(Output::ok(format!(
+                    "The person answered instead of letting this run: {answer}"
+                ))),
+            };
+            if let Some(output) = refused {
+                if recorded {
+                    let status = if output.failed {
+                        ToolStatus::Failed
+                    } else {
+                        ToolStatus::Completed
+                    };
+                    self.emit(events::tool_update(&call.id, status, &output.text))
+                        .await?;
+                }
+                return Ok(output);
+            }
         }
         let (text, failed) = self.host.call(&call.name, input).await;
         if recorded {

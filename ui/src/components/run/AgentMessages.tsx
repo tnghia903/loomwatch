@@ -318,7 +318,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
             )}
             {asking ? (
               <div className="chat-file chat-permission">
-                <p className="chat-file-head"><ShieldQuestionMark size={15} aria-hidden="true" /><span>{permissionAsks(message.permission?.switch)}</span></p>
+                <p className="chat-file-head"><ShieldQuestionMark size={15} aria-hidden="true" /><span>{permissionAsks(message.permission?.switch, message.permission?.tool)}</span></p>
                 <p className="permission-what" title={permissionWhat({ title: text, detail: message.permission?.detail })}>{permissionWhat({ title: text, detail: message.permission?.detail })}</p>
                 {message.permission?.auto && <p className="permission-auto">{autoNote(message.permission.auto)}</p>}
               </div>

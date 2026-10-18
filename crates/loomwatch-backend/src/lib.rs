@@ -13,6 +13,7 @@ pub mod chat;
 pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;
+pub mod connected_tools;
 pub mod control;
 pub mod db;
 pub mod delivery;

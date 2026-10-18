@@ -31,7 +31,7 @@ use crate::agent::{
 use crate::archive::EventArchive;
 use crate::team_bus::TeamBusConnection;
 use crate::{EventKind, SessionOutcome};
-use bridge::{BusTools, ChannelSink, PolicyGate, Record, SpoolGate};
+use bridge::{BusTools, ChannelSink, CombinedTools, PolicyGate, Record, SpoolGate};
 
 /// How an agent is run: its folder, the tools wired to it, its switches (ADR 0037) and who it asks
 /// about anything else (ADR 0040).
@@ -756,20 +756,21 @@ impl AgentRun {
                 Some(json!({"source": "loomwatch", "phase": "session_new"})),
             )
             .await?;
-        if !self.spec.tools.is_empty() {
-            let names: Vec<&str> = self
-                .spec
-                .tools
-                .iter()
-                .map(|tool| tool.name.as_str())
-                .collect();
+        let unavailable: Vec<&str> = self
+            .spec
+            .tools
+            .iter()
+            .filter(|tool| !tool.connected)
+            .map(|tool| tool.name.as_str())
+            .collect();
+        if !unavailable.is_empty() {
             recorder
                 .append(
                     EventKind::SessionMeta,
                     json!({
                         "phase": "tools_unavailable",
-                        "tools": names,
-                        "reason": "LoomWatch's own agent can't use tools from another app's settings yet; the agent runs without them."
+                        "tools": unavailable,
+                        "reason": "These tools aren't connected in LoomWatch; the agent runs without them."
                     }),
                     Some(json!({"source": "loomwatch", "phase": "tools_unavailable"})),
                 )
@@ -849,9 +850,33 @@ impl AgentRun {
         if let Some(host) = &self.host {
             return host.clone();
         }
-        match bus {
-            Some(connection) => Arc::new(BusTools::new(connection.clone())),
-            None => Arc::new(NoHostTools),
+        let mut hosts: Vec<Arc<dyn HostTools>> = Vec::new();
+        if let Some(connection) = bus {
+            hosts.push(Arc::new(BusTools::new(connection.clone())));
+        }
+        // The tools the operator connected and gave this agent (ADR 0069). Only a run agent, with
+        // a policy to ask through, is ever offered them.
+        if self.spec.permissions.is_some()
+            && let Some(tools) = crate::connected_tools::installed()
+        {
+            let given: Vec<_> = self
+                .spec
+                .tools
+                .iter()
+                .filter(|tool| tool.connected)
+                .filter_map(|tool| tools.named_now(&tool.name))
+                .collect();
+            if !given.is_empty() {
+                hosts.push(Arc::new(crate::connected_tools::OutsideTools::new(
+                    tools.clone(),
+                    given,
+                )));
+            }
+        }
+        match hosts.len() {
+            0 => Arc::new(NoHostTools),
+            1 => hosts.remove(0),
+            _ => Arc::new(CombinedTools(hosts)),
         }
     }
 }

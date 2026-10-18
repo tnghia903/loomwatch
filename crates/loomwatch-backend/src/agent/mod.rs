@@ -51,8 +51,8 @@ pub use openrouter::{BASE_URL_ENV, DEFAULT_BASE_URL, OpenRouter, base_url, is_lo
 pub use permission::{AllowAll, Decision, DenyAll, PermissionRequest, Permissions};
 pub use provider::{Completion, Finish, Message, Provider, ServerTools, ToolCall, ToolSpec, Usage};
 pub use session::{
-    CancelHandle, HostTools, NoHostTools, Session, SessionConfig, Snapshot, StopReason, ToolSet,
-    TurnEnd,
+    CancelHandle, HostAsk, HostTools, NoHostTools, Session, SessionConfig, Snapshot, StopReason,
+    ToolSet, TurnEnd,
 };
 pub use skills::{SkillEntry, index_skills};
 pub use spend::{Go, Spend, Unmetered};

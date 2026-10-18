@@ -55,6 +55,11 @@ dunce = "1.0"
 # A skills search reads its results' licenses a few at a time (marketplace.rs). Already in the
 # build through axum and sqlx.
 futures-util = "0.3"
+# Tools the operator connects (connected_tools/): the official MCP client, over Streamable HTTP with sign-in.
+# TLS is reqwest's rustls above; rmcp adds no TLS of its own.
+rmcp = { version = "3.5", default-features = false, features = ["auth", "client", "transport-streamable-http-client-reqwest"] }
+# rmcp's credential store is an async_trait trait.
+async-trait = "0.1"
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"

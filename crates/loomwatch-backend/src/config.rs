@@ -728,14 +728,42 @@ pub struct CapabilityRef {
     /// `name` is then the page's title as it was when chosen.
     #[serde(default)]
     pub notion: Option<NotionRef>,
+    /// Calls of a connected tool the operator always allows this agent to make without asking
+    /// (ADR 0069), by the tool's own name for each: `create_issue`. For `tool` only; every other
+    /// call of the tool asks first.
+    #[serde(default)]
+    pub always_allow: Vec<String>,
 }
 
-/// Which Notion page a knowledge entry reads (ADR 0050). An object rather than a bare id so a
-/// teamspace can join it later without a second field.
+/// The most calls of one tool an agent may always be allowed.
+const MAX_ALWAYS_ALLOWED: usize = 200;
+
 impl CapabilityRef {
     /// Where a path or a Notion page may appear, and that a Notion page is named by its id.
     fn validate(&self) -> Result<(), String> {
         let (name, kind) = (&self.name, self.kind.as_str());
+        if !self.always_allow.is_empty() {
+            if self.kind != CapabilityKind::Tool {
+                return Err(format!(
+                    "{name} is a {kind} with `alwaysAllow`, but only a tool's calls can be always allowed"
+                ));
+            }
+            if self.always_allow.len() > MAX_ALWAYS_ALLOWED {
+                return Err(format!(
+                    "{name} always allows {} calls; keep it to {MAX_ALWAYS_ALLOWED}",
+                    self.always_allow.len()
+                ));
+            }
+            if let Some(bad) = self
+                .always_allow
+                .iter()
+                .find(|call| call.trim().is_empty() || call.chars().count() > 128)
+            {
+                return Err(format!(
+                    "{name} always allows {bad:?}, which isn't the name of a call"
+                ));
+            }
+        }
         if self.path.is_some() && self.kind != CapabilityKind::Knowledge {
             return Err(format!(
                 "{name} is a {kind} with a path, but only knowledge can be read from a path"
@@ -796,8 +824,9 @@ pub enum CapabilityKind {
     /// prompt, and it is a read grant for that folder or file (ADR 0029). Memory is wired through
     /// `memory.inherits`, not here.
     Knowledge,
-    /// An MCP server from the operator's own harness config, passed to the harness in
-    /// `session/new` (ADR 0029).
+    /// A tool the operator connected in `LoomWatch` (ADR 0069), by its name: its calls are offered
+    /// to the agent, each asking first unless `alwaysAllow` names it. A name with no connected tool
+    /// is told to the agent as unavailable.
     Tool,
 }
 
@@ -1556,6 +1585,34 @@ mod tests {
 
     /// ADR 0060: an agent's turned-off list names skills and tools of its app's own, never
     /// knowledge (only ever what `LoomWatch` gives) and never the Team Bus.
+    #[test]
+    fn a_tools_always_allowed_calls_are_read_and_belong_to_tools_only() {
+        let team = |capability: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n    capabilities:\n      - {capability}\n",
+            ))
+        };
+        let parsed = team("{kind: tool, name: Linear, alwaysAllow: [create_issue]}")
+            .expect("a tool's calls can be always allowed");
+        assert_eq!(
+            parsed.agents[0].capabilities[0].always_allow,
+            ["create_issue"]
+        );
+        for (capability, says) in [
+            (
+                "{kind: skill, name: notes, alwaysAllow: [x]}",
+                "only a tool's calls",
+            ),
+            (
+                "{kind: tool, name: Linear, alwaysAllow: [' ']}",
+                "isn't the name of a call",
+            ),
+        ] {
+            let error = format!("{:#}", team(capability).expect_err(says));
+            assert!(error.contains(says), "{error}");
+        }
+    }
+
     #[test]
     fn reads_an_agents_turned_off_skills_and_tools_and_refuses_the_rest() {
         let team = |entries: &str| {

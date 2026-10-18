@@ -545,10 +545,18 @@ impl ComposedPrompt {
             });
         }
         for tool in &delivery.tools {
+            let text = if tool.connected {
+                format!(
+                    "The operator gave you {name}: its calls are your tools whose descriptions start \"From {name}\". They act in the operator's own {name} account, so each call waits for the operator to allow it unless they always allow that call. Use one when the task needs it; if one is declined, carry on without it and say what it would have done.",
+                    name = tool.name
+                )
+            } else {
+                "The operator gave you this tool, but it isn't connected in LoomWatch, so you don't have it. Do the task without it, and say in your reply what it would have let you do.".to_owned()
+            };
             additions.push(PromptSection {
                 kind: PromptSectionKind::Tool,
                 heading: format!("## Tool: {}", tool.name),
-                text: "The operator connected this tool to you, but it came from another AI app's settings, which LoomWatch's agents don't use, so you don't have it. Do the task without it, and say in your reply what it would have let you do.".to_owned(),
+                text,
             });
         }
         let position = self
