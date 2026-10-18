@@ -6,7 +6,7 @@ import { modelNameFromId } from '../../lib/ai/modelIds'
 import { useModels } from '../../lib/ai/useModels'
 import { uniqueLabel } from '../../lib/composer-layout/types'
 import { listNames, middleTruncate } from '../../lib/format'
-import { addAgentFile } from '../../lib/knowledge/client'
+import { addAgentFile, addTeamFile } from '../../lib/knowledge/client'
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
 import { replyLine, replySays, replySection, withReply } from '../../lib/library/desk'
@@ -71,16 +71,17 @@ export interface ByHandProps {
   /** Changes can't be kept here (a team you can't edit): every control shows, none applies. */
   readOnly?: boolean
   /**
-   * In a team: the folders, files and Notion pages the team's agent reads (teamDraft.ts readsOf).
-   * The drawer files them with its own (`draft.reads`), each once; absent in Your agents.
+   * One of Your agents in a team: the folders, files and Notion pages it reads there (teamDraft.ts
+   * readsOf). The drawer files them with its own (`draft.reads`), each once; absent elsewhere.
    */
   reads?: readonly ReadSource[]
   /**
-   * A team's own agent: everything it reads is the team's to give, with a line in Workflow, so
-   * the block lists `reads` and gives it nothing itself. One of Your agents is given what it reads
-   * in every team (`draft.reads`) right in the block.
+   * A team's own agent, in the team at `teamPath` (`null` until it is saved). What it reads
+   * (`draft.reads`) is the team's: each is a card with a line to it in Workflow, so giving it one
+   * here and drawing that line there are the same thing. A file it is given is kept beside the team
+   * file. One of Your agents is given what it reads in every team it joins, here too.
    */
-  teamGivesReads?: boolean
+  teamOwn?: { teamPath: string | null }
   /** In a team: open its Workflow, where the team gives it more to read with a line. */
   onShowWorkflow?: () => void
   /** In a team: the model its job and place in the team suit. Absent, its job alone decides. */
@@ -108,7 +109,7 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamGivesReads = false, onShowWorkflow, modelSuggestion, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, modelSuggestion, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -169,8 +170,9 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const givenTools = draft.tools.map((name) => ({ name, tool: toolNamed(connectedTools, name) }))
   const toGive = connectedTools.filter((tool) => !tool.pending && !draft.tools.some((name) => name.trim().toLowerCase() === tool.name.trim().toLowerCase()))
   const giveTool = (name: string) => { if (!draft.tools.some((given) => given.trim().toLowerCase() === name.trim().toLowerCase())) set('tools', [...draft.tools, name]) }
-  // What it reads: its own, in every team it joins, and in a team what that team gives it besides.
-  const ownReads = useMemo(() => (teamGivesReads ? [] : readsOf({ capabilities: knowledgeOf(draft.reads) })), [teamGivesReads, draft.reads])
+  // What it reads: its own (for a team's own agent, all of it), and in a team what that team gives
+  // one of Your agents besides.
+  const ownReads = useMemo(() => readsOf({ capabilities: knowledgeOf(draft.reads) }), [draft.reads])
   const teamGiven = useMemo(() => {
     const own = new Set(ownReads.map((source) => source.key))
     return (teamReads ?? []).filter((source) => !source.key || !own.has(source.key))
@@ -232,7 +234,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     job: draft.instructions.trim() ? `Says ${parts} of the ${INSTRUCTION_PARTS.length} things good instructions say: its job, how to work, how it checks its work, and what it replies with` : 'Nothing written yet',
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
-    reads: readsSay(ownReads, teamGiven, teamGivesReads),
+    reads: readsSay(ownReads, teamGiven, Boolean(teamOwn)),
     tools: toolsSay(givenTools, connected.state === 'loading'),
     keys: given.length ? `Goes ahead with ${given.map((item) => item.word.toLowerCase()).join(' and ')}${kept.length ? `; asks you first for ${kept.map((item) => item.word.toLowerCase()).join(' and ')}` : ''}` : 'Asks you before it searches the web, changes files or runs a command',
     reply: replyPart ? replySays(replyPart.text) : 'Its instructions don’t say yet',
@@ -325,7 +327,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           {block('reads', <Reads
             reads={reads}
             own={ownReads.length}
-            teamGives={teamGivesReads}
+            teamOwn={teamOwn}
             inTeam={teamReads !== undefined}
             readOnly={readOnly}
             agentName={draft.name.trim() || 'your new agent'}
@@ -513,10 +515,10 @@ function sentence(draft: AgentDraft, model: string, reads: readonly ReadSource[]
 
 /**
  * What it reads, in words, for the line under the block's title: what it reads in every team, and
- * in a team what that team gives it besides. A team's own agent reads only what the team gives it.
+ * in a team what that team gives it besides. A team's own agent is only ever in its team.
  */
-function readsSay(own: readonly ReadSource[], teamGives: readonly ReadSource[], teamOnly: boolean): string {
-  if (teamOnly) return teamGives.length ? `Reads ${readCount(teamGives)} the team gives it` : 'The team gives it nothing to read yet'
+function readsSay(own: readonly ReadSource[], teamGives: readonly ReadSource[], teamOwn: boolean): string {
+  if (teamOwn) return own.length ? `Reads ${readCount(own)}` : 'Nothing yet'
   if (!own.length) return teamGives.length ? `Reads ${readCount(teamGives)} this team gives it` : 'Nothing yet'
   const everywhere = `Reads ${readCount(own)} in every team it joins`
   return teamGives.length ? `${everywhere}, and ${readCount(teamGives)} this team gives it` : everywhere
@@ -526,15 +528,16 @@ function readsSay(own: readonly ReadSource[], teamGives: readonly ReadSource[], 
  * The file drawer's block: what it reads, each with where it is. One of Your agents is given a
  * folder, a file or a Notion page right here, and reads it in every team it joins; a file is kept
  * in the teams folder's `.jobs/.files/`, so every team reads the same one. What a team gives it
- * besides is listed after, and is changed in that team's Workflow. A team's own agent is given
- * everything there (`teamGives`).
+ * besides is listed after, and is changed in that team's Workflow. A team's own agent (`teamOwn`)
+ * is given everything here or there alike, as cards wired to it, and a file is kept beside the team
+ * file (in `.jobs/.files/` while the team has never been saved).
  */
-function Reads({ reads, own, teamGives, inTeam, readOnly, agentName, onGive, onTakeAway, onShowWorkflow }: { reads: readonly ReadSource[]; own: number; teamGives: boolean; inTeam: boolean; readOnly: boolean; agentName: string; onGive: (read: AgentRead) => void; onTakeAway: (key: string) => void; onShowWorkflow?: () => void }) {
+function Reads({ reads, own, teamOwn, inTeam, readOnly, agentName, onGive, onTakeAway, onShowWorkflow }: { reads: readonly ReadSource[]; own: number; teamOwn?: { teamPath: string | null }; inTeam: boolean; readOnly: boolean; agentName: string; onGive: (read: AgentRead) => void; onTakeAway: (key: string) => void; onShowWorkflow?: () => void }) {
   const [picking, setPicking] = useState<'folder' | 'page' | null>(null)
   const [adding, setAdding] = useState(false)
   const [notes, setNotes] = useState<{ text: string; failed: boolean }[]>([])
   const fileInput = useRef<HTMLInputElement>(null)
-  const giving = !teamGives && !readOnly
+  const giving = !readOnly
   // Notion is asked about only once the agent can be given something here.
   const notion = useNotionConnection(giving)
 
@@ -544,7 +547,7 @@ function Reads({ reads, own, teamGives, inTeam, readOnly, agentName, onGive, onT
     const next: { text: string; failed: boolean }[] = []
     for (const file of files) {
       try {
-        const stored = await addAgentFile(file)
+        const stored = await (teamOwn?.teamPath ? addTeamFile(teamOwn.teamPath, file) : addAgentFile(file))
         onGive({ name: stored.name, path: stored.path })
         if (stored.note) next.push({ text: `${stored.name}: ${stored.note}`, failed: false })
       } catch (caught) {
@@ -555,20 +558,21 @@ function Reads({ reads, own, teamGives, inTeam, readOnly, agentName, onGive, onT
     setAdding(false)
   }
 
-  const workflowLabel = teamGives || !own ? (reads.length ? 'Change it in Workflow' : 'Give it something in Workflow') : 'Give it more in Workflow'
+  // A team's own agent is given it here as well as in Workflow, so that button only goes to see it.
+  const workflowLabel = teamOwn ? (reads.length ? 'See it in Workflow' : null) : !own ? (reads.length ? 'Change it in Workflow' : 'Give it something in Workflow') : 'Give it more in Workflow'
   return (
     <>
       {reads.length > 0 && <ul className="byhand-reads" aria-label="In its file drawer">
         {reads.map((source, index) => {
           const Icon = source.kind === 'page' ? NotebookText : source.kind === 'file' ? FileText : Folder
-          const mine = !teamGives && index < own
+          const mine = index < own
           return (
-            <li key={`${source.key ?? `${source.kind}:${source.where}`}:${index}`} className={!mine && !teamGives ? 'team' : undefined}>
+            <li key={`${source.key ?? `${source.kind}:${source.where}`}:${index}`} className={mine ? undefined : 'team'}>
               <Icon size={15} aria-hidden="true" />
               <span>
                 <b>{source.name}</b>
                 <em title={source.where}>{source.kind === 'page' ? source.where : `${source.kind === 'file' ? 'File' : 'Folder'} · ${middleTruncate(source.where, 64)}`}</em>
-                {!mine && !teamGives && <em className="byhand-reads-team">This team gives it</em>}
+                {!mine && <em className="byhand-reads-team">This team gives it</em>}
               </span>
               {mine && giving && source.key && <button type="button" className="iconbtn" aria-label={`Stop reading ${source.name}`} onClick={() => onTakeAway(source.key!)}><X size={12} aria-hidden="true" /></button>}
             </li>
@@ -591,16 +595,16 @@ function Reads({ reads, own, teamGives, inTeam, readOnly, agentName, onGive, onT
           {notes.map((note) => <li key={note.text} className={`t-meta ${note.failed ? 'failed' : ''}`} role={note.failed ? 'alert' : undefined}>{note.text}</li>)}
         </ul>}
       </>}
-      <p className="t-meta">{teamGives
-        ? 'What it reads is the team’s to give: draw a line from a folder, file or Notion page to this agent in Workflow.'
+      <p className="t-meta">{teamOwn
+        ? 'Each is a card in Workflow with a line to this agent, and a line drawn there shows here too. A folder is linked where it is; a file is copied into your teams folder.'
         : inTeam
           ? 'What you give it here, it reads in every team it joins. This team can give it more with a line in Workflow.'
           : 'What you give it here, it reads in every team it joins. A folder is linked where it is; a file is copied into your teams folder. A team can give it more in its Workflow.'}</p>
-      {onShowWorkflow && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{workflowLabel}</button>}
+      {onShowWorkflow && workflowLabel && <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />{workflowLabel}</button>}
       {picking === 'folder' && <FolderPicker
         onClose={() => setPicking(null)}
         title={`Give ${agentName} a folder`}
-        note="It is given the folder’s list of files and its README, and may open the files in it, in every team it joins. The folder is linked, not copied, so every run sees what is in it then."
+        note={`It is given the folder’s list of files and its README, and may open the files in it${teamOwn ? '' : ', in every team it joins'}. The folder is linked, not copied, so every run sees what is in it then.`}
         onChoose={(folder) => { setPicking(null); onGive({ name: folder.name, path: folder.path }) }}
       />}
       {picking === 'page' && <NotionPagePicker

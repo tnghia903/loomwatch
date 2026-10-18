@@ -71,6 +71,41 @@ describe('a team’s own agent on the workbench', () => {
     expect(teamAgentEdit(off, 'tools', ['github'])).not.toHaveProperty('fields.turnedOff')
   })
 
+  it('gives it folders, files and Notion pages from the workbench as the knowledge cards the canvas draws, keeping its other sources', () => {
+    const reading: AgentConfig = { ...writer, capabilities: [
+      { kind: 'knowledge', name: 'notes', path: '/Users/me/notes' },
+      { kind: 'skill', name: 'house-style' },
+      { kind: 'knowledge', name: 'brief.md', path: 'digest.files/brief.md' },
+      { kind: 'tool', name: 'github' },
+      { kind: 'knowledge', name: 'Hub', notion: { page: 'abc' } },
+      // Knowledge without a path names nothing it reads (ADR 0036): not in the drawer, and left as it is.
+      { kind: 'knowledge', name: 'nowhere' },
+      { kind: 'knowledge', name: '', path: '/Users/me/unnamed' },
+    ] }
+    // A file added beside the team keeps its path from the team file's folder.
+    expect(draftFromTeamAgent(reading).reads).toEqual([
+      { name: 'notes', path: '/Users/me/notes' },
+      { name: 'brief.md', path: 'digest.files/brief.md' },
+      { name: 'Hub', notion: { page: 'abc' } },
+      { name: 'unnamed', path: '/Users/me/unnamed' },
+    ])
+    // Taking one away drops only its entry; what it keeps stays where it was, and a new one goes last.
+    expect(teamAgentEdit(reading, 'reads', [
+      { name: 'Hub', notion: { page: 'abc' } },
+      { name: 'notes', path: '/Users/me/notes' },
+      { name: 'brand', path: '/Users/me/brand' },
+    ])).toEqual({ kind: 'fields', fields: { capabilities: [
+      { kind: 'knowledge', name: 'notes', path: '/Users/me/notes' },
+      { kind: 'skill', name: 'house-style' },
+      { kind: 'tool', name: 'github' },
+      { kind: 'knowledge', name: 'Hub', notion: { page: 'abc' } },
+      { kind: 'knowledge', name: 'nowhere' },
+      { kind: 'knowledge', name: 'brand', path: '/Users/me/brand' },
+    ] } })
+    expect(teamAgentEdit({ ...writer, capabilities: [{ kind: 'knowledge', name: 'notes', path: '/Users/me/notes' }] }, 'reads', [])).toEqual({ kind: 'fields', fields: { capabilities: undefined } })
+    expect(teamAgentEdit({ ...writer, capabilities: undefined }, 'reads', [{ name: 'Hub', notion: { page: 'abc' } }])).toEqual({ kind: 'fields', fields: { capabilities: [{ kind: 'knowledge', name: 'Hub', notion: { page: 'abc' } }] } })
+  })
+
   it('reads what the team gives it to read, for its drawer: folders, files and Notion pages, in order', () => {
     expect(readsOf({ capabilities: [
       { kind: 'skill', name: 'house-style' },

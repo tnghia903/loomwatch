@@ -65,10 +65,10 @@ describe('a team’s agents, the first of its views', () => {
     expect(screen.getByRole('button', { name: 'Add one in Workflow' })).toBeInTheDocument()
   })
 
-  it('shows what the team gives an agent to read on its workbench, and sends changes to Workflow', () => {
+  it('shows what a team’s own agent reads on its workbench, and takes one away there', () => {
     const props = renderTeamAgents({ agents: [scoper], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'What it reads' })
-    expect(block).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page the team gives it')
+    expect(block).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page')
     const held = within(block).getByRole('list', { name: 'In its file drawer' })
     expect(within(held).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       'sutd-final-projectFolder · /Users/me/Developer/sutd-final-project',
@@ -76,19 +76,66 @@ describe('a team’s agents, the first of its views', () => {
       'EKIS hubNotion page · read when each run starts',
     ])
     expect(screen.getByText(/has 1 recipe card, and reads 1 folder, 1 file and 1 Notion page\./)).toBeInTheDocument()
-    // A team's own agent is given what it reads in Workflow only: nothing is added or taken here.
-    expect(within(block).queryByRole('group', { name: 'Give it something to read' })).toBeNull()
-    expect(within(block).queryByRole('button', { name: /^Stop reading/ })).toBeNull()
-    fireEvent.click(within(block).getByRole('button', { name: 'Change it in Workflow' }))
+    // Given here or with a line in Workflow, it is the same card: either place changes it.
+    expect(block).toHaveTextContent('Each is a card in Workflow with a line to this agent')
+    expect(within(block).getByRole('group', { name: 'Give it something to read' })).toBeInTheDocument()
+    fireEvent.click(within(held).getByRole('button', { name: 'Stop reading brief.md' }))
+    expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'reads', [
+      { name: 'sutd-final-project', path: '/Users/me/Developer/sutd-final-project' },
+      { name: 'EKIS hub', notion: { page: 'abc123' } },
+    ])
+    fireEvent.click(within(block).getByRole('button', { name: 'See it in Workflow' }))
     expect(props.onShowWorkflow).toHaveBeenCalled()
   })
 
-  it('says when the team gives it nothing to read yet', () => {
+  it('says when a team’s own agent reads nothing yet, and offers what it can be given', () => {
     renderTeamAgents({ agents: [{ ...scoper, capabilities: [{ kind: 'skill', name: 'algorithmic-art' }] }], selected: 'scope' })
     const block = screen.getByRole('region', { name: 'What it reads' })
-    expect(block).toHaveTextContent('The team gives it nothing to read yet')
+    expect(within(block).getByText('Nothing yet')).toBeInTheDocument()
     expect(within(block).queryByRole('list')).toBeNull()
-    expect(within(block).getByRole('button', { name: 'Give it something in Workflow' })).toBeInTheDocument()
+    const give = within(block).getByRole('group', { name: 'Give it something to read' })
+    expect(within(give).getByRole('button', { name: 'Folder' })).toBeInTheDocument()
+    expect(within(give).getByRole('button', { name: 'File' })).toBeInTheDocument()
+    // Giving it something is right here, so there is no second way to it on this screen.
+    expect(within(block).queryByRole('button', { name: /in Workflow$/ })).toBeNull()
+  })
+
+  it('gives a team’s own agent a folder, after what it reads already', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).startsWith('/api/folders')
+      ? Promise.resolve(new Response(JSON.stringify({ path: '/Users/me/brand', name: 'brand', parent: '/Users/me', folders: [], files: ['logo.svg'], moreFiles: 0, places: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      : Promise.reject(new Error('no daemon')))))
+    const props = renderTeamAgents({ agents: [scoper], selected: 'scope' })
+    fireEvent.click(within(screen.getByRole('region', { name: 'What it reads' })).getByRole('button', { name: 'Folder' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Give Project scope a folder' })
+    expect(dialog).not.toHaveTextContent('in every team it joins')
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Add “brand”' }))
+    expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'reads', [
+      { name: 'sutd-final-project', path: '/Users/me/Developer/sutd-final-project' },
+      { name: 'brief.md', path: 'scope.files/brief.md' },
+      { name: 'EKIS hub', notion: { page: 'abc123' } },
+      { name: 'brand', path: '/Users/me/brand' },
+    ])
+  })
+
+  it('keeps a file a team’s own agent is given beside the team file, as a canvas pick does', async () => {
+    const sent: string[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      sent.push(String(url))
+      return String(url).startsWith('/api/team/files')
+        ? Promise.resolve(new Response(JSON.stringify({ name: 'plan.md', path: 'digest.files/plan.md', bytes: 7, chars: 7, excerpted: false }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        : Promise.reject(new Error('no daemon'))
+    }))
+    const props = renderTeamAgents({ agents: [{ ...scoper, capabilities: [] }], selected: 'scope' })
+    fireEvent.change(within(screen.getByRole('region', { name: 'What it reads' })).getByLabelText('Files it reads'), { target: { files: [new File(['# Plan\n'], 'plan.md', { type: 'text/markdown' })] } })
+    await waitFor(() => expect(props.onEdit).toHaveBeenLastCalledWith('scope', 'reads', [{ name: 'plan.md', path: 'digest.files/plan.md' }]))
+    expect(sent.find((url) => url.startsWith('/api/team/files'))).toBe(`/api/team/files?${new URLSearchParams({ path: 'digest.yaml', name: 'plan.md' })}`)
+  })
+
+  it('gives nothing and takes nothing away when the team can’t be changed here', () => {
+    renderTeamAgents({ agents: [scoper], selected: 'scope', editable: false })
+    const block = screen.getByRole('region', { name: 'What it reads' })
+    expect(within(block).queryByRole('group', { name: 'Give it something to read' })).toBeNull()
+    expect(within(block).queryByRole('button', { name: /^Stop reading/ })).toBeNull()
   })
 
   it('says which tools it was given aren’t connected in LoomWatch, and takes one away', async () => {
@@ -141,7 +188,7 @@ describe('a team’s agents, the first of its views', () => {
   it('says on the bench, and in its block, what doesn’t fit in the file drawer', async () => {
     const folders = ['notes', 'drafts', 'sources', 'archive', 'inbox'].map((name) => ({ kind: 'knowledge' as const, name, path: `/Users/me/${name}` }))
     renderTeamAgents({ agents: [{ ...scoper, capabilities: folders }], selected: 'scope' })
-    expect(await screen.findByRole('button', { name: 'The file drawer: Reads 5 folders the team gives it (1 not in the drawer)' })).toHaveTextContent('Reads · 5 (1 not in the drawer)')
+    expect(await screen.findByRole('button', { name: 'The file drawer: Reads 5 folders (1 not in the drawer)' })).toHaveTextContent('Reads · 5 (1 not in the drawer)')
     expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('The drawer has room for 4, so inbox isn’t in it. It still reads it.')
   })
 

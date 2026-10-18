@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from 'react'
 import { Network, Plus, UserRoundPlus, X } from 'lucide-react'
 
 import type { DetectedCapability } from '../../lib/library/client'
-import type { ReadSource } from '../../lib/library/figure'
 import type { AgentDraft } from '../../lib/library/draft'
 import type { JobSpec, SavedJob } from '../../lib/library/jobs'
 import { linkState } from '../../lib/library/link'
@@ -94,7 +93,7 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
         </div>
       )}
 
-      {agent && !link && <OwnAgent key={agent.id} agent={agent} team={{ agents, responder }} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} reads={reads} knowledge={knowledge} onShowWorkflow={onShowWorkflow} />}
+      {agent && !link && <OwnAgent key={agent.id} agent={agent} team={{ agents, responder }} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} knowledge={knowledge} onShowWorkflow={onShowWorkflow} />}
     </div>
   )
 }
@@ -137,8 +136,11 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkfl
  * A team's own agent on the workbench, written straight into the team file, with the same two tabs
  * as one of Your agents: Build, and Chat, where you talk to it on its own.
  */
-function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEdit, reads, knowledge, onShowWorkflow }: { agent: AgentConfig; team: { agents: readonly AgentConfig[]; responder: string | null }; teamPath: string | null; editable: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow: () => void }) {
+function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEdit, knowledge, onShowWorkflow }: { agent: AgentConfig; team: { agents: readonly AgentConfig[]; responder: string | null }; teamPath: string | null; editable: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; knowledge: TeamKnowledge; onShowWorkflow: () => void }) {
   const draft = useMemo(() => draftFromTeamAgent(agent), [agent])
+  // Its chat reads what it reads as `knowledge`, named again from the chat's folder; its draft's
+  // reads name a file added beside the team from the team file's folder, so they stay out of it.
+  const chatDraft = useMemo(() => ({ ...draft, reads: [] }), [draft])
   const roleField = useRef<HTMLTextAreaElement>(null)
   const [record, setRecord] = useState<RunRecord | null>(null)
   // Its chat is named for this team and agent, so talking to one never touches another's. It is the
@@ -156,8 +158,8 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
         <AgentViewTabs view={view} onView={setView} />
       </div>
       <ByHand
-        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} reads={reads} teamGivesReads onShowWorkflow={onShowWorkflow} modelSuggestion={suggestModel({ agent, team })}
-        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
+        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} modelSuggestion={suggestModel({ agent, team })}
+        chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
       />
