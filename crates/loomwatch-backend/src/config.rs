@@ -336,12 +336,16 @@ pub struct BriefConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AskConfig {
-    /// How many questions one agent may put to another in a run, asking again after a question
-    /// back included.
+    /// How many questions one agent may put to another in a run. Clarifying what the other asked
+    /// back continues a question, so it is not counted (`rounds_per_question` bounds that).
     pub max_per_stage: u32,
     /// The most of one answer, in characters, the asker is handed. A longer one is cut in the
     /// middle, keeping its start and its conclusion.
     pub reply_chars: u32,
+    /// How many times an asked agent may ask back about one question before it must answer with
+    /// its best assumption. The asker's clarifications continue the question, so they are not
+    /// counted against `max_per_stage`.
+    pub rounds_per_question: u32,
 }
 
 impl Default for BriefConfig {
@@ -364,9 +368,12 @@ impl Default for AskConfig {
         // Three is enough to recover what a brief cut, and few enough that a stage cannot turn the
         // predecessor into a search engine. An answer stays under the 24,000 characters at which
         // LoomWatch's own engine sets a tool result aside and shows only its start.
+        // Three rounds: enough to settle what was unclear about one question, and an end the
+        // asked agent knows about, so the last round is an answer with its assumption named.
         Self {
             max_per_stage: 3,
             reply_chars: 20_000,
+            rounds_per_question: 3,
         }
     }
 }

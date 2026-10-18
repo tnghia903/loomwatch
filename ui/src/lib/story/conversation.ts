@@ -195,7 +195,9 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
     const { message } = line
     const key = message.id
     const to = line.receiver === null ? [] : [line.receiver]
-    out.push({ key: `${key}:said`, item, part: 'said', from: line.senders, to, word: WORD[message.kind], text: message.text, offsetMs: message.offsetMs, ts: message.ts })
+    // A question back and the clarification answering it read as what they are, round by round.
+    const word = message.refused ? 'not asked' : message.clarifies ? 'clarifies' : WORD[message.kind]
+    out.push({ key: `${key}:said`, item, part: 'said', from: line.senders, to, word, text: message.text, offsetMs: message.offsetMs, ts: message.ts })
     const reviewing = message.kind === 'handover' && line.receiver !== null && you.has(line.receiver)
     const reply = message.reply
     const permission = message.permission
@@ -213,7 +215,7 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
         key: `${key}:reply`, item, part: 'reply', from: [line.replier],
         // An answer goes back to whoever asked; your review goes back where you sent it, or on.
         to: back ? [back] : reviewing ? passedOn.map((passed) => passed.to) : line.senders.slice(0, 1),
-        word: back ? 'sent back' : reviewing ? (plain ? 'approved' : 'approved, with a note') : 'answer',
+        word: back ? 'sent back' : reviewing ? (plain ? 'approved' : 'approved, with a note') : reply.asksBack ? 'asks back' : 'answer',
         text: plain ? '' : reply.text, offsetMs: reply.offsetMs, ts: reply.ts,
       })
     } else if (message.state === 'pending' && line.receiver !== null && (ANSWERED.has(message.kind) || reviewing)) {

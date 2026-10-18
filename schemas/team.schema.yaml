@@ -345,9 +345,9 @@ $defs:
     properties:
       maxPerStage:
         description: >-
-          How many questions one agent may put to another in a run, asking again after a
-          question back included. A stage before this one stays answerable while the stages it
-          feeds run.
+          How many questions one agent may put to another in a run. Clarifying what the other
+          asked back continues a question and is not counted. A stage before this one stays
+          answerable while the stages it feeds run.
         type: integer
         minimum: 0
         default: 3
@@ -358,6 +358,15 @@ $defs:
         type: integer
         minimum: 1000
         default: 20000
+      roundsPerQuestion:
+        description: >-
+          How many times an asked agent may ask back about one question (a `## Question back`
+          section) before it must answer with its best assumption, saying which. The asker's
+          clarifications continue the same question and are not counted against maxPerStage.
+          0 lets no agent ask back.
+        type: integer
+        minimum: 0
+        default: 3
 
   Schedule:
     type: object

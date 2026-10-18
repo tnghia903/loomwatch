@@ -79,6 +79,9 @@ struct TeamBusState {
     finished: std::sync::Mutex<BTreeSet<String>>,
     /// How many questions each agent has put to each other agent in this run, by (asker, asked).
     asked: std::sync::Mutex<BTreeMap<(String, String), u32>>,
+    /// Questions whose asked agent asked back and is waiting for the asker to clarify, by (asker,
+    /// asked). The asker's next `ask` to that agent continues the question.
+    threads: std::sync::Mutex<BTreeMap<(String, String), Thread>>,
     /// Every `ask` still in flight, by the bearer token of the agent that asked, each with the
     /// switch that withdraws it. The asker's turn ending flips them (see
     /// [`TeamBusConnection::turn_ended`]).
@@ -92,6 +95,54 @@ struct TeamBusState {
 
 /// Each caller's `ask` calls in flight, by bearer token: an id, and the switch that withdraws it.
 type OpenAsks = BTreeMap<String, Vec<(u64, oneshot::Sender<()>)>>;
+
+/// A question the asked agent asked back about, waiting for the asker to clarify it.
+#[derive(Debug, Clone)]
+struct Thread {
+    /// The question as first asked.
+    question: String,
+    /// Each earlier round: what the asked agent asked back, and how the asker clarified it.
+    rounds: Vec<(String, String)>,
+    /// What it asked back last, which the asker's next `ask` to it answers.
+    waiting: String,
+}
+
+/// Where one `ask` stands in its question: the first time it is asked, or a clarification of what
+/// the asked agent asked back, and whether the asked agent may still ask back.
+struct Round {
+    /// The question it continues, when this `ask` clarifies a question back.
+    thread: Option<Thread>,
+    /// This `ask`'s place in its question: 1 the first time.
+    number: u32,
+    /// How many more times the asked agent may ask back about this question after this `ask`.
+    backs_left: u32,
+}
+
+impl Round {
+    fn may_ask_back(&self) -> bool {
+        self.backs_left > 0
+    }
+}
+
+/// A Team Bus refusal, with a reason the run's record keeps beside its words (`refused`), so the
+/// team chat can say in a line why a question was not put, whatever words it was refused with.
+#[derive(Debug)]
+struct Refused {
+    reason: &'static str,
+    message: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+fn refused(reason: &'static str, message: String) -> anyhow::Error {
+    Refused { reason, message }.into()
+}
 
 /// One caller's `dispatch`/`handoff` work. See [`TeamBusConnection::collect_delegated`].
 #[derive(Default)]
@@ -200,6 +251,7 @@ impl TeamBus {
             answering: std::sync::Mutex::new(BTreeMap::new()),
             finished: std::sync::Mutex::new(BTreeSet::new()),
             asked: std::sync::Mutex::new(BTreeMap::new()),
+            threads: std::sync::Mutex::new(BTreeMap::new()),
             asks: Mutex::new(BTreeMap::new()),
             next_ask: AtomicU64::new(0),
             delegated: std::sync::Mutex::new(BTreeMap::new()),
@@ -408,12 +460,15 @@ impl TeamBus {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains_key(&session.agent_id);
         if answering {
-            bail!(
-                "{} is answering another agent's question, so it may not start {target} with \
-                 `{tool}`. Answer from what you already have, and say plainly what you could not \
-                 confirm.",
-                session.agent_id
-            );
+            return Err(refused(
+                "cannot_start",
+                format!(
+                    "{} is answering another agent's question, so it may not start {target} \
+                     with `{tool}`. Answer from what you already have, and say plainly what you \
+                     could not confirm.",
+                    session.agent_id
+                ),
+            ));
         }
         Ok(())
     }
@@ -444,11 +499,14 @@ impl TeamBus {
             let name = self
                 .agent(target)
                 .map_or_else(|_| target.to_owned(), |agent| shown_name(&agent).to_owned());
-            bail!(
-                "{name} asked you this and is waiting for your answer, so you can't ask {name} \
-                 anything now. If you need a detail from {name} first, end your answer with a \
-                 `{QUESTION_BACK}` section saying exactly what you need."
-            );
+            return Err(refused(
+                "asking_back",
+                format!(
+                    "{name} asked you this and is waiting for your answer, so you can't ask \
+                     {name} anything now. If you need a detail from {name} first, end your \
+                     answer with a `{QUESTION_BACK}` section saying exactly what you need."
+                ),
+            ));
         }
         Ok(())
     }
@@ -474,15 +532,20 @@ impl TeamBus {
         } else {
             " Work from what you have,"
         };
-        bail!(
-            "{name} has finished its part of this run and is no longer open, so it can't be \
-             asked.{place} and say plainly what it does not cover."
-        )
+        Err(refused(
+            "finished",
+            format!(
+                "{name} has finished its part of this run and is no longer open, so it can't be \
+                 asked.{place} and say plainly what it does not cover."
+            ),
+        ))
     }
 
     /// Count one more question from `asker` to `target`, or refuse it past the team's limit
-    /// (`conversation.ask.maxPerStage`). Returns how many more `asker` may put to `target`.
-    fn count_ask(&self, asker: &str, target: &str) -> Result<u32> {
+    /// (`conversation.ask.maxPerStage`). A clarification of what `target` asked back continues a
+    /// question already counted, so it is not charged (`charge` false). Returns how many more
+    /// questions `asker` may put to `target`.
+    fn count_ask(&self, asker: &str, target: &str, charge: bool) -> Result<u32> {
         let max = self.state.team.conversation.ask.max_per_stage;
         let mut counts = self
             .state
@@ -492,18 +555,72 @@ impl TeamBus {
         let count = counts
             .entry((asker.to_owned(), target.to_owned()))
             .or_default();
+        if !charge {
+            return Ok(max.saturating_sub(*count));
+        }
         if *count >= max {
             let name = self
                 .agent(target)
                 .map_or_else(|_| target.to_owned(), |agent| shown_name(&agent).to_owned());
-            bail!(
-                "You have asked {name} {count} question{} in this run, the most this team allows. \
-                 Work from what you have, and say plainly what you could not confirm.",
-                if *count == 1 { "" } else { "s" }
-            );
+            return Err(refused(
+                "limit",
+                format!(
+                    "You have asked {name} {count} question{} in this run, the most this team \
+                     allows. Work from what you have, and say plainly what you could not confirm.",
+                    if *count == 1 { "" } else { "s" }
+                ),
+            ));
         }
         *count += 1;
         Ok(max - *count)
+    }
+
+    /// Where an `ask` from `asker` to `target` stands: a clarification of the question `target`
+    /// asked back about, when one waits, else a new question. Taken out of the waiting threads:
+    /// [`TeamBus::settle_round`] puts it back if `target` asks back again.
+    fn round_for(&self, asker: &str, target: &str) -> Round {
+        let allowed = self.state.team.conversation.ask.rounds_per_question;
+        let thread = self
+            .state
+            .threads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&(asker.to_owned(), target.to_owned()));
+        // How many times `target` has asked back about this question so far.
+        let backs = thread.as_ref().map_or(0, |thread| {
+            u32::try_from(thread.rounds.len() + 1).unwrap_or(u32::MAX)
+        });
+        Round {
+            thread,
+            number: backs + 1,
+            backs_left: allowed.saturating_sub(backs),
+        }
+    }
+
+    /// After an answer: keep the question waiting when `target` asked back, with this `ask`'s
+    /// words as the clarification of what it asked back last.
+    fn settle_round(&self, asker: &str, target: &str, round: &Round, question: &str, back: &str) {
+        let thread = match &round.thread {
+            Some(thread) => {
+                let mut rounds = thread.rounds.clone();
+                rounds.push((thread.waiting.clone(), question.to_owned()));
+                Thread {
+                    question: thread.question.clone(),
+                    rounds,
+                    waiting: back.to_owned(),
+                }
+            }
+            None => Thread {
+                question: question.to_owned(),
+                rounds: Vec::new(),
+                waiting: back.to_owned(),
+            },
+        };
+        self.state
+            .threads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert((asker.to_owned(), target.to_owned()), thread);
     }
 
     /// Record an `ask` in flight for the caller behind `token`, and the switch that withdraws it.
@@ -646,7 +763,11 @@ impl TeamBus {
             Ok(output) => ("completed", output.clone(), tool_success(&output)),
             Err(error) => {
                 let message = format!("{error:#}");
-                ("failed", json!({"error": message}), tool_error(&message))
+                let mut raw = json!({"error": message});
+                if let Some(refusal) = error.downcast_ref::<Refused>() {
+                    raw["refused"] = json!(refusal.reason);
+                }
+                ("failed", raw, tool_error(&message))
             }
         };
         event_log
@@ -711,10 +832,13 @@ impl TeamBus {
                     !self.is_live(&target).await && !self.is_finished(&target)
                 } =>
             {
-                bail!(
-                    "agent {:?} may not recruit helpers within its own pipeline step (allowRecruiting: false)",
-                    session.agent_id
-                )
+                Err(refused(
+                    "not_recruiting",
+                    format!(
+                        "agent {:?} may not recruit helpers within its own pipeline step (allowRecruiting: false)",
+                        session.agent_id
+                    ),
+                ))
             }
             _ => Ok(()),
         }
@@ -790,9 +914,17 @@ impl TeamBus {
                     context.answering = true;
                     Some(context)
                 };
-                let left = self.count_ask(&session.agent_id, &target)?;
                 let from_agent = self.agent(&session.agent_id)?;
                 let to_agent = self.agent(&target)?;
+                // A clarification of what the asked agent asked back continues its question.
+                let waiting = self
+                    .state
+                    .threads
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .contains_key(&(from_agent.id.clone(), target.clone()));
+                let left = self.count_ask(&session.agent_id, &target, !waiting)?;
+                let round = self.round_for(&session.agent_id, &target);
                 let (ask, withdrawn) = self.track_ask(token).await;
                 let started = AtomicBool::new(false);
                 let answer = async {
@@ -803,12 +935,13 @@ impl TeamBus {
                     if let Some(reply) = self
                         .ask_live(
                             &target,
-                            &live_question(&from_agent, &question),
+                            &live_question(&from_agent, &question, &round),
                             &from_agent.id,
                         )
                         .await?
                     {
-                        let mut answer = ask_result(&self.state.team, &to_agent, &reply, left);
+                        let mut answer =
+                            self.answer(&from_agent, &to_agent, &question, &round, &reply, left);
                         answer["live"] = json!(true);
                         return Ok(answer);
                     }
@@ -821,13 +954,19 @@ impl TeamBus {
                     let helped = self
                         .run_agent(
                             &target,
-                            &helper_question(&from_agent, &question),
+                            &helper_question(&from_agent, &question, &round),
                             event_log.clone(),
                             context,
                         )
                         .await?;
-                    let mut answer =
-                        ask_result(&self.state.team, &to_agent, &helped.outcome.reply, left);
+                    let mut answer = self.answer(
+                        &from_agent,
+                        &to_agent,
+                        &question,
+                        &round,
+                        &helped.outcome.reply,
+                        left,
+                    );
                     answer["sessionId"] = json!(helped.outcome.session_id);
                     // Its reply says why it stopped; it is not an answer to the question.
                     if helped.stopped {
@@ -1842,49 +1981,119 @@ fn scope_sentence(scope: &NoteScope) -> String {
 /// The heading an asked agent ends its answer with when it needs something from the asker first.
 const QUESTION_BACK: &str = "## Question back";
 
+/// What an asked agent is told to do when something is unclear, on this round of its question.
+///
+/// While it may still ask back, a question back; once it may not, its best assumption, named, so a
+/// clarification loop always ends in an answer the asker can check.
+fn when_unclear(asker: &str, round: &Round) -> String {
+    if round.may_ask_back() {
+        format!(
+            "If you can't answer without a detail only {asker} has, end your answer with a \
+             `{QUESTION_BACK}` section saying exactly what you need, instead of guessing."
+        )
+    } else if round.thread.is_some() {
+        "This is the last round on this question, so don't ask back again: answer with your best \
+         assumption for anything still unclear, and say which assumption you made."
+            .to_owned()
+    } else {
+        "If something is unclear, answer with your best assumption and say which assumption you \
+         made."
+            .to_owned()
+    }
+}
+
 /// A question as a kept-open agent receives it: who asks, and how to answer.
 ///
 /// It already did the work, so it is asked to answer from that rather than do it again, briefly,
 /// with what each fact rests on, and to say what it cannot confirm. Needing something from the
-/// asker is a question back in the answer, never a call to the asker, which is waiting on it.
-fn live_question(asker: &AgentConfig, question: &str) -> String {
+/// asker is a question back in the answer, never a call to the asker, which is waiting on it. A
+/// clarification arrives in the same session as the question it clarifies, so it carries only the
+/// asker's words.
+fn live_question(asker: &AgentConfig, question: &str, round: &Round) -> String {
     let name = shown_name(asker);
+    let unclear = when_unclear(name, round);
+    if round.thread.is_some() {
+        return format!(
+            "## {name} answers your question back\n{question}\n\nNow answer {name}'s question, \
+             from the work you already did; don't do it again. Be brief, with the link, file path \
+             or figure each fact rests on. {unclear} Don't contact {name} yourself: it is waiting \
+             for your answer."
+        );
+    }
     format!(
         "## A question from {name}\n{name} is working on this task with what you handed on, and \
          asks:\n\n{question}\n\nAnswer from the work you already did in this conversation; don't \
          do it again. Be brief: the answer, with the link, file path or figure it rests on, and \
-         say plainly what you could not confirm. If you can't answer without a detail from \
-         {name}, end your answer with a `{QUESTION_BACK}` section saying exactly what you need. \
-         Don't contact {name} yourself: it is waiting for your answer."
+         say plainly what you could not confirm. {unclear} Don't contact {name} yourself: it is \
+         waiting for your answer."
     )
 }
 
 /// A question as a helper started for it receives it. It holds nothing yet, so it is not told to
-/// be brief — in team mode `ask` is how a lead has a whole piece written — only how to say it
-/// needs something from the asker.
-fn helper_question(asker: &AgentConfig, question: &str) -> String {
+/// be brief — in team mode `ask` is how a lead has a whole piece written — only what to do when
+/// something is unclear. A fresh helper remembers nothing of a question it asked back about, so a
+/// clarification brings the whole question with it: as asked, each question back and each answer.
+fn helper_question(asker: &AgentConfig, question: &str, round: &Round) -> String {
+    use std::fmt::Write as _;
     let name = shown_name(asker);
-    format!(
-        "{question}\n\n{name} is waiting for your reply. If you can't do this without a detail \
-         only {name} has, end your reply with a `{QUESTION_BACK}` section saying exactly what you \
-         need, instead of guessing."
-    )
+    let unclear = when_unclear(name, round);
+    let Some(thread) = &round.thread else {
+        return format!("{question}\n\n{name} is waiting for your reply. {unclear}");
+    };
+    let mut text = format!("{}\n\n## Clarified so far\n", thread.question);
+    for (back, clarified) in thread
+        .rounds
+        .iter()
+        .map(|(back, clarified)| (back.as_str(), clarified.as_str()))
+        .chain([(thread.waiting.as_str(), question)])
+    {
+        let _ = write!(
+            text,
+            "You asked back:\n{back}\n\n{name} answered:\n{clarified}\n\n"
+        );
+    }
+    let _ = write!(text, "{name} is waiting for your reply. {unclear}");
+    text
 }
 
-/// What an `ask` hands back: the reply, cut in the middle past `conversation.ask.replyChars`, and
-/// what the asked agent needs from the asker when it ended with a question back.
-fn ask_result(team: &TeamConfig, asked: &AgentConfig, reply: &str, left: u32) -> Value {
-    let cap = usize::try_from(team.conversation.ask.reply_chars).unwrap_or(usize::MAX);
-    let mut answer = json!({
-        "agent": asked.id,
-        "name": shown_name(asked),
-        "reply": crate::cap_middle_text(reply, cap),
-        "asksLeft": left,
-    });
-    if let Some(needs) = question_back(reply) {
-        answer["questionBack"] = json!(needs);
+impl TeamBus {
+    /// What an `ask` hands back, and where its question goes next: kept waiting for a
+    /// clarification when the asked agent asked back on a round that allowed it, finished
+    /// otherwise.
+    ///
+    /// The reply is cut in the middle past `conversation.ask.replyChars`. The record says which
+    /// round of its question this was, whether it clarified a question back, and how many more
+    /// times the asked agent may ask back, which is what the team chat reads.
+    fn answer(
+        &self,
+        from: &AgentConfig,
+        to: &AgentConfig,
+        question: &str,
+        round: &Round,
+        reply: &str,
+        left: u32,
+    ) -> Value {
+        let team = &self.state.team;
+        let cap = usize::try_from(team.conversation.ask.reply_chars).unwrap_or(usize::MAX);
+        let mut answer = json!({
+            "agent": to.id,
+            "name": shown_name(to),
+            "reply": crate::cap_middle_text(reply, cap),
+            "asksLeft": left,
+            "round": round.number,
+            "clarifies": round.thread.is_some(),
+            "lastRound": !round.may_ask_back(),
+        });
+        // A question back on a round that allowed none is the answer it was told to give.
+        if round.may_ask_back()
+            && let Some(needs) = question_back(reply)
+        {
+            self.settle_round(&from.id, &to.id, round, question, needs);
+            answer["questionBack"] = json!(needs);
+            answer["backsLeft"] = json!(round.backs_left - 1);
+        }
+        answer
     }
-    answer
 }
 
 /// The question back an answer ends with: the text under a line that reads "Question back" as a
@@ -1909,25 +2118,29 @@ fn question_back(reply: &str) -> Option<&str> {
 ///
 /// Every other tool answers with its JSON as text. A reply serialised that way arrives as one
 /// string with every line break escaped, longer and harder to read than what was written. The
-/// JSON stays in `structuredContent` for whatever reads it.
+/// JSON stays in `structuredContent` for whatever reads it. A question back says what to do next:
+/// ask again with what is needed, which continues the same question rather than starting another.
 fn ask_success(answer: &Value) -> Value {
     let name = answer["name"].as_str().unwrap_or_default();
     let reply = answer["reply"].as_str().unwrap_or_default();
-    let left = answer["asksLeft"].as_u64().unwrap_or(0);
     let text = if answer.get("questionBack").is_some() {
-        let next = if left == 0 {
+        let backs = answer["backsLeft"].as_u64().unwrap_or(0);
+        let next = if backs == 0 {
             format!(
-                "You have no questions left for {name} in this run: work from what you have, and \
-                 say plainly what you could not confirm."
+                "That will be the last round on this question: {name} answers it with its best \
+                 assumption."
             )
         } else {
             format!(
-                "Ask {name} again with what it needs in your question. You can ask {name} {left} \
-                 more time{}.",
-                if left == 1 { "" } else { "s" }
+                "{name} can ask back {backs} more time{} on this question.",
+                if backs == 1 { "" } else { "s" }
             )
         };
-        format!("{name} needs something from you before it can answer:\n\n{reply}\n\n{next}")
+        format!(
+            "{name} needs something from you before it can answer:\n\n{reply}\n\nAsk {name} \
+             again with what it needs: your next question to {name} continues this one, and does \
+             not count against your questions. {next}"
+        )
     } else {
         format!("{name} answered:\n\n{reply}")
     };
@@ -4102,15 +4315,15 @@ mod tests {
     }
 
     /// **An answer comes back as the asked agent wrote it, framed going in, capped coming back,
-    /// with any question back turned into what to do next, and counted.**
+    /// and counted.**
     ///
     /// The kept-open stage answers "framed" only when the question reached it saying who asks and
     /// how to answer. The team file sets the cap and the count: a 30,000-character answer comes
-    /// back as its start and its end within 2,000, and the fourth question is refused.
+    /// back as its start and its end within 2,000, and the fourth question is refused, with the
+    /// reason recorded for the team chat.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
-    async fn an_answer_comes_back_as_plain_text_capped_with_its_question_back_and_counted()
-    -> Result<()> {
+    async fn an_answer_comes_back_as_plain_text_capped_and_counted() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let predecessor = demo_model(Demo::responder(|request| {
             let prompt = request.prompt();
@@ -4119,8 +4332,6 @@ mod tests {
                 && prompt.contains("`## Question back` section");
             Some(says(&if !framed {
                 "main turn done".to_owned()
-            } else if prompt.contains("which year") {
-                "It depends on the year.\n\n**Question back:**\nWhich year do you mean?".to_owned()
             } else if prompt.contains("everything") {
                 format!("START {} END", "x".repeat(30_000))
             } else {
@@ -4151,20 +4362,11 @@ mod tests {
 
         let first = ask(&bus, &b.token, "a", "what did you find?").await?;
         assert_eq!(answer_text(&first), "a name answered:\n\nframed", "{first}");
-        assert_eq!(first["result"]["structuredContent"]["asksLeft"], 2);
-        assert_eq!(first["result"]["structuredContent"]["live"], true);
-
-        let back = ask(&bus, &b.token, "a", "which year was that?").await?;
-        assert_eq!(
-            answer_text(&back),
-            "a name needs something from you before it can answer:\n\nIt depends on the \
-             year.\n\n**Question back:**\nWhich year do you mean?\n\nAsk a name again with what \
-             it needs in your question. You can ask a name 1 more time."
-        );
-        assert_eq!(
-            back["result"]["structuredContent"]["questionBack"],
-            "Which year do you mean?"
-        );
+        let record = &first["result"]["structuredContent"];
+        assert_eq!(record["asksLeft"], 2);
+        assert_eq!(record["live"], true);
+        assert_eq!(record["round"], 1);
+        assert_eq!(record["clarifies"], false);
 
         let long = ask(&bus, &b.token, "a", "tell me everything").await?;
         let text = answer_text(&long);
@@ -4177,13 +4379,213 @@ mod tests {
             text.chars().count()
         );
 
-        let refused = ask(&bus, &b.token, "a", "one more?").await?;
+        let third = ask(&bus, &b.token, "a", "one more?").await?;
+        assert_eq!(third["result"]["structuredContent"]["asksLeft"], 0);
+        let refused = ask(&bus, &b.token, "a", "and another?").await?;
         assert_tool_error_contains(
             &refused,
             "You have asked a name 3 questions in this run, the most this team allows. Work \
              from what you have",
         );
+        let events = archive.load_session("plain-answer-run").await?;
+        let last = events
+            .iter()
+            .rev()
+            .find(|event| event.kind == EventKind::ToolUpdate)
+            .context("the refused ask was recorded")?;
+        assert_eq!(last.payload["status"], "failed");
+        assert_eq!(last.payload["rawOutput"]["refused"], "limit");
         bus.release("a", live).await?;
+        Ok(())
+    }
+
+    /// **A question the asked agent asks back about goes back and forth, uncounted, until it is
+    /// answered — and the last round is an answer with its assumption named.**
+    ///
+    /// Two rounds per question, one question allowed. The kept-open stage asks back on the
+    /// question and on the first clarification; on the second it is told it may not ask back
+    /// again, and answers with an assumption. All three asks are one question: the next new one
+    /// is refused. Each round reaches the stage in the session that asked back, framed for what
+    /// it is, and comes back saying what to do next.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_question_back_is_clarified_round_by_round_until_it_is_answered() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let predecessor = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            Some(says(if prompt.contains("## A question from b name") {
+                "It depends on the year.\n\n## Question back\nWhich year do you mean?"
+            } else if prompt.contains("## b name answers your question back")
+                && prompt.contains("This is the last round on this question")
+            {
+                "42, assuming the fourth quarter. Assumption: Q4."
+            } else if prompt.contains("## b name answers your question back")
+                && prompt.contains("2025")
+                && prompt.contains("`## Question back` section")
+            {
+                "**Question back:**\nWhich quarter of 2025?"
+            } else {
+                "main turn done"
+            }))
+        }));
+        let mut team = TeamConfig {
+            agents: vec![test_agent("a", &predecessor), test_agent("b", OFFLINE)],
+            edges: vec![edge("a", "b")],
+            ..team_of("clarifying-team", "a")
+        };
+        team.conversation.ask.max_per_stage = 1;
+        team.conversation.ask.rounds_per_question = 2;
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let event_log = EventLog::new(archive.clone(), "clarifying-run".into());
+        let live = keep_a_open(&bus, &archive, &predecessor, &event_log, None).await?;
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+
+        let asked = ask(&bus, &b.token, "a", "how many did it sell?").await?;
+        assert_eq!(
+            answer_text(&asked),
+            "a name needs something from you before it can answer:\n\nIt depends on the \
+             year.\n\n## Question back\nWhich year do you mean?\n\nAsk a name again with what it \
+             needs: your next question to a name continues this one, and does not count against \
+             your questions. a name can ask back 1 more time on this question."
+        );
+        let record = &asked["result"]["structuredContent"];
+        assert_eq!(record["questionBack"], "Which year do you mean?");
+        assert_eq!(record["asksLeft"], 0);
+        assert_eq!(record["round"], 1);
+
+        let clarified = ask(&bus, &b.token, "a", "2025").await?;
+        let text = answer_text(&clarified);
+        assert!(
+            text.starts_with("a name needs something from you before it can answer:"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with(
+                "That will be the last round on this question: a name answers it with its best \
+                 assumption."
+            ),
+            "{text}"
+        );
+        let record = &clarified["result"]["structuredContent"];
+        assert_eq!(record["clarifies"], true);
+        assert_eq!(record["round"], 2);
+        assert_eq!(record["questionBack"], "Which quarter of 2025?");
+
+        let last = ask(&bus, &b.token, "a", "any quarter will do").await?;
+        assert_eq!(
+            answer_text(&last),
+            "a name answered:\n\n42, assuming the fourth quarter. Assumption: Q4."
+        );
+        let record = &last["result"]["structuredContent"];
+        assert_eq!(record["round"], 3);
+        assert_eq!(record["lastRound"], true);
+        assert!(record.get("questionBack").is_none(), "{record}");
+
+        // All three were one question, and one is all this team allows.
+        assert_tool_error_contains(
+            &ask(&bus, &b.token, "a", "something else?").await?,
+            "You have asked a name 1 question in this run",
+        );
+        bus.release("a", live).await?;
+        Ok(())
+    }
+
+    /// **A question back works the same in team mode**, where every `ask` starts a fresh helper:
+    /// the helper asked to clarify is handed the question as asked, what it asked back, and the
+    /// lead's answer, so it can answer without having been there. With no rounds allowed, a helper
+    /// is told to answer with its assumption instead, and a question back is taken as its answer.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_question_back_reaches_a_fresh_helper_with_the_question_so_far() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let helper = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            Some(says(if prompt.contains("## Clarified so far") {
+                if prompt.contains("Write the launch note.")
+                    && prompt.contains("You asked back:\nFor which audience?")
+                    && prompt.contains("lead name answered:\nFor first-time users.")
+                {
+                    "A launch note for first-time users."
+                } else {
+                    "the helper was not handed the question so far"
+                }
+            } else if prompt.contains("answer with your best assumption and say which") {
+                "A note for everyone. Assumption: a general audience.\n\n## Question back\nWho?"
+            } else {
+                "Before I write it:\n\n## Question back\nFor which audience?"
+            }))
+        }));
+        let team = |rounds: u32| {
+            let mut team = TeamConfig {
+                agents: vec![test_agent("lead", OFFLINE), test_agent("h", &helper)],
+                ..team_of("helper-clarifying-team", "lead")
+            };
+            team.conversation.ask.rounds_per_question = rounds;
+            Arc::new(team)
+        };
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let event_log = EventLog::new(archive.clone(), "helper-clarifying-run".into());
+
+        let bus = TeamBus::start(
+            team(3),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = bus.connection("lead").await?;
+        lead.register(event_log.clone()).await;
+        let asked = ask(&bus, &lead.token, "h", "Write the launch note.").await?;
+        assert_eq!(
+            asked["result"]["structuredContent"]["questionBack"],
+            "For which audience?"
+        );
+        let answered = ask(&bus, &lead.token, "h", "For first-time users.").await?;
+        assert_eq!(
+            answer_text(&answered),
+            "h name answered:\n\nA launch note for first-time users."
+        );
+        assert_eq!(answered["result"]["structuredContent"]["clarifies"], true);
+        assert_eq!(answered["result"]["structuredContent"]["asksLeft"], 2);
+        bus.wait_for_tasks().await?;
+
+        // No rounds: the helper is told to assume, and what it asks back anyway is its answer.
+        let bus = TeamBus::start(
+            team(0),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = bus.connection("lead").await?;
+        lead.register(event_log.clone()).await;
+        let assumed = ask(&bus, &lead.token, "h", "Write the launch note.").await?;
+        assert!(
+            answer_text(&assumed).starts_with("h name answered:\n\nA note for everyone."),
+            "{assumed}"
+        );
+        assert!(
+            assumed["result"]["structuredContent"]
+                .get("questionBack")
+                .is_none()
+        );
+        bus.wait_for_tasks().await?;
         Ok(())
     }
 
@@ -4267,6 +4669,24 @@ mod tests {
             );
         }
         assert!(never.requests().is_empty(), "a finished stage was started");
+        // Each refusal's reason is recorded beside its words, for the team chat to say in a line.
+        let reasons: Vec<Value> = archive
+            .load_session("finished-run")
+            .await?
+            .iter()
+            .filter(|event| event.kind == EventKind::ToolUpdate)
+            .map(|event| event.payload["rawOutput"]["refused"].clone())
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                json!("finished"),
+                json!("finished"),
+                json!("not_recruiting"),
+                json!("cannot_start"),
+                json!("cannot_start")
+            ]
+        );
         Ok(())
     }
 
@@ -4308,8 +4728,8 @@ mod tests {
         )));
         let helper_model = demo_model(Demo::responder(asking_back(
             "lead",
-            "lead name is waiting for your reply. If you can't do this without a detail only \
-             lead name has, end your reply with a `## Question back` section",
+            "lead name is waiting for your reply. If you can't answer without a detail only \
+             lead name has, end your answer with a `## Question back` section",
         )));
         let team = |edges: Vec<crate::config::EdgeConfig>| {
             Arc::new(TeamConfig {

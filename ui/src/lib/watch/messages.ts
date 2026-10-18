@@ -68,7 +68,23 @@ export interface MessageReply {
    * answered (ADR 0068). `text` says why; it is not an answer to the question.
    */
   stopped?: true
+  /**
+   * For an `ask`: the asked agent did not answer yet but asked back, needing something from the
+   * asker first (`questionBack` in the record). The asker's next `ask` to it clarifies.
+   */
+  asksBack?: true
 }
+
+/**
+ * Why the Team Bus would not put a question, as it recorded it (`refused`): the asked stage had
+ * finished, the asker had asked it as many questions as the team allows, an agent answering a
+ * question tried to ask back the one waiting on it or to bring someone else in, or a stage that may
+ * not recruit asked an agent nobody had started.
+ */
+export type AskRefusal = 'finished' | 'limit' | 'asking_back' | 'cannot_start' | 'not_recruiting'
+
+const REFUSALS: ReadonlySet<string> = new Set<AskRefusal>(['finished', 'limit', 'asking_back', 'cannot_start', 'not_recruiting'])
+const isRefusal = (value: unknown): value is AskRefusal => typeof value === 'string' && REFUSALS.has(value)
 
 /** Who a handover or a direction came from, as the prompt record names them. */
 export interface HandedBy {
@@ -136,6 +152,13 @@ export interface TeamMessage {
   carried: boolean
   /** For a `permission` message: what was asked and how it was settled. */
   permission?: PermissionAsk
+  /**
+   * For an `ask`: it answers what the asked agent asked back, continuing an earlier question
+   * rather than starting one (`clarifies` in the record).
+   */
+  clarifies?: true
+  /** For an `ask` the Team Bus would not put: why, when it recorded a reason. */
+  refused?: AskRefusal
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
@@ -238,12 +261,14 @@ export class Correspondence {
     if (status === 'failed') {
       message.state = 'failed'
       message.error = words(output.error)
+      if (message.kind === 'ask' && isRefusal(output.refused)) message.refused = output.refused
       return
     }
     // The bus accepts a name where the id belongs and answers with the id it resolved.
     if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
     if (message.kind !== 'ask') { message.state = 'delivered'; return }
     message.state = 'answered'
+    if (output.clarifies === true) message.clarifies = true
     message.reply = {
       from: message.to ?? item.agentId,
       text: typeof output.reply === 'string' ? output.reply : '',
@@ -251,6 +276,7 @@ export class Correspondence {
       source: output.live === true ? 'open' : typeof output.sessionId === 'string' ? 'fresh' : null,
       sentBackTo: null,
       ...(output.stopped === 'spend_limit' ? { stopped: true as const } : {}),
+      ...(typeof output.questionBack === 'string' ? { asksBack: true as const } : {}),
     }
   }
 

@@ -456,6 +456,7 @@ conversation:
     maxFindings: 8       # standalone findings a handover carries forward
   ask:
     maxPerStage: 3       # questions one agent may put to another in a run
+    roundsPerQuestion: 3 # times the asked agent may ask back about one question
     replyChars: 20000    # most of one answer handed back to the asker
 ```
 
@@ -481,9 +482,13 @@ helper, not talking to the stage before you.
 Every `ask`, in a pipeline or a team, follows the same rules. One agent may put `maxPerStage`
 questions to another in a run. The question reaches an open stage saying who asks and asking for a
 brief answer from the work it already did. An agent that needs something from the asker first ends
-its answer with a `## Question back` section, never by asking the asker, which is waiting on it,
-and the asker is told to ask again with that detail; that second question counts too. The answer
-comes back as written, cut in the middle past `replyChars` so its conclusion is kept.
+its answer with a `## Question back` section, never by asking the asker, which is waiting on it.
+The asker's next question to it answers that and continues the same question, so it is not
+counted. One question may go back and forth `roundsPerQuestion` times; on the last round the asked
+agent is told it can't ask back again, and answers with its best assumption, saying which. A fresh
+helper asked to clarify is handed the question so far, so this works the same in team mode. The
+answer comes back as written, cut in the middle past `replyChars` so its conclusion is kept. Every
+round, and every question that was refused and why, shows in the team's chat.
 
 Every field is optional and the defaults above apply. Lower `asWrittenUpTo` for a long pipeline on
 a model without prompt caching; the cost of raising the other bounds is paid by every stage
