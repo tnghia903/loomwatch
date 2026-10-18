@@ -4,9 +4,11 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { type Model, contextSize, price, shortName } from '../../lib/ai/client'
 import { makerOf } from '../../lib/ai/makers'
 import { OFFLINE_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
+import { useSetupReading } from '../../lib/ai/reading'
 import { useModels } from '../../lib/ai/useModels'
-import type { ModelSuggestion } from '../../lib/team-file/modelSuggestion'
+import { type ModelSuggestionInput, suggestModel } from '../../lib/team-file/modelSuggestion'
 import { MakerMark } from './MakerMark'
+import { ReadingOffer } from './ReadingOffer'
 
 const MAX_RESULTS = 40
 
@@ -43,9 +45,14 @@ function Row({ id, model, selected, active, why, onPoint, onPick }: {
  * recommended few, and everything OpenRouter lists that can use tools a search away. The arrow keys
  * move through them and Enter picks, as in the command palette. Prices are per million tokens, the
  * way OpenRouter shows them.
+ *
+ * `suggestFor` is the agent and its team (modelSuggestion.ts). Open, the list may have the agent's
+ * whole setup read for a better suggestion, when the operator turned that on (lib/ai/reading.ts).
  */
-export function ModelChoices({ value, suggestion, onPick }: { value: string; suggestion?: ModelSuggestion; onPick: (id: string) => void }) {
+export function ModelChoices({ value, suggestFor, onPick }: { value: string; suggestFor?: ModelSuggestionInput; onPick: (id: string) => void }) {
   const { catalog, error } = useModels()
+  const read = useSetupReading(suggestFor?.agent, Boolean(suggestFor))
+  const suggestion = suggestFor ? suggestModel({ ...suggestFor, reading: read.reading }) : undefined
   const [query, setQuery] = useState('')
   const listId = useId()
   const found = useMemo(() => {
@@ -61,9 +68,10 @@ export function ModelChoices({ value, suggestion, onPick }: { value: string; sug
   const rows = query ? found : [...(suggested ? [suggested] : []), ...others]
   const startAt = (list: readonly Model[]) => Math.max(0, list.findIndex((model) => model.id === value))
   const [activeIndex, setActiveIndex] = useState(() => startAt(rows))
-  // The list arrives after the picker opens the first time, so the chosen model is found then.
-  const [startedOn, setStartedOn] = useState(catalog)
-  if (startedOn !== catalog) { setStartedOn(catalog); setActiveIndex(startAt(rows)) }
+  // The list arrives after the picker opens the first time, so the chosen model is found then; a
+  // reading that arrives later can move the suggestion, and the rows with it.
+  const [startedOn, setStartedOn] = useState({ catalog, suggested: suggested?.id })
+  if (startedOn.catalog !== catalog || startedOn.suggested !== suggested?.id) { setStartedOn({ catalog, suggested: suggested?.id }); setActiveIndex(startAt(rows)) }
   const optionId = (index: number) => `${listId}-${index}`
 
   function pick(id: string) {
@@ -123,6 +131,11 @@ export function ModelChoices({ value, suggestion, onPick }: { value: string; sug
           </> : others.map((model, index) => row(model, index))}
         </div>
         {query && found.length === 0 && <p className="t-meta lw-settings-quiet">No model matches. Try another word.</p>}
+        {!query && suggested && <>
+          {read.pending && <p role="status" className="t-meta lw-settings-quiet">Reading its whole setup for a better suggestion…</p>}
+          {read.problem && <p className="t-meta lw-settings-quiet">{read.problem} The suggestion above comes from its name and instructions.</p>}
+          {suggestFor && <ReadingOffer agent={suggestFor.agent} />}
+        </>}
         {!query && <p className="t-meta lw-settings-quiet">Free models are limited per day, and their makers may learn from what you send. Keep private work on a paid model.</p>}
       </>}
     </>
@@ -131,10 +144,10 @@ export function ModelChoices({ value, suggestion, onPick }: { value: string; sug
 
 /**
  * Chooses the model an agent runs on. `field` marks the button as that team-file field, so a
- * problem with it can take the operator straight there. `suggestion` is the model this agent's job
- * and place suit (modelSuggestion.ts), listed first with why.
+ * problem with it can take the operator straight there. `suggestFor` is the agent and its team: the
+ * model its job and place suit (modelSuggestion.ts) is listed first, with why.
  */
-export function ModelPicker({ value, onChange, label = 'Model', disabled = false, field, suggestion }: { value: string; onChange: (id: string) => void; label?: string; disabled?: boolean; field?: string; suggestion?: ModelSuggestion }) {
+export function ModelPicker({ value, onChange, label = 'Model', disabled = false, field, suggestFor }: { value: string; onChange: (id: string) => void; label?: string; disabled?: boolean; field?: string; suggestFor?: ModelSuggestionInput }) {
   const { catalog } = useModels()
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -168,7 +181,7 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
         <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />
       </button>
       {open && <div className="e2 model-picker-pop" id={listId}>
-        <ModelChoices value={value} suggestion={suggestion} onPick={(id) => { onChange(id); close() }} />
+        <ModelChoices value={value} suggestFor={suggestFor} onPick={(id) => { onChange(id); close() }} />
       </div>}
     </div>
   )

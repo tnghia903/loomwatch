@@ -1,11 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { contextSize, price, shortName } from '../../lib/ai/client'
+import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
+import { forgetReadings } from '../../lib/ai/reading'
+import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetModels } from '../../lib/ai/useModels'
+import { CHECKER_ROLE } from '../../lib/library/checker'
+import { ROLE_PRESETS } from '../../lib/library/roles'
 import { ModelPicker } from './ModelPicker'
 
 const opus = { id: 'anthropic/claude-opus-5.5', name: 'Anthropic: Claude Opus 5.5', contextLength: 1_000_000, inputPrice: 4, outputPrice: 20, free: false, reasoning: true, note: 'Best for hard work' }
@@ -14,9 +19,33 @@ const haiku = { id: 'anthropic/claude-haiku-5.5', name: 'Anthropic: Claude Haiku
 const gemma = { id: 'google/gemma-4-31b-it:free', name: 'Google: Gemma 4 31B (free)', contextLength: 262_144, inputPrice: 0, outputPrice: 0, free: true, reasoning: false }
 const catalog = { fetchedAt: '2026-10-17T00:00:00Z', defaultModel: opus.id, recommended: [opus, haiku], models: [haiku, gemma, opus, sonnet] }
 
+const writer = { id: 'writer', name: 'Writer', role: 'Write the article from what you are handed.', model: DEFAULT_MODEL }
+const researcher = { id: 'researcher', name: 'Researcher', role: 'Find sources on the topic and pass them on.' }
+// The bundled daily digest's Gatherer, which the free reading calls a writer.
+const gatherer = { id: 'gatherer', name: 'Gatherer', role: 'Find what happened in tech in the last 24 hours, from the trusted sources only. Do not judge the stories or write them: the Writer does.' }
+const team = { agents: [gatherer, researcher, writer], responder: 'writer' }
+
+let reading = { enabled: false, readings: 0, spent: 0, today: 0, dailyLimit: 50 }
+let calls: { method: string; path: string; body?: { setup?: Record<string, unknown>; enabled?: boolean } }[] = []
+const readings = () => calls.filter((call) => call.path === '/api/models/reading' && call.method === 'POST')
+
 beforeEach(() => {
-  forgetModels()
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(catalog), { headers: { 'Content-Type': 'application/json' } })))
+  forgetModels(); forgetKeyStatus(); forgetReadings()
+  reading = { enabled: false, readings: 0, spent: 0, today: 0, dailyLimit: 50 }
+  calls = []
+  try { window.localStorage.clear() } catch { /* none */ }
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET'
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    calls.push({ method, path, body })
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
+    if (path === '/api/models') return json(catalog)
+    if (path === '/api/ai') return json({ openrouter: { connected: true } })
+    if (path === '/api/models/reading' && method === 'PUT') { reading = { ...reading, enabled: Boolean(body?.enabled) }; return json(reading) }
+    if (path === '/api/models/reading' && method === 'POST') return json({ reading: { kind: 'gather', probabilities: { gather: 0.9, produce: 0.08, check: 0.02 }, confidence: 0.9 }, kept: false })
+    if (path === '/api/models/reading') return json(reading)
+    return json({ error: 'not found' }, 404)
+  }))
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
@@ -38,7 +67,7 @@ describe('ModelPicker', () => {
   })
 
   it('lists the model suggested for the agent first, with why, and not again below', async () => {
-    render(<ModelPicker value={opus.id} onChange={() => {}} suggestion={{ model: sonnet.id, why: 'It gathers facts for Writer to write up.' }} />)
+    render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: researcher, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
     const suggested = screen.getByRole('group', { name: 'Suggested for this agent' })
     expect(suggested).toHaveTextContent('Claude Sonnet 5.5')
@@ -50,7 +79,8 @@ describe('ModelPicker', () => {
   })
 
   it('leaves the suggestion out when the model list doesn’t have it', async () => {
-    render(<ModelPicker value={opus.id} onChange={() => {}} suggestion={{ model: 'someone/gone-model', why: 'Gone.' }} />)
+    // A check step's model, which this list doesn't have.
+    render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: { id: 'c', name: 'Checker', role: CHECKER_ROLE } }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
     expect(screen.queryByRole('group')).toBeNull()
     expect(screen.getAllByRole('option')).toHaveLength(2)
@@ -105,6 +135,63 @@ describe('ModelPicker', () => {
   it('keeps every row its own height in a list that scrolls', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/styles/app.css'), 'utf8')
     expect(css.match(/\n\.pop-row \{[^}]*\}/)?.[0]).toMatch(/flex-shrink:\s*0/)
+  })
+
+  it('offers to read a setup its name and instructions don’t place, and reads it once turned on', async () => {
+    render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
+    // "write them" makes it a writer, so it is offered the strongest model.
+    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Opus 5.5')
+    const offer = await screen.findByRole('group', { name: 'Better model suggestions' })
+    expect(offer).toHaveTextContent('uses a tiny amount of your OpenRouter credit')
+    expect(readings()).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read setups for better suggestions' }))
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
+    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Reading its whole setup, it gathers for Writer rather than writing the answer.')
+    expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
+    // Its own setup, by name, and never its teammates.
+    expect(readings()).toHaveLength(1)
+    expect(readings()[0].body?.setup).toMatchObject({ name: 'Gatherer', instructions: gatherer.role })
+    expect(JSON.stringify(readings()[0].body)).not.toContain('Write the article')
+
+    // Closed and opened again: answered from what was read, not asked again.
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: /Claude Opus 5\.5/ }))
+    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5')
+    expect(readings()).toHaveLength(1)
+  })
+
+  it('asks nothing before its picker opens, or for an agent a fact already places', async () => {
+    reading = { ...reading, enabled: true }
+    const lead = ROLE_PRESETS.find((preset) => preset.id === 'lead')!
+    const { unmount } = render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
+    await screen.findByRole('button', { name: /Claude Opus 5\.5/ })
+    expect(readings()).toHaveLength(0)
+    unmount()
+
+    // A built-in job's own instructions under another name, and a step whose name says its job.
+    for (const agent of [{ id: 's', name: 'Step 2', role: lead.role }, researcher]) {
+      render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent, team }} />)
+      fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
+      await screen.findByRole('group', { name: 'Suggested for this agent' })
+      expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
+      cleanup()
+    }
+    expect(readings()).toHaveLength(0)
+  })
+
+  it('keeps the offer away once told not now', async () => {
+    render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Not now' }))
+    expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
+    cleanup()
+    render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
+    await screen.findByRole('group', { name: 'Suggested for this agent' })
+    expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
+    expect(calls.some((call) => call.method === 'PUT')).toBe(false)
   })
 
   it('says when a team names a model OpenRouter doesn’t list', async () => {

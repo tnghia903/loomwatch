@@ -189,7 +189,7 @@ const DELIVERS = /\b(finished (piece|result|work|version)|in full|corrected (pie
 
 const STOPWORDS = new Set('the and for that this with from your you are what when which into each them they their then than have has had not but can will its it’s also only more most such these those about over just like make sure should would could been being were was very any all one two our out use using who how why where there here able must every other some what'.split(' '))
 
-function words(text: string): string[] {
+export function words(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean)
 }
 
@@ -204,19 +204,29 @@ function overlap(a: Set<string>, b: Set<string>): number {
   return shared / Math.min(a.size, b.size)
 }
 
+const JOB_STEMS: Record<string, RegExp> = {
+  researcher: /\bresearch/, writer: /\bwrit(er|e|ing)\b/, editor: /\bedit(or|ing)?\b|\bproofread/,
+  reviewer: /\breview|\bcritic|\bqa\b/, coder: /\bcod(er|e|ing)\b|\bdevelop|\bengineer|\bprogramm/,
+  designer: /\bdesign/, analyst: /\banaly/, lead: /\blead\b|\bsupervis/,
+}
+
+/** The built-in job whose own instructions these are, word for word: what it is, whatever it is called. */
+export function keptJob(role: string): RolePreset | null {
+  const text = role.trim()
+  return text ? ROLE_PRESETS.find((preset) => preset.role === text) ?? null : null
+}
+
+/** The built-in job the agent's name names. "Research lead" leads: its name says what it does before it says what about. */
+export function jobByName(name: string): RolePreset | null {
+  const lower = name.toLowerCase()
+  if (JOB_STEMS.lead.test(lower)) return ROLE_PRESETS.find((preset) => preset.id === 'lead') ?? null
+  return ROLE_PRESETS.find((preset) => JOB_STEMS[preset.id]?.test(lower)) ?? null
+}
+
 /** A built-in job whose name the agent carries, so its instructions can stand in for one line. */
 export function jobFor(agent: Pick<AgentConfig, 'name' | 'role'>): RolePreset | null {
-  const name = agent.name.toLowerCase()
   const role = agent.role.toLowerCase()
-  const stems: Record<string, RegExp> = {
-    researcher: /\bresearch/, writer: /\bwrit(er|e|ing)\b/, editor: /\bedit(or|ing)?\b|\bproofread/,
-    reviewer: /\breview|\bcritic|\bqa\b/, coder: /\bcod(er|e|ing)\b|\bdevelop|\bengineer|\bprogramm/,
-    designer: /\bdesign/, analyst: /\banaly/, lead: /\blead\b|\bsupervis/,
-  }
-  // "Research lead" leads: its name says what it does before it says what about.
-  const lead = stems.lead.test(name) ? ROLE_PRESETS.find((preset) => preset.id === 'lead') : undefined
-  const byName = lead ?? ROLE_PRESETS.find((preset) => stems[preset.id]?.test(name))
-  return byName ?? ROLE_PRESETS.find((preset) => stems[preset.id]?.test(role)) ?? null
+  return keptJob(agent.role) ?? jobByName(agent.name) ?? ROLE_PRESETS.find((preset) => JOB_STEMS[preset.id]?.test(role)) ?? null
 }
 
 function list(names: readonly string[]): string {

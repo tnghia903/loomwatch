@@ -1,8 +1,11 @@
 """A stand-in for OpenRouter on 127.0.0.1, for end-to-end checks of LoomWatch with no real key.
 
-It answers the three things LoomWatch asks OpenRouter: the key check (GET /api/v1/key), the model
-list (GET /api/v1/models) and streamed chat completions (POST /api/v1/chat/completions). Replies are
-scripted from what the request says, so a run exercises real tool calls:
+It answers the four things LoomWatch asks OpenRouter: the key check (GET /api/v1/key), the model
+list (GET /api/v1/models), streamed chat completions (POST /api/v1/chat/completions) and the
+reading of an agent's setup for a model suggestion (POST /api/alpha/decisions, which the real
+OpenRouter answers with TypeSafe's Jev; here a few keywords stand in, so a trial shows the flow, not
+how well Jev reads). Chat replies are scripted from what the request says, so a run exercises real
+tool calls:
 
 - "MOCK-RUN: <command>" in the task  -> a run_command call, then a summary
 - "MOCK-WRITE: <path>" in the task    -> a write_file call, then a summary
@@ -13,6 +16,8 @@ scripted from what the request says, so a run exercises real tool calls:
 - a Research lead (its role says so)  -> two dispatch calls at once, then ask the Writer
 - a Researcher / a Writer             -> findings / a cited report
 - anything else                       -> a short text reply
+
+A setup whose instructions contain "MOCK-FAIL-402" is answered 402, like a key out of credit.
 
 The task is the text after the last "## Task" in the latest request, so earlier messages in the
 team's chat don't trigger anything again. Only a key starting "sk-or-v1-mock" is accepted.
@@ -50,6 +55,20 @@ MODELS = [
      "context_length": 128000, "pricing": {"prompt": "0", "completion": "0"},
      "supported_parameters": ["tools"]},
 ]
+
+
+def read_setup(state):
+    """The stand-in reading: which kind of work the setup's instructions describe, by keywords."""
+    text = state.split("Instructions:", 1)[-1].lower()
+    kind = "produce"
+    if any(word in text for word in ("verdict", "met or not met", "check the", "verify every")):
+        kind = "check"
+    elif any(word in text for word in ("do not write", "don't write", "do not judge", "do not teach",
+                                         "hand them on", "tag it", "return them raw")):
+        kind = "gather"
+    others = [other for other in ("gather", "produce", "check") if other != kind]
+    return {"choice": kind, "probabilities": {kind: 0.88, others[0]: 0.08, others[1]: 0.04},
+            "confidence": 0.85}
 
 
 def log(entry):
@@ -202,6 +221,19 @@ class Handler(BaseHTTPRequestHandler):
                  "reasoning": body.get("reasoning"), "tools": tool_names(body),
                  "messages": len(messages), "latest_user": (users[-1] if users else "")[:200],
                  "system_head": text_of(messages[0].get("content"))[:120] if messages else ""}
+        if self.path.startswith("/api/alpha/decisions"):
+            state = str(body.get("state") or "")
+            log({**entry, "answer": "decision", "questions": sorted((body.get("questions") or {}).keys()),
+                 "state_head": state[:120]})
+            if not self.authorised():
+                return self.send_json(401, {"error": {"code": 401, "message": "No auth credentials found"}})
+            if "MOCK-FAIL-402" in state:
+                return self.send_json(402, {"error": {"code": 402, "message": "Insufficient credits"}})
+            tokens = len(state) // 4 + 200
+            return self.send_json(200, {"id": f"dec-{number}", "model": body.get("model"), "provider": "Mock",
+                                        "answers": {"job": read_setup(state)},
+                                        "usage": {"prompt_tokens": tokens, "completion_tokens": 0,
+                                                  "cost": round(tokens * 0.000000042, 9)}})
         if not self.path.startswith("/api/v1/chat/completions"):
             return self.send_json(404, {"error": {"code": 404, "message": "not found"}})
         if not self.authorised():
