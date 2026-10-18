@@ -12,7 +12,7 @@ import { AiChoice } from './AiChoice'
 
 const MAX_RESULTS = 40
 
-function Row({ id, model, selected, active, why, plain = false, onPoint, onPick }: {
+function Row({ id, model, selected, active, why, plain = false, follow, onPoint, onPick }: {
   id: string
   model: Model
   selected: boolean
@@ -21,12 +21,14 @@ function Row({ id, model, selected, active, why, plain = false, onPoint, onPick 
   why?: string
   /** A button, not one of the list's options: the suggestion while the list shows search results. */
   plain?: boolean
+  /** On the suggestion of an agent that could follow it: what picking it does. */
+  follow?: string
   onPoint: () => void
   onPick: (id: string) => void
 }) {
   const maker = makerOf(model.id)
   return (
-    <button id={id} type="button" {...(plain ? {} : { role: 'option', 'aria-selected': selected })} className={`pop-row model-row ${selected ? 'current' : ''} ${active ? 'active' : ''}`} onMouseMove={onPoint} onClick={() => onPick(model.id)}>
+    <button id={id} type="button" {...(plain ? {} : { role: 'option', 'aria-selected': selected })} title={follow} aria-description={follow} className={`pop-row model-row ${selected ? 'current' : ''} ${active ? 'active' : ''}`} onMouseMove={onPoint} onClick={() => onPick(model.id)}>
       <span className="model-row-mark">
         <MakerMark maker={maker} />
         {selected && <span className="model-row-tick" aria-hidden="true"><Check size={10} strokeWidth={3} /></span>}
@@ -54,8 +56,12 @@ function Row({ id, model, selected, active, why, plain = false, onPoint, onPick 
  * the suggestion is and Let AI choose (AiChoice.tsx). The card is outside the listbox, as a control
  * can't be one of its options; `aria-owns` keeps the suggested row first among them, and while the
  * list shows search results it is a plain button.
+ *
+ * `follows` says whether the agent's model follows its suggestion (ADR 0072); absent where following
+ * isn't offered. Picking the suggestion has the agent follow it, and picking any other model pins
+ * it: `onPick`'s second value.
  */
-export function ModelChoices({ value, suggestFor, onPick }: { value: string; suggestFor?: ModelSuggestionInput; onPick: (id: string) => void }) {
+export function ModelChoices({ value, suggestFor, follows, onPick }: { value: string; suggestFor?: ModelSuggestionInput; follows?: boolean; onPick: (id: string, follow: boolean) => void }) {
   const { catalog, error } = useModels()
   const read = useSetupReading(suggestFor?.agent, Boolean(suggestFor))
   const suggestion = suggestFor ? suggestModel({ ...suggestFor, reading: read.reading }) : undefined
@@ -80,8 +86,8 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
   if (startedOn.catalog !== catalog || startedOn.suggested !== suggested?.id) { setStartedOn({ catalog, suggested: suggested?.id }); setActiveIndex(startAt(rows)) }
   const optionId = (index: number) => `${listId}-${index}`
 
-  function pick(id: string) {
-    onPick(id)
+  function pick(id: string, follow = false) {
+    onPick(id, follow)
     setQuery('')
   }
 
@@ -97,12 +103,13 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
     if (event.key === 'Enter') {
       event.preventDefault()
       const model = rows[activeIndex]
-      if (model) pick(model.id)
+      if (model) pick(model.id, !query && Boolean(suggested) && activeIndex === 0)
     }
   }
 
+  const followNote = follows === false ? 'Pick it, and this agent’s model follows its configuration from now on.' : undefined
   const row = (model: Model, index: number, why?: string) => (
-    <Row key={model.id} id={optionId(index)} model={model} selected={model.id === value} active={index === activeIndex} why={why} onPoint={() => setActiveIndex(index)} onPick={pick} />
+    <Row key={model.id} id={optionId(index)} model={model} selected={model.id === value} active={index === activeIndex} why={why} follow={why ? followNote : undefined} onPoint={() => setActiveIndex(index)} onPick={(id) => pick(id, Boolean(why))} />
   )
 
   return (
@@ -111,10 +118,13 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
       {!catalog && !error && <p role="status" className="t-meta lw-settings-quiet">Loading models…</p>}
       {catalog && <>
         {suggested && <div className="model-suggestion">
-          <p className="model-group-head t-micro" id={`${listId}-suggested`}><Sparkles size={11} aria-hidden="true" />Suggested for this agent</p>
+          <div className="model-suggestion-head">
+            <p className="model-group-head t-micro" id={`${listId}-suggested`}><Sparkles size={11} aria-hidden="true" />Suggested for this agent</p>
+            {follows && <span className="t-micro model-follow-note">Follows its configuration</span>}
+          </div>
           <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
             {query
-              ? <Row id={`${listId}-suggested-row`} model={suggested} selected={suggested.id === value} active={false} why={suggestion?.why} plain onPoint={() => {}} onPick={pick} />
+              ? <Row id={`${listId}-suggested-row`} model={suggested} selected={suggested.id === value} active={false} why={suggestion?.why} plain follow={followNote} onPoint={() => {}} onPick={(id) => pick(id, true)} />
               : row(suggested, 0, suggestion?.why)}
           </div>
           {suggestFor && <AiChoice agent={suggestFor.agent} read={read} />}
@@ -153,7 +163,19 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
  * problem with it can take the operator straight there. `suggestFor` is the agent and its team: the
  * model its job and place suit (modelSuggestion.ts) is listed first, with why.
  */
-export function ModelPicker({ value, onChange, label = 'Model', disabled = false, field, suggestFor }: { value: string; onChange: (id: string) => void; label?: string; disabled?: boolean; field?: string; suggestFor?: ModelSuggestionInput }) {
+export function ModelPicker({ value, onChange, label = 'Model', disabled = false, field, suggestFor, follows, moved }: {
+  value: string
+  /** The model picked, and whether the agent now follows its suggestion (ADR 0072). */
+  onChange: (id: string, follow: boolean) => void
+  label?: string
+  disabled?: boolean
+  field?: string
+  suggestFor?: ModelSuggestionInput
+  /** Whether its model follows its suggestion; absent where following isn't offered. */
+  follows?: boolean
+  /** Its model just moved with its configuration: from what, and how to put it back. */
+  moved?: { from: string; onUndo: () => void }
+}) {
   const { catalog } = useModels()
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -161,6 +183,7 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
   const listId = useId()
   const labelId = useId()
   const nameId = useId()
+  const suggestedId = useId()
   const current = catalog?.models.find((model) => model.id === value)
 
   useEffect(() => {
@@ -177,17 +200,22 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
   return (
     <div ref={root} className="model-picker field" onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close() } }}>
       <span className="t-meta" id={labelId}>{label}</span>
-      <button ref={toggle} type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
+      <button ref={toggle} type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}${follows ? ` ${suggestedId}` : ''}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
         {value.includes('/') && value !== OFFLINE_MODEL && <MakerMark maker={makerOf(value)} />}
         <span className="model-picker-text">
           <span className="t-body" id={nameId}>{current ? shortName(current) : value ? modelNameFromId(value) : 'Choose a model'}</span>
           {current && <span className="t-meta lw-settings-quiet">{current.free ? 'Free' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}</span>}
           {!current && value && value !== OFFLINE_MODEL && catalog && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
         </span>
+        {follows && <span className="model-picker-suggested t-meta" id={suggestedId}><Sparkles size={11} aria-hidden="true" />Suggested</span>}
         <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />
       </button>
+      {moved && !open && <p className="t-meta model-moved" role="status">
+        Its configuration changed, so it moved from {modelNameFromId(moved.from)}.
+        {!disabled && <> <button type="button" className="link" onClick={moved.onUndo}>Undo</button></>}
+      </p>}
       {open && <div className="e2 model-picker-pop" id={listId}>
-        <ModelChoices value={value} suggestFor={suggestFor} onPick={(id) => { onChange(id); close() }} />
+        <ModelChoices value={value} suggestFor={suggestFor} follows={follows} onPick={(id, follow) => { onChange(id, follow); close() }} />
       </div>}
     </div>
   )

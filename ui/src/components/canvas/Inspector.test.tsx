@@ -52,7 +52,7 @@ describe('Inspector model and thinking effort', () => {
     const current = await screen.findByRole('button', { name: /Claude Sonnet 5\.5/ })
     fireEvent.click(current)
     fireEvent.click(screen.getByRole('option', { name: /Claude Opus 5\.5/ }))
-    expect(props.onModelChange).toHaveBeenCalledWith(opus.id)
+    expect(props.onModelChange).toHaveBeenCalledWith(opus.id, false)
     expect(props.onFieldBlur).toHaveBeenCalledWith('model')
   })
 

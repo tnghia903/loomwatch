@@ -122,6 +122,10 @@ export interface AgentConfig {
   kind?: 'harness' | 'operator'
   spawn?: SpawnConfig
   model?: string
+  /** Its `model` follows the model suggested for it (ADR 0072): when its configuration changes,
+      the app moves it to the new suggestion. Picking any other model takes this out. Absent: the
+      model is the one picked. The daemon never reads it; a run uses `model`. */
+  followsSuggestion?: boolean
   thinkingEffort?: string
   /** What the finished result must satisfy (ADR 0062): checked before it replies, and anything
       it could not meet is listed under "Not met". At most five short lines. */

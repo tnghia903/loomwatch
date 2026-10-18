@@ -38,6 +38,15 @@ describe('buildAgentFromSource', () => {
     expect(result.model).toBe(DEFAULT_MODEL)
   })
 
+  // ADR 0072: a team's own new agent follows the model suggested for it; one placed from Your agents
+  // keeps the model its builder chose, and a review stop has no model at all.
+  it('has a team’s own new agent follow its suggested model, and nothing else', () => {
+    expect(buildAgentFromSource(blankSource, []).followsSuggestion).toBe(true)
+    expect(buildAgentFromSource(presetSource, []).followsSuggestion).toBe(true)
+    expect(buildAgentFromSource({ ...blankSource, from: { agent: 'scout', version: 2 } }, []).followsSuggestion).toBeUndefined()
+    expect(buildAgentFromSource({ group: 'presets', id: 'you', label: 'You', kind: 'operator' } as LibrarySource, []).followsSuggestion).toBeUndefined()
+  })
+
   it('pre-fills role and model from a preset source', () => {
     const result = buildAgentFromSource(presetSource, [])
     expect(result.role).toBe('Reviewer')

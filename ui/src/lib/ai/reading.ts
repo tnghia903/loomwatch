@@ -111,6 +111,14 @@ function readOnce(id: string, setup: AgentSetup): Promise<SetupReading> {
   return promise
 }
 
+/** The reading of `setup`, from what this page has read or from one call: what an agent whose model
+    follows its suggestion moves by (team-file/useModelFollowing.ts). Refused while reading is off. */
+export function readingOf(setup: AgentSetup): Promise<SetupReading> {
+  const id = JSON.stringify(setup)
+  const known = read.get(id)
+  return known ? Promise.resolve(known) : readOnce(id, setup)
+}
+
 export interface SetupReadingState {
   reading: SetupReading | null
   /** A reading is on its way. */
