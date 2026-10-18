@@ -137,19 +137,24 @@ describe('ModelPicker', () => {
     expect(css.match(/\n\.pop-row \{[^}]*\}/)?.[0]).toMatch(/flex-shrink:\s*0/)
   })
 
-  it('offers to read a setup its name and instructions don’t place, and reads it once turned on', async () => {
+  it('has the reading switch in the suggestion’s header for a setup its name doesn’t place, and reads it once turned on', async () => {
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
     // "write them" makes it a writer, so it is offered the strongest model.
-    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Opus 5.5')
-    const offer = await screen.findByRole('group', { name: 'Better model suggestions' })
-    expect(offer).toHaveTextContent('Read its setup for a better fit, for under a cent?')
+    const suggested = screen.getByRole('group', { name: 'Suggested for this agent' })
+    expect(suggested).toHaveTextContent('Claude Opus 5.5')
+    // The suggestion is a card above the list, and still the list's first option.
+    expect(screen.getByRole('listbox')).toHaveAttribute('aria-owns', expect.stringContaining(suggested.id))
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent('Claude Opus 5.5')
+    const toggle = await screen.findByRole('switch', { name: 'Read its setup · under $0.01' })
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toHaveAccessibleDescription(/never your files or its teammates\. Each agent is read once, at most 50 a day\./)
     expect(readings()).toHaveLength(0)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Read setups' }))
+    fireEvent.click(toggle)
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
     expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Its whole setup says it gathers for Writer rather than writing the answer.')
-    expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Read its setup · under $0.01' })).toBeChecked()
     // Its own setup, by name, and never its teammates.
     expect(readings()).toHaveLength(1)
     expect(readings()[0].body?.setup).toMatchObject({ name: 'Gatherer', instructions: gatherer.role })
@@ -175,23 +180,22 @@ describe('ModelPicker', () => {
       render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent, team }} />)
       fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
       await screen.findByRole('group', { name: 'Suggested for this agent' })
-      expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
+      expect(screen.queryByRole('switch')).toBeNull()
       cleanup()
     }
     expect(readings()).toHaveLength(0)
   })
 
-  it('keeps the offer away once told not now', async () => {
+  it('turned off, goes back to the suggestion from its name and reads nothing more', async () => {
+    reading = { ...reading, enabled: true }
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Not now' }))
-    expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
-    cleanup()
-    render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
-    await screen.findByRole('group', { name: 'Suggested for this agent' })
-    expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
-    expect(calls.some((call) => call.method === 'PUT')).toBe(false)
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Read its setup · under $0.01' }))
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Read its setup · under $0.01' })).not.toBeChecked())
+    expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ enabled: false }])
+    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Opus 5.5')
+    expect(readings()).toHaveLength(1)
   })
 
   it('says when a team names a model OpenRouter doesn’t list', async () => {
