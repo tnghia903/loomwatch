@@ -80,16 +80,6 @@ span.story-schedule { cursor: default; }
 .palette-foot svg { flex: none; }
 .node-palette .palette-foot { display: flex; align-items: center; gap: 5px; }
 
-/* "Save as job" in the agent panel. Its notes are plain help text, not the panel's gold callouts. */
-.save-job { display: grid; gap: 6px; }
-.save-job .btn, .save-job-actions .btn { display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
-.inspector-fields .save-job-note, .inspector-fields .save-job-form p { display: block; margin: 0; color: var(--color-ink-3); font-size: 11.5px; line-height: 1.45; }
-.inspector-fields .save-job-form p[role="alert"] { color: var(--color-alert); }
-.save-job-form { display: grid; gap: 10px; padding: 10px; border: 1px solid var(--color-hairline); border-radius: 7px; }
-.save-job-form .optional { font-size: 11px; color: var(--color-ink-3); }
-.save-job-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.save-job-actions p { flex-basis: 100%; }
-
 /* ---------- depth: Story · Team · Trace (semantic zoom) ---------- */
 /* Rendered only at their own depth by BuildAgentCard; the selectors below style them. */
 

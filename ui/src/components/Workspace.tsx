@@ -2764,7 +2764,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                 doc.applyAgentFields(inspectedNode.id, { from: undefined })
                 setStatusAnnouncement(`${inspectedNode.data.agent.name} is now this team’s own. Save the team to keep it.`)
               },
-              onLink: (link) => { if (editable) doc.applyAgentFields(inspectedNode.id, { from: link }) },
             }}
             teamAutoMode={doc.teamPermissionMode === 'auto'}
             checkup={{ findings: teamCheckup.forAgent(inspectedNode.id), onFix: teamCheckup.apply, onDismiss: teamCheckup.dismiss, onAsk: ask.unavailable ? undefined : askFor }}

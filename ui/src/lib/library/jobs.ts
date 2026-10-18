@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { openRouterId } from '../ai/modelIds'
 import { daemonFetch } from '../daemonFetch'
 import { safeFileStem } from '../files/paths'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
@@ -182,28 +181,6 @@ export function guessIcon(name: string, instructions = ''): RoleIcon | undefined
 export function onlyOn(allow: AgentAllow | undefined): AgentAllow | undefined {
   const kept = Object.fromEntries(Object.entries(allow ?? {}).filter(([, on]) => on === true)) as AgentAllow
   return Object.keys(kept).length > 0 ? kept : undefined
-}
-
-/** What "Add to Your agents" keeps of an agent: its instructions, model and effort, skills, tools and switches. */
-export function jobFromAgent(agent: AgentConfig, options: { name: string; does?: string }): JobSpec {
-  const name = options.name.trim()
-  const icon = guessIcon(name, agent.role)
-  const skills = (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name)
-  const tools = [...new Set((agent.capabilities ?? []).filter((capability) => capability.kind === 'tool').map((capability) => capability.name))]
-  const toolAllow = toolAllowOf(agent)
-  const allow = onlyOn(agent.allow)
-  return {
-    name,
-    ...(options.does?.trim() ? { does: options.does.trim() } : {}),
-    instructions: agent.role,
-    ...(icon ? { icon } : {}),
-    ...(agent.model ? { model: openRouterId(agent.model), ...(agent.thinkingEffort ? { thinkingEffort: agent.thinkingEffort } : {}) } : {}),
-    ...(skills.length ? { skills } : {}),
-    ...(tools.length ? { tools } : {}),
-    ...(Object.keys(toolAllow).length ? { toolAllow } : {}),
-    ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
-    ...(allow ? { allow } : {}),
-  }
 }
 
 /** The calls of its tools a team agent may make without asking, by tool name (ADR 0069). */
