@@ -87,7 +87,11 @@ LoomWatch does about that, so you can judge it for yourself.
   apps' skill folders only when you click it, and reads nothing there but skill folders.
 - **Collect nothing about you.** LoomWatch has no account and no telemetry. It contacts only:
   - OpenRouter, for the model calls your agents and Ask make, to check your key, and for its
-    public list of models;
+    public list of models. Once you turn on **Read each agent's whole setup for better
+    suggestions** in Connections (it is off until you do), OpenRouter is also asked to read an
+    agent whose job its name and instructions don't make plain, when you open its model list.
+    What is sent is that agent's name, instructions and Done when, and the names of its skills,
+    tools and what it reads. The reading model is TypeSafe's Jev;
   - Notion, when you connect it;
   - GitHub, each time you open LoomWatch, to see whether a new version is out (you can turn this
     off);

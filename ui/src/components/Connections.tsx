@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 
 import { ConnectedTools } from './connections/ConnectedTools'
+import { ModelReading } from './connections/ModelReading'
 import { OpenRouterKey } from './connections/OpenRouterKey'
 
 // Connections is a settings surface, so it is a reading column rather than a canvas:
@@ -17,6 +18,7 @@ export default function Connections() {
           <p className="t-body">Connect your tools and choose where your work belongs.</p>
         </div>
         <OpenRouterKey />
+        <ModelReading />
         <ConnectedTools />
       </div>
     </main>
