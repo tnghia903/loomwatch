@@ -18,24 +18,25 @@ describe('markLinked', () => {
     expect(marked.edges).toBe(edges)
   })
 
-  it("lights a selected card's lines in and out, and steps the others back", () => {
+  it("brings a selected card's lines in and out forward, drawn last, and steps the others back", () => {
     const marked = markLinked([node('researcher'), node('checker', true), node('writer'), node('folder')], edges)
+    // Drawn in this order, so where lines cross the selected card's lie on top.
     expect(marked.edges.map((item) => [item.id, linkOf(item.data)])).toEqual([
+      ['researcher->folder', 'faded'],
       ['researcher->checker', 'linked'],
       ['checker->writer', 'linked'],
-      ['researcher->folder', 'faded'],
     ])
-    expect(marked.edges[0].className).toBe('linked')
+    expect(marked.edges[1].className).toBe('linked')
     // A line's own classes stay; the mark is added.
-    expect(marked.edges[2].className).toBe('resource faded')
+    expect(marked.edges[0].className).toBe('resource faded')
     // Its words and the rest of its data come along.
-    expect(marked.edges[0].data).toEqual({ label: 'hands off', link: 'linked' })
+    expect(marked.edges[1].data).toEqual({ label: 'hands off', link: 'linked' })
   })
 
   it('draws a lit line’s arrowhead in gold, and leaves the others’ as they were', () => {
     const marked = markLinked([node('researcher'), node('checker', true), node('writer'), node('folder')], edges)
-    expect(marked.edges[0].markerEnd).toEqual({ ...marker, color: 'var(--color-accent)' })
-    expect(marked.edges[2].markerEnd).toBe(marker)
+    expect(marked.edges[1].markerEnd).toEqual({ ...marker, color: 'var(--color-accent)' })
+    expect(marked.edges[0].markerEnd).toBe(marker)
   })
 
   it('steps back only the cards with no line to the selected card, and keeps the rest as they were', () => {

@@ -500,16 +500,36 @@ span.story-schedule { cursor: default; }
   border-radius: inherit; background: transparent !important; box-shadow: none; opacity: 1;
 }
 .lw-canvas .react-flow__node .react-flow__handle.card-catch::after { content: none; }
-/* A selected card's own lines glow gold, words and arrowheads too; the cards with no line to it go
-   slightly out of focus and the other lines step back (lib/canvas/linked.ts). The glow is a soft
-   stroke under the line, not a filter, so it looks the same in Safari; nothing here animates, since
-   a running opacity or filter animation in the canvas blurs it in Safari. The other lines' words
-   stay as they are. A live line keeps its blue and a run's gold shuttle its own weight. */
+/* Follow the thread (lib/canvas/linked.ts). Select a card, and its own lines come forward: solid
+   gold, drawn over the rest, and as they light up a single glint of light runs once along each,
+   the way work flows, then is gone. Their words become gold pills, readable where lines cross. The
+   cards at their other ends stay as they are; every other card steps behind a veil the colour of
+   the canvas, which keeps it opaque, so no line shows through it, and every other line and word
+   fades back. The glint moves by stroke-dashoffset, a paint-only property, and only once: an
+   opacity, filter or transform animation in the canvas blurs it in Safari. A live line keeps its
+   blue and a run's gold shuttle its own weight. */
+.lw-canvas { --lw-thread-glint: color-mix(in srgb, var(--color-accent) 30%, #FFFFFF); }
+[data-theme="dark"] .lw-canvas { --lw-thread-glint: #FFF8E6; }
 .lw-canvas .react-flow__edge.linked .react-flow__edge-path:not(.prov-live, .shuttle) { stroke: var(--color-accent); stroke-opacity: 1; stroke-width: 2; }
-.lw-canvas .react-flow__edge-glow { fill: none; stroke: var(--color-accent); stroke-width: 7; stroke-opacity: .22; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-.lw-canvas .react-flow__edge.faded { opacity: .3; }
-.lw-canvas .react-flow__node.faded { filter: blur(1.5px); }
-.lw-canvas :is(.prov-label, .edge-label).linked { color: var(--color-accent); }
+/* The glint's path is one unit long (pathLength), so its dash is a fraction of the line, and it
+   starts just before the line and ends just past it: at rest it draws nothing. */
+.lw-canvas .react-flow__edge-thread { fill: none; stroke: var(--lw-thread-glint); stroke-width: 2; stroke-dasharray: .16 1.16; stroke-dashoffset: -1; filter: var(--bloom); pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .lw-canvas .react-flow__edge-thread { animation: thread 700ms var(--ease-out) both; }
+}
+@keyframes thread { from { stroke-dashoffset: .16; } to { stroke-dashoffset: -1; } }
+.lw-canvas .react-flow__edge.faded { opacity: .22; }
+.lw-canvas :is(.prov-label, .edge-label).faded { opacity: .35; }
+.lw-canvas :is(.prov-label, .edge-label).linked,
+.build-graph .lw-canvas :is(.prov-label, .edge-label).linked {
+  color: var(--color-accent); background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  border-radius: var(--r-full); padding: 2px 7px;
+}
+.lw-canvas .react-flow__node.faded > :is(.build-node, .rt)::after {
+  content: ""; position: absolute; inset: -1px; z-index: 2; border-radius: inherit; pointer-events: none;
+  background: color-mix(in srgb, var(--color-ground) 64%, transparent);
+}
 .lw-canvas .react-flow__node .react-flow__handle.card-catch.connectable.connectingto.valid { box-shadow: 0 0 0 1px var(--color-accent), 0 0 0 3px color-mix(in srgb, var(--color-accent) 45%, transparent); }
 
 /* A drop's word sits beside its line; an arc's word sits on its crest. */
