@@ -63,7 +63,7 @@ describe('suggestModel with a reading of the whole setup', () => {
   it('puts a gatherer the keywords call a writer on the faster model, and says it was read', () => {
     expect(suggestModel({ agent: gatherer, team }).model).toBe(DEFAULT_MODEL)
     const read = suggestModel({ agent: gatherer, team, reading: sure('gather') })
-    expect(read).toEqual({ model: FAST_MODEL, read: true, why: 'Its whole setup says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
+    expect(read).toEqual({ model: FAST_MODEL, read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
   })
 
   it('keeps the team’s answer on the strongest model whatever the reading says', () => {

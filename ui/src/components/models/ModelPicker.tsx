@@ -8,7 +8,7 @@ import { useSetupReading } from '../../lib/ai/reading'
 import { useModels } from '../../lib/ai/useModels'
 import { type ModelSuggestionInput, suggestModel } from '../../lib/team-file/modelSuggestion'
 import { MakerMark } from './MakerMark'
-import { ReadingSwitch } from './ReadingSwitch'
+import { Sharpen } from './Sharpen'
 
 const MAX_RESULTS = 40
 
@@ -48,9 +48,9 @@ function Row({ id, model, selected, active, why, onPoint, onPick }: {
  *
  * `suggestFor` is the agent and its team (modelSuggestion.ts). Its suggestion is a card of its own
  * above the list, so it stands apart whether or not it is the model in use, and stays in view while
- * the list scrolls. Along its foot is the switch that has the agent's whole setup read for a more
- * accurate suggestion (ReadingSwitch); the card is outside the listbox, as a control can't be one of
- * its options, while `aria-owns` keeps the suggested row first among them.
+ * the list scrolls. Along its foot, for an agent its name doesn't place, are how sure the suggestion
+ * is and Sharpen, which has AI read its whole setup (Sharpen.tsx); the card is outside the listbox,
+ * as a control can't be one of its options, while `aria-owns` keeps the suggested row first.
  */
 export function ModelChoices({ value, suggestFor, onPick }: { value: string; suggestFor?: ModelSuggestionInput; onPick: (id: string) => void }) {
   const { catalog, error } = useModels()
@@ -126,7 +126,7 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
           <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
             {row(suggested, 0, suggestion?.why)}
           </div>
-          {suggestFor && <ReadingSwitch agent={suggestFor.agent} note={read.pending ? 'Reading its whole setup…' : read.problem || undefined} />}
+          {suggestFor && <Sharpen agent={suggestFor.agent} read={read} />}
         </div>}
         <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'} aria-owns={!query && suggested ? `${listId}-suggested-group ${listId}-others` : undefined}>
           {query ? found.map((model, index) => row(model, index)) : suggested ? (

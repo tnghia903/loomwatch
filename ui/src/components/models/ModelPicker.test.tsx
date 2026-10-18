@@ -26,8 +26,10 @@ const gatherer = { id: 'gatherer', name: 'Gatherer', role: 'Find what happened i
 const team = { agents: [gatherer, researcher, writer], responder: 'writer' }
 
 let reading = { enabled: false, readings: 0, spent: 0, today: 0, dailyLimit: 50 }
-let calls: { method: string; path: string; body?: { setup?: Record<string, unknown>; enabled?: boolean } }[] = []
-const readings = () => calls.filter((call) => call.path === '/api/models/reading' && call.method === 'POST')
+let calls: { method: string; path: string; body?: { setup?: Record<string, unknown>; enabled?: boolean; ask?: string } }[] = []
+// The reads that may cost credit: a free look at what was kept is not one.
+const readings = () => calls.filter((call) => call.path === '/api/models/reading' && call.method === 'POST' && call.body?.ask !== 'kept')
+const looks = () => calls.filter((call) => call.path === '/api/models/reading' && call.method === 'POST' && call.body?.ask === 'kept')
 
 beforeEach(() => {
   forgetModels(); forgetKeyStatus(); forgetReadings()
@@ -42,7 +44,11 @@ beforeEach(() => {
     if (path === '/api/models') return json(catalog)
     if (path === '/api/ai') return json({ openrouter: { connected: true } })
     if (path === '/api/models/reading' && method === 'PUT') { reading = { ...reading, enabled: Boolean(body?.enabled) }; return json(reading) }
-    if (path === '/api/models/reading' && method === 'POST') return json({ reading: { kind: 'gather', probabilities: { gather: 0.9, produce: 0.08, check: 0.02 }, confidence: 0.9 }, kept: false })
+    if (path === '/api/models/reading' && method === 'POST' && body?.ask === 'kept') return json({ error: 'This setup hasn’t been read yet.', code: 'not_kept' }, 404)
+    if (path === '/api/models/reading' && method === 'POST') {
+      reading = { ...reading, readings: reading.readings + 1 }
+      return json({ reading: { kind: 'gather', probabilities: { gather: 0.9, produce: 0.08, check: 0.02 }, confidence: 0.9 }, kept: false })
+    }
     if (path === '/api/models/reading') return json(reading)
     return json({ error: 'not found' }, 404)
   }))
@@ -137,28 +143,33 @@ describe('ModelPicker', () => {
     expect(css.match(/\n\.pop-row \{[^}]*\}/)?.[0]).toMatch(/flex-shrink:\s*0/)
   })
 
-  it('has the reading switch in the suggestion’s header for a setup its name doesn’t place, and reads it once turned on', async () => {
+  it('shows how sure an unclear agent’s suggestion is, and reads its configuration once Sharpen is tapped', async () => {
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
-    // "write them" makes it a writer, so it is offered the strongest model.
+    // "write them" makes it a writer, so it is offered the strongest model, as a quick guess.
     const suggested = screen.getByRole('group', { name: 'Suggested for this agent' })
     expect(suggested).toHaveTextContent('Claude Opus 5.5')
     // The suggestion is a card above the list, and still the list's first option.
     expect(screen.getByRole('listbox')).toHaveAttribute('aria-owns', expect.stringContaining(suggested.id))
     expect(screen.getAllByRole('option')[0]).toHaveTextContent('Claude Opus 5.5')
-    const toggle = await screen.findByRole('switch', { name: 'More accurate suggestion' })
-    expect(toggle).not.toBeChecked()
-    // It says what it gains, what it does and what it costs, and what it sends one step away.
-    expect(toggle).toHaveAccessibleDescription(/^AI reads its whole setup\. Uses your OpenRouter credit: under \$0\.01 an agent\. It sends .*never your files or its teammates\. Each agent is read once, at most 50 a day\./)
+    expect(await screen.findByText('A quick guess')).toBeInTheDocument()
+    const sharpen = screen.getByRole('button', { name: 'Sharpen' })
+    expect(sharpen).toHaveAccessibleDescription(/^AI will read this agent’s configuration to choose the most suitable model\. It uses your OpenRouter credits, under \$0\.01\. It sends .*never your files or its teammates\./)
+    // Before the first reading there is no option to read every agent on its own.
+    expect(screen.queryByRole('checkbox', { name: 'Sharpen every unclear agent on its own' })).toBeNull()
+    // Only a free look at what was kept: nothing that costs credit.
+    await waitFor(() => expect(looks()).toHaveLength(1))
     expect(readings()).toHaveLength(0)
 
-    fireEvent.click(toggle)
+    fireEvent.click(sharpen)
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
-    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Its whole setup says it gathers for Writer rather than writing the answer.')
-    expect(screen.getByRole('switch', { name: 'More accurate suggestion' })).toBeChecked()
-    // Its own setup, by name, and never its teammates.
+    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Its configuration says it gathers for Writer rather than writing the answer.')
+    expect(screen.getByText('Chosen from its configuration')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sharpen' })).toBeNull()
+    expect(await screen.findByRole('checkbox', { name: 'Sharpen every unclear agent on its own' })).not.toBeChecked()
+    // One reading, asked for by the tap, of its own setup by name, and never its teammates.
     expect(readings()).toHaveLength(1)
-    expect(readings()[0].body?.setup).toMatchObject({ name: 'Gatherer', instructions: gatherer.role })
+    expect(readings()[0].body).toMatchObject({ ask: 'once', setup: { name: 'Gatherer', instructions: gatherer.role } })
     expect(JSON.stringify(readings()[0].body)).not.toContain('Write the article')
 
     // Closed and opened again: answered from what was read, not asked again.
@@ -173,7 +184,7 @@ describe('ModelPicker', () => {
     const lead = ROLE_PRESETS.find((preset) => preset.id === 'lead')!
     const { unmount } = render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     await screen.findByRole('button', { name: /Claude Opus 5\.5/ })
-    expect(readings()).toHaveLength(0)
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0)
     unmount()
 
     // A built-in job's own instructions under another name, and a step whose name says its job.
@@ -181,21 +192,27 @@ describe('ModelPicker', () => {
       render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent, team }} />)
       fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
       await screen.findByRole('group', { name: 'Suggested for this agent' })
-      expect(screen.queryByRole('switch')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Sharpen' })).toBeNull()
+      expect(screen.queryByText('A quick guess')).toBeNull()
       cleanup()
     }
-    expect(readings()).toHaveLength(0)
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0)
   })
 
-  it('turned off, goes back to the suggestion from its name and reads nothing more', async () => {
-    reading = { ...reading, enabled: true }
+  it('reads every unclear agent on its own once that is ticked, and keeps what it read when unticked', async () => {
+    reading = { ...reading, enabled: true, readings: 3 }
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
-    fireEvent.click(screen.getByRole('switch', { name: 'More accurate suggestion' }))
-    await waitFor(() => expect(screen.getByRole('switch', { name: 'More accurate suggestion' })).not.toBeChecked())
+    expect(readings()).toHaveLength(1)
+    expect(readings()[0].body?.ask).toBeUndefined()
+    const auto = screen.getByRole('checkbox', { name: 'Sharpen every unclear agent on its own' })
+    expect(auto).toBeChecked()
+
+    fireEvent.click(auto)
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Sharpen every unclear agent on its own' })).not.toBeChecked())
     expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ enabled: false }])
-    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Opus 5.5')
+    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5')
     expect(readings()).toHaveLength(1)
   })
 
