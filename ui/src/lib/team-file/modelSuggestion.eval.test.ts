@@ -9,9 +9,10 @@
 //
 // Live: point it at a LoomWatch with an OpenRouter key and reading turned on (Connections), and it
 // reads each agent `needsReading` picks through that LoomWatch, the same way the picker does, and
-// prints the table. Each setup is read once; running it again is answered from what was kept.
+// prints the table (Vitest hides a passing test's output, hence --silent=false). Each setup is read
+// once; running it again is answered from what was kept.
 //
-//   LOOMWATCH_EVAL_URL=http://127.0.0.1:3000 pnpm vitest run src/lib/team-file/modelSuggestion.eval.test.ts
+//   LOOMWATCH_EVAL_URL=http://127.0.0.1:3000 pnpm vitest run --silent=false src/lib/team-file/modelSuggestion.eval.test.ts
 //
 // LOOMWATCH_EVAL_ALL=1 also reads the agents the gate skips, to measure the reading itself: the
 // suggestion still uses only the readings the app would ask for. LOOMWATCH_EVAL_OUT=<file> keeps
