@@ -8,23 +8,25 @@ import { useSetupReading } from '../../lib/ai/reading'
 import { useModels } from '../../lib/ai/useModels'
 import { type ModelSuggestionInput, suggestModel } from '../../lib/team-file/modelSuggestion'
 import { MakerMark } from './MakerMark'
-import { Sharpen } from './Sharpen'
+import { AiChoice } from './AiChoice'
 
 const MAX_RESULTS = 40
 
-function Row({ id, model, selected, active, why, onPoint, onPick }: {
+function Row({ id, model, selected, active, why, plain = false, onPoint, onPick }: {
   id: string
   model: Model
   selected: boolean
   active: boolean
   /** In place of the model's own note: why it suits this agent. */
   why?: string
+  /** A button, not one of the list's options: the suggestion while the list shows search results. */
+  plain?: boolean
   onPoint: () => void
   onPick: (id: string) => void
 }) {
   const maker = makerOf(model.id)
   return (
-    <button id={id} type="button" role="option" aria-selected={selected} className={`pop-row model-row ${selected ? 'current' : ''} ${active ? 'active' : ''}`} onMouseMove={onPoint} onClick={() => onPick(model.id)}>
+    <button id={id} type="button" {...(plain ? {} : { role: 'option', 'aria-selected': selected })} className={`pop-row model-row ${selected ? 'current' : ''} ${active ? 'active' : ''}`} onMouseMove={onPoint} onClick={() => onPick(model.id)}>
       <span className="model-row-mark">
         <MakerMark maker={maker} />
         {selected && <span className="model-row-tick" aria-hidden="true"><Check size={10} strokeWidth={3} /></span>}
@@ -47,10 +49,11 @@ function Row({ id, model, selected, active, why, onPoint, onPick }: {
  * way OpenRouter shows them.
  *
  * `suggestFor` is the agent and its team (modelSuggestion.ts). Its suggestion is a card of its own
- * above the list, so it stands apart whether or not it is the model in use, and stays in view while
- * the list scrolls. Along its foot, for an agent its name doesn't place, are how sure the suggestion
- * is and Sharpen, which has AI read its whole setup (Sharpen.tsx); the card is outside the listbox,
- * as a control can't be one of its options, while `aria-owns` keeps the suggested row first.
+ * at the top, above the search, so it stands apart whether or not it is the model in use and stays
+ * put while you search or scroll. Along its foot, for an agent its name doesn't place, are how sure
+ * the suggestion is and Let AI choose (AiChoice.tsx). The card is outside the listbox, as a control
+ * can't be one of its options; `aria-owns` keeps the suggested row first among them, and while the
+ * list shows search results it is a plain button.
  */
 export function ModelChoices({ value, suggestFor, onPick }: { value: string; suggestFor?: ModelSuggestionInput; onPick: (id: string) => void }) {
   const { catalog, error } = useModels()
@@ -107,6 +110,15 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
       {error && <p role="alert" className="inline-error t-meta">{error}</p>}
       {!catalog && !error && <p role="status" className="t-meta lw-settings-quiet">Loading models…</p>}
       {catalog && <>
+        {suggested && <div className="model-suggestion">
+          <p className="model-group-head t-micro" id={`${listId}-suggested`}><Sparkles size={11} aria-hidden="true" />Suggested for this agent</p>
+          <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
+            {query
+              ? <Row id={`${listId}-suggested-row`} model={suggested} selected={suggested.id === value} active={false} why={suggestion?.why} plain onPoint={() => {}} onPick={pick} />
+              : row(suggested, 0, suggestion?.why)}
+          </div>
+          {suggestFor && <AiChoice agent={suggestFor.agent} read={read} />}
+        </div>}
         <label className="field">
           <span className="t-meta">Search all {catalog.models.length} models</span>
           <input
@@ -121,13 +133,6 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
             onKeyDown={onKeyDown}
           />
         </label>
-        {!query && suggested && <div className="model-suggestion">
-          <p className="model-group-head t-micro" id={`${listId}-suggested`}><Sparkles size={11} aria-hidden="true" />Suggested for this agent</p>
-          <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
-            {row(suggested, 0, suggestion?.why)}
-          </div>
-          {suggestFor && <Sharpen agent={suggestFor.agent} read={read} />}
-        </div>}
         <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'} aria-owns={!query && suggested ? `${listId}-suggested-group ${listId}-others` : undefined}>
           {query ? found.map((model, index) => row(model, index)) : suggested ? (
             <div className="model-group" role="group" id={`${listId}-others`} aria-labelledby={`${listId}-others-head`}>
