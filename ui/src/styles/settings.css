@@ -106,21 +106,34 @@
 /* Buttons that act on what a section shows, side by side. */
 .lw-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 
-/* The model picker: the chosen model as a field, and a list that opens under it. */
+/* The model picker: the chosen model as a field with a dropdown arrow, and a list that opens under it. */
 .model-picker { position: relative; display: flex; flex-direction: column; gap: var(--sp-1); }
 .model-picker-current {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  display: flex; align-items: center; gap: var(--sp-3);
   height: auto; min-height: 32px; padding: var(--sp-2) var(--sp-3);
   text-align: left; cursor: pointer;
 }
+.model-picker-current:disabled { cursor: default; }
+.model-picker-text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.model-picker-arrow { flex: none; color: var(--color-ink-3); transition: transform 160ms var(--ease-out), color 160ms var(--ease-out); }
+.model-picker-current:hover:not(:disabled) .model-picker-arrow, .model-picker-current[aria-expanded="true"] .model-picker-arrow { color: var(--color-ink); }
+.model-picker-current[aria-expanded="true"] .model-picker-arrow { transform: rotate(180deg); }
+.model-picker-current:disabled .model-picker-arrow { opacity: .45; }
 .model-picker-pop {
   position: absolute; z-index: 100; top: 100%; left: 0; right: 0; margin-top: var(--sp-1);
   display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3);
   min-width: 280px;
 }
-.model-picker-pop .pop-list { padding: 0; }
+.model-picker-pop .pop-list { padding: 0; max-height: 400px; }
+/* "Suggested for this agent" and the rest, each under a small heading. */
+.model-group { display: flex; flex-direction: column; gap: 2px; }
+.model-group + .model-group { margin-top: var(--sp-2); }
+.model-group-head { margin: 0 0 var(--sp-1); padding: 0 var(--sp-3); color: var(--color-ink-3); }
 .model-row { flex-wrap: wrap; row-gap: 0; padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
-.model-row-detail { flex-basis: 100%; color: var(--color-ink-3); }
+/* The tick marks the chosen model; every row keeps its slot so the names line up. */
+.model-row-tick { flex: none; width: 14px; display: inline-flex; color: var(--color-accent); }
+.model-row-detail { flex-basis: 100%; padding-left: calc(14px + var(--sp-3)); color: var(--color-ink-3); }
+.model-row-why { color: var(--color-ink-2); }
 .model-row .badge {
   padding: 0 var(--sp-2); border-radius: var(--r-sm);
   background: var(--color-accent-tint); color: var(--color-ink-2);

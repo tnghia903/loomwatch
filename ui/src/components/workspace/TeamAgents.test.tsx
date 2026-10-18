@@ -36,7 +36,7 @@ const names = (list: HTMLElement) => within(list).getAllByRole('listitem').filte
 
 function renderTeamAgents(extra: Partial<TeamAgentsProps> = {}) {
   const props: TeamAgentsProps = {
-    agents: [], selected: null, onSelect: vi.fn(), teamName: 'Digest', teamPath: 'digest.yaml', editable: true,
+    agents: [], responder: null, selected: null, onSelect: vi.fn(), teamName: 'Digest', teamPath: 'digest.yaml', editable: true,
     skills: [], skillsLoading: false, savedJobs: [reader, elsewhere],
     onEdit: vi.fn(), onApplyVersion: vi.fn(), onUnlink: vi.fn(), onShowWorkflow: vi.fn(), onAdd: vi.fn(), ...extra,
   }
