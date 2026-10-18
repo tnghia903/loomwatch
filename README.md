@@ -1072,9 +1072,8 @@ delete its folder from `.trash`.
 <details>
 <summary>Reusing an agent with My agents</summary>
 
-Build an agent in **My agents** (**Build an agent** on Home), or keep one that works in a team:
-select it and choose **Add to My agents**. It appears under **My agents** in every team's add
-panel, with its instructions, model, skills and what it may do without asking.
+Build an agent in **My agents** (**Build an agent** on Home). It appears under **My agents** in
+every team's add panel, with its instructions, model, skills and what it may do without asking.
 
 Placing it copies that version into the team, so a team runs exactly what it was approved with.
 Saving a change to what a team copies, such as its job, makes the next version and keeps the
