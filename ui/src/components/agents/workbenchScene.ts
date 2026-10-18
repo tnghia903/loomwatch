@@ -112,8 +112,7 @@ const FACE_MESH: Record<BenchFace, string> = { name: 'nameplate_face', job: 'job
 const DISH_KEY_SCALE = 0.72
 /**
  * The bench's two drawers, either side of the nameplate, hold what it works with: what it reads on
- * the left (the team's to give, with a line in Workflow) and its tools on the right (given in its
- * builder or with a line). Its keys and skills hang on the wall, and the work (the job, the laptop,
+ * the left and its tools on the right, each given in its builder or with a line in Workflow. Its keys and skills hang on the wall, and the work (the job, the laptop,
  * the tray) is on top. `front` is the bench's front face; open, a drawer slides out past the bench
  * top's overhang so what is in it shows, and with nothing in it, it stays shut.
  */

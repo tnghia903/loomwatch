@@ -4,7 +4,7 @@ import type { AgentConfig, CapabilityRef } from '../team-file/types'
 import type { AgentDraft } from './draft'
 import type { ReadSource } from './figure'
 import { onlyOn, toolAllowOf } from './jobs'
-import { readKey } from './reads'
+import { knowledgeOf, readKey, type AgentRead } from './reads'
 import { callsFor, type ToolAllow } from '../tools/allow'
 
 /**
@@ -28,8 +28,8 @@ export function draftFromTeamAgent(agent: AgentConfig): AgentDraft {
     toolAllow: toolAllowOf(agent),
     doneWhen: [...(agent.doneWhen ?? [])],
     allow: { ...(agent.allow ?? {}) },
-    // What a team's own agent reads is the team's to give, with a line in its Workflow (`readsOf`).
-    reads: [],
+    // What it reads is the team's: given here or with a line in its Workflow, it is the same entry.
+    reads: readsIn(agent),
     // A team's own agent wears the figure its id picks: the figure belongs to Your agents.
     figure: null,
   }
@@ -48,6 +48,20 @@ export function readsOf(agent: Pick<AgentConfig, 'capabilities'>): ReadSource[] 
     if (!capability.path) return []
     return [{ kind: chosenIsFile(capability.path) ? 'file' : 'folder', name: capability.name || chosenName(capability.path), where: capability.path, key: readKey(capability) }]
   })
+}
+
+/** A knowledge entry that names something to read: a folder or file by its path, or a Notion page. */
+const names = (capability: CapabilityRef) => capability.kind === 'knowledge' && Boolean(capability.notion || capability.path)
+
+/**
+ * What a team's own agent reads, as its workbench edits it: the entries `readsOf` lists, as the team
+ * file writes them, so a file added beside the team keeps its path from the team file's folder.
+ */
+function readsIn(agent: Pick<AgentConfig, 'capabilities'>): AgentRead[] {
+  return (agent.capabilities ?? []).filter(names).map((capability) => ({
+    name: capability.name || chosenName(capability.path ?? ''),
+    ...(capability.notion ? { notion: { page: capability.notion.page } } : { path: capability.path }),
+  }))
 }
 
 /**
@@ -150,6 +164,18 @@ export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, ke
       const off = agent.turnedOff ?? []
       const stillOff = off.filter((entry) => entry.kind !== 'tool' || !given.has(entry.name.toLowerCase()))
       return { kind: 'fields', fields: { capabilities: capabilities.length ? capabilities : undefined, ...(stillOff.length !== off.length ? { turnedOff: stillOff.length ? stillOff : undefined } : {}) } }
+    }
+    case 'reads': {
+      // Its skills and tools stay, and so does knowledge that names nothing to read, which the
+      // drawer doesn't show (ADR 0036). Each read is a knowledge entry, which the Workflow canvas
+      // draws as a folder, file or Notion page card wired to this agent (ADR 0042, 0050): one it
+      // keeps stays where it was, and one it is given goes after the rest, as a line drawn would.
+      const reads = value as AgentRead[]
+      const wanted = new Set(reads.map(readKey))
+      const kept = (agent.capabilities ?? []).filter((capability) => !names(capability) || wanted.has(readKey(capability)))
+      const had = new Set(kept.filter(names).map(readKey))
+      const capabilities = [...kept, ...knowledgeOf(reads.filter((read) => !had.has(readKey(read))))]
+      return { kind: 'fields', fields: { capabilities: capabilities.length ? capabilities : undefined } }
     }
     case 'toolAllow': {
       // Only the tools' always-allowed calls change; everything else stays as it is.
