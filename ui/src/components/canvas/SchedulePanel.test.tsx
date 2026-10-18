@@ -17,7 +17,6 @@ describe('SchedulePanel', () => {
         savedInEditor={false}
         onSave={vi.fn()}
         onSaveFile={vi.fn()}
-        onAdvanced={vi.fn()}
         onClose={vi.fn()}
       />,
     )
@@ -36,7 +35,7 @@ describe('SchedulePanel', () => {
       <SchedulePanel
         schedule={{ cron: '0 10 * * *', timezone: 'Asia/Singapore', prompt: 'Prepare the digest.' }}
         problems={[]} readOnly={false} dirty={false} canSaveFile savedInEditor={false}
-        onSave={vi.fn()} onSaveFile={vi.fn()} onAdvanced={vi.fn()} onClose={vi.fn()}
+        onSave={vi.fn()} onSaveFile={vi.fn()} onClose={vi.fn()}
         status={<button type="button">Run now</button>}
       />,
     )

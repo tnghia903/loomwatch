@@ -87,7 +87,7 @@ export interface InspectorProps {
 // UX_REDESIGN §5.4: zones in the order the operator thinks — IDENTITY (what stands between a
 // drop and a valid save), CONTEXT (what the agent is given; ADR 0034 replaced BEHAVIOUR with
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
-// replaced PROCESS, whose command, arguments and environment stay in Show YAML).
+// replaced PROCESS, whose command, arguments and environment stay in the team file).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
 export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
   // The fields a link to Your agents copies are changed there, or after unlinking.

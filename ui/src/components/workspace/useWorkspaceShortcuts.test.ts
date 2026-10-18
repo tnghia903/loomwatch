@@ -41,8 +41,6 @@ function shortcuts(overrides: Partial<WorkspaceShortcutContext> = {}) {
     setPaletteOpen: vi.fn(),
     problemsOpen: false,
     setProblemsOpen: vi.fn(),
-    yamlOpen: false,
-    setYamlOpen: vi.fn(),
     compareOpen: false,
     setCompareOpen: vi.fn(),
     inspectedEvidenceId: null,

@@ -46,8 +46,6 @@ export interface WorkspaceShortcutContext {
   setPaletteOpen: Setter<boolean>
   problemsOpen: boolean
   setProblemsOpen: Setter<boolean>
-  yamlOpen: boolean
-  setYamlOpen: Setter<boolean>
   compareOpen: boolean
   setCompareOpen: Setter<boolean>
   inspectedEvidenceId: string | null
@@ -98,7 +96,7 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
     toggleLibrary, cycleProblem, clearSelection, closeRun, closeDetails, organize, fitCanvas, pendingNodeDelete,
     setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm, paletteOpen,
     setPaletteOpen, problemsOpen, setProblemsOpen,
-    yamlOpen, setYamlOpen, compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
+    compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen,
     setMemoryOpen, fannedAgentId, setFannedAgentId, setSolo, setSweeping, selectedNodes, selectedEdges,
     selectedCapabilities, selectedCapabilityEdgeIds, capabilityCards, capabilityEdgeById,
@@ -125,7 +123,6 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
       else if (discardConfirm) setDiscardConfirm(false)
       else if (paletteOpen) setPaletteOpen(false)
       else if (problemsOpen) setProblemsOpen(false)
-      else if (yamlOpen) setYamlOpen(false)
       else if (compareOpen) setCompareOpen(false)
       else if (doc.refusal) doc.dismissRefusal()
       else if (inspectedEvidenceId) setInspectedEvidenceId(null)

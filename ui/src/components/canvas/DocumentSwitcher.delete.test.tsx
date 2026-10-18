@@ -17,7 +17,7 @@ function renderSwitcher(overrides: Partial<DocumentSwitcherProps> = {}) {
     <DocumentSwitcher
       path="trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null} linesDiffer={0}
       entrypointProblem={null} documentProblems={[]} fieldProblemsByAgent={new Map()} agentNames={new Map()} isValid
-      readOnlyReason={null} onSave={vi.fn()} onSaveCopy={vi.fn()} onReload={vi.fn()} onDiscard={vi.fn()} onShowYaml={vi.fn()}
+      readOnlyReason={null} onSave={vi.fn()} onSaveCopy={vi.fn()} onReload={vi.fn()} onDiscard={vi.fn()}
       onNewTeam={vi.fn()} onSelectProblem={vi.fn()} problemsOpen={false} onProblemsOpenChange={vi.fn()}
       {...overrides}
     />,
