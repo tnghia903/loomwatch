@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODEL } from '../ai/modelIds'
 import type { AgentConfig } from '../team-file/types'
 import { buildAgentFromSource } from './createAgent'
-import { fetchJobs, guessIcon, JobApiError, jobFromAgent, jobIdFor, JOBS_CHANGED_EVENT, removeJob, saveJob, savedJobPreset, type SavedJob } from './jobs'
+import { fetchJobs, guessIcon, JobApiError, jobIdFor, JOBS_CHANGED_EVENT, removeJob, saveJob, savedJobPreset, type SavedJob } from './jobs'
 import { ROLE_PRESETS, roleSource } from './roles'
 
 const agent: AgentConfig = {
@@ -25,17 +25,6 @@ describe('built-in jobs', () => {
 })
 
 describe('saving an agent as a job', () => {
-  it('keeps its instructions, model and skills', () => {
-    expect(jobFromAgent(agent, { name: ' Release notes ', does: 'Drafts release notes' })).toEqual({
-      name: 'Release notes', does: 'Drafts release notes', instructions: agent.role, icon: 'write', model: 'openai/gpt-6.1-sol', skills: ['release-style'],
-    })
-  })
-
-  it('keeps a model written for an AI app as the OpenRouter model it reads as', () => {
-    expect(jobFromAgent({ ...agent, model: 'sonnet', thinkingEffort: 'high' }, { name: 'Notes' })).toMatchObject({ model: 'anthropic/claude-sonnet-5.5', thinkingEffort: 'high' })
-    expect(jobFromAgent({ ...agent, model: undefined }, { name: 'Notes' })).not.toHaveProperty('model')
-  })
-
   it('names the file from the job name', () => {
     expect(jobIdFor('Release notes — v2!')).toBe('release-notes-v2')
     expect(jobIdFor('Café rédacteur')).toBe('cafe-redacteur')
@@ -61,9 +50,7 @@ describe('placing a saved job', () => {
     expect(placed.model).toBe('openai/gpt-6.1-sol')
   })
 
-  it('keeps its tools, and places them as tools a team’s canvas draws wired to it', () => {
-    const tooled: AgentConfig = { ...agent, capabilities: [...(agent.capabilities ?? []), { kind: 'tool', name: 'github' }, { kind: 'tool', name: 'github' }] }
-    expect(jobFromAgent(tooled, { name: 'Release notes' }).tools).toEqual(['github'])
+  it('places its tools as tools a team’s canvas draws wired to it', () => {
     const source = roleSource(savedJobPreset({ ...saved, tools: ['github'] }))
     const placed = buildAgentFromSource(source, [])
     expect(placed.capabilities).toEqual([{ kind: 'skill', name: 'release-style' }, { kind: 'tool', name: 'github' }])

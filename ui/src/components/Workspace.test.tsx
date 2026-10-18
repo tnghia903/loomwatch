@@ -1025,6 +1025,8 @@ describe('Workspace', () => {
         for (const field of ['Name', 'Instructions']) expect(within(panel).queryByRole('textbox', { name: field })).not.toBeInTheDocument()
         expect(within(panel).queryByRole('button', { name: 'Thinking effort and more settings' })).not.toBeInTheDocument()
         expect(within(panel).queryByRole('group', { name: 'Allowed without asking' })).not.toBeInTheDocument()
+        // Agents are built in My agents before a team uses them, so the panel no longer offers to keep one there.
+        expect(within(panel).queryByRole('button', { name: 'Add to My agents' })).not.toBeInTheDocument()
       } finally {
         view.unmount()
         researcher.selected = false

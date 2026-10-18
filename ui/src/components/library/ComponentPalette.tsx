@@ -236,7 +236,7 @@ const EXPLAIN: Record<string, ReactNode> = {
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
-  [YOURS]: <>A team’s agents come from here: the ones you built or kept, then the ones that live in your teams. A team keeps the version of a built agent it was given until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
+  [YOURS]: <>A team’s agents come from here: the ones you built, then the ones that live in your teams. A team keeps the version of a built agent it was given until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
 }
 
 /**
@@ -384,9 +384,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
         {group.name === MEMORY && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Box size={13} aria-hidden="true" />None yet</p>}
         {group.name === SKILLS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Puzzle size={13} aria-hidden="true" />None yet</p>}
         {group.name === SKILLS && !query && <a className="palette-hint palette-build-agent" href="/skills">Manage skills</a>}
-      </>, group.name === YOURS
-        ? <><div>{EXPLAIN[YOURS]}</div><div>To reuse an agent this team made, select it and choose <b>Add to My agents</b>.</div></>
-        : EXPLAIN[group.name])
+      </>, EXPLAIN[group.name])
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
     </div>

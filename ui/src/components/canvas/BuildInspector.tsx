@@ -10,14 +10,12 @@ import { CheckStep } from './CheckStep'
 import { InstructionsUpdated } from './InstructionsUpdated'
 import { Inspector, type InspectorProps } from './Inspector'
 import { LinkedAgent } from './LinkedAgent'
-import { SaveAsJob } from './SaveAsJob'
 import { FigureStill } from '../agents/FigureStill'
 import { StatusGlyph } from '../ui/glyphs'
 import type { FigureChoice } from '../../lib/library/figures'
 import { modelLabelForAgent } from '../../lib/models'
 import type { JobSpec, SavedJob } from '../../lib/library/jobs'
 import type { AgentLinkState } from '../../lib/library/link'
-import type { AgentLink } from '../../lib/team-file/types'
 
 /** The agent's versioned link to Your agents, and what the panel may do about it. */
 export interface BuildInspectorLink {
@@ -25,8 +23,6 @@ export interface BuildInspectorLink {
   state: AgentLinkState | null
   onApply: (job: SavedJob, previous: JobSpec | null) => void
   onUnlink: () => void
-  /** "Add to Your agents" made a version of this agent: link to it. */
-  onLink: (link: AgentLink) => void
 }
 
 export function BuildInspector(props: InspectorProps & {
@@ -98,7 +94,6 @@ export function BuildInspector(props: InspectorProps & {
       </section>
       {props.onSpendChange && <AgentSpendGuard perRun={node.data.agent.spend?.perRun ?? null} readOnly={locked} onChange={props.onSpendChange} />}
       {props.usage && <AgentUsageLine usage={props.usage.agent} runs={props.usage.runs} alone={props.usage.alone} />}
-      {!link?.state && <SaveAsJob key={node.id} agent={node.data.agent} onLinked={readOnly ? undefined : link?.onLink} />}
     </div>
   </aside>
 }
