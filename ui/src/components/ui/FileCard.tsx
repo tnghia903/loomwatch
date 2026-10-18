@@ -32,7 +32,7 @@ export function FileCard({ path, compact = false, agents = [] }: FileCardProps) 
   const meta = !lookup
     ? 'Checking…'
     : outside
-      ? 'Outside your teams folder, so LoomWatch won’t open it. Copy the path instead.'
+      ? 'Outside the folders your teams use, so LoomWatch won’t open it. Copy the path instead.'
       : lookup.state === 'unknown'
         ? fileLabel(path)
         : missing

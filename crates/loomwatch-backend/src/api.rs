@@ -368,7 +368,13 @@ async fn get_file_stat(
     State(state): State<ApiState>,
     Query(query): Query<TeamPath>,
 ) -> Result<Json<crate::files::FileFacts>, ApiError> {
-    crate::files::stat(&state.teams_root, &query.path).map(Json)
+    // A path outside the teams root is checked against the folders the teams were given, which
+    // reads every team file: blocking I/O, kept off the runtime's worker threads.
+    let teams_root = state.teams_root.clone();
+    tokio::task::spawn_blocking(move || crate::files::stat(&teams_root, &query.path))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map(Json)
 }
 
 /// Open a produced file with its default app, or show it in its folder. JSON only: a page on

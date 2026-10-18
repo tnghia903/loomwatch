@@ -54,7 +54,7 @@ describe('FileCard', () => {
   it('still offers the path when the daemon refuses the folder or predates file support', async () => {
     stat = () => respond(403, { error: 'outside' })
     const { unmount } = render(<FileCard path="/etc/hosts.txt" />)
-    expect(await screen.findByText(/Outside your teams folder/)).toBeInTheDocument()
+    expect(await screen.findByText(/Outside the folders your teams use/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open hosts.txt' })).toBeDisabled()
     unmount()
 
