@@ -124,6 +124,56 @@ export function cardTexture(skill: string, index: number): Texture {
   return texture(element)
 }
 
+/**
+ * A tool's tile in the tool drawer, as ToolIcon draws it in the app: its own icon on white, or its
+ * first letter when it has none or the icon won't load. LoomWatch serves the icon from its own
+ * address (`icons.rs`), so the canvas stays clean enough to draw on the bench. The tile is blank
+ * white until the icon arrives. Drawn on the shape's own UVs, which start at the bottom.
+ */
+export function toolTexture(name: string, icon: string | null): Texture {
+  const size = 256
+  const [element, context] = canvas(size, size)
+  const made = texture(element)
+  made.flipY = true
+  const tile = (fill: string) => {
+    context.clearRect(0, 0, size, size)
+    context.fillStyle = fill
+    context.fillRect(0, 0, size, size)
+    // ToolIcon's hairline, just inside the tile's edge.
+    context.strokeStyle = 'rgba(0, 0, 0, 0.08)'
+    context.lineWidth = 6
+    context.beginPath()
+    context.roundRect(3, 3, size - 6, size - 6, size * 0.24)
+    context.stroke()
+  }
+  const letter = () => {
+    tile('#F4EAD0')
+    context.fillStyle = '#8A6A1E'
+    context.font = `600 ${Math.round(size * 0.46)}px ${fonts().sans}`
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.fillText(name.trim().charAt(0).toUpperCase() || '?', size / 2, size * 0.53)
+    made.needsUpdate = true
+  }
+  if (!icon) { letter(); return made }
+  tile('#FFFFFF')
+  const image = new Image()
+  image.decoding = 'async'
+  image.onload = () => {
+    if (!image.naturalWidth) { letter(); return }
+    // Contained, inside ToolIcon's padding.
+    const room = size * 0.78
+    const scale = Math.min(room / image.naturalWidth, room / image.naturalHeight)
+    const [width, height] = [image.naturalWidth * scale, image.naturalHeight * scale]
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height)
+    made.needsUpdate = true
+  }
+  image.onerror = letter
+  image.src = icon
+  return made
+}
+
 /** Cross-wound thread, as a bump map, for the heads that are wound (the yarn ball, the spool, the cone). */
 export function woundTexture(): Texture {
   const size = 256

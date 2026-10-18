@@ -15,7 +15,7 @@ import type { AllowSwitch } from '../team-file/types'
  * - `skills`: recipe cards pinned on the pegboard, one per skill.
  * - `reads`: the file drawer, left of the nameplate, open with a folder, file or page filed in it
  *   for each one it reads and shut when there is none.
- * - `tools`: the tool drawer, right of the nameplate, with a wrench standing in it for each tool
+ * - `tools`: the tool drawer, right of the nameplate, holding a tile with its own icon for each tool
  *   (MCP server) it is given, in its builder or with a line on the canvas.
  *   What it reads is given the same two ways: in its builder, for every team it joins, and by a
  *   team with a line on the canvas (ADR 0042).
@@ -82,7 +82,7 @@ export interface ReadSource {
 /** How many fit in the drawer; more still count, they just aren't filed in it. */
 export const READ_SLOTS = 4
 
-/** How many wrenches fit in the tool drawer; more tools still count, they just aren't in it. */
+/** How many tools' tiles fit in the tool drawer; more tools still count, they just aren't in it. */
 export const TOOL_SLOTS = 4
 
 /**
