@@ -746,7 +746,10 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
   border-radius: var(--r-sm); color: var(--color-ink-2);
   cursor: pointer; background: none; border: 0; width: 100%; text-align: left;
 }
-.pop-row:hover, .pop-row.active { background: var(--color-accent-tint); color: var(--color-ink); }
+/* accent-tint is about the panel's own value in dark (#1A1508 on #131316), so the row under the
+   pointer or the arrow keys mixes in more gold, and the keyboard row also gets the gold bar. */
+.pop-row:hover, .pop-row.active { background: color-mix(in srgb, var(--color-accent) 14%, var(--color-panel-solid)); color: var(--color-ink); }
+.pop-row.active { box-shadow: inset 2px 0 0 var(--color-accent); }
 .pop-row.current { background: var(--color-accent-tint); }
 .pop-row:disabled { opacity: .45; cursor: not-allowed; }
 .pop-row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

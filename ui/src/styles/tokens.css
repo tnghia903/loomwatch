@@ -68,8 +68,10 @@
   --color-ink-3:          var(--lw-stone-600);
   --color-warp:           var(--lw-stone-400);
   --color-accent:         var(--lw-gold-600);
-  --color-accent-fill:    var(--lw-gold-500);
-  --color-accent-on-fill: var(--lw-ink-950);
+  /* Bronze under a white label: 5.1:1 (APCA Lc 77), and 4.8:1 against the ground. Ink on brass
+     #AD8A20 met 5.6:1 but read muddy (APCA Lc 44). */
+  --color-accent-fill:    var(--lw-gold-600);
+  --color-accent-on-fill: var(--lw-paper-0);
   --color-accent-dim:     var(--lw-brass-450);
   --color-accent-tint:    var(--lw-gold-tint-light);
   --color-live:           var(--lw-blue-700);
