@@ -100,8 +100,9 @@ models that can use tools. It is fetched when first asked for, kept for an hour,
 the state folder so the list still shows offline. `GET /api/models` serves it.
 
 `ai/reading.rs` reads an agent's whole setup for its model suggestion, and only once the operator
-turns that on in Connections; it is off by default. The app suggests a model from an agent's name
-and a few words of its instructions, for free (`ui/src/lib/team-file/modelSuggestion.ts`). When
+turns that on with the switch on the suggestion in an agent's model list (`ReadingSwitch.tsx`); it
+is off by default. The app suggests a model from an agent's name and a few words of its
+instructions, for free (`ui/src/lib/team-file/modelSuggestion.ts`). When
 those can't place an agent (`agentSetup.ts`, `needsReading`) and its model picker is open, the
 app asks `POST /api/models/reading`. The daemon then asks TypeSafe's Jev (`typesafe/jev-1.14`,
 pinned) on OpenRouter's Decisions API, with the operator's key, which kind of work the agent

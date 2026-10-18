@@ -135,9 +135,14 @@
 .lw-settings-switch input:focus-visible + .lw-settings-switch-track { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .lw-settings-switch input:disabled ~ * { opacity: .55; cursor: default; }
 
-/* Under a suggestion the free reading isn't sure of: reading the whole setup, offered. */
-.model-reading-offer { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); }
-.model-reading-offer p { margin: 0; }
+/* The suggestion: a card of its own above the list, framed in the accent, so it reads apart from
+   the rows whether or not it is the model in use. Its header holds the reading switch. */
+.model-suggestion { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1); border: 1px solid color-mix(in srgb, var(--color-accent) 34%, transparent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
+.model-suggestion-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-1) var(--sp-3); padding: 4px var(--sp-2) 2px; }
+.model-suggestion .model-group-head { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0; color: var(--color-accent); }
+.model-suggestion-head .inline-error { flex-basis: 100%; margin: 0; }
+.model-suggestion > .t-meta { margin: 0; padding: 2px var(--sp-2) 4px; }
+.model-reading-switch .t-meta { color: var(--color-ink-2); }
 
 /* "Suggested for this agent" and the rest, each under a small heading. */
 .model-group { display: flex; flex-direction: column; gap: 2px; }
@@ -165,8 +170,8 @@
 .model-row-detail { grid-area: detail; min-width: 0; color: var(--color-ink-3); }
 .model-row-why { color: var(--color-ink-2); }
 /* In a narrow list (the canvas Inspector) the price takes its own line under the name, so the
-   name keeps the whole first line instead of folding beside the price. */
-.model-list { container-type: inline-size; }
+   name keeps the whole first line instead of folding beside the price; the suggestion's card too. */
+.model-list, .model-suggestion { container-type: inline-size; }
 @container (max-width: 380px) {
   .model-row { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "mark name" "mark aside" "mark detail"; }
   .model-row .aside { align-self: auto; padding-top: 0; }

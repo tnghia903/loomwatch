@@ -60,7 +60,7 @@ export async function readSetup(setup: AgentSetup): Promise<{ reading: SetupRead
   return { reading: { kind: kind as JobKind, probabilities, ...(typeof confidence === 'number' ? { confidence } : {}) }, kept: answer.kept === true }
 }
 
-// Whether reading is on, shared by Connections and every picker: turning it on in one shows in all.
+// Whether reading is on, shared by every model list: turning it on in one shows in all.
 let known: ReadingStatus | null = null
 let pending: Promise<ReadingStatus> | null = null
 const listeners = new Set<(status: ReadingStatus) => void>()
@@ -100,7 +100,7 @@ function readOnce(id: string, setup: AgentSetup): Promise<SetupReading> {
       (answer) => {
         read.set(id, answer.reading)
         reading.delete(id)
-        // A new reading cost something: Connections shows it.
+        // A new reading cost something: the switch's description says what reading has cost.
         if (!answer.kept) fetchReadingStatus().then(announceReadingStatus, () => {})
         return answer.reading
       },

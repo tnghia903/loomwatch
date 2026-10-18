@@ -332,7 +332,7 @@ impl Refusal {
         Self::new(
             StatusCode::CONFLICT,
             "off",
-            "Reading agents’ setups is off. Turn it on in Connections.",
+            "Reading agents’ setups is off. Turn on Read its setup in an agent’s model list.",
         )
     }
 
@@ -910,7 +910,7 @@ mod tests {
             .read(
                 Some(&client),
                 async || {
-                    // The operator turns it off in Connections while the key is looked up.
+                    // The operator turns it off in a model list while the key is looked up.
                     reader.set_enabled(false);
                     Ok(ApiKey::new("sk-or-v1-good"))
                 },

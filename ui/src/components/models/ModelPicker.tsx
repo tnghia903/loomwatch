@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, Sparkles } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { type Model, contextSize, price, shortName } from '../../lib/ai/client'
@@ -8,7 +8,7 @@ import { useSetupReading } from '../../lib/ai/reading'
 import { useModels } from '../../lib/ai/useModels'
 import { type ModelSuggestionInput, suggestModel } from '../../lib/team-file/modelSuggestion'
 import { MakerMark } from './MakerMark'
-import { ReadingOffer } from './ReadingOffer'
+import { ReadingSwitch } from './ReadingSwitch'
 
 const MAX_RESULTS = 40
 
@@ -46,8 +46,11 @@ function Row({ id, model, selected, active, why, onPoint, onPick }: {
  * move through them and Enter picks, as in the command palette. Prices are per million tokens, the
  * way OpenRouter shows them.
  *
- * `suggestFor` is the agent and its team (modelSuggestion.ts). Open, the list may have the agent's
- * whole setup read for a better suggestion, when the operator turned that on (lib/ai/reading.ts).
+ * `suggestFor` is the agent and its team (modelSuggestion.ts). Its suggestion is a card of its own
+ * above the list, so it stands apart whether or not it is the model in use, and stays in view while
+ * the list scrolls. The card's header holds the switch that has the agent's whole setup read for a
+ * better suggestion (ReadingSwitch); outside the listbox, as a control can't be one of its options,
+ * while `aria-owns` keeps the suggested row first among them.
  */
 export function ModelChoices({ value, suggestFor, onPick }: { value: string; suggestFor?: ModelSuggestionInput; onPick: (id: string) => void }) {
   const { catalog, error } = useModels()
@@ -118,24 +121,26 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
             onKeyDown={onKeyDown}
           />
         </label>
-        <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'}>
-          {query ? found.map((model, index) => row(model, index)) : suggested ? <>
-            <div className="model-group" role="group" aria-labelledby={`${listId}-suggested`}>
-              <p className="model-group-head t-micro" id={`${listId}-suggested`}>Suggested for this agent</p>
-              {row(suggested, 0, suggestion?.why)}
-            </div>
-            <div className="model-group" role="group" aria-labelledby={`${listId}-others`}>
-              <p className="model-group-head t-micro" id={`${listId}-others`}>Other good models</p>
-              {others.map((model, index) => row(model, index + 1))}
-            </div>
-          </> : others.map((model, index) => row(model, index))}
-        </div>
-        {query && found.length === 0 && <p className="t-meta lw-settings-quiet">No model matches. Try another word.</p>}
-        {!query && suggested && <>
+        {!query && suggested && <div className="model-suggestion">
+          <div className="model-suggestion-head">
+            <p className="model-group-head t-micro" id={`${listId}-suggested`}><Sparkles size={11} aria-hidden="true" />Suggested for this agent</p>
+            {suggestFor && <ReadingSwitch agent={suggestFor.agent} />}
+          </div>
+          <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
+            {row(suggested, 0, suggestion?.why)}
+          </div>
           {read.pending && <p role="status" className="t-meta lw-settings-quiet">Reading its setup…</p>}
           {read.problem && <p className="t-meta lw-settings-quiet">{read.problem}</p>}
-          {suggestFor && <ReadingOffer agent={suggestFor.agent} />}
-        </>}
+        </div>}
+        <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'} aria-owns={!query && suggested ? `${listId}-suggested-group ${listId}-others` : undefined}>
+          {query ? found.map((model, index) => row(model, index)) : suggested ? (
+            <div className="model-group" role="group" id={`${listId}-others`} aria-labelledby={`${listId}-others-head`}>
+              <p className="model-group-head t-micro" id={`${listId}-others-head`}>Other good models</p>
+              {others.map((model, index) => row(model, index + 1))}
+            </div>
+          ) : others.map((model, index) => row(model, index))}
+        </div>
+        {query && found.length === 0 && <p className="t-meta lw-settings-quiet">No model matches. Try another word.</p>}
         {!query && <p className="t-meta lw-settings-quiet">Free models are limited per day, and their makers may learn from what you send. Keep private work on a paid model.</p>}
       </>}
     </>
