@@ -4,14 +4,16 @@ use std::time::Duration;
 
 use rmcp::ServiceExt as _;
 use rmcp::model::{CallToolRequestParams, ClientCapabilities, ClientConfig, Implementation};
-use rmcp::service::{RoleClient, RunningService};
+use rmcp::service::{ClientInitializeError, RoleClient, RunningService};
 use rmcp::transport::StreamableHttpClientTransport;
-use rmcp::transport::auth::{AuthClient, AuthorizationManager};
-use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::auth::{AuthClient, AuthError, AuthorizationManager};
+use rmcp::transport::streamable_http_client::{
+    AuthRequiredError, InsufficientScopeError, StreamableHttpClientTransportConfig,
+};
 use serde_json::{Value, json};
 
 use super::vault::Secret;
-use super::{Auth, ConnectedTool, MAX_CALLS, ToolCall, Tools};
+use super::{Auth, ConnectedTool, MAX_CALLS, ToolCall, Tools, Unusable};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Saying hello, signing in included.
@@ -134,7 +136,7 @@ pub(super) async fn open(tools: &Tools, tool: &ConnectedTool) -> Result<Session,
             match manager.initialize_from_store().await {
                 Ok(true) => {}
                 Ok(false) => return Err(sign_in_again(&tool.name)),
-                Err(rmcp::transport::auth::AuthError::CredentialStoreError(said)) => {
+                Err(AuthError::CredentialStoreError(said)) => {
                     return Err(said);
                 }
                 Err(_) => return Err(unreachable(&tool.name)),
@@ -149,7 +151,7 @@ pub(super) async fn open(tools: &Tools, tool: &ConnectedTool) -> Result<Session,
     };
     match opened {
         Ok(Ok(session)) => Ok(session),
-        Ok(Err(error)) => Err(refused(tool, &error.to_string())),
+        Ok(Err(error)) => Err(refused(tool, &error)),
         Err(_) => Err(format!(
             "{} took too long to answer. Try again shortly.",
             tool.name
@@ -313,20 +315,48 @@ fn first_line(text: &str) -> String {
         .collect()
 }
 
-/// Why opening a session failed, in words.
-fn refused(tool: &ConnectedTool, error: &str) -> String {
-    let error = error.to_lowercase();
-    if error.contains("auth") || error.contains("401") || error.contains("unauthorized") {
-        match tool.auth {
-            Auth::Token => token_again(&tool.name),
-            Auth::SignIn => sign_in_again(&tool.name),
-            Auth::None => format!(
-                "{} now asks who is calling. Remove it in Connections and connect it again.",
-                tool.name
-            ),
+/// Why opening a session failed, in words. Read from the kinds of error rmcp chains, never from
+/// its text: that names the transport's Rust type, which for a sign-in tool includes `AuthClient`,
+/// so a sign-in tool that was only offline read as one whose sign-in had expired.
+fn refused(tool: &ConnectedTool, error: &ClientInitializeError) -> String {
+    // The outer error names no source; the transport's own error chains to a 401's challenge, or
+    // to what went wrong renewing the sign-in.
+    let ClientInitializeError::TransportError { error, .. } = error else {
+        return unreachable(&tool.name);
+    };
+    let causes =
+        std::iter::successors(Some(error as &(dyn std::error::Error + 'static)), |cause| {
+            cause.source()
+        });
+    for cause in causes {
+        if cause.is::<AuthRequiredError>() || cause.is::<InsufficientScopeError>() {
+            return turned_away(tool);
         }
-    } else {
-        unreachable(&tool.name)
+        if let Some(error) = cause.downcast_ref::<AuthError>() {
+            if let AuthError::CredentialStoreError(said) = error {
+                return said.clone();
+            }
+            // Read as [`Tools::bearer`] reads it: a renewal that couldn't reach the tool's site
+            // is not one it turned down.
+            return if Unusable::of(error) == Unusable::SignInAgain {
+                turned_away(tool)
+            } else {
+                unreachable(&tool.name)
+            };
+        }
+    }
+    unreachable(&tool.name)
+}
+
+/// What to do when `tool`'s server turns away who is calling.
+fn turned_away(tool: &ConnectedTool) -> String {
+    match tool.auth {
+        Auth::Token => token_again(&tool.name),
+        Auth::SignIn => sign_in_again(&tool.name),
+        Auth::None => format!(
+            "{} now asks who is calling. Remove it in Connections and connect it again.",
+            tool.name
+        ),
     }
 }
 
@@ -386,5 +416,43 @@ mod tests {
         assert!(failed);
         assert_eq!(text, r#"{"id":7}"#);
         assert_eq!(answer(&json!({})).0, "The tool returned nothing.");
+    }
+
+    /// A server that takes the connection and never answers, so the request gives up: a sign-in
+    /// tool that took too long can't be reached, which says nothing about its sign-in.
+    #[tokio::test]
+    async fn a_sign_in_tool_that_times_out_is_unreachable_not_expired() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((connection, _)) = listener.accept().await {
+                held.push(connection);
+            }
+        });
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .unwrap();
+        let manager = AuthorizationManager::new(url.as_str()).await.unwrap();
+        let transport = StreamableHttpClientTransport::with_client(
+            AuthClient::new(http, manager),
+            StreamableHttpClientTransportConfig::with_uri(url.as_str()),
+        );
+        let Err(error) = client_info().serve(transport).await else {
+            panic!("a server that never answers opened a session");
+        };
+        let tool = ConnectedTool {
+            id: "1".into(),
+            name: "Notion".into(),
+            url,
+            auth: Auth::SignIn,
+            calls: Vec::new(),
+            checked_at: None,
+            metadata: None,
+            pending: false,
+            problem: None,
+        };
+        assert_eq!(refused(&tool, &error), unreachable("Notion"));
     }
 }

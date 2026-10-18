@@ -543,6 +543,166 @@ async fn a_tool_naming_no_scopes_asks_for_none() {
     );
 }
 
+/// An address nothing answers at: connecting is refused, as it is offline or behind a proxy that
+/// refuses.
+fn closed_address() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    format!("http://{}", listener.local_addr().unwrap())
+}
+
+/// Where the sign-in for a tool at `base` signs in and renews, as a moved Notion sign-in has it.
+fn sign_in_metadata(base: &str) -> AuthorizationMetadata {
+    let mut metadata = AuthorizationMetadata::default();
+    metadata.authorization_endpoint = format!("{base}/authorize");
+    metadata.token_endpoint = format!("{base}/token");
+    metadata.registration_endpoint = Some(format!("{base}/register"));
+    metadata.code_challenge_methods_supported = Some(vec!["S256".to_owned()]);
+    metadata
+}
+
+/// A sign-in received now whose access token lasts `expires_in` seconds: 0 to renew it first.
+fn kept_sign_in(expires_in: i64) -> StoredCredentials {
+    serde_json::from_value(json!({
+        "client_id": "client-1",
+        "token_response": {
+            "access_token": "old-access",
+            "token_type": "bearer",
+            "expires_in": expires_in,
+            "refresh_token": "old-refresh",
+        },
+        "granted_scopes": [],
+        "token_received_at": chrono::Utc::now().timestamp(),
+    }))
+    .unwrap()
+}
+
+/// The v0.7.1 trial: a Notion sign-in moved while nothing outside could be reached. The tool
+/// can't be reached, and says so; its sign-in hasn't expired, whether its token was still good or
+/// due to be renewed (which couldn't reach the sign-in site either).
+#[tokio::test]
+async fn a_sign_in_tool_that_cant_be_reached_has_not_expired() {
+    for expires_in in [3600, 0] {
+        let folder = Folder::new();
+        let tools = Tools::for_tests(&folder.0);
+        let offline = closed_address();
+        let url = format!("{offline}/mcp");
+        let adopted = tools
+            .adopt_sign_in(
+                "Notion",
+                &url,
+                sign_in_metadata(&offline),
+                kept_sign_in(expires_in),
+            )
+            .await;
+        assert_eq!(adopted, Ok(Adopted::Kept));
+        let tool = tools.at(&url).await.expect("kept all the same");
+        assert_eq!(
+            tool.problem,
+            Some(client::unreachable("Notion")),
+            "token lasting {expires_in}s"
+        );
+        assert_eq!(
+            client::open(&tools, &tool).await.err(),
+            Some(client::unreachable("Notion"))
+        );
+        let bearer = tools.bearer(&tool).await;
+        if expires_in == 0 {
+            assert_eq!(bearer, Err(Unusable::Unreachable));
+        } else {
+            assert_eq!(bearer.as_deref(), Ok("old-access"));
+        }
+        let secrets = tools.secrets_for_tests();
+        assert!(secrets.contains("old-refresh"), "the sign-in is kept");
+    }
+}
+
+/// A sign-in the tool's server turns down, and whose renewal its site turns down, is the one case
+/// that says to sign in again: whether the token looked good or was due to be renewed.
+#[tokio::test]
+async fn a_sign_in_the_tool_turns_down_says_to_sign_in_again() {
+    let (base, _fake) = start(Guard::SignIn).await;
+    for expires_in in [3600, 0] {
+        let folder = Folder::new();
+        let tools = Tools::for_tests(&folder.0);
+        let url = format!("{base}/mcp");
+        let adopted = tools
+            .adopt_sign_in(
+                "Notion",
+                &url,
+                sign_in_metadata(&base),
+                kept_sign_in(expires_in),
+            )
+            .await;
+        assert_eq!(adopted, Ok(Adopted::Kept));
+        let tool = tools.at(&url).await.expect("kept all the same");
+        assert_eq!(
+            tool.problem,
+            Some(client::sign_in_again("Notion")),
+            "token lasting {expires_in}s"
+        );
+        assert_eq!(
+            client::open(&tools, &tool).await.err(),
+            Some(client::sign_in_again("Notion"))
+        );
+    }
+    // Renewing it is turned down too, so nothing can be sent for it.
+    let folder = Folder::new();
+    let tools = Tools::for_tests(&folder.0);
+    tools
+        .adopt_sign_in(
+            "Notion",
+            &format!("{base}/mcp"),
+            sign_in_metadata(&base),
+            kept_sign_in(0),
+        )
+        .await
+        .unwrap();
+    let tool = tools.at(&format!("{base}/mcp")).await.unwrap();
+    assert_eq!(tools.bearer(&tool).await, Err(Unusable::SignInAgain));
+}
+
+/// A tool with a token, or none, that can't be reached says so; one whose server turns it away
+/// says what to do about that.
+#[tokio::test]
+async fn token_and_open_tools_say_whether_they_were_turned_away_or_unreachable() {
+    let folder = Folder::new();
+    let tools = Tools::for_tests(&folder.0);
+    let offline = format!("{}/mcp", closed_address());
+    let tool = tools.connected_for_tests("Tracker", &offline, TOKEN).await;
+    assert_eq!(
+        client::open(&tools, &tool).await.err(),
+        Some(client::unreachable("Tracker"))
+    );
+
+    let (base, _fake) = start(Guard::Token).await;
+    let url = format!("{base}/mcp");
+    let tool = tools.connected_for_tests("Tracker 2", &url, "wrong").await;
+    assert_eq!(
+        client::open(&tools, &tool).await.err(),
+        Some(client::token_again("Tracker 2"))
+    );
+
+    let open = |url: &str| ConnectedTool {
+        id: uuid::Uuid::new_v4().simple().to_string(),
+        name: "Docs".into(),
+        url: url.to_owned(),
+        auth: Auth::None,
+        calls: Vec::new(),
+        checked_at: None,
+        metadata: None,
+        pending: false,
+        problem: None,
+    };
+    assert_eq!(
+        client::open(&tools, &open(&url)).await.err().as_deref(),
+        Some("Docs now asks who is calling. Remove it in Connections and connect it again.")
+    );
+    assert_eq!(
+        client::open(&tools, &open(&offline)).await.err(),
+        Some(client::unreachable("Docs"))
+    );
+}
+
 #[tokio::test]
 async fn refuses_changes_from_another_site_and_addresses_that_arent_https() {
     let folder = Folder::new();
