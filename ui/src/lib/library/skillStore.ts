@@ -428,6 +428,22 @@ export function displayName(name: string): string {
   }).join(' ')
 }
 
+const FRONT_MATTER = /^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/
+const FENCED_CODE = /(^(?:```|~~~)[\s\S]*?^(?:```|~~~)[^\n]*$)/m
+const LOCAL_LINK = /(^|[^!])\[([^\]\n]+)\]\((?!https?:|mailto:)[^)\n]*\)/g
+
+/**
+ * A SKILL.md to read: without its front matter, whose name and description are shown on their own,
+ * and with its links into its own folder (`../CONNECTORS.md`) as plain words, since a page has no
+ * way to open them. Web links stay links, and fenced code stays as written.
+ */
+export function skillBody(content: string): string {
+  return content.replace(FRONT_MATTER, '').trim()
+    .split(FENCED_CODE)
+    .map((part, index) => (index % 2 ? part : part.replace(LOCAL_LINK, '$1$2')))
+    .join('')
+}
+
 /** `212k`, `1.4M`: a count read at a glance. */
 export function compactCount(count: number): string {
   if (count < 1000) return String(count)

@@ -89,6 +89,9 @@
 .skill-picker-chosen li { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: var(--r-sm); background: var(--color-accent-tint); color: var(--color-ink); font-size: 13px; }
 .skill-picker-chosen li svg { color: var(--color-accent); }
 .skill-picker-chosen .iconbtn { width: 22px; height: 22px; }
+/* A pinned-up skill's name opens it to be read. */
+.skill-picker-open { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.skill-picker-open:hover { text-decoration: underline; text-underline-offset: 2px; }
 .skill-picker-find { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-ground); color: var(--color-ink-3); }
 .skill-picker-find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-ink); font: inherit; font-size: 13px; }
 
@@ -310,7 +313,13 @@
 .byhand-cards.still li, .byhand-cards.still li:active { cursor: default; }
 .byhand-cards li b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .byhand-cards li span:not(.byhand-card-tab) { grid-column: 1; font-size: 11.5px; color: #56524A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.byhand-cards li .iconbtn { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #17150F; }
+.byhand-cards li .iconbtn { position: relative; z-index: 1; grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #17150F; }
+/* A card's words open it to be read, and the whole card is their button: all but its +. */
+.byhand-card-open { grid-column: 1; grid-row: 1 / span 2; display: grid; gap: 2px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.byhand-card-open::after { content: ''; position: absolute; inset: 0; border-radius: var(--r-md); }
+.byhand-card-open:focus-visible { outline: none; }
+.byhand-card-open:focus-visible::after { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.byhand-cards li:hover { background: #F7F3EA; }
 .byhand-card-tab { position: absolute; top: -5px; left: 12px; width: 34px; height: 9px; border-radius: 4px; background: #E9C46A; }
 .byhand-cards li:nth-child(3n + 2) .byhand-card-tab { background: #D9D2C4; }
 .byhand-cards li:nth-child(3n) .byhand-card-tab { background: #85817A; }

@@ -348,6 +348,37 @@
 .lw-skills-intro-desc { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--color-ink); }
 .lw-skills-out { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; }
 
+/* A skill opened from an agent's Skills block (SkillDetails): every word of its SKILL.md. */
+.lw-skills-recipe { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.lw-skills-recipe-text {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-md);
+  background: var(--color-ground);
+  color: var(--color-ink-2);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.lw-skills-recipe-text > :first-child { margin-top: 0; }
+.lw-skills-recipe-text > :last-child, .lw-skills-recipe-text .markdown-fallback > :last-child { margin-bottom: 0; }
+.lw-skills-recipe-text :is(p, ul, ol, pre, table, blockquote) { margin: 0 0 var(--sp-2); }
+.lw-skills-recipe-text :is(h1, h2, h3, h4, h5, h6) { margin: var(--sp-3) 0 var(--sp-1); font: 600 13.5px/1.35 var(--font-sans); color: var(--color-ink); }
+.lw-skills-recipe-text h1 { font-size: 15px; }
+.lw-skills-recipe-text :is(ul, ol) { padding-left: 18px; }
+.lw-skills-recipe-text ul { list-style: disc; }
+.lw-skills-recipe-text ol { list-style: decimal; }
+.lw-skills-recipe-text blockquote { padding-left: var(--sp-3); border-left: 2px solid var(--color-hairline); color: var(--color-ink-3); }
+.lw-skills-recipe-text code { padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); font: 400 12px/1.4 var(--font-mono); }
+.lw-skills-recipe-text pre { padding: var(--sp-2); border-radius: var(--r-sm); background: var(--color-panel-solid); white-space: pre-wrap; overflow-wrap: anywhere; }
+.lw-skills-recipe-text pre code { padding: 0; background: none; }
+.lw-skills-recipe-text table { border-collapse: collapse; font-size: 12px; line-height: 1.4; }
+.lw-skills-recipe-text :is(th, td) { padding: 3px 6px; border: 1px solid var(--color-hairline); text-align: left; vertical-align: top; }
+.lw-skills-recipe-text a { color: var(--color-accent); text-decoration: underline; }
+.lw-skills-recipe-text .markdown-fallback { white-space: pre-wrap; }
+
 /* What to know, one line each, marked by how much it matters. */
 .lw-skills-notices {
   list-style: none;
