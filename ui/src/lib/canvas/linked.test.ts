@@ -38,17 +38,17 @@ describe('markLinked', () => {
     expect(marked.edges[2].markerEnd).toBe(marker)
   })
 
-  it('marks the cards at the other ends, not the selected card itself, and keeps the rest as they were', () => {
+  it('steps back only the cards with no line to the selected card, and keeps the rest as they were', () => {
     const nodes = [node('researcher'), node('checker', true), node('writer'), node('folder')]
     const marked = markLinked(nodes, edges)
-    expect(marked.nodes.map((item) => item.className)).toEqual(['linked', undefined, 'linked', undefined])
-    expect(marked.nodes[1]).toBe(nodes[1])
-    expect(marked.nodes[3]).toBe(nodes[3])
+    // The folder hangs off the researcher, not the checker, so only it goes out of focus.
+    expect(marked.nodes.map((item) => item.className)).toEqual([undefined, undefined, undefined, 'faded'])
+    marked.nodes.slice(0, 3).forEach((item, i) => expect(item).toBe(nodes[i]))
   })
 
   it('lights every line of every selected card', () => {
     const marked = markLinked([node('researcher', true), node('checker'), node('writer', true), node('folder')], edges)
     expect(marked.edges.every((item) => linkOf(item.data) === 'linked')).toBe(true)
-    expect(marked.nodes.map((item) => item.className)).toEqual([undefined, 'linked', undefined, 'linked'])
+    expect(marked.nodes.every((item) => item.className === undefined)).toBe(true)
   })
 })
