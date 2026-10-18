@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -81,6 +84,27 @@ describe('ModelPicker', () => {
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' })
     expect(screen.queryByRole('listbox')).toBeNull()
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('marks every model with its maker’s logo and names the maker, with the chosen one ticked', async () => {
+    render(<ModelPicker value={opus.id} onChange={() => {}} />)
+    const current = await screen.findByRole('button', { name: /Claude Opus 5\.5/ })
+    expect(current.querySelector('.maker-mark svg')).not.toBeNull()
+    fireEvent.click(current)
+    fireEvent.change(screen.getByLabelText('Search all 4 models'), { target: { value: 'gemma' } })
+    const gemmaRow = screen.getByRole('option', { name: /Gemma 4 31B/ })
+    expect(gemmaRow.querySelector('.maker-mark svg')).not.toBeNull()
+    expect(gemmaRow).toHaveTextContent('Google · 262K context')
+    expect(gemmaRow.querySelector('.model-row-tick')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search all 4 models'), { target: { value: 'opus' } })
+    expect(screen.getByRole('option', { name: /Claude Opus 5\.5/ }).querySelector('.model-row-tick')).not.toBeNull()
+  })
+
+  // A flex column squeezes its items to their min-height when it scrolls: the search results once
+  // shrank to 34px, so a row's second line spilled out under the next and its highlight covered half.
+  it('keeps every row its own height in a list that scrolls', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/app.css'), 'utf8')
+    expect(css.match(/\n\.pop-row \{[^}]*\}/)?.[0]).toMatch(/flex-shrink:\s*0/)
   })
 
   it('says when a team names a model OpenRouter doesn’t list', async () => {

@@ -145,6 +145,32 @@ quotes the license it is used under, with its authors' copyright notices.
 The fonts (Inter, Fraunces and JetBrains Mono) are under the SIL Open
 Font License 1.1: see fonts/OFL.txt next to this file.
 
+The model makers' logos in the model list are copied from LobeHub Icons
+(@lobehub/icons-static-svg 1.95.1) under the MIT License quoted here. Each
+logo is its company's trademark and is shown only to say who made a model.
+
+  MIT License
+
+  Copyright (c) 2023 LobeHub
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
 Part 1: ${rust.count} Rust crates inside loomwatchd
 Part 2: ${npm.count} packages in the browser app
 
