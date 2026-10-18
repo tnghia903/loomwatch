@@ -6,7 +6,7 @@ import { draftFromJob } from '../../lib/library/draft'
 import { figureFor } from '../../lib/library/figures'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { ROLE_PRESETS } from '../../lib/library/roles'
-import { useAgentUses } from '../../lib/library/uses'
+import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
 import { QuestsLink } from '../quests/QuestsLink'
@@ -14,6 +14,7 @@ import { SkillsLink } from '../skills/SkillsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
+import { FigureStill } from './FigureStill'
 import { navigate, useAgentsRoute } from './route'
 
 export interface AgentsPageProps {
@@ -54,7 +55,7 @@ export function AgentsPage(props: AgentsPageProps) {
 
 function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
-  const { uses } = useAgentUses()
+  const { uses, own } = useAgentUses()
   const [choosing, setChoosing] = useState(false)
   const usage = useMemo(() => {
     const byAgent = new Map<string, { teams: number; scheduled: number; behind: number }>()
@@ -98,8 +99,10 @@ function AgentsList() {
         {!available && <p role="alert" className="home-empty alert">This LoomWatch server is older than Your agents. Restart it to use them.</p>}
         {error && <p role="alert" className="home-empty alert">Couldn’t list your agents. {error}</p>}
         {available && !loaded && <p role="status" className="home-empty">Loading your agents…</p>}
-        {available && loaded && jobs.length === 0 && (
-          <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Start from a job above, or keep an agent that worked: select it in a team and choose <b>Add to Your agents</b>.</span></div>
+        {available && loaded && jobs.length === 0 && own !== null && (
+          own.length > 0
+            ? <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>None kept here yet. Start from a job above, or keep one of the agents in your teams below.</span></div>
+            : <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Start from a job above, or keep an agent that worked: select it in a team and choose <b>Add to Your agents</b>.</span></div>
         )}
         {jobs.length > 0 && (
           <ul className="home-grid agents-grid">
@@ -114,6 +117,18 @@ function AgentsList() {
         )}
         {problems.map((problem) => <p key={problem.file} className="home-empty alert" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
       </section>
+
+      {own && own.length > 0 && (
+        <section className="home-teams" aria-labelledby="agents-in-teams-title">
+          <div className="home-teams-head"><h2 id="agents-in-teams-title">In your teams<span className="home-section-says">Each works in its own team</span></h2></div>
+          <p className="agents-in-teams-note">These agents were made inside a team, so each one is changed there. To use one in other teams too, keep it: select it in its team’s Workflow and choose <b>Add to Your agents</b>.</p>
+          <ul className="home-agents-row">
+            {own.map((agent) => (
+              <li key={`${agent.teamPath}#${agent.agentId}`}><a className="home-agent-chip" href={teamAgentHref(agent)} title={`Open ${agent.agentName} in ${agent.teamName}`}><FigureStill className="home-agent-figure" figure={figureFor(agent.agentId)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{agent.agentName}</b><span className="home-agent-team">in {agent.teamName}</span></a></li>
+            ))}
+          </ul>
+        </section>
+      )}
     </>
   )
 }

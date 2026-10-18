@@ -113,6 +113,9 @@
 .home-agent-chip:has(.home-agent-figure) { padding-left: 6px; }
 .home-agent-figure { width: 30px; height: 30px; margin: -6px 0; object-fit: contain; }
 .home-agent-chip.new { border-style: dashed; color: var(--color-ink-2); }
+/* A team's own agent says which team, in words rather than a version number. */
+.home-agent-chip .home-agent-team { font: 400 12px var(--font-sans); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-in-teams-note { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--color-ink-3); }
 
 /* ---------- the agent panel: From Your agents ---------- */
 .linked-agent { display: flex; flex-direction: column; gap: 8px; padding: var(--sp-3); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline)); border-radius: var(--r-md); background: var(--color-accent-tint); }

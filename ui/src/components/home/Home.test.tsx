@@ -62,6 +62,27 @@ describe('Home', () => {
     expect(chip).toHaveAttribute('href', '/agents/reply-helper?view=chat')
   })
 
+  // A newcomer whose teams were made first saw "Build your first agent" over teams full of agents.
+  it('lists the agents written into a team with their team, and opens each one there', async () => {
+    const yaml = [
+      'schemaVersion: 1', 'id: rag', 'name: Enterprise RAG research', 'entrypoint: researcher', 'agents:',
+      '  - id: researcher', '    name: RAG researcher', '    role: Research.',
+      '  - id: review', '    kind: operator', '    name: You', '    role: Approve it.',
+    ].join('\n')
+    fetchMock.mockImplementation((url: string) => respond(
+      url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: [], problems: [] }
+        : url.startsWith('/api/team?') ? { path: 'research/rag.yaml', yaml, revision: 'r1' }
+          : { root: '/teams', files: ['research/rag.yaml'], teams: [{ path: 'research/rag.yaml', name: 'Enterprise RAG research', agentCount: 2 }] }))
+    renderHome()
+    const chip = await screen.findByRole('link', { name: /RAG researcher/ })
+    expect(chip).toHaveTextContent('in Enterprise RAG research')
+    expect(chip).toHaveAttribute('href', '/?path=research%2Frag.yaml&view=agents&agent=researcher')
+    // The operator's stop is a step of the workflow, not an agent.
+    expect(screen.queryByRole('link', { name: /^You/ })).toBeNull()
+    expect(screen.queryByText(/Build your first agent/)).toBeNull()
+    expect(screen.getByRole('link', { name: /All agents/ })).toHaveAttribute('href', '/agents')
+  })
+
   // The work in the order it is done: build agents, put them in a team's workflow, then chat with it.
   it('starts with building an agent, lists your agents before your teams, and opens each team where it left off', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/jobs'
