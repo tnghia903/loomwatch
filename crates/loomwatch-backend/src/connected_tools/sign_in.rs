@@ -148,10 +148,15 @@ pub(super) async fn start(
 
 /// Finish the sign-in the site sent back with `state` and `code`: trade the code for tokens,
 /// which rmcp keeps in the vault. Answers the tool's id, and how it ended.
+///
+/// `issuer` is the `iss` the site named itself by on the way back (RFC 9207). A server that says
+/// it sends one must, and it must be the server the sign-in started with, so a code another site
+/// sent back is never traded.
 pub(super) async fn finish(
     tools: &Tools,
     state: &str,
     code: Option<&str>,
+    issuer: Option<&str>,
     denied: bool,
 ) -> (Option<String>, Outcome) {
     let started = tools
@@ -171,7 +176,11 @@ pub(super) async fn finish(
     let Some(code) = code.filter(|code| !code.is_empty()) else {
         return (tool, Outcome::Failed);
     };
-    match started.session.handle_callback(code, state).await {
+    match started
+        .session
+        .handle_callback_with_issuer(code, state, issuer)
+        .await
+    {
         Ok(_) => (tool, Outcome::Connected),
         Err(error) => {
             eprintln!("warning: a tool sign-in could not be finished: {error}");
