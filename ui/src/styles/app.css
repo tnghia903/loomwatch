@@ -599,7 +599,8 @@ select.input, .inspector-fields label > select { appearance: none; -webkit-appea
 .agent-in-team .inspector-head { align-items: center; }
 .agent-in-team .inspector-head > div { flex: 1; min-width: 0; }
 .agent-in-team .inspector-head strong { margin-top: 2px; }
-.inspector-figure { flex: none; width: 34px; height: 34px; object-fit: contain; border-radius: var(--r-sm); background: var(--color-accent-tint); }
+/* The agent's figure on its own, as every avatar is: no circle, disc or tile behind it. */
+.inspector-figure { flex: none; width: 38px; height: 38px; margin: -4px -2px -4px -6px; object-fit: contain; }
 .workflow-place { display: flex; flex-direction: column; gap: var(--sp-2); }
 .workflow-place-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); color: var(--color-ink-3); }
 .inspector-fields p.workflow-place-summary { display: block; margin: 0; color: var(--color-ink-2); font-size: 12.5px; line-height: 1.5; }
