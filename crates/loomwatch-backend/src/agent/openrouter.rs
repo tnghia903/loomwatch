@@ -10,7 +10,8 @@
 //!   web, held to its `spend.web` limits: how much of a page is read and, when the team sets them,
 //!   how many pages, searches and server-tool steps one call takes. A provider that refuses the
 //!   limits gets the tools without them, so a run never fails over a limit;
-//! - exact `usage.cost`, in dollars, in the stream's last chunk.
+//! - exact `usage.cost`, in dollars, and the web searches and page reads, in the stream's last
+//!   chunk.
 //!
 //! Requests are retried only before anything has streamed: once text has reached the operator, a
 //! retry would write it twice. That covers a busy model reported inside the stream, as `OpenRouter`
@@ -671,6 +672,7 @@ fn read_usage(usage: &Value) -> Usage {
     let prompt = number("/prompt_tokens");
     let cached_read = number("/prompt_tokens_details/cached_tokens");
     let cached_write = number("/prompt_tokens_details/cache_write_tokens");
+    let web = read_web_use(usage);
     Usage {
         input_tokens: prompt.saturating_sub(cached_read + cached_write),
         cached_read_tokens: cached_read,
@@ -678,8 +680,41 @@ fn read_usage(usage: &Value) -> Usage {
         output_tokens: number("/completion_tokens"),
         reasoning_tokens: number("/completion_tokens_details/reasoning_tokens"),
         cost_usd: usage.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
-        web_searches: number("/server_tool_use/web_search_requests"),
-        web_fetches: number("/server_tool_use/web_fetch_requests"),
+        web_searches: web.searches,
+        web_fetches: web.fetches,
+    }
+}
+
+/// Searches and page reads, from the counts a usage carries.
+struct WebUse {
+    searches: u64,
+    fetches: u64,
+}
+
+/// The usage's web counts. Chat Completions sends them as `server_tool_use_details`; the
+/// feature guides and the Anthropic-shaped endpoints call them `server_tool_use`. Where both come
+/// they count the same calls, so each figure is the larger of the two, never their sum.
+/// - `web_search_requests`: every search, whether the provider ran it (Anthropic's own) or
+///   `OpenRouter` did.
+/// - `web_fetch_requests`: the pages Anthropic's own fetch read, when `OpenRouter` passes the
+///   count on.
+/// - `tool_calls_executed`: the server-tool calls `OpenRouter` ran itself, its searches among
+///   them, and the only count a page it fetched gets. The web tools are the only server tools
+///   `LoomWatch` offers, so what is left after the searches was a page read. That is exact when
+///   `OpenRouter` ran the searches too, and a floor when the provider searched on its own.
+fn read_web_use(usage: &Value) -> WebUse {
+    let largest = |field: &str| {
+        ["server_tool_use", "server_tool_use_details"]
+            .iter()
+            .filter_map(|counts| usage.get(counts)?.get(field)?.as_u64())
+            .max()
+            .unwrap_or(0)
+    };
+    let searches = largest("web_search_requests");
+    WebUse {
+        searches,
+        fetches: largest("web_fetch_requests")
+            .max(largest("tool_calls_executed").saturating_sub(searches)),
     }
 }
 
@@ -950,7 +985,7 @@ mod tests {
         ));
     }
 
-    /// `usage.server_tool_use` says what the provider ran; without it, the recorded calls do.
+    /// The usage says what the provider ran; without it, the recorded calls do.
     #[test]
     fn web_searches_and_reads_are_counted_per_call() {
         let usage = read_usage(&json!({
@@ -958,6 +993,18 @@ mod tests {
             "server_tool_use": {"web_search_requests": 2, "web_fetch_requests": 3},
         }));
         assert_eq!((usage.web_searches, usage.web_fetches), (2, 3));
+        // The usage of a Chat Completions stream, as `OpenRouter` sends it when a model searched
+        // with its own engine (here Anthropic's): the searches, nothing else.
+        let usage = read_usage(&json!({
+            "prompt_tokens": 24_310,
+            "server_tool_use_details": {"web_search_requests": 3},
+        }));
+        assert_eq!((usage.web_searches, usage.web_fetches), (3, 0));
+        // Anthropic's own count of the pages it read, under either name.
+        let usage = read_usage(&json!({
+            "server_tool_use_details": {"web_search_requests": 1, "web_fetch_requests": 2},
+        }));
+        assert_eq!((usage.web_searches, usage.web_fetches), (1, 2));
         let silent = Assembled {
             reasoning_details: vec![
                 json!({"type": "reasoning.server_tool_call", "tool_name": "openrouter:web_fetch"}),
@@ -974,6 +1021,75 @@ mod tests {
             0,
             "a provider that says nothing"
         );
+    }
+
+    /// The same calls counted under both names, or in the usage and in the recorded calls, are
+    /// counted once.
+    #[test]
+    fn web_use_reported_twice_is_counted_once() {
+        let usage = read_usage(&json!({
+            "server_tool_use": {"web_search_requests": 2, "web_fetch_requests": 1},
+            "server_tool_use_details": {"web_search_requests": 2},
+        }));
+        assert_eq!((usage.web_searches, usage.web_fetches), (2, 1));
+        let usage = read_usage(&json!({
+            "server_tool_use": {"web_search_requests": 1},
+            "server_tool_use_details": {"web_search_requests": 3},
+        }));
+        assert_eq!(usage.web_searches, 3, "the fuller of the two");
+        // A page counted as read and as one of the calls `OpenRouter` ran is one page.
+        let usage = read_usage(&json!({
+            "server_tool_use": {"tool_calls_requested": 2, "tool_calls_executed": 2,
+                                "web_fetch_requests": 2, "web_search_requests": 0},
+        }));
+        assert_eq!(usage.web_fetches, 2);
+        let recorded =
+            |tool: &str| json!({"type": "reasoning.server_tool_call", "tool_name": tool});
+        let both = Assembled {
+            usage: read_usage(&json!({
+                "server_tool_use_details": {"tool_calls_requested": 3, "tool_calls_executed": 3,
+                                            "web_search_requests": 2},
+            })),
+            reasoning_details: vec![
+                recorded("openrouter:web_search"),
+                recorded("openrouter:web_search"),
+                recorded("openrouter:web_fetch"),
+            ],
+            ..Assembled::default()
+        };
+        let counted = finish(both).usage;
+        assert_eq!((counted.web_searches, counted.web_fetches), (2, 1));
+    }
+
+    /// A page `OpenRouter` fetched itself has no count of its own: it is one of the server-tool
+    /// calls it ran, and the searches are the others.
+    #[test]
+    fn pages_openrouter_read_are_the_calls_it_ran_that_were_not_searches() {
+        let usage = read_usage(&json!({
+            "server_tool_use_details": {"tool_calls_requested": 5, "tool_calls_executed": 5,
+                                        "web_search_requests": 2},
+        }));
+        assert_eq!((usage.web_searches, usage.web_fetches), (2, 3));
+        let usage = read_usage(&json!({
+            "server_tool_use_details": {"tool_calls_requested": 2, "tool_calls_executed": 2},
+        }));
+        assert_eq!(
+            (usage.web_searches, usage.web_fetches),
+            (0, 2),
+            "pages only"
+        );
+        // A fetch refused past its limit was asked for, but no page was read.
+        let usage = read_usage(&json!({
+            "server_tool_use_details": {"tool_calls_requested": 4, "tool_calls_executed": 3,
+                                        "web_search_requests": 1},
+        }));
+        assert_eq!(usage.web_fetches, 2);
+        // Searches the provider ran on its own are not among `OpenRouter`'s calls. What is left is
+        // then a floor on the pages, and never below none.
+        let usage = read_usage(&json!({
+            "server_tool_use_details": {"web_search_requests": 4, "tool_calls_executed": 1},
+        }));
+        assert_eq!((usage.web_searches, usage.web_fetches), (4, 0));
     }
 
     #[test]

@@ -1321,6 +1321,102 @@ async fn every_call_is_recorded_with_what_it_was_for_and_used() {
     );
 }
 
+/// A Chat Completions stream from `OpenRouter` for a researcher on Claude that searched with
+/// Anthropic's own engine. Its shape is the one `OpenRouter` sends: keep-alive comments, reasoning
+/// in pieces closed by a signature, the reply, its sources as `url_citation` annotations (one per
+/// cited passage, not per search), the finish, and a last chunk that repeats it with the usage.
+/// The searches are counted only in `server_tool_use_details`; no tool call or reasoning entry
+/// names them.
+const CLAUDE_SEARCHED: &str = r#": OPENROUTER PROCESSING
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":"Search for this week's releases.","reasoning_details":[{"type":"reasoning.text","text":"Search for this week's releases.","format":"anthropic-claude-v1","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_details":[{"type":"reasoning.text","signature":"EqQBCkYIBxgCKkA","format":"anthropic-claude-v1","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"Two releases landed this week"},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":" (page ages shown in search results)."},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"","annotations":[{"type":"url_citation","url_citation":{"url":"https://example.com/releases","title":"Releases","content":"Version 4.2 shipped on Tuesday.","start_index":0,"end_index":29}},{"type":"url_citation","url_citation":{"url":"https://example.org/changelog","title":"Changelog","start_index":0,"end_index":29}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"end_turn"}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"end_turn"}],"usage":{"prompt_tokens":24310,"completion_tokens":412,"total_tokens":24722,"cost":0.0291,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":22258,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0291,"upstream_inference_prompt_cost":0.0255,"upstream_inference_completions_cost":0.0036},"completion_tokens_details":{"reasoning_tokens":31,"image_tokens":0,"audio_tokens":0},"server_tool_use_details":{"web_search_requests":3}}}
+
+data: [DONE]
+
+"#;
+
+/// The same for a model without a search or fetch engine of its own, so `OpenRouter` ran both.
+/// Only its searches have a count; the pages it read are the rest of the calls it ran.
+const OPENROUTER_FETCHED: &str = r#": OPENROUTER PROCESSING
+
+data: {"id":"gen-1792335200-g","object":"chat.completion.chunk","created":1792335200,"model":"z-ai/glm-5.3","provider":"Z.AI","choices":[{"index":0,"delta":{"role":"assistant","content":"The changelog lists three fixes."},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335200-g","object":"chat.completion.chunk","created":1792335200,"model":"z-ai/glm-5.3","provider":"Z.AI","choices":[{"index":0,"delta":{"role":"assistant","content":"","annotations":[{"type":"url_citation","url_citation":{"url":"https://example.org/changelog","title":"Changelog","content":"Fixed: three crashes. [...] Released Tuesday.","start_index":0,"end_index":32}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335200-g","object":"chat.completion.chunk","created":1792335200,"model":"z-ai/glm-5.3","provider":"Z.AI","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop"}],"usage":{"prompt_tokens":9120,"completion_tokens":96,"total_tokens":9216,"cost":0.0071,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"completion_tokens_details":{"reasoning_tokens":0},"server_tool_use_details":{"tool_calls_requested":3,"tool_calls_executed":3,"web_search_requests":1}}}
+
+data: [DONE]
+
+"#;
+
+/// What a researcher's call searched and read reaches its usage record, as `OpenRouter` streams
+/// it: from the model's own engine (Claude's) or from `OpenRouter`'s.
+#[tokio::test]
+async fn a_researchers_web_use_reaches_its_usage_record() {
+    let folder = Folder::new();
+    let streamed = |body: &str| Reply {
+        status: StatusCode::OK,
+        body: body.to_owned(),
+        delay: Duration::ZERO,
+    };
+    let (_, base) = stand(vec![
+        streamed(CLAUDE_SEARCHED),
+        streamed(OPENROUTER_FETCHED),
+    ])
+    .await;
+    let mut calls = Vec::new();
+    for (model, reply) in [
+        (
+            "anthropic/claude-haiku-5.5",
+            "Two releases landed this week (page ages shown in search results).",
+        ),
+        ("z-ai/glm-5.3", "The changelog lists three fixes."),
+    ] {
+        let sink = Arc::new(Recorded::default());
+        let mut config = SessionConfig::new("s", "researcher", folder.0.clone(), model);
+        config.tools = ToolSet::all(true);
+        let mut session = Session::open(
+            config,
+            openrouter(&base),
+            sink.clone(),
+            Arc::new(AllowAll),
+            Arc::new(NoHostTools),
+        );
+        assert_eq!(session.prompt("What's new?").await.unwrap().reply, reply);
+        calls.extend(calls_recorded(&sink));
+    }
+    assert_eq!(
+        calls[0],
+        json!({"kind": "work", "turn": "work", "model": "anthropic/claude-haiku-5.5",
+               "inputTokens": 2052, "cachedReadTokens": 0, "cachedWriteTokens": 22258,
+               "outputTokens": 412, "reasoningTokens": 31, "costUsd": 0.0291,
+               "webSearches": 3, "webFetches": 0})
+    );
+    assert_eq!(
+        (
+            calls[1]["webSearches"].as_u64(),
+            calls[1]["webFetches"].as_u64()
+        ),
+        (Some(1), Some(2))
+    );
+}
+
 /// The team file's web limits reach `OpenRouter` for an agent allowed the web. A provider that
 /// refuses them is asked again without them, and the model isn't sent them again.
 #[tokio::test]
