@@ -80,6 +80,8 @@ vi.mock('@xyflow/react', () => ({
   getSmoothStepPath: () => ['', 0, 0],
   useStore: (selector: (store: { transform: number[]; minZoom: number; maxZoom: number }) => unknown) => selector({ transform: [0, 0, 1], minZoom: 0.25, maxZoom: 2 }),
   useNodesInitialized: () => true,
+  useConnection: (selector: (connection: { inProgress: boolean }) => unknown) => selector({ inProgress: false }),
+  useNodeId: () => null,
   useReactFlow: () => ({ fitView: vi.fn(), screenToFlowPosition: vi.fn((point: { x: number; y: number }) => point), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), getNodes: () => [], getNode: () => undefined }),
   ReactFlow: ({ nodes, edges, nodeTypes, onNodesChange, onEdgesChange, onNodeDragStart, onNodeDragStop, onConnect, onDragOver, onDrop }: { nodes: Array<{ id: string; type: string; data: unknown; position: { x: number; y: number }; selected?: boolean; ariaLabel?: string; measured?: { width: number; height: number }; initialWidth?: number; initialHeight?: number }>; edges: Array<{ id: string; ariaLabel?: string }>; nodeTypes: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>>; onNodesChange?: (...args: unknown[]) => void; onEdgesChange?: (...args: unknown[]) => void; onNodeDragStart?: (...args: unknown[]) => void; onNodeDragStop?: (...args: unknown[]) => void; onConnect?: (connection: { source: string | null; target: string | null }) => void; onDragOver?: (event: unknown) => void; onDrop?: (event: unknown) => void }) => {
     flowRuntime.onNodesChange = onNodesChange ?? null
@@ -988,15 +990,31 @@ describe('Workspace', () => {
 
     // ADR 0034: the Inspector no longer repeats the Output wire, the Output editor and "Final
     // response owner" with a fourth responder control. It says where the agent sits instead.
-    it('says in the agent Inspector where the agent sits, instead of a fourth responder control', () => {
+    it('says in the agent panel where the agent sits, instead of a fourth responder control', () => {
       const researcher = documentState.nodes[0]
       researcher.selected = true
       const view = renderWorkspace()
       try {
-        expect(screen.getByRole('region', { name: 'Context' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
-        fireEvent.click(screen.getByRole('button', { name: 'Thinking effort and more settings' }))
+        expect(screen.getByRole('region', { name: 'In the workflow' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
         expect(screen.queryByRole('button', { name: /Produces the team output/ })).not.toBeInTheDocument()
-        expect(screen.getByText(/Step 1 of \d · receives your request first/)).toBeInTheDocument()
+      } finally {
+        view.unmount()
+        researcher.selected = false
+      }
+    })
+
+    // The user: the panel showed what the agent's workbench already sets. It now says only what this
+    // team makes of the agent, and the workbench is one click away.
+    it('leaves what the workbench sets to the workbench', () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      const view = renderWorkspace()
+      try {
+        const panel = screen.getByRole('complementary', { name: 'Selected node settings' })
+        expect(within(panel).getByRole('button', { name: 'Open its workbench' })).toBeInTheDocument()
+        for (const field of ['Name', 'Instructions']) expect(within(panel).queryByRole('textbox', { name: field })).not.toBeInTheDocument()
+        expect(within(panel).queryByRole('button', { name: 'Thinking effort and more settings' })).not.toBeInTheDocument()
+        expect(within(panel).queryByRole('group', { name: 'Allowed without asking' })).not.toBeInTheDocument()
       } finally {
         view.unmount()
         researcher.selected = false

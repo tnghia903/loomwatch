@@ -28,6 +28,8 @@ vi.mock('@xyflow/react', async (importOriginal) => ({
   NodeToolbar: ({ children, isVisible }: { children: React.ReactNode; isVisible?: boolean }) => isVisible ? <>{children}</> : null,
   useStore: (selector: (store: { transform: number[]; minZoom: number; maxZoom: number }) => unknown) => selector({ transform: [0, 0, 1], minZoom: 0.25, maxZoom: 2 }),
   useNodesInitialized: () => true,
+  useConnection: (selector: (connection: { inProgress: boolean }) => unknown) => selector({ inProgress: false }),
+  useNodeId: () => null,
   useReactFlow: () => ({ fitView: vi.fn(), screenToFlowPosition: vi.fn(), setViewport: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), getNodes: () => [], getNode: () => undefined }),
   ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown; selected?: boolean }>; nodeTypes: Record<string, React.ComponentType<{ id: string; data: unknown; selected: boolean }>> }) => (
     <div data-testid="flow">

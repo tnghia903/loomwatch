@@ -127,7 +127,7 @@ describe('Inspector context', () => {
   it('draws a step as the thread from who hands it work to who it hands work to', () => {
     const place = {
       summary: 'Step 1 of 3 · receives your request first · hands its work to your review.', final: false, canStart: false,
-      flow: { step: 1, of: 3, from: [], to: [{ name: 'your review', you: true }] },
+      flow: { step: 1, of: 3, from: [], to: [{ id: 'review', name: 'your review', you: true }] },
     }
     const { container } = render(<Inspector {...renderInspectorProps({ place })} />)
     const knots = [...container.querySelectorAll('.place-thread .knot')].map((knot) => [knot.className.replace('knot ', ''), knot.textContent])
@@ -136,7 +136,7 @@ describe('Inspector context', () => {
   })
 
   it('ends the last step at the team’s output', () => {
-    const place = { summary: 'Step 3 of 3 · after Writer. Its answer is the team’s output.', final: true, canStart: false, flow: { step: 3, of: 3, from: [{ name: 'Writer', you: false }], to: [] } }
+    const place = { summary: 'Step 3 of 3 · after Writer. Its answer is the team’s output.', final: true, canStart: false, flow: { step: 3, of: 3, from: [{ id: 'write', name: 'Writer', you: false }], to: [] } }
     const { container } = render(<Inspector {...renderInspectorProps({ place })} />)
     expect(container.querySelector('.place-thread')).toHaveTextContent('WriterStep 3 of 3The team’s output')
   })

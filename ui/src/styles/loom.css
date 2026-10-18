@@ -27,14 +27,20 @@
   .build-workspace.lib-collapsed.inspecting .team-story { max-width: min(680px, calc(100% - 126px - var(--lw-inspector-w) - var(--lw-panel-inset) - 12px)); }
 }
 .team-story-eyebrow { font: 600 10.5px/1.3 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
-.team-story p { margin: 0; font: 400 18px/1.5 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
+/* The sentence reads like the landing page's (site/styles.css, .sentence .chip): each name is a
+   28px pill centred on the line's lowercase letters. A pill aligned to its baseline instead sat on
+   the bottom of its figure, above the words around it. The figure stands in it on its own, with no
+   circle or disc behind it, as every agent's avatar does. */
+.team-story p { margin: 0; font: 400 18px/1.75 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
 .story-name, .story-schedule {
-  display: inline-flex; align-items: center; gap: 5px; vertical-align: 1px;
-  margin: 0 1px; padding: 0 9px; min-height: 22px; border-radius: 99px;
-  font: 600 13px/1.6 var(--font-sans); letter-spacing: -.005em; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; vertical-align: middle;
+  margin: 0 1px; padding: 0 10px; height: 28px; border-radius: 99px; white-space: nowrap;
+  font: 600 13px/1 var(--font-sans); letter-spacing: -.005em; cursor: pointer;
   color: var(--color-ink); background: var(--color-accent-tint);
   border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
+.story-face { flex: none; width: 24px; height: 24px; margin: -4px 2px -4px -4px; }
+.story-face > * { display: block; width: 100%; height: 100%; object-fit: contain; }
 .story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); color: var(--color-accent); }
 .story-name.you { background: transparent; border-style: dashed; }
 .story-schedule { color: var(--color-accent); background: transparent; }
@@ -47,7 +53,7 @@ span.story-schedule { cursor: default; }
 .story-fix {
   display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; padding: 2px 10px; min-height: 24px;
   border-radius: 7px; border: 1px solid var(--color-accent-dim); background: transparent; cursor: pointer;
-  font: 500 12.5px/1.4 var(--font-sans); color: var(--color-accent); vertical-align: 2px;
+  font: 500 12.5px/1.4 var(--font-sans); color: var(--color-accent); vertical-align: middle;
 }
 .story-fix:hover, .story-fix:focus-visible { background: var(--color-accent-tint); }
 
@@ -492,6 +498,45 @@ span.story-schedule { cursor: default; }
 .lw-canvas .react-flow__handle:not(.connectable) { opacity: 0 !important; pointer-events: none; }
 .lw-canvas .react-flow__handle-bottom { bottom: -4px; }
 .lw-canvas .react-flow__handle-top { top: -4px; }
+/* The whole card catches a line being drawn (CardPorts): an invisible handle the card's size, which
+   React Flow gives the pointer only while a line is dragged from another card. The card the line
+   would join gets a gold ring, like a card a folder or skill is dragged over. */
+.lw-canvas .react-flow__node .react-flow__handle.card-catch.connectable {
+  inset: -1px !important; width: auto !important; height: auto !important; transform: none; z-index: 1;
+  border-radius: inherit; background: transparent !important; box-shadow: none; opacity: 1;
+}
+.lw-canvas .react-flow__node .react-flow__handle.card-catch::after { content: none; }
+/* Follow the thread (lib/canvas/linked.ts). Select a card, and its own lines come forward: solid
+   gold, drawn over the rest, and as they light up a single glint of light runs once along each,
+   the way work flows, then is gone. Their words become gold pills, readable where lines cross. The
+   cards at their other ends stay as they are; every other card steps behind a veil the colour of
+   the canvas, which keeps it opaque, so no line shows through it, and every other line and word
+   fades back. The glint moves by stroke-dashoffset, a paint-only property, and only once: an
+   opacity, filter or transform animation in the canvas blurs it in Safari. A live line keeps its
+   blue and a run's gold shuttle its own weight. */
+.lw-canvas { --lw-thread-glint: color-mix(in srgb, var(--color-accent) 30%, #FFFFFF); }
+[data-theme="dark"] .lw-canvas { --lw-thread-glint: #FFF8E6; }
+.lw-canvas .react-flow__edge.linked .react-flow__edge-path:not(.prov-live, .shuttle) { stroke: var(--color-accent); stroke-opacity: 1; stroke-width: 2; }
+/* The glint's path is one unit long (pathLength), so its dash is a fraction of the line, and it
+   starts just before the line and ends just past it: at rest it draws nothing. */
+.lw-canvas .react-flow__edge-thread { fill: none; stroke: var(--lw-thread-glint); stroke-width: 2; stroke-dasharray: .16 1.16; stroke-dashoffset: -1; filter: var(--bloom); pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .lw-canvas .react-flow__edge-thread { animation: thread 700ms var(--ease-out) both; }
+}
+@keyframes thread { from { stroke-dashoffset: .16; } to { stroke-dashoffset: -1; } }
+.lw-canvas .react-flow__edge.faded { opacity: .22; }
+.lw-canvas :is(.prov-label, .edge-label).faded { opacity: .35; }
+.lw-canvas :is(.prov-label, .edge-label).linked,
+.build-graph .lw-canvas :is(.prov-label, .edge-label).linked {
+  color: var(--color-accent); background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  border-radius: var(--r-full); padding: 2px 7px;
+}
+.lw-canvas .react-flow__node.faded > :is(.build-node, .rt)::after {
+  content: ""; position: absolute; inset: -1px; z-index: 2; border-radius: inherit; pointer-events: none;
+  background: color-mix(in srgb, var(--color-ground) 64%, transparent);
+}
+.lw-canvas .react-flow__node .react-flow__handle.card-catch.connectable.connectingto.valid { box-shadow: 0 0 0 1px var(--color-accent), 0 0 0 3px color-mix(in srgb, var(--color-accent) 45%, transparent); }
 
 /* A drop's word sits beside its line; an arc's word sits on its crest. */
 .prov-label.beside { transform: translate(10px, -50%); }

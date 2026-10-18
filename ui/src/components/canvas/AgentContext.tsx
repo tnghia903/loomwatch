@@ -238,7 +238,7 @@ const names = (links: readonly PlaceLink[]) => {
 function PlaceThread({ place }: { place: AgentPlace }) {
   const flow = place.flow
   if (!flow) return <div className="t-body agent-context-place-text">{place.summary}</div>
-  const from = flow.from.length > 0 ? flow.from : [{ name: 'your request', you: true }]
+  const from = flow.from.length > 0 ? flow.from : [{ id: '', name: 'your request', you: true }]
   const knots: { key: string; text: string; kind: 'you' | 'agent' | 'self' | 'output' }[] = [
     { key: 'from', text: capitalised(names(from)), kind: from.every((link) => link.you) ? 'you' : 'agent' },
     { key: 'self', text: `Step ${flow.step} of ${flow.of}`, kind: 'self' },

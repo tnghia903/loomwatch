@@ -30,6 +30,7 @@ import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
 import { makeRoom } from '../lib/canvas/makeRoom'
+import { markLinked } from '../lib/canvas/linked'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
 import { RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, notionPageKey, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
 import { chosenIsFile, chosenName, chosenSource } from '../lib/knowledge/chosen'
@@ -58,6 +59,7 @@ import { ParseFailureModal } from './canvas/ParseFailureModal'
 import { ScheduleNodeCard } from './canvas/ScheduleNodeCard'
 import { SchedulePanel } from './canvas/SchedulePanel'
 import { ViewControls } from './canvas/ViewControls'
+import { CardConnectionLine } from './canvas/CardConnectionLine'
 import { YamlSheet } from './canvas/YamlSheet'
 import { ProvEdgeView, WarpEdgeView, WeftEdgeView } from './canvas/edges'
 import { BuildAgentCard, BuildCapabilityCard, BuildOutputCard } from './canvas/BuildNodeCard'
@@ -1124,6 +1126,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const layersVisible = runView && observedCount > 0
   const soloActive: LayerSolo = layersVisible ? solo : 'both'
   const visibleEdges = useMemo(() => graph.edges.filter((edge) => soloActive === 'both' || (soloActive === 'configured' ? edge.type !== 'weft' : edge.type !== 'warp')), [graph.edges, soloActive])
+  const canvasEdges = useMemo(() => (runView ? visibleEdges : visibleEdges.filter((edge) => edge.source !== '__prompt' || allWiringEdges.some((wire) => wire.from === '__prompt'))), [runView, visibleEdges, allWiringEdges])
+  // A selected card's own lines light up in gold with the cards at their other ends, and the other
+  // lines step back (lib/canvas/linked.ts).
+  const lit = useMemo(() => markLinked(roomyNodes, canvasEdges), [roomyNodes, canvasEdges])
 
   const [layoutRevision, setLayoutRevision] = useState(0)
   const arrangementKey = `${doc.path}:${doc.nodes.map((node) => node.id).join(',')}:${capabilityCards.map((node) => node.id).join(',')}`
@@ -2590,8 +2596,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         ) : (
         <div ref={canvasRef} role="application" aria-label={runView ? 'Run graph' : 'Team canvas'} className="lw-canvas" data-depth={depth}>
           <ReactFlow
-            nodes={roomyNodes}
-            edges={runView ? visibleEdges : visibleEdges.filter(edge => edge.source !== '__prompt' || allWiringEdges.some(wire => wire.from === '__prompt'))}
+            nodes={lit.nodes}
+            edges={lit.edges}
             nodeTypes={runView ? nodeTypes : buildNodeTypes}
             edgeTypes={edgeTypes}
             connectionLineType={ConnectionLineType.SmoothStep}
@@ -2600,6 +2606,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={editable ? onConnect : undefined}
+            connectionLineComponent={CardConnectionLine}
             onDragOver={onDragOver}
             onDrop={onDrop}
             onNodeDragStart={onNodeDragStart}
@@ -2748,6 +2755,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           // The same agent panel in Build and in a run (ADR 0041).
           <BuildInspector
             onOpenWorkbench={!runView && !runSetup && inspectedNode.data.agent.kind !== 'operator' ? () => { const id = inspectedNode.id; clearSelection(); showAgents(id) } : undefined}
+            figures={agentFigures} onFocusAgent={focusAgent}
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
             link={{

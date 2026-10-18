@@ -43,6 +43,8 @@ export interface PlaceFlow {
 }
 
 export interface PlaceLink {
+  /** The card's id, so the panel can take you to it. */
+  id: string
   name: string
   /** A review stop: you, not an agent. */
   you: boolean
@@ -51,7 +53,7 @@ export interface PlaceLink {
 export function agentPlace({ agentId, nodes, edges, steps, entrypoint, responder, pipeline }: AgentPlaceInput): AgentPlace {
   const link = (id: string): PlaceLink => {
     const node = nodes.find((candidate) => candidate.id === id)
-    return node?.kind === 'operator' ? { name: 'your review', you: true } : { name: node?.name ?? id, you: false }
+    return node?.kind === 'operator' ? { id, name: 'your review', you: true } : { id, name: node?.name ?? id, you: false }
   }
   const name = (id: string) => link(id).name
   const isStart = agentId === entrypoint

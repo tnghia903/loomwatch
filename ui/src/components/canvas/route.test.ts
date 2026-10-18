@@ -16,7 +16,9 @@ describe('canvas lines', () => {
     ['drop', Position.Bottom, Position.Top, 0, 200],
     ['bridge over the row', Position.Top, Position.Top, 900, 0],
     ['bridge under the row', Position.Bottom, Position.Bottom, 900, 0],
-    ['tree branch', Position.Left, Position.Left, 0, 160],
+    ['tree branch', Position.Bottom, Position.Left, 0, 160],
+    ['relay run backwards', Position.Left, Position.Right, -300, 0],
+    ['rise to a card above', Position.Top, Position.Bottom, 40, -200],
   ])('draws a %s with straight runs and rounded corners', (_name, sourcePosition, targetPosition, dx, dy) => {
     const { path } = routeEdge({ sourceX: 100, sourceY: 100, targetX: 100 + dx, targetY: 100 + dy, sourcePosition, targetPosition })
     expect(new Set(commands(path))).not.toContain('C')
@@ -37,5 +39,17 @@ describe('canvas lines', () => {
     expect(roundedPath([[0, 0], [10, 0], [10, 100]], 14)).toBe('M 0 0 L 5 0 Q 10 0 10 5 L 10 100')
     // A point in the middle of a straight run, or a repeated one, is no corner.
     expect(roundedPath([[0, 0], [50, 0], [50, 0], [100, 0]])).toBe('M 0 0 L 100 0')
+  })
+})
+
+describe('a stack', () => {
+  it('draws each branch off the trunk its column shares, and labels it left of the trunk', () => {
+    const route = routeEdge({ sourceX: 120, sourceY: 100, targetX: 0, targetY: 244, sourcePosition: Position.Bottom, targetPosition: Position.Left, trunk: { x: -20, y: 116 } })
+    expect(route.kind).toBe('tree')
+    expect(route.path.startsWith('M 120 100 L 120 ')).toBe(true)
+    expect(route.path).toContain(' -20 ')
+    expect(route.path.endsWith('L 0 244')).toBe(true)
+    expect(route.labelX).toBe(-26)
+    expect(route.labelY).toBe(244)
   })
 })
