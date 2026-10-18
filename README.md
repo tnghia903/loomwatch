@@ -88,7 +88,7 @@ version; a team keeps the version it was given until you choose **Update**.
 
 ### 02 &nbsp;Workflow
 
-Put your agents in a team, or hire one by job, and connect who hands work to whom on a canvas.
+Start a team with the agents you built, and connect who hands work to whom on a canvas.
 LoomWatch reads the team back to you in **one plain sentence**, so you can check the plan before
 anything runs.
 
@@ -217,9 +217,9 @@ with a lead that hands out work and asks its teammates questions as it goes.
 
 ### 🧑‍🔧 Your agents
 
-Build an agent once: its job, model, skills and the keys it may use. Try it on its own on a
-test bench, then add it to any team. A new job makes a new version, and teams keep theirs until you
-choose **Update**.
+Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
+**Chat** tab, then add it to any team. A new job makes a new version, and teams keep theirs until
+you choose **Update**.
 
 </td>
 <td width="33%" valign="top">
@@ -252,8 +252,8 @@ checks, a free model drafts. Every run's receipt shows exactly what it cost.
 
 ### 🗺️ Connect a workflow
 
-Add agents from **Your agents** or hire them by job, connect them in order, and read your team back
-as one plain sentence before anything runs.
+Add agents from **Your agents** and a **You** review step where you want to check the work, connect
+them in order, and read your team back as one plain sentence before anything runs.
 
 </td>
 <td width="33%" valign="top">
@@ -378,7 +378,7 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists Your agents with their versions and the models they think with, then Hire by job. The heading says Your team is ready, beside Run team.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists Your agents with their versions and the models they think with, the Build a new agent link, then Workflow steps with You (review step). The heading says Your team is ready, beside Run team.">
 </picture>
 <br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
@@ -746,10 +746,11 @@ with what should change; under its new version, **Continue with the team** runs 
 1. Add your OpenRouter key: paste it into **Add your OpenRouter key** on Home, or under **AI models**
    in **Connections…** (☰ menu). LoomWatch checks it with OpenRouter and shows how much credit is
    left on it.
-2. Click **Build an agent** on Home. Give it a name and its instructions, choose its model and how
-   hard it thinks, pin up the skills it needs and hand it the keys it may use without asking. Pick it
-   a face, then **Try it** with a real request: it runs on your key, and asks you before it uses a
-   key it wasn't given. **Save to Your agents** when it does the job.
+2. Click **Build an agent** on Home and start from a job, such as Researcher or Writer, or from
+   **Blank**. Give it a name, change its instructions, model and how hard it thinks to fit your work,
+   pin up the skills it needs and hand it the keys it may use without asking. Pick it a face, then
+   open its **Chat** tab and give it a real request: it runs on your key, and asks you before it uses
+   a key it wasn't given. **Save to Your agents** when it does the job.
 3. Click **New team**, give it a name and choose the agents it starts with. A team always starts
    with at least one:
    - **Your agents** — tick the agents you built; each joins as the version you saved (recommended
@@ -1034,7 +1035,7 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Team definitions and canvas layouts | `~/LoomWatch/teams`; Compose-only deployments use `LOOMWATCH_TEAMS_DIR` |
 | Brief files | Paths configured by the team, usually beside its YAML file |
 | Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
-| Your agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that **Try it** runs are in `.jobs/.bench` |
+| Your agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that an agent's **Chat** runs are in `.jobs/.bench` |
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | Your OpenRouter key | This Mac's Keychain, as `LoomWatch.OpenRouter`. On Windows, Windows Credential Manager, as `api-key.LoomWatch.OpenRouter`. On Linux and in Compose, `keys.json` in LoomWatch's state folder, readable only by your user |
