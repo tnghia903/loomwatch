@@ -26,7 +26,7 @@ use super::client::{self, Hello};
 use super::icons;
 use super::sign_in::{self, Begun, Outcome};
 use super::vault::Secret;
-use super::{Auth, ConnectedTool, MAX_TOOLS, Tools, unique_name};
+use super::{Auth, ConnectedTool, MAX_TOOLS, Tools, same_address, unique_name};
 use crate::api::ApiError;
 
 /// The longest address accepted.
@@ -74,8 +74,20 @@ async fn protect(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
+/// The `Host` a request named, when it is this computer. A name that resolves here only by DNS
+/// rebinding names another host, so it never reaches the sign-in routes.
+fn loopback_host(headers: &HeaderMap) -> Option<&str> {
+    let host = headers.get(header::HOST)?.to_str().ok()?;
+    let authority = host.parse::<axum::http::uri::Authority>().ok()?;
+    matches!(
+        authority.host(),
+        "localhost" | "127.0.0.1" | "[::1]" | "::1"
+    )
+    .then_some(host)
+}
+
 async fn loopback_only(request: Request, next: Next) -> Response {
-    if crate::notion::loopback_host(request.headers()).is_none() {
+    if loopback_host(request.headers()).is_none() {
         return failure(
             StatusCode::FORBIDDEN,
             "Open LoomWatch on this computer to connect a tool.",
@@ -113,6 +125,8 @@ fn public(tool: &ConnectedTool) -> Value {
         "tokenHelp": catalog::at(&tool.url).and_then(|entry| entry.token_help),
         "example": catalog::at(&tool.url).map(|entry| entry.example),
         "icon": icons::site_for(tool).as_deref().and_then(icons::path),
+        // Its sign-in also sends teams' answers to Notion and reads pages for agents (ADR 0070).
+        "notion": same_address(&tool.url, crate::notion::MCP_URL),
     })
 }
 
@@ -169,7 +183,7 @@ async fn connect(
     let existing = tools.list().await;
     let same = existing
         .iter()
-        .find(|tool| tool.url.trim_end_matches('/') == url.trim_end_matches('/'))
+        .find(|tool| same_address(&tool.url, &url))
         .cloned();
     if let Some(tool) = same.as_ref().filter(|tool| !tool.pending) {
         return Err(failure(
@@ -432,7 +446,7 @@ async fn found(tools: &Tools, id: &str) -> ApiResult<ConnectedTool> {
 
 /// [`sign_in::CALLBACK`] on the address the app was opened at, which must be this computer's.
 fn redirect_uri(headers: &HeaderMap) -> ApiResult<String> {
-    let host = crate::notion::loopback_host(headers).ok_or_else(|| {
+    let host = loopback_host(headers).ok_or_else(|| {
         failure(
             StatusCode::FORBIDDEN,
             "Open LoomWatch on this computer to connect a tool.",

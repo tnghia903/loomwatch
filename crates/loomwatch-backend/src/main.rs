@@ -293,13 +293,20 @@ async fn main() -> Result<()> {
             // agent starts, and the model list when it is first asked for.
             let ai = loomwatch_backend::ai::Ai::new(&state_dir);
             loomwatch_backend::ai::install(ai.clone());
-            // Where the Notion connection is kept, chosen the same way as the key's store. Also
-            // before anything can start a run, since a run reads the pages its agents are given.
-            loomwatch_backend::notion::install(&state_dir);
             // The tools the operator connected (ADR 0069), which a run offers the agents given
             // one. Opening reads nothing; the Keychain is read when a tool is first used.
             let connected_tools = loomwatch_backend::connected_tools::Tools::open(&state_dir)?;
             loomwatch_backend::connected_tools::install(connected_tools.clone());
+            // Where the page Notion answers go under is kept. Sending them, and reading the pages
+            // agents are given, go through the Notion tool's sign-in (ADR 0070), so both are
+            // installed before anything can start a run.
+            loomwatch_backend::notion::install(&state_dir);
+            // A Notion sign-in made in Connections before Notion was a tool becomes the Notion
+            // tool's, once. It reads the old Keychain item only when its status says one is there.
+            tokio::spawn(loomwatch_backend::notion::move_to_tools(
+                state_dir.clone(),
+                connected_tools.clone(),
+            ));
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
             let approvals =
@@ -390,7 +397,10 @@ async fn main() -> Result<()> {
                     loomwatch_backend::wardrobe::Wardrobe::open(&state_dir),
                 ));
             if listen.ip().is_loopback() || allow_container_listener {
-                app = app.merge(loomwatch_backend::notion::router(&state_dir)?);
+                app = app.merge(loomwatch_backend::notion::router(
+                    &state_dir,
+                    connected_tools.clone(),
+                )?);
                 // The OpenRouter key and the model list. Like Notion's connection, only on this
                 // computer's own address.
                 app = app.merge(loomwatch_backend::ai::router(ai.clone()));

@@ -359,7 +359,7 @@ bold, italic and code; at most 500 blocks. The outcome is stored on the run reco
 |---|---|
 | `published` | A new page was created; `url` and `pageId` are what Notion returned |
 | `skipped` | A child page with exactly this title already existed; `url` points at it and nothing was written (`A page with this title already exists.`) |
-| `failed` | Nothing was written; `message` says why — `Notion is not connected. Open Connections and choose a destination page.` when no workspace or destination is connected, otherwise the same wording the Connections page uses for Notion's errors |
+| `failed` | Nothing was written; `message` says why — `Notion is not connected yet. Open Connections, connect Notion under Tools, and choose the page answers go under.` when Notion isn't connected or no page is chosen, otherwise the same wording the Connections page uses for Notion's errors |
 
 ### Unattended runs
 

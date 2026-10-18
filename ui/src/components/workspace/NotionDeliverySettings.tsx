@@ -86,10 +86,10 @@ function ConnectionLine({ connection, on }: { connection: NotionConnection; on: 
   if (connection.state === 'loading') return <p className="output-send-status t-meta" role="status">Checking your Notion connection…</p>
   if (connection.state === 'unavailable') return <p className="output-send-status t-meta" role="status">{connection.message}</p>
   if (connection.state === 'disconnected') {
-    return <p className={`output-send-status t-meta ${on ? 'warn' : ''}`} role="status">{on ? 'Notion isn’t connected yet, so nothing can be sent.' : 'Notion isn’t connected yet.'} {link('Connect Notion')}</p>
+    return <p className={`output-send-status t-meta ${on ? 'warn' : ''}`} role="status">{on ? 'Notion isn’t connected yet, so nothing can be sent.' : 'Notion isn’t connected yet.'} {link('Connect Notion under Tools')}</p>
   }
   if (!connection.destination) {
-    return <p className={`output-send-status t-meta ${on ? 'warn' : ''}`} role="status">Connected to {connection.workspace}. Choose the page answers go under. {link('Choose a page')}</p>
+    return <p className={`output-send-status t-meta ${on ? 'warn' : ''}`} role="status">{connection.name} is connected. Choose the page answers go under. {link('Choose a page')}</p>
   }
-  return <p className="output-send-status t-meta" role="status">New pages go under <strong>{connection.destination.title}</strong> in {connection.workspace}. {link('Change')}</p>
+  return <p className="output-send-status t-meta" role="status">New pages go under <strong>{connection.destination.title}</strong> in {connection.name}. {link('Change')}</p>
 }

@@ -193,9 +193,9 @@ describe('ComponentPalette in Build and in a run', () => {
     const page = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
     const item = { id: `notion@${page.replace(/-/g, '')}`, name: 'Roadmap', source: 'Notion page', notion: { page }, detail: 'A page in your Notion.', status: 'Ready' as const }
     render(<ComponentPalette capabilityInventory={capabilities} onRevealSource={reveal}
-      notion={{ connection: { state: 'connected', workspace: 'Acme', destination: null }, pages: [{ id: item.id, name: 'Roadmap', page, readers: ['Researcher'], item }], onChoosePage: choose }} />)
+      notion={{ connection: { state: 'connected', name: 'Notion', destination: null, problem: null }, pages: [{ id: item.id, name: 'Roadmap', page, readers: ['Researcher'], item }], onChoosePage: choose }} />)
     const connections = section('Connections')
-    const notion = within(connections).getByRole('button', { name: /^Notion.*Drag onto an agent, then choose a page.*Acme/ })
+    const notion = within(connections).getByRole('button', { name: /^Notion.*Drag onto an agent, then choose a page.*Notion/ })
     const setData = vi.fn()
     fireEvent.dragStart(notion, { dataTransfer: { setData, effectAllowed: '' } })
     expect(setData).toHaveBeenCalledWith(CONNECTION_DRAG_MIME, JSON.stringify({ service: 'notion' }))
@@ -218,7 +218,7 @@ describe('ComponentPalette in Build and in a run', () => {
     const notion = within(section('Connections')).getByRole('button', { name: /^Notion.*Not connected/ })
     expect(notion).toHaveAttribute('draggable', 'false')
     fireEvent.click(notion)
-    expect(open).toHaveBeenCalledWith('/connections', '_blank', 'noopener')
+    expect(open).toHaveBeenCalledWith('/connections?tool=notion', '_blank', 'noopener')
   })
 
   /** The panel's right edge resizes it: dragged, with the arrow keys, and back to default on a double click. */

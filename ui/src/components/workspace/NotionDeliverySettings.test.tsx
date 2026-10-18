@@ -16,13 +16,13 @@ const renderSettings = (deliver: DeliverConfig | null, extra: Partial<Parameters
 
 describe('Send every answer to Notion (ADR 0038)', () => {
   it('turns delivery on and off as the team file’s top-level deliver block', async () => {
-    connection({ connected: true, name: 'Acme', destination: { id: 'p1', title: 'Team answers' } })
+    connection({ connected: true, name: 'Notion', destination: { id: 'p1', title: 'Team answers' }, problem: null })
     const onChange = renderSettings(null)
     const toggle = screen.getByRole('button', { name: /Send every answer to Notion/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByText('Answers stay in LoomWatch.')).toBeInTheDocument()
     expect(await screen.findByText('Team answers')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('New pages go under Team answers in Acme.')
+    expect(screen.getByRole('status')).toHaveTextContent('New pages go under Team answers in Notion.')
     fireEvent.click(toggle)
     expect(onChange).toHaveBeenCalledWith({ notion: {} })
     cleanup()
@@ -37,13 +37,13 @@ describe('Send every answer to Notion (ADR 0038)', () => {
     renderSettings({ notion: {} })
     const status = await screen.findByText(/Notion isn’t connected yet, so nothing can be sent\./)
     // Connections opens from the menu, its one way in (ADR 0043): the line says where, not a second link.
-    expect(status).toHaveTextContent('Connect Notion in Connections, from the menu.')
+    expect(status).toHaveTextContent('Connect Notion under Tools in Connections, from the menu.')
     expect(screen.queryByRole('link')).toBeNull()
     expect(status).toHaveClass('warn')
   })
 
   it('asks for a page when connected without one, and stays quiet when the daemon has no Notion API', async () => {
-    connection({ connected: true, name: 'Acme', destination: null })
+    connection({ connected: true, name: 'Notion', destination: null, problem: null })
     renderSettings({ notion: {} })
     expect(await screen.findByText(/Choose a page in Connections, from the menu\./)).toBeInTheDocument()
     cleanup()

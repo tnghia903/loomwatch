@@ -37,8 +37,8 @@ use crate::agent::{ApiKey, base_url, is_loopback_http};
 use crate::api::ApiError;
 
 const STATUS_FILE: &str = "openrouter.json";
-/// `file`: keep the key in `<state dir>/keys.json`, and the Notion connection in
-/// `<state dir>/notion-credentials.json`, even on a Mac (trial copies).
+/// `file`: keep the key in `<state dir>/keys.json`, and connected tools' sign-ins (Notion's
+/// among them) in `<state dir>/tool-credentials.json`, even on a Mac (trial copies).
 pub const KEY_STORE_ENV: &str = "LOOMWATCH_KEY_STORE";
 const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -71,8 +71,8 @@ pub(crate) fn installed() -> Option<&'static Ai> {
     INSTALLED.get()
 }
 
-/// Whether [`KEY_STORE_ENV`] asks for keys in the state folder even on a Mac. The Notion
-/// connection follows it too (`notion::install`).
+/// Whether [`KEY_STORE_ENV`] asks for keys in the state folder even on a Mac. Connected tools'
+/// sign-ins follow it too (`connected_tools::Tools::open`).
 pub(crate) fn keys_in_file() -> bool {
     std::env::var(KEY_STORE_ENV).is_ok_and(|store| store.trim() == "file")
 }

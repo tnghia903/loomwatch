@@ -35,7 +35,12 @@ export interface ConnectedTool {
   example?: string | null
   /** Where LoomWatch serves its icon from (`icons.rs`). */
   icon?: string | null
+  /** Notion's: its sign-in also sends teams' answers to Notion and reads pages for agents (ADR 0070). */
+  notion?: boolean
 }
+
+/** Where the Notion tool is connected — `notion::MCP_URL`. */
+export const NOTION_TOOL_URL = 'https://mcp.notion.com/mcp'
 
 /** What a starter tool is for, for the headings the list is shown under (`catalog::Group`). */
 export type CatalogGroup = 'work' | 'create' | 'travel' | 'lookUp' | 'build'

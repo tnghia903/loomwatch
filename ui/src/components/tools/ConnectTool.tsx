@@ -27,6 +27,8 @@ interface ConnectToolProps {
   onClose?: () => void
   /** Pick up a tool already started: one waiting for its sign-in or token, or one to sign in again. */
   resume?: ConnectedTool | null
+  /** Start connecting the starter tool at this address straight away, as if it were picked. */
+  start?: string | null
 }
 
 /**
@@ -35,7 +37,7 @@ interface ConnectToolProps {
  * and this panel carries on when the site sends you back. One that wants a token takes the one you
  * paste. Either way the secret goes to the daemon, which keeps it out of your team files.
  */
-export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, resume }: ConnectToolProps) {
+export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, resume, start }: ConnectToolProps) {
   const ids = useId()
   const [step, setStep] = useState<Step>({ kind: 'pick' })
   const [address, setAddress] = useState('')
@@ -72,6 +74,16 @@ export function ConnectTool({ catalog, connected, keptIn, onConnected, onClose, 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once per tool picked up
   }, [resume])
+
+  // A starter tool asked for by name elsewhere (Connections' `?tool=notion`): as if it were picked.
+  const started = useRef<string | null>(null)
+  useEffect(() => {
+    if (!start || started.current === start) return
+    started.current = start
+    const entry = catalog.find((item) => item.url === start)
+    if (entry && !isConnected(entry)) void act(entry.name, () => begin(entry.url, entry.name))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per address asked for
+  }, [start])
 
   // Waiting on a sign-in in another tab: its landing page says how it went, and a look now and
   // then catches one finished where that message can't reach (another browser window).
