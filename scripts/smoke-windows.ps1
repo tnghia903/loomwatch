@@ -8,7 +8,9 @@
 #   2. LoomWatch.exe, the app beside the clock: it starts LoomWatch, a second one starts nothing,
 #      and LoomWatch.exe --quit stops both;
 #   3. LoomWatch-windows-setup.exe, when -Dist has it: a silent install, its Start menu entry, the
-#      installed app starting, and the uninstaller quitting it and removing it.
+#      installed app starting, Update and restart in it (it downloads the installer of a "newer"
+#      release, made from this one, checks it, saves the run history and runs it, which opens
+#      LoomWatch again), and the uninstaller quitting it and removing it.
 #
 # CI runs this on a Windows runner; nothing in it contacts a model provider. The stand-in for
 # OpenRouter answers on 127.0.0.1 only, and the key it takes is a made-up one.
@@ -276,8 +278,40 @@ try {
     $again = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru
     Check ($again.WaitForExit(180000) -and $again.ExitCode -eq 0) 'installing over a running LoomWatch succeeds'
     Check (@(Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort)) 'the installer quit the running LoomWatch first'
+
+    # Update and restart in the app, to a "newer" release whose installer is this one, served as
+    # GitHub would serve it, with a stand-in for GitHub's answer about the newest release.
+    $appServed = Join-Path $served 'app-v99.0.0'
+    New-Item -ItemType Directory -Force -Path $appServed | Out-Null
+    Copy-Item -LiteralPath $setup -Destination $appServed
+    $setupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $appServed 'LoomWatch-windows-setup.exe')).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText((Join-Path $appServed 'LoomWatch-windows-setup.exe.sha256'), "$setupHash  LoomWatch-windows-setup.exe`n")
+    $latest = @{ tag_name = 'v99.0.0'; name = 'LoomWatch 99.0.0'; body = 'A release made for this smoke test.'; published_at = '2026-10-18T00:00:00Z'; draft = $false; prerelease = $false }
+    [IO.File]::WriteAllText((Join-Path $served 'latest.json'), (ConvertTo-Json $latest))
+    $env:LOOMWATCH_UPDATE_URL = 'http://127.0.0.1:8765/latest.json'
+    $env:LOOMWATCH_DOWNLOAD_BASE = 'http://127.0.0.1:8765/app-v99.0.0'
+    Remove-Item Env:LOOMWATCH_UPDATE_CHECK
     Start-Process -FilePath (Join-Path $installed 'LoomWatch.exe') -ArgumentList '--background' | Out-Null
     Wait-Until { Get-Health $appPort } 90 'LoomWatch.exe to start after the update' | Out-Null
+    $appUrl = "http://127.0.0.1:$appPort"
+    $status = Invoke-RestMethod -Uri "$appUrl/api/updates"
+    Check ($status.install -eq 'app' -and $status.canInstall -eq $true) "the installed LoomWatch.exe can update itself ($($status.installBlocked))"
+    $status = Invoke-RestMethod -Method Post -Uri "$appUrl/api/updates/check"
+    Check ($status.available -eq $true -and $status.latest.version -eq '99.0.0') 'it sees the newer release'
+    $before = (Invoke-RestMethod -Uri "$appUrl/api/about").startedAt
+    $asked = Invoke-RestMethod -Method Post -Uri "$appUrl/api/updates/install" -ContentType 'application/json' -Body '{"stopRuns":true}'
+    Check ($asked.to -eq '99.0.0') 'Update and restart is accepted'
+    $reopened = Wait-Until {
+      try { $about = Invoke-RestMethod -TimeoutSec 2 -Uri "$appUrl/api/about"; if ($about.startedAt -ne $before) { $about } } catch { $null }
+    } 300 'the installer to open LoomWatch again'
+    Check ($null -ne $reopened) 'the installer opened LoomWatch again by itself'
+    $after = Invoke-RestMethod -Uri "$appUrl/api/updates"
+    Check ($null -eq $after.installError) "and the update finished ($($after.installError))"
+    Check (@(Get-AppProcesses).Count -eq 1) 'one LoomWatch.exe runs after the update'
+    $copies = @(Get-ChildItem -LiteralPath (Join-Path $env:LOOMWATCH_BACKUP_DIR 'desktop-app') -Filter 'loomwatch-*.db' -ErrorAction SilentlyContinue)
+    Check ($copies.Count -eq 1) 'it saved a copy of the run history first'
+    Remove-Item Env:LOOMWATCH_UPDATE_URL, Env:LOOMWATCH_DOWNLOAD_BASE
+    $env:LOOMWATCH_UPDATE_CHECK = 'off'
     $uninstaller = Join-Path $installed 'unins000.exe'
     $removed = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru
     Check ($removed.WaitForExit(120000)) 'the uninstaller finishes'

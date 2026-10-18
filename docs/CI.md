@@ -87,6 +87,17 @@ below): stop the trial, run its `loomwatch update`, add a row to `_sqlx_migratio
 change to Update and restart, serve two releases and a stand-in for GitHub's answer
 (`LOOMWATCH_UPDATE_URL`) and click it in the trial's page.
 
+The Mac app's Update and restart (`crates/loomwatch-app/src/update.rs`) is tested with a local file
+server and disk images built from stand-in bundles (`cargo test -p loomwatch-app`, on a Mac). For a
+change to it, build `LoomWatch.app` twice with `scripts/package-macos-app.sh`, the second with a
+higher `version` in both crates' `Cargo.toml`. Serve the newer one's `.dmg` and `.sha256`
+(`LOOMWATCH_DOWNLOAD_BASE`) and a stand-in for GitHub's answer naming its tag
+(`LOOMWATCH_UPDATE_URL`), copy the older app to a scratch folder (never `/Applications`), and open
+it with `open -n --env LOOMWATCH_…=… <app> --args --background` for each of those two,
+`LOOMWATCH_STATE_DIR`, `LOOMWATCH_TEAMS_ROOT`, `LOOMWATCH_BACKUP_DIR`, `LOOMWATCH_KEY_STORE=file`
+and `LOOMWATCH_PORT`. The app hands every `LOOMWATCH_` setting on to the version it opens. The
+**Windows** job's smoke test runs the same flow through the real installer.
+
 ## Making a release
 
 The installer (`curl -fsSL https://loomwatch.github.io/install.sh | bash`) always downloads the

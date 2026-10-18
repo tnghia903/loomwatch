@@ -214,6 +214,9 @@ describe('Updates', () => {
 
 /** A ready-built copy whose launcher starts it again: `./loomwatch` from this version on. */
 const supervised: UpdateStatus = { ...newer, canInstall: true, installError: null }
+/** LoomWatch.app where it can replace itself, as in Applications. */
+const macApp: UpdateStatus = { ...newer, install: 'app', command: null, canInstall: true, installError: null, installBlocked: null }
+const FROM_THE_DMG = 'LoomWatch can’t update itself while it runs from the disk image. Drag LoomWatch to Applications and open it from there, and the next update is one click.'
 const OLD_START = '2026-10-07T08:00:00.000Z'
 const NEW_START = '2026-10-07T08:02:00.000Z'
 
@@ -246,6 +249,7 @@ describe('Update and restart', () => {
       { ...newer, canInstall: false },
       { ...newer, install: 'source' as const, command: './loomwatch update', canInstall: false },
       { ...newer, install: 'other' as const, command: null },
+      { ...newer, install: 'app' as const, command: null, canInstall: false, installBlocked: FROM_THE_DMG },
     ]) {
       dialog = await openOn(status)
       expect(within(dialog).queryByRole('button', { name: 'Update and restart' })).toBeNull()
@@ -336,6 +340,46 @@ describe('Update and restart', () => {
   it('says why the last update did not finish when the page opens after it', async () => {
     const dialog = await openOn({ ...supervised, installError: 'the download did not finish.' })
     expect(within(dialog).getByText('The last update didn’t finish. The download did not finish.')).toHaveAttribute('role', 'status')
+  })
+
+  it('lets the Mac app replace itself, with no terminal to keep open', async () => {
+    const dialog = await openOn(macApp)
+    const how = within(dialog).getByRole('region', { name: 'How to update' })
+    expect(how).toHaveTextContent('LoomWatch saves a copy of your run history, downloads 0.1.6, puts it in place of this version and opens it again.')
+    expect(how).not.toHaveTextContent(/terminal|Ctrl-C|Drag LoomWatch/i)
+    routes['GET /api/runs?preview=true'] = () => json([])
+    routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 0 }, 202)
+    // The daemon that took the request, answering for a moment longer.
+    routes['GET /api/about'] = () => about('0.1.5', OLD_START)
+    fireEvent.click(within(how).getByRole('button', { name: 'Update and restart' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))
+    expect(JSON.parse(String(calls('POST', '/api/updates/install')[0][1].body))).toEqual({ stopRuns: false })
+
+    const updating = await screen.findByRole('dialog', { name: 'Updating to 0.1.6…' })
+    expect(within(updating).getByRole('status')).toHaveTextContent('LoomWatch is saving a copy of your run history, downloading 0.1.6 and opening it in place of this version.')
+    expect(updating).not.toHaveTextContent(/terminal/i)
+  })
+
+  it('says where the Mac app’s log is when it opened the same version again', async () => {
+    const dialog = await openOn(macApp)
+    routes['GET /api/runs?preview=true'] = () => json([])
+    routes['POST /api/updates/install'] = () => json({ from: '0.1.5', to: '0.1.6', startedAt: OLD_START, stoppedRuns: 0 }, 202)
+    routes['GET /api/about'] = () => about('0.1.5', NEW_START)
+    routes['GET /api/updates'] = () => json(macApp)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update and restart' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))
+
+    expect(await screen.findByRole('dialog', { name: 'The update didn’t finish' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(/^LoomWatch 0\.1\.5 was started again instead of 0\.1\.6\. Show log, in the menu of LoomWatch’s icon (in the menu bar|beside the clock), says why\.$/)
+  })
+
+  it('shows the Mac app the steps by hand, and why, when it cannot replace itself', async () => {
+    const dialog = await openOn({ ...newer, install: 'app', command: null, canInstall: false, installBlocked: FROM_THE_DMG })
+    expect(within(dialog).queryByRole('button', { name: 'Update and restart' })).toBeNull()
+    const how = within(dialog).getByRole('region', { name: 'How to update' })
+    expect(how).toHaveTextContent(FROM_THE_DMG)
+    expect(how).toHaveTextContent('Download LoomWatch-macos.dmg from the release page above and open it.')
+    expect(how).toHaveTextContent('Drag LoomWatch to Applications and choose Replace, then open it again.')
   })
 
   it('shows a refusal it cannot act on', async () => {

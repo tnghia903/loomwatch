@@ -1,6 +1,9 @@
 //! The macOS app: a menu-bar item over a supervised `loomwatchd`, which shows what the teams are
 //! doing. While agents work its stitch sews round and the menu names who is working; when something
 //! needs you its mouth opens and the menu bar counts what waits.
+//!
+//! It also updates itself: Update and restart in the app has `loomwatchd` stop for it, and it puts
+//! the new release's `LoomWatch.app` in its own place and opens that (`crate::update`).
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -19,6 +22,7 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, Predefin
 use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::progress::{self, Ended, Mood, Progress, Row};
+use crate::update;
 
 /// The port a `LoomWatch` started from Terminal uses too, so the address people know keeps working.
 const FIRST_PORT: u16 = 3000;
@@ -47,6 +51,8 @@ enum UserEvent {
     Progress(Progress),
     /// The menu-bar item was clicked, which opens its menu.
     Opened,
+    /// The new version is open, after Update and restart: this one goes.
+    Quit,
 }
 
 /// Where everything is.
@@ -61,6 +67,9 @@ struct Paths {
     log: PathBuf,
     /// What `/api/about` reports as the commit, from the bundle's `VERSION`.
     commit: Option<String>,
+    home: PathBuf,
+    /// `loomwatchd`'s state folder: `LOOMWATCH_STATE_DIR`, or its own default.
+    state: PathBuf,
 }
 
 impl Paths {
@@ -84,14 +93,37 @@ impl Paths {
             .as_ref()
             .and_then(|resources| std::fs::read_to_string(resources.join("VERSION")).ok())
             .and_then(|version| version.split_whitespace().nth(1).map(str::to_owned));
+        let state_dir = std::env::var_os("LOOMWATCH_STATE_DIR")
+            .map(PathBuf::from)
+            .filter(|state| state.is_absolute());
+        // A state folder of its own, as for a trial, keeps the log with it, as on Windows.
+        let log = state_dir.as_ref().map_or_else(
+            || home.join("Library/Logs/LoomWatch/loomwatchd.log"),
+            |state| state.join("Logs/loomwatchd.log"),
+        );
         Ok(Self {
             bundle,
             daemon,
-            teams: home.join("LoomWatch/teams"),
+            teams: std::env::var_os("LOOMWATCH_TEAMS_ROOT")
+                .map(PathBuf::from)
+                .filter(|teams| teams.is_absolute())
+                .unwrap_or_else(|| home.join("LoomWatch/teams")),
             examples: resources.map(|resources| resources.join("examples")),
-            log: home.join("Library/Logs/LoomWatch/loomwatchd.log"),
+            log,
             commit,
+            state: state_dir.unwrap_or_else(|| home.join("Library/Application Support/LoomWatch")),
+            home,
         })
+    }
+
+    /// Where `loomwatchd` names the release Update and restart installs.
+    fn update_request(&self) -> PathBuf {
+        self.state.join("app-update-request")
+    }
+
+    /// Where an update is downloaded and its disk image opened. Emptied before and after.
+    fn update_work(&self) -> PathBuf {
+        self.state.join("app-update")
     }
 
     /// Make the teams folder the first time, with the offline demo team in it.
@@ -161,6 +193,12 @@ pub fn run() -> Result<()> {
             Event::UserEvent(UserEvent::Status(text)) => items.status.set_text(text),
             Event::UserEvent(UserEvent::Progress(next)) => bar.show(next),
             Event::UserEvent(UserEvent::Opened) => bar.seen(),
+            Event::UserEvent(UserEvent::Quit) => {
+                supervisor.stop();
+                bar.remove();
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
             Event::UserEvent(UserEvent::Menu(event)) => {
                 if let Some(link) = bar.link_for(&event.id) {
                     if let Some(url) = &address {
@@ -594,9 +632,12 @@ fn supervise(
     }
     let path = login_shell_path();
     let mut stops: Vec<Instant> = Vec::new();
+    // Why the last Update and restart did not finish, for the next start to say.
+    let mut failed: Option<String> = None;
+    update::mac::clear(&paths.update_work());
     loop {
         // One LoomWatch per run history: one started from Terminal on another port holds it.
-        if history_in_use() {
+        if history_in_use(&paths.state) {
             say("Already running from Terminal: stop it there, then open LoomWatch again");
             return;
         }
@@ -604,7 +645,12 @@ fn supervise(
             say("Can’t start: ports 3000–3020 are all in use");
             return;
         };
-        let child = match start_daemon(paths, port, path.as_deref()) {
+        let request = paths.update_request();
+        let _ = std::fs::remove_file(&request);
+        // Update and restart is offered only when this app can put the new version in its place.
+        let handoff = can_update(paths).map(|()| request);
+        let started = start_daemon(paths, port, path.as_deref(), &handoff, failed.take());
+        let child = match started {
             Ok(child) => child,
             Err(error) => {
                 say("Can’t start LoomWatch: see Show log");
@@ -618,23 +664,49 @@ fn supervise(
         } else if !stopping.load(Ordering::SeqCst) {
             say("Still starting… (see Show log)");
         }
-        // Wait for it to stop.
-        loop {
+        // Wait for it to stop, and see how it ended.
+        let exit = loop {
             if stopping.load(Ordering::SeqCst) {
                 return;
             }
-            let exited = slot
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_mut()
-                .is_none_or(|child| matches!(child.try_wait(), Ok(Some(_)) | Err(_)));
-            if exited {
-                break;
+            {
+                let mut child = slot.lock().unwrap_or_else(PoisonError::into_inner);
+                match child.as_mut().map(Child::try_wait) {
+                    Some(Ok(None)) => {}
+                    Some(Ok(Some(status))) => {
+                        child.take();
+                        break status.code();
+                    }
+                    None | Some(Err(_)) => {
+                        child.take();
+                        break None;
+                    }
+                }
             }
             std::thread::sleep(Duration::from_millis(500));
-        }
+        };
         if stopping.load(Ordering::SeqCst) {
             return;
+        }
+        // Update and restart: loomwatchd stopped for this app to install the release it named.
+        if exit == Some(update::EXIT_TO_UPDATE) {
+            let log = |line: &str| append_log(&paths.log, &format!("LoomWatch.app: {line}\n"));
+            match update_app(paths, &say, &log) {
+                Ok(bundle) => match update::mac::open_again(&bundle, &log) {
+                    Ok(()) => {
+                        let _ = proxy.send_event(UserEvent::Quit);
+                        return;
+                    }
+                    // The new loomwatchd is in place: this app starts it instead.
+                    Err(why) => log(&why),
+                },
+                Err(why) => {
+                    log(&format!("the update did not finish: {why}"));
+                    failed = Some(why);
+                }
+            }
+            say("Restarting…");
+            continue;
         }
         let now = Instant::now();
         stops.retain(|stop| now.duration_since(*stop) < CRASH_WINDOW);
@@ -648,24 +720,11 @@ fn supervise(
 }
 
 /// Whether another `loomwatchd` holds the run history this app's would use: the daemon's own
-/// default (`<state folder>/loomwatch.db`) unless `LOOMWATCH_DATABASE` or `LOOMWATCH_STATE_DIR`
-/// says otherwise, locked by `<file>.lock` while a daemon uses it.
-fn history_in_use() -> bool {
+/// default (`<state folder>/loomwatch.db`) unless `LOOMWATCH_DATABASE` says otherwise, locked by
+/// `<file>.lock` while a daemon uses it.
+fn history_in_use(state: &Path) -> bool {
     let database = std::env::var_os("LOOMWATCH_DATABASE")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("LOOMWATCH_STATE_DIR")
-                .map(PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("HOME").map(|home| {
-                        PathBuf::from(home).join("Library/Application Support/LoomWatch")
-                    })
-                })
-                .map(|state| state.join("loomwatch.db"))
-        });
-    let Some(database) = database else {
-        return false;
-    };
+        .map_or_else(|| state.join("loomwatch.db"), PathBuf::from);
     let mut lock = database.into_os_string();
     lock.push(".lock");
     std::fs::OpenOptions::new()
@@ -675,7 +734,64 @@ fn history_in_use() -> bool {
         .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
 }
 
-fn start_daemon(paths: &Paths, port: u16, path: Option<&str>) -> Result<Child> {
+/// Whether this app can put a new version in its own place, or why not, which the updates dialog
+/// shows beside the steps to do it by hand.
+fn can_update(paths: &Paths) -> std::result::Result<(), String> {
+    let bundle = paths.bundle.as_deref().ok_or_else(|| {
+        "This LoomWatch isn’t running from LoomWatch.app, so it can’t replace itself.".to_owned()
+    })?;
+    update::mac::can_replace(bundle)
+}
+
+/// After `loomwatchd` stopped for Update and restart: downloads the release it named, saves a copy
+/// of the run history, and puts the new `LoomWatch.app` in this one's place. Returns the app to
+/// open, or why nothing was changed.
+fn update_app(
+    paths: &Paths,
+    say: &dyn Fn(&str),
+    log: &dyn Fn(&str),
+) -> std::result::Result<PathBuf, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let release = update::requested(&paths.update_request(), current)?;
+    can_update(paths)?;
+    let bundle = paths.bundle.clone().unwrap_or_default();
+    let base = update::download_base(&release)?;
+    log(&format!(
+        "updating {current} to {} from {base}",
+        release.version
+    ));
+    let work = paths.update_work();
+    update::mac::clear(&work);
+    let installed = (|| {
+        say(&format!("Downloading LoomWatch {}…", release.version));
+        let dmg = update::download(&base, "LoomWatch-macos.dmg", &work, log)?;
+        say("Saving a copy of the run history…");
+        let backups = update::backup_folder(&paths.home);
+        if let Some(copy) = update::back_up(&paths.daemon, &backups, current, log)? {
+            log(&format!(
+                "saved a copy of the run history in {}",
+                copy.display()
+            ));
+        }
+        say(&format!("Installing LoomWatch {}…", release.version));
+        update::mac::put_in_place(&dmg, &bundle, &release.version, &work, log)
+    })();
+    update::mac::clear(&work);
+    installed?;
+    log(&format!(
+        "LoomWatch {} is in place; {current} is kept beside it",
+        release.version
+    ));
+    Ok(bundle)
+}
+
+fn start_daemon(
+    paths: &Paths,
+    port: u16,
+    path: Option<&str>,
+    handoff: &std::result::Result<PathBuf, String>,
+    failed: Option<String>,
+) -> Result<Child> {
     if let Some(folder) = paths.log.parent() {
         std::fs::create_dir_all(folder)?;
     }
@@ -696,8 +812,22 @@ fn start_daemon(paths: &Paths, port: u16, path: Option<&str>) -> Result<Child> {
         .stderr(log)
         // If this app is force-quit, LoomWatch stops too instead of running on unseen.
         .env("LOOMWATCH_EXIT_WITH_PARENT", "1")
-        // So the update notice says how this copy is updated: a new .dmg.
+        // So the update notice says how this copy is updated: by this app, or a new .dmg.
         .env("LOOMWATCH_INSTALL", "app");
+    match handoff {
+        Ok(request) => command
+            .env(update::SUPERVISED_ENV, "1")
+            .env(update::REQUEST_ENV, request)
+            .env_remove(update::BLOCKED_ENV),
+        Err(why) => command
+            .env_remove(update::SUPERVISED_ENV)
+            .env_remove(update::REQUEST_ENV)
+            .env(update::BLOCKED_ENV, why),
+    };
+    match failed {
+        Some(why) => command.env(update::FAILED_ENV, why),
+        None => command.env_remove(update::FAILED_ENV),
+    };
     if let Some(path) = path {
         command.env("PATH", path);
     }

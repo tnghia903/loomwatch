@@ -8,6 +8,10 @@
 ; first (LoomWatch.exe --quit), and opens the new one afterwards. Teams and run history live
 ; elsewhere (%USERPROFILE%\LoomWatch\teams and %LOCALAPPDATA%\LoomWatch), so updating and removing
 ; LoomWatch both leave them alone.
+;
+; Update and restart in LoomWatch runs it silently with /UPDATEDFROM=<the version it replaces>.
+; Then it opens LoomWatch again in the background when it is done, as LoomWatch's page waits for it,
+; or, when the new files could not be put in place, the version still there with --update-failed.
 
 #ifndef Version
   #error Pass /DVersion=x.y.z
@@ -74,6 +78,10 @@ Filename: "{app}\LoomWatch.exe"; Description: "Open LoomWatch"; Flags: nowait po
 Filename: "{app}\LoomWatch.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "QuitLoomWatch"
 
 [Code]
+var
+  // Set once every file is in place.
+  Installed: Boolean;
+
 // An update replaces the files of a LoomWatch that may be running: ask it to quit as its own
 // menu would, so it stops its runs and writes what it holds, and wait until it has.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -85,4 +93,33 @@ begin
   if FileExists(Running) then
     Exec(Running, '--quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    Installed := True;
+end;
+
+// Run by LoomWatch's Update and restart: open LoomWatch again whether or not the update finished,
+// the new version or the one still here, which then says the update didn't finish.
+procedure DeinitializeSetup();
+var
+  App: String;
+  Arguments: String;
+  ResultCode: Integer;
+begin
+  if ExpandConstant('{param:UPDATEDFROM|}') = '' then
+    Exit;
+  try
+    App := ExpandConstant('{app}\LoomWatch.exe');
+  except
+    Exit;
+  end;
+  if not FileExists(App) then
+    Exit;
+  Arguments := '--background';
+  if not Installed then
+    Arguments := Arguments + ' --update-failed';
+  Exec(App, Arguments, '', SW_SHOWNORMAL, ewNoWait, ResultCode);
 end;
