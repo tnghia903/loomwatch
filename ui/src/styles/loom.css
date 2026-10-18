@@ -500,6 +500,14 @@ span.story-schedule { cursor: default; }
   border-radius: inherit; background: transparent !important; box-shadow: none; opacity: 1;
 }
 .lw-canvas .react-flow__node .react-flow__handle.card-catch::after { content: none; }
+/* A selected card's own lines light up in gold, words and arrowheads too, and the cards at their
+   other ends take a quiet gold edge; the other lines step back (lib/canvas/linked.ts). Their words
+   stay as they are, so nothing on the canvas becomes hard to read. A live line keeps its blue and
+   a run's gold shuttle its own weight. */
+.lw-canvas .react-flow__edge.linked .react-flow__edge-path:not(.prov-live, .shuttle) { stroke: var(--color-accent); stroke-opacity: 1; stroke-width: 2; }
+.lw-canvas .react-flow__edge.faded { opacity: .3; transition: opacity var(--t-quick) var(--ease-out); }
+.lw-canvas :is(.prov-label, .edge-label).linked { color: var(--color-accent); }
+.lw-canvas .react-flow__node.linked > :is(.build-node, .rt):not(.selected) { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
 .lw-canvas .react-flow__node .react-flow__handle.card-catch.connectable.connectingto.valid { box-shadow: 0 0 0 1px var(--color-accent), 0 0 0 3px color-mix(in srgb, var(--color-accent) 45%, transparent); }
 
 /* A drop's word sits beside its line; an arc's word sits on its crest. */

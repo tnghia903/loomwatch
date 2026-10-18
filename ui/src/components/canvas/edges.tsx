@@ -1,5 +1,6 @@
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 
+import { linkOf } from '../../lib/canvas/linked'
 import { trunkOf } from '../../lib/canvas/ports'
 import { routeEdge } from './route'
 
@@ -22,9 +23,9 @@ export function WarpEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
       {extra?.shuttle && <path d={path} className="react-flow__edge-path shuttle" aria-hidden="true" />}
       {extra?.count ? (
         <EdgeLabelRenderer>
-          <span className={cx('edge-label edge-badge t-mono-sm', extra.anomaly && 'alert')} style={{ left: labelX, top: labelY }} title={`${extra.count} observed event${extra.count === 1 ? '' : 's'} along this configured edge`}>×{extra.count}</span>
+          <span className={cx('edge-label edge-badge t-mono-sm', extra.anomaly && 'alert', linkOf(data))} style={{ left: labelX, top: labelY }} title={`${extra.count} observed event${extra.count === 1 ? '' : 's'} along this configured edge`}>×{extra.count}</span>
         </EdgeLabelRenderer>
-      ) : selected ? <EdgeLabelRenderer><span className="edge-label edge-badge t-mono-sm" style={{ left: labelX, top: labelY }}>hands off</span></EdgeLabelRenderer> : null}
+      ) : selected ? <EdgeLabelRenderer><span className={cx('edge-label edge-badge t-mono-sm', linkOf(data))} style={{ left: labelX, top: labelY }}>hands off</span></EdgeLabelRenderer> : null}
     </>
   )
 }
@@ -38,7 +39,7 @@ export function WeftEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} markerStart={kind === 'ask' ? markerStart : undefined} className={cx('weft', kind, data?.aged && 'aged', data?.anomaly && 'anomaly')} />
       <EdgeLabelRenderer>
-        <span className={cx('edge-label edge-badge t-mono-sm', data?.anomaly && 'alert')} style={{ left: labelX, top: labelY }} title={data?.anomaly ? 'Observed with no configured counterpart' : `${kind} observed`}>
+        <span className={cx('edge-label edge-badge t-mono-sm', data?.anomaly && 'alert', linkOf(data))} style={{ left: labelX, top: labelY }} title={data?.anomaly ? 'Observed with no configured counterpart' : `${kind} observed`}>
           {data?.count && data.count > 1 ? `${kind} ×${data.count}` : kind}
         </span>
       </EdgeLabelRenderer>
@@ -62,7 +63,7 @@ export function ProvEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
       <BaseEdge id={id} path={path} markerEnd={markerEnd} className={cx('prov', data?.resource && 'resource-edge', data?.story && 'story-edge', data?.live && 'prov-live', data?.prior && 'prior-edge', data?.arc && 'arc-edge')} />
       {data?.label && (
         <EdgeLabelRenderer>
-          <div className={cx('prov-label t-micro', data.story && 'story-label', data.live && 'prov-live-label', selected && data.onRemove && 'with-remove', beside && 'beside', before && 'before', data.arc && 'arc-label')} style={{ left: labelX, top: labelY + (data.labelOffset ?? 0) }}>
+          <div className={cx('prov-label t-micro', data.story && 'story-label', data.live && 'prov-live-label', selected && data.onRemove && 'with-remove', beside && 'beside', before && 'before', data.arc && 'arc-label', linkOf(data))} style={{ left: labelX, top: labelY + (data.labelOffset ?? 0) }}>
             <span>{PLAIN_RELATION[data.label.toLowerCase()] ?? data.label.toLowerCase()}</span>
             {selected && data.onRemove ? (
               <button
