@@ -591,6 +591,40 @@ select.input, .inspector-fields label > select { appearance: none; -webkit-appea
 .place-thread .knot.output i { border-radius: 2px; }
 .place-thread .knot.self { color: var(--color-ink); font-weight: 550; }
 .place-thread .knot.self i { width: 11px; height: 11px; margin-left: 1px; border: 0; background: var(--color-accent-fill); box-shadow: 0 0 0 3px var(--color-accent-tint); }
+
+/* THE AGENT IN THIS TEAM (BuildInspector): its figure beside its name, and IN THE WORKFLOW, the
+   selected card's lines said as a thread. A gold rail runs from who hands it work, through its own
+   knot, to who it hands work to, like its lines on the canvas; each neighbour is a row that takes
+   you to that card. */
+.agent-in-team .inspector-head { align-items: center; }
+.agent-in-team .inspector-head > div { flex: 1; min-width: 0; }
+.agent-in-team .inspector-head strong { margin-top: 2px; }
+.inspector-figure { flex: none; width: 34px; height: 34px; object-fit: contain; border-radius: var(--r-sm); background: var(--color-accent-tint); }
+.workflow-place { display: flex; flex-direction: column; gap: var(--sp-2); }
+.workflow-place-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); color: var(--color-ink-3); }
+.inspector-fields p.workflow-place-summary { display: block; margin: 0; color: var(--color-ink-2); font-size: 12.5px; line-height: 1.5; }
+.workflow-thread { position: relative; list-style: none; margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 10px; }
+.workflow-thread::before { content: ""; position: absolute; left: 6px; top: 8px; bottom: 8px; width: 1.5px; border-radius: 1px; background: linear-gradient(var(--color-hairline), var(--color-accent) 35%, var(--color-accent) 65%, var(--color-hairline)); }
+.workflow-thread ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.thread-group { display: flex; flex-direction: column; gap: 5px; }
+.thread-label { color: var(--color-ink-3); font: 500 10.5px/1.3 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; }
+.thread-node {
+  width: 100%; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 8px 4px 5px;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid);
+  color: var(--color-ink); font: 500 12.5px/1.3 var(--font-sans); text-align: left;
+}
+button.thread-node { cursor: pointer; }
+button.thread-node:hover, button.thread-node:focus-visible { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); color: var(--color-accent); }
+button.thread-node svg { margin-left: auto; color: var(--color-ink-3); }
+button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(--color-accent); }
+.thread-node.you { border-style: dashed; }
+.thread-node.request, .thread-node.output { color: var(--color-ink-2); background: transparent; border-style: dashed; }
+.thread-node.request svg, .thread-node.output svg { margin: 0 2px; color: var(--color-ink-3); }
+.thread-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-figure { flex: none; width: 22px; height: 22px; object-fit: contain; }
+.thread-self { position: relative; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 5px 9px 5px 5px; border-radius: var(--r-sm); background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); color: var(--color-ink); font: 600 12.5px/1.3 var(--font-sans); }
+.thread-knot { position: absolute; left: -16px; top: 50%; width: 9px; height: 9px; margin-top: -4.5px; border-radius: var(--r-full); background: var(--color-accent-fill); box-shadow: 0 0 0 3px var(--color-accent-tint); }
+.thread-empty { padding: 2px 0; }
 /* GIVEN: one chip per thing the agent is given, dashed like its card on the canvas. */
 .context-given { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .context-label { margin-right: 2px; color: var(--color-ink-3); }

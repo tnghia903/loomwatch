@@ -990,15 +990,31 @@ describe('Workspace', () => {
 
     // ADR 0034: the Inspector no longer repeats the Output wire, the Output editor and "Final
     // response owner" with a fourth responder control. It says where the agent sits instead.
-    it('says in the agent Inspector where the agent sits, instead of a fourth responder control', () => {
+    it('says in the agent panel where the agent sits, instead of a fourth responder control', () => {
       const researcher = documentState.nodes[0]
       researcher.selected = true
       const view = renderWorkspace()
       try {
-        expect(screen.getByRole('region', { name: 'Context' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
-        fireEvent.click(screen.getByRole('button', { name: 'Thinking effort and more settings' }))
+        expect(screen.getByRole('region', { name: 'In the workflow' })).toHaveTextContent(/Step 1 of \d · receives your request first/)
         expect(screen.queryByRole('button', { name: /Produces the team output/ })).not.toBeInTheDocument()
-        expect(screen.getByText(/Step 1 of \d · receives your request first/)).toBeInTheDocument()
+      } finally {
+        view.unmount()
+        researcher.selected = false
+      }
+    })
+
+    // The user: the panel showed what the agent's workbench already sets. It now says only what this
+    // team makes of the agent, and the workbench is one click away.
+    it('leaves what the workbench sets to the workbench', () => {
+      const researcher = documentState.nodes[0]
+      researcher.selected = true
+      const view = renderWorkspace()
+      try {
+        const panel = screen.getByRole('complementary', { name: 'Selected node settings' })
+        expect(within(panel).getByRole('button', { name: 'Open its workbench' })).toBeInTheDocument()
+        for (const field of ['Name', 'Instructions']) expect(within(panel).queryByRole('textbox', { name: field })).not.toBeInTheDocument()
+        expect(within(panel).queryByRole('button', { name: 'Thinking effort and more settings' })).not.toBeInTheDocument()
+        expect(within(panel).queryByRole('group', { name: 'Allowed without asking' })).not.toBeInTheDocument()
       } finally {
         view.unmount()
         researcher.selected = false

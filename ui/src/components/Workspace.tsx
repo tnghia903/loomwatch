@@ -2755,6 +2755,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           // The same agent panel in Build and in a run (ADR 0041).
           <BuildInspector
             onOpenWorkbench={!runView && !runSetup && inspectedNode.data.agent.kind !== 'operator' ? () => { const id = inspectedNode.id; clearSelection(); showAgents(id) } : undefined}
+            figures={agentFigures} onFocusAgent={focusAgent}
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
             link={{
