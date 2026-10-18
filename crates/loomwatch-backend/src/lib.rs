@@ -849,8 +849,11 @@ async fn run_pipeline_nodes(
         replies.insert(agent_id.clone(), reply.clone());
         if !truly_last {
             // Every stage after this one checks it: they are handed the work as written, so a
-            // summary of it would be a turn paid for and never read (ADR 0062).
-            let handover = if only_checked_by_successors(team, agent_id) {
+            // summary of it would be a turn paid for and never read (ADR 0062). A reply already as
+            // short as a handover, for agents to read, is handed on as written too.
+            let handover = if only_checked_by_successors(team, agent_id)
+                || reply_is_its_own_handover(team, agent_id, &reply)
+            {
                 reply.clone()
             } else {
                 stage_handover(team, order, index, &mut process, &mut recorder, &reply).await?
@@ -1234,7 +1237,9 @@ fn delegated_turn(team: &TeamConfig, results: &[team_bus::DelegatedResult]) -> S
             result.mode
         );
         match &result.outcome {
-            Ok(reply) => text.push_str(reply.trim()),
+            // Capped like a stage's results: this is a prompt, not a tool result, so nothing
+            // would otherwise set a very long reply aside.
+            Ok(reply) => text.push_str(&cap_middle_text(reply.trim(), SECTION_CAP_CHARS)),
             Err(error) => {
                 let _ = write!(text, "It failed: {error}");
             }
@@ -2524,6 +2529,37 @@ impl NodeTask {
 }
 
 /// Whether every stage this one hands work to is a check step that checks it.
+/// About how long one of a handover's findings runs: a standalone fact and its source.
+const FINDING_CHARS: usize = 250;
+
+/// Whether a stage's reply goes to the stages after it as written, with no handover turn.
+///
+/// A handover is at most `conversation.brief.summaryChars` of summary and `maxFindings` findings.
+/// A reply no longer than that cannot be made shorter by one, so asking for it would be a model
+/// call that re-reads the stage's whole conversation to re-word a reply its role already shaped
+/// for the next stage, and the next stage can still `ask` for more. A review stop after the stage
+/// still gets the handover: a person decides from its summary and open questions.
+fn reply_is_its_own_handover(team: &TeamConfig, agent_id: &str, reply: &str) -> bool {
+    let brief = &team.conversation.brief;
+    let budget = usize::try_from(brief.summary_chars)
+        .unwrap_or(usize::MAX)
+        .saturating_add(
+            usize::try_from(brief.max_findings)
+                .unwrap_or(usize::MAX)
+                .saturating_mul(FINDING_CHARS),
+        );
+    let mut successors = team
+        .edges
+        .iter()
+        .filter(|edge| edge.from == agent_id)
+        .filter_map(|edge| team.agents.iter().find(|agent| agent.id == edge.to))
+        .peekable();
+    successors.peek().is_some()
+        && successors.all(|successor| !successor.is_operator())
+        && !reply.trim().is_empty()
+        && reply.chars().count() <= budget
+}
+
 fn only_checked_by_successors(team: &TeamConfig, agent_id: &str) -> bool {
     let successors: Vec<&config::AgentConfig> = team
         .edges
@@ -3043,6 +3079,15 @@ pub(crate) mod test_support {
     }
 
     /// A turn whose prompt contains every one of `must`, answered with `reply`.
+    /// `reply` made longer than a reply a stage hands on as written (`reply_is_its_own_handover`),
+    /// for a test of the handover turn that a longer reply is summarised in.
+    pub(crate) fn long(reply: &str) -> String {
+        format!(
+            "{reply}\n\n{}",
+            "More detail from the stage's work. ".repeat(120)
+        )
+    }
+
     pub(crate) fn turn(must: &[&str], reply: &str) -> Turn {
         Turn {
             must: must.iter().map(|fragment| (*fragment).to_owned()).collect(),
@@ -3204,13 +3249,13 @@ mod tests {
     #[tokio::test]
     async fn pipeline_mode_runs_two_nodes_in_declared_order() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let (first_script, _) = crate::test_support::stand_in(vec![
-            crate::test_support::turn(&[], "node a done"),
-            crate::test_support::turn(&["## Summary", "## Findings"], "node a brief"),
-        ]);
+        // A reply as short as a handover goes to the next stage as written: `a` is never asked
+        // for a handover, and its script would panic at a second turn.
+        let (first_script, _) =
+            crate::test_support::stand_in(vec![crate::test_support::turn(&[], "node a done")]);
         let (second_script, _) = crate::test_support::stand_in(vec![crate::test_support::turn(
             &[
-                "node a brief",
+                "your assigned task.\n\nnode a done",
                 "Asking the stage before you",
                 "b role",
                 "start the pipeline",
@@ -3520,7 +3565,12 @@ mod tests {
     async fn a_team_with_a_notebook_still_checkpoints_every_stage() -> Result<()> {
         let pool = crate::db::Db::temp().await;
         let stage = |handover: bool| {
-            let mut turns = vec![crate::test_support::turn(&[], "worked")];
+            let worked = if handover {
+                crate::test_support::long("worked")
+            } else {
+                "worked".to_owned()
+            };
+            let mut turns = vec![crate::test_support::turn(&[], &worked)];
             if handover {
                 turns.push(crate::test_support::turn(
                     &["## Summary"],
@@ -3594,6 +3644,99 @@ mod tests {
         Ok(())
     }
 
+    /// A reply no longer than a handover is handed to the agents after it as written, with no
+    /// handover turn; a longer one, one a person reviews next, and the last stage's are not.
+    #[test]
+    fn only_a_reply_as_short_as_a_handover_skips_the_handover_turn() {
+        let edge = |from: &str, to: &str| EdgeConfig {
+            from: from.into(),
+            to: to.into(),
+            layer: "configured".into(),
+            kind: "sequence".into(),
+            ts: "2026-10-18T00:00:00Z".into(),
+        };
+        let review = AgentConfig {
+            kind: config::AgentKind::Operator,
+            ..pipeline_agent("review", "fake/offline")
+        };
+        let mut team = TeamConfig {
+            schema_version: 1,
+            id: "chain".into(),
+            name: "Chain".into(),
+            entrypoint: "a".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("a", "m"),
+                pipeline_agent("b", "m"),
+                review,
+                pipeline_agent("c", "m"),
+            ],
+            edges: vec![edge("a", "b"), edge("b", "review"), edge("review", "c")],
+        };
+        // 1200 characters of summary and 8 findings, by default.
+        let budget = 1200 + 8 * FINDING_CHARS;
+        assert!(reply_is_its_own_handover(&team, "a", &"x".repeat(budget)));
+        assert!(!reply_is_its_own_handover(
+            &team,
+            "a",
+            &"x".repeat(budget + 1)
+        ));
+        assert!(!reply_is_its_own_handover(&team, "a", "  \n"));
+        assert!(
+            !reply_is_its_own_handover(&team, "b", "short"),
+            "a person reviews b's work next, from its handover"
+        );
+        assert!(!reply_is_its_own_handover(&team, "c", "short"), "c is last");
+        // The team file's own brief sets the length.
+        team.conversation.brief.summary_chars = 10;
+        team.conversation.brief.max_findings = 0;
+        assert!(!reply_is_its_own_handover(&team, "a", "longer than ten"));
+    }
+
+    /// What helpers came back with goes into the lead's next turn as a prompt, which nothing sets
+    /// aside, so a very long reply is capped there as a stage's results are.
+    #[test]
+    fn a_helpers_long_reply_is_capped_in_the_turn_that_hands_it_back() {
+        let team = TeamConfig {
+            schema_version: 1,
+            id: "desk".into(),
+            name: "Desk".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![pipeline_agent("lead", "m"), pipeline_agent("worker", "m")],
+            edges: Vec::new(),
+        };
+        let result = |reply: String| team_bus::DelegatedResult {
+            agent: "worker".into(),
+            mode: "dispatch",
+            task: "find the facts".into(),
+            outcome: Ok(reply),
+        };
+        let short = delegated_turn(&team, &[result("three facts".into())]);
+        assert!(short.contains("three facts"));
+        let long = delegated_turn(&team, &[result("y".repeat(SECTION_CAP_CHARS * 3))]);
+        assert!(
+            long.chars().count() < SECTION_CAP_CHARS + 1_000,
+            "{}",
+            long.len()
+        );
+        assert!(long.contains("characters cut here"));
+    }
+
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn pipeline_mode_joins_diamond_predecessor_outputs() -> Result<()> {
@@ -3601,7 +3744,14 @@ mod tests {
         // Every stage but the last is asked for a handover once its own turn ends. A team with
         // no notebook asks no stage for a checkpoint.
         let node = |reply: &str, must: &[&str], never: &[&str], writes_brief: bool| {
-            let mut turns = vec![crate::test_support::turn(must, reply).never(never)];
+            // A stage that writes a handover replies at length; a short reply is handed on as
+            // written instead.
+            let work = if writes_brief {
+                crate::test_support::long(reply)
+            } else {
+                reply.to_owned()
+            };
+            let mut turns = vec![crate::test_support::turn(must, &work).never(never)];
             if writes_brief {
                 turns.push(crate::test_support::turn(
                     &["## Summary"],
@@ -4326,7 +4476,7 @@ mod tests {
             ])
         };
         let (first_script, _) = crate::test_support::stand_in(vec![
-            opening("a done"),
+            opening(&crate::test_support::long("a done")),
             crate::test_support::turn(&["## Summary"], "a handover"),
             crate::test_support::turn(&["Record where this work stands"], CHECKPOINT_REPLY),
         ]);
@@ -4572,7 +4722,7 @@ mod tests {
         // about this test rather than a hope about a model.
         let needs_decision = [DECISION_BODY, "From the team's notebook"];
         let (stage_a, _) = stand_in(vec![
-            turn(&[], "note-a done").calling(
+            turn(&[], &crate::test_support::long("note-a done")).calling(
                 "memory_write",
                 json!({
                     "kind": "decision",
@@ -4587,7 +4737,7 @@ mod tests {
             turn(&["Record where this work stands"], CHECKPOINT_REPLY),
         ]);
         let (stage_b, _) = stand_in(vec![
-            turn(&needs_decision, "note-b done"),
+            turn(&needs_decision, &crate::test_support::long("note-b done")),
             // Deliberately silent about the decision.
             turn(&["## Summary"], "## Summary\nStage b drafted the report."),
             turn(&["Record where this work stands"], CHECKPOINT_REPLY),

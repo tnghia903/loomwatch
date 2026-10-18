@@ -615,7 +615,9 @@ impl TeamBus {
                             json!({
                                 "id": agent.id,
                                 "name": agent.name,
-                                "role": agent.role,
+                                // A line, as the opening prompt shows teammates: each agent is
+                                // given its own instructions, and a lead reads only what it is for.
+                                "role": crate::orientation::role_summary(&agent.role),
                                 "model": agent.model,
                                 "allowRecruiting": agent.allow_recruiting,
                                 "capabilities": {"canRecruit": agent.allow_recruiting},
@@ -1804,7 +1806,7 @@ fn memory_tool_definitions() -> Vec<Value> {
     vec![
         tool(
             "memory_search",
-            "Search the team's notebook: this run's notes, the team's kept notes, and anything it              inherits. Returns bounded snippets with revision ids.",
+            "Search the team's notebook: this run's notes, the team's kept notes, and anything it inherits. Returns bounded snippets with revision ids.",
             &object(
                 &[
                     ("query", string_property("Words to search for", 0)),
@@ -1823,7 +1825,7 @@ fn memory_tool_definitions() -> Vec<Value> {
         ),
         tool(
             "memory_read",
-            "Read one notebook revision by the id a search returned. An id outside what this              session can see reads as not found.",
+            "Read one notebook revision by the id a search returned. An id outside what this session can see reads as not found.",
             &object(
                 &[(
                     "id",
@@ -1834,7 +1836,7 @@ fn memory_tool_definitions() -> Vec<Value> {
         ),
         tool(
             "memory_write",
-            "Record one observation in the team's notebook, attributed to you and to this run. It              becomes evidence in the run story, and the operator decides whether it outlives the              run.",
+            "Record one observation in the team's notebook, attributed to you and to this run. It becomes evidence in the run story, and the operator decides whether it outlives the run.",
             &object(
                 &[
                     ("kind", enum_property("What kind of observation", &kinds)),
@@ -1850,7 +1852,7 @@ fn memory_tool_definitions() -> Vec<Value> {
                     (
                         "idempotencyKey",
                         string_property(
-                            "A key unique to this observation. Retrying with the same key does                              not write a second note.",
+                            "A key unique to this observation. Retrying with the same key does not write a second note.",
                             1,
                         ),
                     ),
@@ -2073,6 +2075,18 @@ mod tests {
         )
     }
 
+    /// Every description goes to the model on every call: a line continuation missing its `\` left
+    /// a run of spaces in the middle of a sentence.
+    #[test]
+    fn no_tool_description_carries_a_run_of_spaces() {
+        for mode in [TeamBusMode::Team, TeamBusMode::Pipeline] {
+            for tool in tool_definitions(mode, true, true) {
+                let text = tool.to_string();
+                assert!(!text.contains("  "), "{text}");
+            }
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn all_tools_emit_events_and_dispatch_runs_a_second_agent() -> Result<()> {
@@ -2091,7 +2105,15 @@ mod tests {
             spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &worker)],
+            agents: vec![
+                test_agent("lead", OFFLINE),
+                AgentConfig {
+                    role: "You find the facts for the brief.\nHow to work:\n- Use primary \
+                           sources.\n- Check every link before you reply."
+                        .into(),
+                    ..test_agent("worker", &worker)
+                },
+            ],
             edges: Vec::new(),
         });
         let archive = EventArchive::new(pool);
@@ -2138,6 +2160,14 @@ mod tests {
             )
             .await?;
             assert_eq!(response["result"]["isError"], false, "{name}: {response}");
+            if *name == "roster" {
+                // What a teammate is for, in a line, as the opening prompt shows it: its own
+                // instructions are its business, and a lead pays for every line it reads.
+                assert_eq!(
+                    response["result"]["structuredContent"][1]["role"],
+                    "You find the facts for the brief."
+                );
+            }
             if *name == "ask" {
                 assert_eq!(
                     response["result"]["structuredContent"]["reply"],

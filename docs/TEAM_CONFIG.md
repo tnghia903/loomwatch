@@ -456,7 +456,12 @@ conversation:
 
 A stage does not receive its predecessor's transcript. When its own work is done, each non-final
 stage is asked — in the session it already built — to write a handover under fixed headings, and
-that is what the next stage reads. The predecessor's session then stays open while its successor
+that is what the next stage reads. A reply no longer than a handover (`summaryChars` plus about
+250 characters per finding, 3,200 by default) is handed to the agents after it as written, with no
+handover turn: it cannot be made shorter, and its role already shaped it for the next stage. A
+review stop always gets the handover, because you decide from its summary and open questions. A
+step that checks its predecessor is handed the work as written either way. The predecessor's
+session then stays open while its successor
 runs, so anything the brief left out can be pulled with the Team Bus `ask` tool and answered from
 the context that produced it. `allowRecruiting: false` does not block such a question: that flag
 governs recruiting a helper, not talking to the stage before you.
