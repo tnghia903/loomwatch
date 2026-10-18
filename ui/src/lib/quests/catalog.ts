@@ -85,9 +85,9 @@ export const QUESTS: readonly Quest[] = [
   },
   {
     item: 'cushion', reward: 'accessory', area: 'harness', name: 'Wrist pincushion', practice: 'Test before you ship',
-    hint: 'Try an agent on its test bench in Your agents before a team uses it.',
+    hint: 'Try an agent on its test bench in My agents before a team uses it.',
     why: 'An agent acts over many steps and changes things, so a trial run catches problems before they reach real work.',
-    earnedWhen: 'A team run finishes with an agent from Your agents that had a test bench run that finished before it.',
+    earnedWhen: 'A team run finishes with an agent from My agents that had a test bench run that finished before it.',
   },
   {
     item: 'shuttle', reward: 'accessory', area: 'graph', name: 'Shuttle', practice: 'Orchestrator and workers',

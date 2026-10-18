@@ -34,7 +34,7 @@ describe('team templates', () => {
   })
 
   // A team made from Your agents is what the canvas would make placing each one: linked copies.
-  it('writes a schema-valid team of Your agents, each a linked copy of its saved version', () => {
+  it('writes a schema-valid team of My agents, each a linked copy of its saved version', () => {
     const jobs = [
       { id: 'reader', file: 'reader.yaml', name: 'Reader', instructions: 'Read every source you are given and list what each one says.', model: FAST_MODEL, skills: ['notebooklm'], allow: { web: true }, version: 3 },
       { id: 'reader-2', file: 'reader-2.yaml', name: 'Reader', instructions: 'Read the second half of the sources and list what each one says.' },

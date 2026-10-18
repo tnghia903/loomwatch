@@ -1,5 +1,5 @@
 /* Your agents: the list, the builder and its chat, the ID card, Home's row of agents, and the
-   agent panel's "From Your agents" section. Built on Home's frame (home.css) and the app's tokens:
+   agent panel's "From My agents" section. Built on Home's frame (home.css) and the app's tokens:
    gold (accent) for your actions, blue (live) for work running now, red (alert) for what needs you. */
 
 .agents-main { gap: var(--sp-7); width: min(1180px, 100%); }

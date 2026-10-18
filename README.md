@@ -78,7 +78,7 @@ and asks.
 
 **Build an agent** once: its job, the model it thinks with, its skills, and the keys it may use
 without asking, such as the web or running commands. Pick it a face, **try it on its own**
-with a real request, and save it to **Your agents**. Change its job later and it becomes the next
+with a real request, and save it to **My agents**. Change its job later and it becomes the next
 version; a team keeps the version it was given until you choose **Update**.
 
 </td>
@@ -160,7 +160,7 @@ you decide**, and the finished answer comes with the evidence to check before yo
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
 | Each AI app keeps its own skills and folders. | Skills and the folders and files you choose are delivered to the agents that need them. Take one off and it is turned off for that agent. |
-| You set the same agent up again in every project. | Build it once in Your agents, try it on its own, and add it to any team. Teams keep their version until you choose Update. |
+| You set the same agent up again in every project. | Build it once in My agents, try it on its own, and add it to any team. Teams keep their version until you choose Update. |
 | Doing the job again means retyping the prompt. | One chat per team that remembers the conversation, **@** an agent to redo one step, and daily schedules. |
 
 ## How a run works
@@ -215,7 +215,7 @@ with a lead that hands out work and asks its teammates questions as it goes.
 <tr>
 <td width="33%" valign="top">
 
-### 🧑‍🔧 Your agents
+### 🧑‍🔧 My agents
 
 Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
 **Chat** tab, then add it to any team. A new job makes a new version, and teams keep theirs until
@@ -252,7 +252,7 @@ checks, a free model drafts. Every run's receipt shows exactly what it cost.
 
 ### 🗺️ Connect a workflow
 
-Add agents from **Your agents** and a **You** review step where you want to check the work, connect
+Add agents from **My agents** and a **You** review step where you want to check the work, connect
 them in order, and read your team back as one plain sentence before anything runs.
 
 </td>
@@ -348,7 +348,7 @@ to the model you chose, through OpenRouter.
 
 ## Teams you can build
 
-Every team below is made of agents you build in **Your agents**, each starting from a job such as
+Every team below is made of agents you build in **My agents**, each starting from a job such as
 Researcher or Writer, on the model its kind of work suits. Start from **New team** with the agents
 you built, then add, connect and rename agents to match. To run a team on a schedule, ask
 [Ask LoomWatch](#ask-loomwatch-to-set-up-a-team) to add one, or see [Routines](docs/WATCH.md#routines).
@@ -750,10 +750,10 @@ with what should change; under its new version, **Continue with the team** runs 
    **Blank**. Give it a name, change its instructions, model and how hard it thinks to fit your work,
    pin up the skills it needs and hand it the keys it may use without asking. Pick it a face, then
    open its **Chat** tab and give it a real request: it runs on your key, and asks you before it uses
-   a key it wasn't given. **Save to Your agents** when it does the job.
+   a key it wasn't given. **Save to My agents** when it does the job.
 3. Click **New team**, give it a name and choose the agents it starts with. A team always starts
    with at least one:
-   - **Your agents** — tick the agents you built; each joins as the version you saved (recommended
+   - **My agents** — tick the agents you built; each joins as the version you saved (recommended
      once you have one).
    - **One assistant** — a single agent that does the whole task (recommended to begin with).
    - **Researcher and writer** — one agent gathers facts, a second writes the result.
@@ -766,7 +766,7 @@ with what should change; under its new version, **Continue with the team** runs 
    Ready-made teams are saved straight away, each agent on the model its job suits, so you can run
    them immediately.
 4. A team has three tabs: **Agents**, **Workflow** and **Chat**. On **Agents**, click **Add an
-   agent** to bring in one from Your agents. On **Workflow**, add more from **Your agents** in the
+   agent** to bring in one from My agents. On **Workflow**, add more from **My agents** in the
    panel on the left; to make a new one, choose **Build a new agent** and start from a job such as
    Researcher or Writer. Select a card to edit its name, instructions, model and how hard it
    thinks. Drag from the dot on a card's right edge to the next card to make them work in order, and
@@ -1035,7 +1035,7 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Team definitions and canvas layouts | `~/LoomWatch/teams`; Compose-only deployments use `LOOMWATCH_TEAMS_DIR` |
 | Brief files | Paths configured by the team, usually beside its YAML file |
 | Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
-| Your agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that an agent's **Chat** runs are in `.jobs/.bench` |
+| My agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that an agent's **Chat** runs are in `.jobs/.bench` |
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | Your OpenRouter key | This Mac's Keychain, as `LoomWatch.OpenRouter`. On Windows, Windows Credential Manager, as `api-key.LoomWatch.OpenRouter`. On Linux and in Compose, `keys.json` in LoomWatch's state folder, readable only by your user |
@@ -1070,19 +1070,24 @@ delete its folder from `.trash`.
 </details>
 
 <details>
-<summary>Reusing an agent with Your agents</summary>
+<summary>Reusing an agent with My agents</summary>
 
-Build an agent in **Your agents** (**Build an agent** on Home), or keep one that works in a team:
-select it and choose **Add to Your agents**. It appears under **Your agents** in every team's add
+Build an agent in **My agents** (**Build an agent** on Home), or keep one that works in a team:
+select it and choose **Add to My agents**. It appears under **My agents** in every team's add
 panel, with its instructions, model, skills and what it may do without asking.
 
 Placing it copies that version into the team, so a team runs exactly what it was approved with.
 Saving a change to what a team copies, such as its job, makes the next version and keeps the
 earlier ones; a new face keeps the version. The agent's panel in a team says when a newer version
-is ready and offers **Update to v…**, **Edit in Your agents**, or **Make it this team's own** to
+is ready and offers **Update to v…**, **Edit in My agents**, or **Make it this team's own** to
 change it there alone. The builder lists the teams that use the agent and the version each one has.
-Removing an agent from Your agents leaves the teams' copies alone. An agent is one small file, so
+Removing an agent from My agents leaves the teams' copies alone. An agent is one small file, so
 you can share it by copying it into another teams folder's `.jobs`.
+
+An agent made inside a team, such as one from a ready-made team, is listed under **My agents** too,
+with its team's name. In the add panel, one of this team's own finds its card on the canvas, and
+another team's is added as a copy this team owns. Its knowledge and work folder stay with the team
+it came from.
 
 </details>
 

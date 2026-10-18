@@ -33,8 +33,8 @@ export function SaveAsJob({ agent, onLinked }: { agent: AgentConfig; onLinked?: 
 
   if (step.kind === 'closed' || step.kind === 'saved') {
     return <div className="save-job">
-      <button className="btn" disabled={!agent.role.trim()} title={agent.role.trim() ? 'Keep this agent under Your agents, to build on and use in any team' : 'Write its instructions first'} onClick={() => { setName(agent.name); setDoes(''); setError(null); setStep({ kind: 'naming' }) }}><BookmarkPlus size={13} />Add to Your agents</button>
-      {step.kind === 'saved' && <p className="save-job-note" role="status">Added “{step.name}” to Your agents as v{step.version}.{step.linked ? ' This agent now follows it. Save the team to keep the link.' : ''}</p>}
+      <button className="btn" disabled={!agent.role.trim()} title={agent.role.trim() ? 'Keep this agent under My agents, to build on and use in any team' : 'Write its instructions first'} onClick={() => { setName(agent.name); setDoes(''); setError(null); setStep({ kind: 'naming' }) }}><BookmarkPlus size={13} />Add to My agents</button>
+      {step.kind === 'saved' && <p className="save-job-note" role="status">Added “{step.name}” to My agents as v{step.version}.{step.linked ? ' This agent now follows it. Save the team to keep the link.' : ''}</p>}
     </div>
   }
 
@@ -54,17 +54,17 @@ export function SaveAsJob({ agent, onLinked }: { agent: AgentConfig; onLinked?: 
         return
       }
       // A server started before saved jobs existed has no such route until it is restarted.
-      setError(failed instanceof JobApiError && failed.status === 404 ? 'This LoomWatch server is older than Your agents. Restart it, then save again.' : failed instanceof Error ? failed.message : String(failed))
+      setError(failed instanceof JobApiError && failed.status === 404 ? 'This LoomWatch server is older than My agents. Restart it, then save again.' : failed instanceof Error ? failed.message : String(failed))
       setStep({ kind: 'naming' })
     }
   }
   const skills = spec().skills ?? []
 
   const allowed = Object.values(agent.allow ?? {}).some(Boolean)
-  return <form ref={form} className="save-job-form" aria-label="Add to Your agents" onSubmit={(event) => { event.preventDefault(); if (name.trim()) void save(false) }}>
-    <label>Name in Your agents<input value={name} autoFocus onChange={(event) => { setName(event.target.value); if (step.kind === 'replace') setStep({ kind: 'naming' }) }} maxLength={80} /></label>
+  return <form ref={form} className="save-job-form" aria-label="Add to My agents" onSubmit={(event) => { event.preventDefault(); if (name.trim()) void save(false) }}>
+    <label>Name in My agents<input value={name} autoFocus onChange={(event) => { setName(event.target.value); if (step.kind === 'replace') setStep({ kind: 'naming' }) }} maxLength={80} /></label>
     <label><span>What it does <span className="optional">optional</span></span><input value={does} onChange={(event) => setDoes(event.target.value)} placeholder="e.g. Drafts release notes" maxLength={120} /></label>
-    <p className="save-job-note">Keeps its instructions{agent.model ? ', model' : ''}{skills.length ? `, ${skills.length === 1 ? 'its skill' : `${skills.length} skills`}` : ''}{allowed ? ' and what it may do without asking' : ''}. You can build on it in Your agents and add it to any team.</p>
+    <p className="save-job-note">Keeps its instructions{agent.model ? ', model' : ''}{skills.length ? `, ${skills.length === 1 ? 'its skill' : `${skills.length} skills`}` : ''}{allowed ? ' and what it may do without asking' : ''}. You can build on it in My agents and add it to any team.</p>
     {error && <p role="alert">{error}</p>}
     {step.kind === 'replace'
       ? <div className="save-job-actions"><p role="alert">You already have an agent called “{name.trim()}”. Save this as its next version? Teams using it change only when you choose Update in them.</p><button type="button" className="btn btn-primary" onClick={() => void save(true)}>Save as next version</button><button type="button" className="btn" onClick={() => setStep({ kind: 'naming' })}>Keep both — rename</button></div>

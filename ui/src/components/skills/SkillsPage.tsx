@@ -32,7 +32,7 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
       <header className="home-top">
         <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
-          <a className="btn" href="/agents">Your agents</a>
+          <a className="btn" href="/agents">My agents</a>
           <a className="btn lw-skills-teams-link" href="/">Your teams</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>

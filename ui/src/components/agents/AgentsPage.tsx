@@ -103,7 +103,7 @@ function AgentsList() {
   return (
     <>
       <section className="home-hero agents-hero">
-        <h1 className="t-display">Your agents</h1>
+        <h1 className="t-display">My agents</h1>
         <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the version it was given until you update it there.</p>
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
@@ -112,8 +112,8 @@ function AgentsList() {
 
 
       <section className="home-teams" aria-labelledby="agents-title">
-        <div className="home-teams-head"><h2 id="agents-title">Your agents</h2></div>
-        {!available && <p role="alert" className="home-empty alert">This LoomWatch server is older than Your agents. Restart it to use them.</p>}
+        <div className="home-teams-head"><h2 id="agents-title">My agents</h2></div>
+        {!available && <p role="alert" className="home-empty alert">This LoomWatch server is older than My agents. Restart it to use them.</p>}
         {error && <p role="alert" className="home-empty alert">Couldn’t list your agents. {error}</p>}
         {available && !loaded && <p role="status" className="home-empty">Loading your agents…</p>}
         {available && loaded && jobs.length === 0 && own !== null && (
@@ -138,7 +138,7 @@ function AgentsList() {
       {own && own.length > 0 && (
         <section className="home-teams" aria-labelledby="agents-in-teams-title">
           <div className="home-teams-head"><h2 id="agents-in-teams-title">In your teams<span className="home-section-says">Each works in its own team</span></h2></div>
-          <p className="agents-in-teams-note">These agents were made inside a team, so each one is changed there. To use one in other teams too, keep it: select it in its team’s Workflow and choose <b>Add to Your agents</b>.</p>
+          <p className="agents-in-teams-note">These agents were made inside a team, so each one is changed there. To use one in other teams too, keep it: select it in its team’s Workflow and choose <b>Add to My agents</b>.</p>
           <ul className="home-agents-row">
             {own.map((agent) => (
               <li key={`${agent.teamPath}#${agent.agentId}`}><a className="home-agent-chip" href={teamAgentHref(agent)} title={`Open ${agent.agentName} in ${agent.teamName}`}><FigureStill className="home-agent-figure" figure={figureFor(agent.agentId)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{agent.agentName}</b><span className="home-agent-team">in {agent.teamName}</span></a></li>

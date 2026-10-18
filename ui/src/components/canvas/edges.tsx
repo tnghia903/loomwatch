@@ -1,4 +1,4 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 
 import { routeEdge } from './route'
 
@@ -30,11 +30,8 @@ export function WarpEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
 
 // Observed (weft): gold, dashed, travelling. dispatch 6 4; ask 2 3 both ends; handoff 10 4 heavy.
 export function WeftEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, markerStart, data }: EdgeProps<WeftEdge>) {
-  // Observed calls keep the weft's curve on a plain relay; every other shape is the shared route.
-  const routed = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
-  const [path, labelX, labelY] = routed.kind === 'forward'
-    ? getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
-    : [routed.path, routed.labelX, routed.labelY]
+  // Observed calls take the same straight, rounded-corner route as the planned lines.
+  const { path, labelX, labelY } = routeEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
   const kind = data?.kind ?? 'dispatch'
   return (
     <>

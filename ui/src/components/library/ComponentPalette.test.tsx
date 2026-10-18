@@ -9,14 +9,23 @@ import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY
 let jobs: object[] = []
 let problems: object[] = []
 const removed: string[] = []
+/** Team files by path, with the team's name, for the agents that live in teams. */
+let teams: Record<string, { name: string; yaml: string }> = {}
 
 beforeEach(() => {
   jobs = []
   problems = []
+  teams = {}
   removed.length = 0
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url === '/api/jobs') return new Response(JSON.stringify({ folder: '.jobs', jobs, problems }), { status: 200 })
+    if (url === '/api/teams') return new Response(JSON.stringify({ root: '/teams', files: Object.keys(teams), teams: Object.entries(teams).map(([path, team]) => ({ path, name: team.name, agentCount: 2 })) }), { status: 200 })
+    if (url.startsWith('/api/team?')) {
+      const path = new URLSearchParams(url.slice('/api/team?'.length)).get('path') ?? ''
+      const team = teams[path]
+      return team ? new Response(JSON.stringify({ path, yaml: team.yaml, revision: 'r1' }), { status: 200 }) : new Response(JSON.stringify({ error: 'no such team' }), { status: 404 })
+    }
     if (url.startsWith('/api/jobs/') && init?.method === 'DELETE') {
       const id = decodeURIComponent(url.slice('/api/jobs/'.length))
       removed.push(id)
@@ -38,10 +47,10 @@ describe('ComponentPalette jobs', () => {
     expect(screen.queryByRole('heading', { name: 'Hire by job' })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Researcher/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Blank agent/ })).toBeNull()
-    const yours = section('Your agents')
+    const yours = section('My agents')
     expect(await within(yours).findByText('None yet')).toBeInTheDocument()
     expect(within(yours).getByRole('link', { name: 'Build a new agent' })).toHaveAttribute('href', '/agents/new?team=desk%2Fresearch.yaml')
-    fireEvent.click(within(yours).getByRole('button', { name: 'About Your agents' }))
+    fireEvent.click(within(yours).getByRole('button', { name: 'About My agents' }))
     expect(await screen.findByText(/select it and choose/)).toBeInTheDocument()
     // The review step is a step of the workflow, not an agent, so it stays here.
     expect(within(section('Workflow steps')).getByRole('button', { name: /^You \(review step\)/ })).toBeInTheDocument()
@@ -52,9 +61,9 @@ describe('ComponentPalette jobs', () => {
     const added = vi.fn()
     window.addEventListener('loomwatch:add-agent', added)
     palette()
-    const yours = await waitFor(() => section('Your agents'))
+    const yours = await waitFor(() => section('My agents'))
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent)
-    expect(headings.indexOf('Your agents')).toBeLessThan(headings.indexOf('Workflow steps'))
+    expect(headings.indexOf('My agents')).toBeLessThan(headings.indexOf('Workflow steps'))
     fireEvent.click(within(yours).getByRole('button', { name: /^Release notes/ }))
     const payload = JSON.parse((added.mock.calls[0][0] as CustomEvent<string>).detail)
     expect(payload).toMatchObject({ label: 'Release notes', role: 'Write the notes.', model: 'openai/gpt-6.1-sol', capabilities: [{ kind: 'skill', name: 'release-style' }], from: { agent: 'release-notes', version: 1 } })
@@ -70,7 +79,46 @@ describe('ComponentPalette jobs', () => {
     expect(removed).toEqual([])
     fireEvent.click(screen.getByRole('button', { name: 'Confirm removing Release notes' }))
     await waitFor(() => expect(removed).toEqual(['release-notes']))
-    expect(await within(section('Your agents')).findByText('None yet')).toBeInTheDocument()
+    expect(await within(section('My agents')).findByText('None yet')).toBeInTheDocument()
+  })
+
+  // Home lists the agents written straight into a team with My agents; the canvas must list the same ones.
+  it('lists the agents that live in teams: this team’s find their card, and another team’s come as a copy', async () => {
+    teams = {
+      'research/rag.yaml': { name: 'Enterprise RAG research', yaml: 'schemaVersion: 1\nid: rag\nname: Enterprise RAG research\nentrypoint: rag-researcher\nagents:\n  - id: rag-researcher\n    name: RAG researcher\n    role: Research RAG.\n' },
+      'demo/review.yaml': { name: 'Review stop demo', yaml: [
+        'schemaVersion: 1', 'id: review', 'name: Review stop demo', 'entrypoint: researcher', 'agents:',
+        '  - id: researcher', '    name: Researcher', '    role: Find sources.', '    model: openai/gpt-6.1-sol', '    thinkingEffort: high',
+        '    spawn: { cwd: /work/demo }', '    doneWhen: [Every claim has a link]', '    allow: { web: true }',
+        '    capabilities:', '      - { kind: skill, name: web-research }', '      - { kind: knowledge, name: notes, path: demo.files/notes.md }',
+        '  - id: you', '    kind: operator', '    name: You', '    role: Review.',
+      ].join('\n') },
+    }
+    const reveal = vi.fn()
+    const added = vi.fn()
+    window.addEventListener('loomwatch:add-agent', added)
+    render(<ComponentPalette teamPath="/teams/research/rag.yaml" teamAgents={[{ id: 'rag-researcher', name: 'RAG researcher' }]} onRevealAgent={reveal} />)
+    const yours = section('My agents')
+    const other = await within(yours).findByRole('button', { name: /^Researcher/ })
+    expect(other).toHaveTextContent('in Review stop demo')
+    // This team's agent is listed once, from the canvas, and a click finds its card instead of adding another.
+    const here = within(yours).getAllByRole('button', { name: /^RAG researcher/ })
+    expect(here).toHaveLength(1)
+    expect(here[0]).toHaveTextContent('On this canvas')
+    fireEvent.click(here[0])
+    expect(reveal).toHaveBeenCalledWith('rag-researcher')
+    expect(added).not.toHaveBeenCalled()
+    // The review step is not an agent.
+    expect(within(yours).queryByRole('button', { name: /^You/ })).toBeNull()
+    expect(within(yours).queryByText('None yet')).toBeNull()
+    fireEvent.click(other)
+    const payload = JSON.parse((added.mock.calls[0][0] as CustomEvent<string>).detail)
+    expect(payload).toMatchObject({ label: 'Researcher', role: 'Find sources.', model: 'openai/gpt-6.1-sol', thinkingEffort: 'high', doneWhen: ['Every claim has a link'], allow: { web: true } })
+    // A copy this team owns: no link back, and nothing that names where the other team keeps its files.
+    expect(payload.capabilities).toEqual([{ kind: 'skill', name: 'web-research' }])
+    expect(payload).not.toHaveProperty('from')
+    expect(payload).not.toHaveProperty('spawn')
+    window.removeEventListener('loomwatch:add-agent', added)
   })
 
   it('says which job file it could not read instead of hiding it', async () => {
