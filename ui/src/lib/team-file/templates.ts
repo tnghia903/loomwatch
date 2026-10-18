@@ -177,13 +177,17 @@ export function templateTeamYaml(template: TeamTemplateId, name: string, now = n
 
 /**
  * A team of some of Your agents, as YAML text ready to save. Each joins as the canvas places one:
- * a copy of its current version, linked to it, so the team keeps that version until Update. The
- * first is where a request starts; connecting the rest is the Workflow's job, as it is for agents
- * added later. `agents` must not be empty: a team always starts with agents.
+ * a copy of its current version, linked to it, so the team keeps that version until Update. They
+ * are connected in the order they are placed, each handing its work to the next, so a request
+ * starts with the first and the last one answers. Unconnected, the first would lead the others
+ * without being told it leads, and they would never see the request. The Workflow rewires them
+ * like any other team. `agents` must not be empty: a team always starts with agents.
  */
-export function agentsTeamYaml(agents: readonly SavedJob[], name: string, id = slugifyTeamName(name)): string {
+export function agentsTeamYaml(agents: readonly SavedJob[], name: string, id = slugifyTeamName(name), now = new Date()): string {
   if (agents.length === 0) throw new Error('a team starts with at least one agent')
   const placed: AgentConfig[] = []
   for (const job of agents) placed.push(buildAgentFromSource(roleSource(savedJobPreset(job)), placed))
-  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: placed[0].id, agents: placed, edges: [] }, { lineWidth: 0 })
+  const ts = now.toISOString()
+  const edges = placed.slice(1).map((agent, index) => sequence(placed[index].id, agent.id, ts))
+  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: placed[0].id, agents: placed, edges }, { lineWidth: 0 })
 }

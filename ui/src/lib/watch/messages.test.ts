@@ -95,6 +95,43 @@ describe('messages between agents', () => {
     expect(messages[1]).toMatchObject({ state: 'failed', error: 'cycle detected: lead -> lead', reply: null })
   })
 
+  // The daemon records a question back on the answer and a clarification on the ask that answers
+  // it; every round is its own call, so the record reads in order however many rounds there were.
+  it('reads a question back and the clarifications answering it, round by round, from the record', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'writer', 'q1', 'ask', { agent: 'researcher', question: 'How many did it sell?' }),
+      settled(5, 'writer', 'q1', { agent: 'researcher', reply: 'It depends.\n\n## Question back\nWhich year?', live: true, round: 1, clarifies: false, questionBack: 'Which year?', backsLeft: 2 }),
+      bus(6, 'writer', 'q2', 'ask', { agent: 'researcher', question: '2025.' }),
+      settled(9, 'writer', 'q2', { agent: 'researcher', reply: '**Question back:**\nWhich quarter?', live: true, round: 2, clarifies: true, questionBack: 'Which quarter?', backsLeft: 1 }),
+      bus(10, 'writer', 'q3', 'ask', { agent: 'researcher', question: 'Any quarter.' }),
+      settled(14, 'writer', 'q3', { agent: 'researcher', reply: '42, assuming Q4.', live: true, round: 3, clarifies: true }),
+    ])
+    expect(messages.map(({ text, clarifies, reply }) => ({ text, clarifies: clarifies ?? false, asksBack: reply?.asksBack ?? false, answer: reply?.text }))).toEqual([
+      { text: 'How many did it sell?', clarifies: false, asksBack: true, answer: 'It depends.\n\n## Question back\nWhich year?' },
+      { text: '2025.', clarifies: true, asksBack: true, answer: '**Question back:**\nWhich quarter?' },
+      { text: 'Any quarter.', clarifies: true, asksBack: false, answer: '42, assuming Q4.' },
+    ])
+  })
+
+  it('keeps why the Team Bus would not put a question, when it recorded a reason, and only then', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'writer', 'q1', 'ask', { agent: 'researcher', question: 'Which source?' }),
+      settled(1, 'writer', 'q1', { error: 'Researcher has finished its part of this run…', refused: 'finished' }, 'failed'),
+      bus(2, 'writer', 'q2', 'ask', { agent: 'editor', question: 'And you?' }),
+      settled(2, 'writer', 'q2', { error: 'You have asked Editor 3 questions…', refused: 'limit' }, 'failed'),
+      bus(3, 'writer', 'q3', 'ask', { agent: 'editor', question: 'Older?' }),
+      settled(3, 'writer', 'q3', { error: 'cycle detected', refused: 'something new' }, 'failed'),
+    ])
+    expect(messages.map(({ state, refused, error }) => ({ state, refused, error }))).toEqual([
+      { state: 'failed', refused: 'finished', error: 'Researcher has finished its part of this run…' },
+      { state: 'failed', refused: 'limit', error: 'You have asked Editor 3 questions…' },
+      // A reason this version does not know reads as a failure in the Team Bus's own words.
+      { state: 'failed', refused: undefined, error: 'cycle detected' },
+    ])
+  })
+
   it('marks an answer cut short at a spending limit as stopped, keeping why (ADR 0068)', () => {
     seq = 0
     const { messages } = projectRun([

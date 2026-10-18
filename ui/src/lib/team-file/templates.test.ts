@@ -33,22 +33,37 @@ describe('team templates', () => {
     }
   })
 
-  // A team made from Your agents is what the canvas would make placing each one: linked copies.
+  // A team made from Your agents is what the canvas would make placing each one: linked copies,
+  // each handing its work to the next in the order they were placed.
   it('writes a schema-valid team of My agents, each a linked copy of its saved version', () => {
     const jobs = [
       { id: 'reader', file: 'reader.yaml', name: 'Reader', instructions: 'Read every source you are given and list what each one says.', model: FAST_MODEL, skills: ['notebooklm'], allow: { web: true }, version: 3 },
       { id: 'reader-2', file: 'reader-2.yaml', name: 'Reader', instructions: 'Read the second half of the sources and list what each one says.' },
     ]
-    const doc = parse(agentsTeamYaml(jobs, ' Digest ', 'digest')) as TeamDocument
+    const doc = parse(agentsTeamYaml(jobs, ' Digest ', 'digest', new Date('2026-10-18T00:00:00Z'))) as TeamDocument
     const result = validate(doc)
     expect(result.documentProblems).toEqual([])
     expect(result.valid).toBe(true)
-    expect(doc).toMatchObject({ id: 'digest', name: 'Digest', entrypoint: 'reader', edges: [], spend: { perRun: 1 } })
+    expect(doc).toMatchObject({ id: 'digest', name: 'Digest', entrypoint: 'reader', spend: { perRun: 1 } })
     expect(doc.agents[0]).toMatchObject({ id: 'reader', model: FAST_MODEL, capabilities: [{ kind: 'skill', name: 'notebooklm' }], allow: { web: true }, from: { agent: 'reader', version: 3 } })
     // Two agents with one name still get their own ids.
     expect(doc.agents[1]).toMatchObject({ name: 'Reader', from: { agent: 'reader-2', version: 1 } })
     expect(doc.agents[1].id).not.toBe('reader')
+    expect(doc.edges).toEqual([{ from: 'reader', to: doc.agents[1].id, layer: 'configured', kind: 'sequence', ts: '2026-10-18T00:00:00.000Z' }])
     expect(() => agentsTeamYaml([], 'Nobody')).toThrow()
+  })
+
+  // Unconnected, the first agent would lead the rest without knowing it, and they would never see
+  // the request: a pipeline in the order placed, first to last, whatever the number.
+  it('connects My agents first to last in the order they are placed', () => {
+    const job = (id: string, name: string) => ({ id, file: `${id}.yaml`, name, instructions: `Do the ${name.toLowerCase()} part of the request and hand it on.` })
+    const one = parse(agentsTeamYaml([job('solo', 'Solo')], 'One')) as TeamDocument
+    expect(one.edges).toEqual([])
+    const doc = parse(agentsTeamYaml([job('gather', 'Gather'), job('draft', 'Draft'), job('polish', 'Polish'), job('send', 'Send')], 'Four')) as TeamDocument
+    expect(validate(doc).valid).toBe(true)
+    expect(doc.entrypoint).toBe('gather')
+    expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['gather->draft', 'draft->polish', 'polish->send'])
+    expect(doc.edges.every((edge) => edge.layer === 'configured' && edge.kind === 'sequence')).toBe(true)
   })
 
   // ADR 0037: a researcher that cannot search the web can only guess, so it starts allowed to;

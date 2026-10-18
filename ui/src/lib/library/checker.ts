@@ -24,10 +24,24 @@ export function isCheckerRole(role: string): boolean {
 }
 
 /**
- * The agent whose reply is the team's answer when a pipeline ends on `terminal`: the agent it
- * checks, when it is a check step (the daemon's `responder_id`), else itself.
+ * The agent whose reply is the team's answer when a pipeline ends on `terminal`, as the daemon's
+ * `responder_id` decides it. A review stop answers with the work it approved: the agent that feeds
+ * it, through any stops before it, while exactly one does. Then a check step answers with the agent
+ * it checks. Anything else answers itself.
  */
-export function answeringAgent(terminal: string | null, agents: readonly Pick<AgentConfig, 'id' | 'checks'>[]): string | null {
+export function answeringAgent(
+  terminal: string | null,
+  agents: readonly Pick<AgentConfig, 'id' | 'checks' | 'kind'>[],
+  edges: readonly { from: string; to: string }[] = [],
+): string | null {
   if (!terminal) return terminal
-  return agents.find((agent) => agent.id === terminal)?.checks ?? terminal
+  let answering = terminal
+  const seen = new Set<string>()
+  while (agents.find((agent) => agent.id === answering)?.kind === 'operator' && !seen.has(answering)) {
+    seen.add(answering)
+    const feeding = edges.filter((edge) => edge.to === answering)
+    if (feeding.length !== 1) break
+    answering = feeding[0].from
+  }
+  return agents.find((agent) => agent.id === answering)?.checks ?? answering
 }

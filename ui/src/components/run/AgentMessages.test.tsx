@@ -144,6 +144,55 @@ describe('Team chat', () => {
     expect(screen.getByRole('note')).toHaveTextContent('Not delivered: cycle detected')
   })
 
+  it('shows each round of a clarification, in order, with who asked whom', () => {
+    const round = (id: string, seq: number, text: string, reply: MessageReply, clarifies = false) => message({ id, kind: 'ask', from: 'writer', to: 'researcher', text, seq, offsetMs: seq * 1000, ts: at(seq), state: 'answered', reply, ...(clarifies ? { clarifies: true as const } : {}) })
+    setup([
+      round('q1', 50, 'How many did it sell?', answer('researcher', 'It depends.\n\n## Question back\nWhich year?', 55, { seq: 55, asksBack: true })),
+      round('q2', 60, '2025.', answer('researcher', '42 in 2025.', 65, { seq: 65 }), true),
+    ])
+    expect(said().map((item) => item.getAttribute('aria-label')?.replace(/^[^,]+, /, ''))).toEqual([
+      'Writer to Researcher: question',
+      'Researcher to Writer: asks back',
+      'Writer to Researcher: clarifies',
+      'Researcher to Writer: answer',
+    ])
+    // Each round says what it is under it, and the question back is shown as the agent wrote it.
+    expect(within(msg(/asks back/)).getByText('asks back')).toBeInTheDocument()
+    expect(within(msg(/asks back/)).getByText('Which year?')).toBeInTheDocument()
+    expect(within(msg(/clarifies/)).getByText('clarifies')).toBeInTheDocument()
+    expect(within(msg(/clarifies/)).getByText('@Researcher')).toBeInTheDocument()
+    // The answer quotes the clarification it answers.
+    expect(within(msg(/Researcher to Writer: answer/)).getByRole('blockquote')).toHaveTextContent('Writer2025.')
+  })
+
+  // A team-mode helper is brought in fresh for each round; the chat reads the same.
+  it('reads a clarification with a helper brought in for it the same way', () => {
+    const helperOrder = [{ id: 'lead', name: 'Research lead', operator: false }, { id: 'writer', name: 'Writer', operator: false }]
+    render(<AgentMessages messages={[
+      message({ id: 'q1', kind: 'ask', from: 'lead', to: 'writer', text: 'Write the note.', seq: 1, state: 'answered', reply: answer('writer', '## Question back\nFor whom?', 5, { seq: 5, source: 'fresh', asksBack: true }) }),
+      message({ id: 'q2', kind: 'ask', from: 'lead', to: 'writer', text: 'First-time users.', seq: 6, state: 'answered', clarifies: true, reply: answer('writer', 'The note.', 9, { seq: 9, source: 'fresh' }) }),
+    ]} order={helperOrder} evidence={[]} live={false} onInspectEvidence={vi.fn()} />)
+    expect(said().map((item) => item.getAttribute('aria-label')?.replace(/^[^,]+, /, ''))).toEqual([
+      'Research lead to Writer: question',
+      'Writer to Research lead: asks back',
+      'Research lead to Writer: clarifies',
+      'Writer to Research lead: answer',
+    ])
+  })
+
+  it('says in one line why a question was not asked, with the Team Bus’s words a hover away', () => {
+    const refusal = (reason: TeamMessage['refused']) => ({ ...askBack, id: `writer:${reason}`, state: 'failed' as const, reply: null, error: 'The Team Bus’s own words.', refused: reason })
+    setup([refusal('finished'), refusal('limit')])
+    const lines = said()
+    expect(lines.map((item) => item.textContent?.replace(/\d+:\d+.*$/, ''))).toEqual([
+      'Writer asked Researcher, but Researcher had already finished its part of this run',
+      'Writer had already asked Researcher as many questions as this team allows, so this one wasn’t sent',
+    ])
+    expect(lines[0]).toHaveClass('chat-notice')
+    expect(lines[0]).toHaveAttribute('title', 'Which spec version did you read?\n\nThe Team Bus’s own words.')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
   it('cuts a long message to its first lines, with the rest a click away', () => {
     setup([{ ...handover, text: Array.from({ length: 12 }, (_, index) => `Line ${index + 1}`).join('\n\n') }])
     const more = screen.getByRole('button', { name: 'Read more' })

@@ -41,7 +41,7 @@ pub mod wardrobe;
 pub mod watch_api;
 pub mod workspace;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -624,8 +624,9 @@ async fn run_pipeline_nodes(
     // are rendered under different headings and under opposite cautions (§9): a handover is source
     // material, an answer is direction.
     let mut directions: BTreeMap<String, String> = BTreeMap::new();
-    // The stage before the one now running, kept answerable until this one finishes.
-    let mut held: Option<(String, crate::team_bus::LiveAgent)> = None;
+    // Finished stages kept answerable while a stage they feed still has its work turn to take
+    // (`release_answered`).
+    let mut held: Vec<(String, crate::team_bus::LiveAgent)> = Vec::new();
     // The stage before a review stop, parked while the person at the keyboard thinks. A different
     // thing from `held`: that one is answerable to the *next stage*, this one is holding still for
     // a person, and decision 7 says what holding still costs.
@@ -642,6 +643,20 @@ async fn run_pipeline_nodes(
         .as_deref()
         .and_then(|only| order.iter().position(|stage| stage == only));
     let mut first_executed = true;
+    // The stages that still take a work turn in this run: what decides how long a finished stage
+    // stays answerable. Those before the start were replayed, so their work is handed on and
+    // they cannot be asked.
+    let mut to_ask: BTreeSet<String> = BTreeSet::new();
+    for (index, stage) in order.iter().enumerate() {
+        if is_stop(team, stage) {
+            continue;
+        }
+        if index < start_index {
+            bus.finished(stage);
+        } else if stop_index.is_none_or(|stop| index <= stop) {
+            to_ask.insert(stage.clone());
+        }
+    }
 
     for (index, agent_id) in order.iter().enumerate() {
         if index < start_index {
@@ -658,7 +673,7 @@ async fn run_pipeline_nodes(
         if agent.is_operator() {
             // A review stop. No harness is spawned: the "harness" is the person at the keyboard,
             // and what they type becomes this node's reply.
-            let (answer, handover) = run_review_stop(
+            let (answer, handover, revised) = run_review_stop(
                 team,
                 agent,
                 archive,
@@ -672,6 +687,11 @@ async fn run_pipeline_nodes(
                 memory.notebook_enabled,
             )
             .await?;
+            // Sent back and redone: the redone reply is that stage's work now, and the answer when
+            // the pipeline ends here.
+            if let Some((stage, reply)) = revised {
+                replies.insert(stage, reply);
+            }
             // The stop passes its predecessors' handover through unchanged — the stage after a
             // stop still needs what the stage before it produced — and adds the operator's answer
             // as direction beside it.
@@ -686,8 +706,8 @@ async fn run_pipeline_nodes(
             replies.insert(agent_id.clone(), answer.clone());
             first_executed = false;
             if index + 1 == order.len() {
-                // A pipeline that ends on a stop answers with what the operator wrote. Unusual,
-                // and legal: "approve and we are done" is a pipeline.
+                // "Approve and we are done" is a pipeline. Its answer is the approved work, not
+                // what the operator wrote (`TeamConfig::responder_id`); the run closes here.
                 let session_id = shared_log
                     .as_ref()
                     .map(EventLog::session_id)
@@ -722,6 +742,10 @@ async fn run_pipeline_nodes(
             lineage,
             first_executed,
         );
+        // Offered from who is open in this run right now, not from the edges alone.
+        if !node_prompt.replayed {
+            node_prompt.ask_offer = ask_offer(team, agent_id, &bus.open_agents().await);
+        }
         node_prompt.place = if lineage.only.is_some() {
             Some(orientation::for_one_agent(team, agent))
         } else {
@@ -780,7 +804,8 @@ async fn run_pipeline_nodes(
         // A check step that may send the work back keeps the stage it checks open until it has.
         let sends_back = agent.send_back_once && agent.checks.is_some();
         if !sends_back {
-            release_previous(bus, &mut held, &mut outcome).await?;
+            to_ask.remove(agent_id);
+            release_answered(team, bus, &mut held, &to_ask, &mut outcome).await?;
         }
 
         // The stage called `ask_user` and ended its turn, exactly as the tool told it to. Its
@@ -834,7 +859,8 @@ async fn run_pipeline_nodes(
             .await?;
         }
         if sends_back {
-            release_previous(bus, &mut held, &mut outcome).await?;
+            to_ask.remove(agent_id);
+            release_answered(team, bus, &mut held, &to_ask, &mut outcome).await?;
         }
         let StageSession {
             mut process,
@@ -847,16 +873,30 @@ async fn run_pipeline_nodes(
         // after it: "Continue with the team" hands that to the next stage (ADR 0051).
         let last = truly_last || stop_index == Some(index);
         replies.insert(agent_id.clone(), reply.clone());
+        // Its work is done: from here an `ask` reaches it only while it is kept open below.
+        bus.finished(agent_id);
+        // Kept answerable for the stages it feeds that still take their turn; parked for a review
+        // stop next instead, which nothing but the person can reach.
+        let stays_open =
+            !last && !next_is_operator(team, order, index) && feeds_one_of(team, agent_id, &to_ask);
         if !truly_last {
             // Every stage after this one checks it: they are handed the work as written, so a
-            // summary of it would be a turn paid for and never read (ADR 0062). A reply already as
-            // short as a handover, for agents to read, is handed on as written too.
+            // summary of it would be a turn paid for and never read (ADR 0062). A reply that fits
+            // what its readers are handed is handed on as written too.
             let handover = if only_checked_by_successors(team, agent_id)
                 || reply_is_its_own_handover(team, agent_id, &reply)
             {
                 reply.clone()
             } else {
-                stage_handover(team, order, index, &mut process, &mut recorder, &reply).await?
+                stage_handover(
+                    team,
+                    agent_id,
+                    stays_open,
+                    &mut process,
+                    &mut recorder,
+                    &reply,
+                )
+                .await?
             };
             if last && let Some(log) = shared_log.as_ref() {
                 log.append(
@@ -902,14 +942,16 @@ async fn run_pipeline_nodes(
                 .await?,
             );
         } else {
-            held = Some((
+            held.push((
                 agent_id.clone(),
                 bus.keep_alive(agent_id, process, recorder, reply).await,
             ));
+            // Closed at once when nothing still to run can ask it.
+            release_answered(team, bus, &mut held, &to_ask, &mut outcome).await?;
         }
     }
     // A single-stage pipeline never enters the release branch above.
-    release_previous(bus, &mut held, &mut outcome).await?;
+    release_answered(team, bus, &mut held, &BTreeSet::new(), &mut outcome).await?;
     if let Some(parked) = parked.take() {
         parked.release(archive, exit_timeout).await?;
     }
@@ -1271,6 +1313,9 @@ fn answer_turn(answer: &str) -> String {
 /// "Send back to <predecessor>" re-prompts the still-warm — or reloaded — stage before the stop
 /// with the note, takes its new reply, handover and — when the team has a notebook — checkpoint,
 /// and then runs the stop again with the new handover in front of the operator.
+///
+/// Returns the operator's answer, what the stop hands on, and — when the work was sent back —
+/// the stage that redid it with its new reply.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn run_review_stop(
     team: &TeamConfig,
@@ -1284,7 +1329,7 @@ async fn run_review_stop(
     exit_timeout: Duration,
     team_path: &Path,
     notebook: bool,
-) -> Result<(String, String)> {
+) -> Result<(String, String, Option<(String, String)>)> {
     let desk = lineage.operator.as_ref().with_context(|| {
         format!(
             "{} is a review stop, and this run has nobody to ask: a `loomwatchd run` has no \
@@ -1305,6 +1350,7 @@ async fn run_review_stop(
         .get(&node.id)
         .cloned()
         .unwrap_or_else(|| pipeline_node_prompt(team, &node.id, handovers));
+    let mut revised = None;
 
     loop {
         // Stops have no harness opening prompt, but a follow-up starting here still needs the
@@ -1364,7 +1410,7 @@ async fn run_review_stop(
 
         archive_operator_answer(log, &node.id, &answer, desk.questions(), &run_id, &node.id).await;
         let Some(send_back) = answer.send_back.clone() else {
-            return Ok((answer.text, handover));
+            return Ok((answer.text, handover, revised));
         };
         // "Send back": the note goes to the stage before the stop, and the stop runs again on what
         // that stage produces next.
@@ -1385,23 +1431,30 @@ async fn run_review_stop(
         let reply = stage
             .send_back(&feedback, bus, archive, shared_log, exit_timeout)
             .await?;
-        let session = stage
-            .session_mut()
-            .context("the stage answered a note without a session, which cannot happen")?;
-        let fresh = session
-            .process
-            .bookkeeping_turn(
-                &mut session.recorder,
-                &handover_request_for(team, &node.id),
-                "handover",
-            )
-            .await
-            .with_context(|| format!("{stage_id} failed to rewrite its handover"))?;
-        handover = if fresh.trim().is_empty() {
-            reply
+        // The redone work is handed on by the rule the first pass was: as written when it fits.
+        handover = if reply_is_its_own_handover(team, &stage_id, &reply) {
+            reply.clone()
         } else {
-            fresh
+            let session = stage
+                .session_mut()
+                .context("the stage answered a note without a session, which cannot happen")?;
+            let fresh = session
+                .process
+                .bookkeeping_turn(
+                    &mut session.recorder,
+                    // The person reads it next, and only a note can reach the stage after that.
+                    &handover_request(team, &stage_id, false),
+                    "handover",
+                )
+                .await
+                .with_context(|| format!("{stage_id} failed to rewrite its handover"))?;
+            if fresh.trim().is_empty() {
+                reply.clone()
+            } else {
+                with_dropped_links(&reply, &fresh)
+            }
         };
+        revised = Some((stage_id.clone(), reply));
         // Like the stage boundary it redoes: asked only of a team with a notebook.
         if notebook {
             let boundary = StageBoundary {
@@ -1505,25 +1558,28 @@ fn send_back_note(note: &str) -> String {
     )
 }
 
-/// The handover request a stage is given when a stop sends its work back, naming the stop rather
-/// than the stage after it — the operator is who reads it next.
-fn handover_request_for(team: &TeamConfig, stop_id: &str) -> String {
-    let order = [String::new(), stop_id.to_owned()];
-    handover_request(team, &order, 0)
-}
-
-/// Stop keeping the stage before this one answerable.
+/// Stop keeping answerable every held stage that nothing still to run in this run feeds on.
 ///
-/// It was kept alive only for the duration of the stage that could ask it (ADR 0013 decision 2);
-/// holding it longer would keep a harness alive for nobody. The released stage's outcome becomes
-/// the run's only if nothing has produced one yet, which is what makes a one-stage pipeline work.
-async fn release_previous(
+/// A finished stage is kept alive only while a stage that could ask it has its work turn to take
+/// (ADR 0013 decision 2), read from the configured edges rather than the run order: a fan-out's
+/// source stays answerable to each branch, and each input of a join to the join. Holding it longer
+/// would keep a harness alive for nobody. A released stage's outcome becomes the run's only if
+/// nothing has produced one yet, which is what makes a one-stage pipeline work.
+async fn release_answered(
+    team: &TeamConfig,
     bus: &TeamBus,
-    held: &mut Option<(String, crate::team_bus::LiveAgent)>,
+    held: &mut Vec<(String, crate::team_bus::LiveAgent)>,
+    to_ask: &BTreeSet<String>,
     outcome: &mut Option<SessionOutcome>,
 ) -> Result<()> {
-    if let Some((previous_id, previous)) = held.take() {
-        let released = bus.release(&previous_id, previous).await?;
+    let mut index = 0;
+    while index < held.len() {
+        if feeds_one_of(team, &held[index].0, to_ask) {
+            index += 1;
+            continue;
+        }
+        let (stage, live) = held.remove(index);
+        let released = bus.release(&stage, live).await?;
         if outcome.is_none() {
             *outcome = Some(released);
         }
@@ -1531,32 +1587,46 @@ async fn release_previous(
     Ok(())
 }
 
+/// Whether `stage` feeds, by a configured edge, any of `stages`.
+fn feeds_one_of(team: &TeamConfig, stage: &str, stages: &BTreeSet<String>) -> bool {
+    team.edges
+        .iter()
+        .any(|edge| edge.from == stage && stages.contains(&edge.to))
+}
+
+/// Whether `id` is a review stop.
+fn is_stop(team: &TeamConfig, id: &str) -> bool {
+    team.agents
+        .iter()
+        .any(|agent| agent.id == id && agent.is_operator())
+}
+
 /// Ask a stage to write its own handover while its context is still loaded (ADR 0013).
 ///
-/// The next stage reads this instead of the transcript, and pulls anything missing with `ask`. A
-/// stage that answers nothing falls back to its own reply — a successor handed an empty handover
-/// would be worse off than one handed a dump.
+/// Asked only of a reply too long to hand on as written (`reply_is_its_own_handover`). The next
+/// stage reads this instead of the reply. A stage that answers nothing falls back to its own
+/// reply — a successor handed an empty handover would be worse off than one handed a dump — and
+/// links the handover dropped are put back under it (`with_dropped_links`).
 async fn stage_handover(
     team: &TeamConfig,
-    order: &[String],
-    index: usize,
+    agent_id: &str,
+    askable: bool,
     process: &mut AgentRun,
     recorder: &mut crate::engine::Recorder,
     reply: &str,
 ) -> Result<String> {
     let handover = process
-        .bookkeeping_turn(recorder, &handover_request(team, order, index), "handover")
+        .bookkeeping_turn(
+            recorder,
+            &handover_request(team, agent_id, askable),
+            "handover",
+        )
         .await
-        .with_context(|| {
-            format!(
-                "pipeline node {} failed to write its handover",
-                order[index]
-            )
-        })?;
+        .with_context(|| format!("pipeline node {agent_id} failed to write its handover"))?;
     Ok(if handover.trim().is_empty() {
         reply.to_owned()
     } else {
-        handover
+        with_dropped_links(reply, &handover)
     })
 }
 
@@ -2047,7 +2117,8 @@ fn node_task(
         stage_results: (!results.trim().is_empty()).then_some(results),
         previous_output: None,
         own_previous_output: false,
-        ask_offer: ask_offer(team, agent_id),
+        // Set by the pipeline from who is open when the stage starts (`ask_offer`).
+        ask_offer: None,
         place: None,
         conversation: None,
         replayed: false,
@@ -2164,7 +2235,7 @@ impl NotebookSupply<'_> {
 /// The run order is deliberately not used. Two parallel branches of one DAG both "ran before" the
 /// join that follows them, but only a node's own ancestors are things it is a continuation of; a
 /// sibling branch's notes are reachable by `memory_search` and are never injected.
-fn configured_ancestors(team: &TeamConfig, node_id: &str) -> Vec<String> {
+pub(crate) fn configured_ancestors(team: &TeamConfig, node_id: &str) -> Vec<String> {
     let mut ancestors: Vec<String> = Vec::new();
     let mut frontier: Vec<String> = vec![node_id.to_owned()];
     while let Some(current) = frontier.pop() {
@@ -2179,84 +2250,193 @@ fn configured_ancestors(team: &TeamConfig, node_id: &str) -> Vec<String> {
     ancestors
 }
 
-/// Tell a stage who it can still talk to. Without this the brief has to be self-sufficient, which
-/// is what forces the whole transcript into the prompt; with it, the brief can stay short because
-/// anything missing is one question away.
-fn ask_offer(team: &TeamConfig, node_id: &str) -> Option<String> {
-    let predecessors: Vec<&str> = team
-        .edges
-        .iter()
-        .filter(|edge| edge.to == node_id)
-        .map(|edge| edge.from.as_str())
-        // A review stop has no session to ask, and the stage before it was released when the
-        // operator answered. Offering `ask` here would be the one kind of lie this design refuses:
-        // telling an agent something is reachable when it is not. The operator's decision is in
-        // the prompt already, under its own heading.
-        .filter(|id| {
-            !team
-                .agents
-                .iter()
-                .any(|agent| agent.id == *id && agent.is_operator())
-        })
-        .collect();
-    if predecessors.is_empty() {
+/// Tell a stage which of the stages feeding it it can still ask. Without this the brief has to be
+/// self-sufficient, which is what forces the whole transcript into the prompt; with it, anything
+/// missing is one question away.
+///
+/// Read from who is open in the bus when the stage starts (`open`), never from the edges or the
+/// run order alone: a stage parked for a review stop, released, or replayed from an earlier run
+/// has no session to ask, and telling an agent it does is how a question used to cold-start a
+/// fresh copy that knew nothing. Stages that fed it and cannot be asked are named as such, so it
+/// works from their handed-on work instead of trying. A review stop is never named: the
+/// operator's decision is in the prompt already, under its own heading.
+fn ask_offer(team: &TeamConfig, node_id: &str, open: &BTreeSet<String>) -> Option<String> {
+    use std::fmt::Write as _;
+    let max = team.conversation.ask.max_per_stage;
+    let (askable, finished): (Vec<&str>, Vec<&str>) = predecessors(team, node_id)
+        .into_iter()
+        .filter(|id| !is_stop(team, id))
+        .partition(|id| open.contains(*id));
+    if askable.is_empty() || max == 0 {
         return None;
     }
-    let named = predecessors
-        .iter()
-        .map(|id| {
-            team.agents
-                .iter()
-                .find(|agent| agent.id == *id)
-                .map_or(*id, |agent| agent.name.as_str())
-                .to_owned()
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    Some(format!(
-        "{named} is still running and still holds the full \
-         context behind the brief above. Use the Team Bus `ask` tool to ask for anything the brief \
-         does not cover — evidence for a claim, a detail it summarised away, its reasoning. Ask at \
-         most {max} question{plural}, and only when the answer would change what you produce.",
-        max = team.conversation.ask.max_per_stage,
-        plural = if team.conversation.ask.max_per_stage == 1 {
-            ""
-        } else {
-            "s"
-        },
-    ))
+    let names = |ids: &[&str]| {
+        ids.iter()
+            .map(|id| display_name(team, id))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let plural = if max == 1 { "" } else { "s" };
+    let mut offer = if let [one] = askable.as_slice() {
+        format!(
+            "{} is still open and holds the full context behind its work above. Use the Team Bus \
+             `ask` tool for anything that work does not cover — evidence for a claim, a detail it \
+             left out, its reasoning. Ask it at most {max} question{plural}, and only when the \
+             answer would change what you produce.",
+            display_name(team, one)
+        )
+    } else {
+        format!(
+            "{} are still open, and each holds the full context behind its work above. Use the \
+             Team Bus `ask` tool for anything that work does not cover — evidence for a claim, a \
+             detail it left out, its reasoning. Ask each at most {max} question{plural}, and only \
+             when the answer would change what you produce.",
+            names(&askable)
+        )
+    };
+    if !finished.is_empty() {
+        let _ = write!(
+            offer,
+            " {} finished earlier and cannot be asked: work from what is above.",
+            names(&finished)
+        );
+    }
+    Some(offer)
 }
 
-/// What a stage is asked for once its own work is done.
+/// What a stage is asked for once its own work is done and its reply is too long to hand on as
+/// written (`reply_is_its_own_handover`).
 ///
 /// Pasting a stage's whole transcript into the next one is what made a handover read as a dump: in
 /// a measured run it was 7.7k characters, 95% of the receiving stage's opening prompt, most of it
 /// narration. Asking the producer to write the brief costs one extra turn on a session whose
 /// context is already loaded, and it is the only party that knows which parts mattered. Truncation
 /// cannot substitute: the conclusion is always at the end, so that is what a cap would cut.
-fn handover_request(team: &TeamConfig, order: &[String], index: usize) -> String {
-    let successor = order
-        .get(index + 1)
-        .and_then(|id| team.agents.iter().find(|agent| &agent.id == id))
-        .map_or("the next stage", |agent| agent.name.as_str());
+///
+/// It names no job's format. Whatever evidence the work rests on — a link, a file path, a figure,
+/// a date — is asked to stay with the fact it backs, and what could not be confirmed is asked for
+/// too, so the reader can tell solid claims from guesses whatever the stage does. It says the
+/// reader can ask follow-up questions only when it can (`askable`): the stage stays open for it.
+fn handover_request(team: &TeamConfig, agent_id: &str, askable: bool) -> String {
+    let readers = readers(team, agent_id);
+    let follow_up = if askable {
+        format!(
+            "{readers} can ask you follow-up questions while they work, so leave out what they \
+             can ask for."
+        )
+    } else {
+        "Nobody can ask you about it afterwards, so it must stand on its own.".to_owned()
+    };
     let conversation = &team.conversation;
     format!(
-        "Your work on this task is done. Write the handover {successor} will receive. It will not \
-         see this conversation — only what you write now — but it can ask you follow-up questions \
-         while it works, so leave out anything it can ask for.\n\n\
+        "Your work on this task is done. Write the handover {readers} will receive in place of \
+         your reply, which is too long to hand on as it is. They will not see this conversation \
+         — only what you write now. {follow_up}\n\n\
          Use exactly these headings:\n\n\
          ## Summary\n\
          What you did and what you concluded, at most {summary} characters.\n\n\
          ## Findings\n\
-         At most {findings} bullets. One standalone fact each, no narration of how you found it.\n\n\
+         At most {findings} bullets. One standalone fact each, no narration of how you found it. \
+         Keep with each fact the evidence your work has for it, such as a link, a file path, a \
+         figure or a date, copied exactly.\n\n\
+         ## Gaps\n\
+         What you looked for and could not find or confirm. Omit the heading if there is \
+         nothing.\n\n\
          ## Open questions\n\
-         Anything {successor} must decide that you could not. Omit the heading if there are none.\n\n\
+         Anything {readers} must decide that you could not. Omit the heading if there are none.\n\n\
          ## Artifacts\n\
          Paths of files you produced. Omit the heading if there are none.\n\n\
          Write only the handover. Do not restate your instructions or narrate this step.",
         summary = conversation.brief.summary_chars,
         findings = conversation.brief.max_findings,
     )
+}
+
+/// Who reads what `agent_id` hands on: the stages it feeds, by name, and the person at a review
+/// stop as such.
+fn readers(team: &TeamConfig, agent_id: &str) -> String {
+    let names: Vec<String> = team
+        .edges
+        .iter()
+        .filter(|edge| edge.from == agent_id)
+        .map(|edge| {
+            if is_stop(team, &edge.to) {
+                "the person reviewing your work".to_owned()
+            } else {
+                display_name(team, &edge.to)
+            }
+        })
+        .collect();
+    match names.as_slice() {
+        [] => "the next stage".to_owned(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// `handover`, and under it every link in `reply` it does not mention.
+///
+/// However it is asked, evidence is the first thing a summary drops. A link is the one kind of it
+/// that can be found in any reply without knowing its format, so this much is kept whatever the
+/// model wrote: the next stage can still open the source, or ask for it.
+fn with_dropped_links(reply: &str, handover: &str) -> String {
+    use std::fmt::Write as _;
+    let mut dropped: Vec<&str> = Vec::new();
+    for link in links(reply) {
+        if !handover.contains(link) && !dropped.contains(&link) {
+            dropped.push(link);
+        }
+    }
+    if dropped.is_empty() {
+        return handover.to_owned();
+    }
+    let mut text = format!(
+        "{}\n\n## Links in the full work\nThe work this summarises cites these too.\n",
+        handover.trim_end()
+    );
+    for link in dropped {
+        let _ = writeln!(text, "- {link}");
+    }
+    text
+}
+
+/// Every `http://` or `https://` link in `text`, as written, without the punctuation or closing
+/// bracket that ends the sentence or the Markdown around it.
+fn links(text: &str) -> impl Iterator<Item = &str> {
+    text.match_indices("http").filter_map(move |(at, _)| {
+        let rest = &text[at..];
+        if !(rest.starts_with("http://") || rest.starts_with("https://")) {
+            return None;
+        }
+        if text[..at]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+        {
+            return None;
+        }
+        let end = rest
+            .find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`' | '\''))
+            .unwrap_or(rest.len());
+        let mut link = &rest[..end];
+        loop {
+            let trimmed = link.trim_end_matches(['.', ',', ';', ':', '!', '?', '*', '_']);
+            let trimmed = match trimmed.chars().last() {
+                Some(')') if trimmed.matches('(').count() < trimmed.matches(')').count() => {
+                    &trimmed[..trimmed.len() - 1]
+                }
+                Some(']') if trimmed.matches('[').count() < trimmed.matches(']').count() => {
+                    &trimmed[..trimmed.len() - 1]
+                }
+                _ => trimmed,
+            };
+            if trimmed == link {
+                break;
+            }
+            link = trimmed;
+        }
+        (link.len() > "https://".len()).then_some(link)
+    })
 }
 
 /// Build a downstream node's prompt from the replies of its actual configured predecessors,
@@ -2528,38 +2708,52 @@ impl NodeTask {
     }
 }
 
-/// Whether every stage this one hands work to is a check step that checks it.
-/// About how long one of a handover's findings runs: a standalone fact and its source.
-const FINDING_CHARS: usize = 250;
-
 /// Whether a stage's reply goes to the stages after it as written, with no handover turn.
 ///
-/// A handover is at most `conversation.brief.summaryChars` of summary and `maxFindings` findings.
-/// A reply no longer than that cannot be made shorter by one, so asking for it would be a model
-/// call that re-reads the stage's whole conversation to re-word a reply its role already shaped
-/// for the next stage, and the next stage can still `ask` for more. A review stop after the stage
-/// still gets the handover: a person decides from its summary and open questions.
+/// It does when it fits what its readers are handed (`as_written_room`). A handover turn re-reads
+/// the stage's whole conversation to save the next stage a few thousand tokens, and a summary
+/// drops what the next stage needs most: the links, dates and figures behind each claim. A review
+/// stop is no exception: the person reads the work they approve, and the stage after the stop
+/// works from that same text.
 fn reply_is_its_own_handover(team: &TeamConfig, agent_id: &str, reply: &str) -> bool {
-    let brief = &team.conversation.brief;
-    let budget = usize::try_from(brief.summary_chars)
-        .unwrap_or(usize::MAX)
-        .saturating_add(
-            usize::try_from(brief.max_findings)
-                .unwrap_or(usize::MAX)
-                .saturating_mul(FINDING_CHARS),
-        );
-    let mut successors = team
-        .edges
-        .iter()
-        .filter(|edge| edge.from == agent_id)
-        .filter_map(|edge| team.agents.iter().find(|agent| agent.id == edge.to))
-        .peekable();
-    successors.peek().is_some()
-        && successors.all(|successor| !successor.is_operator())
-        && !reply.trim().is_empty()
-        && reply.chars().count() <= budget
+    !reply.trim().is_empty() && reply.chars().count() <= as_written_room(team, agent_id)
 }
 
+/// How long a reply from `agent_id` may be and still go on as written.
+///
+/// `conversation.brief.asWrittenUpTo`, never more than a prompt's section cap, which would cut it
+/// anyway. Where several stages feed one, they share it, and a review stop's share is passed on
+/// to what comes after the stop, so a join or a stop never has to cut what it was handed. The
+/// tightest successor decides. A stage that feeds nothing has no reader to hand anything to.
+fn as_written_room(team: &TeamConfig, agent_id: &str) -> usize {
+    let limit = usize::try_from(team.conversation.brief.as_written_up_to)
+        .unwrap_or(usize::MAX)
+        .min(SECTION_CAP_CHARS);
+    team.edges
+        .iter()
+        .filter(|edge| edge.from == agent_id)
+        .map(|edge| share_of(team, &edge.to, limit))
+        .min()
+        .unwrap_or(0)
+}
+
+/// How much of what `node` is handed one of the stages feeding it may fill.
+fn share_of(team: &TeamConfig, node: &str, limit: usize) -> usize {
+    let room = if is_stop(team, node) {
+        // A stop hands what it was handed on unchanged, as one input of each stage after it.
+        team.edges
+            .iter()
+            .filter(|edge| edge.from == node)
+            .map(|edge| share_of(team, &edge.to, limit))
+            .min()
+            .unwrap_or(limit)
+    } else {
+        limit
+    };
+    room / predecessors(team, node).len().max(1)
+}
+
+/// Whether every stage this one hands work to is a check step that checks it.
 fn only_checked_by_successors(team: &TeamConfig, agent_id: &str) -> bool {
     let successors: Vec<&config::AgentConfig> = team
         .edges
@@ -3084,7 +3278,7 @@ pub(crate) mod test_support {
     pub(crate) fn long(reply: &str) -> String {
         format!(
             "{reply}\n\n{}",
-            "More detail from the stage's work. ".repeat(120)
+            "More detail from the stage's work. ".repeat(720)
         )
     }
 
@@ -3644,26 +3838,31 @@ mod tests {
         Ok(())
     }
 
-    /// A reply no longer than a handover is handed to the agents after it as written, with no
-    /// handover turn; a longer one, one a person reviews next, and the last stage's are not.
-    #[test]
-    fn only_a_reply_as_short_as_a_handover_skips_the_handover_turn() {
-        let edge = |from: &str, to: &str| EdgeConfig {
-            from: from.into(),
-            to: to.into(),
-            layer: "configured".into(),
-            kind: "sequence".into(),
-            ts: "2026-10-18T00:00:00Z".into(),
-        };
-        let review = AgentConfig {
-            kind: config::AgentKind::Operator,
-            ..pipeline_agent("review", "fake/offline")
-        };
-        let mut team = TeamConfig {
+    /// A team of plain agents and review stops, wired by `edges` (`"from>to"`), for the rules that
+    /// read nothing but the shape.
+    fn shape(stops: &[&str], edges: &[&str]) -> TeamConfig {
+        let mut ids: Vec<&str> = Vec::new();
+        let mut wired = Vec::new();
+        for edge in edges {
+            let (from, to) = edge.split_once('>').expect("an edge is from>to");
+            for id in [from, to] {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+            wired.push(EdgeConfig {
+                from: from.into(),
+                to: to.into(),
+                layer: "configured".into(),
+                kind: "sequence".into(),
+                ts: "2026-10-18T00:00:00Z".into(),
+            });
+        }
+        TeamConfig {
             schema_version: 1,
-            id: "chain".into(),
-            name: "Chain".into(),
-            entrypoint: "a".into(),
+            id: "shape".into(),
+            name: "Shape".into(),
+            entrypoint: ids.first().copied().unwrap_or("a").into(),
             responder: None,
             schedule: None,
             deliver: None,
@@ -3672,32 +3871,196 @@ mod tests {
             spend: crate::spend::SpendConfig::default(),
             memory: None,
             guards: GuardsConfig::default(),
-            agents: vec![
-                pipeline_agent("a", "m"),
-                pipeline_agent("b", "m"),
-                review,
-                pipeline_agent("c", "m"),
-            ],
-            edges: vec![edge("a", "b"), edge("b", "review"), edge("review", "c")],
+            agents: ids
+                .iter()
+                .map(|id| {
+                    if stops.contains(id) {
+                        AgentConfig {
+                            kind: config::AgentKind::Operator,
+                            ..pipeline_agent(id, "m")
+                        }
+                    } else {
+                        pipeline_agent(id, "m")
+                    }
+                })
+                .collect(),
+            edges: wired,
+        }
+    }
+
+    /// A reply goes on as written when it fits what its readers are handed, read from the edges
+    /// alone: the limit is shared by the stages that feed one stage, passes through a review stop
+    /// to what follows it, and the tightest reader decides. Only a longer reply gets a handover.
+    #[test]
+    fn a_reply_goes_on_as_written_when_it_fits_what_its_readers_are_handed() {
+        let fits = |team: &TeamConfig, stage: &str, chars: usize| {
+            reply_is_its_own_handover(team, stage, &"x".repeat(chars))
         };
-        // 1200 characters of summary and 8 findings, by default.
-        let budget = 1200 + 8 * FINDING_CHARS;
-        assert!(reply_is_its_own_handover(&team, "a", &"x".repeat(budget)));
-        assert!(!reply_is_its_own_handover(
-            &team,
-            "a",
-            &"x".repeat(budget + 1)
-        ));
-        assert!(!reply_is_its_own_handover(&team, "a", "  \n"));
+        let limit = SECTION_CAP_CHARS;
+        // A chain: the whole section, and not a character more.
+        let chain = shape(&[], &["a>b", "b>c"]);
+        assert!(fits(&chain, "a", limit));
+        assert!(!fits(&chain, "a", limit + 1));
+        assert!(!reply_is_its_own_handover(&chain, "a", "  \n"));
         assert!(
-            !reply_is_its_own_handover(&team, "b", "short"),
-            "a person reviews b's work next, from its handover"
+            !fits(&chain, "c", 10),
+            "c feeds nothing, so it has no reader"
         );
-        assert!(!reply_is_its_own_handover(&team, "c", "short"), "c is last");
-        // The team file's own brief sets the length.
-        team.conversation.brief.summary_chars = 10;
-        team.conversation.brief.max_findings = 0;
-        assert!(!reply_is_its_own_handover(&team, "a", "longer than ten"));
+        // A fan-out: each branch reads the source on its own.
+        let fan_out = shape(&[], &["a>b", "a>c"]);
+        assert!(fits(&fan_out, "a", limit));
+        // A join: its inputs share what it is handed.
+        let join = shape(&[], &["x>j", "y>j"]);
+        assert!(fits(&join, "x", limit / 2));
+        assert!(!fits(&join, "x", limit / 2 + 1));
+        // A stop in the middle passes its predecessor's work on whole: the person reads all of
+        // it, and so does the stage after the stop.
+        let middle = shape(&["review"], &["a>review", "review>c"]);
+        assert!(fits(&middle, "a", limit));
+        assert!(!fits(&middle, "a", limit + 1));
+        // A stop at the end: the person is the only reader.
+        let end = shape(&["review"], &["a>review"]);
+        assert!(fits(&end, "a", limit));
+        // A stop fed by two hands both on as one input; one feeding a join is one input of it.
+        let joined_stop = shape(&["review"], &["x>review", "y>review", "review>z"]);
+        assert!(fits(&joined_stop, "x", limit / 2));
+        assert!(!fits(&joined_stop, "x", limit / 2 + 1));
+        let stop_into_join = shape(&["review"], &["a>review", "review>j", "k>j"]);
+        assert!(fits(&stop_into_join, "a", limit / 2));
+        assert!(!fits(&stop_into_join, "a", limit / 2 + 1));
+        // Stops in a row, and a stage feeding a join and a plain stage: the tightest reader.
+        let two_stops = shape(&["s1", "s2"], &["a>s1", "s1>s2", "s2>b"]);
+        assert!(fits(&two_stops, "a", limit));
+        let mixed = shape(&[], &["a>b", "a>j", "k>j"]);
+        assert!(fits(&mixed, "a", limit / 2));
+        assert!(!fits(&mixed, "a", limit / 2 + 1));
+        // The team file sets the limit, never past what a prompt carries; 0 asks for a handover
+        // every time.
+        let mut set = chain.clone();
+        set.conversation.brief.as_written_up_to = 1_000;
+        assert!(fits(&set, "a", 1_000));
+        assert!(!fits(&set, "a", 1_001));
+        set.conversation.brief.as_written_up_to = 100_000;
+        assert!(!fits(&set, "a", limit + 1));
+        set.conversation.brief.as_written_up_to = 0;
+        assert!(!fits(&set, "a", 1));
+    }
+
+    /// When a handover is asked for, it names no job's format: it asks every finding to keep the
+    /// evidence it rests on, asks for gaps, and says the reader can ask back only when it can.
+    #[test]
+    fn a_handover_request_keeps_evidence_and_says_who_can_ask_only_when_true() {
+        let team = shape(&["review"], &["a>b", "a>c", "c>review"]);
+        let open = handover_request(&team, "a", true);
+        assert!(
+            open.starts_with(
+                "Your work on this task is done. Write the handover b name and c name"
+            ),
+            "{open}"
+        );
+        for asked in [
+            "## Summary",
+            "## Findings",
+            "a link, a file path, a figure or a date, copied exactly",
+            "## Gaps",
+            "could not find or confirm",
+            "can ask you follow-up questions",
+        ] {
+            assert!(open.contains(asked), "{asked:?} is not asked for: {open}");
+        }
+        let closed = handover_request(&team, "c", false);
+        assert!(
+            closed.contains("the person reviewing your work"),
+            "{closed}"
+        );
+        assert!(
+            closed.contains("Nobody can ask you about it afterwards"),
+            "{closed}"
+        );
+        assert!(!closed.contains("follow-up questions"), "{closed}");
+        // The team file shapes the handover itself.
+        let mut shorter = team.clone();
+        shorter.conversation.brief.summary_chars = 300;
+        shorter.conversation.brief.max_findings = 4;
+        let shaped = handover_request(&shorter, "a", true);
+        assert!(shaped.contains("at most 300 characters") && shaped.contains("At most 4 bullets"));
+    }
+
+    /// A summary that dropped links gets them back under it, in the reply's order, once each,
+    /// whatever the reply's format: Markdown links, bare ones, ones ending a sentence or in
+    /// brackets. A handover that kept them all, or a reply with none, is left as it was.
+    #[test]
+    fn links_a_handover_dropped_are_put_back_under_it() {
+        let reply = "Prices rose (see https://example.com/prices).\n\
+                     - [Report](https://example.com/report?id=7) and https://example.com/report?id=7\n\
+                     A wiki page https://en.wikipedia.org/wiki/Foo_(bar), then <https://example.org/a>.\n\
+                     Not a link: xhttps://nope.example and http:// alone.";
+        assert_eq!(
+            links(reply).collect::<Vec<_>>(),
+            [
+                "https://example.com/prices",
+                "https://example.com/report?id=7",
+                "https://example.com/report?id=7",
+                "https://en.wikipedia.org/wiki/Foo_(bar)",
+                "https://example.org/a",
+            ]
+        );
+        let handover = "## Summary\nPrices rose, per https://example.com/prices.";
+        let kept = with_dropped_links(reply, handover);
+        assert!(kept.starts_with(handover), "{kept}");
+        assert_eq!(
+            kept.strip_prefix(handover)
+                .expect("the handover comes first"),
+            "\n\n## Links in the full work\nThe work this summarises cites these too.\n\
+             - https://example.com/report?id=7\n\
+             - https://en.wikipedia.org/wiki/Foo_(bar)\n\
+             - https://example.org/a\n"
+        );
+        assert_eq!(with_dropped_links("no links at all", "summary"), "summary");
+        assert_eq!(with_dropped_links(reply, &kept), kept);
+    }
+
+    /// What a stage is offered to ask is who feeds it and is open right now — never a stage that
+    /// finished, a review stop, or anyone at all when the team allows no questions.
+    #[test]
+    fn a_stage_is_offered_to_ask_only_the_stages_feeding_it_that_are_open() {
+        let open = |ids: &[&str]| {
+            ids.iter()
+                .map(|id| (*id).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        let join = shape(&["review"], &["a>j", "b>j", "review>j", "a>review"]);
+        let offer = ask_offer(&join, "j", &open(&["a", "b"])).expect("two are open");
+        assert!(
+            offer.starts_with("a name, b name are still open, and each holds"),
+            "{offer}"
+        );
+        assert!(offer.contains("Ask each at most 3 questions"), "{offer}");
+        assert!(
+            !offer.contains("review name"),
+            "a review stop is never offered: {offer}"
+        );
+        let offer = ask_offer(&join, "j", &open(&["b"])).expect("one is open");
+        assert!(offer.starts_with("b name is still open"), "{offer}");
+        assert!(
+            offer
+                .ends_with("a name finished earlier and cannot be asked: work from what is above."),
+            "{offer}"
+        );
+        // Open, but not feeding it: not offered.
+        assert_eq!(ask_offer(&join, "j", &open(&["c"])), None);
+        assert_eq!(ask_offer(&join, "j", &open(&[])), None);
+        assert_eq!(
+            ask_offer(&join, "a", &open(&["a", "b"])),
+            None,
+            "a is first"
+        );
+        let mut silent = join.clone();
+        silent.conversation.ask.max_per_stage = 0;
+        assert_eq!(ask_offer(&silent, "j", &open(&["a", "b"])), None);
+        silent.conversation.ask.max_per_stage = 1;
+        let offer = ask_offer(&silent, "j", &open(&["b"])).expect("one is open");
+        assert!(offer.contains("at most 1 question,"), "{offer}");
     }
 
     /// What helpers came back with goes into the lead's next turn as a prompt, which nothing sets
@@ -3853,6 +4216,257 @@ mod tests {
                     .and_then(Value::as_str)
                     == Some("node d done")
         }));
+        Ok(())
+    }
+
+    /// **A fan-out's source stays open for every branch, and every input of a join for the join.**
+    ///
+    /// a feeds b and c; b and c feed d. Run order alone would keep only the stage just before:
+    /// c could not ask a (b ran in between), and d could not ask b. Each stand-in panics if its
+    /// prompt does not offer the stages that feed it, if a question does not reach the stage it
+    /// was put to in the session that did the work, or if its answer does not come back.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_stage_stays_answerable_to_every_stage_it_feeds_across_a_fan_out_and_a_join()
+    -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (a, _) = stand_in(vec![
+            turn(&[], "a found the figure"),
+            turn(
+                &["## A question from c name", "which figure?"],
+                "42, from the 2026 report",
+            )
+            .remembering(&["a found the figure"]),
+        ]);
+        let (b, _) = stand_in(vec![
+            turn(&["a name is still open"], "b used the figure"),
+            turn(
+                &["## A question from d name", "what for?"],
+                "for the summary",
+            )
+            .remembering(&["b used the figure"]),
+        ]);
+        let (c, _) = stand_in(vec![
+            turn(&["a name is still open"], "c checked the figure").calling(
+                "ask",
+                json!({"agent": "a", "question": "which figure?"}),
+                "a name answered:\n\n42, from the 2026 report",
+            ),
+        ]);
+        let (d, _) = stand_in(vec![
+            turn(&["b name, c name are still open"], "d joined both").calling(
+                "ask",
+                json!({"agent": "b", "question": "what for?"}),
+                "b name answered:\n\nfor the summary",
+            ),
+        ]);
+        let edge = |from: &str, to: &str| EdgeConfig {
+            from: from.into(),
+            to: to.into(),
+            layer: "configured".into(),
+            kind: "sequence".into(),
+            ts: "2026-10-18T00:00:00Z".into(),
+        };
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                pipeline_agent("a", &a),
+                pipeline_agent("b", &b),
+                pipeline_agent("c", &c),
+                pipeline_agent("d", &d),
+            ],
+            edges: vec![
+                edge("a", "b"),
+                edge("a", "c"),
+                edge("b", "d"),
+                edge("c", "d"),
+            ],
+            ..shape(&[], &[])
+        });
+        assert_eq!(team.pipeline_order()?, ["a", "b", "c", "d"]);
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "start",
+            Duration::from_secs(5),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "d joined both");
+        // Every stage closed: none is left answering for a run that is over.
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        let exited: BTreeSet<&str> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Process && event.payload["phase"] == "exited")
+            .map(|event| event.agent_id.as_str())
+            .collect();
+        assert_eq!(exited, BTreeSet::from(["a", "b", "c", "d"]));
+        Ok(())
+    }
+
+    /// **A stage that has closed is refused with where its work is, not started again.**
+    ///
+    /// In a chain a, b, c, a closes once b has taken its turn. c is offered only b, and asking a
+    /// anyway is answered with where a's work went; a's stand-in panics on a second prompt, which
+    /// is what a fresh copy started for the question would be.
+    #[tokio::test]
+    async fn a_stage_that_has_closed_is_refused_with_where_its_work_went() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (a, _) = stand_in(vec![turn(&[], "a found it")]);
+        let (b, _) = stand_in(vec![turn(&["a name is still open"], "b used it")]);
+        let (c, _) = stand_in(vec![
+            turn(&["b name is still open"], "c worked from what it had")
+                .never(&["a name is still open"])
+                .calling(
+                    "ask",
+                    json!({"agent": "a", "question": "where did you find it?"}),
+                    "a name has finished its part of this run and is no longer open, so it \
+                     can't be asked. Its work reached you in your prompt",
+                ),
+        ]);
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                pipeline_agent("a", &a),
+                pipeline_agent("b", &b),
+                pipeline_agent("c", &c),
+            ],
+            ..shape(&[], &["a>b", "b>c"])
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive,
+            "start",
+            Duration::from_secs(5),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "c worked from what it had");
+        Ok(())
+    }
+
+    /// **A stage that feeds a review stop and a stage is put away for the person, and the stage
+    /// is told so.**
+    ///
+    /// a feeds the stop and w, and the stop runs first. a is parked for it, so w is handed a's
+    /// work as written and is not offered to ask a; asking anyway is answered with where a's work
+    /// is. a's stand-in panics on a prompt past its first.
+    #[tokio::test]
+    async fn a_stage_parked_for_a_review_stop_is_not_offered_to_the_stage_it_also_feeds()
+    -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (a, _) = stand_in(vec![turn(&[], "a found it")]);
+        let (w, _) = stand_in(vec![
+            turn(&["a found it"], "w worked from it")
+                .never(&["a name is still open", "## Asking the stage before you"])
+                .calling(
+                    "ask",
+                    json!({"agent": "a", "question": "where did you find it?"}),
+                    "a name has finished its part of this run",
+                ),
+        ]);
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                pipeline_agent("a", &a),
+                operator_node("review", "Approve it."),
+                pipeline_agent("w", &w),
+            ],
+            ..shape(&[], &["a>review", "a>w"])
+        });
+        assert_eq!(team.pipeline_order()?, ["a", "review", "w"]);
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let waiting = wait_for_stop(&desk, &run_id, |_| true).await;
+                desk.deliver(&run_id, &waiting.node, answer("Approved", None))
+                    .await
+                    .expect("the stop takes the answer");
+            }
+        });
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "go",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive, run_id)),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        answering.await?;
+        assert_eq!(outcome.reply, "w worked from it");
+        Ok(())
+    }
+
+    /// **A long reply's handover keeps its links, and says who can ask only when they can.**
+    ///
+    /// a's reply is too long to hand on, so it is asked for a handover — one that names no format
+    /// and tells it b can still ask — and writes one that drops a link. b is handed the handover
+    /// with the dropped link put back under it, and never a's long reply.
+    #[tokio::test]
+    async fn a_long_replys_handover_keeps_the_links_the_summary_dropped() -> Result<()> {
+        use crate::test_support::{long, stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let work = long("Prices rose 4% (https://example.com/prices) and fell after.");
+        let (a, _) = stand_in(vec![
+            turn(&[], &work),
+            turn(
+                &[
+                    "## Gaps",
+                    "copied exactly",
+                    "b name can ask you follow-up questions",
+                ],
+                "## Summary\nPrices rose, then fell.",
+            ),
+        ]);
+        let (b, _) = stand_in(vec![
+            turn(
+                &[
+                    "Prices rose, then fell.",
+                    "## Links in the full work",
+                    "- https://example.com/prices",
+                ],
+                "b wrote it",
+            )
+            .never(&["More detail from the stage's work."]),
+        ]);
+        let team = Arc::new(TeamConfig {
+            agents: vec![pipeline_agent("a", &a), pipeline_agent("b", &b)],
+            ..shape(&[], &["a>b"])
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive,
+            "start",
+            Duration::from_secs(5),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "b wrote it");
         Ok(())
     }
 
@@ -5616,11 +6230,10 @@ mod tests {
     async fn a_review_stop_holds_with_nothing_in_flight_and_never_re_prompts() -> Result<()> {
         use crate::test_support::{stand_in, turn};
         let pool = crate::db::Db::temp().await;
-        let (researcher, _) = stand_in(vec![
-            turn(&[], "three harnesses auto-approve"),
-            turn(&["## Summary"], "## Summary\nthe findings, handed over"),
-        ]);
-        let (writer, _) = stand_in(vec![turn(&[], "wrote it")]);
+        // A reply that fits is handed on as written: the person reviews the work itself, with no
+        // handover turn (the stand-in panics on a second prompt), and the writer gets it too.
+        let (researcher, _) = stand_in(vec![turn(&[], "three harnesses auto-approve")]);
+        let (writer, _) = stand_in(vec![turn(&["three harnesses auto-approve"], "wrote it")]);
         let team = stop_team(
             "held",
             pipeline_agent("a", &researcher),
@@ -5673,8 +6286,8 @@ mod tests {
         assert!(waiting.send_back_available);
         assert_eq!(
             waiting.context.as_deref(),
-            Some("## Summary\nthe findings, handed over"),
-            "the stop shows the predecessor's stored handover"
+            Some("three harnesses auto-approve"),
+            "the stop shows the predecessor's work as written"
         );
 
         let events = archive.load_verified_session(&run_id).await?;
@@ -5728,7 +6341,7 @@ mod tests {
         const HANDOVER: &str = "## Summary\nthree harnesses auto-approve";
         let pool = crate::db::Db::temp().await;
         let (researcher, _) = stand_in(vec![
-            turn(&[], "researched"),
+            turn(&[], &crate::test_support::long("researched")),
             turn(&["## Summary"], HANDOVER),
         ]);
         let (writer, _) = stand_in(vec![
@@ -5830,6 +6443,80 @@ mod tests {
         Ok(())
     }
 
+    /// **A pipeline that ends on a review stop answers with the work approved there, not with
+    /// "Approved".**
+    ///
+    /// The draft fits, so the stop shows it as written with no handover turn; sent back, the redone
+    /// draft is shown the same way, again with no handover turn (the stand-in panics on a prompt
+    /// past the two it expects); approved, the redone draft is the run's answer and its responder.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_pipeline_ending_on_a_review_stop_answers_with_the_work_approved_there() -> Result<()>
+    {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (drafter, _) = stand_in(vec![
+            turn(&[], "first draft"),
+            turn(&["add the dates"], "second draft, with dates").remembering(&["first draft"]),
+        ]);
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                pipeline_agent("a", &drafter),
+                operator_node("review", "Approve the draft, or say what to change."),
+            ],
+            ..shape(&[], &["a>review"])
+        });
+        assert_eq!(team.responder_id()?, "a");
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let first = wait_for_stop(&desk, &run_id, |waiting| {
+                    waiting.context.as_deref() == Some("first draft")
+                })
+                .await;
+                desk.deliver(&run_id, &first.node, answer("add the dates", Some("a")))
+                    .await
+                    .expect("the stop takes a send-back");
+                let second = wait_for_stop(&desk, &run_id, |waiting| {
+                    waiting.context.as_deref() == Some("second draft, with dates")
+                })
+                .await;
+                desk.deliver(&run_id, &second.node, answer("Approved", None))
+                    .await
+                    .expect("the stop takes the answer");
+            }
+        });
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "go",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk.clone()),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        answering.await?;
+        assert_eq!(outcome.reply, "second draft, with dates");
+        let events = archive.load_verified_session(&run_id).await?;
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.payload["phase"] == "turn_purpose"
+                    && event.payload["purpose"] == "handover"),
+            "a reply that fits took a handover turn"
+        );
+        Ok(())
+    }
+
     /// **Send back re-prompts the warm predecessor, and the stop runs again on what it produces.**
     ///
     /// Stage `a` panics if the note never arrives, so a send-back that quietly did nothing fails
@@ -5844,12 +6531,17 @@ mod tests {
         const NOTE: &str = "cut the Gemini section";
         let pool = crate::db::Db::temp().await;
         let checkpoint = || turn(&["Record where this work stands"], CHECKPOINT_REPLY);
+        let first = crate::test_support::long("first pass");
         let (researcher, _) = stand_in(vec![
-            turn(&[], "first pass"),
+            turn(&[], &first),
             turn(&["## Summary"], "HANDOVER ONE"),
             checkpoint(),
-            turn(&[NOTE], "second pass").remembering(&["first pass"]),
-            turn(&["## Summary"], "HANDOVER TWO"),
+            turn(&[NOTE], &crate::test_support::long("second pass")).remembering(&[&first]),
+            // Read next by the person, so nobody is said to be able to ask.
+            turn(
+                &["## Summary", "Nobody can ask you about it afterwards"],
+                "HANDOVER TWO",
+            ),
             checkpoint(),
         ]);
         let (writer, _) = stand_in(vec![
@@ -5939,14 +6631,15 @@ mod tests {
     async fn a_parked_stage_is_reopened_on_the_same_session() -> Result<()> {
         use crate::test_support::{stand_in, turn};
         let pool = crate::db::Db::temp().await;
+        let first = crate::test_support::long("first pass");
         let (researcher, _) = stand_in(vec![
-            turn(&[], "first pass"),
+            turn(&[], &first),
             turn(&["## Summary"], "HANDOVER ONE"),
             turn(
                 &["you already found"],
-                "second pass, from what I already had",
+                &crate::test_support::long("second pass, from what I already had"),
             )
-            .remembering(&["first pass", "HANDOVER ONE"]),
+            .remembering(&[&first, "HANDOVER ONE"]),
             turn(&["## Summary"], "HANDOVER TWO"),
         ]);
         let (writer, _) = stand_in(vec![turn(&["HANDOVER TWO"], "wrote it")]);
@@ -6051,10 +6744,7 @@ mod tests {
     #[tokio::test]
     async fn a_restart_at_a_review_stop_leaves_a_checkpoint_and_no_parked_agent() -> Result<()> {
         use crate::test_support::{stand_in, turn};
-        let (researcher, _) = stand_in(vec![
-            turn(&[], "the findings so far"),
-            turn(&["## Summary"], "## Summary\nthe findings, handed over"),
-        ]);
+        let (researcher, _) = stand_in(vec![turn(&[], "the findings so far")]);
         // Never prompted: the run stops at the review before it.
         let (writer, _) = stand_in(Vec::new());
         let team = stop_team(
@@ -6141,10 +6831,7 @@ mod tests {
             .await
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let point = checkpoints.last().context("the stage has a checkpoint")?;
-        assert!(
-            point.done.contains("the findings, handed over"),
-            "{point:?}"
-        );
+        assert!(point.done.contains("the findings so far"), "{point:?}");
         assert_eq!(point.source, memory::CheckpointSource::Coordinator);
         Ok(())
     }
