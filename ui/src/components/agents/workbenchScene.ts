@@ -12,7 +12,6 @@ import {
   MeshStandardMaterial,
   NeutralToneMapping,
   Object3D,
-  Path,
   PCFShadowMap,
   PerspectiveCamera,
   Plane,
@@ -24,6 +23,7 @@ import {
   Scene,
   ShadowMaterial,
   Shape,
+  ShapeGeometry,
   SphereGeometry,
   Texture,
   Vector2,
@@ -37,7 +37,7 @@ import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, TOOL
 import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { dress, type Dressed } from './accessoryMeshes'
-import { cardTexture, keyLabelTexture, pegboardTexture, woundTexture } from './benchTextures'
+import { cardTexture, keyLabelTexture, pegboardTexture, toolTexture, woundTexture } from './benchTextures'
 import { benchMaterial, fitCanvas, LIVE, readModel, readyToDraw } from './workbenchModel'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
@@ -62,10 +62,17 @@ export interface BenchView {
    */
   reads?: readonly ReadSource[] | null
   /**
-   * The tools (MCP servers) it is given, standing in the bench's tool drawer. Every agent you build
-   * has one, in Your agents and in a team; the landing page's bench has none.
+   * The tools (MCP servers) it is given, a tile with each one's icon standing in the bench's tool
+   * drawer. Every agent you build has one, in Your agents and in a team; the landing page's bench
+   * has none.
    */
-  tools?: readonly string[] | null
+  tools?: readonly BenchTool[] | null
+}
+
+/** A tool in the drawer: its name, and the icon LoomWatch serves for it once it is connected. */
+export interface BenchTool {
+  name: string
+  icon: string | null
 }
 
 export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply'
@@ -119,13 +126,27 @@ const DISH_KEY_SCALE = 0.72
 const DRAWER = { bottom: 0.27, width: 0.42, height: 0.18, depth: 0.32, front: 0.26, open: 0.28 }
 type DrawerName = 'reads' | 'tools'
 const DRAWER_X: Record<DrawerName, number> = { reads: -0.7, tools: 0.7 }
-/** Where each folder is filed, front first, and where each wrench stands, side by side. */
+/**
+ * The tool drawer is lined with foam, flush with its sides, and each tool stands in it as a tile
+ * with its icon, in a row across the drawer: bigger the fewer there are, so one or two read at a
+ * glance. A tile is made `TOOL_TILE` high and scaled to its size, by how many there are.
+ */
+const TOOL_FOAM = 0.135
+const TOOL_TILE = 0.1
+/** How big a tile is with one to four in the drawer. */
+const TOOL_SIZES = [0.115, 0.105, 0.092, 0.08]
+/** Where a tool's tile stands, and how big it is, with `count` in the drawer. */
+function toolPlace(slot: number, count: number): { at: Vector3; scale: number } {
+  const shown = MathUtils.clamp(count, 1, TOOL_SLOTS)
+  const size = TOOL_SIZES[shown - 1]
+  // Standing on the foam, so the whole tile shows over the drawer's front.
+  return { at: new Vector3((slot - (shown - 1) / 2) * (size + 0.014), TOOL_FOAM + 0.002, -0.07), scale: size / TOOL_TILE }
+}
+/** Where each folder is filed, front first, and where each tool's tile stands with the drawer full. */
 const DRAWER_SLOTS: Record<DrawerName, Vector3[]> = {
   reads: Array.from({ length: READ_SLOTS }, (_, slot) => new Vector3(0, 0.016, -0.035 - slot * 0.042)),
-  tools: Array.from({ length: TOOL_SLOTS }, (_, slot) => new Vector3((slot - (TOOL_SLOTS - 1) / 2) * 0.085, 0.016, -0.06 - (slot % 2) * 0.03)),
+  tools: Array.from({ length: TOOL_SLOTS }, (_, slot) => toolPlace(slot, TOOL_SLOTS).at),
 }
-/** Each wrench's grip, so tools side by side read apart. */
-const GRIP_TINTS = ['#C0342E', '#2F7DD3', '#D8A93C', '#6E9C6A']
 const FOLDER_TINTS = ['#E6CD97', '#DCC08A', '#E9D5AA', '#D9BC80']
 const HIGHLIGHT = new Color('#E9C46A')
 /** It looks with its head; its body turns only a little, so both hands stay on the laptop. */
@@ -146,6 +167,22 @@ const smooth = (edge0: number, edge1: number, x: number) => MathUtils.smoothstep
 const shown = (object: Object3D | null): boolean => { for (let at = object; at; at = at.parent) if (!at.visible) return false; return true }
 const envelope = (u: number) => smooth(0, 0.18, u) * (1 - smooth(0.72, 1, u))
 const bump = (u: number) => Math.sin(Math.PI * MathUtils.clamp(u, 0, 1))
+
+/** A square `size` across with rounded corners, standing on its bottom edge, its middle at x = 0. */
+function roundedSquare(size: number, radius: number): Shape {
+  const half = size / 2
+  const shape = new Shape()
+  shape.moveTo(-half + radius, 0)
+  shape.lineTo(half - radius, 0)
+  shape.absarc(half - radius, radius, radius, -Math.PI / 2, 0, false)
+  shape.lineTo(half, size - radius)
+  shape.absarc(half - radius, size - radius, radius, 0, Math.PI / 2, false)
+  shape.lineTo(-half + radius, size)
+  shape.absarc(-half + radius, size - radius, radius, Math.PI / 2, Math.PI, false)
+  shape.lineTo(-half, radius)
+  shape.absarc(-half + radius, radius, radius, Math.PI, Math.PI * 1.5, false)
+  return shape
+}
 
 /** A flat face's top left, top right and bottom left corners, found by its UVs (glTF's start at the top). */
 function corners(mesh: Mesh): Vector3[] {
@@ -191,7 +228,7 @@ export class WorkbenchScene {
   /** Whether each drawer is open, or `null` before the first view: it opens only with something in it. */
   private readonly drawerOpen: Record<DrawerName, boolean | null> = { reads: null, tools: null }
   /** Which tool stands in each slot of the tool drawer. */
-  private readonly stocked: { group: Group | null; tool: string | null }[] = Array.from({ length: TOOL_SLOTS }, () => ({ group: null, tool: null }))
+  private readonly stocked: { group: Group | null; tool: BenchTool | null }[] = Array.from({ length: TOOL_SLOTS }, () => ({ group: null, tool: null }))
   private readonly faces = new Map<string, Mesh>()
   /** Each worded face's top left, top right and bottom left corners, in its own space. */
   private readonly faceCorners = new Map<BenchFace, Vector3[]>()
@@ -455,7 +492,7 @@ export class WorkbenchScene {
       for (const reaction of reactionsBetween(before.look, look)) this.react(reaction)
       if (before.figure.kind !== view.figure.kind || before.figure.color !== view.figure.color) this.react({ kind: 'redressed' })
       if (before.reads && view.reads && sourceKeys(before.reads) !== sourceKeys(view.reads)) this.react({ kind: 'filed' })
-      if (before.tools && view.tools && before.tools.join('\n') !== view.tools.join('\n')) this.react({ kind: 'tooled' })
+      if (before.tools && view.tools && toolNames(before.tools) !== toolNames(view.tools)) this.react({ kind: 'tooled' })
       if (before.mood !== view.mood) this.moodChanged(before.mood, view.mood)
     }
   }
@@ -586,6 +623,7 @@ export class WorkbenchScene {
     add(drawer, box(width - 0.03, 0.008, depth, inside()), 'floor', 0, 0.012, -depth / 2)
     for (const sign of [-1, 1]) add(drawer, box(0.008, height * 0.7, depth, inside()), `side_${sign < 0 ? 'l' : 'r'}`, sign * (width / 2 - 0.02), height * 0.35 + 0.008, -depth / 2)
     add(drawer, box(width - 0.03, height * 0.7, 0.008, inside()), 'back', 0, height * 0.35 + 0.008, -depth)
+    if (name === 'tools') add(drawer, box(width - 0.048, TOOL_FOAM - 0.016, depth - 0.008, new MeshStandardMaterial({ color: '#1E1E24', roughness: 0.95 })), 'foam', 0, (TOOL_FOAM + 0.016) / 2, -depth / 2)
     DRAWER_SLOTS[name].forEach((place, slot) => {
       const at = new Group()
       at.name = `${name}_${slot + 1}`
@@ -660,57 +698,62 @@ export class WorkbenchScene {
     return group
   }
 
-  /** The tools it is given, standing in the tool drawer from the left, in the order the team file lists them. */
-  private hangTools(tools: readonly string[], animate: boolean) {
+  /** The tools it is given, a tile each standing in the tool drawer from the left, in the order the team file lists them. */
+  private hangTools(tools: readonly BenchTool[], animate: boolean) {
+    const count = Math.min(tools.length, TOOL_SLOTS)
     for (let slot = 0; slot < TOOL_SLOTS; slot += 1) {
       const tool = tools[slot] ?? null
       const hung = this.stocked[slot]
-      if (hung.tool === tool) continue
-      if (hung.group) this.unpin(hung.group, animate)
-      hung.group = tool ? this.wrench(slot, animate) : null
+      const kept = Boolean(tool && hung.group && hung.tool?.name === tool.name)
+      // The row spreads out or closes up as a tool comes or goes; a new tile is put in where it stands.
+      if (tool) this.placeTool(slot, count, animate && kept)
+      if (kept) {
+        // The same tool, its icon found once it is connected (or lost): the same tile, painted again.
+        if (hung.tool!.icon !== tool!.icon) this.paintTool(hung.group!, tool!)
+      } else {
+        if (hung.group) this.unpin(hung.group, animate)
+        hung.group = tool ? this.toolTile(slot, tool, animate) : null
+      }
       hung.tool = tool
     }
   }
 
-  /** An open-ended wrench with a coloured grip, standing on its handle in the drawer, its head up. */
-  private wrench(slot: number, animate: boolean): Group {
+  private placeTool(slot: number, count: number, animate: boolean) {
+    const node = this.node(`tools_${slot + 1}`)
+    const { at, scale } = toolPlace(slot, count)
+    if (node.position.equals(at) && node.scale.x === scale) return
+    this.tweens = this.tweens.filter((tween) => tween.node !== node)
+    if (!animate || this.reduced) { node.position.copy(at); node.scale.setScalar(scale); return }
+    this.tween(node, at, node.quaternion.clone(), 0.4, 0, undefined, false, scale)
+  }
+
+  /**
+   * A tool's tile: white enamel with rounded corners, like an app's icon, and the tool's own icon on
+   * its face (ToolIcon's, in the app). It stands in the foam leaning back a little, so its face shows
+   * over the drawer's front.
+   */
+  private toolTile(slot: number, tool: BenchTool, animate: boolean): Group {
     const group = new Group()
-    group.name = `tools_${slot + 1}_wrench`
-    // Drawn head up around its head's middle.
-    const head = 0.034
-    const half = 0.011
-    const length = 0.19
-    const shape = new Shape()
-    const meet = Math.sqrt(head * head - half * half)
-    const side = Math.atan2(meet, half)
-    shape.moveTo(-half, -length)
-    shape.lineTo(-half, -meet)
-    // Round the head's left side, from the handle up to the jaw, then its right side back down.
-    shape.absarc(0, 0, head, side - Math.PI, Math.PI - side, true)
-    shape.lineTo(-half, 0.004)
-    shape.lineTo(half, 0.004)
-    shape.lineTo(half, meet)
-    shape.absarc(0, 0, head, side, -side, true)
-    shape.lineTo(half, -length)
-    shape.absarc(0, -length, half, 0, Math.PI, true)
-    const hole = new Path()
-    hole.absarc(0, -length + 0.002, 0.0045, 0, Math.PI * 2, false)
-    shape.holes.push(hole)
-    const steel = new Mesh(new ExtrudeGeometry(shape, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.002, bevelSize: 0.002, bevelSegments: 2, curveSegments: 18 }), new MeshStandardMaterial({ color: '#C9CCD2', roughness: 0.3, metalness: 0.85 }))
-    steel.name = `tools_${slot + 1}_steel`
-    const grip = new Mesh(new BoxGeometry(0.03, 0.085, 0.014), new MeshStandardMaterial({ color: GRIP_TINTS[slot % GRIP_TINTS.length], roughness: 0.55 }))
-    grip.name = `tools_${slot + 1}_grip`
-    // Just under its head, so its colour shows over the drawer's front.
-    grip.position.set(0, -0.08, 0.003)
-    const body = new Group()
-    body.add(steel, grip)
-    // Standing on the end of its handle, so its head shows over the drawer's front.
-    body.position.y = length + half
-    group.add(body)
-    group.rotation.set(-0.16, 0, MathUtils.degToRad(((slot * 29) % 9) - 4))
+    group.name = `tools_${slot + 1}_tile`
+    const shape = roundedSquare(TOOL_TILE, TOOL_TILE * 0.24)
+    const depth = 0.008
+    const bevel = 0.002
+    const body = new Mesh(new ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 10 }), new MeshPhysicalMaterial({ color: '#F7F5F0', roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.2 }))
+    body.name = `tools_${slot + 1}_body`
+    body.position.z = -depth / 2
+    const faceGeometry = new ShapeGeometry(shape, 10)
+    // Its UVs from its corners, so the icon covers the face once.
+    const uv = faceGeometry.getAttribute('uv')
+    for (let index = 0; index < uv.count; index += 1) uv.setXY(index, uv.getX(index) / TOOL_TILE + 0.5, uv.getY(index) / TOOL_TILE)
+    const face = new Mesh(faceGeometry, new MeshPhysicalMaterial({ map: toolTexture(tool.name, tool.icon), roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.2 }))
+    face.name = `tools_${slot + 1}_face`
+    face.position.z = depth / 2 + bevel + 0.0004
+    group.add(body, face)
+    group.rotation.set(-0.22, 0, MathUtils.degToRad(((slot * 29) % 5) - 2))
     this.node(`tools_${slot + 1}`).add(group)
-    for (const mesh of [steel, grip]) {
+    for (const mesh of [body, face]) {
       mesh.castShadow = true
+      mesh.receiveShadow = true
       this.pickables.push(mesh)
       this.roles.set(mesh, 'tool')
       this.disposables.push(mesh.geometry)
@@ -722,6 +765,14 @@ export class WorkbenchScene {
       this.tween(group, new Vector3(0, 0, 0), group.quaternion.clone(), 0.5, 0.06)
     }
     return group
+  }
+
+  private paintTool(group: Group, tool: BenchTool) {
+    const face = group.children.find((child) => child.name.endsWith('_face')) as Mesh
+    const material = face.material as MeshStandardMaterial
+    material.map?.dispose()
+    material.map = toolTexture(tool.name, tool.icon)
+    material.needsUpdate = true
   }
 
   /** Hang a key on its hook (it may) or put it in your dish (it asks you first). */
@@ -1175,3 +1226,4 @@ export class WorkbenchScene {
 /** What a source is, and where, so a slot keeps its folder until a different one goes there. */
 const sourceKey = (source: ReadSource) => `${source.kind}\n${source.name}\n${source.where}`
 const sourceKeys = (sources: readonly ReadSource[]) => sources.map(sourceKey).join('\n\n')
+const toolNames = (tools: readonly BenchTool[]) => tools.map((tool) => tool.name).join('\n')

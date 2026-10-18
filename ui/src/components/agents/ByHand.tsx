@@ -47,7 +47,7 @@ const SkillsMarket = lazy(() => import('../skills/SkillsMarket'))
  * The blocks are the way in: each says what its setting does, in words, so nobody needs to learn
  * the bench first. The bench is the picture of the same settings: the laptop shows the model it
  * thinks with, the nameplate the name, the clipboard the job, the cards on the pegboard the skills, the folders in
- * the file drawer what it reads, the wrenches in the tool drawer its tools,
+ * the file drawer what it reads, the tiles with their icons in the tool drawer its tools,
  * the keys on the hooks what it may do without
  * asking (the ones in your dish ask you first), and the tray what it hands back. Clicking anything
  * on the bench takes you to its block, and working in a block lights its thing on the bench. While
@@ -168,6 +168,9 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const connectedTools = connected.state === 'ready' ? connected.tools : []
   const [connecting, setConnecting] = useState<ConnectedTool | 'new' | null>(null)
   const givenTools = draft.tools.map((name) => ({ name, tool: toolNamed(connectedTools, name) }))
+  // The bench's tool drawer shows each one's own icon, once it is connected.
+  const readyTools = connected.state === 'ready' ? connected.tools : null
+  const benchTools = useMemo(() => draft.tools.map((name) => ({ name, icon: (readyTools && toolNamed(readyTools, name)?.icon) || null })), [draft.tools, readyTools])
   const toGive = connectedTools.filter((tool) => !tool.pending && !draft.tools.some((name) => name.trim().toLowerCase() === tool.name.trim().toLowerCase()))
   const giveTool = (name: string) => { if (!draft.tools.some((given) => given.trim().toLowerCase() === name.trim().toLowerCase())) set('tools', [...draft.tools, name]) }
   // What it reads: its own (for a team's own agent, all of it), and in a team what that team gives
@@ -197,8 +200,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     open: focus,
     dropping: dragging === 'skill',
     reads,
-    tools: draft.tools,
-  }), [draft, figure, model, mood, events, asked, focus, dragging, reads])
+    tools: benchTools,
+  }), [draft, figure, model, mood, events, asked, focus, dragging, reads, benchTools])
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (target: FigurePart) => {
