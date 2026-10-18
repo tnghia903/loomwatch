@@ -135,22 +135,31 @@ $defs:
 
   Brief:
     description: >-
-      Bounds on the handover a stage writes for the stage after it. The successor reads this
-      instead of the transcript, so these bounds are what keep a long pipeline from carrying
-      every earlier stage's narration in its prompt.
+      What a stage hands the stages after it. A reply that fits is handed on as written; a longer
+      one is summarised first, in a handover the stage writes in the session it already built,
+      and these bounds shape that handover.
     type: object
     additionalProperties: false
     properties:
       summaryChars:
-        description: Character budget for the summary section.
+        description: Character budget for a handover's summary section.
         type: integer
         minimum: 1
         default: 1200
       maxFindings:
-        description: How many standalone findings a stage may carry forward.
+        description: How many standalone findings a handover may carry forward.
         type: integer
         minimum: 0
         default: 8
+      asWrittenUpTo:
+        description: >-
+          The longest reply, in characters, handed on as written. Where several stages feed one,
+          they share it. Longer replies get a handover. At most 24000, the most of a handed
+          section one prompt carries; 0 asks every stage for a handover.
+        type: integer
+        minimum: 0
+        maximum: 24000
+        default: 24000
 
   Memory:
     description: >-
@@ -336,11 +345,19 @@ $defs:
     properties:
       maxPerStage:
         description: >-
-          How many questions a stage may put to the stage before it, which stays alive and
-          answerable while this one runs.
+          How many questions one agent may put to another in a run, asking again after a
+          question back included. A stage before this one stays answerable while the stages it
+          feeds run.
         type: integer
         minimum: 0
         default: 3
+      replyChars:
+        description: >-
+          The most of one answer, in characters, handed back to the agent that asked. A longer
+          answer is cut in the middle, keeping its start and its conclusion.
+        type: integer
+        minimum: 1000
+        default: 20000
 
   Schedule:
     type: object

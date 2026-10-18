@@ -103,7 +103,10 @@ depend on the document as a whole:
   mode it may name any agent in the configured pipeline; later stages still run, but their replies
   do not replace the selected output. In team mode it must equal `entrypoint`, because the entrypoint
   owns the self-organizing root turn. When omitted, compatibility inference applies: `entrypoint`
-  responds in team mode and the last topological pipeline stage responds in pipeline mode.
+  responds in team mode and the last topological pipeline stage responds in pipeline mode. A
+  pipeline that ends on a review stop answers with the work approved there, not with what you typed
+  to approve it: the stage feeding the stop responds (through stops in a row, and then the
+  check-step rule below). A final stop fed by more than one stage responds itself.
 - An optional `schedule` block (`$defs.Schedule`) turns the team into a routine: `cron`
   must parse (standard 5-field form with `0`/`7` = Sunday, or the 6/7-field seconds form),
   `timezone` must be an IANA zone when present, and `prompt` must not be blank. Loaders
@@ -448,26 +451,43 @@ The decision is made on this computer from the command line alone; `permission_a
 ```yaml
 conversation:
   brief:
-    summaryChars: 1200   # character budget for the handover summary
-    maxFindings: 8       # standalone findings carried forward
+    asWrittenUpTo: 24000 # longest reply handed on as written (at most 24000)
+    summaryChars: 1200   # character budget for a handover's summary
+    maxFindings: 8       # standalone findings a handover carries forward
   ask:
-    maxPerStage: 3       # questions a stage may put to the stage before it
+    maxPerStage: 3       # questions one agent may put to another in a run
+    replyChars: 20000    # most of one answer handed back to the asker
 ```
 
-A stage does not receive its predecessor's transcript. When its own work is done, each non-final
-stage is asked — in the session it already built — to write a handover under fixed headings, and
-that is what the next stage reads. A reply no longer than a handover (`summaryChars` plus about
-250 characters per finding, 3,200 by default) is handed to the agents after it as written, with no
-handover turn: it cannot be made shorter, and its role already shaped it for the next stage. A
-review stop always gets the handover, because you decide from its summary and open questions. A
-step that checks its predecessor is handed the work as written either way. The predecessor's
-session then stays open while its successor
-runs, so anything the brief left out can be pulled with the Team Bus `ask` tool and answered from
-the context that produced it. `allowRecruiting: false` does not block such a question: that flag
-governs recruiting a helper, not talking to the stage before you.
+A stage does not receive its predecessor's transcript. It receives its reply, as written, when the
+reply fits: up to `asWrittenUpTo` characters, shared equally where several stages feed one stage, so
+a join is never cut. A review stop passes its share on to the stage after it, so you read the work
+itself, and the stage after the stop works from the same text you approved. Only a longer reply is
+summarised: the stage is asked, in the session it already built, to write a handover under fixed
+headings, keeping with each finding the evidence it rests on (a link, a file path, a figure, a date)
+and saying what it could not confirm. Any link in the full reply that the handover leaves out is
+listed under it. A step that checks its predecessor is handed the work as written either way.
 
-Every field is optional and the defaults above apply. Raise them for a stage whose output genuinely
-cannot be summarised; the cost of raising them is paid by every stage downstream.
+A finished stage's session stays open while the stages it feeds take their turn, so anything its
+work left out can be pulled with the Team Bus `ask` tool and answered from the context that
+produced it. This follows the edges, not the run order: the source of a fan-out stays open for
+every branch, and every input of a join for the join. A stage followed by a review stop is put away
+for you instead, and a stage that finished in an earlier run you continue from has no session at
+all. Each stage is told which of the stages feeding it are open; asking one that has finished is
+refused with where its work is, rather than starting a fresh copy that knows nothing.
+`allowRecruiting: false` does not block a question to an open stage: that flag governs recruiting a
+helper, not talking to the stage before you.
+
+Every `ask`, in a pipeline or a team, follows the same rules. One agent may put `maxPerStage`
+questions to another in a run. The question reaches an open stage saying who asks and asking for a
+brief answer from the work it already did. An agent that needs something from the asker first ends
+its answer with a `## Question back` section, never by asking the asker, which is waiting on it,
+and the asker is told to ask again with that detail; that second question counts too. The answer
+comes back as written, cut in the middle past `replyChars` so its conclusion is kept.
+
+Every field is optional and the defaults above apply. Lower `asWrittenUpTo` for a long pipeline on
+a model without prompt caching; the cost of raising the other bounds is paid by every stage
+downstream.
 
 ## Memory
 
