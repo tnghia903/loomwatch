@@ -29,6 +29,7 @@ import { NotionPagePicker } from '../canvas/NotionPagePicker'
 import { InstructionShape } from '../canvas/InstructionShape'
 import { EffortSlider } from '../models/EffortSlider'
 import { ModelPicker } from '../models/ModelPicker'
+import { SkillDetails } from '../skills/SkillDetails'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
 import type { BenchLabel } from './AgentFigure'
@@ -221,9 +222,10 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const toolsOff = draft.tools.length > TOOL_SLOTS ? ` (${draft.tools.length - TOOL_SLOTS} not in the drawer)` : ''
   const readsText = !reads.length ? 'Reads · nothing yet' : reads.length === 1 ? `Reads · ${reads[0].name}` : readsOff ? `Reads · ${reads.length}${readsOff}` : `Reads · ${readCount(reads)}`
   const toolsText = !draft.tools.length ? 'Tools · none yet' : draft.tools.length === 1 ? `Tools · ${draft.tools[0]}` : `Tools · ${draft.tools.length}${toolsOff}`
-  // What each setting adds up to, in words: the line under each block's title.
+  // What each setting adds up to, in words: the line under each block's title. Name has none: its
+  // boxes already say all of it, and a line above them said the name twice.
   const says: Record<Exclude<FigurePart, 'app'>, string> = {
-    name: hideDoes || !draft.does.trim() ? name : `${name} · ${draft.does.trim()}`,
+    name: '',
     job: draft.instructions.trim() ? `Says ${parts} of the ${INSTRUCTION_PARTS.length} things good instructions say: its job, how to work, how it checks its work, and what it replies with` : 'Nothing written yet',
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
@@ -265,7 +267,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           <h3 id={`${ids}-${part}`}>{meta.title}</h3>
           <span className="byhand-block-where">{meta.where}</span>
         </header>
-        <p className="byhand-block-says">{says[part]}</p>
+        {says[part] && <p className="byhand-block-says">{says[part]}</p>}
         {body}
         {extra}
       </section>
@@ -298,7 +300,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
         {/* Kept while chatting, only hidden: what you were writing in a block is there when you come back. */}
         <div className="byhand-blocks" data-tour="agent-blocks" hidden={chatting}>
           {block('name', <div className="agent-field-row">
-            <label className="agent-field">Name<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
+            {/* Its only box is under the block's own "Name", so that word isn't shown twice. */}
+            <label className="agent-field">{hideDoes ? <span className="visually-hidden">Name</span> : 'Name'}<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
             {!hideDoes && <label className="agent-field"><span>What it does <span className="optional">optional</span></span><input value={draft.does} maxLength={120} onChange={(event) => set('does', event.target.value)} placeholder="Shown under its name" /></label>}
           </div>)}
 
@@ -430,7 +433,7 @@ const SHELF = {
   skill: {
     Icon: Puzzle,
     chosen: 'Recipe cards on its pegboard',
-    none: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. Press + on one below, or drag it onto the bench.',
+    none: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. Click one below to read it, press + to pin it up, or drag it onto the bench.',
     noneToGive: 'None yet. A skill is a recipe card: instructions it opens when the work calls for it. LoomWatch has none to give yet, so find some in the marketplace.',
     looking: 'Looking for recipe cards…',
     find: (count: number) => `Find a recipe card (${count} in LoomWatch)`,
@@ -438,6 +441,7 @@ const SHELF = {
     list: 'Recipe cards you can add',
     take: (name: string) => `Take ${name} down`,
     give: (name: string) => `Pin ${name} up`,
+    read: (name: string) => `Read ${name}`,
     market: 'Find skills in the marketplace',
     marketFor: (query: string) => `Search the marketplace for “${query}”`,
     fromMarket: (names: readonly string[]) => `Pinned up ${listNames(names)} from the marketplace.`,
@@ -447,11 +451,17 @@ const SHELF = {
 /**
  * The skills it has, each with a way to take it off, and the others LoomWatch has to give it. They
  * can also be dragged onto the bench, where they are pinned up as recipe cards. LoomWatch gets more
- * from the marketplace (`onMarket`, with what was typed when nothing here matches it).
+ * from the marketplace (`onMarket`, with what was typed when nothing here matches it). Any of them,
+ * pinned up or not, opens to be read in full (SkillDetails).
  */
 function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag, onMarket, fromMarket = [] }: { kind: 'skill'; chosen: readonly string[]; available: readonly DetectedCapability[]; loading: boolean; onAdd: (name: string) => void; onRemove: (name: string) => void; onDrag?: (kind: 'skill' | null) => void; onMarket?: (query: string) => void; fromMarket?: readonly string[] }) {
   const words = SHELF[kind]
+  const ids = useId()
   const [query, setQuery] = useState('')
+  // The skill open to be read, by name: pinning it up moves it from the cards to the pegboard.
+  const [reading, setReading] = useState<string | null>(null)
+  const named = (name: string) => available.find((item) => item.name === name)
+  const open = reading ? named(reading) : undefined
   const found = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const seen = new Set<string>()
@@ -460,21 +470,31 @@ function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag, onMa
   return (
     <div className="byhand-shelf">
       {chosen.length > 0
-        ? <ul className="skill-picker-chosen" aria-label={words.chosen}>{chosen.map((name) => <li key={name}><words.Icon size={12} aria-hidden="true" />{name}<button type="button" className="iconbtn" aria-label={words.take(name)} onClick={() => onRemove(name)}><X size={12} aria-hidden="true" /></button></li>)}</ul>
+        ? <ul className="skill-picker-chosen" aria-label={words.chosen}>{chosen.map((name) => (
+          <li key={name}>
+            <words.Icon size={12} aria-hidden="true" />
+            {/* One LoomWatch can't find any more has nothing to read. */}
+            {named(name) ? <button type="button" className="skill-picker-open" data-skill={name} aria-label={words.read(name)} onClick={() => setReading(name)}>{name}</button> : name}
+            <button type="button" className="iconbtn" aria-label={words.take(name)} onClick={() => onRemove(name)}><X size={12} aria-hidden="true" /></button>
+          </li>
+        ))}</ul>
         : <p className="t-meta">{onMarket && !loading && available.length === 0 ? words.noneToGive : words.none}</p>}
       {fromMarket.length > 0 && <p className="t-meta byhand-shelf-news" role="status">{words.fromMarket(fromMarket)}</p>}
       <label className="skill-picker-find"><Search size={13} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={loading ? words.looking : words.find(available.length)} aria-label={words.findLabel} /></label>
       <ul className={`byhand-cards${onDrag ? '' : ' still'}`} aria-label={words.list}>
         {found.map((item) => (
-          <li key={item.id} draggable={Boolean(onDrag)} onDragStart={onDrag && ((event) => { event.dataTransfer.setData(SKILL_MIME, item.name); event.dataTransfer.effectAllowed = 'copy'; onDrag('skill') })} onDragEnd={onDrag && (() => onDrag(null))} title={onDrag ? 'Drag it onto the bench' : undefined}>
+          <li key={item.id} draggable={Boolean(onDrag)} onDragStart={onDrag && ((event) => { event.dataTransfer.setData(SKILL_MIME, item.name); event.dataTransfer.effectAllowed = 'copy'; onDrag('skill') })} onDragEnd={onDrag && (() => onDrag(null))} title={onDrag ? 'Click to read it, or drag it onto the bench' : undefined}>
             <span className="byhand-card-tab" aria-hidden="true" />
-            <b>{item.name}</b>
-            <span>{item.detail || item.source}</span>
-            <button type="button" className="iconbtn" aria-label={words.give(item.name)} onClick={() => onAdd(item.name)}><Plus size={13} aria-hidden="true" /></button>
+            <button type="button" className="byhand-card-open" data-skill={item.name} aria-label={words.read(item.name)} aria-describedby={`${ids}-${item.id}`} onClick={() => setReading(item.name)}>
+              <b>{item.name}</b>
+              <span id={`${ids}-${item.id}`}>{item.detail || item.source}</span>
+            </button>
+            <button type="button" className="iconbtn" aria-label={words.give(item.name)} title={words.give(item.name)} onClick={() => onAdd(item.name)}><Plus size={13} aria-hidden="true" /></button>
           </li>
         ))}
       </ul>
       {onMarket && <button type="button" className="btn byhand-market" onClick={() => { const typed = found.length ? '' : query.trim(); if (typed) setQuery(''); onMarket(typed) }}><Store size={14} aria-hidden="true" />{query.trim() && !found.length ? words.marketFor(query.trim()) : words.market}</button>}
+      {open && <SkillDetails key={open.id} item={open} pinned={chosen.includes(open.name)} onPin={() => { onAdd(open.name); setReading(null) }} onTakeDown={() => { onRemove(open.name); setReading(null) }} onClose={() => setReading(null)} />}
     </div>
   )
 }

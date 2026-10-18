@@ -112,7 +112,7 @@ describe('By hand: skills from the marketplace', () => {
   it('points at the marketplace from the cards too, and not where nothing can change', () => {
     const pdf: DetectedCapability = { id: 'skill:pdf', name: 'pdf', source: 'LoomWatch', detail: 'Fills PDF forms.', status: 'Ready' }
     const { unmount } = render(<Bench start={{ name: 'Reader' }} available={[pdf]} />)
-    expect(skillsBlock()).toHaveTextContent('Press + on one below, or drag it onto the bench.')
+    expect(skillsBlock()).toHaveTextContent('Click one below to read it, press + to pin it up, or drag it onto the bench.')
     expect(within(skillsBlock()).getByRole('button', { name: 'Find skills in the marketplace' })).toBeInTheDocument()
     unmount()
     render(<Bench start={{ name: 'Reader' }} readOnly />)
