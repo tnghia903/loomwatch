@@ -19,7 +19,7 @@ export function FileChip({ path }: { path: string }) {
   const why = !lookup
     ? 'Checking…'
     : lookup.state === 'outside'
-      ? 'Outside your teams folder'
+      ? 'Outside the folders your teams use'
       : lookup.state === 'unknown' || !facts
         ? fileLabel(path)
         : !facts.exists

@@ -1,7 +1,7 @@
 /**
  * The daemon's file endpoints (crates/loomwatch-backend/src/files.rs): what a produced file is, and
- * asking the system to open it or show it in its folder. Paths outside the teams folder are refused
- * by the daemon; the UI only reports that.
+ * asking the system to open it or show it in its folder. Paths outside the teams folder and the
+ * folders a team was given are refused by the daemon; the UI only reports that.
  */
 export interface FileFacts {
   path: string
