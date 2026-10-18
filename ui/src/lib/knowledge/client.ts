@@ -58,3 +58,18 @@ export async function addTeamFile(teamPath: string, file: File): Promise<StoredF
     body: file,
   }))
 }
+
+/**
+ * Keep a file one of Your agents reads, in the teams folder's `.jobs/.files/`. The answer's `path`
+ * is its full path, which every team the agent joins reads the same.
+ */
+export async function addAgentFile(file: File): Promise<StoredFile> {
+  const query = new URLSearchParams({ name: file.name })
+  const response = await daemonFetch(`/api/agents/files?${query}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  })
+  if (response.status === 404) throw new Error('This LoomWatch server is older than this page. Restart it, then add the file again.')
+  return readJson<StoredFile>(response)
+}

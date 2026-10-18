@@ -2671,10 +2671,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                 if (change.kind === 'rename') doc.renameAgent(agentId, change.field, change.value)
                 else doc.applyAgentFields(agentId, change.fields)
               }}
-              onApplyVersion={(agentId, job) => {
+              onApplyVersion={(agentId, job, previous) => {
                 const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
                 if (!agent || !editable) return
-                doc.applyAgentFields(agentId, fieldsForVersion(job, agent))
+                doc.applyAgentFields(agentId, fieldsForVersion(job, agent, previous))
                 setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
               }}
               onUnlink={(agentId) => {
@@ -2749,9 +2749,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
             link={{
               state: linkState(inspectedNode.data.agent, savedJobs),
-              onApply: (job) => {
+              onApply: (job, previous) => {
                 if (!editable) return
-                doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent))
+                doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent, previous))
                 setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
               },
               onUnlink: () => {

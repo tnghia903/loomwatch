@@ -76,6 +76,9 @@ describe('a team’s agents, the first of its views', () => {
       'EKIS hubNotion page · read when each run starts',
     ])
     expect(screen.getByText(/has 1 recipe card, and reads 1 folder, 1 file and 1 Notion page\./)).toBeInTheDocument()
+    // A team's own agent is given what it reads in Workflow only: nothing is added or taken here.
+    expect(within(block).queryByRole('group', { name: 'Give it something to read' })).toBeNull()
+    expect(within(block).queryByRole('button', { name: /^Stop reading/ })).toBeNull()
     fireEvent.click(within(block).getByRole('button', { name: 'Change it in Workflow' }))
     expect(props.onShowWorkflow).toHaveBeenCalled()
   })
@@ -220,9 +223,30 @@ describe('a team’s agents, the first of its views', () => {
     const block = await screen.findByRole('region', { name: 'Tools it can use' })
     // Its tools are the version's, like its skills: saving there moves this team to them.
     expect(names(within(block).getByRole('list', { name: 'Tools you gave it' }))).toEqual(['linear'])
-    expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page the team gives it')
+    expect(screen.getByRole('region', { name: 'What it reads' })).toHaveTextContent('Reads 1 folder, 1 file and 1 Notion page this team gives it')
     // It has its Chat here too: the one it has in Your agents.
     expect(within(screen.getByRole('navigation', { name: 'Agent view' })).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.queryByRole('region', { name: 'Try it' })).toBeNull()
+  })
+
+  it('lists what an agent from Your agents reads in every team apart from what this team gives it', async () => {
+    const reading = { ...reader, reads: [{ name: 'Style guide', path: '/Users/me/style' }] }
+    vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).endsWith('/api/jobs')
+      ? Promise.resolve(new Response(JSON.stringify({ jobs: [reading], problems: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      : Promise.reject(new Error('no daemon')))))
+    // The team copied its read when it placed it, and gives it a Notion page besides.
+    const placed: AgentConfig = { ...scoper, from: { agent: 'reader', version: 1 }, capabilities: [{ kind: 'knowledge', name: 'Style guide', path: '/Users/me/style' }, { kind: 'knowledge', name: 'EKIS hub', notion: { page: 'abc123' } }] }
+    renderTeamAgents({ agents: [placed], selected: 'scope', savedJobs: [reading] })
+    const block = await screen.findByRole('region', { name: 'What it reads' })
+    expect(block).toHaveTextContent('Reads 1 folder in every team it joins, and 1 Notion page this team gives it')
+    const held = within(block).getByRole('list', { name: 'In its file drawer' })
+    expect(within(held).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Style guideFolder · /Users/me/style',
+      'EKIS hubNotion page · read when each run startsThis team gives it',
+    ])
+    // Its own can be taken away here, as its next version; what the team gives it can't.
+    expect(within(held).getByRole('button', { name: 'Stop reading Style guide' })).toBeInTheDocument()
+    expect(within(held).queryByRole('button', { name: 'Stop reading EKIS hub' })).toBeNull()
+    expect(within(block).getByRole('group', { name: 'Give it something to read' })).toBeInTheDocument()
   })
 })

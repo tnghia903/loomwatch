@@ -17,7 +17,8 @@ import type { AllowSwitch } from '../team-file/types'
  *   for each one it reads and shut when there is none.
  * - `tools`: the tool drawer, right of the nameplate, with a wrench standing in it for each tool
  *   (MCP server) it is given, in its builder or with a line on the canvas.
- *   What it reads is the team's to give (ADR 0042): in Your agents the file drawer stays shut.
+ *   What it reads is given the same two ways: in its builder, for every team it joins, and by a
+ *   team with a line on the canvas (ADR 0042).
  * - `keys`: keys on the pegboard hooks go ahead without asking; the ones in your dish ask you first.
  * - `reply`: the tray where what it hands back lands.
  *
@@ -74,6 +75,8 @@ export interface ReadSource {
   name: string
   /** Where it is, in words: the folder's or file's path, or that it is a Notion page. */
   where: string
+  /** Which folder, file or page it is (lib/library/reads.ts `readKey`), whatever it is called. */
+  key?: string
 }
 
 /** How many fit in the drawer; more still count, they just aren't filed in it. */

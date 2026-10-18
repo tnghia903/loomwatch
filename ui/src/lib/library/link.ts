@@ -1,5 +1,7 @@
-import type { AgentAllow, AgentConfig } from '../team-file/types'
+import { uniqueLabel } from '../composer-layout/types'
+import type { AgentAllow, AgentConfig, CapabilityRef } from '../team-file/types'
 import { onlyOn, toolAllowOf, versionOf, type JobSpec, type SavedJob } from './jobs'
+import { knowledgeOf, readKey } from './reads'
 import { capabilitiesOf } from './roles'
 import { sameAllow } from '../tools/allow'
 
@@ -7,8 +9,9 @@ import { sameAllow } from '../tools/allow'
  * A team's side of the versioned link to Your agents.
  *
  * A linked agent carries `from: {agent, version}` and a copy of that version's fields. What the
- * version decides is its name, instructions, model, skills and tools, and what it may do
- * without asking; where it works, what it reads, and its place in the team stay the team's own.
+ * version decides is its name, instructions, model, skills and tools, what it reads in every team,
+ * and what it may do without asking; where it works, what else the team gives it to read, and its
+ * place in the team stay the team's own.
  */
 
 export interface AgentLinkState {
@@ -30,13 +33,21 @@ export function linkState(agent: AgentConfig, jobs: readonly SavedJob[]): AgentL
 }
 
 /**
- * The fields to write on a team's agent to bring it to `job`'s current version. What it reads and
- * where it works stay; its skills and tools become the version's, and the canvas draws each tool
- * as a card. Its model becomes the version's when the version names one.
+ * The fields to write on a team's agent to bring it to `job`'s current version. Where it works
+ * stays; its skills and tools become the version's, and the canvas draws each tool as a card. What
+ * the version reads is added to what the team gives it, and what `previous` (the version it
+ * leaves, when known) read and this one doesn't is taken away; everything else the team gave it
+ * stays. Its model becomes the version's when the version names one.
  */
-export function fieldsForVersion(job: SavedJob, agent: AgentConfig): Partial<AgentConfig> {
-  const own = (agent.capabilities ?? []).filter((capability) => capability.kind === 'knowledge')
-  const capabilities = [...own, ...capabilitiesOf(job.skills ?? [], job.tools ?? [], job.toolAllow ?? {})]
+export function fieldsForVersion(job: SavedJob, agent: AgentConfig, previous?: Pick<JobSpec, 'reads'> | null): Partial<AgentConfig> {
+  const reads = knowledgeOf(job.reads ?? [])
+  const leaving = new Set((previous?.reads ?? []).map(readKey))
+  const coming = new Set(reads.map(readKey))
+  const teams = (agent.capabilities ?? []).filter((capability) => capability.kind === 'knowledge' && !coming.has(readKey(capability)) && !leaving.has(readKey(capability)))
+  // Each label once, as the team's cards are named: a version's read takes another if the team uses it.
+  const taken = new Set(teams.map((capability) => capability.name))
+  const added: CapabilityRef[] = reads.map((capability) => ({ ...capability, name: uniqueLabel(capability.name, taken) }))
+  const capabilities = [...teams, ...added, ...capabilitiesOf(job.skills ?? [], job.tools ?? [], job.toolAllow ?? {})]
   const fields: Partial<AgentConfig> = {
     name: job.name,
     role: job.instructions,
@@ -69,6 +80,9 @@ export function changedHere(agent: AgentConfig, pinned: JobSpec): string[] {
   if (skills.join('\n') !== pinnedSkills.join('\n')) changed.push('skills')
   const tools = [...new Set((agent.capabilities ?? []).filter((capability) => capability.kind === 'tool').map((capability) => capability.name))].sort()
   if (tools.join('\n') !== [...(pinned.tools ?? [])].sort().join('\n')) changed.push('tools')
+  // The team may give it more to read; only something its version reads going missing is a change.
+  const reads = new Set((agent.capabilities ?? []).filter((capability) => capability.kind === 'knowledge').map(readKey))
+  if ((pinned.reads ?? []).some((read) => !reads.has(readKey(read)))) changed.push('what it reads')
   if ((agent.doneWhen ?? []).join('\n') !== (pinned.doneWhen ?? []).join('\n')) changed.push('done when')
   const mine = onlyOn(agent.allow) ?? {}
   const theirs = onlyOn(pinned.allow) ?? {}

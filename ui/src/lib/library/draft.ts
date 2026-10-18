@@ -5,6 +5,7 @@ import type { AgentAllow, AgentConfig, CapabilityRef } from '../team-file/types'
 import { DEFAULT_AGENT_ROLE } from './createAgent'
 import { isFigureChoice, type FigureChoice } from './figures'
 import { guessIcon, onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
+import { readKey, type AgentRead } from './reads'
 import { capabilitiesOf, modelForPreset, type RolePreset } from './roles'
 import { keptFor, sameAllow, type ToolAllow } from '../tools/allow'
 import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
@@ -29,6 +30,9 @@ export interface AgentDraft {
   /** Calls of those tools it may make without asking, by tool name (ADR 0069). Every other call
       asks you first. */
   toolAllow: ToolAllow
+  /** The folders, files and Notion pages it reads in every team it joins. A team copies them like
+      its skills, and can give it more. */
+  reads: AgentRead[]
   /** What the finished result must satisfy (ADR 0062); empty when nothing is set. */
   doneWhen: string[]
   allow: AgentAllow
@@ -36,7 +40,7 @@ export interface AgentDraft {
   figure: FigureChoice | null
 }
 
-export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, model: DEFAULT_MODEL, effort: '', skills: [], tools: [], toolAllow: {}, doneWhen: [], allow: {}, figure: null }
+export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, model: DEFAULT_MODEL, effort: '', skills: [], tools: [], toolAllow: {}, reads: [], doneWhen: [], allow: {}, figure: null }
 
 export function draftFromJob(job: JobSpec): AgentDraft {
   return {
@@ -48,6 +52,7 @@ export function draftFromJob(job: JobSpec): AgentDraft {
     skills: [...(job.skills ?? [])],
     tools: [...(job.tools ?? [])],
     toolAllow: keptFor(job.toolAllow ?? {}, job.tools ?? []),
+    reads: (job.reads ?? []).map((read) => ({ ...read })),
     doneWhen: [...(job.doneWhen ?? [])],
     allow: { ...(onlyOn(job.allow) ?? {}) },
     figure: isFigureChoice(job.figure) ? { ...job.figure } : null,
@@ -66,6 +71,7 @@ export function draftFromPreset(preset: RolePreset): AgentDraft {
     skills: [...(preset.skills ?? [])],
     tools: [...(preset.tools ?? [])],
     toolAllow: {},
+    reads: [],
     doneWhen: [...(preset.doneWhen ?? [])],
     allow: { ...(onlyOn(preset.allow) ?? {}) },
     figure: null,
@@ -86,6 +92,7 @@ export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
     ...(draft.skills.length ? { skills: [...draft.skills] } : {}),
     ...(draft.tools.length ? { tools: [...draft.tools] } : {}),
     ...(Object.keys(toolAllow).length ? { toolAllow } : {}),
+    ...(draft.reads.length ? { reads: draft.reads.map((read) => ({ ...read })) } : {}),
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(note.trim() ? { note: note.trim() } : {}),
@@ -108,6 +115,7 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
     || draft.skills.join('\n') !== saved.skills.join('\n')
     || draft.tools.join('\n') !== saved.tools.join('\n')
     || !sameAllow(draft.toolAllow, saved.toolAllow, draft.tools)
+    || draft.reads.map((read) => `${read.name}\t${readKey(read)}`).join('\n') !== saved.reads.map((read) => `${read.name}\t${readKey(read)}`).join('\n')
     || doneWhenOf(draft).join('\n') !== doneWhenOf(saved).join('\n')
     || SWITCHES.some((key) => Boolean(draft.allow[key]) !== Boolean(saved.allow[key]))
 }
@@ -133,7 +141,7 @@ export function agentFromDraft(draft: AgentDraft, model = draft.model, link?: { 
     role: draft.instructions.trim() || DEFAULT_AGENT_ROLE,
     model: model || DEFAULT_MODEL,
     ...(effort ? { thinkingEffort: effort } : {}),
-    ...(draft.skills.length || draft.tools.length ? { capabilities: capabilitiesOf(draft.skills, draft.tools, draft.toolAllow) } : {}),
+    ...(draft.skills.length || draft.tools.length || draft.reads.length ? { capabilities: capabilitiesOf(draft.skills, draft.tools, draft.toolAllow, draft.reads) } : {}),
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(link?.job ? { from: { agent: link.id, version: versionOf(link.job) } } : {}),
@@ -150,11 +158,13 @@ export function chatAgentId(chatId: string): string {
  * it is on screen, in the hidden `.jobs/.bench/` folder so the team list and the scheduler never
  * see it. Its agent keeps `chatAgentId(chatId)` whatever it
  * is called, so the chat's history and a note written while it works still reach it after a rename.
- * Inside a team it also reads what the team gives it (`knowledge`, from `knowledgeForChat`).
+ * Inside a team it also reads what the team gives it (`knowledge`, from `knowledgeForChat`), each
+ * folder, file or page once: a linked agent's team already copied what its version reads.
  */
 export function chatTeamYaml(draft: AgentDraft, model: string, chatId: string, knowledge: readonly CapabilityRef[] = []): string {
   const own = agentFromDraft(draft, model)
-  const capabilities = [...knowledge, ...(own.capabilities ?? [])]
+  const given = new Set(knowledge.map(readKey))
+  const capabilities = [...knowledge, ...(own.capabilities ?? []).filter((capability) => capability.kind !== 'knowledge' || !given.has(readKey(capability)))]
   const agent = { ...own, id: chatAgentId(chatId), ...(capabilities.length ? { capabilities } : {}) }
   return stringify({ schemaVersion: 1, id: `bench-${chatId}`, name: `${agent.name} · chat`, spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: agent.id, agents: [agent] }, { lineWidth: 0 })
 }

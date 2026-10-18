@@ -14,7 +14,7 @@ describe('a team’s own agent on the workbench', () => {
   it('reads the team agent as the workbench shows it', () => {
     expect(draftFromTeamAgent(writer)).toEqual({
       // A model written for an AI app reads as the OpenRouter model it maps to.
-      name: 'Writer', does: '', instructions: 'Write the digest.', model: 'anthropic/claude-sonnet-5.5', effort: 'high', skills: ['house-style'], tools: [], toolAllow: {}, doneWhen: [], allow: { web: true }, figure: null,
+      name: 'Writer', does: '', instructions: 'Write the digest.', model: 'anthropic/claude-sonnet-5.5', effort: 'high', skills: ['house-style'], tools: [], toolAllow: {}, reads: [], doneWhen: [], allow: { web: true }, figure: null,
     })
   })
 
@@ -83,11 +83,11 @@ describe('a team’s own agent on the workbench', () => {
       { kind: 'knowledge', name: 'nowhere' },
       { kind: 'knowledge', name: '', path: '/Users/me/unnamed/' },
     ] })).toEqual([
-      { kind: 'folder', name: 'notes', where: '/Users/me/notes' },
-      { kind: 'file', name: 'brief.md', where: 'digest.files/brief.md' },
-      { kind: 'file', name: 'ref.pdf', where: '/Users/me/ref.pdf' },
-      { kind: 'page', name: 'Hub', where: 'Notion page · read when each run starts' },
-      { kind: 'folder', name: 'unnamed', where: '/Users/me/unnamed/' },
+      { kind: 'folder', name: 'notes', where: '/Users/me/notes', key: 'path:/Users/me/notes' },
+      { kind: 'file', name: 'brief.md', where: 'digest.files/brief.md', key: 'path:digest.files/brief.md' },
+      { kind: 'file', name: 'ref.pdf', where: '/Users/me/ref.pdf', key: 'path:/Users/me/ref.pdf' },
+      { kind: 'page', name: 'Hub', where: 'Notion page · read when each run starts', key: 'notion:abc' },
+      { kind: 'folder', name: 'unnamed', where: '/Users/me/unnamed/', key: 'path:/Users/me/unnamed/' },
     ])
     expect(readsOf({})).toEqual([])
   })

@@ -2,6 +2,7 @@ import { modelForJob, type EffortTier, type ModelTier } from '../ai/modelIds'
 import type { AgentAllow, AgentLink, CapabilityRef } from '../team-file/types'
 import { callsFor, type ToolAllow } from '../tools/allow'
 import { CHECKER_ROLE } from './checker'
+import { knowledgeOf, type AgentRead } from './reads'
 import type { LibrarySource } from './types'
 
 /**
@@ -52,6 +53,8 @@ export interface RolePreset {
   tools?: readonly string[]
   /** Calls of those tools it may make without asking, by tool name (ADR 0069). */
   toolAllow?: ToolAllow
+  /** Folders, files and Notion pages it reads in every team; only Your agents carry any. */
+  reads?: readonly AgentRead[]
   /** What the agent may do without asking from the start (ADR 0037). Only what the job cannot be
       done without: a researcher that cannot search the web can only guess. */
   allow?: AgentAllow
@@ -237,11 +240,12 @@ export function modelForPreset(preset: RolePreset): { model: string; thinkingEff
 }
 
 /**
- * Skills and tools as a team agent's `capabilities`: what placing an agent, or the test bench,
- * writes. Each tool carries the calls it may make without asking (ADR 0069).
+ * What it reads, its skills and its tools as a team agent's `capabilities`: what placing an agent,
+ * or the test bench, writes. Each tool carries the calls it may make without asking (ADR 0069).
  */
-export function capabilitiesOf(skills: readonly string[], tools: readonly string[], toolAllow: ToolAllow = {}): CapabilityRef[] {
+export function capabilitiesOf(skills: readonly string[], tools: readonly string[], toolAllow: ToolAllow = {}, reads: readonly AgentRead[] = []): CapabilityRef[] {
   return [
+    ...knowledgeOf(reads),
     ...skills.map((name) => ({ kind: 'skill' as const, name })),
     ...tools.map((name) => {
       const calls = callsFor(toolAllow, name)
@@ -258,7 +262,7 @@ export function roleSource(preset: RolePreset): LibrarySource {
     label: preset.label,
     role: preset.role,
     ...modelForPreset(preset),
-    ...(preset.skills?.length || preset.tools?.length ? { capabilities: capabilitiesOf(preset.skills ?? [], preset.tools ?? [], preset.toolAllow ?? {}) } : {}),
+    ...(preset.skills?.length || preset.tools?.length || preset.reads?.length ? { capabilities: capabilitiesOf(preset.skills ?? [], preset.tools ?? [], preset.toolAllow ?? {}, preset.reads ?? []) } : {}),
     ...(preset.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
     ...(preset.allow ? { allow: { ...preset.allow } } : {}),
     ...(preset.from ? { from: { ...preset.from } } : {}),

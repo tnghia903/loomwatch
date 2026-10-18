@@ -229,6 +229,13 @@ pub fn router_with_archive(
                 crate::chosen_knowledge::MAX_FILE_BYTES,
             )),
         )
+        // A file one of Your agents reads, kept in `.jobs/.files/`.
+        .route(
+            "/api/agents/files",
+            axum::routing::put(put_agent_file).layer(axum::extract::DefaultBodyLimit::max(
+                crate::chosen_knowledge::MAX_FILE_BYTES,
+            )),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             enforce_allowed_host,
@@ -442,6 +449,41 @@ async fn put_team_file(
     .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
     .map(Json)
     .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, message))
+}
+
+#[derive(Deserialize)]
+struct AgentFileUpload {
+    /// The file's own name, as the browser reports it.
+    name: String,
+}
+
+/// Keep a file one of Your agents reads (`crate::jobs::store_agent_file`): the body is the file's
+/// bytes, and the answer names it by its full path. `application/octet-stream` only, as for a
+/// team's file, so a page on another origin cannot send one with a plain form.
+async fn put_agent_file(
+    State(state): State<ApiState>,
+    Query(query): Query<AgentFileUpload>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<crate::chosen_knowledge::StoredFile>, ApiError> {
+    let octet_stream = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/octet-stream"));
+    if !octet_stream {
+        return Err(ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "send the file as application/octet-stream".into(),
+        ));
+    }
+    let teams_root = state.teams_root.clone();
+    // Extracting a PDF's text can take a moment, so it runs off the async workers.
+    tokio::task::spawn_blocking(move || {
+        crate::jobs::store_agent_file(&teams_root, &query.name, &body).map_err(job_error)
+    })
+    .await
+    .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+    .map(Json)
 }
 
 /// The jobs the operator saved (`crate::jobs`, ADR 0030), and the files in the jobs folder that
@@ -1874,6 +1916,42 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    /// A file one of Your agents reads is kept in `.jobs/.files/` and answered by its full path; a
+    /// plain form, which any page could send, is refused.
+    #[tokio::test]
+    async fn a_file_an_agent_reads_is_kept_and_named_by_its_full_path() {
+        let root = TempDirectory::new();
+        let upload = |content_type: &str| {
+            Request::builder()
+                .method("PUT")
+                .uri("/api/agents/files?name=plan.md")
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from("# Plan\n"))
+                .expect("request")
+        };
+        let response = test_router(&root.0)
+            .oneshot(upload("application/x-www-form-urlencoded"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let stored = response_json(
+            test_router(&root.0)
+                .oneshot(upload("application/octet-stream"))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(stored["name"], "plan.md");
+        let path = stored["path"].as_str().expect("path");
+        assert!(Path::new(path).is_absolute(), "{path}");
+        assert!(
+            Path::new(path).ends_with(Path::new(".jobs").join(".files").join("plan.md")),
+            "{path}"
+        );
+        assert_eq!(fs::read_to_string(path).expect("kept"), "# Plan\n");
     }
 
     /// A saved job round-trips through the API: created once, refused a second create so the UI

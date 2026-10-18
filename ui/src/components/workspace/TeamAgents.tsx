@@ -4,7 +4,7 @@ import { Network, Plus, UserRoundPlus, X } from 'lucide-react'
 import type { DetectedCapability } from '../../lib/library/client'
 import type { ReadSource } from '../../lib/library/figure'
 import type { AgentDraft } from '../../lib/library/draft'
-import type { SavedJob } from '../../lib/library/jobs'
+import type { JobSpec, SavedJob } from '../../lib/library/jobs'
 import { linkState } from '../../lib/library/link'
 import { draftFromTeamAgent, readsOf, teamKnowledge, type TeamKnowledge } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
@@ -32,8 +32,9 @@ export interface TeamAgentsProps {
   savedJobs: readonly SavedJob[]
   /** One workbench change on a team's own agent, written into the team file. */
   onEdit: <K extends keyof AgentDraft>(agentId: string, key: K, value: AgentDraft[K]) => void
-  /** Bring a linked agent in this team to a version of its agent in Your agents. */
-  onApplyVersion: (agentId: string, job: SavedJob) => void
+  /** Bring a linked agent in this team to a version of its agent in Your agents, from `previous`
+      when it is known (lib/library/link.ts `fieldsForVersion`). */
+  onApplyVersion: (agentId: string, job: SavedJob, previous: Pick<JobSpec, 'reads'> | null) => void
   onUnlink: (agentId: string) => void
   onShowWorkflow: () => void
   /** Put one of Your agents in this team. Absent when the team can't be changed here. */
@@ -83,9 +84,9 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
 
       {agent && link && (
         <div className="team-agents-linked" key={agent.id}>
-          <LinkedAgent agent={agent} link={link} readOnly={!editable} onApply={(job) => onApplyVersion(agent.id, job)} onUnlink={() => onUnlink(agent.id)} teamPath={teamPath} headClassName="agent-section-head" showEdit={false} />
+          <LinkedAgent agent={agent} link={link} readOnly={!editable} onApply={(job, previous) => onApplyVersion(agent.id, job, previous)} onUnlink={() => onUnlink(agent.id)} teamPath={teamPath} headClassName="agent-section-head" showEdit={false} />
           {link.job
-            ? <AgentBuilder id={link.job.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job) => { if (editable) onApplyVersion(agent.id, job) }, reads, knowledge, onShowWorkflow }} />
+            ? <AgentBuilder id={link.job.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job, previous) => { if (editable) onApplyVersion(agent.id, job, previous) }, reads, knowledge, onShowWorkflow }} />
             : <p className="t-meta">Its agent is gone from Your agents. Make it this team’s own to change it here.</p>}
         </div>
       )}
@@ -152,7 +153,7 @@ function OwnAgent({ agent, teamPath, editable, skills, skillsLoading, onEdit, re
         <AgentViewTabs view={view} onView={setView} />
       </div>
       <ByHand
-        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} reads={reads} onShowWorkflow={onShowWorkflow}
+        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} reads={reads} teamGivesReads onShowWorkflow={onShowWorkflow}
         chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}

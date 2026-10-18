@@ -481,6 +481,28 @@ pub fn store_file(
     requested_name: &str,
     bytes: &[u8],
 ) -> Result<StoredFile, String> {
+    let team_dir = team_file.parent().ok_or("the team file has no folder")?;
+    let folder = files_folder(team_file);
+    let folder_name = folder
+        .file_name()
+        .ok_or("the team file has no name")?
+        .to_string_lossy()
+        .into_owned();
+    store_file_in(team_dir, &folder_name, requested_name, bytes)
+}
+
+/// Copy an uploaded file into the folder `folder_name` inside `within`, made when missing, the
+/// way [`store_file`] does for a team. The stored file's `path` is relative to `within`.
+///
+/// # Errors
+///
+/// As [`store_file`].
+pub fn store_file_in(
+    within: &Path,
+    folder_name: &str,
+    requested_name: &str,
+    bytes: &[u8],
+) -> Result<StoredFile, String> {
     if bytes.len() > MAX_FILE_BYTES {
         return Err(format!(
             "{requested_name} is larger than {} MB. Put it in a folder and add the folder instead.",
@@ -489,16 +511,8 @@ pub fn store_file(
     }
     let name = safe_name(requested_name)
         .ok_or_else(|| format!("{requested_name:?} cannot be used as a file name"))?;
-    let team_dir = team_file
-        .parent()
-        .ok_or("the team file has no folder")?
-        .to_path_buf();
-    let folder = files_folder(team_file);
-    let folder_name = folder
-        .file_name()
-        .ok_or("the team file has no name")?
-        .to_string_lossy()
-        .into_owned();
+    let team_dir = within.to_path_buf();
+    let folder = within.join(folder_name);
     fs::create_dir_all(&folder)
         .map_err(|error| format!("{} could not be created ({error})", folder.display()))?;
     // Re-checked after creating: a symlinked folder already on the way would put the file outside

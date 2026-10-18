@@ -4,6 +4,7 @@ import type { AgentConfig, CapabilityRef } from '../team-file/types'
 import type { AgentDraft } from './draft'
 import type { ReadSource } from './figure'
 import { onlyOn, toolAllowOf } from './jobs'
+import { readKey } from './reads'
 import { callsFor, type ToolAllow } from '../tools/allow'
 
 /**
@@ -27,6 +28,8 @@ export function draftFromTeamAgent(agent: AgentConfig): AgentDraft {
     toolAllow: toolAllowOf(agent),
     doneWhen: [...(agent.doneWhen ?? [])],
     allow: { ...(agent.allow ?? {}) },
+    // What a team's own agent reads is the team's to give, with a line in its Workflow (`readsOf`).
+    reads: [],
     // A team's own agent wears the figure its id picks: the figure belongs to Your agents.
     figure: null,
   }
@@ -34,16 +37,16 @@ export function draftFromTeamAgent(agent: AgentConfig): AgentDraft {
 
 /**
  * What a team's agent reads, for the drawer in its bench: each folder, file and Notion page
- * the team gives it with a line on the canvas (ADR 0042, 0050), in the team file's order. The same
- * for a linked agent, since what it reads stays the team's own. Knowledge without a path or page
+ * the team gives it with a line on the canvas (ADR 0042, 0050), in the team file's order. For a
+ * linked agent that includes what its version reads, which the team copied. Knowledge without a path or page
  * names nothing it can read (ADR 0036), so it isn't shown as something it reads.
  */
 export function readsOf(agent: Pick<AgentConfig, 'capabilities'>): ReadSource[] {
   return (agent.capabilities ?? []).flatMap((capability): ReadSource[] => {
     if (capability.kind !== 'knowledge') return []
-    if (capability.notion) return [{ kind: 'page', name: capability.name, where: 'Notion page · read when each run starts' }]
+    if (capability.notion) return [{ kind: 'page', name: capability.name, where: 'Notion page · read when each run starts', key: readKey(capability) }]
     if (!capability.path) return []
-    return [{ kind: chosenIsFile(capability.path) ? 'file' : 'folder', name: capability.name || chosenName(capability.path), where: capability.path }]
+    return [{ kind: chosenIsFile(capability.path) ? 'file' : 'folder', name: capability.name || chosenName(capability.path), where: capability.path, key: readKey(capability) }]
   })
 }
 

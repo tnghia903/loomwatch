@@ -15,6 +15,11 @@
 //!
 //! `.jobs/.bench/` holds the one-agent teams the agent builder's test bench runs. It is hidden, so
 //! neither the team list nor the scheduler ever sees them.
+//!
+//! What an agent reads (its folders, files and Notion pages) can be its own as well as a team's: a
+//! saved agent's `reads` go with it into every team it joins, and a team can give it more. A file
+//! it reads is copied into `.jobs/.files/` and named by its full path, so every team, wherever its
+//! file is, reads the same one.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -30,12 +35,16 @@ const REMOVED_DIR: &str = ".removed";
 const VERSIONS_DIR: &str = ".versions";
 /// The test bench's one-agent teams, below [`JOBS_DIR`].
 pub(crate) const BENCH_DIR: &str = ".bench";
+/// The files Your agents read, below [`JOBS_DIR`]. One folder for all of them: a file is read by
+/// its path, and an identical one is kept once.
+const FILES_DIR: &str = ".files";
 
 const MAX_NAME: usize = 80;
 const MAX_DOES: usize = 120;
 const MAX_NOTE: usize = 200;
 const MAX_INSTRUCTIONS: usize = 20_000;
 const MAX_MODEL: usize = 200;
+const MAX_PATH: usize = 4096;
 const MAX_LIST: usize = 32;
 
 /// The icons a job may name; the UI draws one for each, and a job without one gets a plain mark.
@@ -85,6 +94,28 @@ impl JobAllow {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// A folder, file or Notion page the agent reads in every team it joins: what a team file's
+/// `{kind: knowledge, name, path | notion}` capability holds (ADR 0035, ADR 0050).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct JobRead {
+    /// Its label, as the team's card shows it.
+    pub(crate) name: String,
+    /// A folder or file, by its full path (or from `~/`): every team reads it from its own folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    /// A Notion page, read through the operator's Notion connection when each run starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) notion: Option<JobNotionPage>,
+}
+
+/// Which Notion page a read names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct JobNotionPage {
+    pub(crate) page: String,
 }
 
 /// Which figure an agent wears in Your agents, and in what colour.
@@ -148,6 +179,10 @@ pub(crate) struct JobSpec {
     /// (ADR 0069). A team copies each into the tool's `alwaysAllow`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub(crate) tool_allow: std::collections::BTreeMap<String, Vec<String>>,
+    /// The folders, files and Notion pages it reads, in every team it joins. A team copies each
+    /// into the agent's capabilities as knowledge, and may give it more.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) reads: Vec<JobRead>,
     /// What the finished result must satisfy (ADR 0062), copied into the team with the rest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) done_when: Vec<String>,
@@ -177,6 +212,7 @@ impl JobSpec {
             || self.skills != other.skills
             || self.tools != other.tools
             || self.tool_allow != other.tool_allow
+            || self.reads != other.reads
             || self.done_when != other.done_when
             || self.allow != other.allow
     }
@@ -361,6 +397,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
             "A job can name at most {MAX_LIST} skills and {MAX_LIST} tools."
         ));
     }
+    let reads = normalize_reads(spec.reads)?;
     let note = spec.note.trim().to_owned();
     if note.chars().count() > MAX_NOTE {
         return Err(format!(
@@ -379,6 +416,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         skills,
         tools,
         tool_allow,
+        reads,
         done_when,
         allow: spec.allow,
         version: spec.version.max(1),
@@ -410,6 +448,74 @@ fn normalize_tool_allow(
         if !calls.is_empty() {
             kept.insert(given.clone(), calls);
         }
+    }
+    Ok(kept)
+}
+
+/// What it reads, as a job keeps it: each a folder or file by its full path, or a Notion page,
+/// trimmed and once, labelled. A path that only means something beside one team file is refused,
+/// since every team it joins reads it from its own folder.
+fn normalize_reads(reads: Vec<JobRead>) -> Result<Vec<JobRead>, String> {
+    let mut kept: Vec<JobRead> = Vec::new();
+    for read in reads {
+        let path = read
+            .path
+            .map(|path| path.trim().to_owned())
+            .filter(|path| !path.is_empty());
+        let page = read
+            .notion
+            .map(|notion| notion.page.trim().to_owned())
+            .filter(|page| !page.is_empty());
+        let (path, notion) = match (path, page) {
+            (Some(path), None) => {
+                if !(Path::new(&path).is_absolute() || path == "~" || path.starts_with("~/")) {
+                    return Err(format!(
+                        "{path} is not a full path. An agent reads a folder or file by its full path, so every team finds it."
+                    ));
+                }
+                if path.chars().count() > MAX_PATH {
+                    return Err("That folder or file's path is too long.".into());
+                }
+                (Some(path), None)
+            }
+            (None, Some(page)) => {
+                if page.chars().count() > MAX_MODEL {
+                    return Err("That Notion page id is too long.".into());
+                }
+                (None, Some(JobNotionPage { page }))
+            }
+            _ => {
+                return Err(
+                    "Each thing an agent reads is a folder, a file or a Notion page.".into(),
+                );
+            }
+        };
+        let name = read.name.trim().to_owned();
+        let name = if name.is_empty() {
+            path.as_deref()
+                .and_then(|path| Path::new(path).file_name())
+                .map_or_else(
+                    || "Notion page".to_owned(),
+                    |name| name.to_string_lossy().into_owned(),
+                )
+        } else {
+            name
+        };
+        if name.chars().count() > MAX_NAME * 2 {
+            return Err(format!("{name} is too long a name for something it reads."));
+        }
+        if kept
+            .iter()
+            .any(|other| other.path == path && other.notion == notion)
+        {
+            continue;
+        }
+        kept.push(JobRead { name, path, notion });
+    }
+    if kept.len() > MAX_LIST {
+        return Err(format!(
+            "An agent can read at most {MAX_LIST} folders, files and pages."
+        ));
     }
     Ok(kept)
 }
@@ -706,6 +812,26 @@ pub(crate) fn bench_folder(teams_root: &Path) -> Result<String, JobError> {
     Ok(format!("{JOBS_DIR}/{BENCH_DIR}"))
 }
 
+/// Keep a file one of Your agents reads, in `.jobs/.files/`, and name it by its full path: what
+/// the agent's `reads` holds, so every team it joins reads the same file wherever that team is.
+/// An identical file already there is reused; another with the same name gets a numbered name.
+pub(crate) fn store_agent_file(
+    teams_root: &Path,
+    requested_name: &str,
+    bytes: &[u8],
+) -> Result<crate::chosen_knowledge::StoredFile, JobError> {
+    let jobs = teams_root.join(JOBS_DIR);
+    plain_folder(&jobs, JOBS_DIR)?;
+    plain_folder(&jobs.join(FILES_DIR), &format!("{JOBS_DIR}/{FILES_DIR}"))?;
+    let jobs =
+        crate::platform::canonicalize(&jobs).map_err(|error| JobError::Io(error.to_string()))?;
+    let mut stored =
+        crate::chosen_knowledge::store_file_in(&jobs, FILES_DIR, requested_name, bytes)
+            .map_err(JobError::Invalid)?;
+    stored.path = jobs.join(&stored.path).to_string_lossy().into_owned();
+    Ok(stored)
+}
+
 /// Move job `id` into `.jobs/.removed/`, keeping every earlier removal of the same id.
 pub(crate) fn remove_job(teams_root: &Path, id: &str) -> Result<String, JobError> {
     if !is_job_id(id) {
@@ -793,6 +919,7 @@ mod tests {
             skills: vec!["release-style".into()],
             tools: Vec::new(),
             tool_allow: std::collections::BTreeMap::new(),
+            reads: Vec::new(),
             done_when: Vec::new(),
             allow: JobAllow::default(),
             version: 1,
@@ -1131,6 +1258,114 @@ mod tests {
         // A job saved before tools existed has none, and reads back unchanged.
         let old = spec("Notes");
         assert!(serde_yaml::to_string(&old).is_ok_and(|text| !text.contains("tools")));
+    }
+
+    /// What it reads goes with it into every team, so a change to it is a new version. Each is a
+    /// folder or file by its full path, or a Notion page, kept once and labelled.
+    #[test]
+    fn what_it_reads_is_a_new_version_kept_once_by_full_path() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let folder = root.path().join("brand").to_string_lossy().into_owned();
+        let mut reading = spec("Notes");
+        reading.reads = vec![
+            JobRead {
+                name: " Brand ".into(),
+                path: Some(format!(" {folder} ")),
+                notion: None,
+            },
+            JobRead {
+                name: "Brand again".into(),
+                path: Some(folder.clone()),
+                notion: None,
+            },
+            JobRead {
+                name: String::new(),
+                path: None,
+                notion: Some(JobNotionPage {
+                    page: " 1234abcd ".into(),
+                }),
+            },
+            JobRead {
+                name: String::new(),
+                path: Some("~/Documents/plan.md".into()),
+                notion: None,
+            },
+        ];
+        let second = save_job(root.path(), "notes", reading, false, Some(1)).expect("second");
+        assert_eq!(
+            second.spec.version, 2,
+            "a team copies what it reads, so it is a new version"
+        );
+        assert_eq!(
+            second.spec.reads,
+            vec![
+                JobRead {
+                    name: "Brand".into(),
+                    path: Some(folder),
+                    notion: None,
+                },
+                JobRead {
+                    name: "Notion page".into(),
+                    path: None,
+                    notion: Some(JobNotionPage {
+                        page: "1234abcd".into(),
+                    }),
+                },
+                JobRead {
+                    name: "plan.md".into(),
+                    path: Some("~/Documents/plan.md".into()),
+                    notion: None,
+                },
+            ]
+        );
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(text.contains("reads:"), "{text}");
+        assert_eq!(
+            list_jobs(root.path()).expect("list").jobs[0].spec,
+            second.spec
+        );
+
+        let mut relative = spec("Notes");
+        relative.reads = vec![JobRead {
+            name: "Notes".into(),
+            path: Some("notes.files/a.md".into()),
+            notion: None,
+        }];
+        let refused = save_job(root.path(), "notes", relative, false, Some(2));
+        assert!(
+            matches!(&refused, Err(JobError::Invalid(message)) if message.contains("full path")),
+            "{refused:?}"
+        );
+        let mut both = spec("Notes");
+        both.reads = vec![JobRead {
+            name: "Both".into(),
+            path: Some("/tmp/a".into()),
+            notion: Some(JobNotionPage { page: "x".into() }),
+        }];
+        assert!(save_job(root.path(), "notes", both, false, Some(2)).is_err());
+        // A job saved before reads existed has none, and writes none.
+        assert!(serde_yaml::to_string(&spec("Notes")).is_ok_and(|text| !text.contains("reads")));
+    }
+
+    /// A file an agent reads is kept in `.jobs/.files/` and named by its full path; the same file
+    /// again is the same one, and another with its name gets a numbered name.
+    #[test]
+    fn a_file_an_agent_reads_is_kept_once_by_full_path() {
+        let root = root();
+        let first = store_agent_file(root.path(), "plan.md", b"# Plan\n").expect("store");
+        let jobs = crate::platform::canonicalize(root.path().join(JOBS_DIR)).expect("jobs");
+        assert_eq!(first.name, "plan.md");
+        assert_eq!(Path::new(&first.path), jobs.join(".files").join("plan.md"));
+        assert!(Path::new(&first.path).is_absolute());
+        let again = store_agent_file(root.path(), "plan.md", b"# Plan\n").expect("again");
+        assert_eq!(again.path, first.path);
+        let other = store_agent_file(root.path(), "../plan.md", b"# Other\n").expect("other");
+        assert_eq!(other.name, "plan (2).md");
+        assert!(
+            list_jobs(root.path()).expect("list").problems.is_empty(),
+            "the files folder is never read as a job"
+        );
     }
 
     /// ADR 0069: a call always allowed is kept for a tool the job is given, and only for one.
