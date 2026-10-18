@@ -72,7 +72,11 @@ describe('Deleting a team from Home', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /Old desk/ })).not.toBeInTheDocument())
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Research desk/ })).toBeInTheDocument()
-    expect(screen.getByText(/Deleted “Old desk”\. Its files are in/)).toHaveTextContent('.trash/2026-10-01T090000Z-old-desk inside your teams folder')
+    // No visible notice or trash path; only a screen reader hears that it went.
+    const said = screen.getByText('Deleted “Old desk”.')
+    expect(said).toHaveAttribute('role', 'status')
+    expect(said).toHaveClass('visually-hidden')
+    expect(screen.queryByText(/\.trash/)).not.toBeInTheDocument()
 
     // Its name stays taken: a new "Old desk" would otherwise inherit the deleted one's history.
     expect(await createTeam('Old desk')).toBe('old-desk-2.yaml')
