@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { CHECKER_ROLE } from '../library/checker'
 import { absoluteTeamPath, slugifyTeamName, useTeamDocument } from './useTeamDocument'
 
 const TEAM_YAML = `schemaVersion: 1
@@ -965,6 +966,44 @@ describe('useTeamDocument', () => {
       expect(result.current.mode).toBe('pipeline')
       expect(result.current.edges).toHaveLength(1)
       expect(result.current.pendingEdgeRemoval).toBeNull()
+    })
+
+    it('connecting work into a Checker makes it check that work, send a miss back once, and think as the effort table says (ADR 0062)', async () => {
+      const checkerYaml = (from: { id: string; name: string; role: string }, role: string) => `schemaVersion: 1
+id: checked-team
+name: Checked
+entrypoint: ${from.id}
+agents:
+  - id: ${from.id}
+    name: ${from.name}
+    role: ${from.role}
+    model: anthropic/claude-sonnet-5.5
+  - id: checker
+    name: Checker
+    role: ${JSON.stringify(role)}
+    model: openai/gpt-6.1-sol
+    thinkingEffort: low
+edges: []
+`
+      const connect = async (yaml: string, from: string) => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/checked.yaml', yaml })))
+        const { result, unmount } = renderHook(() => useTeamDocument())
+        await waitFor(() => expect(result.current.saveState).toBe('clean'))
+        act(() => result.current.onConnect({ source: from, target: 'checker', sourceHandle: null, targetHandle: null }))
+        const agent = result.current.nodes.find((node) => node.id === 'checker')?.data.agent
+        const yamlPreview = result.current.yamlPreview
+        unmount()
+        return { agent, yamlPreview }
+      }
+      const writer = { id: 'writer', name: 'Writer', role: 'Write the piece from what you were given.' }
+      const written = await connect(checkerYaml(writer, CHECKER_ROLE), 'writer')
+      expect(written.agent).toMatchObject({ checks: 'writer', sendBackOnce: true, thinkingEffort: 'high' })
+      expect(written.yamlPreview).toContain('sendBackOnce: true')
+      expect(written.yamlPreview).toContain('thinkingEffort: high')
+      const coder = { id: 'coder', name: 'Coder', role: 'Change the code in this folder.' }
+      expect((await connect(checkerYaml(coder, CHECKER_ROLE), 'coder')).agent).toMatchObject({ checks: 'coder', sendBackOnce: true, thinkingEffort: 'high' })
+      // Any other agent connected into a non-Checker is only connected.
+      expect((await connect(checkerYaml(writer, 'Read the piece and say what you think.'), 'writer')).agent).not.toHaveProperty('checks')
     })
 
     it('undo after deleting the last edge brings back the check step it ended (ADR 0062)', async () => {

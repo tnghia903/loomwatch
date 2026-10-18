@@ -1,5 +1,5 @@
 import type { Evidence } from '../watch/events'
-import { OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
+import { allMet, OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
 
 /**
  * The run's messages made ready to read (components/run/AgentMessages.tsx): who sent each one and
@@ -171,7 +171,13 @@ export interface Bubble {
 
 const WORD: Record<MessageKind, string> = {
   handover: 'handover', direction: 'direction', ask: 'question', question: 'question',
-  escalate: 'needs you', dispatch: 'task', handoff: 'handover', note: 'note', permission: 'asks permission',
+  escalate: 'needs you', dispatch: 'task', handoff: 'handover', note: 'note', permission: 'asks permission', check: 'checked',
+}
+
+/** What a check step's round says, in a word: it sent the work back, found it all met, or reports. */
+function checkWord(message: TeamMessage): string {
+  if (!message.check) return WORD.check
+  return message.check.sentBack ? 'sent back' : allMet(message.check) ? 'all met' : 'checked'
 }
 
 /** Kinds that expect an answer, so an answer not yet given shows as one owed. */
@@ -195,7 +201,7 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
     const { message } = line
     const key = message.id
     const to = line.receiver === null ? [] : [line.receiver]
-    out.push({ key: `${key}:said`, item, part: 'said', from: line.senders, to, word: WORD[message.kind], text: message.text, offsetMs: message.offsetMs, ts: message.ts })
+    out.push({ key: `${key}:said`, item, part: 'said', from: line.senders, to, word: message.kind === 'check' ? checkWord(message) : WORD[message.kind], text: message.text, offsetMs: message.offsetMs, ts: message.ts })
     const reviewing = message.kind === 'handover' && line.receiver !== null && you.has(line.receiver)
     const reply = message.reply
     const permission = message.permission
@@ -213,14 +219,15 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
         key: `${key}:reply`, item, part: 'reply', from: [line.replier],
         // An answer goes back to whoever asked; your review goes back where you sent it, or on.
         to: back ? [back] : reviewing ? passedOn.map((passed) => passed.to) : line.senders.slice(0, 1),
-        word: back ? 'sent back' : reviewing ? (plain ? 'approved' : 'approved, with a note') : 'answer',
+        word: back ? 'sent back' : reviewing ? (plain ? 'approved' : 'approved, with a note') : message.kind === 'check' ? 'revised' : 'answer',
         text: plain ? '' : reply.text, offsetMs: reply.offsetMs, ts: reply.ts,
       })
-    } else if (message.state === 'pending' && line.receiver !== null && (ANSWERED.has(message.kind) || reviewing)) {
+    } else if (message.state === 'pending' && line.receiver !== null && (ANSWERED.has(message.kind) || reviewing || message.kind === 'check')) {
       const owedByYou = you.has(line.receiver)
+      const revising = message.kind === 'check'
       out.push({
         key: `${key}:waiting`, item, part: 'waiting', from: [line.receiver], to: line.senders.slice(0, 1),
-        word: live ? (reviewing ? 'waiting for your review' : owedByYou ? 'waiting for you' : 'thinking…') : (reviewing ? 'not reviewed' : 'no answer'),
+        word: live ? (reviewing ? 'waiting for your review' : owedByYou ? 'waiting for you' : revising ? 'revising' : 'thinking…') : (reviewing ? 'not reviewed' : revising ? 'not revised' : 'no answer'),
         text: '', offsetMs: message.offsetMs, ts: message.ts,
       })
     }

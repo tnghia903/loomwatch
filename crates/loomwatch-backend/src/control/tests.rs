@@ -758,6 +758,36 @@ async fn a_proposal_must_pass_the_editors_schema_and_name_a_plain_team_file() {
     );
 }
 
+/// A check step Ask proposes without saying whether it sends a miss back is shown, and saved on
+/// Apply, sending it back (ADR 0062), as one made from a template or on the canvas does.
+#[tokio::test]
+async fn a_proposed_check_step_is_saved_sending_a_miss_back() {
+    let fixture = Fixture::start(None, None).await;
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    let yaml = "schemaVersion: 1\nid: checked\nname: Checked\nentrypoint: writer\nagents:\n  - id: writer\n    \
+                name: Writer\n    role: Write it.\n    model: anthropic/claude-sonnet-5.5\n  - id: checker\n    \
+                name: Checker\n    role: Check it.\n    model: openai/gpt-6.1-sol\n    checks: writer\nedges:\n  \
+                - { from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-18T00:00:00Z\" }\n";
+    let (answer, failed) = tools
+        .call(
+            "propose_team",
+            json!({"file": "checked.yaml", "yaml": yaml, "summary": "A checked team."}),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
+    let id = answer["proposalId"].as_str().expect("a proposal id");
+    let proposals = fixture.control.inner.proposals.read().await;
+    let proposed = &proposals.get(id).expect("the proposal is kept").yaml;
+    assert!(
+        proposed.contains("    checks: writer\n    sendBackOnce: true\n"),
+        "{proposed}"
+    );
+}
+
 /// Without the daemon's model list (no state folder set up), `list_models` says so rather than
 /// inventing models.
 #[tokio::test]

@@ -249,3 +249,43 @@ describe('Team chat', () => {
     expect(screen.getByText(/Nothing has passed between the agents yet/)).toBeInTheDocument()
   })
 })
+
+// ADR 0062: each round of a check step is an exchange: what it sent back, the revised work as the
+// reply, and the next round's verdict; a round with nothing missing is one quiet line.
+describe('a check step in the chat', () => {
+  const items = (verdicts: ('met' | 'not_met')[]) => verdicts.map((verdict, index) => ({ verdict, item: `Item ${index + 1}`, evidence: verdict === 'met' ? 'seen' : 'not seen' }))
+  const sentBack = message({
+    id: 'check:e10', kind: 'check', from: 'editor', to: 'writer', seq: 10, offsetMs: 60_000, ts: at(60), state: 'answered',
+    text: 'The piece runs long.\n\n**Not met**\n- Item 2 — not seen',
+    check: { round: 1, items: items(['met', 'not_met']), readable: true, sentBack: true, problems: 'The piece runs long.' },
+    reply: answer('writer', 'Shorter draft.', 90, { seq: 14, source: 'open' }),
+  })
+  const allMetAgain = message({
+    id: 'check:e20', kind: 'check', from: 'editor', to: 'writer', seq: 20, offsetMs: 120_000, ts: at(120), text: 'All 2 met.',
+    check: { round: 2, items: items(['met', 'met']), readable: true, sentBack: false, problems: null },
+  })
+
+  it('shows what was sent back, the revised work as the reply, and the round that found it all met', () => {
+    setup([sentBack, allMetAgain])
+    const back = msg(/Editor to Writer: sent back/)
+    expect(within(back).getByText('The piece runs long.')).toBeInTheDocument()
+    expect(within(back).getByText(/Item 2/)).toBeInTheDocument()
+    expect(within(back).getByText('sent back')).toBeInTheDocument()
+    const revised = msg(/Writer to Editor: revised/)
+    expect(within(revised).getByText('Shorter draft.')).toBeInTheDocument()
+    fireEvent.click(within(revised).getByRole('button', { name: 'Info' }))
+    expect(within(revised).getByText(/Revised 30 seconds after it was sent back/)).toBeInTheDocument()
+    // Nothing missing: a line, not a message.
+    expect(screen.getByText('Editor checked Writer’s revised work: all 2 met').closest('li')).toHaveClass('chat-notice')
+  })
+
+  it('says the agent is revising while it does, and that it never did once the run is over', () => {
+    const pending = { ...sentBack, state: 'pending' as const, reply: null }
+    setup([pending], { live: true })
+    expect(screen.getByText('Writer is revising its work')).toBeInTheDocument()
+    cleanup()
+    setup([pending])
+    expect(screen.getByText('Not revised')).toBeInTheDocument()
+  })
+})
+

@@ -106,7 +106,21 @@ pub fn for_stage(
         );
     }
     let after = neighbours(team, |edge| (edge.from == agent.id).then_some(&edge.to));
-    if !after.is_empty()
+    let checked = agent
+        .checks
+        .as_deref()
+        .and_then(|id| team.agents.iter().find(|other| other.id == id));
+    if let Some(checked) = checked.filter(|_| !after.is_empty()) {
+        // ADR 0062: a check step hands on the work it checked, not its own reply (lib.rs
+        // `checked_work_handover`), so it writes no handover either.
+        let _ = write!(
+            text,
+            "\nAfter you: {}. They receive {}'s work, not your reply, with the items you mark Not \
+             met or Not sure.",
+            names(&after, ids),
+            checked.name
+        );
+    } else if !after.is_empty()
         && after
             .iter()
             .all(|next| next.checks.as_deref() == Some(agent.id.as_str()))
@@ -134,18 +148,14 @@ pub fn for_stage(
             names(&after, ids)
         );
     }
-    if let Some(checked) = agent
-        .checks
-        .as_deref()
-        .and_then(|id| team.agents.iter().find(|other| other.id == id))
-    {
+    if let Some(checked) = checked {
         // ADR 0062: the verdict is read from this block whatever the role says, so a check step
         // whose instructions were written by hand or by Ask LoomWatch is told it here; without
         // it, every item reads Not sure and nothing can be sent back.
         let _ = write!(
             text,
             "
-You check {}'s work: it is in the sections above the task, with what it must satisfy. {CHECK_BLOCK}",
+You check {}'s work: it is in the sections above the task, with what it was given and what it must satisfy. {CHECK_BLOCK}",
             checked.name
         );
     }
@@ -158,9 +168,13 @@ You check {}'s work: it is in the sections above the task, with what it must sat
 
 /// How a check step reports, wherever its instructions came from: the block the daemon reads its
 /// verdict from (`read_checks`).
+///
+/// Numbered, because a line is matched to the item it answers; and every problem is a line,
+/// because a problem written only above the block is never shown or sent back.
 const CHECK_BLOCK: &str = "Do not rewrite the work. End your reply with this block, one line \
-     for each item it must satisfy (or for the request, when nothing was set):\n## Check\n- Met | \
-     Not met | Not sure — the item — your evidence";
+     for each numbered item it must satisfy, in order, starting with its number. Every problem you \
+     found must be one of these lines, marked Not met:\n## Check\n1. Met | Not met | Not sure — \
+     the item — your evidence";
 
 /// An agent the operator wrote to directly with an @mention (ADR 0051).
 ///
@@ -381,9 +395,21 @@ mod tests {
         let text = for_stage(&team, &team.agents[1], &order(), 1, "write").unwrap();
         assert!(text.contains("You check Researcher's work"), "{text}");
         assert!(
-            text.ends_with("## Check\n- Met | Not met | Not sure — the item — your evidence"),
+            text.contains("Every problem you found must be one of these lines, marked Not met"),
             "{text}"
         );
+        assert!(
+            text.ends_with("## Check\n1. Met | Not met | Not sure — the item — your evidence"),
+            "{text}"
+        );
+        // Its successor is handed the work it checked, so it is not asked for a handover.
+        assert!(
+            text.contains(
+                "After you: Writer (`write`). They receive Researcher's work, not your reply"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("handover"), "{text}");
         // A stage that checks nothing is not told to.
         let plain = pipeline();
         let text = for_stage(&plain, &plain.agents[1], &order(), 1, "write").unwrap();

@@ -208,6 +208,8 @@ function PickedUp({ messages, order, predecessors, open, flash, onToggle }: { me
 }
 
 function isNotice(bubble: Bubble): boolean {
+  // A check round that found nothing missing is said in a line, not a message (ADR 0062).
+  if (bubble.part === 'said') return bubble.item.line.message.kind === 'check' && bubble.word === 'all met'
   return bubble.part === 'reply' && (bubble.word === 'approved' || bubble.item.line.message.kind === 'permission')
 }
 
@@ -224,6 +226,16 @@ const SETTLED: Record<PermissionOutcome, (agent: string, written: string) => str
 
 function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: string) => Member; flash: boolean; when: (bubble: Bubble) => string }) {
   const writer = bubble.item.line.senders[0]
+  const check = bubble.item.line.message.check
+  if (check) {
+    const checked = bubble.to[0] ? member(bubble.to[0]).name : 'the agent'
+    return (
+      <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, ${writer ? member(writer).name : 'The check'}: ${bubble.word}`}>
+        <span>{writer ? member(writer).name : 'The check'} checked {check.round > 1 ? `${checked}’s revised work` : `${checked}’s work`}: all {check.items.length} met</span>
+        <time dateTime={bubble.ts}>{when(bubble)}</time>
+      </li>
+    )
+  }
   const outcome = bubble.item.line.message.permission?.outcome
   if (outcome) {
     return (
@@ -284,7 +296,9 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
   const addressed = part === 'reply' ? mentions.filter((person) => !item.line.senders.includes(person.id)) : mentions
   const caption = part === 'reply' && message.kind === 'handover'
     ? bubble.word === 'sent back' ? 'sent back' : `approved${item.passedOn.length ? ` · passed on to ${nameList(item.passedOn.map((passed) => member(passed.to).name))}` : ''}`
-    : bubble.word === 'task' || bubble.word === 'direction' ? bubble.word : null
+    : message.kind === 'check' && part !== 'waiting'
+      ? `${bubble.word}${message.check && message.check.round > 1 ? ` · round ${message.check.round}` : ''}`
+      : bubble.word === 'task' || bubble.word === 'direction' ? bubble.word : null
 
   return (
     <li
@@ -352,7 +366,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
           <div className="chat-details">
             {part === 'reply' && reply && (
               <p>
-                {message.kind === 'handover' ? 'Reviewed' : 'Answered'} {waited(reply.offsetMs - message.offsetMs)} after it was {message.kind === 'handover' ? 'handed over' : 'asked'}
+                {message.kind === 'handover' ? 'Reviewed' : message.kind === 'check' ? 'Revised' : 'Answered'} {waited(reply.offsetMs - message.offsetMs)} after it was {message.kind === 'handover' ? 'handed over' : message.kind === 'check' ? 'sent back' : 'asked'}
                 {reply.source === 'open' && ', from the work it had already done'}
                 {reply.source === 'fresh' && '. A fresh copy answered: it saw only its role and the question'}.
               </p>
@@ -382,7 +396,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
 function typing(word: string, speaker: Member | null, live: boolean): string {
   const said = word.charAt(0).toUpperCase() + word.slice(1)
   if (!live || speaker?.you) return said
-  return `${speaker?.name ?? 'Someone'} is writing an answer`
+  return `${speaker?.name ?? 'Someone'} is ${word === 'revising' ? 'revising its work' : 'writing an answer'}`
 }
 
 /** Who a message is for, as a chat names them. */

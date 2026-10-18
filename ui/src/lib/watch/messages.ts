@@ -1,3 +1,4 @@
+import { checkItemsOf, type CheckItemResult } from '../story/checks'
 import type { Evidence, PromptSection, RunEvent } from './events'
 
 /**
@@ -39,6 +40,11 @@ export type MessageKind =
   | 'note'
   /** An agent's app asked to do something its switches do not cover, and LoomWatch asked you (ADR 0040). */
   | 'permission'
+  /**
+   * A check step's round on the work it checks (ADR 0062): its verdict, and when it sent the work
+   * back, what it found; the checked agent's revised work is the reply. One message per round.
+   */
+  | 'check'
 
 /**
  * `pending` — sent, and waiting for the reply its kind expects (an `ask`, a question for you, a
@@ -104,6 +110,19 @@ export interface PermissionAsk {
   settled: { eventId: string; seq: number; ts: string; offsetMs: number } | null
 }
 
+/** A check step's round, as the daemon recorded it (`check_result`, then `check_sent_back`). */
+export interface CheckExchange {
+  round: number
+  /** Every item it checked in this round, with its verdict and evidence. */
+  items: CheckItemResult[]
+  /** False when its reply had no Check block LoomWatch could read: nothing in it is confirmed. */
+  readable: boolean
+  /** The findings went back to the checked agent, whose next turn is the reply. */
+  sentBack: boolean
+  /** What the check step wrote about the problems, sent back with the findings. */
+  problems: string | null
+}
+
 export interface TeamMessage {
   id: string
   kind: MessageKind
@@ -136,6 +155,27 @@ export interface TeamMessage {
   carried: boolean
   /** For a `permission` message: what was asked and how it was settled. */
   permission?: PermissionAsk
+  /** For a `check` message: the round and what it found. */
+  check?: CheckExchange
+}
+
+/** Whether a check round found nothing missing: every item met, from a reply that could be read. */
+export function allMet(check: CheckExchange): boolean {
+  return check.readable && check.items.length > 0 && check.items.every((item) => item.verdict === 'met')
+}
+
+/**
+ * A check round's words, from what it recorded: the check step's own account of the problems when
+ * it sent the work back, then the items it did not find met, each with its evidence.
+ */
+export function checkText(check: CheckExchange): string {
+  if (!check.readable) return 'Its reply had no Check block LoomWatch could read, so nothing it checked is confirmed.'
+  if (allMet(check)) return `All ${check.items.length} met.`
+  const list = (verdict: CheckItemResult['verdict'], heading: string) => {
+    const items = check.items.filter((item) => item.verdict === verdict)
+    return items.length ? [`**${heading}**`, ...items.map((item) => `- ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)].join('\n') : ''
+  }
+  return [check.problems ?? '', list('not_met', 'Not met'), list('not_sure', 'Not sure')].filter(Boolean).join('\n\n')
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
@@ -165,6 +205,8 @@ export class Correspondence {
   private readonly askedUser = new Map<string, string>()
   /** Agents the record shows as review steps, which pass a handover through rather than write one. */
   private readonly reviewSteps = new Set<string>()
+  /** Each agent's last ended turn, for a send-back recorded after the turn that answered it. */
+  private readonly lastTurn = new Map<string, { reply: string; event: RunEvent }>()
   private readonly startMs: number
 
   constructor(startMs: number) {
@@ -328,20 +370,63 @@ export class Correspondence {
   }
 
   /**
-   * An agent's turn ended with this reply. The daemon prompts a kept-alive agent with your note in
-   * the turn right after archiving it, so the first turn to end on that agent after a note is the
-   * one that answered it.
+   * `check_result`: a check step's verdict on a round of the work it checks (ADR 0062). Every round
+   * is a message of its own, so a loop of any length reads as one exchange after another.
    */
-  turnEnded(event: RunEvent, reply: string) {
-    const note = this.messages.find((message) => message.kind === 'note' && message.to === event.agentId && message.state === 'pending')
-    if (!note) return
-    note.state = 'answered'
-    note.reply = { from: event.agentId, text: reply, ...this.at(event), source: null, sentBackTo: null }
+  checkResult(event: RunEvent) {
+    const p = event.payload
+    const to = words(p.checked)
+    if (!to || !Array.isArray(p.items)) return
+    const check: CheckExchange = { round: typeof p.round === 'number' ? p.round : 1, items: checkItemsOf(p.items), readable: p.readable !== false, sentBack: false, problems: null }
+    this.add(event, { id: `check:${event.id}`, kind: 'check', from: event.agentId, to, text: checkText(check), state: 'delivered', check })
   }
 
-  /** An agent's turn ended in an error its app reported, so the note that turn was for failed. */
+  /**
+   * `check_sent_back`: the round's findings went back to the checked agent, with what the check
+   * step wrote about them. The daemon records it before the turn it starts, so the turn that agent
+   * ends next is the reply. Older runs recorded it after that turn, and named no round: there, the
+   * turn the agent ended last is the reply.
+   */
+  checkSentBack(event: RunEvent) {
+    const p = event.payload
+    const to = words(p.to)
+    const message = this.messages.findLast((candidate) => candidate.kind === 'check' && candidate.from === event.agentId && candidate.to === to && !candidate.check?.sentBack)
+    if (!to || !message?.check) return
+    message.check.sentBack = true
+    message.check.problems = words(p.problems)
+    message.text = checkText(message.check)
+    if (typeof p.round === 'number') { message.state = 'pending'; return }
+    const last = this.lastTurn.get(to)
+    if (!last || last.event.seq < message.seq) return
+    message.state = 'answered'
+    message.reply = { from: to, text: last.reply, ...this.at(last.event), source: 'open', sentBackTo: null }
+  }
+
+  /** `check_send_back_skipped`: the checked agent was no longer open, so nothing went back. */
+  checkSendBackSkipped(event: RunEvent) {
+    const to = words(event.payload.to)
+    const message = this.messages.findLast((candidate) => candidate.kind === 'check' && candidate.from === event.agentId && candidate.to === to && candidate.state === 'pending')
+    if (!message) return
+    message.state = 'failed'
+    message.error = 'it had already finished, so the work was not revised'
+  }
+
+  /**
+   * An agent's turn ended with this reply. The daemon prompts a kept-alive agent with your note, or
+   * a check step's findings, in the turn right after archiving it, so the first turn to end on that
+   * agent after one is the one that answered it.
+   */
+  turnEnded(event: RunEvent, reply: string) {
+    this.lastTurn.set(event.agentId, { reply, event })
+    const owed = this.messages.find((message) => (message.kind === 'note' || message.kind === 'check') && message.to === event.agentId && message.state === 'pending')
+    if (!owed) return
+    owed.state = 'answered'
+    owed.reply = { from: event.agentId, text: reply, ...this.at(event), source: owed.kind === 'check' ? 'open' : null, sentBackTo: null }
+  }
+
+  /** An agent's turn ended in an error its app reported, so the note or findings that turn was for failed. */
   turnFailed(event: RunEvent, error: string) {
-    const note = this.messages.find((message) => message.kind === 'note' && message.to === event.agentId && message.state === 'pending')
+    const note = this.messages.find((message) => (message.kind === 'note' || message.kind === 'check') && message.to === event.agentId && message.state === 'pending')
     if (!note) return
     note.state = 'failed'
     note.error = error
@@ -352,6 +437,7 @@ export class Correspondence {
       ...message,
       reply: message.reply ? { ...message.reply } : null,
       ...(message.permission ? { permission: { ...message.permission } } : {}),
+      ...(message.check ? { check: { ...message.check, items: [...message.check.items] } } : {}),
     }))
   }
 }

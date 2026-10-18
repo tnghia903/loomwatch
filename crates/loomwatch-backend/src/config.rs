@@ -296,6 +296,7 @@ impl Default for AgentMemoryConfig {
 pub struct ConversationConfig {
     pub brief: BriefConfig,
     pub ask: AskConfig,
+    pub check: CheckConfig,
     /// Bounds on a review stop or a parked `ask_user`, kept so older team files still load.
     pub stop: StopConfig,
 }
@@ -344,6 +345,22 @@ impl Default for BriefConfig {
             summary_chars: 1200,
             max_findings: 8,
         }
+    }
+}
+
+/// What a check step is shown besides the work it checks (ADR 0062).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CheckConfig {
+    /// The most of what the checked agent was given that its check step is shown, in characters:
+    /// what lets it trace a claim without opening the claim's source. 0 shows none of it.
+    pub given_chars: u32,
+}
+
+impl Default for CheckConfig {
+    fn default() -> Self {
+        // About 2,000 tokens: a research handover's findings and its sources, whole, in most runs.
+        Self { given_chars: 8_000 }
     }
 }
 

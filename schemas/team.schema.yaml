@@ -113,8 +113,27 @@ $defs:
         $ref: "#/$defs/Brief"
       ask:
         $ref: "#/$defs/Ask"
+      check:
+        $ref: "#/$defs/Check"
       stop:
         $ref: "#/$defs/Stop"
+
+  Check:
+    description: >-
+      What a check step (`checks:`) is shown besides the work it checks.
+    type: object
+    additionalProperties: false
+    properties:
+      givenChars:
+        description: >-
+          The most of what the checked agent was given (the results of the stages before it, the
+          operator's direction, what the team knows) that its check step is shown, in characters.
+          It lets the check trace a claim to what the work was written from instead of opening the
+          claim's source. Shared fairly when several stages fed the checked agent. 0 shows none.
+        type: integer
+        minimum: 0
+        maximum: 24000
+        default: 8000
 
   Stop:
     description: >-
