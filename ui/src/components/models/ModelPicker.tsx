@@ -48,9 +48,9 @@ function Row({ id, model, selected, active, why, onPoint, onPick }: {
  *
  * `suggestFor` is the agent and its team (modelSuggestion.ts). Its suggestion is a card of its own
  * above the list, so it stands apart whether or not it is the model in use, and stays in view while
- * the list scrolls. The card's header holds the switch that has the agent's whole setup read for a
- * better suggestion (ReadingSwitch); outside the listbox, as a control can't be one of its options,
- * while `aria-owns` keeps the suggested row first among them.
+ * the list scrolls. Along its foot is the switch that has the agent's whole setup read for a more
+ * accurate suggestion (ReadingSwitch); the card is outside the listbox, as a control can't be one of
+ * its options, while `aria-owns` keeps the suggested row first among them.
  */
 export function ModelChoices({ value, suggestFor, onPick }: { value: string; suggestFor?: ModelSuggestionInput; onPick: (id: string) => void }) {
   const { catalog, error } = useModels()
@@ -122,15 +122,11 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
           />
         </label>
         {!query && suggested && <div className="model-suggestion">
-          <div className="model-suggestion-head">
-            <p className="model-group-head t-micro" id={`${listId}-suggested`}><Sparkles size={11} aria-hidden="true" />Suggested for this agent</p>
-            {suggestFor && <ReadingSwitch agent={suggestFor.agent} />}
-          </div>
+          <p className="model-group-head t-micro" id={`${listId}-suggested`}><Sparkles size={11} aria-hidden="true" />Suggested for this agent</p>
           <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
             {row(suggested, 0, suggestion?.why)}
           </div>
-          {read.pending && <p role="status" className="t-meta lw-settings-quiet">Reading its setup…</p>}
-          {read.problem && <p className="t-meta lw-settings-quiet">{read.problem}</p>}
+          {suggestFor && <ReadingSwitch agent={suggestFor.agent} note={read.pending ? 'Reading its whole setup…' : read.problem || undefined} />}
         </div>}
         <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'} aria-owns={!query && suggested ? `${listId}-suggested-group ${listId}-others` : undefined}>
           {query ? found.map((model, index) => row(model, index)) : suggested ? (

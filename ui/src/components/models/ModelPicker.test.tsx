@@ -146,15 +146,16 @@ describe('ModelPicker', () => {
     // The suggestion is a card above the list, and still the list's first option.
     expect(screen.getByRole('listbox')).toHaveAttribute('aria-owns', expect.stringContaining(suggested.id))
     expect(screen.getAllByRole('option')[0]).toHaveTextContent('Claude Opus 5.5')
-    const toggle = await screen.findByRole('switch', { name: 'Read its setup · under $0.01' })
+    const toggle = await screen.findByRole('switch', { name: 'More accurate suggestion' })
     expect(toggle).not.toBeChecked()
-    expect(toggle).toHaveAccessibleDescription(/never your files or its teammates\. Each agent is read once, at most 50 a day\./)
+    // It says what it gains, what it does and what it costs, and what it sends one step away.
+    expect(toggle).toHaveAccessibleDescription(/^AI reads its whole setup\. Uses your OpenRouter credit: under \$0\.01 an agent\. It sends .*never your files or its teammates\. Each agent is read once, at most 50 a day\./)
     expect(readings()).toHaveLength(0)
 
     fireEvent.click(toggle)
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
     expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Its whole setup says it gathers for Writer rather than writing the answer.')
-    expect(screen.getByRole('switch', { name: 'Read its setup · under $0.01' })).toBeChecked()
+    expect(screen.getByRole('switch', { name: 'More accurate suggestion' })).toBeChecked()
     // Its own setup, by name, and never its teammates.
     expect(readings()).toHaveLength(1)
     expect(readings()[0].body?.setup).toMatchObject({ name: 'Gatherer', instructions: gatherer.role })
@@ -191,8 +192,8 @@ describe('ModelPicker', () => {
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: gatherer, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
-    fireEvent.click(screen.getByRole('switch', { name: 'Read its setup · under $0.01' }))
-    await waitFor(() => expect(screen.getByRole('switch', { name: 'Read its setup · under $0.01' })).not.toBeChecked())
+    fireEvent.click(screen.getByRole('switch', { name: 'More accurate suggestion' }))
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'More accurate suggestion' })).not.toBeChecked())
     expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ enabled: false }])
     expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Opus 5.5')
     expect(readings()).toHaveLength(1)
