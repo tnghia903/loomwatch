@@ -30,12 +30,12 @@ describe('SaveAsJob', () => {
     const saves = daemon(new Set())
     const linked = vi.fn()
     render(<SaveAsJob agent={{ ...agent, allow: { web: true } }} onLinked={linked} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Your agents' }))
-    fireEvent.change(screen.getByLabelText('Name in Your agents'), { target: { value: 'Release notes writer' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add to My agents' }))
+    fireEvent.change(screen.getByLabelText('Name in My agents'), { target: { value: 'Release notes writer' } })
     fireEvent.change(screen.getByLabelText(/What it does/), { target: { value: 'Drafts release notes' } })
     expect(screen.getByText(/Keeps its instructions, model, its skill and what it may do without asking/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('Added “Release notes writer” to Your agents as v1. This agent now follows it.')
+    expect(await screen.findByRole('status')).toHaveTextContent('Added “Release notes writer” to My agents as v1. This agent now follows it.')
     expect(saves).toEqual([{ id: 'release-notes-writer', createOnly: true, body: { name: 'Release notes writer', does: 'Drafts release notes', instructions: 'Write release notes.', icon: 'write', model: 'openai/gpt-6.1-sol', skills: ['release-style'], allow: { web: true } } }])
     expect(linked).toHaveBeenCalledWith({ agent: 'release-notes-writer', version: 1 })
   })
@@ -43,7 +43,7 @@ describe('SaveAsJob', () => {
   it('asks before saving over an agent of the same name, as its next version', async () => {
     const saves = daemon(new Set(['writer']))
     render(<SaveAsJob agent={agent} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Your agents' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add to My agents' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(await screen.findByText(/You already have an agent called “Writer”. Save this as its next version\?/)).toBeInTheDocument()
     expect(saves).toHaveLength(1)
@@ -54,6 +54,6 @@ describe('SaveAsJob', () => {
 
   it('cannot save an agent with no instructions', () => {
     render(<SaveAsJob agent={{ ...agent, role: '  ' }} />)
-    expect(screen.getByRole('button', { name: 'Add to Your agents' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add to My agents' })).toBeDisabled()
   })
 })

@@ -14,7 +14,7 @@ const placed: AgentConfig = {
   from: { agent: 'reader', version: 2 },
 }
 
-describe('the versioned link to Your agents', () => {
+describe('the versioned link to My agents', () => {
   it('says which version a team copies and whether a newer one is ready', () => {
     expect(linkState({ ...placed, from: undefined }, [job])).toBeNull()
     expect(linkState(placed, [job])).toEqual({ job, version: 2, latest: 3, behind: true })

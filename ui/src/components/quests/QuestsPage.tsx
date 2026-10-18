@@ -33,7 +33,7 @@ export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mar
       <header className="home-top">
         <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
-          <a className="btn" href="/agents">Your agents</a>
+          <a className="btn" href="/agents">My agents</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
       </header>
@@ -53,8 +53,8 @@ export function QuestsPage({ wardrobe: given, mark }: { wardrobe?: Wardrobe; mar
         <QuestGroup id="quests-figures" title="Figures" says="Any of your agents can be one" quests={figures} wardrobe={wardrobe} />
 
         <p className="quests-wear">
-          Put on what you’ve earned in an agent’s figure, beside its ID card in Your agents.
-          <a className="link" href="/agents">Open Your agents<ArrowRight size={14} aria-hidden="true" /></a>
+          Put on what you’ve earned in an agent’s figure, beside its ID card in My agents.
+          <a className="link" href="/agents">Open My agents<ArrowRight size={14} aria-hidden="true" /></a>
         </p>
       </main>
     </div>

@@ -67,7 +67,7 @@ const FIGURES: &[&str] = &[
 ];
 const FIGURE_COLORS: &[&str] = &["clay", "butter", "sage", "sky", "lilac", "rose", "oat"];
 
-const FILE_HEADER: &str = "# One of your LoomWatch agents: add it to a team from \"Your agents\" in the Build palette.\n\
+const FILE_HEADER: &str = "# One of your LoomWatch agents: add it to a team from \"My agents\" in the Build palette.\n\
 # A team keeps the version it was placed with until you choose Update in that team.\n";
 
 /// What the agent may do without asking (ADR 0037), as a team file's `allow:` block writes it.

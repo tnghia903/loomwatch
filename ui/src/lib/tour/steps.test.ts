@@ -8,7 +8,7 @@ const ready = { keyReady: true, keyLoading: false }
 afterEach(() => { document.body.innerHTML = '' })
 
 describe('getting-started guide steps', () => {
-  it('follows the work: build an agent in Your agents, then a team, then its chat', () => {
+  it('follows the work: build an agent in My agents, then a team, then its chat', () => {
     const screens = TOUR_STEPS.map((candidate) => candidate.screen).filter((screen, at, all) => screen !== all[at - 1])
     expect(screens).toEqual(['any', 'home', 'agents', 'home', 'workspace', 'any'])
     const order = (id: TourStep['id']) => TOUR_STEPS.indexOf(step(id))

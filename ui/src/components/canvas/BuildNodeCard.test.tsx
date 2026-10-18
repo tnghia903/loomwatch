@@ -91,7 +91,7 @@ describe('BuildAgentCard on the Build canvas', () => {
 // The Run canvas ("Full trace") draws the same card, so these assert that what a run adds lands
 // on it — and that the card is still recognisably the one the operator composed.
 describe('BuildAgentCard wears the agent’s figure', () => {
-  it('is the one it wears in Your agents when it came from there, and the one its id picks when it is the team’s own', () => {
+  it('is the one it wears in My agents when it came from there, and the one its id picks when it is the team’s own', () => {
     const editor: SavedJob = { id: 'editor', file: '.jobs/editor.yaml', name: 'Editor', instructions: 'Edit.', figure: { kind: 'button', color: 'butter' } }
     // Placed from Your agents as "editor-2": it still wears Editor's figure, found by its link.
     const { container, unmount } = render(

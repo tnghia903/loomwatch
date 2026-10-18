@@ -113,7 +113,7 @@ describe('quests', () => {
     expect(items({ ...base, agents: [agent('scout')] })).toEqual([])
   })
 
-  it('cushion: an agent from Your agents that had a test bench run first', () => {
+  it('cushion: an agent from My agents that had a test bench run first', () => {
     const placed = agent('writer', { from: { agent: 'house-writer', version: 2 } })
     expect(questsEarned(facts({ agents: [placed], benched: new Set(['house-writer']) }))).toEqual([{ item: 'cushion', agentId: 'writer', line: 'Writer was tried on its test bench before this team used it.' }])
     expect(items(facts({ agents: [placed] }))).toEqual([])

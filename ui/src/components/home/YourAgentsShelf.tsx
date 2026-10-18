@@ -22,8 +22,8 @@ export function YourAgentsShelf() {
   return (
     <section className="home-teams home-agents" aria-labelledby="home-agents-title">
       <div className="home-teams-head">
-        <h2 id="home-agents-title">Your agents<span className="home-section-says">Build and try each one</span></h2>
-        <a className="link home-agents-all" href="/agents">{any ? 'All agents' : 'Open Your agents'}<ArrowRight size={14} aria-hidden="true" /></a>
+        <h2 id="home-agents-title">My agents<span className="home-section-says">Build and try each one</span></h2>
+        <a className="link home-agents-all" href="/agents">{any ? 'All agents' : 'Open My agents'}<ArrowRight size={14} aria-hidden="true" /></a>
       </div>
       {loaded && own !== null && !any && (
         <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>Start here: build an agent once, chat with it on its own, then use it in any team. <a href="/agents/new">Build your first agent</a></span></div>
