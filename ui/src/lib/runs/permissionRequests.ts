@@ -9,13 +9,16 @@ const WANTS: Record<string, string> = {
 }
 
 /** "Researcher wants to use the web" — the sentence a card or ticket leads with. */
-export function permissionSentence(request: Pick<PermissionRequest, 'name' | 'switch' | 'title'>): string {
+export function permissionSentence(request: Pick<PermissionRequest, 'name' | 'switch' | 'title' | 'tool'>): string {
+  // A connected tool's call (ADR 0069): which tool, then the call and what it sends, below.
+  if (request.tool) return `${request.name} wants to use ${request.tool.server}`
   const wants = request.switch ? WANTS[request.switch] : null
   return `${request.name} wants to ${wants ?? `do this: ${request.title}`}`
 }
 
 /** "Asks to use the web" — the request as the asking agent's own message in the team's chat. */
-export function permissionAsks(switchKey: string | null | undefined): string {
+export function permissionAsks(switchKey: string | null | undefined, tool?: string | null): string {
+  if (tool) return `Asks to use ${tool}`
   const wants = switchKey ? WANTS[switchKey] : null
   return wants ? `Asks to ${wants}` : 'Asks your permission for'
 }

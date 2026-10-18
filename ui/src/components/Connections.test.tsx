@@ -8,6 +8,7 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
     are about Notion, so those sections are answered on their own and the Notion responses keep their order. */
 const routed = (notion: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) => vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
   String(input).startsWith('/api/ask/') ? Promise.resolve(response({ url: 'http://127.0.0.1:3000/api/control/mcp', apps: [] }))
+    : String(input).startsWith('/api/tools') ? Promise.resolve(response({ tools: [], catalog: [], keptIn: 'keychain' }))
     : String(input).startsWith('/api/ai') ? Promise.resolve(response({ openrouter: { connected: true, label: 'sk-or-v1-abc...xyz' } }))
       : notion(input, init))
 
@@ -97,5 +98,30 @@ describe('Notion sign-in', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(message)
     expect(await screen.findByRole('button', { name: 'Connect Notion' })).toBeEnabled()
     replace.mockRestore()
+  })
+})
+
+describe('Connections’ tools (ADR 0069)', () => {
+  it('lists each connected tool with what it offers, and removes one', async () => {
+    const linear = { id: 't1', name: 'Linear', url: 'https://mcp.linear.app/mcp', auth: 'signIn', calls: [{ name: 'create_issue', label: 'Create issue', description: 'Create a Linear issue.', readOnly: false }, { name: 'list_teams', label: 'List teams', description: '', readOnly: true }], checkedAt: null, pending: false, problem: null, tokenHelp: null }
+    let tools = [linear]
+    const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/tools/t1') && init?.method === 'DELETE') { tools = []; return Promise.resolve(response({ removed: true })) }
+      if (url.startsWith('/api/tools')) return Promise.resolve(response({ tools, catalog: [], keptIn: 'keychain' }))
+      if (url.startsWith('/api/ai')) return Promise.resolve(response({ openrouter: { connected: true, label: 'sk-or-v1-abc...xyz' } }))
+      return Promise.resolve(response({ connected: false }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    render(<Connections />)
+    const list = await screen.findByRole('list', { name: 'Connected tools' })
+    expect(list).toHaveTextContent('Linear')
+    expect(list).toHaveTextContent('2 actions · signed in')
+    expect(list).toHaveTextContent('List teams · only reads')
+    expect(screen.getByText(/Agents never get them/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Linear' }))
+    expect(await screen.findByText(/Linear is removed/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Connected tools' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Connect a tool' })).toBeInTheDocument()
   })
 })

@@ -470,7 +470,7 @@ async fn protect(request: Request, next: Next) -> Response {
 
 /// The `Host` a request named, when it is this computer. A name that resolves here only by DNS
 /// rebinding names another host, so it never reaches the sign-in routes.
-fn loopback_host(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn loopback_host(headers: &HeaderMap) -> Option<&str> {
     let host = headers.get(header::HOST)?.to_str().ok()?;
     let authority = host.parse::<Authority>().ok()?;
     matches!(
@@ -684,7 +684,7 @@ mod credential_manager {
 const SECRET_PART_BYTES: usize = 2_400;
 /// How many saved credentials one connection may take, 24 KB in all: far more than a sign-in is.
 #[cfg_attr(not(windows), allow(dead_code))]
-const MAX_SECRET_PARTS: usize = 10;
+pub(crate) const MAX_SECRET_PARTS: usize = 10;
 /// How the first of several parts begins: never the start of a stored connection, which is JSON.
 #[cfg_attr(not(windows), allow(dead_code))]
 const SECRET_PARTS_MARKER: &str = "loomwatch-parts:";
@@ -693,7 +693,7 @@ const SECRET_PARTS_MARKER: &str = "loomwatch-parts:";
 /// is `value` itself; the first of several starts with [`SECRET_PARTS_MARKER`], the count, and a
 /// newline.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn split_secret(value: &str) -> Vec<String> {
+pub(crate) fn split_secret(value: &str) -> Vec<String> {
     if value.len() <= SECRET_PART_BYTES {
         return vec![value.to_owned()];
     }
@@ -716,7 +716,10 @@ fn split_secret(value: &str) -> Vec<String> {
 /// The value [`split_secret`] cut into parts, given its first part and a way to read part `n`.
 /// `None` when a part it names is missing, or it names more than [`MAX_SECRET_PARTS`].
 #[cfg_attr(not(windows), allow(dead_code))]
-fn join_secret(first: &str, mut part: impl FnMut(usize) -> Option<String>) -> Option<String> {
+pub(crate) fn join_secret(
+    first: &str,
+    mut part: impl FnMut(usize) -> Option<String>,
+) -> Option<String> {
     let Some(rest) = first.strip_prefix(SECRET_PARTS_MARKER) else {
         return Some(first.to_owned());
     };

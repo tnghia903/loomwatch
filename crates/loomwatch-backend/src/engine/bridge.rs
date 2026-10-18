@@ -5,12 +5,14 @@
 //! record in the order they happened. The record is written while the turn is still running, so
 //! the app shows the agent working, and shows a permission card while the agent waits on it.
 
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::agent::{
-    BoxFuture, Decision, EventSink, Go, HostTools, PermissionRequest, Permissions, Spend, ToolSpec,
-    Usage,
+    BoxFuture, Decision, EventSink, Go, HostAsk, HostTools, PermissionRequest, Permissions, Spend,
+    ToolSpec, Usage,
 };
 use crate::permissions::{AskOutcome, PermissionAsker, PermissionPolicy};
 use crate::team_bus::TeamBusConnection;
@@ -238,6 +240,7 @@ impl PolicyGate {
                 "title": title,
                 "kind": kind,
                 "switch": open.request.switch,
+                "tool": open.request.tool,
                 "detail": open.request.detail,
                 "expiresAt": open.request.expires_at,
                 "autoNote": open.request.auto,
@@ -296,6 +299,46 @@ impl HostTools for BusTools {
 
     fn call<'a>(&'a self, name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)> {
         Box::pin(async move { tool_answer(&self.connection.call(name, input).await) })
+    }
+}
+
+/// Several kinds of daemon tools served as one: the Team Bus and the tools the operator connected
+/// (ADR 0069). A name belongs to the first that offers it.
+pub(crate) struct CombinedTools(pub(crate) Vec<Arc<dyn HostTools>>);
+
+impl CombinedTools {
+    fn owner(&self, name: &str) -> Option<&Arc<dyn HostTools>> {
+        self.0
+            .iter()
+            .find(|host| host.specs().iter().any(|spec| spec.name == name))
+    }
+}
+
+impl HostTools for CombinedTools {
+    fn specs(&self) -> Vec<ToolSpec> {
+        let mut specs: Vec<ToolSpec> = Vec::new();
+        for spec in self.0.iter().flat_map(|host| host.specs()) {
+            if !specs.iter().any(|known| known.name == spec.name) {
+                specs.push(spec);
+            }
+        }
+        specs
+    }
+
+    fn records_own_calls(&self, name: &str) -> bool {
+        self.owner(name)
+            .is_some_and(|host| host.records_own_calls(name))
+    }
+
+    fn asks(&self, name: &str) -> Option<HostAsk> {
+        self.owner(name).and_then(|host| host.asks(name))
+    }
+
+    fn call<'a>(&'a self, name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)> {
+        match self.owner(name) {
+            Some(host) => host.call(name, input),
+            None => Box::pin(async move { (format!("There's no tool called {name}."), true) }),
+        }
     }
 }
 

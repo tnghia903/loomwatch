@@ -81,6 +81,21 @@ describe('the permission card (ADR 0040)', () => {
     await vi.waitFor(() => expect(screen.queryByRole('region', { name: 'Waiting for your permission' })).toBeNull())
   })
 
+  // ADR 0069: a connected tool's call says which tool, what it would send, and can be always allowed on its own.
+  it('asks before a connected tool’s call, shows what it sends, and always allows just that call', async () => {
+    const fetch = vi.fn(() => Promise.resolve(json({ runId: 'r1' })))
+    vi.stubGlobal('fetch', fetch)
+    const onAlwaysAllow = vi.fn()
+    render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request({ title: 'Linear: Create issue', kind: 'other', switch: null, detail: '{"title":"Fix login"}', tool: { server: 'Linear', call: 'create_issue' } })] }} onAlwaysAllow={onAlwaysAllow} />)
+    expect(screen.getByText('Researcher wants to use Linear')).toBeInTheDocument()
+    expect(screen.getByText('Linear: Create issue · {"title":"Fix login"}')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit, then allow' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this' }))
+    expect(onAlwaysAllow).toHaveBeenCalledWith('researcher', { tool: 'Linear', call: 'create_issue', label: 'Linear: Create issue' })
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(String((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toEqual({ requestId: 'p1', decision: 'allow_run' })
+  })
+
   it('says so when the request had already gone, and renders nothing with nothing open', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({ error: 'That request is no longer waiting: it was answered, or declined when nobody answered in time.' }, 404))))
     const { rerender } = render(<PermissionPrompt run={{ runId: 'r1', permissionRequests: [request(), request({ id: 'p2' })] }} />)

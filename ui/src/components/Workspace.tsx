@@ -50,7 +50,7 @@ import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
-import type { AgentConfig, AllowSwitch, PermissionMode } from '../lib/team-file/types'
+import type { AgentConfig, PermissionMode } from '../lib/team-file/types'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
@@ -115,9 +115,11 @@ import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
 import { SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
-import { savedJobPreset, useSavedJobs, versionOf, type SavedJob } from '../lib/library/jobs'
+import { savedJobPreset, toolAllowOf, useSavedJobs, versionOf, type SavedJob } from '../lib/library/jobs'
 import { fieldsForVersion, linkState } from '../lib/library/link'
 import { teamAgentEdit } from '../lib/library/teamDraft'
+import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
+import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../lib/tools/client'
 import type { LibrarySource } from '../lib/library/types'
 import { OPERATOR_SOURCE } from '../lib/library/fixtures'
 import { teamSentence } from '../lib/story/teamSentence'
@@ -677,6 +679,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // skill or tool, one per path however each agent labels it, and a line from every agent that
   // uses it. Like a memory card it has no saved position until it is dragged, so it sits under the
   // first agent that uses it, placed by the slot finder click-placed cards use.
+  // A tool card says whether that tool is connected in LoomWatch (ADR 0069).
+  const connectedTools = useConnectedTools()
+  const toolsConnected = connectedTools.state === 'ready' ? connectedTools.tools : null
   const teamFileCards = useMemo<CapabilityNodeConfig[]>(() => {
     const cards: CapabilityNodeConfig[] = []
     const taken = [...doc.nodes.map((node) => node.position), ...composerLayout.nodes.map((node) => node.position), ...memoryCards.map((node) => node.position)]
@@ -694,11 +699,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         const installed = inventory.find((item) => item.name.toLowerCase() === capability.name.toLowerCase())
         const position = freeCapabilitySlot({ x: node.position.x, y: node.position.y + 220 }, taken)
         taken.push(position)
-        cards.push({ id, ...card, source: notion ? NOTION_PAGE_SOURCE : path ? chosenSource(path) : installed?.source ?? (capability.kind === 'tool' ? 'From an AI app, not available' : 'Not in LoomWatch’s skills'), position })
+        cards.push({ id, ...card, source: notion ? NOTION_PAGE_SOURCE : path ? chosenSource(path) : installed?.source ?? (capability.kind === 'tool' ? toolCardSource(toolsConnected, capability.name) : 'Not in LoomWatch’s skills'), position })
       }
     }
     return cards
-  }, [capabilityInventory.skills, composerLayout.nodes, doc.nodes, memoryCards])
+  }, [capabilityInventory.skills, composerLayout.nodes, doc.nodes, memoryCards, toolsConnected])
   const capabilityCards = useMemo(() => [...composerLayout.nodes, ...memoryCards, ...teamFileCards], [composerLayout.nodes, memoryCards, teamFileCards])
   /** What the last removal turned off, said over the canvas until dismissed (ADR 0060). */
   const [turnedOffNote, setTurnedOffNote] = useState<TurnedOffNoteState | null>(null)
@@ -1639,11 +1644,21 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     setPaneTab(null)
     if (wide) showRun(runId)
   }, [wide, showRun])
-  const allowAlways = useCallback((agentId: string, key: AllowSwitch) => {
-    doc.updateAgentAllow(agentId, key, true)
+  const allowAlways = useCallback((agentId: string, what: AlwaysAllowed) => {
+    const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
+    const name = agent?.name ?? agentId
+    if (typeof what === 'string') {
+      doc.updateAgentAllow(agentId, what, true)
+      void doc.save()
+      setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on.`)
+      return
+    }
+    // One call of a connected tool (ADR 0069): kept on the agent's tool entry, so later runs don't ask.
+    const change = agent ? teamAgentEdit(agent, 'toolAllow', withAllowed(toolAllowOf(agent), what.tool, what.call)) : null
+    if (change?.kind !== 'fields') return
+    doc.applyAgentFields(agentId, change.fields)
     void doc.save()
-    const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
-    setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from now on.`)
+    setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on.`)
   }, [doc])
   // ADR 0061: the chat's Auto mode switch. Saved at once, like "Always allow": it is a decision
   // about the team's next commands, not a draft.
@@ -2469,12 +2484,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           <PermissionPrompt
             run={record}
             team={record.agentIds.length > 1}
-            onAlwaysAllow={editable && sameTeamFile(doc.path, record.teamPath) ? (agentId, key) => {
-              doc.updateAgentAllow(agentId, key, true)
-              void doc.save()
-              const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
-              setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from now on.`)
-            } : undefined}
+            onAlwaysAllow={editable && sameTeamFile(doc.path, record.teamPath) ? allowAlways : undefined}
           />
         )}
         {/* ADR 0068: the run, or an agent, used what it may spend, and waits for you. */}
@@ -2955,4 +2965,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     </TeamFiguresContext.Provider>
     </SavedAgentsContext.Provider>
   )
+}
+
+/** What a tool card says under its name: whether LoomWatch has that tool connected (ADR 0069). */
+function toolCardSource(tools: readonly ConnectedTool[] | null, name: string): string {
+  if (!tools) return 'Tool'
+  const tool = toolNamed(tools, name)
+  if (!tool) return 'Not connected in LoomWatch'
+  return `Connected tool · ${actionCount(tool.calls.length)}`
 }

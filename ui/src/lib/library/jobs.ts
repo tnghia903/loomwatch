@@ -31,8 +31,12 @@ export interface JobSpec {
   /** How hard that model thinks. Absent, the model's own default. */
   thinkingEffort?: string
   skills?: string[]
-  /** The tools (MCP servers) it is given, by name; a team copies them into its capabilities. */
+  /** The tools it is given, by the name of a tool connected in LoomWatch (ADR 0069); a team copies
+      them into its capabilities. */
   tools?: string[]
+  /** Calls of those tools it may make without asking, by tool name (ADR 0069). A team copies each
+      list into the tool's `alwaysAllow`. */
+  toolAllow?: Record<string, string[]>
   /** What the finished result must satisfy (ADR 0062), copied into a team with the rest. */
   doneWhen?: string[]
   /** What it may do without asking (ADR 0037); only switches that are on are written. */
@@ -182,6 +186,7 @@ export function jobFromAgent(agent: AgentConfig, options: { name: string; does?:
   const icon = guessIcon(name, agent.role)
   const skills = (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name)
   const tools = [...new Set((agent.capabilities ?? []).filter((capability) => capability.kind === 'tool').map((capability) => capability.name))]
+  const toolAllow = toolAllowOf(agent)
   const allow = onlyOn(agent.allow)
   return {
     name,
@@ -191,9 +196,19 @@ export function jobFromAgent(agent: AgentConfig, options: { name: string; does?:
     ...(agent.model ? { model: openRouterId(agent.model), ...(agent.thinkingEffort ? { thinkingEffort: agent.thinkingEffort } : {}) } : {}),
     ...(skills.length ? { skills } : {}),
     ...(tools.length ? { tools } : {}),
+    ...(Object.keys(toolAllow).length ? { toolAllow } : {}),
     ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(allow ? { allow } : {}),
   }
+}
+
+/** The calls of its tools a team agent may make without asking, by tool name (ADR 0069). */
+export function toolAllowOf(agent: Pick<AgentConfig, 'capabilities'>): Record<string, string[]> {
+  const allow: Record<string, string[]> = {}
+  for (const capability of agent.capabilities ?? []) {
+    if (capability.kind === 'tool' && capability.alwaysAllow?.length) allow[capability.name] = [...capability.alwaysAllow]
+  }
+  return allow
 }
 
 /** A short line for a job saved without one: the first sentence of its instructions. */
@@ -215,6 +230,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     ...(job.model ? { model: job.model, ...(job.thinkingEffort ? { thinkingEffort: job.thinkingEffort } : {}) } : {}),
     ...(job.skills?.length ? { skills: job.skills } : {}),
     ...(job.tools?.length ? { tools: job.tools } : {}),
+    ...(job.toolAllow && Object.keys(job.toolAllow).length ? { toolAllow: job.toolAllow } : {}),
     ...(job.doneWhen?.length ? { doneWhen: job.doneWhen } : {}),
     ...(allow ? { allow } : {}),
     from: { agent: job.id, version: versionOf(job) },

@@ -4158,6 +4158,7 @@ pub(crate) mod tests {
             title: "Web search".to_owned(),
             kind: kind.to_owned(),
             switch: crate::permissions::switch_for(kind).map(str::to_owned),
+            tool: None,
             detail: None,
             since: now(),
             expires_at: now(),

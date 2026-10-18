@@ -700,8 +700,10 @@ $defs:
           0021). `knowledge` is a folder or file the operator chose, named by `path`: its contents
           are supplied in the prompt as source material and it is a read grant for that folder or
           file (ADR 0029, 0035, 0036), or, with `notion`, a Notion page read at run start (ADR
-          0050). `tool` named an MCP server from an AI app's settings (ADR 0029); it is kept so
-          older team files load, and the agent is told it is unavailable. Team memory is wired through `memory.inherits`, never as
+          0050). `tool` is a tool connected in LoomWatch, by its name (ADR 0069): its actions are
+          offered to the agent, and each asks the operator first unless `alwaysAllow` names it. A
+          name with no connected tool (such as one from an AI app's settings, ADR 0029) is told to
+          the agent as unavailable. Team memory is wired through `memory.inherits`, never as
           `knowledge`.
         type: string
         enum:
@@ -737,7 +739,25 @@ $defs:
             description: The Notion page id.
             type: string
             pattern: "^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$"
+      alwaysAllow:
+        description: >-
+          Tool only (ADR 0069): the actions of this tool the agent may take without asking, by the
+          tool's own name for each (`create_issue`). Every other action asks the operator first,
+          and on a schedule, with nobody to ask, is declined.
+        type: array
+        maxItems: 200
+        items:
+          type: string
+          minLength: 1
+          maxLength: 128
     allOf:
+      - if:
+          required:
+            - alwaysAllow
+        then:
+          properties:
+            kind:
+              const: tool
       - if:
           required:
             - path

@@ -53,6 +53,9 @@ export interface PermissionRequest {
   kind: string
   /** The switch that would allow it without asking. */
   switch?: 'web' | 'commands' | 'edits' | null
+  /** A connected tool's call (ADR 0069): which tool and which of its calls, which "Always allow"
+      lets through for this agent from then on. */
+  tool?: { server: string; call: string } | null
   /** The query, command, address or path, when there is one. */
   detail?: string | null
   since: string

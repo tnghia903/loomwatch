@@ -6,6 +6,7 @@ import { DEFAULT_AGENT_ROLE } from './createAgent'
 import { isFigureChoice, type FigureChoice } from './figures'
 import { guessIcon, onlyOn, versionOf, type JobSpec, type SavedJob } from './jobs'
 import { capabilitiesOf, modelForPreset, type RolePreset } from './roles'
+import { keptFor, sameAllow, type ToolAllow } from '../tools/allow'
 import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
 
 /**
@@ -25,6 +26,9 @@ export interface AgentDraft {
   /** The tools it is given, by name. A team copies them like its skills, and its Workflow canvas
       draws each as a card wired to it. */
   tools: string[]
+  /** Calls of those tools it may make without asking, by tool name (ADR 0069). Every other call
+      asks you first. */
+  toolAllow: ToolAllow
   /** What the finished result must satisfy (ADR 0062); empty when nothing is set. */
   doneWhen: string[]
   allow: AgentAllow
@@ -32,7 +36,7 @@ export interface AgentDraft {
   figure: FigureChoice | null
 }
 
-export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, model: DEFAULT_MODEL, effort: '', skills: [], tools: [], doneWhen: [], allow: {}, figure: null }
+export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, model: DEFAULT_MODEL, effort: '', skills: [], tools: [], toolAllow: {}, doneWhen: [], allow: {}, figure: null }
 
 export function draftFromJob(job: JobSpec): AgentDraft {
   return {
@@ -43,6 +47,7 @@ export function draftFromJob(job: JobSpec): AgentDraft {
     effort: job.model ? job.thinkingEffort ?? '' : '',
     skills: [...(job.skills ?? [])],
     tools: [...(job.tools ?? [])],
+    toolAllow: keptFor(job.toolAllow ?? {}, job.tools ?? []),
     doneWhen: [...(job.doneWhen ?? [])],
     allow: { ...(onlyOn(job.allow) ?? {}) },
     figure: isFigureChoice(job.figure) ? { ...job.figure } : null,
@@ -60,6 +65,7 @@ export function draftFromPreset(preset: RolePreset): AgentDraft {
     effort: choice.thinkingEffort ?? '',
     skills: [...(preset.skills ?? [])],
     tools: [...(preset.tools ?? [])],
+    toolAllow: {},
     doneWhen: [...(preset.doneWhen ?? [])],
     allow: { ...(onlyOn(preset.allow) ?? {}) },
     figure: null,
@@ -69,6 +75,7 @@ export function draftFromPreset(preset: RolePreset): AgentDraft {
 export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
   const icon = guessIcon(draft.name, draft.instructions)
   const allow = onlyOn(draft.allow)
+  const toolAllow = keptFor(draft.toolAllow, draft.tools)
   return {
     name: draft.name.trim(),
     ...(draft.does.trim() ? { does: draft.does.trim() } : {}),
@@ -78,6 +85,7 @@ export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
     ...(draft.model ? { model: draft.model, ...(draft.effort ? { thinkingEffort: draft.effort } : {}) } : {}),
     ...(draft.skills.length ? { skills: [...draft.skills] } : {}),
     ...(draft.tools.length ? { tools: [...draft.tools] } : {}),
+    ...(Object.keys(toolAllow).length ? { toolAllow } : {}),
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(note.trim() ? { note: note.trim() } : {}),
@@ -99,6 +107,7 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
     || draft.effort !== saved.effort
     || draft.skills.join('\n') !== saved.skills.join('\n')
     || draft.tools.join('\n') !== saved.tools.join('\n')
+    || !sameAllow(draft.toolAllow, saved.toolAllow, draft.tools)
     || doneWhenOf(draft).join('\n') !== doneWhenOf(saved).join('\n')
     || SWITCHES.some((key) => Boolean(draft.allow[key]) !== Boolean(saved.allow[key]))
 }
@@ -124,7 +133,7 @@ export function agentFromDraft(draft: AgentDraft, model = draft.model, link?: { 
     role: draft.instructions.trim() || DEFAULT_AGENT_ROLE,
     model: model || DEFAULT_MODEL,
     ...(effort ? { thinkingEffort: effort } : {}),
-    ...(draft.skills.length || draft.tools.length ? { capabilities: capabilitiesOf(draft.skills, draft.tools) } : {}),
+    ...(draft.skills.length || draft.tools.length ? { capabilities: capabilitiesOf(draft.skills, draft.tools, draft.toolAllow) } : {}),
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(link?.job ? { from: { agent: link.id, version: versionOf(link.job) } } : {}),

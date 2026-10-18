@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, type RunEvent } from './events'
+import { permissionAsks } from '../runs/permissionRequests'
 
 const T0 = Date.parse('2026-10-05T09:00:00Z')
 let seq = 0
@@ -173,6 +174,15 @@ describe('messages between agents', () => {
     expect(messages[2]).toMatchObject({ kind: 'permission', text: 'Bash: rm -rf build', state: 'pending', reply: null, permission: { requestId: 'p3', outcome: null, settled: null } })
     // Before the answer, the first one waits on you.
     expect(projectRun(events, 1).messages[0]).toMatchObject({ state: 'pending', reply: null, permission: { outcome: null } })
+  })
+
+  it('names the connected tool a call asked to use (ADR 0069)', () => {
+    seq = 0
+    const { messages } = projectRun([
+      event(1, 'researcher', 'session_meta', { phase: 'awaiting_permission', requestId: 'p1', title: 'DeepWiki: Ask wiki question', kind: 'other', switch: null, tool: { server: 'DeepWiki', call: 'ask_wiki_question' }, detail: '{"repoName":"facebook/react"}' }, loomwatch('awaiting_permission')),
+    ])
+    expect(messages[0]).toMatchObject({ text: 'DeepWiki: Ask wiki question', permission: { tool: 'DeepWiki', switch: null, detail: '{"repoName":"facebook/react"}' } })
+    expect(permissionAsks(messages[0].permission?.switch, messages[0].permission?.tool)).toBe('Asks to use DeepWiki')
   })
 
   it('keeps the command you changed, or the answer you gave in its place, with the request', () => {

@@ -10,7 +10,7 @@ import { isTerminalRun, type RunRecord } from '../../lib/runs/client'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { fetchTeamFile, saveTeamFile } from '../../lib/team-file/client'
-import type { AllowSwitch } from '../../lib/team-file/types'
+import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { AnswerDocument } from '../chat/AnswerDocument'
 import { TeamChat, type Prepared } from '../chat/TeamChat'
 import type { TeamView } from '../chat/WorkPiece'
@@ -26,8 +26,9 @@ export interface AgentChatProps {
    */
   chatId: string
   figure: FigureChoice
-  /** "Allow from now on": switch this on in the draft, for the next message and every team. */
-  onAllow: (key: AllowSwitch) => void
+  /** "Allow from now on": switch this on, or always allow this tool call, in the draft, for the
+      next message and every team. */
+  onAllow: (what: AlwaysAllowed) => void
   /** The work the figure shows: the newest piece while it runs, and how it ended if you watched. */
   onRecord: (record: RunRecord | null) => void
   /** The piece whose long answer is read in full over the bench, and opening or closing one. */
@@ -162,9 +163,11 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
         onDetails={details}
         onTeamReview={() => announce(`LoomWatch wants you to look over ${name}’s chat file before it runs. Open Details on any piece to see it.`)}
         onStale={() => announce(`${name}’s chat file changed while you were sending. Send your message again.`)}
-        onAlwaysAllow={(_, key) => {
-          onAllow(key)
-          announce(`${name} may ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from now on. Save it to keep that.`)
+        onAlwaysAllow={(_, what) => {
+          onAllow(what)
+          announce(typeof what === 'string'
+            ? `${name} may ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on. Save it to keep that.`
+            : `${name} may do “${what.label}” without asking from now on. Save it to keep that.`)
         }}
         announce={announce}
         onOpenFinding={(runId) => details(runId)}

@@ -654,3 +654,111 @@ async fn a_cancelled_turn_stops_waiting_and_says_so() {
     assert_eq!(end.stop_reason, StopReason::Cancelled);
     assert!(started.elapsed() < Duration::from_secs(5));
 }
+
+/// A connected tool (ADR 0069), standing in for one: it asks before each call and keeps the calls
+/// that went through.
+#[derive(Default)]
+struct AskingTool {
+    made: Mutex<Vec<Value>>,
+}
+
+impl HostTools for AskingTool {
+    fn specs(&self) -> Vec<ToolSpec> {
+        vec![ToolSpec {
+            name: "linear__create_issue".to_owned(),
+            description: "From Linear: Create an issue.".to_owned(),
+            parameters: json!({"type": "object"}),
+        }]
+    }
+
+    fn asks(&self, name: &str) -> Option<HostAsk> {
+        (name == "linear__create_issue").then(|| HostAsk {
+            title: "Linear: Create issue".to_owned(),
+            server: "Linear".to_owned(),
+            call: "create_issue".to_owned(),
+        })
+    }
+
+    fn call<'a>(&'a self, _name: &'a str, input: Value) -> BoxFuture<'a, (String, bool)> {
+        self.made.lock().unwrap().push(input);
+        Box::pin(async { ("Created ENG-1".to_owned(), false) })
+    }
+}
+
+#[tokio::test]
+async fn a_connected_tools_call_asks_first_and_runs_only_when_allowed() {
+    let folder = Folder::new();
+    let issue = json!({"title": "Fix login"});
+    let demo = Demo::scripted(vec![
+        Completion::calls("", vec![call("c1", "linear__create_issue", &issue)]),
+        Completion::calls("", vec![call("c2", "linear__create_issue", &issue)]),
+        Completion::calls("", vec![call("c3", "linear__create_issue", &issue)]),
+        Completion::text("Done."),
+    ]);
+    let sink = Arc::new(Recorded::default());
+    let answers = Answers::new(vec![
+        Decision::Deny,
+        Decision::Answer("It's ENG-9 already.".to_owned()),
+        Decision::Allow,
+    ]);
+    let tool = Arc::new(AskingTool::default());
+    let config = SessionConfig::new(
+        "session-1",
+        "writer",
+        folder.0.clone(),
+        "anthropic/claude-haiku-5.5",
+    );
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        sink.clone(),
+        answers.clone(),
+        tool.clone(),
+    );
+    session.prompt("File the bug.").await.unwrap();
+
+    // Asked three times, each with the tool, the call and what it would send.
+    let asked = answers.asked.lock().unwrap();
+    assert_eq!(asked.len(), 3);
+    let message = asked[0].as_message();
+    assert_eq!(
+        message["params"]["toolCall"]["title"],
+        "Linear: Create issue"
+    );
+    assert_eq!(message["params"]["toolCall"]["kind"], "other");
+    assert_eq!(
+        message["params"]["toolCall"]["rawInput"],
+        json!({"server": "Linear", "tool": "create_issue", "arguments": issue})
+    );
+    // Only the allowed call reached the tool.
+    assert_eq!(*tool.made.lock().unwrap(), std::slice::from_ref(&issue));
+    // The record names it in words, and each answer reached the model.
+    let started: Vec<Value> = sink
+        .all()
+        .into_iter()
+        .filter(|update| update["sessionUpdate"] == "tool_call")
+        .collect();
+    assert!(
+        started
+            .iter()
+            .all(|update| update["title"] == "Linear: Create issue")
+    );
+    let replies: Vec<String> = demo
+        .requests()
+        .iter()
+        .skip(1)
+        .filter_map(|request| match request.messages.last() {
+            Some(Message::Tool { content, .. }) => Some(content.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        replies[0].starts_with("The person declined this."),
+        "{replies:?}"
+    );
+    assert_eq!(
+        replies[1],
+        "The person answered instead of letting this run: It's ENG-9 already."
+    );
+    assert_eq!(replies[2], "Created ENG-1");
+}

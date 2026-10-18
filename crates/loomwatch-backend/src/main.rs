@@ -296,6 +296,10 @@ async fn main() -> Result<()> {
             // Where the Notion connection is kept, chosen the same way as the key's store. Also
             // before anything can start a run, since a run reads the pages its agents are given.
             loomwatch_backend::notion::install(&state_dir);
+            // The tools the operator connected (ADR 0069), which a run offers the agents given
+            // one. Opening reads nothing; the Keychain is read when a tool is first used.
+            let connected_tools = loomwatch_backend::connected_tools::Tools::open(&state_dir)?;
+            loomwatch_backend::connected_tools::install(connected_tools.clone());
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
             let approvals =
@@ -390,6 +394,10 @@ async fn main() -> Result<()> {
                 // The OpenRouter key and the model list. Like Notion's connection, only on this
                 // computer's own address.
                 app = app.merge(loomwatch_backend::ai::router(ai.clone()));
+                // Connecting tools, and where their sites send a sign-in back.
+                app = app.merge(loomwatch_backend::connected_tools::router(
+                    connected_tools.clone(),
+                ));
                 // LoomWatch's skills folder, bringing skills in from apps on request, and installing
                 // from GitHub, skills.sh and ClawHub. Building it scans and fetches nothing.
                 app = app.merge(loomwatch_backend::skills_api::router(

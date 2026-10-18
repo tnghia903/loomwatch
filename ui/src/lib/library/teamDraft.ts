@@ -3,7 +3,8 @@ import { chosenIsFile, chosenName } from '../knowledge/chosen'
 import type { AgentConfig, CapabilityRef } from '../team-file/types'
 import type { AgentDraft } from './draft'
 import type { ReadSource } from './figure'
-import { onlyOn } from './jobs'
+import { onlyOn, toolAllowOf } from './jobs'
+import { callsFor, type ToolAllow } from '../tools/allow'
 
 /**
  * A team's own agent on the workbench (the team's Agents tab). The workbench edits an
@@ -23,6 +24,7 @@ export function draftFromTeamAgent(agent: AgentConfig): AgentDraft {
     effort: agent.thinkingEffort ?? '',
     skills: (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name),
     tools: toolsOf(agent),
+    toolAllow: toolAllowOf(agent),
     doneWhen: [...(agent.doneWhen ?? [])],
     allow: { ...(agent.allow ?? {}) },
     // A team's own agent wears the figure its id picks: the figure belongs to Your agents.
@@ -108,6 +110,12 @@ export function toolsOf(agent: Pick<AgentConfig, 'capabilities'>): string[] {
   return [...new Set(names)]
 }
 
+/** A tool given to an agent, with the calls it always allows (ADR 0069), as a team file entry. */
+function toolEntry(name: string, allowed: ToolAllow): CapabilityRef {
+  const calls = callsFor(allowed, name)
+  return { kind: 'tool', name, ...(calls.length ? { alwaysAllow: calls } : {}) }
+}
+
 /** What one workbench change does to the team file. */
 export type TeamAgentEdit =
   | { kind: 'rename'; field: 'name' | 'role'; value: string }
@@ -132,11 +140,19 @@ export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, ke
       // turned off there (ADR 0060), as drawing its line would.
       const tools = value as string[]
       const others = (agent.capabilities ?? []).filter((capability) => capability.kind !== 'tool')
-      const capabilities = [...others, ...tools.map((name) => ({ kind: 'tool' as const, name }))]
+      // A tool still given keeps the calls it always allows (ADR 0069).
+      const allowed = toolAllowOf(agent)
+      const capabilities = [...others, ...tools.map((name) => toolEntry(name, allowed))]
       const given = new Set(tools.map((name) => name.toLowerCase()))
       const off = agent.turnedOff ?? []
       const stillOff = off.filter((entry) => entry.kind !== 'tool' || !given.has(entry.name.toLowerCase()))
       return { kind: 'fields', fields: { capabilities: capabilities.length ? capabilities : undefined, ...(stillOff.length !== off.length ? { turnedOff: stillOff.length ? stillOff : undefined } : {}) } }
+    }
+    case 'toolAllow': {
+      // Only the tools' always-allowed calls change; everything else stays as it is.
+      const allowed = value as ToolAllow
+      const capabilities = (agent.capabilities ?? []).map((capability) => (capability.kind === 'tool' ? toolEntry(capability.name, allowed) : capability))
+      return { kind: 'fields', fields: { capabilities: capabilities.length ? capabilities : undefined } }
     }
     case 'allow': return { kind: 'fields', fields: { allow: onlyOn(value as AgentDraft['allow']) } }
     case 'doneWhen': {

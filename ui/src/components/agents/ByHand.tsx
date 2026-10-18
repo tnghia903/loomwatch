@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { FileText, Folder, KeyRound, Network, NotebookText, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
+import { FileText, Folder, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
 import { modelNameFromId } from '../../lib/ai/modelIds'
@@ -14,12 +14,16 @@ import type { RunRecord } from '../../lib/runs/client'
 import { useNow } from '../../lib/useNow'
 import { useSessionEvents } from '../../lib/watch/useSessionEvents'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
+import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
+import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
 import { appendToRole, INSTRUCTION_PARTS, instructionShape, PART_STARTERS } from '../../lib/team-file/checkup'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { DoneWhen } from '../canvas/DoneWhen'
 import { InstructionShape } from '../canvas/InstructionShape'
 import { EffortSlider } from '../models/EffortSlider'
 import { ModelPicker } from '../models/ModelPicker'
+import { ConnectTool } from '../tools/ConnectTool'
+import { ToolIcon } from '../tools/ToolIcon'
 import type { BenchLabel } from './AgentFigure'
 import type { BenchView } from './workbenchScene'
 
@@ -142,6 +146,13 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const effort = draft.effort && reasons ? { name: `${draft.effort.charAt(0).toUpperCase()}${draft.effort.slice(1)}` } : null
   const thinks = effort ? `${model} · ${effort.name.toLowerCase()} effort` : model
   const asked = askedKey(record)
+  // The tools connected in LoomWatch (ADR 0069): the ones it is given, and the ones it could be.
+  const connected = useConnectedTools()
+  const connectedTools = connected.state === 'ready' ? connected.tools : []
+  const [connecting, setConnecting] = useState<ConnectedTool | 'new' | null>(null)
+  const givenTools = draft.tools.map((name) => ({ name, tool: toolNamed(connectedTools, name) }))
+  const toGive = connectedTools.filter((tool) => !tool.pending && !draft.tools.some((name) => name.trim().toLowerCase() === tool.name.trim().toLowerCase()))
+  const giveTool = (name: string) => { if (!draft.tools.some((given) => given.trim().toLowerCase() === name.trim().toLowerCase())) set('tools', [...draft.tools, name]) }
 
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.model, model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },
@@ -194,7 +205,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     mind: `Thinks with ${thinks}`,
     skills: draft.skills.length ? `${draft.skills.length} skill${draft.skills.length === 1 ? '' : 's'} it opens when the work calls for one` : 'No skills yet',
     reads: !reads ? 'Each team it joins gives it what it reads' : reads.length ? `Reads ${readCount(reads)} the team gives it` : 'The team gives it nothing to read yet',
-    tools: draft.tools.length ? `${toolCount(draft.tools)} from an AI app it can’t use here` : 'Files, the web and commands, as its keys allow',
+    tools: toolsSay(givenTools, connected.state === 'loading'),
     keys: given.length ? `Goes ahead with ${given.map((item) => item.word.toLowerCase()).join(' and ')}${kept.length ? `; asks you first for ${kept.map((item) => item.word.toLowerCase()).join(' and ')}` : ''}` : 'Asks you before it searches the web, changes files or runs a command',
     reply: reply ?? 'Its instructions don’t say yet',
   }
@@ -296,10 +307,53 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
 
           {block('tools', <>
             <p className="t-meta">Every agent can read and write files in its own folder, search and read the web, and run commands, as its keys below allow.</p>
-            {draft.tools.length > 0 && <>
-              <ul className="skill-picker-chosen" aria-label="Tools from an AI app">{draft.tools.map((tool) => <li key={tool}><Wrench size={12} aria-hidden="true" />{tool}<button type="button" className="iconbtn" aria-label={`Take ${tool} out`} onClick={() => set('tools', draft.tools.filter((item) => item !== tool))}><X size={12} aria-hidden="true" /></button></li>)}</ul>
-              <p className="t-meta">{draft.tools.length === 1 ? 'This tool was' : 'These tools were'} set up in an AI app, and LoomWatch doesn’t read AI apps’ settings, so the agent is told {draft.tools.length === 1 ? 'it isn’t' : 'they aren’t'} available. Take {draft.tools.length === 1 ? 'it' : 'them'} out to stop the note.</p>
-            </>}
+            {givenTools.length > 0 && <ul className="byhand-tools" aria-label="Tools you gave it">
+              {givenTools.map(({ name, tool }) => {
+                const allowed = allowedFor(draft.toolAllow, name)
+                const label = (call: string) => tool?.calls.find((item) => item.name === call)?.label ?? call
+                return (
+                  <li key={name} className={tool ? '' : 'missing'}>
+                    {tool ? <ToolIcon name={tool.name} icon={tool.icon} size={24} /> : <Wrench size={15} aria-hidden="true" />}
+                    <span className="byhand-tool-text">
+                      <b>{name}</b>
+                      {!tool
+                        ? <em>{connected.state === 'loading' ? 'Looking for it…' : 'Not connected in LoomWatch, so it can’t use it yet.'}</em>
+                        : tool.problem
+                          ? <em className="problem">{tool.problem}</em>
+                          : <em>{allowed.length ? 'Asks you before each action, except these, which it always may do:' : `Asks you before each of its ${actionCount(tool.calls.length)}.`}</em>}
+                      {tool?.example && !tool.problem && <em className="byhand-tool-try">Try asking: “{tool.example}”</em>}
+                      {allowed.length > 0 && <ul className="byhand-tool-allowed" aria-label={`Always allowed for ${name}`}>
+                        {allowed.map((call) => <li key={call}>{label(call)}<button type="button" className="iconbtn" aria-label={`Ask again before ${label(call)}`} onClick={() => set('toolAllow', withoutAllowed(draft.toolAllow, name, call))}><X size={11} aria-hidden="true" /></button></li>)}
+                      </ul>}
+                    </span>
+                    <span className="byhand-tool-actions">
+                      {!tool && connected.state === 'ready' && <button type="button" className="btn" onClick={() => setConnecting('new')}>Connect</button>}
+                      {tool?.problem && tool.auth === 'signIn' && <button type="button" className="btn" onClick={() => setConnecting(tool)}>Sign in again</button>}
+                      <button type="button" className="iconbtn" aria-label={`Take ${name} away`} onClick={() => set('tools', draft.tools.filter((item) => item !== name))}><X size={12} aria-hidden="true" /></button>
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>}
+            {toGive.length > 0 && !connecting && <div className="byhand-tools-give">
+              <p className="t-meta">Give it a tool you connected</p>
+              <ul className="connect-tool-list" aria-label="Tools you can give it">
+                {toGive.map((tool) => <li key={tool.id}><button type="button" onClick={() => giveTool(tool.name)}><span className="connect-tool-name"><ToolIcon name={tool.name} icon={tool.icon} size={24} /><b>{tool.name}</b></span><span>{actionCount(tool.calls.length)}</span><em><Plus size={12} aria-hidden="true" /> Give it {tool.name}</em></button></li>)}
+              </ul>
+            </div>}
+            {connecting && connected.state === 'ready'
+              ? <ConnectTool
+                  catalog={connected.catalog}
+                  connected={connected.tools}
+                  keptIn={connected.keptIn}
+                  resume={connecting === 'new' ? null : connecting}
+                  onClose={() => setConnecting(null)}
+                  onConnected={(tool) => { setConnecting(null); connected.refresh(); giveTool(tool.name) }}
+                />
+              : connected.state === 'ready'
+                ? <button type="button" className="btn byhand-tools-connect" onClick={() => setConnecting('new')}><Plug size={14} aria-hidden="true" />Connect a new tool</button>
+                : connected.state === 'unavailable' && <p className="t-meta">{connected.message}</p>}
+            {givenTools.length > 0 && <p className="t-meta">A tool works in your own account on its site, so it asks you before each action, and the card lets you always allow one. On a schedule nobody can answer, so actions you haven’t always allowed are declined.</p>}
           </>)}
 
           {block('keys', <ul className="byhand-keys">
@@ -424,7 +478,13 @@ function readCount(reads: readonly ReadSource[]): string {
   return words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}` : words[0] ?? 'nothing'
 }
 
-/** The tools it is given, counted in words: "1 tool", "3 tools". */
-function toolCount(tools: readonly string[]): string {
-  return `${tools.length} tool${tools.length === 1 ? '' : 's'}`
+/** What its tools add up to, in words, for the line under the block's title and the tool drawer. */
+function toolsSay(given: readonly { name: string; tool: ConnectedTool | undefined }[], loading: boolean): string {
+  const builtIn = 'Files, the web and commands'
+  if (!given.length) return `${builtIn}, as its keys allow`
+  const usable = given.filter((item) => item.tool).map((item) => item.name)
+  const missing = given.length - usable.length
+  const plus = usable.length ? `${builtIn}, plus ${listNames(usable)}` : builtIn
+  if (!missing || loading) return plus
+  return `${plus}; ${missing} tool${missing === 1 ? ' isn’t' : 's aren’t'} connected`
 }

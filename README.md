@@ -816,9 +816,11 @@ a folder or a file, select the agent and click **Folder** or **File** under **Gi
   or a file's text. A PDF's text is read when `pdftotext` is installed (`brew install poppler`).
   The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
   folder for anything bigger.
-- A **tool** from an AI app's own settings, such as an MCP server, is not given to LoomWatch's
-  agents: reading those settings would mean reading that app's sign-ins. An agent that still has
-  one is told it isn't there, and the run carries on without it.
+- A **tool** you connected, such as Todoist or Kiwi.com, lets the agent use that service. Connect one
+  in the agent's **Tools it can use** block or in Connections; the agent asks you before each action
+  it takes there, unless you always allow that action. See [Give agents tools](docs/TOOLS.md). A tool from an AI app's own settings is
+  not given to LoomWatch's agents: an agent that still names one is told it isn't there, and the run
+  carries on without it.
 
 Taking a skill card off the canvas, or the line from it to one agent, **turns it off** for that
 agent. The agent's **Context** lists what is turned off, with a button to turn each back on. When an

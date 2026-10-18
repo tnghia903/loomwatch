@@ -1,5 +1,6 @@
 import { modelForJob, type EffortTier, type ModelTier } from '../ai/modelIds'
 import type { AgentAllow, AgentLink, CapabilityRef } from '../team-file/types'
+import { callsFor, type ToolAllow } from '../tools/allow'
 import { CHECKER_ROLE } from './checker'
 import type { LibrarySource } from './types'
 
@@ -47,8 +48,10 @@ export interface RolePreset {
   doneWhen?: readonly string[]
   /** Skill names the agent is given (ADR 0031). */
   skills?: readonly string[]
-  /** Tools (MCP servers, by name) the agent is given; only Your agents carry any. */
+  /** Tools connected in LoomWatch, by name, the agent is given; only Your agents carry any. */
   tools?: readonly string[]
+  /** Calls of those tools it may make without asking, by tool name (ADR 0069). */
+  toolAllow?: ToolAllow
   /** What the agent may do without asking from the start (ADR 0037). Only what the job cannot be
       done without: a researcher that cannot search the web can only guess. */
   allow?: AgentAllow
@@ -233,9 +236,18 @@ export function modelForPreset(preset: RolePreset): { model: string; thinkingEff
   return modelForJob(preset)
 }
 
-/** Skills and tools as a team agent's `capabilities`: what placing an agent, or the test bench, writes. */
-export function capabilitiesOf(skills: readonly string[], tools: readonly string[]): CapabilityRef[] {
-  return [...skills.map((name) => ({ kind: 'skill' as const, name })), ...tools.map((name) => ({ kind: 'tool' as const, name }))]
+/**
+ * Skills and tools as a team agent's `capabilities`: what placing an agent, or the test bench,
+ * writes. Each tool carries the calls it may make without asking (ADR 0069).
+ */
+export function capabilitiesOf(skills: readonly string[], tools: readonly string[], toolAllow: ToolAllow = {}): CapabilityRef[] {
+  return [
+    ...skills.map((name) => ({ kind: 'skill' as const, name })),
+    ...tools.map((name) => {
+      const calls = callsFor(toolAllow, name)
+      return { kind: 'tool' as const, name, ...(calls.length ? { alwaysAllow: calls } : {}) }
+    }),
+  ]
 }
 
 /** The Library payload that places this job as an agent. */
@@ -246,7 +258,7 @@ export function roleSource(preset: RolePreset): LibrarySource {
     label: preset.label,
     role: preset.role,
     ...modelForPreset(preset),
-    ...(preset.skills?.length || preset.tools?.length ? { capabilities: capabilitiesOf(preset.skills ?? [], preset.tools ?? []) } : {}),
+    ...(preset.skills?.length || preset.tools?.length ? { capabilities: capabilitiesOf(preset.skills ?? [], preset.tools ?? [], preset.toolAllow ?? {}) } : {}),
     ...(preset.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
     ...(preset.allow ? { allow: { ...preset.allow } } : {}),
     ...(preset.from ? { from: { ...preset.from } } : {}),
