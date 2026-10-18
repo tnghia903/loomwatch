@@ -99,13 +99,12 @@ Connections page. The backend handles exactly one key, and it guards it:
 models that can use tools. It is fetched when first asked for, kept for an hour, and saved in
 the state folder so the list still shows offline. `GET /api/models` serves it.
 
-`ai/reading.rs` reads an agent's whole setup for its model suggestion, and only when the operator
-asks. The app suggests a model from an agent's name and a few words of its instructions, for free
+`ai/reading.rs` reads an agent's whole setup for its model suggestion, and only once the operator
+turns on Let AI choose (`AiChoice.tsx`), off by default, under the suggestion in an agent's model
+list. The app suggests a model from an agent's name and a few words of its instructions, for free
 (`ui/src/lib/team-file/modelSuggestion.ts`). When those can't place an agent (`agentSetup.ts`,
-`needsReading`), its model list shows how sure the suggestion is and offers Sharpen
-(`Sharpen.tsx`): a tap asks `POST /api/models/reading` with `ask: "once"`. Once the operator
-ticks "Sharpen every unclear agent on its own" (off by default), an open list asks without a tap;
-until then it only looks at what was kept (`ask: "kept"`, free, never a call). The daemon then asks TypeSafe's Jev (`typesafe/jev-1.14`,
+`needsReading`), its model list shows how sure the suggestion is, and with the toggle on, an open
+list asks `POST /api/models/reading`. The daemon then asks TypeSafe's Jev (`typesafe/jev-1.14`,
 pinned) on OpenRouter's Decisions API, with the operator's key, which kind of work the agent
 does: gather, produce or check. The app's rules still apply after it: the team's answer stays on
 the strongest model, and a check step uses another maker's model. Each answer is kept in
