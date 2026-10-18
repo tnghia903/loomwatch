@@ -3012,9 +3012,11 @@ impl CheckReading {
 /// The `## Check` block a check step ends with, one line per numbered item:
 /// `1. Met — the item — evidence`. The heading is read however a section is headed (`## Check`,
 /// `**Check**`), and the block ends at the next section. A line answers the item whose words it
-/// names, else the item its number names; a line that answers none is a problem of its own. Lines
-/// may be list items, numbered or not, or table rows. Met with no evidence is Not sure and partly
-/// met is Not met: a check is only as good as what it saw.
+/// names, else the item its number names; a line that answers none is a problem of its own. A line
+/// that names its item by number alone and has one field after its verdict (`1. Met — each
+/// sentence cites one`) gives that field as its evidence. Lines may be list items, numbered or not,
+/// or table rows. Met with no evidence is Not sure and partly met is Not met: a check is only as
+/// good as what it saw.
 fn read_checks(reply: &str, expected: &[String]) -> CheckReading {
     let mut reading = CheckReading {
         listed: vec![None; expected.len()],
@@ -3034,31 +3036,38 @@ fn read_checks(reply: &str, expected: &[String]) -> CheckReading {
             continue;
         };
         reading.readable = true;
-        let slot = expected
-            .iter()
-            .position(|item| same_item(item, &line.item))
-            .or_else(|| {
-                line.number
-                    .and_then(|number| number.checked_sub(1))
-                    .filter(|index| *index < expected.len())
-            });
+        let by_words = expected.iter().position(|item| same_item(item, &line.item));
+        let slot = by_words.or_else(|| {
+            line.number
+                .and_then(|number| number.checked_sub(1))
+                .filter(|index| *index < expected.len())
+        });
         let Some(index) = slot else {
+            let (verdict, evidence) = held_to_evidence(line.verdict, line.evidence);
             reading.extra.push(CheckItem {
-                verdict: line.verdict,
+                verdict,
                 item: line.item,
-                evidence: line.evidence,
+                evidence,
             });
             continue;
         };
+        // A bare line found by its number alone did not name the item with its one field, so
+        // that field is what it saw: "1. Met — each sentence cites one".
+        let evidence = if line.bare && by_words.is_none() {
+            line.item
+        } else {
+            line.evidence
+        };
+        let (verdict, evidence) = held_to_evidence(line.verdict, evidence);
         // Two lines on one item: the worse verdict stands.
         if reading.listed[index]
             .as_ref()
-            .is_none_or(|kept| verdict_rank(line.verdict) > verdict_rank(kept.verdict))
+            .is_none_or(|kept| verdict_rank(verdict) > verdict_rank(kept.verdict))
         {
             reading.listed[index] = Some(CheckItem {
-                verdict: line.verdict,
+                verdict,
                 item: expected[index].clone(),
-                evidence: line.evidence,
+                evidence,
             });
         }
     }
@@ -3076,9 +3085,12 @@ fn is_check_heading(line: &str) -> bool {
 /// One line of a `## Check` block, read.
 struct CheckLine {
     number: Option<usize>,
-    verdict: &'static str,
+    verdict: Verdict,
     item: String,
     evidence: String,
+    /// Whether the line is its number, its verdict and one field after it (`1. Met — …`): that
+    /// field is the item when it names one, else what the check saw.
+    bare: bool,
 }
 
 /// A line of a `## Check` block, if it is one: `- Met — item — evidence`, `1. Met — …`,
@@ -3099,7 +3111,7 @@ fn check_line(raw: &str) -> Option<CheckLine> {
             .trim()
             .trim_start_matches('(')
             .trim_end_matches(')');
-        return checked_line(number.or(after), verdict, item, evidence);
+        return checked_line(number.or(after), verdict, item, evidence, false);
     };
     let rest = rest.trim_start_matches(FIELD_SEPARATORS).trim();
     let (mut item, mut evidence) = split_check_fields(rest);
@@ -3112,7 +3124,16 @@ fn check_line(raw: &str) -> Option<CheckLine> {
         (item, evidence) = split_check_fields(evidence);
     }
     let (before_item, item) = leading_number(item.trim());
-    checked_line(number.or(after).or(before_item), verdict, item, evidence)
+    // A number that leads the line leaves its one field to be the item or the evidence; one placed
+    // with the field marks it as the item ("Met — 2. Length").
+    let bare = number.is_some() && evidence.trim().is_empty();
+    checked_line(
+        number.or(after).or(before_item),
+        verdict,
+        item,
+        evidence,
+        bare,
+    )
 }
 
 /// What a check line's fields are separated by, and trimmed of at their start.
@@ -3176,7 +3197,9 @@ fn table_check_line(line: &str) -> Option<CheckLine> {
         .map(|(_, cell)| *cell);
     let item = others.next().unwrap_or_default();
     let evidence = others.collect::<Vec<_>>().join(" — ");
-    checked_line(number, verdict, item, &evidence)
+    // `| 1 | Met | … |`: the one cell after the verdict may be the item or the evidence.
+    let bare = number.is_some() && at == 0 && cells.len() == 2;
+    checked_line(number, verdict, item, &evidence, bare)
 }
 
 /// How a check step can mark an item.
@@ -3224,35 +3247,41 @@ fn verdict_words(line: &str) -> Option<(Verdict, &str)> {
     .find_map(|(word, verdict)| Some((verdict, verdict_word(line, word)?)))
 }
 
-/// A line made of what was read from it, holding a check to what it saw: Met with no evidence is
-/// Not sure, and partly met is Not met. A verdict naming no item is no line.
+/// A line made of what was read from it. A verdict naming no item is no line.
 fn checked_line(
     number: Option<usize>,
     verdict: Verdict,
     item: &str,
     evidence: &str,
+    bare: bool,
 ) -> Option<CheckLine> {
     let item = item.trim().trim_matches(['*', '_']).trim();
     let evidence = evidence.trim().trim_matches(['*', '_']).trim();
     if item.is_empty() && number.is_none() {
         return None;
     }
-    let (verdict, evidence) = match verdict {
-        Verdict::Met if !evidence.chars().any(char::is_alphanumeric) => {
-            ("not_sure", "Marked Met without evidence".to_owned())
-        }
-        Verdict::Met => ("met", evidence.to_owned()),
-        Verdict::NotMet => ("not_met", evidence.to_owned()),
-        Verdict::NotSure => ("not_sure", evidence.to_owned()),
-        Verdict::Partly if evidence.is_empty() => ("not_met", "Partly met".to_owned()),
-        Verdict::Partly => ("not_met", format!("Partly met: {evidence}")),
-    };
     Some(CheckLine {
         number,
         verdict,
         item: item.to_owned(),
-        evidence,
+        evidence: evidence.to_owned(),
+        bare,
     })
+}
+
+/// A verdict and its evidence, holding a check to what it saw: Met with no evidence is Not sure,
+/// and partly met is Not met. Settled once the line is matched, which decides what its evidence is.
+fn held_to_evidence(verdict: Verdict, evidence: String) -> (&'static str, String) {
+    match verdict {
+        Verdict::Met if !evidence.chars().any(char::is_alphanumeric) => {
+            ("not_sure", "Marked Met without evidence".to_owned())
+        }
+        Verdict::Met => ("met", evidence),
+        Verdict::NotMet => ("not_met", evidence),
+        Verdict::NotSure => ("not_sure", evidence),
+        Verdict::Partly if evidence.is_empty() => ("not_met", "Partly met".to_owned()),
+        Verdict::Partly => ("not_met", format!("Partly met: {evidence}")),
+    }
 }
 
 /// What follows `word` when `line` starts with it as a whole word, in any case: "Met — x" and
@@ -4398,6 +4427,103 @@ mod tests {
                 (1, verdicts(&["not_met", "met", "met"]), true),
                 (2, verdicts(&["met", "met", "met"]), true),
             ]
+        );
+        Ok(())
+    }
+
+    /// The live run's Check block, whose lines name their items by number alone: the Not met goes
+    /// back to the writer with its evidence, the two Mets are not sent to the recheck, and they
+    /// stand with their evidence after it.
+    #[tokio::test]
+    async fn a_send_back_carries_the_evidence_of_a_line_named_by_number_alone() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let finding = format!("- {CONTRADICTION_ITEM} ({})", LIVE_EVIDENCE[3]);
+        let (writer, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(&[], "first guide"),
+            crate::test_support::turn(&["Sent back by Checker", &finding], "revised guide"),
+        ]);
+        let (checker, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(
+                &[
+                    "### Work from Writer",
+                    "first guide",
+                    "1. Every claim has a numbered citation",
+                    "4. No claim contradicts its source or the request",
+                ],
+                LIVE_CHECK_BLOCK,
+            ),
+            crate::test_support::turn(
+                &[
+                    "revised guide",
+                    "3. Under 200 words (Not sure)",
+                    "4. No claim contradicts its source or the request (Not met)",
+                ],
+                LIVE_RECHECK_BLOCK,
+            )
+            .never(&[
+                "Every claim has a numbered citation (",
+                "Every source in the list has a date (",
+            ]),
+        ]);
+        let mut writer_agent = named("writer", "Writer", &writer);
+        writer_agent.done_when = LIVE_CHECK_ITEMS[..3]
+            .iter()
+            .map(|item| (*item).to_owned())
+            .collect();
+        let mut checker_agent = named("checker", "Checker", &checker);
+        checker_agent.checks = Some("writer".into());
+        checker_agent.send_back_once = true;
+        let team = check_team(
+            "check-by-number",
+            vec![writer_agent, checker_agent],
+            &[("writer", "checker")],
+        );
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "write the onboarding guide",
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "revised guide");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        let sent = events
+            .iter()
+            .find(|event| event.payload["phase"] == "check_sent_back")
+            .expect("the send-back is recorded");
+        assert_eq!(
+            sent.payload["findings"],
+            json!([{"verdict": "not_met", "item": CONTRADICTION_ITEM, "evidence": LIVE_EVIDENCE[3]}])
+        );
+        let verdicts = |list: [&str; 4]| list.map(str::to_owned).to_vec();
+        assert_eq!(
+            check_results(&events),
+            [
+                (1, verdicts(["met", "met", "not_sure", "not_met"]), true),
+                (2, verdicts(["met"; 4]), true),
+            ]
+        );
+        let evidence: Vec<Vec<&str>> = events
+            .iter()
+            .filter(|event| event.payload["phase"] == "check_result")
+            .map(|event| {
+                let items = event.payload["items"].as_array().into_iter().flatten();
+                items
+                    .map(|item| item["evidence"].as_str().unwrap_or_default())
+                    .collect()
+            })
+            .collect();
+        let [first, second, ..] = LIVE_EVIDENCE;
+        let [third, fourth] = LIVE_RECHECK_EVIDENCE;
+        assert_eq!(
+            evidence,
+            [LIVE_EVIDENCE.to_vec(), vec![first, second, third, fourth]]
         );
         Ok(())
     }
@@ -6638,6 +6764,132 @@ mod tests {
                 ("met", "Linked", "all four"),
                 ("met", "Short", "280 words now"),
                 ("not_sure", "Dated", "Not checked again"),
+            ])
+        );
+    }
+
+    /// The items a live run's checker (GPT-6 Luna) was sent, and its `## Check` block verbatim:
+    /// each line gives the item's number and verdict, then its evidence without the item's words.
+    const LIVE_CHECK_ITEMS: [&str; 4] = [
+        "Every claim has a numbered citation",
+        "Every source in the list has a date",
+        "Under 200 words",
+        CONTRADICTION_ITEM,
+    ];
+    const LIVE_CHECK_BLOCK: &str = "## Check\n\
+        1. Met — Each factual sentence has a numbered citation; the title is not a factual claim.\n\
+        2. Met — All eight source-list entries include an approximate date.\n\
+        3. Not sure — The guide text is about 170 words including the title, but the dated source \
+        list puts the full response over 200; it is unclear whether the source list is excluded.\n\
+        4. Not met — Researcher's item 5 recommends giving role definitions …; it does not \
+        establish that new hires should expect these …";
+    const LIVE_EVIDENCE: [&str; 4] = [
+        "Each factual sentence has a numbered citation; the title is not a factual claim.",
+        "All eight source-list entries include an approximate date.",
+        "The guide text is about 170 words including the title, but the dated source list puts \
+         the full response over 200; it is unclear whether the source list is excluded.",
+        "Researcher's item 5 recommends giving role definitions …; it does not establish that new \
+         hires should expect these …",
+    ];
+    /// A recheck in the same shape, on the two items the live block left open.
+    const LIVE_RECHECK_BLOCK: &str = "## Check\n\
+        3. Met — The guide is 168 words; the request did not count the source list.\n\
+        4. Met — Item 5 now says only what the source says about role definitions.";
+    const LIVE_RECHECK_EVIDENCE: [&str; 2] = [
+        "The guide is 168 words; the request did not count the source list.",
+        "Item 5 now says only what the source says about role definitions.",
+    ];
+
+    /// The live block, read as it should have been: its items, Met, Met, Not sure and Not met,
+    /// each with its evidence.
+    fn live_verdicts() -> Vec<(&'static str, String, String)> {
+        ["met", "met", "not_sure", "not_met"]
+            .into_iter()
+            .zip(LIVE_CHECK_ITEMS.into_iter().zip(LIVE_EVIDENCE))
+            .map(|(verdict, (item, evidence))| (verdict, item.to_owned(), evidence.to_owned()))
+            .collect()
+    }
+
+    /// Found live: a line that names its item by number alone (`1. Met — evidence`) had its
+    /// evidence read as the item, so two Mets with evidence became "Marked Met without evidence"
+    /// and the Not met went back to the writer with no reason. A line whose field is the item's
+    /// own words, or that places a number with its field, still names the item.
+    #[test]
+    fn a_line_that_names_its_item_by_number_alone_keeps_its_evidence() {
+        assert_eq!(
+            settled(LIVE_CHECK_BLOCK, &LIVE_CHECK_ITEMS),
+            live_verdicts()
+        );
+        assert_eq!(
+            settled(
+                "## Check\n- 1. **Met** — each of the 9 sentences ends in [n]\n\
+                 | 2 | Not met | the March source has no date |\n\
+                 3. Met — Under 200 words\n\
+                 - Met — 4. Contradictions",
+                &LIVE_CHECK_ITEMS,
+            ),
+            owned(&[
+                (
+                    "met",
+                    LIVE_CHECK_ITEMS[0],
+                    "each of the 9 sentences ends in [n]"
+                ),
+                (
+                    "not_met",
+                    LIVE_CHECK_ITEMS[1],
+                    "the March source has no date"
+                ),
+                (
+                    "not_sure",
+                    LIVE_CHECK_ITEMS[2],
+                    "Marked Met without evidence"
+                ),
+                (
+                    "not_sure",
+                    CONTRADICTION_ITEM,
+                    "Marked Met without evidence"
+                ),
+            ])
+        );
+    }
+
+    /// The recheck reads the same lines the same way, and an item round 1 met with that evidence
+    /// stays met when the recheck answers only the items that were open.
+    #[test]
+    fn a_recheck_keeps_the_evidence_on_lines_named_by_number_alone() {
+        let items: Vec<String> = LIVE_CHECK_ITEMS
+            .iter()
+            .map(|item| (*item).to_owned())
+            .collect();
+        let first = read_checks(LIVE_CHECK_BLOCK, &items).settle(&items, None);
+        let read = |items: Vec<CheckItem>| {
+            items
+                .into_iter()
+                .map(|item| (item.verdict, item.item, item.evidence))
+                .collect::<Vec<_>>()
+        };
+        // Every item answered again, over a round that had left all four open.
+        let open: Vec<CheckItem> = items
+            .iter()
+            .map(|item| CheckItem {
+                verdict: "not_sure",
+                item: item.clone(),
+                evidence: String::new(),
+            })
+            .collect();
+        assert_eq!(
+            read(read_checks(LIVE_CHECK_BLOCK, &items).settle(&items, Some(&open))),
+            live_verdicts()
+        );
+        // Only the open items answered: what round 1 met stands, with its evidence.
+        let second = read_checks(LIVE_RECHECK_BLOCK, &items).settle(&items, Some(&first));
+        assert_eq!(
+            read(second),
+            owned(&[
+                ("met", LIVE_CHECK_ITEMS[0], LIVE_EVIDENCE[0]),
+                ("met", LIVE_CHECK_ITEMS[1], LIVE_EVIDENCE[1]),
+                ("met", LIVE_CHECK_ITEMS[2], LIVE_RECHECK_EVIDENCE[0]),
+                ("met", CONTRADICTION_ITEM, LIVE_RECHECK_EVIDENCE[1]),
             ])
         );
     }
