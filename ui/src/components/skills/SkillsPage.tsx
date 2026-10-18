@@ -1,5 +1,5 @@
 import { Moon, Sun } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import {
   displayName, errorText, fetchSkills, inspectInstall, installedKeys, publisherOf, removeSkill, resultKey, searchEverywhere, skillCount,
@@ -21,19 +21,53 @@ type ToastState = { text: string; action?: string; onAction?: () => void }
 const FRESH_FOR = 4000
 
 /**
- * Skills (`/skills`): teach every agent a kind of work. One search box finds skills on skills.sh
- * and ClawHub at once, or looks inside a pasted link; topics give a start to someone who doesn't
- * know what to search for. Add opens a review that says what to know in plain words before
- * anything is copied. Your skills sit beside the search, so an added skill is seen arriving.
- * Skills other apps on this computer already have come in through one card, only when asked.
- *
- * One of the Home pages (Your agents, Quests), so it wears their header and ground.
+ * Skills (`/skills`): teach every agent a kind of work. One of the Home pages (Your agents,
+ * Quests), so it wears their header and ground around the store (SkillsStore).
  */
 export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
   const { resolved, toggle } = useTheme()
+  return (
+    <div className="lw-home lw-skills">
+      <div className="ground" aria-hidden="true" />
+      <header className="home-top">
+        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
+        <span className="home-top-acts">
+          <a className="btn" href="/agents">Your agents</a>
+          <a className="btn lw-skills-teams-link" href="/">Your teams</a>
+          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
+        </span>
+      </header>
+      <SkillsStore heading="Skills" intro="Skills teach your agents a kind of work, like filling in PDF forms or writing in your house style. Add a skill here and every agent can use it." />
+    </div>
+  )
+}
+
+export interface SkillsStoreProps {
+  heading: ReactNode
+  /** The line under the heading. */
+  intro: ReactNode
+  /** A search to start with, as if it had been typed. */
+  initialQuery?: string
+  /** Skills just added with Add, by name. Not a bring-in's: that can be all of an app's skills. */
+  onAdded?: (names: string[]) => void
+  /** Each time Your skills is read: what the folder holds now (an Undo, a removal). */
+  onFolder?: (folder: SkillsFolder) => void
+}
+
+/**
+ * The store: one search box finds skills on skills.sh and ClawHub at once, or looks inside a
+ * pasted link; topics give a start to someone who doesn't know what to search for. Add opens a
+ * review that says what to know in plain words before anything is copied. Your skills sit beside
+ * the search, so an added skill is seen arriving. Skills other apps on this computer already have
+ * come in through one card, only when asked.
+ *
+ * The Skills page shows it under Home's header; the builder opens it over an agent's bench
+ * (SkillsMarket), so what was added can be given to that agent on the way back.
+ */
+export function SkillsStore({ heading, intro, initialQuery = '', onAdded, onFolder }: SkillsStoreProps) {
   const [folder, setFolder] = useState<SkillsFolder | null>(null)
   const [folderError, setFolderError] = useState('')
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialQuery)
   const [search, setSearch] = useState<Search | null>(null)
   const [adding, setAdding] = useState<{ state: Adding; key?: string; publisher?: Publisher } | null>(null)
   const [outcomes, setOutcomes] = useState<Record<string, ResultState>>({})
@@ -55,6 +89,15 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
       .then((value) => { if (active) setFolder(value) })
       .catch((caught: unknown) => { if (active) setFolderError(errorText(caught)) })
     return () => { active = false }
+  }, [])
+  // The latest one counts: the folder can be read again after whoever asked has rendered anew.
+  const report = useRef(onFolder)
+  useEffect(() => { report.current = onFolder })
+  useEffect(() => { if (folder) report.current?.(folder) }, [folder])
+  useEffect(() => {
+    // Once, on opening: the search it was asked to start with.
+    if (initialQuery.trim()) void runSearch(initialQuery.trim())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => {
     if (fresh.size === 0) return
@@ -105,6 +148,7 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
     void load()
     if (key) setOutcomes((current) => ({ ...current, [key]: { kind: 'added' } }))
     setFresh(new Set(records.map((record) => record.name)))
+    onAdded?.(records.map((record) => record.name))
     const text = records.length === 1 ? `Added ${displayName(records[0].name)}. Every agent can use it now.` : `Added ${skillCount(records.length)}. Every agent can use them now.`
     // Undo removes what was just added; after a replace that would leave nothing, so it isn't offered.
     say(replaced ? { text } : { text, action: 'Undo', onAction: () => void takeBack(records, key) })
@@ -121,20 +165,11 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
   }
 
   return (
-    <div className="lw-home lw-skills">
-      <div className="ground" aria-hidden="true" />
-      <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
-        <span className="home-top-acts">
-          <a className="btn" href="/agents">Your agents</a>
-          <a className="btn lw-skills-teams-link" href="/">Your teams</a>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
-        </span>
-      </header>
+    <>
       <main className="home-main lw-skills-main">
         <section className="home-hero lw-skills-hero">
-          <h1 className="t-display">Skills</h1>
-          <p>Skills teach your agents a kind of work, like filling in PDF forms or writing in your house style. Add a skill here and every agent can use it.</p>
+          <h1 className="t-display">{heading}</h1>
+          <p>{intro}</p>
         </section>
         <div className="lw-skills-layout">
           <div className="lw-skills-browse">
@@ -154,6 +189,6 @@ export function SkillsPage({ mark }: { mark?: LoomMarkState } = {}) {
       {adding && <AddSheet adding={adding.state} publisher={adding.publisher} onClose={closeAdd} onAdded={added} returnFocus={adding.key ? (gone.has(adding.key) ? 'input[aria-label="Find skills"]' : `[data-result=${JSON.stringify(adding.key)}]`) : undefined} />}
       {bringingIn && <BringInSheet onClose={() => setBringingIn(false)} onChanged={() => void load()} onBroughtIn={(names) => setFresh(new Set(names))} />}
       {toast && <Toast key={toast.id} text={toast.text} action={toast.action} onAction={toast.onAction} onClose={() => setToast(null)} />}
-    </div>
+    </>
   )
 }

@@ -1,4 +1,5 @@
 import { daemonFetch } from '../daemonFetch'
+import { SKILLS_CHANGED_EVENT } from './client'
 
 /**
  * LoomWatch's own skills folder (backend `skills_store.rs`, `marketplace.rs`, `skills_api.rs`).
@@ -184,20 +185,27 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const change = <T>(path: string, method: string, body?: unknown) =>
   call<T>(path, { method, headers: CHANGE, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
 
+/** A change to the folder itself: once it is made, whatever lists the skills reads them again. */
+async function changed<T>(write: Promise<T>): Promise<T> {
+  const result = await write
+  window.dispatchEvent(new Event(SKILLS_CHANGED_EVENT))
+  return result
+}
+
 export const fetchSkills = () => call<SkillsFolder>('/api/skills')
 
 /** Moves the skill to the folder's `.removed/`; answers its name. */
 export const removeSkill = async (name: string) =>
-  (await change<{ removed: string }>(`/api/skills/${encodeURIComponent(name)}`, 'DELETE')).removed
+  (await changed(change<{ removed: string }>(`/api/skills/${encodeURIComponent(name)}`, 'DELETE'))).removed
 
 export const previewBringIn = async () =>
   (await change<{ candidates: BringInCandidate[] }>('/api/skills/bring-in/preview', 'POST')).candidates
 
-export const bringIn = (keys: string[]) => change<BringInOutcome>('/api/skills/bring-in', 'POST', { keys })
+export const bringIn = (keys: string[]) => changed(change<BringInOutcome>('/api/skills/bring-in', 'POST', { keys }))
 
 /** Takes a bring-in back whole; answers the names it removed. */
 export const undoBringIn = async (batchId: string) =>
-  (await change<{ removed: string[] }>(`/api/skills/bring-in/${encodeURIComponent(batchId)}/undo`, 'POST')).removed
+  (await changed(change<{ removed: string[] }>(`/api/skills/bring-in/${encodeURIComponent(batchId)}/undo`, 'POST'))).removed
 
 export const searchSkills = async (query: string, source: SearchSource) =>
   (await call<{ results: SearchResult[] }>(`/api/skills/search?${new URLSearchParams({ q: query, source })}`)).results
@@ -208,7 +216,7 @@ export const inspectInstall = (ref: string, source?: SkillSource) =>
 
 /** Without `replace`, a name already in LoomWatch answers 409 and nothing is installed. */
 export const installSkills = async (token: string, paths: string[], replace = false) =>
-  (await change<{ installed: SkillRecord[] }>('/api/skills/install', 'POST', { token, paths, replace })).installed
+  (await changed(change<{ installed: SkillRecord[] }>('/api/skills/install', 'POST', { token, paths, replace }))).installed
 
 // --- Words for the page -------------------------------------------------------------------------
 
