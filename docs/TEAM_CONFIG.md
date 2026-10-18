@@ -44,6 +44,11 @@ agents:
   new agents get) or `openai/gpt-6.1-sol`. The model picker lists the OpenRouter models that can use
   tools. `fake/offline` is the offline demo model: it answers with fixed text and calls no model,
   so it needs no key.
+- **`followsSuggestion: true`** says the agent's `model` follows the model LoomWatch suggests for
+  it (ADR 0072). An agent added in the app starts that way. When its configuration changes there,
+  LoomWatch moves `model` to the new suggestion and shows what it was, with Undo. Picking any other
+  model in its model list takes the line out, and the model stays as picked. A run always uses
+  `model`, so a file edited elsewhere keeps its model until the agent is next changed in the app.
 - **`thinkingEffort`** says how hard the model reasons. LoomWatch sends it to OpenRouter as
   `reasoning.effort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, with `ultra`
   read as `max`. If it is absent or set to `default`, the model decides. The older combined form
@@ -579,7 +584,7 @@ the frame it was recorded from.
 ## Operator review stops and questions
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
-(default `You`). It must omit `spawn`, `model`, `thinkingEffort`, `allow`, `turnedOff`,
+(default `You`). It must omit `spawn`, `model`, `followsSuggestion`, `thinkingEffort`, `allow`, `turnedOff`,
 `doneWhen`, `checks` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
 mode; consecutive stops are allowed. A pipeline with stops must be started from the app, so that
 someone can answer: `loomwatchd run` on the command line has nobody to ask, so its run fails when

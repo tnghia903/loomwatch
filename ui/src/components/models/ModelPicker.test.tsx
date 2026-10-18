@@ -65,7 +65,7 @@ describe('ModelPicker', () => {
 
     fireEvent.change(screen.getByLabelText('Search all 4 models'), { target: { value: 'free' } })
     fireEvent.click(screen.getByRole('option', { name: /Gemma 4 31B/ }))
-    expect(onChange).toHaveBeenCalledWith('google/gemma-4-31b-it:free')
+    expect(onChange).toHaveBeenCalledWith('google/gemma-4-31b-it:free', false)
     expect(screen.queryByRole('listbox')).toBeNull()
   })
 
@@ -106,7 +106,7 @@ describe('ModelPicker', () => {
     expect(first).toHaveClass('active')
     expect(second).not.toHaveClass('active')
     fireEvent.keyDown(search, { key: 'Enter' })
-    expect(onChange).toHaveBeenCalledWith(opus.id)
+    expect(onChange).toHaveBeenCalledWith(opus.id, false)
     expect(screen.queryByRole('listbox')).toBeNull()
   })
 
@@ -150,17 +150,24 @@ describe('ModelPicker', () => {
     expect(suggested.compareDocumentPosition(screen.getByRole('combobox')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('listbox')).toHaveAttribute('aria-owns', expect.stringContaining(suggested.id))
     expect(screen.getAllByRole('option')[0]).toHaveTextContent('Claude Opus 5.5')
-    expect(await screen.findByText('A quick guess from its configuration')).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent('A quick guess from its configuration')
     const toggle = screen.getByRole('switch', { name: 'Let AI choose' })
     expect(toggle).not.toBeChecked()
-    expect(toggle).toHaveAccessibleDescription(/^AI will read this agent’s configuration to choose the most suitable model\. It uses your OpenRouter credits, under \$0\.01\. One toggle for every agent .*never your files or its teammates\./)
+    expect(toggle).toHaveAccessibleDescription(/^AI will read this agent’s configuration to choose the most suitable model\. It uses your OpenRouter credits, under \$0\.01\. A more accurate suggestion\./)
+    // Its "?" says it all: what it gains, what it costs and what AI is sent.
+    const about = screen.getByRole('button', { name: 'About Let AI choose' })
+    expect(about).toHaveAccessibleDescription(/A more accurate suggestion\..*Uses your OpenRouter credits\. Under \$0\.01 a reading\..*Never your files or its teammates\. One toggle for every agent\./)
+    // The meter: one bar of three for a quick guess, with a key to every level.
+    const meter = screen.getByRole('img', { name: 'How sure the suggestion is: 1 of 3' })
+    expect(meter).toHaveAccessibleDescription('How sure this suggestion is A quick guess from its configuration AI read it, but isn’t sure Chosen by AI from its configuration')
     expect(readings()).toHaveLength(0)
 
     fireEvent.click(toggle)
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
     expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ enabled: true }])
     expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Its configuration says it gathers for Writer rather than writing the answer.')
-    expect(screen.getByText('Chosen by AI from its configuration')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Chosen by AI from its configuration')
+    expect(screen.getByRole('img', { name: 'How sure the suggestion is: 3 of 3' })).toBeInTheDocument()
     // Its own setup, by name, and never its teammates.
     expect(readings()).toHaveLength(1)
     expect(readings()[0].body?.setup).toMatchObject({ name: 'Gatherer', instructions: gatherer.role })
@@ -202,7 +209,7 @@ describe('ModelPicker', () => {
     await waitFor(() => expect(screen.getByRole('switch', { name: 'Let AI choose' })).not.toBeChecked())
     expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ enabled: false }])
     expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Opus 5.5')
-    expect(screen.getByText('A quick guess from its configuration')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('A quick guess from its configuration')
     expect(readings()).toHaveLength(1)
   })
 
@@ -216,7 +223,38 @@ describe('ModelPicker', () => {
     // Not one of the search results, so not an option, but still a pick.
     expect(within(suggested).queryByRole('option')).toBeNull()
     fireEvent.click(within(suggested).getByRole('button', { name: /Claude Opus 5\.5/ }))
-    expect(onChange).toHaveBeenCalledWith(opus.id)
+    // Picking the suggestion has the agent follow it.
+    expect(onChange).toHaveBeenCalledWith(opus.id, true)
+  })
+
+  it('says Suggested on its button while the model follows its suggestion, and pins any other pick', async () => {
+    const onChange = vi.fn()
+    const following = { ...writer, followsSuggestion: true }
+    render(<ModelPicker value={opus.id} onChange={onChange} suggestFor={{ agent: following, team }} follows />)
+    const button = await screen.findByRole('button', { name: /Claude Opus 5\.5/ })
+    expect(button).toHaveAccessibleName('Model Claude Opus 5.5 Suggested')
+    fireEvent.click(button)
+    expect(screen.getByText('Follows its configuration')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('option', { name: /Claude Haiku 5\.5/ }))
+    expect(onChange).toHaveBeenLastCalledWith(haiku.id, false)
+
+    cleanup()
+    render(<ModelPicker value={haiku.id} onChange={onChange} suggestFor={{ agent: writer, team }} follows={false} />)
+    const pinned = await screen.findByRole('button', { name: /Claude Haiku 5\.5/ })
+    expect(pinned).toHaveAccessibleName('Model Claude Haiku 5.5')
+    fireEvent.click(pinned)
+    const suggestion = screen.getAllByRole('option')[0]
+    expect(suggestion).toHaveAccessibleDescription('Pick it, and this agent’s model follows its configuration from now on.')
+    fireEvent.click(suggestion)
+    expect(onChange).toHaveBeenLastCalledWith(opus.id, true)
+  })
+
+  it('says where its model moved from, with Undo, while the list is closed', async () => {
+    const onUndo = vi.fn()
+    render(<ModelPicker value={sonnet.id} onChange={() => {}} follows moved={{ from: opus.id, onUndo }} />)
+    expect(await screen.findByRole('status')).toHaveTextContent('Its configuration changed, so it moved from Claude Opus 5.5. Undo')
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(onUndo).toHaveBeenCalled()
   })
 
   it('says when a team names a model OpenRouter doesn’t list', async () => {

@@ -1124,7 +1124,7 @@ export function useTeamDocument() {
    * removed from the file rather than written as null.
    */
   const applyAgentFields = useCallback(
-    (id: string, fields: Partial<Pick<AgentConfig, 'name' | 'role' | 'model' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'turnedOff' | 'allow' | 'from' | 'doneWhen' | 'checks' | 'sendBackOnce'>>) => {
+    (id: string, fields: Partial<Pick<AgentConfig, 'name' | 'role' | 'model' | 'followsSuggestion' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'turnedOff' | 'allow' | 'from' | 'doneWhen' | 'checks' | 'sendBackOnce'>>) => {
       const target = nodes.find((node) => node.id === id)
       if (!target || target.data.agent.kind === 'operator') return
       captureHistory()

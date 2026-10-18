@@ -2548,6 +2548,26 @@ mod tests {
         assert_eq!(schema_errors(&without), Vec::<String>::new());
     }
 
+    /// ADR 0072: an agent may say its model follows its suggestion; a review stop has no model to.
+    #[test]
+    fn team_schema_takes_a_model_that_follows_its_suggestion() {
+        let with = |agent: Value| {
+            let mut document = scheduled_document(&Value::Null);
+            let object = document.as_object_mut().unwrap();
+            object.remove("schedule");
+            object.insert("agents".to_owned(), json!([agent]));
+            schema_errors(&document)
+        };
+        assert_eq!(
+            with(
+                json!({"id": "a", "name": "A", "role": "collect", "model": "m", "followsSuggestion": true})
+            ),
+            Vec::<String>::new()
+        );
+        assert!(!with(json!({"id": "a", "name": "A", "role": "collect", "model": "m", "followsSuggestion": "yes"})).is_empty());
+        assert!(!with(json!({"id": "you", "kind": "operator", "role": "Approve?", "followsSuggestion": true})).is_empty());
+    }
+
     /// ADR 0038: the team-wide `deliver` block shares the routine's shape, refusals included.
     #[test]
     fn team_schema_accepts_a_team_wide_deliver_block_of_the_same_shape() {

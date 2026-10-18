@@ -50,6 +50,9 @@ export function buildAgentFromSource(
     name: source.label,
     role: source.role ?? DEFAULT_AGENT_ROLE,
     model: source.model || DEFAULT_MODEL,
+    // A team's own new agent follows the model suggested for it (ADR 0072); one placed from Your
+    // agents keeps the model its builder chose.
+    ...(source.from ? {} : { followsSuggestion: true }),
     ...(source.thinkingEffort ? { thinkingEffort: source.thinkingEffort } : {}),
     allowRecruiting: true,
     ...(source.capabilities?.length ? { capabilities: source.capabilities.map((capability) => ({ ...capability })) } : {}),

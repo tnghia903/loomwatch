@@ -28,6 +28,7 @@ import { pipelineTerminal } from '../lib/team-file/pipelineOrder'
 import { agentPlace } from '../lib/team-file/agentPlace'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
+import { type ModelMove, useModelFollowing } from '../lib/team-file/useModelFollowing'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
 import { withRoom } from '../lib/canvas/makeRoom'
 import { markLinked } from '../lib/canvas/linked'
@@ -426,6 +427,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     ? answeringAgent(pipelineTerminal(doc.nodes.map((node) => node.id), doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), doc.entrypoint), doc.nodes.map((node) => node.data.agent))
     : doc.entrypoint
   const responderFromDoc = doc.responder ?? inferredResponder
+  // ADR 0072: an agent whose model follows its suggestion moves with its configuration.
+  const modelFollowing = useModelFollowing({
+    team: doc.path,
+    agents: doc.nodes.map((node) => node.data.agent),
+    responder: responderFromDoc,
+    editable,
+    move: (agentId, model) => doc.applyAgentFields(agentId, { model }),
+    pin: (agentId, model) => doc.applyAgentFields(agentId, { model, followsSuggestion: undefined }),
+  })
   const runLessons = useRunLessons(doc.saveState === 'new' ? null : doc.path)
   const teamCheckup = useTeamCheckup(doc, responderFromDoc, setStatusAnnouncement, runLessons)
   const session = useRunSession(activeRunId, responderFromDoc)
@@ -2675,6 +2685,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               }}
               onShowWorkflow={showWorkflow}
               onAdd={editable ? addSavedAgent : undefined}
+              onPickModel={(agentId, model, follow) => doc.applyAgentFields(agentId, { model, followsSuggestion: follow ? true : undefined })}
+              modelMoves={modelFollowing.moves}
+              onUndoModelMove={modelFollowing.undo}
             />
           </div>
         )}
@@ -2774,7 +2787,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               doc.setAgentCapabilities(inspectedNode.id, [...(inspectedNode.data.agent.capabilities ?? []), ...added])
               setStatusAnnouncement(`${added.map((capability) => capability.name).join(', ')} ${added.length === 1 ? 'is' : 'are'} now supplied to ${inspectedNode.data.agent.name}. Save the team to keep this change.`)
             }}
-            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value) => doc.updateAgentModel(inspectedNode.id, value)} onSpendChange={(perRun) => doc.updateAgentSpend(inspectedNode.id, perRun)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)} suggestFor={{ agent: inspectedNode.data.agent, team: { agents: doc.nodes.map((node) => node.data.agent), responder: responderFromDoc } }}
+            onFieldBlur={(field) => doc.touchField(inspectedNode.id, field)} onRename={(field, value) => { retireFixHint(inspectedNode.id, field); doc.renameAgent(inspectedNode.id, field, value) }} onModelChange={(value, follow) => doc.applyAgentFields(inspectedNode.id, { model: value, followsSuggestion: follow ? true : undefined })} modelMove={modelFollowing.moves.get(inspectedNode.id) && { from: (modelFollowing.moves.get(inspectedNode.id) as ModelMove).from, onUndo: () => modelFollowing.undo(inspectedNode.id) }} onSpendChange={(perRun) => doc.updateAgentSpend(inspectedNode.id, perRun)} onThinkingEffortChange={(value) => doc.updateAgentThinkingEffort(inspectedNode.id, value)} onDoneWhenChange={(items) => doc.applyAgentFields(inspectedNode.id, { doneWhen: items.length ? items : undefined })} checkStep={checkStepFor(inspectedNode.data.agent)} suggestFor={{ agent: inspectedNode.data.agent, team: { agents: doc.nodes.map((node) => node.data.agent), responder: responderFromDoc } }}
             onCwdChange={(value) => doc.updateAgentCwd(inspectedNode.id, value)}
             onAllowRecruitingChange={(value) => doc.updateAgentAllowRecruiting(inspectedNode.id, value)} onAllowChange={(key, on) => doc.updateAgentAllow(inspectedNode.id, key, on)} onPromoteEntrypoint={() => doc.promoteEntrypoint(inspectedNode.id)} onDelete={() => requestNodeDelete([inspectedNode.id])}
             briefCount={memory?.entries.length ?? 0} teamDeliverAs={memory?.deliverAs}

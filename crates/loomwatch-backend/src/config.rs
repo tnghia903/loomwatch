@@ -1836,6 +1836,17 @@ mod tests {
         assert_eq!(legacy.model_selector(), "vendor/deep[xhigh]");
     }
 
+    /// ADR 0072: `followsSuggestion` is the app's, to move `model` when an agent's configuration
+    /// changes. The daemon accepts it and runs on `model`, whatever it says.
+    #[test]
+    fn a_model_that_follows_its_suggestion_still_runs_on_model() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: anthropic/claude-sonnet-5.5\n    followsSuggestion: true\n",
+        )
+        .expect("valid config");
+        assert_eq!(team.agents[0].model, "anthropic/claude-sonnet-5.5");
+    }
+
     /// ADR 0068: `spend.perRun` on the team and on an agent. A team that says nothing has no limit
     /// and its agents no guard; an operator node spends nothing, so it may not say.
     #[test]

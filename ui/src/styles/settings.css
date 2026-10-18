@@ -128,7 +128,14 @@
 
 /* The suggestion: a card of its own above the list, framed in the accent, so it reads apart from
    the rows whether or not it is the model in use. How sure it is, and Let AI choose, run along its foot. */
-.model-suggestion { margin-bottom: var(--sp-2); display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1); border: 1px solid color-mix(in srgb, var(--color-accent) 34%, transparent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
+.model-suggestion { position: relative; z-index: 2; margin-bottom: var(--sp-2); display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1); border: 1px solid color-mix(in srgb, var(--color-accent) 34%, transparent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
+.model-suggestion-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.model-follow-note { padding: 4px var(--sp-2) 2px; color: var(--color-ink-3); }
+/* Its model follows its suggestion (ADR 0072): said on the picker's button, in the accent. */
+.model-picker-suggested { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--r-xs); color: var(--color-accent); background: var(--color-accent-tint); }
+/* Its model just moved with its configuration: what it was, with Undo. */
+.model-moved { margin: 4px 0 0; color: var(--color-ink-2); }
+.model-moved .link { font: inherit; }
 /* Two lines kept for why, so turning Let AI choose on or off doesn't move it under the pointer. */
 .model-suggestion .model-row-why { min-height: 2lh; }
 .model-suggestion .model-group-head { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px var(--sp-2) 2px; color: var(--color-accent); }
@@ -137,11 +144,25 @@
 .model-ai-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-height: 22px; }
 .model-ai-line > .t-meta { color: var(--color-ink-2); }
 .model-ai-line > .t-meta.inline-error { color: var(--color-alert); flex: 1 1 200px; }
-/* How sure the suggestion is: four short bars, lit in the accent as AI reads it. */
+/* How sure the suggestion is: three short bars, one per level, lit in the accent. */
 .model-sureness { display: inline-flex; gap: 3px; }
 .model-sureness i { width: 12px; height: 5px; border-radius: 3px; background: var(--color-hairline); transition: background-color var(--t-quick) var(--ease-out); }
 .model-sureness i.on { background: var(--color-accent); }
-.model-ai-switch { margin-left: auto; }
+.model-ai-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.model-ai-about { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--color-ink-3); cursor: help; }
+.model-ai-about:hover, .model-ai-about:focus-visible { color: var(--color-accent); }
+.model-ai-about:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.model-sureness[tabindex] { cursor: help; border-radius: 3px; }
+.model-sureness[tabindex]:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+/* The meter's key: each level's bars and what it means, the one shown now lit. */
+.model-sureness-key { display: flex; align-items: center; gap: var(--sp-2); color: var(--color-ink-3); }
+.model-sureness-key.now { color: var(--color-ink); }
+/* A hint that opens on hover or keyboard focus, under what it explains. */
+.lw-tip { position: relative; display: inline-flex; align-items: center; }
+.lw-tip-bubble { position: absolute; top: calc(100% + 8px); left: -6px; z-index: 30; width: max-content; max-width: 300px; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); box-shadow: 0 8px 24px rgb(0 0 0 / .3); color: var(--color-ink-2); font: 400 12px/1.5 var(--font-sans); text-transform: none; letter-spacing: normal; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity var(--t-quick) var(--ease-out), visibility var(--t-quick); }
+.lw-tip-end .lw-tip-bubble { left: auto; right: -6px; }
+.lw-tip:hover .lw-tip-bubble, .lw-tip:focus-within .lw-tip-bubble { opacity: 1; visibility: visible; }
+.lw-tip-bubble b { color: var(--color-ink); font-weight: 500; }
 .model-ai-switch .t-meta { color: var(--color-ink-2); }
 .model-ai-hint { color: var(--color-ink-3); }
 /* An on/off preference: the track, then what it turns on. The knob shows on a dark card when off. */

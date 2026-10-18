@@ -115,6 +115,14 @@ sent, by name: never a skill's text, a file, a folder's path, the Brief or its t
 instructions go as written, up to 6,000 characters, so whatever they mention goes with them.
 `modelSuggestion.eval.test.ts` measures the suggestion with and without readings.
 
+An agent with `followsSuggestion: true` in its team file follows its suggestion (ADR 0072): a team's
+own agent added in the app starts that way, picking the suggestion in its model list sets it, and
+picking any other model takes it out. `ui/src/lib/team-file/useModelFollowing.ts` watches the open
+team: when a following agent's configuration settles after a change, it works the suggestion out
+again (with a reading when Let AI choose is on) and moves `model`, and the model list says what it
+was, with Undo, which pins it back. The team as it opened is left as it is. The daemon never reads
+the flag; a run uses `model`.
+
 ---
 
 ## 2. Backend — Rust
