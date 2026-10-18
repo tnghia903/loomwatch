@@ -130,7 +130,8 @@ pub(crate) fn plan(entries: &[(String, String)]) -> Value {
 pub(crate) struct CallRecord<'a> {
     /// `work`, `carry_on`, `summary` or `bare_summary`.
     pub call: &'a str,
-    /// What the turn is for: `work`, `handover`, `checkpoint`, `check`, `ask_answer`, `helper`.
+    /// What the turn is for: `work`, `handover`, `checkpoint`, `check`, `ask_answer`, `helper`,
+    /// `revision`.
     pub turn: &'a str,
     pub model: &'a str,
     pub usage: &'a super::provider::Usage,

@@ -328,6 +328,8 @@ impl TeamBus {
                 } else {
                     request.prompt
                 };
+                // Each turn names what it is for, so nothing carries over from the one before.
+                process.turn_for(request.turn);
                 let answer = if request.from_operator {
                     process.prompt_turn(&mut recorder, &prompt).await
                 } else {
@@ -453,6 +455,13 @@ impl TeamBus {
             .send(LiveTurn {
                 prompt: question.to_owned(),
                 from_operator: false,
+                // An asker's question is answered; the pipeline's own turn is a check step's
+                // send-back, which the agent revises its work for.
+                turn: if asker.is_empty() {
+                    "revision"
+                } else {
+                    "ask_answer"
+                },
                 answer,
             })
             .await
@@ -3836,6 +3845,7 @@ mod tests {
             .send(LiveTurn {
                 prompt: "Also check the footnotes.".into(),
                 from_operator: true,
+                turn: crate::agent::WORK,
                 answer,
             })
             .await
@@ -4539,6 +4549,80 @@ mod tests {
             .context("the refused ask was recorded")?;
         assert_eq!(last.payload["status"], "failed");
         assert_eq!(last.payload["rawOutput"]["refused"], "limit");
+        bus.release("a", live).await?;
+        Ok(())
+    }
+
+    /// **A kept-open stage's turns are recorded as what they are for.** Its own work, its answer
+    /// to the stage after it, its revision of work a check step sent back and the operator's
+    /// follow-up are four turns in one session; each call's usage record names which, so what the
+    /// clarification and check rounds cost can be told from what the work cost.
+    #[tokio::test]
+    async fn a_kept_open_stage_s_turns_are_recorded_as_what_they_are_for() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let model = demo_model(Demo::responder(|_| {
+            Some(Completion {
+                usage: crate::agent::Usage {
+                    input_tokens: 100,
+                    output_tokens: 10,
+                    ..Default::default()
+                },
+                ..says("said")
+            })
+        }));
+        let team = TeamConfig {
+            agents: vec![test_agent("a", &model), test_agent("b", OFFLINE)],
+            edges: vec![edge("a", "b")],
+            ..team_of("turns-team", "a")
+        };
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let event_log = EventLog::new(archive.clone(), "turns-run".into());
+        let live = keep_a_open(&bus, &archive, &model, &event_log, None).await?;
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+        ask(&bus, &b.token, "a", "what did you find?").await?;
+        bus.turn_live("a", "## Sent back by Checker\nClaim 2 has no link.")
+            .await?
+            .context("a is kept open")?;
+        let sender = bus
+            .state
+            .live
+            .lock()
+            .await
+            .get("a")
+            .cloned()
+            .context("a is kept alive")?;
+        let (answer, answered) = oneshot::channel();
+        sender
+            .send(LiveTurn {
+                prompt: "Also check the footnotes.".into(),
+                from_operator: true,
+                turn: crate::agent::WORK,
+                answer,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("the kept-alive session stopped taking turns"))?;
+        answered.await??;
+
+        let turns: Vec<Value> = archive
+            .load_session("turns-run")
+            .await?
+            .into_iter()
+            .filter(|event| event.agent_id == "a" && event.kind == EventKind::Usage)
+            .map(|event| event.payload["_meta"]["loomwatch"]["call"]["turn"].clone())
+            .collect();
+        assert_eq!(turns, ["work", "ask_answer", "revision", "work"]);
+        drop(sender);
         bus.release("a", live).await?;
         Ok(())
     }

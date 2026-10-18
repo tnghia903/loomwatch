@@ -358,6 +358,9 @@ pub fn now_rfc3339() -> String {
 pub(crate) struct LiveTurn {
     pub(crate) prompt: String,
     pub(crate) from_operator: bool,
+    /// What the turn is for, in its usage records: `work` for the operator's follow-up,
+    /// `ask_answer` for another agent's question, `revision` for work a check step sent back.
+    pub(crate) turn: &'static str,
     pub(crate) answer: oneshot::Sender<anyhow::Result<String>>,
 }
 
@@ -523,6 +526,7 @@ impl OperatorDesk {
             .send(LiveTurn {
                 prompt: prompt.to_owned(),
                 from_operator: true,
+                turn: crate::agent::WORK,
                 answer,
             })
             .await

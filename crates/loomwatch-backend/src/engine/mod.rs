@@ -551,6 +551,22 @@ impl AgentRun {
         self.records = None;
     }
 
+    /// What the next turns are for, in their usage records, until [`Self::end_turn_for`]: a
+    /// handover or checkpoint the engine asks for, or a kept-open agent's answer to a question or
+    /// revision of work sent back to it.
+    pub(crate) fn turn_for(&mut self, purpose: &str) {
+        if let Some(session) = self.session.as_mut() {
+            session.set_purpose(purpose);
+        }
+    }
+
+    /// Back to what the session is for.
+    pub(crate) fn end_turn_for(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            session.end_purpose();
+        }
+    }
+
     /// Record why a coordinator-requested turn exists. Its text and cost remain evidence, but a
     /// checkpoint or handover must never replace the agent's answer in the Output card.
     pub(crate) async fn bookkeeping_turn(
@@ -567,13 +583,9 @@ impl AgentRun {
             )
             .await?;
         let listening = recorder.interrupt.take();
-        if let Some(session) = self.session.as_mut() {
-            session.set_purpose(purpose);
-        }
+        self.turn_for(purpose);
         let answer = self.prompt_turn(recorder, prompt).await;
-        if let Some(session) = self.session.as_mut() {
-            session.end_purpose();
-        }
+        self.end_turn_for();
         recorder.interrupt = listening;
         recorder
             .append(

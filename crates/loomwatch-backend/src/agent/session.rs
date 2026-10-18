@@ -433,7 +433,8 @@ impl Session {
     }
 
     /// What the next turns are for, for the usage record: a handover or a checkpoint the engine
-    /// asks for. [`Self::end_purpose`] goes back to what the session is for.
+    /// asks for, or a kept-open agent's `ask_answer` or `revision`. [`Self::end_purpose`] goes back
+    /// to what the session is for.
     pub fn set_purpose(&mut self, purpose: &str) {
         purpose.clone_into(&mut self.turn);
     }
