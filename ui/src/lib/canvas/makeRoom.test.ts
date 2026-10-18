@@ -1,6 +1,8 @@
+import type { Edge, Node } from '@xyflow/react'
 import { describe, expect, it } from 'vitest'
 
-import { makeRoom, ROOM_GAP } from './makeRoom'
+import { makeRoom, ROOM_GAP, withRoom } from './makeRoom'
+import { PORT } from './ports'
 
 const card = (id: string, x: number, y: number, height = 84, width = 232) => ({ id, x, y, width, height })
 
@@ -43,5 +45,31 @@ describe('makeRoom', () => {
   it('gives the same answer whatever order the cards arrive in', () => {
     const cards = [card('agent', 0, 0, 334), card('folder', 0, 214, 88), card('skill', 0, 334, 88), card('checker', 382, 0, 300)]
     expect(makeRoom([...cards].reverse())).toEqual(makeRoom(cards))
+  })
+})
+
+describe('withRoom', () => {
+  const node = (id: string, x: number, y: number, height = 84, width = 232): Node => ({ id, position: { x, y }, data: {}, measured: { width, height } })
+  // Routed where the cards are saved, which is what the canvas builder hands over.
+  const bridged: Edge = { id: 'reads', source: 'agent', target: 'folder', sourceHandle: PORT.topOut, targetHandle: PORT.top }
+
+  it('drops the line straight down to a folder it drew below a card that grew over it', () => {
+    // The enterprise RAG team at Trace: where the folder is saved, the agent card covers its top,
+    // so its line bridged up over the agent and back down through it.
+    const { nodes, edges } = withRoom([node('agent', 0, 0, 334), node('folder', 0, 214, 88)], [bridged], {})
+    expect(nodes.find((item) => item.id === 'folder')?.position.y).toBe(334 + ROOM_GAP)
+    expect(edges[0]).toMatchObject({ sourceHandle: PORT.down, targetHandle: PORT.top })
+  })
+
+  it('hands the cards and lines back untouched while nothing needs room', () => {
+    const nodes = [node('agent', 0, 0), node('folder', 0, 214, 88)]
+    const edges = [bridged]
+    expect(withRoom(nodes, edges, {})).toEqual({ nodes, edges })
+  })
+
+  it('sizes a card the document does not own from what was measured for it', () => {
+    const folder: Node = { id: 'folder', position: { x: 0, y: 214 }, data: {} }
+    const { nodes } = withRoom([node('agent', 0, 0, 334), folder], [bridged], { folder: { width: 232, height: 88 } })
+    expect(nodes[1].position.y).toBe(334 + ROOM_GAP)
   })
 })

@@ -30,7 +30,7 @@ import { suggestModel } from '../lib/team-file/modelSuggestion'
 import { unifiedYamlDiff } from '../lib/team-file/diff'
 import { useTeamDocument } from '../lib/team-file/useTeamDocument'
 import { organizePipeline, type Positions } from '../lib/composer-layout/organize'
-import { makeRoom } from '../lib/canvas/makeRoom'
+import { withRoom } from '../lib/canvas/makeRoom'
 import { markLinked } from '../lib/canvas/linked'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
 import { RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, notionPageKey, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
@@ -1099,17 +1099,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   })), [canvasNodes, askMarks, runView])
 
   // Trace makes a card several times taller where it stands, so whatever is under it is drawn
-  // lower until it clears it (lib/canvas/makeRoom.ts). Only the drawing moves: a card dragged here
-  // is saved where it is seen, and Team and Story keep the arrangement as it was.
-  const roomyNodes = useMemo(() => {
-    if (depth !== 'trace') return markedNodes
-    const shifts = makeRoom(markedNodes.filter((node) => !node.hidden).map((node) => ({ id: node.id, ...node.position, ...(synthMeasurements[node.id] ?? node.measured) })))
-    if (shifts.size === 0) return markedNodes
-    return markedNodes.map((node) => {
-      const down = shifts.get(node.id)
-      return down ? { ...node, position: { x: node.position.x, y: node.position.y + down } } : node
-    })
-  }, [depth, markedNodes, synthMeasurements])
+  // lower until it clears it, and the lines meet the cards where they are drawn
+  // (lib/canvas/makeRoom.ts). Only the drawing moves: a card dragged here is saved where it is
+  // seen, and Team and Story keep the arrangement as it was.
+  const roomy = useMemo(() => (depth === 'trace' ? withRoom(markedNodes, graph.edges, synthMeasurements) : { nodes: markedNodes, edges: graph.edges }), [depth, markedNodes, graph.edges, synthMeasurements])
+  const roomyNodes = roomy.nodes
 
   const observedCount = projection.delegations.length
   // UX_REDESIGN §6.7: solo is conditional chrome — the legend is its only readout and click-path
@@ -1118,7 +1112,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // (e.g. a replay scrubbed past the delegations) suspends instead of silently blanking edges.
   const layersVisible = runView && observedCount > 0
   const soloActive: LayerSolo = layersVisible ? solo : 'both'
-  const visibleEdges = useMemo(() => graph.edges.filter((edge) => soloActive === 'both' || (soloActive === 'configured' ? edge.type !== 'weft' : edge.type !== 'warp')), [graph.edges, soloActive])
+  const visibleEdges = useMemo(() => roomy.edges.filter((edge) => soloActive === 'both' || (soloActive === 'configured' ? edge.type !== 'weft' : edge.type !== 'warp')), [roomy.edges, soloActive])
   const canvasEdges = useMemo(() => (runView ? visibleEdges : visibleEdges.filter((edge) => edge.source !== '__prompt' || allWiringEdges.some((wire) => wire.from === '__prompt'))), [runView, visibleEdges, allWiringEdges])
   // A selected card's own lines light up in gold with the cards at their other ends, and the other
   // lines step back (lib/canvas/linked.ts).

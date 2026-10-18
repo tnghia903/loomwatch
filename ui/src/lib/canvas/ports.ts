@@ -8,9 +8,10 @@ import { Position, type Edge, type Node } from '@xyflow/react'
  * name, so a row of top-aligned cards of different heights still draws a straight line. No section
  * of the graph builder picks one. The rules below are the whole policy:
  *
- * 1. **Stack** — two or more cards hanging below a card, in one column, are reached by a tree: out of
- *    the source's bottom, down a trunk to the left of the column, one short branch into each card's
- *    left side, like a file list.
+ * 1. **Stack** — two or more cards hanging below a card, in one column: the nearest is dropped to
+ *    straight, bottom to top, as a lone card would be, and the ones past it, which a straight line
+ *    would reach only through it, by a tree: out of the source's bottom, down a trunk to the left of
+ *    the column, one short branch into each card's left side, like a file list.
  * 2. Otherwise a line joins the two points that face each other, the shape that crosses the fewest
  *    other cards winning, and the earlier on a tie: a **relay** to a card on the right (right side to
  *    left side), a **drop** to a card below (bottom to top), a **bridge** over the row (top to top)
@@ -176,8 +177,10 @@ export function assignPorts<E extends Edge>(edges: readonly E[], nodes: readonly
     const xs = column.map((box) => box.x)
     if (hanging.length < 2 || Math.max(...xs) - Math.min(...xs) > COLUMN) continue
     const bottom = s.y + s.height
-    const trunk = { x: Math.min(...xs) - TRUNK_GAP, y: bottom + Math.min(TRUNK_DROP, (Math.min(...column.map((box) => box.y)) - bottom) / 2) }
-    hanging.forEach((edge) => trunks.set(edge.id, trunk))
+    const nearest = column.reduce((best, box) => (box.y < best.y ? box : best))
+    const trunk = { x: Math.min(...xs) - TRUNK_GAP, y: bottom + Math.min(TRUNK_DROP, (nearest.y - bottom) / 2) }
+    // The nearest card gets the straight drop; only the ones past it go round, down the trunk.
+    hanging.forEach((edge, i) => { if (column[i] !== nearest) trunks.set(edge.id, trunk) })
   }
   return edges.map((edge) => {
     const s = boxes.get(edge.source)
