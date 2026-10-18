@@ -1,7 +1,7 @@
-import type { Edge, Node } from '@xyflow/react'
+import { Position, type Edge, type Node } from '@xyflow/react'
 import { describe, expect, it } from 'vitest'
 
-import { assignPorts, choosePorts, PORT, type Box } from './ports'
+import { assignPorts, cardEdgePoint, choosePorts, PORT, type Box } from './ports'
 
 const card = (x: number, y: number, width = 240, height = 100): Box => ({ x, y, width, height })
 const node = (id: string, box: Box): Node => ({ id, position: { x: box.x, y: box.y }, data: {}, measured: { width: box.width, height: box.height } })
@@ -54,5 +54,30 @@ describe('assignPorts', () => {
   it('leaves an edge alone when a card has not been sized yet', () => {
     const routed = assignPorts([edge('a', 'b')], [{ id: 'a', position: { x: 0, y: 0 }, data: {} }, node('b', card(400, 0))])
     expect(routed[0].sourceHandle).toBeUndefined()
+  })
+})
+
+describe('cardEdgePoint', () => {
+  const card = { x: 400, y: 300, width: 200, height: 80 } // centre (500, 340)
+
+  it('meets the side that faces where the line comes from', () => {
+    expect(cardEdgePoint({ x: 100, y: 340 }, card)).toEqual({ x: 400, y: 340, position: Position.Left })
+    expect(cardEdgePoint({ x: 900, y: 340 }, card)).toEqual({ x: 600, y: 340, position: Position.Right })
+    expect(cardEdgePoint({ x: 500, y: 0 }, card)).toEqual({ x: 500, y: 300, position: Position.Top })
+    expect(cardEdgePoint({ x: 500, y: 700 }, card)).toEqual({ x: 500, y: 380, position: Position.Bottom })
+  })
+
+  it('aims at the centre, so a line from above and to the left lands on the edge on that diagonal', () => {
+    // From (300, 240): the line to the centre crosses x = 400 at y = 290, above the card, so it
+    // enters by the top, at y = 300 and x = 500 - 200 * (40 / 100) = 420.
+    const point = cardEdgePoint({ x: 300, y: 240 }, card)
+    expect(point.position).toBe(Position.Top)
+    expect(point.y).toBeCloseTo(300)
+    expect(point.x).toBeCloseTo(420)
+  })
+
+  it('still ends on the edge when the line starts inside the card', () => {
+    expect(cardEdgePoint({ x: 450, y: 340 }, card)).toEqual({ x: 400, y: 340, position: Position.Left })
+    expect(cardEdgePoint({ x: 500, y: 340 }, card)).toEqual({ x: 400, y: 340, position: Position.Left })
   })
 })

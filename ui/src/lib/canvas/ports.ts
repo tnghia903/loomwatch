@@ -1,4 +1,4 @@
-import type { Edge, Node } from '@xyflow/react'
+import { Position, type Edge, type Node, type XYPosition } from '@xyflow/react'
 
 /**
  * Where every canvas line attaches, decided in one place from where the two cards actually are.
@@ -40,6 +40,25 @@ export const BRIDGE_IN_AT = 0.38
 export const HANDLE_Y = 44
 
 export interface Box { x: number; y: number; width: number; height: number }
+
+/**
+ * Where a line from `from` meets the edge of `box`, aimed at its centre, and the side it enters by:
+ * the end of the line drawn while connecting, over a card (components/canvas/CardConnectionLine.tsx).
+ * A point inside the box (or at its centre) meets the edge in the same direction, so the line never
+ * stops partway into a card.
+ */
+export function cardEdgePoint(from: XYPosition, box: Box): XYPosition & { position: Position } {
+  const cx = box.x + box.width / 2
+  const cy = box.y + box.height / 2
+  const dx = from.x - cx
+  const dy = from.y - cy
+  const across = Math.abs(dx) / (box.width / 2)
+  const down = Math.abs(dy) / (box.height / 2)
+  if (across === 0 && down === 0) return { x: box.x, y: cy, position: Position.Left }
+  const scale = 1 / Math.max(across, down)
+  const position = across >= down ? (dx < 0 ? Position.Left : Position.Right) : (dy < 0 ? Position.Top : Position.Bottom)
+  return { x: cx + dx * scale, y: cy + dy * scale, position }
+}
 
 type Ports = { sourceHandle: string | null; targetHandle: string | null }
 

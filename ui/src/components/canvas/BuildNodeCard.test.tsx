@@ -13,6 +13,8 @@ const view = vi.hoisted(() => ({ zoom: 1 }))
 vi.mock('@xyflow/react', () => ({
   Handle: ({ type, className }: { type: string; className?: string }) => <span data-handle={type} className={className} />,
   Position: { Left: 'left', Right: 'right' },
+  useConnection: (selector: (connection: { inProgress: boolean }) => unknown) => selector({ inProgress: false }),
+  useNodeId: () => null,
   useStore: (selector: (state: { transform: [number, number, number] }) => unknown) => selector({ transform: [0, 0, view.zoom] }),
 }))
 

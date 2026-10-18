@@ -492,6 +492,15 @@ span.story-schedule { cursor: default; }
 .lw-canvas .react-flow__handle:not(.connectable) { opacity: 0 !important; pointer-events: none; }
 .lw-canvas .react-flow__handle-bottom { bottom: -4px; }
 .lw-canvas .react-flow__handle-top { top: -4px; }
+/* The whole card catches a line being drawn (CardPorts): an invisible handle the card's size, which
+   React Flow gives the pointer only while a line is dragged from another card. The card the line
+   would join gets a gold ring, like a card a folder or skill is dragged over. */
+.lw-canvas .react-flow__node .react-flow__handle.card-catch.connectable {
+  inset: -1px !important; width: auto !important; height: auto !important; transform: none; z-index: 1;
+  border-radius: inherit; background: transparent !important; box-shadow: none; opacity: 1;
+}
+.lw-canvas .react-flow__node .react-flow__handle.card-catch::after { content: none; }
+.lw-canvas .react-flow__node .react-flow__handle.card-catch.connectable.connectingto.valid { box-shadow: 0 0 0 1px var(--color-accent), 0 0 0 3px color-mix(in srgb, var(--color-accent) 45%, transparent); }
 
 /* A drop's word sits beside its line; an arc's word sits on its crest. */
 .prov-label.beside { transform: translate(10px, -50%); }

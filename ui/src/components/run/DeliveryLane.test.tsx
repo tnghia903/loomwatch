@@ -14,6 +14,8 @@ vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   Handle: () => null,
   Position: { Left: 'left', Right: 'right' },
+  useConnection: (selector: (connection: { inProgress: boolean }) => unknown) => selector({ inProgress: false }),
+  useNodeId: () => null,
   MarkerType: { ArrowClosed: 'arrowclosed' },
   ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown }>; nodeTypes: Record<string, ComponentType<{ data: unknown }>> }) => <>{nodes.map(node => createElement(nodeTypes[node.type], { key: node.id, data: node.data }))}</>,
 }))

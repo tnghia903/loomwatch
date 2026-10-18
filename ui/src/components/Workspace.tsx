@@ -58,6 +58,7 @@ import { ParseFailureModal } from './canvas/ParseFailureModal'
 import { ScheduleNodeCard } from './canvas/ScheduleNodeCard'
 import { SchedulePanel } from './canvas/SchedulePanel'
 import { ViewControls } from './canvas/ViewControls'
+import { CardConnectionLine } from './canvas/CardConnectionLine'
 import { YamlSheet } from './canvas/YamlSheet'
 import { ProvEdgeView, WarpEdgeView, WeftEdgeView } from './canvas/edges'
 import { BuildAgentCard, BuildCapabilityCard, BuildOutputCard } from './canvas/BuildNodeCard'
@@ -2597,6 +2598,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={editable ? onConnect : undefined}
+            connectionLineComponent={CardConnectionLine}
             onDragOver={onDragOver}
             onDrop={onDrop}
             onNodeDragStart={onNodeDragStart}

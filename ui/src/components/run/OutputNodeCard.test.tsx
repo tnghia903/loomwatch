@@ -12,6 +12,8 @@ import { OutputNodeCard } from './StoryNodes'
 vi.mock('@xyflow/react', () => ({
   Handle: ({ type }: { type: string }) => <span data-handle={type} />,
   Position: { Left: 'left', Top: 'top' },
+  useConnection: (selector: (connection: { inProgress: boolean }) => unknown) => selector({ inProgress: false }),
+  useNodeId: () => null,
 }))
 
 const failedOutput: OutputNode['data'] = {
