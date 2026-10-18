@@ -47,11 +47,10 @@ export function ReadingOffer({ agent }: { agent: SuggestedAgent }) {
 
   return (
     <div className="e2 model-reading-offer" role="group" aria-label="Better model suggestions">
-      <p className="t-meta">This agent’s name and instructions don’t say its job plainly, so this suggestion may not fit. LoomWatch can read its whole setup, its instructions, skills and tools, to suggest a model that fits better.</p>
-      <p className="t-meta lw-settings-quiet">Each agent it reads uses a tiny amount of your OpenRouter credit, far less than a cent. An agent is read once, and again only after you change it.</p>
+      <p className="t-meta">A guess from its name. Read its setup for a better fit, for under a cent?</p>
       {error && <p role="alert" className="t-meta inline-error">{error}</p>}
       <div className="lw-settings-actions">
-        <button type="button" className="btn" disabled={busy} onClick={() => void turnOn()}>{busy ? 'Turning on…' : 'Read setups for better suggestions'}</button>
+        <button type="button" className="btn" disabled={busy} onClick={() => void turnOn()}>{busy ? 'Turning on…' : 'Read setups'}</button>
         <button type="button" className="link" onClick={notNow}>Not now</button>
       </div>
     </div>

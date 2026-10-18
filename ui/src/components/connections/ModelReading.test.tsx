@@ -30,10 +30,14 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 describe('ModelReading', () => {
   it('is off until turned on, and says it gives better suggestions for OpenRouter credit', async () => {
     render(<ModelReading />)
-    const toggle = await screen.findByRole('switch', { name: 'Read each agent’s whole setup for better suggestions' })
+    expect(await screen.findByRole('region', { name: 'Model suggestions' })).toBeInTheDocument()
+    const toggle = await screen.findByRole('switch', { name: 'Read each agent’s setup' })
     expect(toggle).not.toBeChecked()
-    expect(toggle).toHaveAccessibleDescription(/Suggestions get more accurate, and this uses your OpenRouter credit\./)
-    expect(screen.getByText(/Never your files, your team’s Brief or its other agents\. At most 50 agents a day\./)).toBeInTheDocument()
+    expect(toggle).toHaveAccessibleDescription('Better suggestions, for under a cent of OpenRouter credit per agent.')
+    // What is sent is one click away, behind the heading's "?".
+    expect(screen.queryByText(/never your files/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'About Model suggestions' }))
+    expect(screen.getByRole('note')).toHaveTextContent(/never your files, your Brief or its other agents\. Each agent is read once, at most 50 a day\./)
 
     await waitFor(() => expect(toggle).toBeEnabled())
     fireEvent.click(toggle)
@@ -44,13 +48,13 @@ describe('ModelReading', () => {
   it('says what reading has cost so far', async () => {
     status = { enabled: true, readings: 12, spent: 0.0006, today: 3, dailyLimit: 50 }
     render(<ModelReading />)
-    expect(await screen.findByText('12 agents read so far, for less than $0.01.')).toBeInTheDocument()
+    expect(await screen.findByText('12 agents read · under $0.01')).toBeInTheDocument()
   })
 
   it('waits for an OpenRouter key before it can be turned on', async () => {
     connected = false
     render(<ModelReading />)
-    expect(await screen.findByText('Add your OpenRouter key above to turn this on.')).toBeInTheDocument()
+    expect(await screen.findByText('Add your OpenRouter key above first.')).toBeInTheDocument()
     expect(screen.getByRole('switch')).toBeDisabled()
   })
 })
