@@ -358,8 +358,6 @@
 .lw-canvas[data-depth="story"] .build-node-figure { width: 60px; height: 60px; margin: -7px; }
 /* In the add panel's Your agents. */
 .palette-figure { flex: none; width: 38px; height: 38px; margin: -6px -3px -6px -5px; object-fit: contain; pointer-events: none; }
-/* In the team's sentence above the canvas. */
-.story-figure { width: 22px; height: 22px; margin: -4px 1px -4px -4px; vertical-align: middle; object-fit: contain; }
 /* On the Agents tab's strip. */
 .team-agents-figure { flex: none; width: 40px; height: 40px; margin: -8px -4px -8px -6px; object-fit: contain; }
 /* In Details, beside its name: the stage cards and the timeline. */

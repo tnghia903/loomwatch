@@ -27,14 +27,19 @@
   .build-workspace.lib-collapsed.inspecting .team-story { max-width: min(680px, calc(100% - 126px - var(--lw-inspector-w) - var(--lw-panel-inset) - 12px)); }
 }
 .team-story-eyebrow { font: 600 10.5px/1.3 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
-.team-story p { margin: 0; font: 400 18px/1.5 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
+/* The sentence reads like the landing page's (site/styles.css, .sentence .chip): each name is a
+   28px pill centred on the line's lowercase letters, its figure's face in a round frame. A pill
+   aligned to its baseline instead sat on the bottom of its figure, above the words around it. */
+.team-story p { margin: 0; font: 400 18px/1.75 var(--font-serif); color: var(--color-ink-2); text-wrap: pretty; }
 .story-name, .story-schedule {
-  display: inline-flex; align-items: center; gap: 5px; vertical-align: 1px;
-  margin: 0 1px; padding: 0 9px; min-height: 22px; border-radius: 99px;
-  font: 600 13px/1.6 var(--font-sans); letter-spacing: -.005em; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; vertical-align: middle;
+  margin: 0 1px; padding: 0 10px; height: 28px; border-radius: 99px; white-space: nowrap;
+  font: 600 13px/1 var(--font-sans); letter-spacing: -.005em; cursor: pointer;
   color: var(--color-ink); background: var(--color-accent-tint);
   border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
+.story-face { flex: none; width: 22px; height: 22px; margin: -5px 6px -5px 0; border-radius: 50%; overflow: hidden; background: color-mix(in srgb, var(--color-accent) 14%, var(--color-panel-solid)); }
+.story-face > * { display: block; width: 100%; height: 100%; object-fit: contain; transform: scale(1.7); transform-origin: 50% 20%; }
 .story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); color: var(--color-accent); }
 .story-name.you { background: transparent; border-style: dashed; }
 .story-schedule { color: var(--color-accent); background: transparent; }
@@ -47,7 +52,7 @@ span.story-schedule { cursor: default; }
 .story-fix {
   display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; padding: 2px 10px; min-height: 24px;
   border-radius: 7px; border: 1px solid var(--color-accent-dim); background: transparent; cursor: pointer;
-  font: 500 12.5px/1.4 var(--font-sans); color: var(--color-accent); vertical-align: 2px;
+  font: 500 12.5px/1.4 var(--font-sans); color: var(--color-accent); vertical-align: middle;
 }
 .story-fix:hover, .story-fix:focus-visible { background: var(--color-accent-tint); }
 

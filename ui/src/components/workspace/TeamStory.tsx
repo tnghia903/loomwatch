@@ -33,7 +33,7 @@ export function TeamStory({ parts, onAgent, onSchedule, onConnect, figures }: Te
             const figure = part.operator ? undefined : figures?.get(part.id)
             return (
               <button key={index} type="button" className={`story-name ${part.operator ? 'you' : ''}`} aria-label={part.operator ? 'You, the review step' : part.name} title={part.title} onClick={() => onAgent(part.id)}>
-                {figure ? <FigureStill className="story-figure" figure={figure} headOnly alt="" /> : <AgentMark id={part.id} size={14} operator={part.operator} />}
+                {figure ? <span className="story-face" aria-hidden="true"><FigureStill figure={figure} headOnly alt="" /></span> : <AgentMark id={part.id} size={14} operator={part.operator} />}
                 {part.name}
               </button>
             )
