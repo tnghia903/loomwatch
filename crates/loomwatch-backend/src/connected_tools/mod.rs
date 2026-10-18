@@ -143,6 +143,21 @@ pub(crate) enum Unusable {
     Unavailable,
 }
 
+impl Unusable {
+    /// What an rmcp sign-in error leaves to do. Only a sign-in that is gone, or that the tool's
+    /// site turned down, means signing in again; a renewal that couldn't reach the site is tried
+    /// again later. [`client::open`] reads its errors the same way.
+    fn of(error: &AuthError) -> Self {
+        match error {
+            AuthError::AuthorizationRequired
+            | AuthError::TokenRefreshRejected(_)
+            | AuthError::InsufficientScope { .. } => Self::SignInAgain,
+            AuthError::CredentialStoreError(_) => Self::Unavailable,
+            _ => Self::Unreachable,
+        }
+    }
+}
+
 /// What [`Tools::adopt_sign_in`] kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Adopted {
@@ -333,13 +348,7 @@ impl Tools {
                 if let Some(metadata) = &tool.metadata {
                     manager.set_metadata(metadata.clone());
                 }
-                let unusable = |error: AuthError| match error {
-                    AuthError::AuthorizationRequired | AuthError::TokenRefreshRejected(_) => {
-                        Unusable::SignInAgain
-                    }
-                    AuthError::CredentialStoreError(_) => Unusable::Unavailable,
-                    _ => Unusable::Unreachable,
-                };
+                let unusable = |error: AuthError| Unusable::of(&error);
                 if !manager.initialize_from_store().await.map_err(unusable)? {
                     return Err(Unusable::SignInAgain);
                 }
