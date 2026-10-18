@@ -148,6 +148,11 @@ const DRAWER_SLOTS: Record<DrawerName, Vector3[]> = {
   tools: Array.from({ length: TOOL_SLOTS }, (_, slot) => toolPlace(slot, TOOL_SLOTS).at),
 }
 const FOLDER_TINTS = ['#E6CD97', '#DCC08A', '#E9D5AA', '#D9BC80']
+/**
+ * What is in a drawer sits under the bench top, in its shade: its folders, sheets and tool tiles are
+ * darkened by this much (in linear light), so they don't outshine the work on top.
+ */
+const DRAWER_SHADE = 0.4
 const HIGHLIGHT = new Color('#E9C46A')
 /** It looks with its head; its body turns only a little, so both hands stay on the laptop. */
 const BODY_TURN = 0.12
@@ -666,7 +671,7 @@ export class WorkbenchScene {
     group.name = `reads_${slot + 1}_${source.kind}`
     const parts: Mesh[] = []
     const piece = (width: number, height: number, color: Color | string, x: number, y: number, z: number, roughness = 0.8) => {
-      const mesh = new Mesh(new BoxGeometry(width, height, 0.004), new MeshStandardMaterial({ color, roughness }))
+      const mesh = new Mesh(new BoxGeometry(width, height, 0.004), new MeshStandardMaterial({ color: new Color(color).multiplyScalar(DRAWER_SHADE), roughness }))
       mesh.position.set(x, y, z)
       mesh.castShadow = true
       mesh.receiveShadow = true
@@ -738,14 +743,15 @@ export class WorkbenchScene {
     const shape = roundedSquare(TOOL_TILE, TOOL_TILE * 0.24)
     const depth = 0.008
     const bevel = 0.002
-    const body = new Mesh(new ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 10 }), new MeshPhysicalMaterial({ color: '#F7F5F0', roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.2 }))
+    const body = new Mesh(new ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 10 }), new MeshPhysicalMaterial({ color: new Color('#F7F5F0').multiplyScalar(DRAWER_SHADE), roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.2 }))
     body.name = `tools_${slot + 1}_body`
     body.position.z = -depth / 2
     const faceGeometry = new ShapeGeometry(shape, 10)
     // Its UVs from its corners, so the icon covers the face once.
     const uv = faceGeometry.getAttribute('uv')
     for (let index = 0; index < uv.count; index += 1) uv.setXY(index, uv.getX(index) / TOOL_TILE + 0.5, uv.getY(index) / TOOL_TILE)
-    const face = new Mesh(faceGeometry, new MeshPhysicalMaterial({ map: toolTexture(tool.name, tool.icon), roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.2 }))
+    // The icon in the same shade as its tile.
+    const face = new Mesh(faceGeometry, new MeshPhysicalMaterial({ map: toolTexture(tool.name, tool.icon), color: new Color().setScalar(DRAWER_SHADE), roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.2 }))
     face.name = `tools_${slot + 1}_face`
     face.position.z = depth / 2 + bevel + 0.0004
     group.add(body, face)
