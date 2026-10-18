@@ -143,12 +143,12 @@ describe('ModelPicker', () => {
     // "write them" makes it a writer, so it is offered the strongest model.
     expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Opus 5.5')
     const offer = await screen.findByRole('group', { name: 'Better model suggestions' })
-    expect(offer).toHaveTextContent('uses a tiny amount of your OpenRouter credit')
+    expect(offer).toHaveTextContent('Read its setup for a better fit, for under a cent?')
     expect(readings()).toHaveLength(0)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Read setups for better suggestions' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Read setups' }))
     await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
-    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Reading its whole setup, it gathers for Writer rather than writing the answer.')
+    expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Its whole setup says it gathers for Writer rather than writing the answer.')
     expect(screen.queryByRole('group', { name: 'Better model suggestions' })).toBeNull()
     // Its own setup, by name, and never its teammates.
     expect(readings()).toHaveLength(1)

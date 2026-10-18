@@ -132,8 +132,8 @@ export function ModelChoices({ value, suggestFor, onPick }: { value: string; sug
         </div>
         {query && found.length === 0 && <p className="t-meta lw-settings-quiet">No model matches. Try another word.</p>}
         {!query && suggested && <>
-          {read.pending && <p role="status" className="t-meta lw-settings-quiet">Reading its whole setup for a better suggestion…</p>}
-          {read.problem && <p className="t-meta lw-settings-quiet">{read.problem} The suggestion above comes from its name and instructions.</p>}
+          {read.pending && <p role="status" className="t-meta lw-settings-quiet">Reading its setup…</p>}
+          {read.problem && <p className="t-meta lw-settings-quiet">{read.problem}</p>}
           {suggestFor && <ReadingOffer agent={suggestFor.agent} />}
         </>}
         {!query && <p className="t-meta lw-settings-quiet">Free models are limited per day, and their makers may learn from what you send. Keep private work on a paid model.</p>}
