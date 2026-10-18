@@ -126,11 +126,43 @@ pub(crate) fn plan(entries: &[(String, String)]) -> Value {
 }
 
 /// How full the model's context is and what the session has cost so far.
-pub(crate) fn usage_update(used: u64, size: Option<u64>, cost_usd: f64) -> Value {
+/// One model call, as its usage record names it.
+pub(crate) struct CallRecord<'a> {
+    /// `work`, `carry_on`, `summary` or `bare_summary`.
+    pub call: &'a str,
+    /// What the turn is for: `work`, `handover`, `checkpoint`, `check`, `ask_answer`, `helper`.
+    pub turn: &'a str,
+    pub model: &'a str,
+    pub usage: &'a super::provider::Usage,
+}
+
+/// How full the context is and what the session has cost, after one model call, with that call's
+/// own record in `_meta.loomwatch.call`: what it was for, its tokens by kind, its cost and the web
+/// searches and reads the provider ran. A provider that leaves a figure out gets a zero.
+pub(crate) fn usage_update(
+    used: u64,
+    size: Option<u64>,
+    cost_usd: f64,
+    call: &CallRecord<'_>,
+) -> Value {
+    let usage = call.usage;
     let mut update = json!({
         "sessionUpdate": "usage_update",
         "used": used,
         "cost": {"amount": cost_usd, "currency": "USD"},
+        "_meta": {"loomwatch": {"call": {
+            "kind": call.call,
+            "turn": call.turn,
+            "model": call.model,
+            "inputTokens": usage.input_tokens,
+            "cachedReadTokens": usage.cached_read_tokens,
+            "cachedWriteTokens": usage.cached_write_tokens,
+            "outputTokens": usage.output_tokens,
+            "reasoningTokens": usage.reasoning_tokens,
+            "costUsd": usage.cost_usd,
+            "webSearches": usage.web_searches,
+            "webFetches": usage.web_fetches,
+        }}},
     });
     if let Some(size) = size {
         update["size"] = json!(size);

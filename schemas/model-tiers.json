@@ -1,0 +1,35 @@
+{
+  "$comment": "Which model and thinking effort each kind of agent starts on (ADR 0057 tiers, ADR 0062 efforts). The one table: the app reads it in ui/src/lib/ai/modelIds.ts for templates, the builder and new agents, and the daemon reads it for Ask's list_models, so every way of making an agent chooses alike. Quality comes first (2026-10-18): every job that gathers for the work, produces it, decides it or checks it is on the strong or check tier. Moving one to the fast tier is a one-line change here, to try once the quality benchmark shows the work stays as good.",
+  "models": {
+    "strong": "anthropic/claude-opus-5.5",
+    "fast": "anthropic/claude-sonnet-5.5",
+    "check": "openai/gpt-6.1-sol"
+  },
+  "tiers": {
+    "strong": "an agent that gathers what the work rests on, writes it, decides it or reviews it: research, writing, designing, leading, analysis, code",
+    "fast": "short supporting work that judgement does not hang on: reformatting, simple lookups",
+    "check": "a check step, read on another maker's model so it doesn't share the writer's blind spots"
+  },
+  "efforts": {
+    "light": "low",
+    "standard": "medium",
+    "deep": "high"
+  },
+  "effortFor": {
+    "light": "tidying, formatting and simple lookups",
+    "standard": "most work",
+    "deep": "checking, analysis and code"
+  },
+  "newAgent": { "tier": "strong", "effort": "standard" },
+  "jobs": {
+    "researcher": { "tier": "strong", "effort": "standard" },
+    "writer": { "tier": "strong", "effort": "standard" },
+    "editor": { "tier": "strong", "effort": "light" },
+    "reviewer": { "tier": "strong", "effort": "deep" },
+    "checker": { "tier": "check", "effort": "deep" },
+    "coder": { "tier": "strong", "effort": "deep" },
+    "designer": { "tier": "strong", "effort": "standard" },
+    "lead": { "tier": "strong", "effort": "standard" },
+    "analyst": { "tier": "strong", "effort": "deep" }
+  }
+}

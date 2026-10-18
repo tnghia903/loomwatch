@@ -1210,13 +1210,15 @@ export function useTeamDocument() {
   const updateAgentSpend = useCallback(
     (id: string, perRun: number | null) => {
       captureHistory()
-      const spend = perRun !== null && perRun > 0 ? { perRun } : undefined
-      modelRef.current?.setAgentField(id, 'spend', spend)
+      modelRef.current?.setAgentSpend(id, perRun)
       setNodes((current) =>
         current.map((node) => {
           if (node.id !== id) return node
-          const { spend: _old, ...rest } = node.data.agent
-          return { ...node, data: { ...node.data, agent: spend ? { ...rest, spend } : rest } }
+          // Only the money limit changes: the rest of the block, such as its web limits, stays.
+          const { spend: old, ...rest } = node.data.agent
+          const { perRun: _old, ...kept } = old ?? {}
+          const spend = perRun !== null && perRun > 0 ? { ...kept, perRun } : kept
+          return { ...node, data: { ...node.data, agent: Object.keys(spend).length > 0 ? { ...rest, spend } : rest } }
         }),
       )
       markDirty()

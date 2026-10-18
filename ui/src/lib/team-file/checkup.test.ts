@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { DEFAULT_MODEL, FAST_MODEL, type ModelTier } from '../ai/modelIds'
 import { modelForPreset, ROLE_PRESETS } from '../library/roles'
 import { appendToRole, checkup, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
 import { templateTeamYaml } from './templates'
@@ -39,7 +39,26 @@ describe('checkup', () => {
     }
   })
 
-  it('suggests the faster model for a gatherer on the strong one, with its share of the team’s tokens', () => {
+  // No built-in job is on the fast tier while quality comes first (schemas/model-tiers.json). The
+  // rule is for when the table moves one there, so these move the Researcher there meanwhile.
+  const onTheFastTier = (check: () => void) => () => {
+    const job = ROLE_PRESETS.find((candidate) => candidate.id === 'researcher') as { tier?: ModelTier }
+    const tier = job.tier
+    job.tier = 'fast'
+    try {
+      check()
+    } finally {
+      job.tier = tier
+    }
+  }
+
+  it('leaves a gatherer on the strong model alone while its job is on the strong tier', () => {
+    const edges = [{ from: 'researcher', to: 'writer' }]
+    const agents = [agent('researcher', preset('researcher'), { model: DEFAULT_MODEL }), agent('writer', preset('writer'))]
+    expect(rules(run({ agents, edges }))).toEqual([])
+  })
+
+  it('suggests the faster model for a gatherer on the strong one, with its share of the team’s tokens', onTheFastTier(() => {
     const team = (model: string, extra: Partial<AgentConfig> = {}) => [agent('researcher', preset('researcher'), { model, ...extra }), agent('writer', preset('writer'), { model: DEFAULT_MODEL })]
     const edges = [{ from: 'researcher', to: 'writer' }]
     const usage = { runs: 3, perRun: 90_000, agents: [{ id: 'writer', name: 'Writer', perRun: 53_000, share: 0.59, opening: null }, { id: 'researcher', name: 'Researcher', perRun: 37_000, share: 0.41, opening: null }] }
@@ -56,9 +75,9 @@ describe('checkup', () => {
     expect(run({ agents: team('opus'), edges })[0]).toMatchObject({ rule: 'strong-gatherer' })
     // The model list's own names, once it has arrived.
     expect(run({ agents: team(DEFAULT_MODEL), edges, modelNames: new Map([[FAST_MODEL, 'Sonnet 5.5']]) })[0].title).toBe('Researcher could gather on Sonnet 5.5')
-  })
+  }))
 
-  it('leaves alone a gatherer whose reply is the answer, one already faster, and one on a model chosen on purpose', () => {
+  it('leaves alone a gatherer whose reply is the answer, one already faster, and one on a model chosen on purpose', onTheFastTier(() => {
     const researcher = agent('researcher', preset('researcher'))
     expect(run({ agents: [researcher] })).toEqual([])
     const writer = agent('writer', preset('writer'))
@@ -66,7 +85,7 @@ describe('checkup', () => {
     expect(run({ agents: [{ ...researcher, model: FAST_MODEL }, writer], edges })).toEqual([])
     expect(run({ agents: [{ ...researcher, model: 'anthropic/claude-haiku-5.5' }, writer], edges })).toEqual([])
     expect(run({ agents: [{ ...researcher, model: 'openai/gpt-6.1-sol' }, writer], edges })).toEqual([])
-  })
+  }))
 
   it('stays silent on every built-in job as the canvas places it', () => {
     const placed = ROLE_PRESETS.map((job) => agent(job.id, job.role, { ...modelForPreset(job) }))

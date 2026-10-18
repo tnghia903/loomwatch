@@ -52,6 +52,9 @@ pub struct PermissionPolicy {
     /// Calls of connected tools the operator always allows this agent (ADR 0069), as
     /// `tool.call` in lowercase. Every other call of a connected tool asks.
     always: Vec<String>,
+    /// How much web reading one model call may do, when `allow.web` lets it read at all: the
+    /// agent's `spend.web` over the team's.
+    web_limits: crate::agent::WebLimits,
 }
 
 impl PermissionPolicy {
@@ -72,6 +75,7 @@ impl PermissionPolicy {
             state_dir: installed.map(|ai| resolve(&ai.state_dir())),
             skills_folder: installed.map(|ai| resolve(&ai.skills_folder())),
             always: Vec::new(),
+            web_limits: crate::agent::WebLimits::default(),
         }
     }
 
@@ -117,8 +121,16 @@ impl PermissionPolicy {
     /// for it (ADR 0060).
     #[must_use]
     pub fn for_run_agent(agent: &AgentConfig, folder: &Path, delivery: &Delivery) -> Self {
-        Self::for_agent(agent.allow, folder, delivery)
-            .turning_off(&agent.turned_off, &agent.capabilities)
+        let mut policy = Self::for_agent(agent.allow, folder, delivery)
+            .turning_off(&agent.turned_off, &agent.capabilities);
+        policy.web_limits = agent.spend.web.limits();
+        policy
+    }
+
+    /// How much web reading one model call may do.
+    #[must_use]
+    pub const fn web_limits(&self) -> crate::agent::WebLimits {
+        self.web_limits
     }
 
     /// This policy with what the operator turned off for the agent (ADR 0060), less anything the

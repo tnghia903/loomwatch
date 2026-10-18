@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, modelForJob, modelNameFromId, openRouterId } from './modelIds'
+import tiers from '../../../../schemas/model-tiers.json'
+import { BLANK_DRAFT } from '../library/draft'
+import { buildAgentFromSource } from '../library/createAgent'
+import { ROLE_PRESETS } from '../library/roles'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, jobNeeds, modelForJob, modelNameFromId, NEW_AGENT, openRouterId } from './modelIds'
 
 describe('openRouterId', () => {
   // The same cases as `old_model_names_become_openrouter_ids` in the daemon's ai/models.rs.
@@ -30,6 +34,27 @@ describe('modelForJob', () => {
     expect(modelForJob({ tier: 'strong', effort: 'deep' })).toEqual({ model: DEFAULT_MODEL, thinkingEffort: 'high' })
     expect(modelForJob({ tier: 'check', effort: 'deep' })).toEqual({ model: CHECK_MODEL, thinkingEffort: 'high' })
     expect(modelForJob({})).toEqual({ model: DEFAULT_MODEL })
+  })
+})
+
+// `schemas/model-tiers.json` is the one table: the daemon's Ask reads it too (ai/models.rs).
+describe('the model table', () => {
+  it('gives every built-in job and every new agent its model and effort', () => {
+    expect([DEFAULT_MODEL, FAST_MODEL, CHECK_MODEL]).toEqual([tiers.models.strong, tiers.models.fast, tiers.models.check])
+    for (const preset of ROLE_PRESETS) {
+      expect({ tier: preset.tier, effort: preset.effort }).toEqual(jobNeeds(preset.id))
+    }
+    expect(Object.keys(tiers.jobs).sort()).toEqual(ROLE_PRESETS.map((preset) => preset.id).sort())
+    expect(() => jobNeeds('juggler')).toThrow(/no job juggler/)
+    // A blank agent, in the builder and on the canvas, starts as the table's new agent.
+    const fresh = modelForJob(NEW_AGENT)
+    expect(fresh).toEqual({ model: DEFAULT_MODEL, thinkingEffort: 'medium' })
+    expect({ model: BLANK_DRAFT.model, effort: BLANK_DRAFT.effort }).toEqual({ model: fresh.model, effort: fresh.thinkingEffort })
+    const dropped = buildAgentFromSource({ group: 'presets', id: 'blank', label: 'Agent' }, [])
+    expect({ model: dropped.model, thinkingEffort: dropped.thinkingEffort }).toEqual(fresh)
+    // A source that names its own model keeps it, and its own effort or none.
+    const named = buildAgentFromSource({ group: 'presets', id: 'blank', label: 'Agent', model: 'z-ai/glm-5.3' }, [])
+    expect({ model: named.model, thinkingEffort: named.thinkingEffort }).toEqual({ model: 'z-ai/glm-5.3', thinkingEffort: undefined })
   })
 })
 

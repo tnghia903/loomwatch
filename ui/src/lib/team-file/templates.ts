@@ -1,6 +1,6 @@
 import { stringify } from 'yaml'
 
-import { DEFAULT_MODEL } from '../ai/modelIds'
+import { modelForJob, NEW_AGENT } from '../ai/modelIds'
 import { buildAgentFromSource } from '../library/createAgent'
 import { savedJobPreset, type SavedJob } from '../library/jobs'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../library/roles'
@@ -115,7 +115,7 @@ function agent(id: string, name: string, role: string): AgentConfig {
   // The Researcher job's own switches (ADR 0037), so a template's researcher can search the web
   // like one hired from the palette; each job's model tier (ADR 0057) and effort (ADR 0062).
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
-  const choice = preset ? modelForPreset(preset) : { model: DEFAULT_MODEL }
+  const choice = preset ? modelForPreset(preset) : modelForJob(NEW_AGENT)
   return {
     id,
     name,

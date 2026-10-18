@@ -60,20 +60,21 @@ describe('team templates', () => {
     expect(single.agents[0].allow).toBeUndefined()
   })
 
-  // ADR 0057 and 0062: the researcher gathers on the faster model, the writer writes on the strong
+  // The model table (ADR 0057 and 0062), quality first: the researcher and the writer on the strong
   // one, the check step reads on another maker's, and each thinks as hard as its job needs.
   it('puts each job on its tier’s model at its job’s effort', () => {
     const tiers = (template: 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research') => {
       const doc = parse(templateTeamYaml(template, 'Report')) as TeamDocument
       return Object.fromEntries(doc.agents.filter((agent) => agent.kind !== 'operator').map((agent) => [agent.id, `${agent.model}${agent.thinkingEffort ? `[${agent.thinkingEffort}]` : ''}`]))
     }
-    expect(tiers('research-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
-    expect(tiers('research-review-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
-    expect(tiers('research-write-check')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]`, checker: `${CHECK_MODEL}[high]` })
-    // The lead plans and judges on the strong model; its researchers gather on the faster one.
-    expect(tiers('research')).toEqual({ lead: `${DEFAULT_MODEL}[medium]`, researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
-    // One assistant writes the answer itself: the strong model, at its own default.
-    expect(tiers('single')).toEqual({ assistant: DEFAULT_MODEL })
+    expect(tiers('research-write')).toEqual({ researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    expect(tiers('research-review-write')).toEqual({ researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    expect(tiers('research-write-check')).toEqual({ researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]`, checker: `${CHECK_MODEL}[high]` })
+    // The lead plans and judges on the strong model, and its researchers gather on it too.
+    expect(tiers('research')).toEqual({ lead: `${DEFAULT_MODEL}[medium]`, researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    // One assistant, with no job of its own, starts as the model table's new agent: the strong
+    // model at the standard effort.
+    expect(tiers('single')).toEqual({ assistant: `${DEFAULT_MODEL}[medium]` })
   })
 
   // Open Deep Research's shape: no edges, so the lead answers, and reaches the Researcher (many

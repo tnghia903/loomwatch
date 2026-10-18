@@ -150,6 +150,19 @@ impl Drop for TeamBusTeardown {
 pub(crate) struct TeamBusConnection {
     bus: TeamBus,
     token: String,
+    /// Who is behind this connection, for what it is offered.
+    holder: Holder,
+}
+
+/// The agent behind a connection: what the tools it is offered, and what its turns are recorded
+/// as, depend on.
+#[derive(Debug, Clone)]
+struct Holder {
+    agent_id: String,
+    /// Started by another agent, with `dispatch`, `handoff` or `ask`.
+    helper: bool,
+    /// Started by `ask`, to answer one question.
+    answering: bool,
 }
 
 impl TeamBus {
@@ -215,6 +228,11 @@ impl TeamBus {
         Ok(TeamBusConnection {
             bus: self.clone(),
             token,
+            holder: Holder {
+                agent_id: agent_id.to_owned(),
+                helper: false,
+                answering: false,
+            },
         })
     }
 
@@ -1342,6 +1360,11 @@ impl TeamBus {
         Ok(TeamBusConnection {
             bus: self.clone(),
             token,
+            holder: Holder {
+                agent_id: agent_id.to_owned(),
+                helper: true,
+                answering: context.answering,
+            },
         })
     }
 
@@ -1510,13 +1533,40 @@ impl TeamBusConnection {
     }
 
     /// The bus's tools, as the agent behind this connection is offered them: `{name, description,
-    /// inputSchema}` each.
-    pub(crate) fn tool_definitions(&self) -> Vec<Value> {
-        tool_definitions(
-            self.bus.state.mode,
-            self.bus.state.memory.notebook_enabled,
-            self.bus.state.operator.is_some(),
-        )
+    /// inputSchema}` each. `conversation` says its opening message holds `## Conversation so far`.
+    pub(crate) fn tool_definitions(&self, conversation: bool) -> Vec<Value> {
+        offered_tools(&self.bus.seat(&self.holder, conversation))
+    }
+
+    /// What this agent's turns are for, for the usage record: `check` for a check step,
+    /// `ask_answer` for a helper answering a question, `helper` for one handed work, else `work`.
+    pub(crate) fn purpose(&self) -> &'static str {
+        let checks = self
+            .bus
+            .state
+            .team
+            .agents
+            .iter()
+            .any(|agent| agent.id == self.holder.agent_id && agent.checks.is_some());
+        if self.holder.answering {
+            "ask_answer"
+        } else if self.holder.helper {
+            "helper"
+        } else if checks {
+            "check"
+        } else {
+            crate::agent::WORK
+        }
+    }
+
+    /// The time zone the team works in: its schedule's, when it has one.
+    pub(crate) fn time_zone(&self) -> Option<String> {
+        self.bus
+            .state
+            .team
+            .schedule
+            .as_ref()
+            .and_then(|schedule| schedule.timezone.clone())
     }
 
     /// One tool call from the agent behind this connection, made directly rather than over the
@@ -1700,16 +1750,90 @@ fn tool_error(message: &str) -> Value {
 /// The four memory tools, named once so the gate and the definitions cannot disagree.
 const MEMORY_TOOLS: [&str; 4] = ["memory_search", "memory_read", "memory_write", "checkpoint"];
 
-fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value> {
-    let mut tools = vec![tool(
-        "roster",
-        "List the team, capabilities, and live status",
-        &json!({"type": "object", "additionalProperties": false}),
-    )];
+/// What an agent can use the Team Bus for, from where it sits: the facts [`offered_tools`] decides
+/// every tool from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct BusSeat {
+    pub(crate) mode: TeamBusMode,
+    /// Agents on the team besides this one that run on a model. A review stop is the person,
+    /// reached with `ask_user`.
+    pub(crate) teammates: usize,
+    /// In a pipeline, a stage that runs on a model is connected straight into this one: the one
+    /// kept open for it to ask.
+    pub(crate) has_stage_before: bool,
+    /// Started by `ask` to answer one question, so it may not start other agents.
+    pub(crate) answering: bool,
+    pub(crate) notebook: bool,
+    /// A person at the keyboard: a run started from the app, not the command line.
+    pub(crate) operator: bool,
+    /// Its opening message holds `## Conversation so far`, whose work ids `earlier_work` reads.
+    pub(crate) conversation: bool,
+}
+
+impl TeamBus {
+    /// Where the agent behind `holder` sits on this team.
+    fn seat(&self, holder: &Holder, conversation: bool) -> BusSeat {
+        let team = &self.state.team;
+        let runs_on_a_model = |id: &str| {
+            team.agents
+                .iter()
+                .any(|agent| agent.id == id && !agent.is_operator())
+        };
+        BusSeat {
+            mode: self.state.mode,
+            teammates: team
+                .agents
+                .iter()
+                .filter(|agent| !agent.is_operator() && agent.id != holder.agent_id)
+                .count(),
+            has_stage_before: team
+                .edges
+                .iter()
+                .any(|edge| edge.to == holder.agent_id && runs_on_a_model(&edge.from)),
+            answering: holder.answering,
+            notebook: self.state.memory.notebook_enabled,
+            operator: self.state.operator.is_some(),
+            conversation,
+        }
+    }
+}
+
+/// The Team Bus tools an agent is offered: only the ones it can use from its seat. Every tool is
+/// decided here, from [`BusSeat`] alone, so a new kind of seat needs no new special case.
+///
+/// - `dispatch` and `handoff` start a teammate, so they need team mode, a teammate, and an agent
+///   that is not answering a question (the bus refuses it).
+/// - `ask` needs someone to ask: in team mode, a teammate it may start; in a pipeline, the stage
+///   before, kept open for it. A pipeline stage with none would only start a cold copy of another
+///   agent, which knows nothing of the work.
+/// - `roster` comes with any of those, to find the teammate.
+/// - `report` is never offered: only `roster` reads it, and the bus records each agent's status
+///   itself. A call still works, for a model that remembers it.
+/// - `ask_user` needs a person to ask; the Notebook's tools a notebook; `earlier_work` a
+///   conversation to read from.
+pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
+    let team = seat.mode == TeamBusMode::Team;
+    let together = seat.teammates > 0;
+    let hands_out = team && together && !seat.answering;
+    let asks = together
+        && if team {
+            !seat.answering
+        } else {
+            seat.has_stage_before
+        };
+    let mut tools = Vec::new();
+    if hands_out || asks {
+        tools.push(tool(
+            "roster",
+            "List the team, capabilities, and live status",
+            &json!({"type": "object", "additionalProperties": false}),
+        ));
+    }
     // The descriptions carry the delegation brief because the agent reads them at the moment it
     // writes one. The agent it starts sees nothing but that text (orientation.rs `for_helper`),
     // and a vague brief is how two helpers end up doing the same search, or the wrong one.
-    if mode == TeamBusMode::Team {
+    if hands_out {
         tools.push(tool(
             "dispatch",
             "Hand part of the work to a teammate without waiting for it. Hand out parts that do \
@@ -1724,18 +1848,20 @@ fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value>
             ),
         ));
     }
-    tools.push(tool(
-        "ask",
-        "Ask another agent and wait for its reply. Use it when you need the answer before you \
-         can go on.",
-        &two_strings(
-            "agent",
-            "Target agent ID",
-            "question",
-            "A question it can answer from this text alone: it does not see your conversation.",
-        ),
-    ));
-    if mode == TeamBusMode::Team {
+    if asks {
+        tools.push(tool(
+            "ask",
+            "Ask another agent and wait for its reply. Use it when you need the answer before you \
+             can go on.",
+            &two_strings(
+                "agent",
+                "Target agent ID",
+                "question",
+                "A question it can answer from this text alone: it does not see your conversation.",
+            ),
+        ));
+    }
+    if hands_out {
         tools.push(tool(
             "handoff",
             "Pass the rest of the task to a teammate and stop: it carries on, and you end this \
@@ -1749,37 +1875,34 @@ fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value>
             ),
         ));
     }
-    tools.push(tool(
-        "report",
-        "Publish this agent's current status",
-        &one_string("status", "Progress status"),
-    ));
-    tools.push(tool(
-        "ask_user",
-        "Put a question to the person running this team. Returns immediately: end your turn after \
-         calling it, and their answer arrives as your next turn. Ask only for a decision you \
-         cannot reasonably make yourself and that would change the result; otherwise make the \
-         most reasonable assumption, say which one you made, and carry on.",
-        &object(
-            &[
-                (
-                    "question",
-                    string_property("What you need the person to decide", 1),
-                ),
-                (
-                    "context",
-                    string_property("What they need to know to decide it", 0),
-                ),
-            ],
-            &["question"],
-        ),
-    ));
-    if notebook {
+    if seat.operator {
+        tools.push(tool(
+            "ask_user",
+            "Put a question to the person running this team. Returns immediately: end your turn \
+             after calling it, and their answer arrives as your next turn. Ask only for a decision \
+             you cannot reasonably make yourself and that would change the result; otherwise make \
+             the most reasonable assumption, say which one you made, and carry on.",
+            &object(
+                &[
+                    (
+                        "question",
+                        string_property("What you need the person to decide", 1),
+                    ),
+                    (
+                        "context",
+                        string_property("What they need to know to decide it", 0),
+                    ),
+                ],
+                &["question"],
+            ),
+        ));
+    }
+    if seat.notebook {
         tools.extend(memory_tool_definitions());
     }
     // ADR 0051: the conversation shows older work one line each; this reads one piece in full.
-    // Offered only where there is a team chat to read — a run started from the app.
-    if chat {
+    // Offered only where there is one: a run started from the team's chat.
+    if seat.operator && seat.conversation {
         tools.push(tool(
             "earlier_work",
             "Read one earlier piece of this team's work in full: what the operator asked and the \
@@ -2059,11 +2182,18 @@ mod tests {
     /// MCP: `tools/list`, or `tools/call` with the result or the error as a tool error.
     async fn post_json(bus: &TeamBus, token: &str, request: &Value) -> Result<Value> {
         let result = match request.get("method").and_then(Value::as_str) {
-            Some("tools/list") => json!({"tools": tool_definitions(
-                bus.state.mode,
-                bus.state.memory.notebook_enabled,
-                bus.state.operator.is_some(),
-            )}),
+            Some("tools/list") => {
+                let holder = {
+                    let tokens = bus.state.tokens.read().await;
+                    let session = tokens.get(token).context("unknown token")?;
+                    Holder {
+                        agent_id: session.agent_id.clone(),
+                        helper: session.delegation_path.len() > 1,
+                        answering: session.answering,
+                    }
+                };
+                json!({"tools": offered_tools(&bus.seat(&holder, true))})
+            }
             Some("tools/call") => match bus.call_tool(token, request).await {
                 Ok(result) => result,
                 Err(error) => tool_error(&format!("{error:#}")),
@@ -2080,7 +2210,16 @@ mod tests {
     #[test]
     fn no_tool_description_carries_a_run_of_spaces() {
         for mode in [TeamBusMode::Team, TeamBusMode::Pipeline] {
-            for tool in tool_definitions(mode, true, true) {
+            let seat = BusSeat {
+                mode,
+                teammates: 2,
+                has_stage_before: true,
+                answering: false,
+                notebook: true,
+                operator: true,
+                conversation: true,
+            };
+            for tool in offered_tools(&seat) {
                 let text = tool.to_string();
                 assert!(!text.contains("  "), "{text}");
             }
@@ -2431,10 +2570,12 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().expect("tool name"))
             .collect();
-        assert_eq!(
-            names,
-            ["roster", "ask", "report", "ask_user"],
-            "dispatch and handoff must be withdrawn in pipeline mode"
+        // A first stage on the command line has no stage before it to ask, nobody at the keyboard
+        // and no notebook: it is offered none of the bus. Pipeline mode never offers `dispatch` or
+        // `handoff`, and the bus still refuses them below for a model that calls them anyway.
+        assert!(
+            names.is_empty(),
+            "dispatch and handoff must be withdrawn in pipeline mode: {names:?}"
         );
 
         open.register(event_log.clone()).await;
@@ -3464,7 +3605,10 @@ mod tests {
                     return Some(says("done"));
                 }
                 let answers = answers(&request.messages);
-                if let Some(wrong) = answers.iter().find(|answer| !answer.contains(REFUSED)) {
+                // Refused by the bus, or not offered at all to an agent that may not start one.
+                if let Some(wrong) = answers.iter().find(|answer| {
+                    !answer.contains(REFUSED) && !answer.contains("There's no tool called")
+                }) {
                     return Some(says(&format!("started another agent: {wrong}")));
                 }
                 Some(match tries.get(answers.len()) {
@@ -3813,5 +3957,183 @@ mod tests {
                 .collect();
             assert!(errors.is_empty(), "invalid event: {errors:?}\n{value}");
         }
+    }
+
+    fn tool_names(seat: &BusSeat) -> Vec<String> {
+        offered_tools(seat)
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    }
+
+    /// One rule decides every tool from where the agent sits, for every kind of seat: a team of
+    /// one, a pipeline's first and later stages, a stage after a review stop, a lead and its
+    /// helpers, with and without a notebook, a person to ask and a conversation.
+    #[test]
+    fn the_tools_offered_follow_where_the_agent_sits() {
+        let seat = |mode, teammates, has_stage_before| BusSeat {
+            mode,
+            teammates,
+            has_stage_before,
+            answering: false,
+            notebook: false,
+            operator: true,
+            conversation: false,
+        };
+        let cases: [(&str, BusSeat, &[&str]); 9] = [
+            (
+                "one agent, team mode",
+                seat(TeamBusMode::Team, 0, false),
+                &["ask_user"],
+            ),
+            (
+                "one agent, pipeline",
+                seat(TeamBusMode::Pipeline, 0, false),
+                &["ask_user"],
+            ),
+            (
+                "a pipeline's first stage",
+                seat(TeamBusMode::Pipeline, 2, false),
+                &["ask_user"],
+            ),
+            (
+                "a later stage",
+                seat(TeamBusMode::Pipeline, 2, true),
+                &["roster", "ask", "ask_user"],
+            ),
+            (
+                "a lead",
+                seat(TeamBusMode::Team, 2, false),
+                &["roster", "dispatch", "ask", "handoff", "ask_user"],
+            ),
+            (
+                "a helper answering a question",
+                BusSeat {
+                    answering: true,
+                    ..seat(TeamBusMode::Team, 2, false)
+                },
+                &["ask_user"],
+            ),
+            (
+                "the command line, nobody to ask",
+                BusSeat {
+                    operator: false,
+                    ..seat(TeamBusMode::Pipeline, 2, true)
+                },
+                &["roster", "ask"],
+            ),
+            (
+                "with a notebook and a conversation",
+                BusSeat {
+                    notebook: true,
+                    conversation: true,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &[
+                    "ask_user",
+                    "memory_search",
+                    "memory_read",
+                    "memory_write",
+                    "checkpoint",
+                    "earlier_work",
+                ],
+            ),
+            (
+                "a conversation, but nobody to ask",
+                BusSeat {
+                    conversation: true,
+                    operator: false,
+                    ..seat(TeamBusMode::Team, 0, false)
+                },
+                &[],
+            ),
+        ];
+        for (what, seat, expected) in cases {
+            assert_eq!(tool_names(&seat), expected, "{what}");
+            assert!(!tool_names(&seat).contains(&"report".to_owned()), "{what}");
+        }
+    }
+
+    /// The seat is read from the team: review stops are not teammates, a stage straight after one
+    /// has no stage before it to ask, and what a session is for comes from who opened it.
+    #[tokio::test]
+    async fn a_seat_is_read_from_the_team_file() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let mut stop = test_agent("stop", OFFLINE);
+        stop.kind = crate::config::AgentKind::Operator;
+        let mut checker = test_agent("checker", OFFLINE);
+        checker.checks = Some("writer".to_owned());
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                test_agent("researcher", OFFLINE),
+                stop,
+                test_agent("writer", OFFLINE),
+                checker,
+            ],
+            edges: vec![
+                edge("researcher", "stop"),
+                edge("stop", "writer"),
+                edge("writer", "checker"),
+            ],
+            ..team_of("seat-team", "researcher")
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive,
+            Duration::from_secs(1),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let names = |connection: &TeamBusConnection| -> Vec<String> {
+            connection
+                .tool_definitions(false)
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap_or_default().to_owned())
+                .collect()
+        };
+        let researcher = bus.connection("researcher").await?;
+        let writer = bus.connection("writer").await?;
+        let checker = bus.connection("checker").await?;
+        let seat = bus.seat(&writer.holder, false);
+        assert_eq!(
+            seat.teammates, 2,
+            "the review stop is the person, not a teammate"
+        );
+        assert!(
+            !seat.has_stage_before,
+            "the stage before the writer is a review stop"
+        );
+        assert!(names(&researcher).is_empty() && names(&writer).is_empty());
+        assert_eq!(names(&checker), ["roster", "ask"]);
+        assert_eq!(researcher.purpose(), crate::agent::WORK);
+        assert_eq!(checker.purpose(), "check");
+        let helper = bus
+            .connection_with_context(
+                "writer",
+                DelegationContext {
+                    path: vec!["checker".into(), "writer".into()],
+                    depth: 1,
+                    answering: false,
+                },
+            )
+            .await?;
+        assert_eq!(helper.purpose(), "helper");
+        let answering = bus
+            .connection_with_context(
+                "researcher",
+                DelegationContext {
+                    path: vec!["checker".into(), "researcher".into()],
+                    depth: 1,
+                    answering: true,
+                },
+            )
+            .await?;
+        assert_eq!(answering.purpose(), "ask_answer");
+        assert_eq!(researcher.time_zone(), None);
+        Ok(())
     }
 }

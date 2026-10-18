@@ -99,6 +99,23 @@ describe('TeamFileModel mutations touch only the affected lines', () => {
     expect(model.toYaml()).not.toMatch(/^spend:/m)
   })
 
+  it('keeps the web limits when the money limit changes or goes, on the team and on an agent', () => {
+    const source = 'schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 1\n  web:\n    maxPageTokens: 16000\nagents:\n  - id: a\n    name: A\n    role: r\n    model: m\n    spend:\n      perRun: 0.5\n      web:\n        maxPages: 2\nedges: []\n'
+    const model = TeamFileModel.parse(source)
+    model.setSpend(null)
+    expect(model.snapshot().spend).toEqual({ web: { maxPageTokens: 16000 } })
+    model.setSpend(3)
+    expect(model.snapshot().spend).toEqual({ perRun: 3, web: { maxPageTokens: 16000 } })
+    model.setAgentSpend('a', null)
+    expect(model.snapshot().agents[0].spend).toEqual({ web: { maxPages: 2 } })
+    model.setAgentSpend('a', 0.25)
+    expect(model.snapshot().agents[0].spend).toEqual({ perRun: 0.25, web: { maxPages: 2 } })
+    const plain = TeamFileModel.parse('schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    name: A\n    role: r\n    model: m\n    spend:\n      perRun: 0.5\nedges: []\n')
+    plain.setAgentSpend('a', null)
+    expect(plain.snapshot().agents[0].spend).toBeUndefined()
+    expect(plain.toYaml()).not.toMatch(/spend:/)
+  })
+
   it('writes a new team with $1.00 a run (ADR 0068)', () => {
     expect(TeamFileModel.create('blog', 'Blog').snapshot().spend).toEqual({ perRun: 1 })
   })

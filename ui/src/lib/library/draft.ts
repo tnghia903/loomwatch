@@ -1,6 +1,6 @@
 import { stringify } from 'yaml'
 
-import { DEFAULT_MODEL } from '../ai/modelIds'
+import { DEFAULT_MODEL, modelForJob, NEW_AGENT } from '../ai/modelIds'
 import type { AgentAllow, AgentConfig, CapabilityRef } from '../team-file/types'
 import { DEFAULT_AGENT_ROLE } from './createAgent'
 import { isFigureChoice, type FigureChoice } from './figures'
@@ -40,15 +40,18 @@ export interface AgentDraft {
   figure: FigureChoice | null
 }
 
-export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, model: DEFAULT_MODEL, effort: '', skills: [], tools: [], toolAllow: {}, reads: [], doneWhen: [], allow: {}, figure: null }
+/** A new agent starts as the model table says one made from nothing should (`NEW_AGENT`). */
+const NEW_AGENT_CHOICE = modelForJob(NEW_AGENT)
+
+export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, model: NEW_AGENT_CHOICE.model, effort: NEW_AGENT_CHOICE.thinkingEffort ?? '', skills: [], tools: [], toolAllow: {}, reads: [], doneWhen: [], allow: {}, figure: null }
 
 export function draftFromJob(job: JobSpec): AgentDraft {
   return {
     name: job.name,
     does: job.does ?? '',
     instructions: job.instructions,
-    model: job.model || DEFAULT_MODEL,
-    effort: job.model ? job.thinkingEffort ?? '' : '',
+    model: job.model || NEW_AGENT_CHOICE.model,
+    effort: job.model ? job.thinkingEffort ?? '' : NEW_AGENT_CHOICE.thinkingEffort ?? '',
     skills: [...(job.skills ?? [])],
     tools: [...(job.tools ?? [])],
     toolAllow: keptFor(job.toolAllow ?? {}, job.tools ?? []),

@@ -31,7 +31,10 @@ use serde_json::{Value, json};
 /// The key file's name in the state folder, where it is kept off a Mac: no agent may touch it.
 pub(crate) use keys::FILE_NAME as KEY_FILE;
 pub use keys::Keys;
-pub use models::{Catalog, DEFAULT_MODEL, FAST_MODEL, Model, Models, openrouter_id};
+pub use models::{
+    Catalog, DEFAULT_MODEL, FAST_MODEL, JobNeeds, MODEL_TIERS, Model, ModelTiers, Models,
+    openrouter_id,
+};
 
 use crate::agent::{ApiKey, base_url, is_loopback_http};
 use crate::api::ApiError;

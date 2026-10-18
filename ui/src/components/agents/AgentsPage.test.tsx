@@ -26,7 +26,8 @@ describe('Building an agent', () => {
     expect(screen.getByRole('heading', { name: 'Build an agent' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Back to the team' })).toHaveAttribute('href', '/?path=desk%2Fresearch.yaml&view=agents')
     const jobs = screen.getByRole('region', { name: 'Start from a job' })
-    expect(within(jobs).getByRole('button', { name: /^Researcher.*on Claude Sonnet 5\.5/ })).toBeInTheDocument()
+    // On its job's model from the model table: the strong one, while quality comes first.
+    expect(within(jobs).getByRole('button', { name: /^Researcher.*on Claude Opus 5\.5/ })).toBeInTheDocument()
     fireEvent.click(within(jobs).getByRole('button', { name: /^Researcher/ }))
     expect(window.location.pathname + window.location.search).toBe('/agents/new?from=researcher&team=desk%2Fresearch.yaml')
     expect(screen.getByText('Builder from researcher')).toBeInTheDocument()

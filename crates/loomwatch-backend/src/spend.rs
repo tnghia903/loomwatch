@@ -21,6 +21,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::WebLimits;
 use crate::config::{AgentConfig, TeamConfig};
 
 /// What a new team, and every starter team, is written with: one run may spend $1.00. A team file
@@ -38,12 +39,86 @@ pub const MAX_TOP_UP_USD: f64 = 1000.0;
 pub struct SpendConfig {
     /// The most one run may spend, in dollars.
     pub per_run: Option<f64>,
+    /// How much web reading one model call may do. On an agent, each figure it leaves out is the
+    /// team's; one the team leaves out too is the built-in default ([`WebLimits::default`]).
+    pub web: WebConfig,
 }
 
 impl SpendConfig {
     /// The figure, when it is one a run can be held to.
     fn limit(self) -> Option<f64> {
         self.per_run.filter(|usd| usd.is_finite() && *usd > 0.0)
+    }
+}
+
+/// `spend.web`: what one model call may read from the web. Every figure is optional.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct WebConfig {
+    /// How much of one page is read, in tokens (a token is about three quarters of a word).
+    pub max_page_tokens: Option<u32>,
+    /// Pages read in one model call.
+    pub max_pages: Option<u32>,
+    /// Searches in one model call.
+    pub max_searches: Option<u32>,
+    /// Searches and page reads together in one model call.
+    pub max_steps: Option<u32>,
+}
+
+/// The range each `spend.web` figure may take: what `OpenRouter` accepts (a fetch reads at most 50
+/// pages and a request takes at most 30 server-tool steps), and no page so short it says nothing.
+const WEB_RANGES: [(&str, u32, u32); 4] = [
+    ("maxPageTokens", 500, 100_000),
+    ("maxPages", 1, 50),
+    ("maxSearches", 1, 25),
+    ("maxSteps", 1, 30),
+];
+
+impl WebConfig {
+    /// This block with what it leaves out taken from `team`'s.
+    #[must_use]
+    pub fn over(self, team: Self) -> Self {
+        Self {
+            max_page_tokens: self.max_page_tokens.or(team.max_page_tokens),
+            max_pages: self.max_pages.or(team.max_pages),
+            max_searches: self.max_searches.or(team.max_searches),
+            max_steps: self.max_steps.or(team.max_steps),
+        }
+    }
+
+    /// The limits a session is held to: each figure given, or the built-in default (a page length;
+    /// no count, which leaves the counts to `OpenRouter`).
+    #[must_use]
+    pub fn limits(self) -> WebLimits {
+        let default = WebLimits::default();
+        WebLimits {
+            page_tokens: self.max_page_tokens.unwrap_or(default.page_tokens),
+            pages: self.max_pages.or(default.pages),
+            searches: self.max_searches.or(default.searches),
+            steps: self.max_steps.or(default.steps),
+        }
+    }
+
+    /// A figure outside what `OpenRouter` takes, said for the file it is in.
+    ///
+    /// # Errors
+    ///
+    /// Names the field, its value and the range.
+    pub fn validate(self, whose: &str) -> Result<(), String> {
+        let values = [
+            self.max_page_tokens,
+            self.max_pages,
+            self.max_searches,
+            self.max_steps,
+        ];
+        for ((field, least, most), value) in WEB_RANGES.into_iter().zip(values) {
+            if let Some(value) = value.filter(|value| !(least..=most).contains(value)) {
+                return Err(format!(
+                    "{whose} spend.web.{field} is {value}; it must be between {least} and {most}."
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -426,6 +501,37 @@ pub fn usd(amount: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The team schema states the same ranges and defaults the daemon holds a team file to, so the
+    /// editor and the daemon agree on what a valid `spend.web` is.
+    #[test]
+    fn the_schema_states_the_web_limits_the_daemon_holds() {
+        let schema: serde_json::Value =
+            serde_yaml::from_str(crate::api::TEAM_SCHEMA).expect("schema");
+        let fields = &schema["$defs"]["WebLimits"]["properties"];
+        let default = WebLimits::default();
+        let defaults = [
+            Some(default.page_tokens),
+            default.pages,
+            default.searches,
+            default.steps,
+        ];
+        for ((field, least, most), default) in WEB_RANGES.into_iter().zip(defaults) {
+            let field = &fields[field];
+            assert_eq!(field["minimum"], least, "{field}");
+            assert_eq!(field["maximum"], most, "{field}");
+            // A count with no default is left to OpenRouter, and the schema says no default.
+            assert_eq!(
+                field.get("default").and_then(serde_json::Value::as_u64),
+                default.map(u64::from),
+                "{field}"
+            );
+        }
+        assert_eq!(
+            schema["$defs"]["Spend"]["properties"]["web"]["$ref"],
+            "#/$defs/WebLimits"
+        );
+    }
 
     fn spool(limit: f64) -> RunSpend {
         RunSpend {

@@ -11,8 +11,6 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use super::skills::{SkillEntry, prompt_section};
-
 /// The project notes file an agent reads from its work folder: the team's Brief when it is
 /// delivered as a file (`docs/TEAM_MEMORY.md`, channel 2), or what the person keeps there. The
 /// name the Agent Skills apps share.
@@ -21,10 +19,14 @@ pub(crate) const PROJECT_NOTES: &str = "AGENTS.md";
 const MAX_NOTES_CHARS: usize = 40_000;
 
 /// The work folder's `AGENTS.md`, cut to [`MAX_NOTES_CHARS`], or `None` when there is none.
+///
+/// The Brief `LoomWatch` writes there itself is left out: the opening message already carries it,
+/// under "What the team knows", so the agent would read it twice on every call.
+/// [`loomwatch_brief`] reads it back for a summary that drops the opening message.
 pub(crate) fn project_notes(cwd: &Path) -> Option<String> {
     let text = std::fs::read_to_string(cwd.join(PROJECT_NOTES)).ok()?;
     let text = text.trim();
-    if text.is_empty() {
+    if text.is_empty() || text.starts_with(crate::memory::NATIVE_FILE_MARKER) {
         return None;
     }
     if text.chars().count() <= MAX_NOTES_CHARS {
@@ -38,22 +40,37 @@ pub(crate) fn project_notes(cwd: &Path) -> Option<String> {
     Some(cut)
 }
 
+/// The Brief `LoomWatch` wrote as the work folder's `AGENTS.md`, without the line saying who wrote
+/// it, or `None` when the file is the person's own or there is none.
+pub(crate) fn loomwatch_brief(cwd: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(cwd.join(PROJECT_NOTES)).ok()?;
+    let text = text.trim();
+    if !text.starts_with(crate::memory::NATIVE_FILE_MARKER) {
+        return None;
+    }
+    let brief = text.split_once("-->").map_or(text, |(_, rest)| rest).trim();
+    (!brief.is_empty()).then(|| brief.to_owned())
+}
+
 /// What the agent can do in this session, so the instructions mention only tools it has.
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Abilities {
     pub files: bool,
     pub commands: bool,
-    pub web: bool,
+    /// Reading the web, with how many words of a page it reads.
+    pub web: Option<u32>,
     pub plan: bool,
     /// The Team Bus's `ask_user` is among its tools.
     pub ask_user: bool,
 }
 
+/// The built-in instructions, then `skills` (the rendered `## Skills` section, or nothing), the
+/// person's own project notes and `extra`.
 pub(crate) fn system_prompt(
     cwd: &Path,
     abilities: Abilities,
-    skills: &[SkillEntry],
+    skills: &str,
     notes: Option<&str>,
     extra: Option<&str>,
 ) -> String {
@@ -70,7 +87,7 @@ pub(crate) fn system_prompt(
              calls, not in a message of its own.\n",
         );
     }
-    if abilities.files || abilities.commands || abilities.web || abilities.plan {
+    if abilities.files || abilities.commands || abilities.web.is_some() || abilities.plan {
         // Every message re-reads the whole conversation, so one message asking for five things
         // costs far less than five messages asking for one each.
         prompt.push_str(
@@ -95,10 +112,20 @@ pub(crate) fn system_prompt(
              provides. The person may be asked first, so don't run commands you don't need.\n",
         );
     }
-    if abilities.web {
-        prompt.push_str(
-            "- You can search the web and read web pages. Prefer primary sources, and check that \
-             a source says what you cite it for.\n",
+    if let Some(words) = abilities.web {
+        let words = if words >= 1_000 {
+            format!("{},{:03}", words / 1_000, words % 1_000)
+        } else {
+            words.to_string()
+        };
+        // A page read stays in the conversation and is paid for again on every later call, so
+        // reading it twice pays for it twice from then on.
+        let _ = writeln!(
+            prompt,
+            "- You can search the web and read web pages. Prefer primary sources, and check that a \
+             source says what you cite it for. A page is read up to about {words} words. What you \
+             read stays in this conversation, so check a claim against it there rather than \
+             opening the page again."
         );
     }
     prompt.push_str(
@@ -126,10 +153,9 @@ pub(crate) fn system_prompt(
          - Then reply with the result itself, plainly. Don't describe the steps you took unless \
          the person asked.\n",
     );
-    let skills = prompt_section(skills);
     if !skills.is_empty() {
         prompt.push('\n');
-        prompt.push_str(&skills);
+        prompt.push_str(skills);
     }
     if let Some(notes) = notes {
         let _ = write!(
@@ -154,14 +180,14 @@ mod tests {
         let none = Abilities {
             files: false,
             commands: false,
-            web: false,
+            web: None,
             plan: false,
             ask_user: false,
         };
         let talking = system_prompt(
             Path::new("/w"),
             none,
-            &[],
+            "",
             None,
             Some("You are Ask LoomWatch."),
         );
@@ -170,17 +196,45 @@ mod tests {
         let all = Abilities {
             files: true,
             commands: true,
-            web: true,
+            web: Some(6_000),
             plan: true,
             ask_user: true,
         };
-        let working = system_prompt(Path::new("/w"), all, &[], Some("Cite every source."), None);
+        let working = system_prompt(Path::new("/w"), all, "", Some("Cite every source."), None);
         assert!(working.contains("update_plan") && working.contains("Your work folder is /w"));
         assert!(working.contains("in the same message as the step's other tool calls"));
         assert!(working.contains("ask for all of them in one message"));
         assert!(!talking.contains("in one message"));
         assert!(working.contains("ask_user"));
         assert!(working.contains("From AGENTS.md in your work folder:\n\nCite every source.\n"));
+        // The page cut is said, and why a page isn't opened twice.
+        assert!(working.contains("A page is read up to about 6,000 words."));
+        assert!(working.contains("rather than opening the page again"));
+        assert!(!talking.contains("web pages"));
+    }
+
+    /// The Brief `LoomWatch` writes as `AGENTS.md` is in the opening message already, so the
+    /// instructions don't carry it too; the person's own `AGENTS.md` still is read.
+    #[test]
+    fn loomwatchs_own_brief_file_is_not_read_twice() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-brief-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        let body = format!(
+            "{}team t, agent a. Rebuilt on every run; edit the Brief files beside the team file \
+             instead. -->\n\n# What the team knows\n\nWrite in French.\n",
+            crate::memory::NATIVE_FILE_MARKER
+        );
+        std::fs::write(folder.join(PROJECT_NOTES), &body).expect("brief");
+        assert_eq!(project_notes(&folder), None);
+        let brief = loomwatch_brief(&folder).expect("the brief, for a summary");
+        assert!(brief.starts_with("# What the team knows") && brief.ends_with("Write in French."));
+        std::fs::write(folder.join(PROJECT_NOTES), "Use British spelling.").expect("own notes");
+        assert_eq!(
+            project_notes(&folder).as_deref(),
+            Some("Use British spelling.")
+        );
+        assert_eq!(loomwatch_brief(&folder), None);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

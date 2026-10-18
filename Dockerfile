@@ -5,6 +5,8 @@ RUN corepack enable
 COPY ui/package.json ui/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY ui/ ./
+# The model table the app shares with the daemon (ui/src/lib/ai/modelIds.ts).
+COPY schemas/ ../schemas/
 RUN pnpm run build
 
 FROM rust:1.98-bookworm AS backend-builder

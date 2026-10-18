@@ -7,13 +7,17 @@
 //! - `cache_control` for Anthropic models, which cache only when asked;
 //! - `session_id`, so a session's calls stay on one route and keep their cache;
 //! - the `openrouter:web_search` and `openrouter:web_fetch` server tools for an agent allowed the
-//!   web;
+//!   web, held to its `spend.web` limits: how much of a page is read and, when the team sets them,
+//!   how many pages, searches and server-tool steps one call takes. A provider that refuses the
+//!   limits gets the tools without them, so a run never fails over a limit;
 //! - exact `usage.cost`, in dollars, in the stream's last chunk.
 //!
 //! Requests are retried only before anything has streamed: once text has reached the operator, a
 //! retry would write it twice. That covers a busy model reported inside the stream, as `OpenRouter`
 //! does once it has answered `200`, as long as it comes before the model's first word.
 
+use std::collections::HashSet;
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use reqwest::{Client, StatusCode};
@@ -78,6 +82,14 @@ const ATTEMPTS: u32 = 4;
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// An error body worth reading is a few hundred bytes.
 const MAX_ERROR_BYTES: usize = 64 * 1024;
+/// Words in a refusal that say it was the web limits, not the request, the provider could not take.
+const LIMIT_FIELDS: [&str; 5] = [
+    "max_tool_calls",
+    "max_uses",
+    "max_content_tokens",
+    "server tool",
+    "openrouter:web",
+];
 
 /// A connection to `OpenRouter` with the operator's key.
 #[derive(Debug)]
@@ -86,6 +98,9 @@ pub struct OpenRouter {
     base: String,
     key: ApiKey,
     backoff: Duration,
+    /// Models whose provider refused the web limits, so they get the web tools without them for as
+    /// long as the daemon runs, and don't pay for a refused call each time.
+    unlimited: Mutex<HashSet<String>>,
 }
 
 impl OpenRouter {
@@ -121,6 +136,7 @@ impl OpenRouter {
             base,
             key,
             backoff: Duration::from_secs(1),
+            unlimited: Mutex::default(),
         })
     }
 
@@ -137,7 +153,8 @@ impl OpenRouter {
         deltas: &dyn DeltaSink,
         cancel: &Cancel,
     ) -> Result<Completion, CallError> {
-        let body = body(request);
+        let mut limited = request.server_tools.any() && !self.refuses_limits(request.model);
+        let mut body = body(request, limited);
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -166,6 +183,12 @@ impl OpenRouter {
                 match read_stream(response, request.model, deltas, cancel).await? {
                     Streamed::Whole(completion) => return Ok(completion),
                     Streamed::Refused { status, said } => {
+                        if limited && refused_the_limits(status, &said) {
+                            self.forget_limits(request.model);
+                            limited = false;
+                            body = self::body(request, false);
+                            continue;
+                        }
                         if attempt < ATTEMPTS && retryable(status) {
                             self.wait(attempt, None, cancel).await?;
                             continue;
@@ -185,8 +208,31 @@ impl OpenRouter {
                 continue;
             }
             let said = read_error_body(response).await;
+            if limited && refused_the_limits(status, &said) {
+                self.forget_limits(request.model);
+                limited = false;
+                body = self::body(request, false);
+                continue;
+            }
             return Err(status_error(status, &said, request.model).into());
         }
+    }
+
+    fn refuses_limits(&self, model: &str) -> bool {
+        self.unlimited
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(model)
+    }
+
+    fn forget_limits(&self, model: &str) {
+        eprintln!(
+            "warning: {model}'s provider refused the web limits; it reads the web without them"
+        );
+        self.unlimited
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(model.to_owned());
     }
 
     async fn wait(
@@ -208,8 +254,18 @@ fn retryable(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
 
-/// The request body.
-fn body(request: &ChatRequest<'_>) -> Value {
+/// Whether a refusal was the provider saying it can't take the web limits: a bad request that
+/// names one of them.
+fn refused_the_limits(status: StatusCode, said: &str) -> bool {
+    let lower = said.to_lowercase();
+    matches!(
+        status,
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+    ) && LIMIT_FIELDS.iter().any(|field| lower.contains(field))
+}
+
+/// The request body. `limited` holds the web tools to the request's limits.
+fn body(request: &ChatRequest<'_>, limited: bool) -> Value {
     let mut tools: Vec<Value> = request
         .tools
         .iter()
@@ -227,12 +283,29 @@ fn body(request: &ChatRequest<'_>) -> Value {
     let ServerTools {
         web_search,
         web_fetch,
+        limits,
     } = request.server_tools;
+    // A page longer than the limit is cut rather than filling the conversation. A figure the team
+    // leaves out is left to `OpenRouter`.
+    let server_tool = |kind: &str, parameters: Map<String, Value>| {
+        if limited && !parameters.is_empty() {
+            json!({"type": kind, "parameters": parameters})
+        } else {
+            json!({"type": kind})
+        }
+    };
+    let uses = |count: Option<u32>| {
+        count
+            .map(|count| Map::from_iter([("max_uses".to_owned(), json!(count))]))
+            .unwrap_or_default()
+    };
     if web_search {
-        tools.push(json!({"type": "openrouter:web_search"}));
+        tools.push(server_tool("openrouter:web_search", uses(limits.searches)));
     }
     if web_fetch {
-        tools.push(json!({"type": "openrouter:web_fetch"}));
+        let mut parameters = uses(limits.pages);
+        parameters.insert("max_content_tokens".into(), json!(limits.page_tokens));
+        tools.push(server_tool("openrouter:web_fetch", parameters));
     }
     let mut body = Map::new();
     body.insert("model".into(), json!(request.model));
@@ -246,6 +319,14 @@ fn body(request: &ChatRequest<'_>) -> Value {
     if !tools.is_empty() {
         body.insert("tools".into(), Value::Array(tools));
         body.insert("parallel_tool_calls".into(), json!(true));
+    }
+    // The steps one call's server tools may take together, when the team sets it: `max_uses`
+    // binds only some search engines, and this binds them all.
+    if let Some(steps) = limits
+        .steps
+        .filter(|_| limited && (web_search || web_fetch))
+    {
+        body.insert("max_tool_calls".into(), json!(steps));
     }
     if let Some(effort) = request.effort {
         body.insert("reasoning".into(), json!({"effort": effort}));
@@ -547,7 +628,7 @@ fn finish(message: Assembled) -> Completion {
             },
         })
         .collect();
-    let server_tool_calls = message
+    let server_tool_calls: Vec<Value> = message
         .reasoning_details
         .iter()
         .filter(|detail| {
@@ -560,12 +641,27 @@ fn finish(message: Assembled) -> Completion {
         None if !tool_calls.is_empty() => Finish::ToolCalls,
         None => Finish::Stop,
     };
+    // What the provider ran, counted from the calls themselves when its usage doesn't say.
+    let mut usage = message.usage;
+    let ran = |kind: &str| -> u64 {
+        let count = server_tool_calls
+            .iter()
+            .filter(|call| {
+                call.get("tool_name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.ends_with(kind))
+            })
+            .count();
+        u64::try_from(count).unwrap_or(u64::MAX)
+    };
+    usage.web_searches = usage.web_searches.max(ran("web_search"));
+    usage.web_fetches = usage.web_fetches.max(ran("web_fetch"));
     Completion {
         content: message.content,
         reasoning_details: message.reasoning_details,
         tool_calls,
         finish,
-        usage: message.usage,
+        usage,
         server_tool_calls,
     }
 }
@@ -582,6 +678,8 @@ fn read_usage(usage: &Value) -> Usage {
         output_tokens: number("/completion_tokens"),
         reasoning_tokens: number("/completion_tokens_details/reasoning_tokens"),
         cost_usd: usage.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
+        web_searches: number("/server_tool_use/web_search_requests"),
+        web_fetches: number("/server_tool_use/web_fetch_requests"),
     }
 }
 
@@ -693,6 +791,7 @@ mod tests {
             server_tools: ServerTools {
                 web_search: true,
                 web_fetch: false,
+                limits: crate::agent::WebLimits::default(),
             },
             max_tokens: 8192,
             session_key: "s-1",
@@ -727,13 +826,18 @@ mod tests {
             description: "Read a file.".into(),
             parameters: json!({"type": "object"}),
         }];
-        let body = body(&request(&messages, &tools, "anthropic/claude-haiku-5.5"));
+        let body = body(
+            &request(&messages, &tools, "anthropic/claude-haiku-5.5"),
+            true,
+        );
         assert_eq!(body["stream"], true);
         assert_eq!(body["reasoning"], json!({"effort": "medium"}));
         assert_eq!(body["cache_control"], json!({"type": "ephemeral"}));
         assert_eq!(body["session_id"], "s-1");
         assert_eq!(body["tools"][0]["function"]["name"], "read_file");
+        // By default only a page's length is held; how many searches is left to OpenRouter.
         assert_eq!(body["tools"][1], json!({"type": "openrouter:web_search"}));
+        assert!(body.get("max_tool_calls").is_none());
         assert_eq!(body["messages"][1]["content"], Value::Null);
         assert_eq!(
             body["messages"][1]["tool_calls"][0]["function"]["arguments"],
@@ -753,7 +857,123 @@ mod tests {
     }
 
     fn body_for_model(model: &str) -> Value {
-        body(&request(&[], &[], model))
+        body(&request(&[], &[], model), true)
+    }
+
+    /// Every model `OpenRouter` routes to gets the same limits, as the team file sets them; a model
+    /// without the web gets none; and a provider that refused them gets the bare tools.
+    #[test]
+    fn web_limits_go_to_every_model_that_reads_the_web() {
+        let limits = crate::agent::WebLimits {
+            page_tokens: 12_000,
+            pages: Some(4),
+            searches: Some(2),
+            steps: Some(6),
+        };
+        for model in [
+            "anthropic/claude-opus-5.5",
+            "openai/gpt-6.1-sol",
+            "google/gemini-4-argon",
+            "deepseek/deepseek-v4-pro",
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+        ] {
+            let both = ChatRequest {
+                server_tools: ServerTools {
+                    web_search: true,
+                    web_fetch: true,
+                    limits,
+                },
+                ..request(&[], &[], model)
+            };
+            let sent = body(&both, true);
+            assert_eq!(
+                sent["tools"],
+                json!([
+                    {"type": "openrouter:web_search", "parameters": {"max_uses": 2}},
+                    {"type": "openrouter:web_fetch", "parameters": {"max_uses": 4, "max_content_tokens": 12_000}},
+                ]),
+                "{model}"
+            );
+            assert_eq!(sent["max_tool_calls"], 6, "{model}");
+            let bare = body(&both, false);
+            assert_eq!(
+                bare["tools"],
+                json!([{"type": "openrouter:web_search"}, {"type": "openrouter:web_fetch"}]),
+                "{model}"
+            );
+            assert!(bare.get("max_tool_calls").is_none(), "{model}");
+            // The default holds only the page length, and leaves the counts to OpenRouter.
+            let default = ChatRequest {
+                server_tools: ServerTools {
+                    web_search: true,
+                    web_fetch: true,
+                    limits: crate::agent::WebLimits::default(),
+                },
+                ..request(&[], &[], model)
+            };
+            let sent = body(&default, true);
+            assert_eq!(
+                sent["tools"],
+                json!([
+                    {"type": "openrouter:web_search"},
+                    {"type": "openrouter:web_fetch", "parameters": {"max_content_tokens": 16_000}},
+                ]),
+                "{model}"
+            );
+            assert!(sent.get("max_tool_calls").is_none(), "{model}");
+            let offline = ChatRequest {
+                server_tools: ServerTools::default(),
+                ..request(&[], &[], model)
+            };
+            let sent = body(&offline, true);
+            assert!(sent.get("tools").is_none() && sent.get("max_tool_calls").is_none());
+        }
+    }
+
+    #[test]
+    fn a_refusal_of_the_limits_is_told_from_any_other() {
+        for said in [
+            "Invalid parameter: max_tool_calls is not supported for this model",
+            "tools[1].parameters.max_content_tokens: unknown field",
+            "This provider does not support server tools",
+            "openrouter:web_fetch is not available with this provider",
+        ] {
+            assert!(refused_the_limits(StatusCode::BAD_REQUEST, said), "{said}");
+        }
+        assert!(!refused_the_limits(
+            StatusCode::BAD_REQUEST,
+            "This endpoint's maximum context length is 200000 tokens"
+        ));
+        assert!(!refused_the_limits(
+            StatusCode::TOO_MANY_REQUESTS,
+            "max_tool_calls: slow down"
+        ));
+    }
+
+    /// `usage.server_tool_use` says what the provider ran; without it, the recorded calls do.
+    #[test]
+    fn web_searches_and_reads_are_counted_per_call() {
+        let usage = read_usage(&json!({
+            "prompt_tokens": 10,
+            "server_tool_use": {"web_search_requests": 2, "web_fetch_requests": 3},
+        }));
+        assert_eq!((usage.web_searches, usage.web_fetches), (2, 3));
+        let silent = Assembled {
+            reasoning_details: vec![
+                json!({"type": "reasoning.server_tool_call", "tool_name": "openrouter:web_fetch"}),
+                json!({"type": "reasoning.server_tool_call", "tool_name": "openrouter:web_fetch"}),
+                json!({"type": "reasoning.server_tool_call", "tool_name": "openrouter:web_search"}),
+                json!({"type": "reasoning.text", "text": "hm"}),
+            ],
+            ..Assembled::default()
+        };
+        let counted = finish(silent).usage;
+        assert_eq!((counted.web_searches, counted.web_fetches), (1, 2));
+        assert_eq!(
+            read_usage(&json!({})).web_fetches,
+            0,
+            "a provider that says nothing"
+        );
     }
 
     #[test]
