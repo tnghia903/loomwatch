@@ -140,7 +140,7 @@ function ReceiptEarned({ earned }: { earned: readonly RunEarned[] }) {
             <p><strong>{quest.name}.</strong> {line}</p>
             <p className="receipt-why">{quest.why}</p>
             <p className="receipt-earned-links">
-              <a className="link" href="/agents">{quest.reward === 'accessory' ? 'Any agent can wear it: choose in Your agents' : 'Any agent can be one: choose in Your agents'}</a>
+              <a className="link" href="/agents">{quest.reward === 'accessory' ? 'Any agent can wear it: choose in My agents' : 'Any agent can be one: choose in My agents'}</a>
               <a className="link" href="/quests">See every quest</a>
             </p>
           </div>

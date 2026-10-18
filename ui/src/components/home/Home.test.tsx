@@ -99,7 +99,7 @@ describe('Home', () => {
     expect(screen.getByRole('button', { name: 'New team' })).not.toHaveClass('btn-primary')
     const steps = within(screen.getByRole('list', { name: 'How it works' })).getAllByRole('listitem')
     expect(steps.map((step) => step.querySelector('strong')?.textContent)).toEqual(['Agents.', 'Workflow.', 'Chat.'])
-    const agents = await screen.findByRole('heading', { name: /Your agents/ })
+    const agents = await screen.findByRole('heading', { name: /My agents/ })
     const teams = screen.getByRole('heading', { name: /Your teams/ })
     expect(agents.compareDocumentPosition(teams) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // A team with no agents opens on its agents, the first thing to set up; one with agents, on its workflow.
@@ -244,7 +244,7 @@ describe('Home', () => {
     await screen.findByText(/No teams yet/)
     fireEvent.click(screen.getByRole('button', { name: 'New team' }))
     const dialog = screen.getByRole('dialog', { name: 'Create a team' })
-    expect(await within(dialog).findByRole('radio', { name: /Your agents/ })).toBeChecked()
+    expect(await within(dialog).findByRole('radio', { name: /My agents/ })).toBeChecked()
     expect(within(dialog).queryByRole('radio', { name: /Empty team/ })).toBeNull()
     fireEvent.change(within(dialog).getByLabelText('Team name'), { target: { value: 'Digest' } })
     // Two agents, none ticked yet: nothing to start with, so nothing is created.
@@ -274,7 +274,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New team' }))
     const dialog = screen.getByRole('dialog', { name: 'Create a team' })
     expect(await within(dialog).findByRole('link', { name: /Build your first agent/ })).toHaveAttribute('href', '/agents/new')
-    expect(within(dialog).getByRole('radio', { name: /Your agents/ })).toBeDisabled()
+    expect(within(dialog).getByRole('radio', { name: /My agents/ })).toBeDisabled()
     expect(within(dialog).getByRole('radio', { name: /One assistant/ })).toBeChecked()
   })
 

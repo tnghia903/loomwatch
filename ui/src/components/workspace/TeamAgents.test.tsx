@@ -202,7 +202,7 @@ describe('a team’s agents, the first of its views', () => {
     expect(capabilities?.filter((capability) => capability.kind !== 'knowledge').map((capability) => capability.name)).toEqual(['algorithmic-art', 'github', 'notion'])
   })
 
-  it('chats with an agent placed from Your agents with what this team gives it to read', async () => {
+  it('chats with an agent placed from My agents with what this team gives it to read', async () => {
     const versioned = { ...reader, model: 'anthropic/claude-sonnet-5.5' }
     const written = benchDaemon([versioned])
     renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader', version: 1 } }], selected: 'scope', savedJobs: [versioned] })
@@ -213,7 +213,7 @@ describe('a team’s agents, the first of its views', () => {
     expect(written.get('.jobs/.bench/reader.yaml')!.agents[0].capabilities?.filter((capability) => capability.kind === 'knowledge')).toEqual(teamReads)
   })
 
-  it('shows the version’s tools on the bench of an agent placed from Your agents, and the team’s reads', async () => {
+  it('shows the version’s tools on the bench of an agent placed from My agents, and the team’s reads', async () => {
     // Its bench loads the agent from Your agents; nothing else is asked of the daemon here.
     const tooled = { ...reader, tools: ['linear'] }
     vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).endsWith('/api/jobs')
@@ -229,7 +229,7 @@ describe('a team’s agents, the first of its views', () => {
     expect(screen.queryByRole('region', { name: 'Try it' })).toBeNull()
   })
 
-  it('lists what an agent from Your agents reads in every team apart from what this team gives it', async () => {
+  it('lists what an agent from My agents reads in every team apart from what this team gives it', async () => {
     const reading = { ...reader, reads: [{ name: 'Style guide', path: '/Users/me/style' }] }
     vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).endsWith('/api/jobs')
       ? Promise.resolve(new Response(JSON.stringify({ jobs: [reading], problems: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))

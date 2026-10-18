@@ -36,7 +36,7 @@ function Builder({ start, onChange, ...rest }: { start: Partial<AgentDraft>; onC
 const readsBlock = () => screen.getByRole('region', { name: 'What it reads' })
 const drawer = () => within(readsBlock()).getAllByRole('listitem').map((item) => item.querySelector('b')?.textContent)
 
-describe('By hand: what one of Your agents reads, in every team it joins', () => {
+describe('By hand: what one of My agents reads, in every team it joins', () => {
   it('starts reading nothing, and says what it is given here it reads in every team', () => {
     daemon()
     render(<Builder start={{}} />)

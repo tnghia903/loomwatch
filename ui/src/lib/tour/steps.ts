@@ -172,14 +172,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-builder"][data-tour-saved]')
       ? {
           title: 'Now put it in a team',
-          body: 'It is in Your agents now, ready for any team. Go to Your teams to make one.',
+          body: 'It is in My agents now, ready for any team. Go to Your teams to make one.',
           target: ['[data-tour="your-teams"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
         }
       : {
-          title: 'Save it to Your agents',
-          body: 'Press Save to Your agents. Every team you add it to keeps the version it was given, until you update it there.',
+          title: 'Save it to My agents',
+          body: 'Press Save to My agents. Every team you add it to keeps the version it was given, until you update it there.',
           target: ['[data-tour="save-agent"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
@@ -192,7 +192,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="new-team-dialog"]')
       ? {
           title: 'Start it with your agent',
-          body: 'Type any name, tick the agent you built under Your agents, and press Create team. A team always starts with at least one agent.',
+          body: 'Type any name, tick the agent you built under My agents, and press Create team. A team always starts with at least one agent.',
           target: ['[data-tour="new-team-dialog"]'],
           sides: ['right', 'left'],
           advance: 'action',

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { parseAgentsRoute, withView } from './route'
 
-describe('Your agents’ addresses', () => {
+describe('My agents’ addresses', () => {
   it('opens an agent on Build unless the address asks for its Chat', () => {
     expect(parseAgentsRoute('/agents', '')).toEqual({ kind: 'list' })
     expect(parseAgentsRoute('/agents/reader', '')).toEqual({ kind: 'agent', id: 'reader', team: null, view: 'build' })

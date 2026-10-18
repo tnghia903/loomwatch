@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { BookmarkCheck, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, UserRound, Wrench, type LucideIcon } from 'lucide-react'
-import { modelNameFromId } from '../../lib/ai/modelIds'
+import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { usedInRun, type UsedInRun } from '../../lib/library/observed'
+import { isOpenTeam, teamAgentSource, useAgentUses, type TeamOwnAgent } from '../../lib/library/uses'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { modelForPreset, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
@@ -22,7 +23,7 @@ import { keys } from '../../lib/platform'
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
 const USED = 'Used in this run'
-const YOURS = 'Your agents'
+const YOURS = 'My agents'
 const STEPS = 'Workflow steps'
 const SKILLS = 'Skills'
 const CONNECTIONS = 'Connections'
@@ -55,6 +56,10 @@ export interface LibraryProps {
   notion?: NotionPanel
   /** The open team's file, so "Build a new agent" comes back to it. */
   teamPath?: string | null
+  /** This team's own agents, as the canvas has them now, listed with My agents. */
+  teamAgents?: readonly { id: string; name: string }[]
+  /** Select one of this team's agents on the canvas and bring it into view. */
+  onRevealAgent?: (id: string) => void
   /** The panel's width in pixels, and how dragging its edge changes it. Absent: it cannot be resized. */
   width?: number
   onResize?: (width: number) => void
@@ -106,8 +111,10 @@ interface PaletteItem {
   payload: object
   /** A saved job's id: the row offers to remove it. */
   jobId?: string
-  /** One of Your agents wears its figure here, as it does on Home and on the canvas. */
+  /** One of My agents wears its figure here, as it does on Home and on the canvas. */
   figure?: FigureChoice
+  /** The row's tooltip, when it says more than its detail and engine lines. */
+  hint?: string
   /** A skill or knowledge source: the row offers its details. */
   capability?: { item: DetectedCapability; kind: CapabilityKind }
   /** What a click does instead of adding: a folder or file already has a card, so it is found. */
@@ -122,6 +129,17 @@ interface PaletteItem {
 
 function jobItem(preset: RolePreset, jobId?: string): PaletteItem {
   return { name: preset.label, detail: preset.does, engine: `on ${modelNameFromId(modelForPreset(preset).model)}`, Icon: preset.icon ? ROLE_ICONS[preset.icon] : BookmarkCheck, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: roleSource(preset) as object, ...(jobId ? { jobId } : {}) }
+}
+
+/** One of this team's own agents: it is already on the canvas, so a click finds its card. */
+function hereItem(agent: { id: string; name: string }, reveal?: (id: string) => void): PaletteItem {
+  return { name: agent.name, detail: 'On this canvas', hint: `Show ${agent.name} on the canvas`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: !reveal, payload: {}, draggable: false, figure: figureFor(agent.id), ...(reveal ? { onActivate: () => reveal(agent.id), Trailing: LocateFixed } : {}) }
+}
+
+/** Another team's own agent: adding it gives this team a copy of its own, and leaves that team's as it is. */
+function elsewhereItem(agent: TeamOwnAgent): PaletteItem {
+  const source = teamAgentSource(agent.agent)
+  return { name: agent.agentName, detail: `in ${agent.teamName}`, engine: `on ${modelNameFromId(source.model ?? DEFAULT_MODEL)}`, hint: `Add a copy of ${agent.agentName} to this team. The one in ${agent.teamName} stays as it is.`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: source as object, figure: figureFor(agent.agentId) }
 }
 
 /** "You": the review step that pauses the team for the operator's approval. It is a step, not an agent. */
@@ -218,7 +236,7 @@ const EXPLAIN: Record<string, ReactNode> = {
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
-  [YOURS]: <>A team’s agents come from here: the ones you built or kept. A team keeps the version it was given until you choose <b>Update</b> in that agent’s panel. Build one in <a href="/agents">Your agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
+  [YOURS]: <>A team’s agents come from here: the ones you built or kept, then the ones that live in your teams. A team keeps the version of a built agent it was given until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
 }
 
 /**
@@ -227,7 +245,7 @@ const EXPLAIN: Record<string, ReactNode> = {
  * second "Library" that the trace drew with other groups, other rows and other words for the
  * same skills and tools.
  */
-export function ComponentPalette({ capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, teamPath = null, width, onResize }: LibraryProps) {
+export function ComponentPalette({ capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, teamPath = null, teamAgents = [], onRevealAgent, width, onResize }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -238,6 +256,10 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const saved = useSavedJobs()
+  // Agents written straight into a team are the operator's agents too, and Home lists them with
+  // their team, so this list does as well. This team's are read from the canvas, which is newer
+  // than its file while it is being edited.
+  const { own: teamOwn, root: teamsRoot } = useAgentUses()
   const used = useMemo(() => usedInRun(observedEvidence, observedConnected), [observedEvidence, observedConnected])
   const agentName = (id: string) => agentNames?.get(id) ?? id
   useEffect(() => { onCollapsedChange?.(collapsed) }, [collapsed, onCollapsedChange])
@@ -262,10 +284,15 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
       window.removeEventListener('loomwatch:toggle-library', toggle)
     }
   }, [])
-  // A team's agents are Your agents (ADR 0030), each placed as the version you saved. The built-in
-  // jobs are templates for building one in Your agents, not agents to hire here: an agent is built
-  // and tried on its own before a team depends on it.
-  const yours = { name: YOURS, items: saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}`, figure: figureFor(job.id, job.figure) } }) }
+  // A team's agents are My agents (ADR 0030), each placed as the version you saved. The built-in
+  // jobs are templates for building one in My agents, not agents to hire here: an agent is built
+  // and tried on its own before a team depends on it. After them, the agents that live in teams:
+  // this team's own (found on the canvas) and other teams' (added as a copy).
+  const yours = { name: YOURS, items: [
+    ...saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}`, figure: figureFor(job.id, job.figure) } }),
+    ...teamAgents.map(agent => hereItem(agent, onRevealAgent)),
+    ...(teamOwn ?? []).filter(agent => !isOpenTeam(agent.teamPath, teamPath, teamsRoot)).map(elsewhereItem),
+  ] }
   const groups: { name: string; items: PaletteItem[] }[] = [
     yours,
     { name: STEPS, items: [REVIEW_STEP] },
@@ -289,7 +316,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
     removeJob(item.jobId).catch((error: unknown) => setRemoveError(error instanceof Error ? error.message : String(error)))
   }
   const row = (item: PaletteItem, i: number) => {
-    const add = <button key={`${item.name}-${i}`} className={item.nested ? 'palette-item nested' : 'palette-item'} disabled={item.disabled} title={item.engine ? `${item.detail} · ${item.engine}` : item.detail} draggable={!item.disabled && item.draggable !== false} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} />{item.figure ? <FigureStill className="palette-figure" figure={item.figure} alt="" width={38} height={38} loading="lazy" decoding="async" /> : <span className="palette-icon"><item.Icon size={15} /></span>}<span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
+    const add = <button key={`${item.name}-${i}`} className={item.nested ? 'palette-item nested' : 'palette-item'} disabled={item.disabled} title={item.hint ?? (item.engine ? `${item.detail} · ${item.engine}` : item.detail)} draggable={!item.disabled && item.draggable !== false} onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(item.mime, JSON.stringify(item.payload)); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }} onDragEnd={() => onDragStateChange?.(false)} onClick={() => { if (item.onActivate) item.onActivate(); else window.dispatchEvent(new CustomEvent(item.event, { detail: JSON.stringify(item.payload) })); if (narrow()) setCollapsed(true) }}><GripVertical size={13} />{item.figure ? <FigureStill className="palette-figure" figure={item.figure} alt="" width={38} height={38} loading="lazy" decoding="async" /> : <span className="palette-icon"><item.Icon size={15} /></span>}<span><strong>{item.name}</strong><small>{item.detail}</small>{item.engine && <em className={item.quiet ? 'palette-engine quiet' : 'palette-engine'}>{item.engine}</em>}</span>{item.Trailing ? <item.Trailing size={13} aria-hidden="true" /> : <Plus size={13} />}</button>
     if (item.capability && onInspectCapability) {
       const { item: capability, kind } = item.capability
       return <div key={`${item.name}-${i}`} className="palette-job">
@@ -350,7 +377,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
         ...visible(group.name, items).map(row),
       ], items.length, <>
         {group.name === YOURS && saved.problems.map(problem => <p key={problem.file} className="palette-hint palette-problem" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
-        {group.name === YOURS && !query && group.items.length === 0 && saved.loaded && <p className="palette-empty"><UserRound size={13} aria-hidden="true" />None yet</p>}
+        {group.name === YOURS && !query && group.items.length === 0 && saved.loaded && teamOwn !== null && <p className="palette-empty"><UserRound size={13} aria-hidden="true" />None yet</p>}
         {group.name === YOURS && !query && <a className="palette-hint palette-build-agent" href={`/agents/new${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}>Build a new agent</a>}
         {/* An empty group is one dashed slot, the shape its first row will fill; why it is empty is behind the heading's "?". */}
         {group.name === FILES && !query && group.items.length === 0 && <p className="palette-empty"><Folder size={13} aria-hidden="true" />None yet</p>}
@@ -358,7 +385,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
         {group.name === SKILLS && !query && group.items.length === 0 && !capabilitiesLoading && <p className="palette-empty"><Puzzle size={13} aria-hidden="true" />None yet</p>}
         {group.name === SKILLS && !query && <a className="palette-hint palette-build-agent" href="/skills">Manage skills</a>}
       </>, group.name === YOURS
-        ? <><div>{EXPLAIN[YOURS]}</div><div>To reuse an agent this team made, select it and choose <b>Add to Your agents</b>.</div></>
+        ? <><div>{EXPLAIN[YOURS]}</div><div>To reuse an agent this team made, select it and choose <b>Add to My agents</b>.</div></>
         : EXPLAIN[group.name])
     })}
     {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}

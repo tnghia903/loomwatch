@@ -72,6 +72,7 @@ vi.mock('@xyflow/react', () => ({
   Handle: () => null,
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
   MarkerType: { Arrow: 'arrow', ArrowClosed: 'arrowclosed' },
+  ConnectionLineType: { Bezier: 'default', Straight: 'straight', Step: 'step', SmoothStep: 'smoothstep', SimpleBezier: 'simplebezier' },
   BaseEdge: () => null,
   EdgeLabelRenderer: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   NodeToolbar: ({ children, isVisible }: { children: React.ReactNode; isVisible?: boolean }) => isVisible ? <>{children}</> : null,

@@ -1,4 +1,4 @@
-import { Background, getNodesBounds, getViewportForBounds, ReactFlow, useNodesInitialized, useReactFlow, useStore, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
+import { Background, ConnectionLineType, getNodesBounds, getViewportForBounds, ReactFlow, useNodesInitialized, useReactFlow, useStore, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
@@ -519,6 +519,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // ---- team graph ----------------------------------------------------------------------
   const stepById = useMemo(() => new Map(doc.pipelineSteps.map((step) => [step.id, { ...step, step: step.step + (doc.teamSchedule ? 1 : 0) }])), [doc.pipelineSteps, doc.teamSchedule])
   const nodeNames = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node.data.label])), [doc.nodes])
+  // This team's own agents for the add panel's My agents (the linked ones are listed as the agents they came from).
+  const ownAgents = useMemo(() => doc.nodes.filter((node) => node.data.agent.kind !== 'operator' && !node.data.agent.from).map((node) => ({ id: node.id, name: node.data.label || node.id })), [doc.nodes])
   const agentIds = useMemo(() => doc.nodes.map((node) => node.id), [doc.nodes])
   const docAgents = useMemo(() => doc.nodes.map((node) => node.data.agent), [doc.nodes])
   // Every agent thinks on the person's OpenRouter key, so a team can't run without one. The offline
@@ -2287,7 +2289,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     { label: notificationsOn ? 'Disable notifications' : 'Enable notifications', run: () => void enableNotifications() },
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'Show YAML', run: () => setYamlOpen(true), disabled: !doc.path },
-    { label: 'Your agents…', run: () => window.location.assign('/agents') },
+    { label: 'My agents…', run: () => window.location.assign('/agents') },
     { label: 'Skills…', run: () => window.location.assign('/skills') },
     { label: 'Quests…', run: () => window.location.assign('/quests') },
     { label: 'Connections…', run: () => window.location.assign('/connections') },
@@ -2320,7 +2322,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           // tried on its own, before a team depends on it.
           const job = ROLE_PRESETS.find((candidate) => candidate.id === intent.job)
           if (!job) return null
-          return { dialect, label: `Build a ${job.label} agent`, detail: `${job.does} · starts from the ${job.label} job in Your agents`, disabled: false, run: () => window.location.assign(`/agents/new?from=${encodeURIComponent(job.id)}${doc.path ? `&team=${encodeURIComponent(doc.path)}` : ''}`) }
+          return { dialect, label: `Build a ${job.label} agent`, detail: `${job.does} · starts from the ${job.label} job in My agents`, disabled: false, run: () => window.location.assign(`/agents/new?from=${encodeURIComponent(job.id)}${doc.path ? `&team=${encodeURIComponent(doc.path)}` : ''}`) }
         }
         const preset = savedJobPreset(own)
         const source = roleSource(preset)
@@ -2593,6 +2595,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             edges={runView ? visibleEdges : visibleEdges.filter(edge => edge.source !== '__prompt' || allWiringEdges.some(wire => wire.from === '__prompt'))}
             nodeTypes={runView ? nodeTypes : buildNodeTypes}
             edgeTypes={edgeTypes}
+            connectionLineType={ConnectionLineType.SmoothStep}
             onNodeClick={(_, node) => { if (!runView) { setOutputEditorOpen(node.id === '__output'); if (node.id === '__output') clearSelection() } }}
             onPaneClick={() => setOutputEditorOpen(false)}
             onNodesChange={onNodesChange}
@@ -2642,7 +2645,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
         {(!runView && !runSetup && !agentsView || runPresentation === 'trace') && (
           // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} teamPath={doc.path} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
+          <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} teamPath={doc.path} teamAgents={ownAgents} onRevealAgent={focusAgent} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
             // Folded is the default, so "reveal" means: fan the agent that owns this card, then
             // frame it. Framing the agent rather than the card is deliberate — the evidence node
             // does not exist yet on this render.

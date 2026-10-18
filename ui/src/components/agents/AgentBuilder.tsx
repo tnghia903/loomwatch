@@ -144,8 +144,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       }
     } catch (failed) {
       const message = failed instanceof JobApiError && failed.status === 412
-        ? saved ? failed.message : `You already have an agent called “${draft.name.trim()}”. Give this one another name, or open that one from Your agents.`
-        : failed instanceof JobApiError && failed.status === 404 ? 'This LoomWatch server is older than Your agents. Restart it, then save again.'
+        ? saved ? failed.message : `You already have an agent called “${draft.name.trim()}”. Give this one another name, or open that one from My agents.`
+        : failed instanceof JobApiError && failed.status === 404 ? 'This LoomWatch server is older than My agents. Restart it, then save again.'
         : failed instanceof Error ? failed.message : String(failed)
       setSave({ kind: 'error', message })
     }
@@ -157,7 +157,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   }
 
   if (id && !saved) {
-    return <div className="agent-builder"><a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />Your agents</a><p className="home-empty">{!loaded ? 'Loading…' : available ? `There is no agent “${id}” in Your agents.` : 'This LoomWatch server is older than Your agents. Restart it to use them.'}</p></div>
+    return <div className="agent-builder"><a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a><p className="home-empty">{!loaded ? 'Loading…' : available ? `There is no agent “${id}” in My agents.` : 'This LoomWatch server is older than My agents. Restart it to use them.'}</p></div>
   }
 
   // Its chat is kept under the id it is saved as, so a new agent saved under the name it had in its
@@ -169,7 +169,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const cameFromUse = cameFrom ? mine.find((use) => use.teamPath === cameFrom || cameFrom.endsWith(`/${use.teamPath}`)) ?? null : null
   const scheduledUses = mine.filter((use) => use.scheduled).length
   const behindUses = version ? mine.filter((use) => use.version < version).length : 0
-  const saveLabel = !saved ? 'Save to Your agents' : bumps ? `Save as v${(version ?? 1) + 1}` : 'Save'
+  const saveLabel = !saved ? 'Save to My agents' : bumps ? `Save as v${(version ?? 1) + 1}` : 'Save'
   const markId = saved?.id ?? (draft.name || 'new')
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
   const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} version={saved && !changed ? version : null} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
@@ -177,8 +177,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
       <header className="agent-builder-head">
-        {inTeam ? <span className="agent-backs t-meta">From Your agents. Saving makes its next version, and moves {inTeam.name} to it.</span> : <span className="agent-backs">
-          <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />Your agents</a>
+        {inTeam ? <span className="agent-backs t-meta">From My agents. Saving makes its next version, and moves {inTeam.name} to it.</span> : <span className="agent-backs">
+          <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
           {/* Back to the team's agents: that is where an agent is added, or moved to a new version. */}
           {cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ` to update it to v${save.version}` : ''}</a>}
         </span>}
@@ -215,7 +215,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
               <section className="agent-section" aria-label="Used in">
                 <div className="agent-section-head">Used in</div>
                 {uses === null ? <p className="t-meta">Looking through your teams…</p>
-                  : mine.length === 0 ? <p className="t-meta">No team uses it yet. Open a team and add it from Your agents in the add panel.</p>
+                  : mine.length === 0 ? <p className="t-meta">No team uses it yet. Open a team and add it from My agents in the add panel.</p>
                   : <ul className="agent-uses">
                     {mine.map((use) => (
                       <li key={`${use.teamPath}#${use.agentId}`}>
@@ -240,8 +240,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
             {saved && (
               <div className="agent-remove">
                 {removing
-                  ? <><span className="t-meta">Remove it from Your agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
-                  : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from Your agents</button>}
+                  ? <><span className="t-meta">Remove it from My agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
+                  : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from My agents</button>}
               </div>
             )}
           </div>

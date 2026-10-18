@@ -46,10 +46,10 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
   const putBack = pinned && link.job ? () => onApply({ ...pinned.spec, id, file: link.job!.file }, pinned.spec) : null
 
   return (
-    <section className="build-context linked-agent" aria-label="From Your agents">
-      <div className={headClassName}>From Your agents</div>
+    <section className="build-context linked-agent" aria-label="From My agents">
+      <div className={headClassName}>From My agents</div>
       <p className="linked-agent-line"><b>{name}</b> <span className="linked-agent-version">v{link.version}</span>{link.job && !link.behind && changed.length === 0 && <span className="t-meta"> · up to date</span>}</p>
-      {!link.job && <p className="t-meta">It is no longer in Your agents. This team keeps its copy of v{link.version}.</p>}
+      {!link.job && <p className="t-meta">It is no longer in My agents. This team keeps its copy of v{link.version}.</p>}
       {link.behind && link.latest !== null && (
         <div className="linked-agent-update">
           <p><b>v{link.latest} is ready.</b>{notes.length > 0 ? ` ${notes.join(' · ')}` : ''}</p>
@@ -63,10 +63,10 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
         </div>
       )}
       <div className="linked-agent-acts">
-        {link.job && showEdit && <a className="btn" href={`/agents/${encodeURIComponent(id)}${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}><ExternalLink size={13} aria-hidden="true" />Edit in Your agents</a>}
-        <button type="button" className="btn" disabled={readOnly} onClick={onUnlink} title="Keep it exactly as it is now, with no link to Your agents"><Unlink size={13} aria-hidden="true" />Make it this team’s own</button>
+        {link.job && showEdit && <a className="btn" href={`/agents/${encodeURIComponent(id)}${teamPath ? `?team=${encodeURIComponent(teamPath)}` : ''}`}><ExternalLink size={13} aria-hidden="true" />Edit in My agents</a>}
+        <button type="button" className="btn" disabled={readOnly} onClick={onUnlink} title="Keep it exactly as it is now, with no link to My agents"><Unlink size={13} aria-hidden="true" />Make it this team’s own</button>
       </div>
-      <p className="t-meta linked-agent-note">Its name, instructions, app and model, skills and what it may do without asking come from Your agents. Where it works, its knowledge and its place in this team stay this team’s own.</p>
+      <p className="t-meta linked-agent-note">Its name, instructions, app and model, skills and what it may do without asking come from My agents. Where it works, its knowledge and its place in this team stay this team’s own.</p>
     </section>
   )
 }

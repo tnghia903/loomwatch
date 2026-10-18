@@ -66,11 +66,11 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
           return (
             <button key={candidate.id} type="button" className="team-agents-chip" aria-pressed={candidate.id === agent?.id} onClick={() => onSelect(candidate.id)}>
               <FigureStill className="team-agents-figure" figure={agentFigure(candidate, savedJobs)} alt="" width={40} height={40} />
-              <span><b>{candidate.name}</b><em>{linked ? `From Your agents · v${linked.version}${linked.behind ? ` · v${linked.latest} ready` : ''}` : 'This team’s own'}</em></span>
+              <span><b>{candidate.name}</b><em>{linked ? `From My agents · v${linked.version}${linked.behind ? ` · v${linked.latest} ready` : ''}` : 'This team’s own'}</em></span>
             </button>
           )
         })}
-        {onAdd && agent && <button type="button" className="team-agents-chip add" aria-expanded={adding} onClick={() => setAdding((value) => !value)}><Plus size={16} aria-hidden="true" /><span><b>Add an agent</b><em>From Your agents, or a new one</em></span></button>}
+        {onAdd && agent && <button type="button" className="team-agents-chip add" aria-expanded={adding} onClick={() => setAdding((value) => !value)}><Plus size={16} aria-hidden="true" /><span><b>Add an agent</b><em>From My agents, or a new one</em></span></button>}
       </nav>
 
       {choosing && onAdd && <AddAgents jobs={savedJobs} inTeam={agents} teamPath={teamPath} first={!agent} onAdd={(job) => { onAdd(job); setAdding(false) }} onClose={agent ? () => setAdding(false) : undefined} onShowWorkflow={onShowWorkflow} />}
@@ -87,7 +87,7 @@ export function TeamAgents({ agents, selected, onSelect, teamName, teamPath, edi
           <LinkedAgent agent={agent} link={link} readOnly={!editable} onApply={(job, previous) => onApplyVersion(agent.id, job, previous)} onUnlink={() => onUnlink(agent.id)} teamPath={teamPath} headClassName="agent-section-head" showEdit={false} />
           {link.job
             ? <AgentBuilder id={link.job.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job, previous) => { if (editable) onApplyVersion(agent.id, job, previous) }, reads, knowledge, onShowWorkflow }} />
-            : <p className="t-meta">Its agent is gone from Your agents. Make it this team’s own to change it here.</p>}
+            : <p className="t-meta">Its agent is gone from My agents. Make it this team’s own to change it here.</p>}
         </div>
       )}
 

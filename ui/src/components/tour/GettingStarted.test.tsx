@@ -44,7 +44,7 @@ afterEach(() => {
 
 const HOME = '<div data-tour="home"><span data-tour="apps">Ready</span><a data-tour="build-agent">Build an agent</a><button data-tour="new-team">New team</button></div>'
 /** Your agents: the builder for one agent, with its chat open or not, or the list with its New agent button. */
-const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="your-teams">Your teams</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to Your agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
+const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="your-teams">Your teams</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to My agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
 /** Its chat, before and after it answers. */
 const CHAT = '<section data-tour="chat"><form data-tour="composer"></form></section>'
 const ANSWERED = '<section data-tour="chat"><div data-tour="output"></div><form data-tour="composer"></form></section>'
@@ -73,7 +73,7 @@ describe('GettingStarted', () => {
     expect(screen.getByText('Waiting for you')).toBeInTheDocument()
   })
 
-  it('carries on in Your agents once the builder opens', () => {
+  it('carries on in My agents once the builder opens', () => {
     showPage(builder())
     goToStep('build-agent')
     renderGuide()
@@ -87,7 +87,7 @@ describe('GettingStarted', () => {
     expect(screen.getByRole('heading', { name: 'Chat with it on its own' })).toBeInTheDocument()
   })
 
-  it('asks for a new agent on the list of Your agents', () => {
+  it('asks for a new agent on the list of My agents', () => {
     showPage(AGENTS_LIST)
     goToStep('agent')
     renderGuide()
@@ -115,7 +115,7 @@ describe('GettingStarted', () => {
     expect(readTourState()?.step).toBe('try')
     fireEvent.click(screen.getByRole('button', { name: /Next/ }))
     tick()
-    expect(screen.getByRole('heading', { name: 'Save it to Your agents' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Save it to My agents' })).toBeInTheDocument()
   })
 
   it('brings each card’s target into view, a tall one by its top', () => {
@@ -151,7 +151,7 @@ describe('GettingStarted', () => {
     showPage(builder())
     goToStep('save')
     renderGuide()
-    expect(screen.getByRole('heading', { name: 'Save it to Your agents' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Save it to My agents' })).toBeInTheDocument()
 
     showPage(builder(true))
     tick(250)
@@ -226,7 +226,7 @@ describe('GettingStarted', () => {
     expect(screen.getByRole('heading', { name: 'Put it in a team' })).toBeInTheDocument()
   })
 
-  it('waits in Your agents for the operator to go back to Your teams', () => {
+  it('waits in My agents for the operator to go back to Your teams', () => {
     showPage(builder(true))
     goToStep('new-team')
     renderGuide()

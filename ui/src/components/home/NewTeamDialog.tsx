@@ -81,7 +81,7 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false 
                 <input type="radio" name="template" value="agents" checked={start === 'agents'} disabled={!hasAgents} onChange={() => setChosen('agents')} />
                 <span className="nt-check" aria-hidden="true">{start === 'agents' && <Check size={12} />}</span>
                 <span className="nt-body">
-                  <span className="nt-title">Your agents{hasAgents && <em>Recommended</em>}</span>
+                  <span className="nt-title">My agents{hasAgents && <em>Recommended</em>}</span>
                   <span className="nt-desc">{!saved.loaded ? 'Loading your agents…' : hasAgents ? 'The agents you built and tried. Each joins as the version you saved.' : 'You have no agents yet. Build one first, or start from a template below.'}</span>
                 </span>
               </label>
