@@ -2,13 +2,18 @@
 // whose model it is at a glance. The marks are copied from LobeHub Icons 1.95.1
 // (@lobehub/icons-static-svg, MIT License, Copyright (c) 2023 LobeHub; see
 // third-party-notices.txt). Each mark is its company's trademark and is shown only to say who
-// made the model; LoomWatch is not affiliated with any of them.
+// made the model; LoomWatch is not affiliated with any of them. Where a company has a mark in its
+// own colours, that is the one shown (makerColours.ts); the one-colour mark is for the rest.
+
+import { COLOUR_MARKS, type ColourMark } from './makerColours'
 
 export interface Maker {
   /** The name people know the company by, or OpenRouter's own word for it when this list has none. */
   name: string
   /** Its mark: paths on a 24-unit square, filled even-odd. None when this list has no mark for it. */
   mark?: readonly string[]
+  /** Its mark in its own colours, shown in place of `mark`. None for a company whose mark is one colour. */
+  colour?: ColourMark
 }
 
 // Each company's mark once, by LobeHub's file name.
@@ -79,9 +84,9 @@ const MAKERS: Record<string, { name: string; mark?: string }> = {
   fireworks: { name: 'Fireworks AI', mark: 'fireworks' },
   meituan: { name: 'Meituan', mark: 'longcat' },
   perplexity: { name: 'Perplexity', mark: 'perplexity' },
-  microsoft: { name: 'Microsoft' },
-  'aion-labs': { name: 'Aion Labs' },
-  poolside: { name: 'Poolside' },
+  microsoft: { name: 'Microsoft', mark: 'microsoft' },
+  'aion-labs': { name: 'Aion Labs', mark: 'aionlabs' },
+  poolside: { name: 'Poolside', mark: 'poolside' },
   thinkingmachines: { name: 'Thinking Machines' },
   inclusionai: { name: 'inclusionAI' },
 }
@@ -94,5 +99,8 @@ export function makerOf(id: string): Maker {
   const slug = (id.split('/')[0] ?? '').replace(/^~/, '')
   const known = Object.hasOwn(MAKERS, slug) ? MAKERS[slug] : undefined
   if (!known) return { name: slug }
-  return known.mark ? { name: known.name, mark: MARKS[known.mark] } : { name: known.name }
+  if (!known.mark) return { name: known.name }
+  const mark = Object.hasOwn(MARKS, known.mark) ? MARKS[known.mark] : undefined
+  const colour = Object.hasOwn(COLOUR_MARKS, known.mark) ? COLOUR_MARKS[known.mark] : undefined
+  return { name: known.name, ...(mark ? { mark } : {}), ...(colour ? { colour } : {}) }
 }

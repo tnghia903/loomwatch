@@ -221,6 +221,10 @@
   box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 .maker-mark svg { width: 16px; height: 16px; }
+/* A mark whose maker gives a dark-background version (OpenRouter's Volt) swaps to it on the dark theme. */
+.maker-mark .on-dark { display: none; }
+[data-theme="dark"] .maker-mark .on-dark { display: block; }
+[data-theme="dark"] .maker-mark .on-light { display: none; }
 .maker-mark b { font: 600 13px/1 var(--font-sans); color: var(--color-ink-2); }
 .model-row .badge {
   padding: 0 var(--sp-2); border-radius: var(--r-sm);

@@ -15,6 +15,20 @@ describe('makerOf', () => {
     expect(makerOf('~deepseek/deepseek-pro-latest')).toEqual(makerOf('deepseek/deepseek-v4-pro'))
   })
 
+  it('shows a company in its own colours where it has a colour mark, and in one colour where it doesn’t', () => {
+    // Anthropic has no colour mark of its own: its models' Claude mark is the one people know.
+    expect(makerOf('anthropic/claude-opus-5.5').colour?.svg).toContain('#D97757')
+    expect(makerOf('google/gemini-3-pro').colour?.svg).toContain('#4285F4')
+    // OpenRouter's own brand glyphs: Grape on light, Volt on dark.
+    expect(makerOf('openrouter/auto').colour).toMatchObject({ svg: expect.stringContaining('#7624F4'), dark: expect.stringContaining('#C8FF00') })
+    // OpenAI's and xAI's marks are one colour, as they draw them.
+    expect(makerOf('openai/gpt-5.5').colour).toBeUndefined()
+    expect(makerOf('x-ai/grok-5').colour).toBeUndefined()
+    expect(makerOf('openai/gpt-5.5').mark?.length).toBeGreaterThan(0)
+    // A company with only a colour mark still gets it.
+    expect(makerOf('microsoft/phi-5').colour?.svg).toContain('#F25022')
+  })
+
   it('gives a maker it has no mark for its name alone, and one it doesn’t know OpenRouter’s word', () => {
     expect(makerOf('thinkingmachines/tinker-1')).toEqual({ name: 'Thinking Machines' })
     expect(makerOf('acme/plain-1')).toEqual({ name: 'acme' })
