@@ -34,7 +34,7 @@ describe('checkStepFields', () => {
   })
 })
 
-describe('the Writer job’s Done when', () => {
+describe('the Writer job’s sources', () => {
   // Read word for word, "each source link beside its claim" was Not met on a rewrite whose facts all
   // came in the request, and the round it was sent back for could not meet it (quality bench
   // pilot-1, W1). The daemon tells every check step such an item does not apply (lib.rs
@@ -45,6 +45,17 @@ describe('the Writer job’s Done when', () => {
       'Answers what the request asked, in the format and length it named',
       'Uses only facts you were given; if they came with source links, each claim has its link beside it',
     ])
+  })
+
+  // Given linked findings and one "some blogs say" with no link, every Writer on the bench's L1
+  // probe kept it, ending its paragraph with a link that backs only the rest of the sentence. Told
+  // only to drop what "has no source", it took the blogs for the source, or wrote "You may read
+  // that…" instead.
+  it('leaves out, or says it has no source, a report of what others say', () => {
+    const writer = ROLE_PRESETS.find((preset) => preset.id === 'writer')
+    expect(writer?.role).toContain(
+      '- A report of what others say, such as "some blogs say", has no source unless it links to them: leave it out, or say plainly that it has none. Do not reword it to hide that.',
+    )
   })
 })
 
