@@ -1,8 +1,23 @@
 import { useEffect, useId, useState } from 'react'
 
+import type { ModelSource } from '../../lib/ai/modelIds'
+import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
+import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { type AboutYou as Told, MAX_ABOUT_CHARS, MAX_NAME_CHARS, announceYou, fetchYou, saveYou, toldNothing } from '../../lib/you/client'
 
 const count = (value: number) => value.toLocaleString('en-US')
+
+/**
+ * Where what the person wrote goes: every service their agents can run on now (ADR 0073), named
+ * the way they know it. Before anything is connected, or while that is still being asked, the AI in
+ * general.
+ */
+function sentTo(sources: readonly ModelSource[]): string {
+  const names = sources.map((source) => SOURCE_INFO[source].service)
+  if (names.length === 0) return 'so it goes with their work to the AI they run on'
+  if (names.length === 1) return `so it goes to ${names[0]} with their work`
+  return `so it goes with their work to ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}, whichever an agent runs on`
+}
 
 /**
  * What the person tells their agents about themselves (ADR 0074): a name, and a few lines about
@@ -19,6 +34,7 @@ export function AboutYou({ variant = 'section', onDone }: { variant?: 'section' 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const ai = useAiStatus()
   const headingId = useId()
   const nameId = useId()
   const aboutId = useId()
@@ -89,7 +105,7 @@ export function AboutYou({ variant = 'section', onDone }: { variant?: 'section' 
               <span className="lw-you-count" aria-label={`${count(about.length)} of ${count(MAX_ABOUT_CHARS)} characters`}>{count(about.length)} / {count(MAX_ABOUT_CHARS)}</span>
             </span>
           </div>
-          <p className="t-meta lw-settings-quiet">Kept on this computer. Your agents read it with every task, so it goes to OpenRouter with their work. Leave out passwords and anything private.</p>
+          <p className="t-meta lw-settings-quiet">Kept on this computer. Your agents read it with every task, {sentTo(ai ? connectedSources(ai) : [])}. Leave out passwords and anything private.</p>
           <div className="lw-settings-actions">
             <button type="submit" className="btn btn-primary" disabled={busy || empty || (!card && !changed)}>{busy ? 'Saving…' : 'Save'}</button>
             {card && <button type="button" className="btn" disabled={busy} onClick={() => void keep({ skipped: true }, '')}>Not now</button>}

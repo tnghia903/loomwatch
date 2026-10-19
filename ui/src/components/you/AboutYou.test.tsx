@@ -1,11 +1,14 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { announceAiStatus, forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetYou } from '../../lib/you/client'
 import { AboutYou } from './AboutYou'
 import AboutYouPage from './AboutYouPage'
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); forgetYou() })
+// The privacy note names the AI the agents run on; known up front, so no test's fetch answers it.
+beforeEach(() => { announceAiStatus({ openrouter: { connected: true } }) })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); forgetYou(); forgetKeyStatus() })
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const sent = (fetch: ReturnType<typeof vi.fn>, call: number) => {
   const [url, init] = fetch.mock.calls[call] as [string, RequestInit & { headers: Record<string, string> }]
@@ -43,6 +46,25 @@ describe('About you', () => {
     expect(name).toHaveValue('Mai')
     // Saved and unchanged: nothing to save again.
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  it('says it goes to each AI the agents can run on now, and follows a change in Connections', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ skipped: false }))))
+    forgetKeyStatus()
+    announceAiStatus({ openrouter: { connected: false } })
+    render(<AboutYou />)
+    expect(await screen.findByText(/so it goes with their work to the AI they run on\. Leave out/)).toBeInTheDocument()
+
+    // Signed in to ChatGPT but not using the plan: agents can't run there, so it isn't named.
+    act(() => announceAiStatus({ chatgpt: { available: true, connected: true, planUse: false } }))
+    expect(screen.getByText(/so it goes with their work to the AI they run on\./)).toBeInTheDocument()
+    act(() => announceAiStatus({ chatgpt: { available: true, connected: true, planUse: true } }))
+    expect(screen.getByText(/so it goes to ChatGPT with their work\./)).toBeInTheDocument()
+    act(() => announceAiStatus({ anthropic: { connected: true } }))
+    expect(screen.getByText(/so it goes with their work to ChatGPT or Claude, whichever an agent runs on\./)).toBeInTheDocument()
+    act(() => announceAiStatus({ openrouter: { connected: true } }))
+    expect(screen.getByText(/so it goes with their work to ChatGPT, Claude or OpenRouter, whichever an agent runs on\./)).toBeInTheDocument()
+    expect(screen.queryByText(/OpenRouter with their work/)).toBeNull()
   })
 
   it('clears what agents know, and the card stays away after', async () => {

@@ -10,28 +10,14 @@ import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
-import { toldNothing, useYou } from '../../lib/you/client'
 import { QuestsLink } from '../quests/QuestsLink'
 import { SkillsLink } from '../skills/SkillsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
+import { KnowYou } from '../you/KnowYou'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
 import { FigureStill } from './FigureStill'
 import { navigate, useAgentsRoute } from './route'
-
-/** What every agent here is told about the person (ADR 0074), with the way to change it. */
-function KnowYou() {
-  const you = useYou()
-  if (!you) return null
-  const name = you.name?.trim()
-  return (
-    <p className="t-meta agents-know-you">
-      {toldNothing(you)
-        ? <>Your agents don’t know you yet. <a className="link" href="/you">Tell them about you</a></>
-        : <>{name ? <>Your agents know you as <strong>{name}</strong>.</> : 'Your agents know about you.'} <a className="link" href="/you">Edit</a></>}
-    </p>
-  )
-}
 
 export interface AgentsPageProps {
   skills: DetectedCapability[]
