@@ -619,16 +619,19 @@ $defs:
         $ref: "#/$defs/Spawn"
       model:
         description: >-
-          The OpenRouter model id the agent runs on, such as `anthropic/claude-opus-5.5`. Names an
-          earlier LoomWatch wrote for an AI app (`sonnet`, `gpt-5.5`) are read as the matching
-          OpenRouter model.
+          The model the agent runs on, and how it is paid (ADR 0073): `chatgpt:<slug>` on the
+          operator's ChatGPT plan, such as `chatgpt:gpt-6.1-sol`; `anthropic:<model id>` on their
+          Claude API credit, such as `anthropic:claude-opus-5-5`; or an OpenRouter model id, such as
+          `anthropic/claude-opus-5.5`. Names an earlier LoomWatch wrote for an AI app (`sonnet`,
+          `gpt-5.5`) are read as the matching OpenRouter model.
         type: string
         minLength: 1
       followsSuggestion:
         description: >-
           True when `model` follows the model the app suggests for this agent (ADR 0072): when its
-          configuration changes, the app moves `model` to the new suggestion. Picking another model
-          takes it out. A run always uses `model`; the daemon does not read this.
+          configuration changes, the app moves `model` to the new suggestion, and onto a plan
+          connected since that offers its model, never onto OpenRouter by itself. Picking another
+          model takes it out. A run always uses `model`; the daemon does not read this.
         type: boolean
       thinkingEffort:
         description: >-

@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-56524A" alt="Platform: macOS and Windows">
   <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20key-17724A" alt="First run: offline demo, no key">
-  <img src="https://img.shields.io/badge/models%20via-OpenRouter-56524A" alt="Models via OpenRouter">
+  <img src="https://img.shields.io/badge/models%20via-ChatGPT%20plan%20%7C%20Claude%20credit%20%7C%20OpenRouter-56524A" alt="Models via your ChatGPT plan, your Claude credit or OpenRouter">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
 </p>
 
@@ -56,10 +56,10 @@ step-by-step pipeline, or a team that delegates work as it goes. When the team n
 and asks.
 
 <p align="center">
-  <sub>ONE OPENROUTER KEY, MODELS FROM EVERY MAJOR AI COMPANY</sub><br>
+  <sub>MODELS FROM EVERY MAJOR AI COMPANY</sub><br>
   <strong>Claude</strong> &nbsp;·&nbsp; <strong>GPT</strong> &nbsp;·&nbsp; <strong>Gemini</strong> &nbsp;·&nbsp;
   <strong>DeepSeek</strong> &nbsp;·&nbsp; <strong>Kimi</strong> &nbsp;·&nbsp; <strong>Qwen</strong><br>
-  <sub>with nothing else to install, and no AI app or subscription to sign in to</sub>
+  <sub>on your ChatGPT plan, your Claude plan's API credit or one OpenRouter key, with nothing else to install</sub>
 </p>
 
 ## How it works
@@ -177,7 +177,8 @@ flowchart LR
 ```
 
 Each agent runs on LoomWatch's own agent, inside the program on your computer. It thinks with the
-model you chose, reached through [OpenRouter](https://openrouter.ai) with your own key, and uses
+model you chose, paid through your ChatGPT plan, your Claude API credit or
+[OpenRouter](https://openrouter.ai) with your own key, and uses
 LoomWatch's tools to read and write files in its folder, search the web and run commands, each only
 as far as you allow. Agents can hand work to each other, or ask each other questions, through
 LoomWatch's Team Bus. Every message, tool call and
@@ -244,8 +245,9 @@ with a one-click fix, and says about how many tokens a run uses.
 
 ### 🧵 One team, many models
 
-Each agent thinks with its own model, chosen from hundreds on OpenRouter: Claude researches, GPT
-checks, a free model drafts. Every run's receipt shows exactly what it cost.
+Each agent thinks with its own model, from your ChatGPT plan, your Claude credit or hundreds on
+OpenRouter: Claude researches, GPT checks, a free model drafts. Every run's receipt shows what it
+cost and how it was paid.
 
 </td>
 <td width="33%" valign="top">
@@ -324,8 +326,8 @@ Run a team every morning and send the answer to Notion. A review stop still wait
 
 ### 💬 Ask LoomWatch
 
-Describe the team you want in a sentence. Ask sets it up on the canvas, on your OpenRouter key, and
-nothing is saved until you click **Apply**.
+Describe the team you want in a sentence. Ask sets it up on the canvas, on the models you've
+connected, and nothing is saved until you click **Apply**.
 
 </td>
 <td valign="top">
@@ -339,8 +341,8 @@ An offline demo team and a three-minute guide. You can learn the whole app befor
 
 ### 🔒 Runs on your computer
 
-The app, your teams, your run history and your key stay on this computer. Agents send their prompts
-to the model you chose, through OpenRouter.
+The app, your teams, your run history and your keys stay on this computer. Agents send their prompts
+to the model you chose: at OpenAI, at Anthropic, or through OpenRouter.
 
 </td>
 </tr>
@@ -398,8 +400,9 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 
 - **Not a chatbot.** It runs teams of agents, each with its own job, and shows you every step.
 - **Not a cloud service.** It runs on your computer and keeps your run history there.
-- **Not a model provider.** Your agents use models through your own OpenRouter key, and OpenRouter
-  bills you for what they use.
+- **Not a model provider.** Your agents use models through your own ChatGPT plan, Claude API credit
+  or OpenRouter key, and each is paid the way it always is: your plan's limits, your monthly credit,
+  or OpenRouter's prices.
 - **Not autopilot.** You choose where the team stops for your review, and it waits for you.
 
 ## Quickstart
@@ -462,8 +465,8 @@ command. If PowerShell says running scripts is disabled, run
 `powershell -ExecutionPolicy Bypass -c "irm https://loomwatch.github.io/install.ps1 | iex"` instead.
 
 > [!TIP]
-> No OpenRouter key yet? The offline demo needs no key and calls no model, so you can learn the whole
-> app first.
+> Nothing connected yet? The offline demo needs no key or sign-in and calls no model, so you can
+> learn the whole app first.
 
 <details>
 <summary>Rather read the installer before running it?</summary>
@@ -495,15 +498,27 @@ your agents can work in the folders you give them.
 
 - **A Mac** with macOS 11 or newer, or **a Windows PC** with 64-bit Windows 10 or 11. Linux
   downloads exist for x86_64 and arm64 but are untested.
-- **For real runs, an [OpenRouter](https://openrouter.ai) API key.** One key reaches models from
-  Anthropic, OpenAI, Google and others, including some free ones. Make one at
-  [openrouter.ai/keys](https://openrouter.ai/keys), add a few dollars of credit for the models that
-  aren't free, and paste it into **Add your OpenRouter key** on Home. LoomWatch checks it with
-  OpenRouter, then keeps it in this Mac's Keychain, or on Windows in Windows Credential Manager. You
-  don't need a key for the demo.
+- **For real runs, one way to pay for models.** Connect any of these on Home, or on
+  **Connections…** in the ☰ menu. Each model you pick says which one pays for it.
+  - **Your ChatGPT Plus or Pro plan.** Click **Continue with ChatGPT** and allow LoomWatch on
+    ChatGPT's own page. Agents on ChatGPT models count against your plan's limits, at no extra
+    charge. LoomWatch never sees your password.
+  - **Your Claude Max or Team plan's API credit.** These plans include API credit every month:
+    $100 on Max 5x, $200 on Max 20x, and up to $500 on Team. On claude.ai, open
+    **Settings › Billing** and link a Claude Console organization under API credits. Make an API key
+    in that organization and paste it into **Your Claude API credit**. Claude Pro and Free plans
+    have no API credit.
+  - **An [OpenRouter](https://openrouter.ai) API key.** One key reaches models from Anthropic,
+    OpenAI, Google and others, including some free ones, and you pay per use. Make one at
+    [openrouter.ai/keys](https://openrouter.ai/keys), add a few dollars of credit for the models
+    that aren't free, and paste it into **OpenRouter (pay per use)**.
 
-LoomWatch never signs in to an AI app and never uses an AI subscription: no Claude, ChatGPT or Gemini
-account is involved, and nothing else needs installing, not even for the offline demo.
+  LoomWatch checks each with its company, then keeps it in this Mac's Keychain, or on Windows in
+  Windows Credential Manager. You don't need any of them for the demo.
+
+LoomWatch never borrows another AI app's sign-in, such as Claude Code's, Codex's or Gemini's.
+Anthropic doesn't allow a Claude sign-in in other apps, which is why a Claude plan connects through
+its API credit. Nothing else needs installing, not even for the offline demo.
 
 > [!WARNING]
 > On Windows, commands an agent runs are not sandboxed: an agent you let run commands can change
@@ -621,10 +636,12 @@ off Start at sign-in). Your teams stay in `%USERPROFILE%\LoomWatch` and your his
 `%LOCALAPPDATA%\LoomWatch`; delete both to leave nothing behind. The steps below are for the
 Terminal install.
 
-1. Remove your OpenRouter key: choose **Connections…** from the ☰ menu and click **Remove key**
-   under **AI models**. Otherwise it stays in your Keychain as `LoomWatch.OpenRouter` (on Windows,
-   in Windows Credential Manager). To stop it
-   working anywhere, delete the key at [openrouter.ai/keys](https://openrouter.ai/keys) too.
+1. Disconnect what you connected: choose **Connections…** from the ☰ menu, click **Remove key** on
+   **Your Claude API credit** and **OpenRouter (pay per use)**, and **Sign out** on
+   **Your ChatGPT plan**. Otherwise the OpenRouter key stays in your Keychain as
+   `LoomWatch.OpenRouter`, and the Claude key and ChatGPT sign-in as `LoomWatch.Plans` (on Windows,
+   in Windows Credential Manager). To stop the keys working anywhere, delete them at
+   [openrouter.ai/keys](https://openrouter.ai/keys) and in the Claude Console too.
 2. Stop LoomWatch: `~/LoomWatch/app/loomwatch stop`.
 3. Delete the program: `rm -rf ~/LoomWatch/app`, and `rm ~/.local/bin/loomwatch` if the installer
    made that shortcut.
@@ -645,8 +662,8 @@ in Docker Desktop, the `loomwatch-app_postgres-data` volume).
 On Windows the steps are the same, in PowerShell: remove the key first, `loomwatch stop`, then
 delete `%USERPROFILE%\LoomWatch\app` and remove that folder from your `PATH` (Start menu, "Edit
 environment variables for your account"). Your run history and LoomWatch's approvals are in
-`%LOCALAPPDATA%\LoomWatch`. The OpenRouter key and a Notion sign-in are kept in Windows Credential
-Manager under LoomWatch's name.
+`%LOCALAPPDATA%\LoomWatch`. The OpenRouter key, the Claude key and ChatGPT sign-in, and a Notion
+sign-in are kept in Windows Credential Manager under LoomWatch's name.
 
 ### Change the defaults
 
@@ -716,7 +733,7 @@ saves a copy of the run history, safely while it runs.
 ## Try your first run
 
 The first time you open LoomWatch, a short guide offers to walk you through building your first
-agent, trying it on its own, putting it in a team and running it on your OpenRouter key.
+agent, trying it on its own, putting it in a team and running it on the models you've connected.
 Reopen it any time with **New here? Take the 3-minute guide** on Home, from the menu in a team, or
 by pressing <kbd>⌘</kbd><kbd>K</kbd> and choosing **Getting started guide**.
 
@@ -743,14 +760,14 @@ with what should change; under its new version, **Continue with the team** runs 
 
 ## Run your own agents
 
-1. Add your OpenRouter key: paste it into **Add your OpenRouter key** on Home, or under **AI models**
-   in **Connections…** (☰ menu). LoomWatch checks it with OpenRouter and shows how much credit is
-   left on it.
+1. Connect a way to pay for models, on Home or on **Connections…** (☰ menu): click
+   **Continue with ChatGPT**, or paste a Claude API key or an OpenRouter key. LoomWatch checks each
+   with its company. **Usage…** in the ☰ menu shows what LoomWatch has used on each.
 2. Click **Build an agent** on Home and start from a job, such as Researcher or Writer, or from
    **Blank**. Give it a name, change its instructions, model and how hard it thinks to fit your work,
    pin up the skills it needs and hand it the keys it may use without asking. Pick it a face, then
-   open its **Chat** tab and give it a real request: it runs on your key, and asks you before it uses
-   a key it wasn't given. **Save to My agents** when it does the job.
+   open its **Chat** tab and give it a real request: it runs on its model, and asks you before it
+   uses a key it wasn't given. **Save to My agents** when it does the job.
 3. Click **New team**, give it a name and choose the agents it starts with. A team always starts
    with at least one:
    - **My agents** — tick the agents you built; each joins as the version you saved (recommended
@@ -774,16 +791,19 @@ with what should change; under its new version, **Continue with the team** runs 
 5. Click **Run team**, or open **Chat**, describe what you want in plain words, and press
    <kbd>Enter</kbd>.
 
-Each agent's model is an OpenRouter model id, such as `anthropic/claude-opus-5.5`. The model picker
-recommends a short list, marks the free ones **Free**, and searches the rest of OpenRouter's
-catalogue. New agents start on Claude Opus 5.5; the jobs that gather facts start on the faster Claude
-Sonnet 5.5, and a check step on another company's model, so the work is read by a model that didn't
-write it.
+Each agent's model says how it is paid: `chatgpt:gpt-6.1-sol` on your ChatGPT plan,
+`anthropic:claude-opus-5-5` on your Claude API credit, or an OpenRouter model id such as
+`anthropic/claude-opus-5.5`. The model picker keeps the three apart, each headed by what it costs,
+suggests a model for the agent, and searches every model you can use. The suggestion picks the
+model first, for the kind of work: Claude Opus 5.5 for most agents, and for a check step a model
+from another company, so the work is read by a model that didn't write it. Then it runs on a plan
+you've connected that offers that model, or else through OpenRouter.
 
 > [!IMPORTANT]
-> OpenRouter bills real runs to your key, at each model's price, and each run's receipt shows what
-> it cost. Your request, the agents' instructions and the files and pages they read go to OpenRouter
-> and the company whose model you chose. Running LoomWatch locally does not make cloud models
+> Real runs are paid the way each agent's model is: from your ChatGPT plan's limits, from your
+> Claude credit, or by OpenRouter at each model's price. Each run's receipt shows what it cost. Your
+> request, the agents' instructions and the files and pages they read go to the company whose model
+> you chose, through OpenRouter when that is how it's paid. Running LoomWatch locally does not make cloud models
 > offline. Free models change often, and some let their maker learn from what you send, so keep
 > private work for a model you pay for. The offline demo calls no model.
 
@@ -867,21 +887,21 @@ an applied one back.
   unless you turn off **Ask me before starting a run**.
 - **It never answers a review step.** It can put a drafted note in the review box; only you click
   **Approve** or **Send back**.
-- **You choose the model.** Ask runs on LoomWatch's own agent with your OpenRouter key, and the
-  panel names its model. Click the name to pick another. Each conversation is billed to your key,
-  like a run. Without a key, the panel asks you to add one.
+- **You choose the model.** Ask runs on LoomWatch's own agent, on a model you've connected, and the
+  panel names its model and how it is paid. Click the name to pick another. Each conversation is
+  paid like a run. With nothing connected, the panel offers the three ways to connect.
 
 ## FAQ
 
 <details>
 <summary><strong>Do I need an account or an API key?</strong></summary>
 
-For real runs, yes: an OpenRouter API key, which you make at
+For real runs you need one way to pay for models: your ChatGPT Plus or Pro plan, your Claude Max or
+Team plan's monthly API credit, or an OpenRouter API key from
 [openrouter.ai/keys](https://openrouter.ai/keys). LoomWatch itself is free and has no account. It
-never signs in to an AI app, never uses an AI subscription and never reads another app's sign-ins:
-every model call goes through LoomWatch's own agent with your key. The key stays in this Mac's
-Keychain (on Windows, in Windows Credential Manager; on Linux, in a file only your user can read),
-and agents never see it: it is not in their
+never reads another app's sign-ins: every model call goes through LoomWatch's own agent. Your keys
+and your ChatGPT sign-in stay in this Mac's Keychain (on Windows, in Windows Credential Manager; on
+Linux, in a file only your user can read), and agents never see them: they are not in their
 commands, their folders, the team file or the run history.
 
 The offline demo needs no key at all, and some models on OpenRouter are free. Free models change
@@ -891,10 +911,41 @@ for.
 </details>
 
 <details>
+<summary><strong>Can I use my ChatGPT or Claude subscription?</strong></summary>
+
+Yes, two of them.
+
+- **ChatGPT Plus or Pro.** Click **Continue with ChatGPT** and allow LoomWatch on ChatGPT's own
+  page. OpenAI lets open-source apps that run on your computer use your plan this way. Agents on
+  ChatGPT models count against your plan's limits, at no extra charge. Only Plus and Pro plans can
+  be shared with apps. You can see LoomWatch's share, and limit it, under **Manage usage** in
+  ChatGPT's settings.
+- **Claude Max or Team.** These plans include API credit every month. LoomWatch spends it through
+  an API key from the Claude Console organization linked to your plan. A Claude sign-in can't be
+  used: Anthropic doesn't allow it in other apps. Claude Pro has no API credit, so it can't be used
+  either.
+
+When the model LoomWatch suggests for an agent is one your plan offers, it runs on your plan.
+Otherwise it runs through OpenRouter if you've added a key. With neither, it uses your plan's own
+model for that kind of work.
+
+</details>
+
+<details>
 <summary><strong>What does a run cost?</strong></summary>
 
-OpenRouter bills your key for each model call, at that model's price. Each run's receipt shows the
-exact cost OpenRouter reported. The offline demo costs nothing.
+It depends on how each agent's model is paid:
+
+- **On your ChatGPT plan,** nothing extra: it counts against your plan's limits, and the receipt
+  says "ChatGPT plan".
+- **On your Claude API credit,** each call is paid from the credit at Claude's list prices.
+  Anthropic doesn't report what a call cost, so LoomWatch works it out and the receipt shows it with
+  "≈".
+- **Through OpenRouter,** OpenRouter bills your key for each call at that model's price, and the
+  receipt shows the exact cost it reported.
+
+**Usage…** in the ☰ menu shows what LoomWatch used on each over the last 30 days, with a link to
+where you see the exact figure. The offline demo costs nothing.
 
 </details>
 
@@ -903,7 +954,8 @@ exact cost OpenRouter reported. The offline demo costs nothing.
 
 LoomWatch serves everything on `127.0.0.1` and keeps your run history in a file on this computer.
 What an agent works with (its instructions, your request, and the files and pages it reads) goes to
-OpenRouter and the company whose model it uses, as with any AI service. Skills are fetched from
+the company whose model it uses, as with any AI service: OpenAI on your ChatGPT plan, Anthropic on
+your Claude credit, and through OpenRouter when that is how it's paid. Skills are fetched from
 skills.sh, ClawHub or GitHub only when you add one.
 
 </details>
@@ -911,8 +963,9 @@ skills.sh, ClawHub or GitHub only when you add one.
 <details>
 <summary><strong>Can different agents in one team use different models?</strong></summary>
 
-Yes. Each agent card has its own model and effort. A team can research on Claude Sonnet, check on
-GPT and draft on a free model such as DeepSeek or Qwen, all through the one OpenRouter key.
+Yes. Each agent card has its own model and effort, and says how its model is paid. A team can
+research on Claude Sonnet from your Claude credit, check on GPT on your ChatGPT plan and draft on a
+free model such as DeepSeek or Qwen through OpenRouter.
 
 </details>
 
@@ -1011,15 +1064,16 @@ The defaults mount these explicit roots:
 | --- | --- | --- | --- |
 | `/data/teams` | `./teams` | Read/write | Team YAML, Brief files, layouts, and managed `.loomwatch` workspaces |
 | `/workspaces` | `./container/workspaces` | Read/write | Repositories used by container-native agents |
-| `/home/node` | `loomwatch-home` volume | Read/write | The run history, your OpenRouter key and LoomWatch's skills |
+| `/home/node` | `loomwatch-home` volume | Read/write | The run history, your keys and ChatGPT sign-in, and LoomWatch's skills |
 
 </details>
 
 <details>
 <summary>Your key and skills in the container</summary>
 
-Add your OpenRouter key in the browser as on a Mac. In the container it is kept in `keys.json` in
-LoomWatch's state folder, inside the `loomwatch-home` volume, readable only by LoomWatch's user, and
+Connect your models in the browser as on a Mac. In the container the OpenRouter key is kept in
+`keys.json`, and the Claude key and ChatGPT sign-in in `plans.json`, in LoomWatch's state folder
+inside the `loomwatch-home` volume, readable only by LoomWatch's user, and
 the skills you add on the Skills page are kept in the same volume. The image includes Node.js,
 Python, Git and curl, for skills whose scripts need them.
 
@@ -1038,7 +1092,7 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | My agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that an agent's **Chat** runs are in `.jobs/.bench` |
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
-| Your OpenRouter key | This Mac's Keychain, as `LoomWatch.OpenRouter`. On Windows, Windows Credential Manager, as `api-key.LoomWatch.OpenRouter`. On Linux and in Compose, `keys.json` in LoomWatch's state folder, readable only by your user |
+| Your keys and ChatGPT sign-in | This Mac's Keychain: the OpenRouter key as `LoomWatch.OpenRouter`, the Claude key and ChatGPT sign-in together as `LoomWatch.Plans`. On Windows, Windows Credential Manager, as `api-key.LoomWatch.OpenRouter` and `plans.LoomWatch.Plans`. On Linux and in Compose, `keys.json` and `plans.json` in LoomWatch's state folder, readable only by your user |
 | Your skills | `skills/` in `~/Library/Application Support/LoomWatch` (`%LOCALAPPDATA%\LoomWatch` on Windows, `~/.local/state/loomwatch` on Linux), and where each one came from in `skills.json` beside it. Skills that travel with a team are in `.agents/skills` beside its file |
 | Team chats (your messages and every run), recorded events, Notebook entries and Ask conversations | One file, `loomwatch.db`, in `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows or `~/.local/state/loomwatch` on Linux. A copy of the source keeps its own in `.loomwatch/` in its folder; Compose deployments in the `loomwatch-home` volume. |
 | Which team files you approved to run, and your update-check choices | `~/Library/Application Support/LoomWatch` on macOS, `%LOCALAPPDATA%\LoomWatch` on Windows, `~/.local/state/loomwatch` on Linux |
@@ -1109,11 +1163,17 @@ it came from.
 | Another program is using port 3000 | Start LoomWatch on another port: `LOOMWATCH_PORT=3001 ~/LoomWatch/app/loomwatch`. |
 | LoomWatch says another copy of LoomWatch is already running, or the page says "Couldn't list your teams" | An earlier copy is still running, often one whose folder you deleted before downloading LoomWatch again. Stop it with the `kill` command the message gives, then run `loomwatch` again. |
 | Team file not found | Confirm the file is in your teams folder (`~/LoomWatch/teams` unless you set `LOOMWATCH_TEAMS_ROOT`). The demo link uses `?path=operator-stop.yaml`, relative to that folder. |
-| "OpenRouter refused the API key" | The key was deleted or mistyped. Make a new one at [openrouter.ai/keys](https://openrouter.ai/keys) and paste it under **AI models** in **Connections…**. |
+| "OpenRouter refused the API key" | The key was deleted or mistyped. Make a new one at [openrouter.ai/keys](https://openrouter.ai/keys) and paste it into **OpenRouter (pay per use)** in **Connections…**. |
+| "Anthropic refused the Claude API key" | The key was deleted or mistyped. Make a new one in the Claude Console, in the organization linked to your Claude plan, and paste it into **Your Claude API credit** in **Connections…**. A key starting `sk-ant-oat` is a Claude sign-in, which LoomWatch can't use. |
+| "Your Claude API credit is used up" | It comes back when your plan renews. Until then, add credits in the Claude Console, or choose the agent a model paid another way. **Usage…** in the ☰ menu shows what LoomWatch spent. |
+| "LoomWatch has reached a usage limit on your ChatGPT plan" | Click **Manage usage** to see your plan's limit and LoomWatch's share of it. Wait until the plan's limit resets, raise LoomWatch's share there, or choose the agent a model paid another way. |
+| "LoomWatch's sign-in with ChatGPT has ended" | Click **Continue with ChatGPT** on **Your ChatGPT plan** in **Connections…**. |
+| "This ChatGPT account can't share its plan with apps" | Only ChatGPT Plus and Pro plans can. Choose the agent a model on your Claude credit or OpenRouter. |
+| "You signed in with ChatGPT but didn't allow LoomWatch to use your plan" | Click **Turn on plan use** on **Your ChatGPT plan** in **Connections…**, and allow it on ChatGPT's page. |
 | "Your OpenRouter account is out of credits" | Add credits at [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits), or choose a free model for the agent. |
 | "OpenRouter has no model called …" | The model was renamed or retired. Choose another model in the agent's panel. |
 | A skill is missing | Add it on the Skills page, or click **Look on this computer** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
-| Ask asks for a key | Ask runs on your OpenRouter key, like your agents. Add it on Home or under **AI models** in **Connections…**. |
+| Ask or a team says a way of paying isn't connected | The agent's model is paid by your ChatGPT plan, your Claude credit or OpenRouter, and that one isn't connected. Connect it in **Connections…**, or choose a model you can run. When a connected one has the same models, the team offers to move its agents with one click. |
 | An agent's working folder is missing | Native teams should use a real folder on this computer. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Workflow. An edit outside the agent's own folder always asks, even with **Edit files** on. |
 | Build reports an unsupported Node version | Install the current Node.js from <https://nodejs.org/>, reopen Terminal, and check `node --version`. |
@@ -1127,7 +1187,7 @@ it came from.
 | Piece | What it does |
 | --- | --- |
 | `loomwatchd` | One Rust program that runs every agent itself, supervises the runs, and serves the browser app |
-| LoomWatch's agent | Each agent's loop: it calls the model through OpenRouter with your key, and uses LoomWatch's tools for files, the web, commands and the team. The key never leaves the program |
+| LoomWatch's agent | Each agent's loop: it calls the model on your ChatGPT plan, on your Claude credit or through OpenRouter, and uses LoomWatch's tools for files, the web, commands and the team. Keys and sign-ins never leave the program |
 | Team Bus | The tools agents use to hand work over, ask each other questions, or report |
 | LoomWatch Control | The tools Ask LoomWatch uses to read, propose and start teams |
 | Event archive | One SQLite file, built into the program, holding every message, tool call and handover, so runs can be replayed |

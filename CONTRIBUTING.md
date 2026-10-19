@@ -8,8 +8,8 @@ change and why.
 ## Reporting problems
 
 - **Bugs and ideas:** use **Send feedback** in the app (☰ menu). It opens a GitHub issue form with
-  your LoomWatch version, system, browser and whether an OpenRouter key is added filled in, never
-  the key itself or your teams. You can also open the forms directly.
+  your LoomWatch version, system, browser and which ways of paying for models are connected filled
+  in, never a key, a sign-in or your teams. You can also open the forms directly.
 - **Security problems:** report them privately, as [SECURITY.md](SECURITY.md) describes, never in a
   public issue.
 
@@ -51,6 +51,22 @@ LOOMWATCH_OPENROUTER_URL=http://127.0.0.1:4100/api/v1 LOOMWATCH_KEY_STORE=file \
 Add any key starting `sk-or-v1-mock`. `LOOMWATCH_OPENROUTER_URL` is taken only for an address on
 this computer, so a key can never be sent anywhere else. The script's opening comment lists the
 requests that make it run a command, write a file or hand out research.
+
+To try the ChatGPT plan and the Claude API credit the same way, add the stand-ins for OpenAI and
+Anthropic in [scripts/mock-vendors.py](scripts/mock-vendors.py): Anthropic on the port you give it,
+OpenAI on the next one.
+
+```sh
+python3 scripts/mock-vendors.py 4200 &
+LOOMWATCH_ANTHROPIC_URL=http://127.0.0.1:4200 LOOMWATCH_OPENAI_AUTH_URL=http://127.0.0.1:4201 \
+  LOOMWATCH_OPENAI_URL=http://127.0.0.1:4201 LOOMWATCH_KEY_STORE=file \
+  LOOMWATCH_STATE_DIR=/tmp/lw-trial ./target/debug/loomwatchd serve --teams-root /tmp/lw-trial/teams
+```
+
+**Continue with ChatGPT** opens the stand-in's consent page, which sends you back to LoomWatch on
+`127.0.0.1`, and any Claude key starting `sk-ant-api03-mock` is accepted. The stand-ins refuse a request shaped the way the real companies
+refuse it, and its opening comment lists the requests that make them hit a plan's limit or run
+out of credit. Each of these addresses, too, is taken only on this computer.
 
 ## Before you open a pull request
 

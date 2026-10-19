@@ -31,6 +31,10 @@ describe('describeSystem', () => {
     ].join('\n'))
     expect(text).not.toContain('sk-or')
     expect(describeSystem(about, { connected: false }, {}, SAFARI)).toContain('OpenRouter key: not added')
+    // Each plan as yes or no, never its account.
+    const plans = describeSystem(about, { connected: false }, { plans: { chatgpt: true, anthropic: false } }, SAFARI)
+    expect(plans).toContain('ChatGPT plan: connected')
+    expect(plans).toContain('Claude API credit: not connected')
   })
 
   it('hides the home folder in an error', () => {

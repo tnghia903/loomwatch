@@ -1,7 +1,7 @@
 import { Check, Copy, ExternalLink } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 
-import { useKeyStatus } from '../../lib/ai/useKeyStatus'
+import { useAiStatus, useKeyStatus } from '../../lib/ai/useKeyStatus'
 import {
   describeSystem,
   fetchAbout,
@@ -59,7 +59,9 @@ export function FeedbackDialog({ context, onClose }: FeedbackDialogProps) {
     return () => controller.abort()
   }, [])
 
-  const details = describeSystem(checking ? null : about, key, context)
+  const ai = useAiStatus()
+  const plans = ai ? { chatgpt: ai.chatgpt.connected && ai.chatgpt.planUse, anthropic: ai.anthropic.connected } : undefined
+  const details = describeSystem(checking ? null : about, key, { ...context, ...(plans ? { plans } : {}) })
   const href = issueUrl(kind, details)
 
   async function copy() {
