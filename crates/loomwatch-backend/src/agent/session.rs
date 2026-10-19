@@ -34,12 +34,12 @@ use super::events::{self, EventSink, ToolKind, ToolStatus};
 use super::permission::{Decision, PermissionRequest, Permissions};
 use super::prompt::{Abilities, loomwatch_brief, project_notes, system_prompt};
 use super::provider::{
-    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Provider, ServerTools, ToolCall,
-    ToolSpec, Usage, WebLimits,
+    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Picture, Provider, ServerTools,
+    ToolCall, ToolSpec, Usage, WebLimits,
 };
 use super::skills::{SkillIndex, prompt_section};
 use super::spend::{Go, Spend, Unmetered};
-use super::tools::{Builtin, CommandSettings, Context, Output};
+use super::tools::{Builtin, CommandSettings, Context, Output, Pictures};
 use crate::you::AboutYou;
 
 /// The context size assumed for a model whose size isn't known.
@@ -60,6 +60,12 @@ const SET_ASIDE_PREVIEW_CHARS: usize = 6_000;
 /// How much of a tool's result the run record keeps. The model still gets all of it.
 const RECORDED_OUTPUT_CHARS: usize = 4_000;
 const READ_OUTPUT_DEFAULT_CHARS: usize = 20_000;
+/// The most pictures one conversation holds. Past 20 in one request, Claude's API wants each
+/// picture at most 2000 pixels on a side, smaller than the pictures are sent.
+pub const MAX_PICTURES: usize = 20;
+/// The most picture data one conversation holds, in base64. Every call sends the whole
+/// conversation again, and Anthropic refuses a request over 32 MB.
+pub const MAX_PICTURE_BYTES: usize = 20 * 1024 * 1024;
 
 /// Which of the built-in tools an agent gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,6 +178,13 @@ pub struct SessionConfig {
     pub context_window: Option<u64>,
     /// The most tool calls one turn may make before it stops.
     pub max_tool_calls: usize,
+    /// The model can see pictures, so a picture `read_file` opens is shown to it. From the model
+    /// list.
+    pub sees_pictures: bool,
+    /// The most pictures the conversation may hold.
+    pub max_pictures: usize,
+    /// The most picture data the conversation may hold, in base64 bytes.
+    pub max_picture_bytes: usize,
     /// Folders besides the work folder a command may write to.
     pub writable: Vec<PathBuf>,
     /// How much web reading one model call may do.
@@ -205,6 +218,9 @@ impl SessionConfig {
             max_tokens: 16_000,
             context_window: None,
             max_tool_calls: 200,
+            sees_pictures: false,
+            max_pictures: MAX_PICTURES,
+            max_picture_bytes: MAX_PICTURE_BYTES,
             writable: Vec::new(),
             web: WebLimits::default(),
             time_zone: None,
@@ -532,10 +548,13 @@ impl Session {
                 return Ok(ended(reason, turn, &reply));
             }
             for call in &calls {
-                let content = if calls_made >= self.config.max_tool_calls {
-                    "Not run: this turn reached its limit of tool calls.".to_owned()
+                let (content, pictures) = if calls_made >= self.config.max_tool_calls {
+                    (
+                        "Not run: this turn reached its limit of tool calls.".to_owned(),
+                        Vec::new(),
+                    )
                 } else if cancel.is_cancelled() {
-                    "Not run: the turn was cancelled.".to_owned()
+                    ("Not run: the turn was cancelled.".to_owned(), Vec::new())
                 } else {
                     calls_made += 1;
                     self.run_tool(call, cut, &cancel).await?
@@ -543,6 +562,7 @@ impl Session {
                 self.history.push(Message::Tool {
                     tool_call_id: call.id.clone(),
                     content,
+                    pictures,
                 });
             }
             if calls_made >= self.config.max_tool_calls {
@@ -742,7 +762,7 @@ impl Session {
         call: &ToolCall,
         cut: bool,
         cancel: &Cancel,
-    ) -> Result<String, AgentError> {
+    ) -> Result<(String, Vec<Picture>), AgentError> {
         let Ok(input @ Value::Object(_)) = serde_json::from_str::<Value>(&call.arguments) else {
             // Told why, or the model makes the same call again and is cut off at the same place.
             let said = if cut {
@@ -770,7 +790,7 @@ impl Session {
             .await?;
             self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                 .await?;
-            return Ok(said);
+            return Ok((said, Vec::new()));
         };
         let output = match Builtin::named(&call.name).filter(|tool| self.offers(*tool)) {
             Some(tool) => self.run_builtin(tool, call, input, cancel).await?,
@@ -796,7 +816,23 @@ impl Session {
                 said
             }
         };
-        Ok(self.for_conversation(&call.id, output.text))
+        Ok((
+            self.for_conversation(&call.id, output.text),
+            output.pictures,
+        ))
+    }
+
+    /// How many pictures the conversation holds now, and how much data they are in base64.
+    fn pictures_held(&self) -> (usize, usize) {
+        self.history
+            .iter()
+            .flat_map(|message| match message {
+                Message::Tool { pictures, .. } => pictures.as_slice(),
+                _ => &[],
+            })
+            .fold((0, 0), |(count, bytes), picture| {
+                (count + 1, bytes + picture.data.len())
+            })
     }
 
     fn offers(&self, tool: Builtin) -> bool {
@@ -868,7 +904,11 @@ impl Session {
             ))
             .await?;
         }
-        Ok(Output { text, failed })
+        Ok(Output {
+            text,
+            failed,
+            pictures: Vec::new(),
+        })
     }
 
     async fn run_builtin(
@@ -950,6 +990,14 @@ impl Session {
                     cwd: &self.config.cwd,
                     cancel,
                     command: &settings,
+                    pictures: {
+                        let (held, bytes) = self.pictures_held();
+                        Pictures {
+                            seen: self.config.sees_pictures,
+                            room: self.config.max_pictures.saturating_sub(held),
+                            bytes: self.config.max_picture_bytes.saturating_sub(bytes),
+                        }
+                    },
                 };
                 tool.run(&input, &context).await
             }

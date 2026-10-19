@@ -517,11 +517,36 @@ fn wire_messages(history: &[Message]) -> Vec<Value> {
             Message::Tool {
                 tool_call_id,
                 content,
-            } => user.push(json!({
-                "type": "tool_result",
-                "tool_use_id": tool_call_id,
-                "content": if content.is_empty() { "(no output)" } else { content.as_str() },
-            })),
+                pictures,
+            } => {
+                let text = if content.is_empty() {
+                    "(no output)"
+                } else {
+                    content.as_str()
+                };
+                // A picture goes inside the result of the tool that opened it.
+                let content = if pictures.is_empty() {
+                    json!(text)
+                } else {
+                    let mut blocks = vec![json!({"type": "text", "text": text})];
+                    blocks.extend(pictures.iter().map(|picture| {
+                        json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": picture.media_type,
+                                "data": picture.data,
+                            },
+                        })
+                    }));
+                    Value::Array(blocks)
+                };
+                user.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_id,
+                    "content": content,
+                }));
+            }
             Message::Assistant {
                 content,
                 tool_calls,
@@ -899,6 +924,7 @@ mod tests {
             context_length: 1_000_000,
             max_output: 128_000,
             adaptive_thinking: true,
+            sees_pictures: true,
             efforts: ["low", "medium", "high", "xhigh", "max"]
                 .map(str::to_owned)
                 .to_vec(),
@@ -917,6 +943,38 @@ mod tests {
             session_key: "s-1",
             agent_id: "writer",
         }
+    }
+
+    /// A picture goes inside the result of the tool that opened it, where Claude reads it with
+    /// the tool's words; a result without one stays the text it always was.
+    #[test]
+    fn a_picture_goes_inside_the_result_of_the_tool_that_opened_it() {
+        let history = [
+            Message::Tool {
+                tool_call_id: "toolu_1".into(),
+                content: "shot.png: a picture, 40×20 pixels.".into(),
+                pictures: vec![crate::agent::provider::Picture {
+                    name: "shot.png".into(),
+                    media_type: "image/png".into(),
+                    data: "iVBORw0K".into(),
+                }],
+            },
+            Message::Tool {
+                tool_call_id: "toolu_2".into(),
+                content: "B".into(),
+                pictures: Vec::new(),
+            },
+        ];
+        assert_eq!(
+            wire_messages(&history),
+            [json!({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": [
+                    {"type": "text", "text": "shot.png: a picture, 40×20 pixels."},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0K"}},
+                ]},
+                {"type": "tool_result", "tool_use_id": "toolu_2", "content": "B"},
+            ]})]
+        );
     }
 
     /// The system prompt goes on top, a turn's tool results and the words after them share one user
@@ -948,10 +1006,12 @@ mod tests {
             Message::Tool {
                 tool_call_id: "toolu_1".into(),
                 content: "A".into(),
+                pictures: Vec::new(),
             },
             Message::Tool {
                 tool_call_id: "toolu_2".into(),
                 content: String::new(),
+                pictures: Vec::new(),
             },
             Message::User {
                 content: "Now sum up.".into(),

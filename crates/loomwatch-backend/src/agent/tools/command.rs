@@ -311,6 +311,7 @@ mod tests {
             cwd,
             cancel: &cancel,
             command: &settings,
+            pictures: super::super::Pictures::default(),
         };
         let done = run(
             &script(
@@ -365,6 +366,7 @@ mod tests {
             cwd: &folder.0,
             cancel: &cancel,
             command: &settings,
+            pictures: super::super::Pictures::default(),
         };
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(500)).await;

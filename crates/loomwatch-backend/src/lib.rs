@@ -17,6 +17,7 @@ pub mod connected_tools;
 pub mod control;
 pub mod db;
 pub mod delivery;
+pub mod documents;
 pub mod engine;
 mod files;
 mod jobs;
@@ -4690,6 +4691,108 @@ pub(crate) mod test_support {
             })
         });
         (crate::engine::demo_model(demo.clone()), demo)
+    }
+
+    /// The smallest PDF a reader takes: one page of Helvetica text per entry, an empty entry a
+    /// page with no text, as a scanned page has none.
+    pub(crate) fn minimal_pdf(pages: &[&str]) -> Vec<u8> {
+        let kids: Vec<String> = (0..pages.len())
+            .map(|index| format!("{} 0 R", 4 + index * 2))
+            .collect();
+        let mut objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            format!(
+                "<< /Type /Pages /Kids [{}] /Count {} >>",
+                kids.join(" "),
+                pages.len()
+            ),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
+        ];
+        for (index, text) in pages.iter().enumerate() {
+            let stream = if text.is_empty() {
+                String::new()
+            } else {
+                format!("BT /F1 18 Tf 50 700 Td ({text}) Tj ET")
+            };
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {} 0 R \
+                 /Resources << /Font << /F1 3 0 R >> >> >>",
+                5 + index * 2
+            ));
+            objects.push(format!(
+                "<< /Length {} >>\nstream\n{stream}\nendstream",
+                stream.len()
+            ));
+        }
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend(format!("{} 0 obj\n{object}\nendobj\n", index + 1).bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).bytes());
+        for offset in offsets {
+            pdf.extend(format!("{offset:010} 00000 n \n").bytes());
+        }
+        pdf.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .bytes(),
+        );
+        pdf
+    }
+
+    /// A ZIP of `parts`, as Word, Excel and `PowerPoint` files are, stored without compression.
+    pub(crate) fn zip_of(parts: &[(&str, &str)]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut zipped = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let stored = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, content) in parts {
+            zipped.start_file(*name, stored).expect("start a part");
+            zipped.write_all(content.as_bytes()).expect("write a part");
+        }
+        zipped.finish().expect("finish the ZIP").into_inner()
+    }
+
+    /// A Word file whose body is `body`, the XML inside `<w:body>`.
+    pub(crate) fn docx(body: &str) -> Vec<u8> {
+        zip_of(&[(
+            "word/document.xml",
+            &format!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><w:body>{body}</w:body></w:document>"#
+            ),
+        )])
+    }
+
+    /// A PNG of `width` by `height` in one colour, with see-through parts when `alpha`.
+    pub(crate) fn png(width: u32, height: u32, alpha: bool) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let image = if alpha {
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                width,
+                height,
+                image::Rgba([200, 30, 30, 128]),
+            ))
+        } else {
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(width, height, |x, y| {
+                image::Rgb([
+                    u8::try_from(x % 256).unwrap_or(0),
+                    u8::try_from(y % 256).unwrap_or(0),
+                    90,
+                ])
+            }))
+        };
+        image
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode a PNG");
+        bytes
     }
 }
 

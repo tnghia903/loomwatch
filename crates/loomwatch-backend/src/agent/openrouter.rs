@@ -317,7 +317,7 @@ fn body(request: &ChatRequest<'_>, limited: bool) -> Value {
     body.insert("model".into(), json!(request.model));
     body.insert(
         "messages".into(),
-        Value::Array(request.messages.iter().map(wire_message).collect()),
+        Value::Array(wire_messages(request.messages)),
     );
     body.insert("stream".into(), json!(true));
     body.insert("max_completion_tokens".into(), json!(request.max_tokens));
@@ -342,6 +342,33 @@ fn body(request: &ChatRequest<'_>, limited: bool) -> Value {
         body.insert("cache_control".into(), json!({"type": "ephemeral"}));
     }
     Value::Object(body)
+}
+
+/// The conversation as chat messages. A `tool` message carries text only, so the pictures a turn's
+/// tools opened follow its tool results in one user message, each after the name of its file.
+fn wire_messages(history: &[Message]) -> Vec<Value> {
+    let mut messages = Vec::with_capacity(history.len());
+    let mut pictures: Vec<Value> = Vec::new();
+    for (index, message) in history.iter().enumerate() {
+        messages.push(wire_message(message));
+        if let Message::Tool {
+            pictures: opened, ..
+        } = message
+        {
+            for picture in opened {
+                pictures.push(
+                    json!({"type": "text", "text": format!("The picture {} shows:", picture.name)}),
+                );
+                pictures
+                    .push(json!({"type": "image_url", "image_url": {"url": picture.data_url()}}));
+            }
+        }
+        let results_end = !matches!(history.get(index + 1), Some(Message::Tool { .. }));
+        if results_end && !pictures.is_empty() {
+            messages.push(json!({"role": "user", "content": std::mem::take(&mut pictures)}));
+        }
+    }
+    messages
 }
 
 fn wire_message(message: &Message) -> Value {
@@ -390,6 +417,7 @@ fn wire_message(message: &Message) -> Value {
         Message::Tool {
             tool_call_id,
             content,
+            ..
         } => json!({"role": "tool", "tool_call_id": tool_call_id, "content": content}),
     }
 }
@@ -801,6 +829,49 @@ mod tests {
     use super::*;
     use crate::agent::provider::ToolSpec;
 
+    /// A `tool` message carries text only, so the pictures a turn's tools opened follow its tool
+    /// results in one user message, each after the name of its file.
+    #[test]
+    fn pictures_follow_the_turns_tool_results_in_a_user_message() {
+        let history = [
+            Message::Tool {
+                tool_call_id: "call_1".into(),
+                content: "shot.png: a picture, 40×20 pixels.".into(),
+                pictures: vec![crate::agent::provider::Picture {
+                    name: "shot.png".into(),
+                    media_type: "image/png".into(),
+                    data: "iVBORw0K".into(),
+                }],
+            },
+            Message::Tool {
+                tool_call_id: "call_2".into(),
+                content: "B".into(),
+                pictures: Vec::new(),
+            },
+            Message::Assistant {
+                content: "Seen.".into(),
+                reasoning_details: Vec::new(),
+                tool_calls: Vec::new(),
+                native: None,
+            },
+        ];
+        let wire = wire_messages(&history);
+        assert_eq!(
+            wire,
+            [
+                json!({"role": "tool", "tool_call_id": "call_1", "content": "shot.png: a picture, 40×20 pixels."}),
+                json!({"role": "tool", "tool_call_id": "call_2", "content": "B"}),
+                json!({"role": "user", "content": [
+                    {"type": "text", "text": "The picture shot.png shows:"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0K"}},
+                ]}),
+                json!({"role": "assistant", "content": "Seen."}),
+            ]
+        );
+        let without = wire_messages(&history[1..]);
+        assert_eq!(without.len(), 2, "no pictures, no extra message");
+    }
+
     /// A stand-in on this computer is taken, with or without a trailing slash; anything that would
     /// send the key elsewhere, even dressed up as local, falls back to `OpenRouter` itself.
     #[test]
@@ -871,6 +942,7 @@ mod tests {
             Message::Tool {
                 tool_call_id: "call_1".into(),
                 content: "hello".into(),
+                pictures: Vec::new(),
             },
         ];
         let tools = [ToolSpec {

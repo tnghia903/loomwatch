@@ -14,7 +14,7 @@ use std::path::{Component, Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::events::ToolKind;
-use super::provider::{Cancel, ToolSpec};
+use super::provider::{Cancel, Picture, ToolSpec};
 
 pub(crate) use command::CommandSettings;
 
@@ -60,6 +60,8 @@ pub(crate) struct Prepared {
 pub(crate) struct Output {
     pub text: String,
     pub failed: bool,
+    /// Pictures for the model to look at, after the text.
+    pub pictures: Vec<Picture>,
 }
 
 impl Output {
@@ -67,6 +69,7 @@ impl Output {
         Self {
             text: text.into(),
             failed: false,
+            pictures: Vec::new(),
         }
     }
 
@@ -74,8 +77,21 @@ impl Output {
         Self {
             text: text.into(),
             failed: true,
+            pictures: Vec::new(),
         }
     }
+}
+
+/// Whether a picture `read_file` opens reaches the model, and how many more the conversation may
+/// hold.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Pictures {
+    /// The model the agent runs on can see pictures.
+    pub seen: bool,
+    /// How many more pictures the conversation may hold.
+    pub room: usize,
+    /// How much more picture data the conversation may hold, in base64 bytes.
+    pub bytes: usize,
 }
 
 /// What a tool runs with.
@@ -83,6 +99,7 @@ pub(crate) struct Context<'a> {
     pub cwd: &'a Path,
     pub cancel: &'a Cancel,
     pub command: &'a CommandSettings,
+    pub pictures: Pictures,
 }
 
 impl Builtin {
@@ -129,8 +146,10 @@ impl Builtin {
                 }),
             ),
             Self::ReadFile => (
-                "Read a text file. Lines come numbered. For a long file, read it in parts with \
-                 offset and limit.",
+                "Read a file. Text comes with its lines numbered, and so does the text of a PDF, \
+                 Word (.docx), Excel (.xlsx, .xls) or PowerPoint (.pptx) file. For a long file, \
+                 read it in parts with offset and limit. A picture (PNG, JPEG, GIF or WebP) is \
+                 shown to you when the model you run on can see pictures.",
                 json!({
                     "type": "object",
                     "properties": {
@@ -332,7 +351,8 @@ impl Builtin {
             | Self::EditFile => {
                 let input = input.clone();
                 let cwd = context.cwd.to_path_buf();
-                tokio::task::spawn_blocking(move || files::run(self, &input, &cwd))
+                let pictures = context.pictures;
+                tokio::task::spawn_blocking(move || files::run(self, &input, &cwd, pictures))
                     .await
                     .unwrap_or_else(|error| Output::failed(format!("The tool stopped: {error}")))
             }

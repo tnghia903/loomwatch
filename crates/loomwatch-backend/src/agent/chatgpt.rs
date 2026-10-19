@@ -269,11 +269,24 @@ fn input(history: &[Message]) -> Vec<Value> {
             Message::Tool {
                 tool_call_id,
                 content,
-            } => items.push(json!({
-                "type": "function_call_output",
-                "call_id": tool_call_id,
-                "output": content,
-            })),
+                pictures,
+            } => {
+                // A picture goes inside the output of the call that opened it, as Codex sends one.
+                let output = if pictures.is_empty() {
+                    json!(content)
+                } else {
+                    let mut parts = vec![json!({"type": "input_text", "text": content})];
+                    parts.extend(pictures.iter().map(
+                        |picture| json!({"type": "input_image", "image_url": picture.data_url()}),
+                    ));
+                    Value::Array(parts)
+                };
+                items.push(json!({
+                    "type": "function_call_output",
+                    "call_id": tool_call_id,
+                    "output": output,
+                }));
+            }
             Message::Assistant {
                 content,
                 tool_calls,
@@ -645,6 +658,7 @@ mod tests {
                 .map(str::to_owned)
                 .to_vec(),
             priority: 1,
+            sees_pictures: true,
         }
     }
 
@@ -660,6 +674,38 @@ mod tests {
             session_key: "s-1",
             agent_id: "writer",
         }
+    }
+
+    /// A picture goes inside the output of the call that opened it, as Codex sends one; an output
+    /// without one stays the text it always was.
+    #[test]
+    fn a_picture_goes_inside_the_output_of_the_call_that_opened_it() {
+        let history = [
+            Message::Tool {
+                tool_call_id: "call_1".into(),
+                content: "shot.png: a picture, 40×20 pixels.".into(),
+                pictures: vec![crate::agent::provider::Picture {
+                    name: "shot.png".into(),
+                    media_type: "image/png".into(),
+                    data: "iVBORw0K".into(),
+                }],
+            },
+            Message::Tool {
+                tool_call_id: "call_2".into(),
+                content: "B".into(),
+                pictures: Vec::new(),
+            },
+        ];
+        assert_eq!(
+            input(&history),
+            [
+                json!({"type": "function_call_output", "call_id": "call_1", "output": [
+                    {"type": "input_text", "text": "shot.png: a picture, 40×20 pixels."},
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0K"},
+                ]}),
+                json!({"type": "function_call_output", "call_id": "call_2", "output": "B"}),
+            ]
+        );
     }
 
     /// The shape plan usage takes: instructions instead of a system message, nothing stored, the
@@ -690,6 +736,7 @@ mod tests {
             Message::Tool {
                 tool_call_id: "call_1".into(),
                 content: "A".into(),
+                pictures: Vec::new(),
             },
         ];
         let tools = [ToolSpec {
