@@ -17,9 +17,18 @@ describe('a team’s answer as a message or a document', () => {
   it('reads its title, opening words and size from its own text', () => {
     const facts = describeDocument('# Today’s AI digest\n\n**Lead:** chipmakers rally on the [export rule](https://example.com).\n\n## Chips\n- Shares up.\n\n| a | b |\n|---|---|\n\n## Models\nAn open model.')
     expect(facts.title).toBe('Today’s AI digest')
-    expect(facts.preview).toBe('Lead: chipmakers rally on the export rule. Chips Shares up. Models An open model.')
+    expect(facts.preview).toBe('Lead: chipmakers rally on the export rule. Shares up. An open model.')
     expect(facts.sections).toBe(2)
     expect(documentSize(facts)).toBe(`${facts.words} words · 2 sections`)
+  })
+
+  it('opens its preview on its words, without a section heading or a claim mark', () => {
+    const facts = describeDocument('# Enterprise RAG: production engineering brief\n\n## Retrieval Architecture\n\n[ Sourced ] Chunk boundaries affect retrieval quality.\n\n- **[Inference]** Rerank a bounded set.')
+    expect(facts.preview).toBe('Chunk boundaries affect retrieval quality. Rerank a bounded set.')
+    // A placeholder in brackets is the writer's text, not a mark.
+    expect(describeDocument('# Letter\n\n[Your name] signs here.').preview).toBe('[Your name] signs here.')
+    // Headings alone are still something to show.
+    expect(describeDocument('# Plan\n\n## Gather\n## Check').preview).toBe('Gather Check')
   })
 
   it('takes the first line as the title when there is no heading, and cuts the preview at a word', () => {

@@ -1,6 +1,7 @@
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
 
@@ -36,11 +37,6 @@ const REHYPE_PLUGINS = [() => markClaimsAndSources]
 type HastElement = NonNullable<ExtraProps['node']>
 type HastChild = HastElement['children'][number]
 
-// The marks writers put before a claim, in two kinds: backed by a source, or the writer's own
-// reasoning. Only these words: a paragraph opening with "[Your name]" is a placeholder, not a mark.
-const BACKED = ['sourced', 'cited', 'verified', 'confirmed', 'fact']
-const REASONED = ['inference', 'inferred', 'assumption', 'assumed', 'estimate', 'estimated', 'speculation', 'hypothesis', 'opinion', 'unverified']
-const CLAIM_MARK = new RegExp(`^\\s*\\[\\s*(${[...BACKED, ...REASONED].join('|')})\\s*\\]\\s*`, 'i')
 const CLAIM_SAYS = {
   backed: 'The writer marked this as backed by a source',
   reasoned: 'The writer marked this as their own reasoning, not taken from a source',
