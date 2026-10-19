@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { endTour, goToStep, offerTourIfFirstRun, readTourState, resetTourForTests, startTour } from './store'
+import { endTour, goToStep, readTourState, resetTourForTests, startTour } from './store'
 
 beforeEach(() => {
   resetTourForTests()
@@ -8,36 +8,17 @@ beforeEach(() => {
 })
 afterEach(() => vi.restoreAllMocks())
 
+// The guide no longer opens by itself: a newcomer starts on the first run (ADR 0075), and the
+// guide is a link on Home and in the menu.
 describe('getting-started guide progress', () => {
-  it('is offered to someone who has never run a team, even with the demo team in place', async () => {
-    await offerTourIfFirstRun(1, async () => [])
-    expect(readTourState()).toEqual({ status: 'active', step: 'welcome', runAtStepStart: null })
-  })
-
-  it('is not offered to someone who has run a team', async () => {
-    await offerTourIfFirstRun(0, async () => [{ runId: 'run-1' }])
-    expect(readTourState()).toBeNull()
-  })
-
-  it('falls back to an empty teams folder when run history cannot be read', async () => {
-    const unreadable = async () => { throw new Error('daemon unreachable') }
-    await offerTourIfFirstRun(2, unreadable)
-    expect(readTourState()).toBeNull()
-    await offerTourIfFirstRun(0, unreadable)
-    expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })
-  })
-
-  it('is not offered again once closed or finished, and never asks for runs then', async () => {
-    const listRuns = vi.fn(async () => [])
+  it('starts at the welcome, and stays closed or finished once it is', () => {
     startTour()
+    expect(readTourState()).toEqual({ status: 'active', step: 'welcome', runAtStepStart: null })
     endTour('dismissed')
-    await offerTourIfFirstRun(0, listRuns)
     expect(readTourState()).toMatchObject({ status: 'dismissed' })
     startTour()
     endTour('finished')
-    await offerTourIfFirstRun(0, listRuns)
     expect(readTourState()).toMatchObject({ status: 'finished' })
-    expect(listRuns).not.toHaveBeenCalled()
   })
 
   it('remembers the run on screen when a step begins', () => {
@@ -61,11 +42,9 @@ describe('getting-started guide progress', () => {
     expect(readTourState()).toBeNull()
   })
 
-  it('keeps a closed guide closed after its steps change', async () => {
+  it('keeps a closed guide closed after its steps change', () => {
     localStorage.setItem('loomwatch:tour', JSON.stringify({ status: 'dismissed', step: 'a-step-that-was-removed' }))
     expect(readTourState()).toEqual({ status: 'dismissed', step: 'welcome' })
-    await offerTourIfFirstRun(0, async () => [])
-    expect(readTourState()).toMatchObject({ status: 'dismissed' })
   })
 
   it('still works for the page when storage refuses writes', () => {

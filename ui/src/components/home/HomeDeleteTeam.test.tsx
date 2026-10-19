@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { markFirstRun } from '../../lib/firstrun/store'
 import { Home } from './Home'
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -10,6 +11,8 @@ function respond(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
+  // Someone who has run nothing would open on the first run (ADR 0075); these tests are about Home.
+  markFirstRun('skipped')
   Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign: vi.fn(), search: '', pathname: '/' } })
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
