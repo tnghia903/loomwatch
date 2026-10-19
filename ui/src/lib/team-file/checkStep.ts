@@ -3,6 +3,7 @@
 
 import type { Effort } from '../ai/modelIds'
 import { jobFor } from './checkup'
+import { NEW_SEND_BACK } from './sendBack'
 import type { AgentConfig } from './types'
 
 /**
@@ -38,10 +39,11 @@ export function checkEffort(checked: Pick<AgentConfig, 'name' | 'role' | 'allow'
 }
 
 /**
- * What makes `checker` a check step on `checked`'s work. It sends a missed check back once, so what
- * it finds is fixed before the answer is shown: without that, the check costs about half a run and
- * changes nothing. Its effort follows the work, on a model that has an effort setting at all.
+ * What makes `checker` a check step on `checked`'s work. It sends what is not met back
+ * (`NEW_SEND_BACK`), so what it finds is fixed before the answer is shown: without that, the
+ * check costs about half a run and changes nothing. Its effort follows the work, on a model that has
+ * an effort setting at all.
  */
-export function checkStepFields(checker: Pick<AgentConfig, 'thinkingEffort'>, checked: Pick<AgentConfig, 'id' | 'name' | 'role' | 'allow'>): Pick<AgentConfig, 'checks' | 'sendBackOnce' | 'thinkingEffort'> {
-  return { checks: checked.id, sendBackOnce: true, ...(checker.thinkingEffort ? { thinkingEffort: checkEffort(checked) } : {}) }
+export function checkStepFields(checker: Pick<AgentConfig, 'thinkingEffort'>, checked: Pick<AgentConfig, 'id' | 'name' | 'role' | 'allow'>): Pick<AgentConfig, 'checks' | 'sendBack' | 'thinkingEffort'> {
+  return { checks: checked.id, sendBack: { ...NEW_SEND_BACK }, ...(checker.thinkingEffort ? { thinkingEffort: checkEffort(checked) } : {}) }
 }

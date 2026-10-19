@@ -3,9 +3,10 @@ import { ArrowLeft, ExternalLink, History, MessagesSquare, Trash2, Wrench } from
 
 import { shortName } from '../../lib/ai/client'
 import { modelNameFromId } from '../../lib/ai/modelIds'
+import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { useModels } from '../../lib/ai/useModels'
 import type { DetectedCapability } from '../../lib/library/client'
-import { BLANK_DRAFT, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft, type AgentDraft } from '../../lib/library/draft'
+import { BLANK_DRAFT, blankDraft, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
 import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobSpec, type JobVersion, type SavedJob } from '../../lib/library/jobs'
@@ -62,6 +63,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
   const { jobs, available, loaded } = useSavedJobs()
+  const ai = useAiStatus()
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
   const [base, setBase] = useState<AgentDraft | null>(null)
   const [draft, setDraft] = useState<AgentDraft>(BLANK_DRAFT)
@@ -83,10 +85,11 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       const from = draftFromJob(saved)
       setBase(from)
       setDraft(from)
-    } else if (!id && loaded) {
+    } else if (!id && loaded && ai) {
+      // A new agent waits for what is connected, so its model is one it can run on (ADR 0073).
       setStartedFor(startKey)
       const preset = ROLE_PRESETS.find((candidate) => candidate.id === startFrom)
-      const from = preset ? draftFromPreset(preset) : BLANK_DRAFT
+      const from = preset ? draftFromPreset(preset) : blankDraft()
       // A new agent wears a figure none of your agents wears yet, so it is easy to tell apart.
       const worn = jobs.map((job) => figureFor(job.id, job.figure))
       setBase(null)

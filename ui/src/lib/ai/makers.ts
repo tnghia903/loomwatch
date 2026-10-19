@@ -2,7 +2,10 @@
 // whose model it is at a glance. The marks are copied from LobeHub Icons 1.95.1
 // (@lobehub/icons-static-svg, MIT License, Copyright (c) 2023 LobeHub; see
 // third-party-notices.txt). Each mark is its company's trademark and is shown only to say who
-// made the model; LoomWatch is not affiliated with any of them.
+// made the model; LoomWatch is not affiliated with any of them. Where a company has a mark in its
+// own colours, that is the one shown (makerColours.ts); the one-colour mark is for the rest.
+
+import { COLOUR_MARKS, type ColourMark } from './makerColours'
 
 import { type ModelSource, openRouterEquivalent, parseModelRef } from './modelIds'
 
@@ -11,6 +14,8 @@ export interface Maker {
   name: string
   /** Its mark: paths on a 24-unit square, filled even-odd. None when this list has no mark for it. */
   mark?: readonly string[]
+  /** Its mark in its own colours, shown in place of `mark`. None for a company whose mark is one colour. */
+  colour?: ColourMark
 }
 
 // Each company's mark once, by LobeHub's file name.
@@ -81,9 +86,9 @@ const MAKERS: Record<string, { name: string; mark?: string }> = {
   fireworks: { name: 'Fireworks AI', mark: 'fireworks' },
   meituan: { name: 'Meituan', mark: 'longcat' },
   perplexity: { name: 'Perplexity', mark: 'perplexity' },
-  microsoft: { name: 'Microsoft' },
-  'aion-labs': { name: 'Aion Labs' },
-  poolside: { name: 'Poolside' },
+  microsoft: { name: 'Microsoft', mark: 'microsoft' },
+  'aion-labs': { name: 'Aion Labs', mark: 'aionlabs' },
+  poolside: { name: 'Poolside', mark: 'poolside' },
   thinkingmachines: { name: 'Thinking Machines' },
   inclusionai: { name: 'inclusionAI' },
 }
@@ -91,19 +96,26 @@ const MAKERS: Record<string, { name: string; mark?: string }> = {
 /**
  * Who made a model, from its id: an OpenRouter id ("anthropic/claude-opus-5.5") or one a plan pays
  * for ("chatgpt:gpt-6.1-sol" is OpenAI's). A "~" in front is OpenRouter's always-the-latest alias
- * ("~anthropic/claude-opus-latest"), the same maker.
+ * ("~anthropic/claude-opus-latest"), the same maker. OpenRouter's own models ("openrouter/auto")
+ * are OpenRouter's: read as an older name, that prefix would be taken off.
  */
 export function makerOf(id: string): Maker {
-  const openrouter = openRouterEquivalent(parseModelRef(id))
-  const slug = (openrouter.split('/')[0] ?? '').replace(/^~/, '')
+  const own = /^~?openrouter\//.test(id.trim())
+  const openrouter = own ? id.trim() : openRouterEquivalent(parseModelRef(id))
+  return makerNamed((openrouter.split('/')[0] ?? '').replace(/^~/, ''))
+}
+
+/** A maker by OpenRouter's word for it, with its marks. */
+function makerNamed(slug: string): Maker {
   const known = Object.hasOwn(MAKERS, slug) ? MAKERS[slug] : undefined
   if (!known) return { name: slug }
-  return known.mark ? { name: known.name, mark: MARKS[known.mark] } : { name: known.name }
+  if (!known.mark) return { name: known.name }
+  const mark = Object.hasOwn(MARKS, known.mark) ? MARKS[known.mark] : undefined
+  const colour = Object.hasOwn(COLOUR_MARKS, known.mark) ? COLOUR_MARKS[known.mark] : undefined
+  return { name: known.name, ...(mark ? { mark } : {}), ...(colour ? { colour } : {}) }
 }
 
 /** The company behind a way of paying: OpenAI for the ChatGPT plan, Anthropic for the Claude credit, OpenRouter for itself. */
 export function sourceMaker(source: ModelSource): Maker {
-  const slug = source === 'chatgpt' ? 'openai' : source
-  const known = MAKERS[slug]
-  return known.mark ? { name: known.name, mark: MARKS[known.mark] } : { name: known.name }
+  return makerNamed(source === 'chatgpt' ? 'openai' : source)
 }

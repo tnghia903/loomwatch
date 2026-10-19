@@ -45,13 +45,22 @@ const NEW_AGENT_CHOICE = modelForJob(NEW_AGENT)
 
 export const BLANK_DRAFT: AgentDraft = { name: '', does: '', instructions: DEFAULT_AGENT_ROLE, model: NEW_AGENT_CHOICE.model, effort: NEW_AGENT_CHOICE.thinkingEffort ?? '', skills: [], tools: [], toolAllow: {}, reads: [], doneWhen: [], allow: {}, figure: null }
 
+/**
+ * A blank agent made now: on the model a new agent starts on, paid the way what is connected now
+ * says (ADR 0073). `BLANK_DRAFT` is the same agent as the page loaded, before anything was known.
+ */
+export function blankDraft(): AgentDraft {
+  const choice = modelForJob(NEW_AGENT)
+  return { ...BLANK_DRAFT, model: choice.model, effort: choice.thinkingEffort ?? '' }
+}
+
 export function draftFromJob(job: JobSpec): AgentDraft {
   return {
     name: job.name,
     does: job.does ?? '',
     instructions: job.instructions,
-    model: job.model || NEW_AGENT_CHOICE.model,
-    effort: job.model ? job.thinkingEffort ?? '' : NEW_AGENT_CHOICE.thinkingEffort ?? '',
+    model: job.model || modelForJob(NEW_AGENT).model,
+    effort: job.model ? job.thinkingEffort ?? '' : modelForJob(NEW_AGENT).thinkingEffort ?? '',
     skills: [...(job.skills ?? [])],
     tools: [...(job.tools ?? [])],
     toolAllow: keptFor(job.toolAllow ?? {}, job.tools ?? []),

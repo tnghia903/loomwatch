@@ -8,12 +8,12 @@ afterEach(cleanup)
 // ADR 0043: the menu holds only what has no other control on the screen. All teams is the brand,
 // Organize is in the view bar, Full trace in the run's heading, and a routine runs from its
 // schedule. Past work is in each team's chat (ADR 0051), so the run
-// history list it used to open is gone.
+// history list it used to open is gone. About you (ADR 0074) has no control on a team's screen.
 it('lists only what no other control on the screen does', () => {
   render(<WorkspaceMenu runView onMemory={vi.fn()} />)
   fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
   expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-    'Team memory', 'My agents…', 'Connections…', 'Usage…', 'Getting started guide', 'Send feedback…',
+    'Team memory', 'My agents…', 'About you…', 'Connections…', 'Usage…', 'Getting started guide', 'Send feedback…',
   ])
 })
 

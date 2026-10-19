@@ -322,6 +322,9 @@ pub struct AgentRun {
     tools: Option<ToolSet>,
     /// Instructions after the built-in ones.
     instructions: Option<String>,
+    /// It is told what the person told their agents about themselves (ADR 0074). Every agent is,
+    /// but a helper that edits `LoomWatch`'s own text for the person.
+    knows_the_person: bool,
     has_run: bool,
     session: Option<Session>,
     session_id: Option<String>,
@@ -341,6 +344,7 @@ impl AgentRun {
             host: None,
             tools: None,
             instructions: None,
+            knows_the_person: true,
             has_run: false,
             session: None,
             session_id: None,
@@ -368,6 +372,14 @@ impl AgentRun {
     #[must_use]
     pub(crate) fn without_tools(mut self) -> Self {
         self.tools = Some(ToolSet::NONE);
+        self
+    }
+
+    /// Not told about the person (ADR 0074): a helper whose answer is `LoomWatch`'s own text, such
+    /// as an agent's instructions, which their "answer in Vietnamese" must not rewrite.
+    #[must_use]
+    pub(crate) fn without_the_person(mut self) -> Self {
+        self.knows_the_person = false;
         self
     }
 
@@ -993,6 +1005,9 @@ impl AgentRun {
             }
         });
         config.instructions.clone_from(&self.instructions);
+        if self.knows_the_person {
+            config.person = crate::you::told_in(&self.spec.cwd);
+        }
         if let Some(policy) = &self.spec.permissions {
             config.turned_off = policy.turned_off_skills();
             config.web = policy.web_limits();
@@ -1164,6 +1179,37 @@ mod tests {
             permissions: None,
             asker: None,
         }
+    }
+
+    /// Every agent is told what the person told their agents (ADR 0074), but the helper that
+    /// rewrites `LoomWatch`'s own text, which an "answer in Vietnamese" would translate.
+    #[tokio::test]
+    async fn every_agent_is_told_about_the_person_but_the_instructions_rewriter() {
+        let folder = Folder(std::env::temp_dir().join(format!("loomwatch-you-{}", Uuid::new_v4())));
+        std::fs::create_dir_all(&folder.0).expect("folder");
+        let mai = crate::you::AboutYou {
+            name: Some("Mai".into()),
+            about: Some("Answer in Vietnamese.".into()),
+            skipped: false,
+        };
+        let open = |run: AgentRun| async move {
+            run.session_config("s", "a", "m", None, None).await.person
+        };
+        assert_eq!(
+            open(AgentRun::spawn(&spec(&folder.0)).expect("agent")).await,
+            None,
+            "nothing told, nothing said"
+        );
+        let _told = crate::you::testing::tell_agents_under(&folder.0, mai.clone());
+        assert_eq!(
+            open(AgentRun::spawn(&spec(&folder.0)).expect("agent")).await,
+            Some(mai)
+        );
+        let rewriter = AgentRun::spawn(&spec(&folder.0))
+            .expect("agent")
+            .without_tools()
+            .without_the_person();
+        assert_eq!(open(rewriter).await, None);
     }
 
     fn context(archive: &EventArchive, event_log: Option<EventLog>) -> TeamSessionContext<'_> {

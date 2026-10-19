@@ -1,11 +1,24 @@
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_MODEL } from '../ai/modelIds'
-import { agentFromDraft, BLANK_DRAFT, chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
+import { DEFAULT_MODEL, setConnectedSources } from '../ai/modelIds'
+import { agentFromDraft, BLANK_DRAFT, blankDraft, chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
 import { ROLE_PRESETS } from './roles'
 
 describe('the agent builder’s draft', () => {
+  it('starts a blank agent on a model what is connected now can run (ADR 0073)', () => {
+    try {
+      setConnectedSources(['anthropic'])
+      expect(blankDraft().model).toBe('anthropic:claude-opus-5-5')
+      setConnectedSources(['chatgpt'])
+      expect(blankDraft().model).toBe('chatgpt:gpt-6.1-sol')
+      setConnectedSources([])
+      expect(blankDraft().model).toBe(DEFAULT_MODEL)
+    } finally {
+      setConnectedSources([])
+    }
+  })
+
   it('saves what it shows and reads back the same', () => {
     const draft = { name: 'Reader', does: 'Checks stories', instructions: 'Check every story.', model: 'sonnet', effort: '', skills: ['source-check'], tools: ['github'], toolAllow: {}, reads: [], doneWhen: [], allow: { web: true, edits: false }, figure: { kind: 'button' as const, color: 'sage' as const } }
     const spec = specFromDraft(draft, 'First cut')

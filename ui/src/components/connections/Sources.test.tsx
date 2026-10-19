@@ -65,7 +65,11 @@ describe('How agents’ models are paid', () => {
     new BroadcastChannel(AI_CHANNEL).postMessage({ source: 'chatgpt', outcome: 'connected' })
     expect(await screen.findByText('Using ChatGPT plan')).toBeInTheDocument()
     expect(screen.getByText('Signed in as a@example.com')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Manage usage' })).toHaveAttribute('href', 'https://chatgpt.com/settings/usage')
+    // The first time plan use is on, a note says what it means, with Manage usage of its own.
+    expect(await screen.findByText(/You’re using your ChatGPT plan/)).toBeInTheDocument()
+    const manage = screen.getAllByRole('link', { name: 'Manage usage' })
+    expect(manage).toHaveLength(2)
+    for (const link of manage) expect(link).toHaveAttribute('href', 'https://chatgpt.com/settings/usage')
   })
 
   it('says plainly when plan use is off, and offers to turn it on', async () => {

@@ -13,6 +13,7 @@
 import { OVERTHINKING_EFFORTS, canonicalModel, makerSlug, modelForJob, modelForTier, modelNameFromId, parseModelRef, tierOfModel } from '../ai/modelIds'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
 import type { TeamUsage } from './runLessons'
+import { NEW_SEND_BACK, sendBackOf } from './sendBack'
 import type { AgentAllow, AgentConfig, AllowSwitch } from './types'
 
 export interface CheckupEdge {
@@ -71,14 +72,14 @@ export type CheckupFix =
   | { kind: 'model'; agentId: string; model: string; thinkingEffort?: string }
   /** A Done when list for the agent: what a check on its work checks against. */
   | { kind: 'done-when'; agentId: string; items: readonly string[] }
-  /** A check step sends a missed check back once. */
+  /** A check step sends what it finds not met back, as a new check step does (`NEW_SEND_BACK`). */
   | { kind: 'send-back'; agentId: string }
 
 /** The agent fields a fix sets, for a fix that is a plain field edit; `null` for any other. */
-export function fixFields(change: CheckupFix): Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'doneWhen' | 'sendBackOnce'>> | null {
+export function fixFields(change: CheckupFix): Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'doneWhen' | 'sendBack' | 'sendBackOnce'>> | null {
   if (change.kind === 'model') return { model: change.model, thinkingEffort: change.thinkingEffort }
   if (change.kind === 'done-when') return { doneWhen: [...change.items] }
-  if (change.kind === 'send-back') return { sendBackOnce: true }
+  if (change.kind === 'send-back') return { sendBack: { ...NEW_SEND_BACK }, sendBackOnce: undefined }
   return null
 }
 
@@ -473,12 +474,12 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
           : { askPrompt: `Suggest two or three short, checkable things ${checked.name}’s finished result in this team must have, as its Done when, and propose the change.` }),
       })
     }
-    if (!checker.sendBackOnce) {
+    if (!sendBackOf(checker)) {
       add({
         rule: 'check-no-send-back', severity: 'improve', agentId: checker.id, agentIds: [checker.id, checked.id],
         title: `What ${checker.name} finds is never fixed`,
-        why: `It shows beside the answer, but ${checked.name} never sees it, so the check costs about half a run and changes nothing in it. Sent back once, a missed check is fixed before you see the answer.`,
-        fix: { label: 'Send a missed check back once', change: { kind: 'send-back', agentId: checker.id } },
+        why: `It shows beside the answer, but ${checked.name} never sees it, so the check costs about half a run and changes nothing in it. Sent back, a missed check is fixed before you see the answer, and if it still isn’t, you decide.`,
+        fix: { label: `Send it back up to ${NEW_SEND_BACK.rounds} times`, change: { kind: 'send-back', agentId: checker.id } },
       })
     }
   }

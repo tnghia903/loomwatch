@@ -146,7 +146,8 @@ The fonts (Inter, Fraunces and JetBrains Mono) are under the SIL Open
 Font License 1.1: see fonts/OFL.txt next to this file.
 
 The model makers' logos in the model list are copied from LobeHub Icons
-(@lobehub/icons-static-svg 1.95.1) under the MIT License quoted here. Each
+(@lobehub/icons-static-svg 1.95.1) under the MIT License quoted here, except
+OpenRouter's two, which are its own files from openrouter.ai/brand. Each
 logo is its company's trademark and is shown only to say who made a model.
 
   MIT License

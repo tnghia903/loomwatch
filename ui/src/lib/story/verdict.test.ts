@@ -25,13 +25,29 @@ describe('answerVerdict', () => {
   })
 
   it('shows what the answer’s author could not meet or kept against a check, beside the answer they were taken off', () => {
-    const verdict = answerVerdict({ ...finished, notes: { agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: ['The March total: no sheet was attached'], notChanged: ['2.5 million: the report says so'] } })
+    const verdict = answerVerdict({ ...finished, notes: { agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: ['The March total: no sheet was attached'], notChanged: ['2.5 million: the report says so'], changes: [] } })
     expect(verdict).toMatchObject({ tone: 'look', label: '3 things to check', detail: 'Could not meet: Story 2 has a link: the page is down.' })
     expect(verdict.findings).toEqual([
       { tone: 'warn', text: 'Could not meet: Story 2 has a link: the page is down', agentId: 'writer' },
       { tone: 'warn', text: 'Missing: The March total: no sheet was attached', agentId: 'writer' },
       { tone: 'warn', text: 'Kept against the check: 2.5 million: the report says so', agentId: 'writer' },
     ])
+  })
+
+  // Quality bench pilot 1: the Editor's change list was delivered as part of the answer.
+  it('lists the edits taken off the answer beside it, without counting an edit as a problem', () => {
+    const notes = { agentId: 'editor', notMet: [], missing: [], notChanged: [], changes: ['"overnight" became "at night"', 'Cut a repeated "the water"'] }
+    const clean = answerVerdict({ ...finished, notes })
+    expect(clean).toMatchObject({ tone: 'ok', label: 'Nothing flagged', detail: 'Every step finished and nothing in the record was flagged. The review lists 2 changes made to the draft.', findings: [] })
+    expect(clean.changes).toEqual([
+      { tone: 'ok', text: '"overnight" became "at night"', agentId: 'editor' },
+      { tone: 'ok', text: 'Cut a repeated "the water"', agentId: 'editor' },
+    ])
+    // What the Editor flagged goes under Missing, which is worth a look; the edits still are not.
+    const flagged = answerVerdict({ ...finished, notes: { ...notes, missing: ['The end date: the notice gives none'] } })
+    expect(flagged).toMatchObject({ tone: 'look', label: '1 thing to check', detail: 'Missing: The end date: the notice gives none. The review lists 2 changes made to the draft.' })
+    expect(flagged.changes).toHaveLength(2)
+    expect(answerVerdict({ ...finished, notes: { ...notes, changes: [] } })).not.toHaveProperty('changes')
   })
 
   it('leads with a failure even when a check step also missed something', () => {
@@ -60,6 +76,15 @@ describe('answerVerdict', () => {
     expect(answerVerdict({ ...finished, checks: round([missed('Linked')], [missed('Linked')]) }).detail).toBe('Check not met: Linked (not seen). The check found 1 problem, and none was fixed when the work was sent back.')
     // Nothing sent back, nothing said.
     expect(answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [met('Linked')] }] }).detail).toBe('Every step finished and nothing in the record was flagged. Every check was met.')
+  })
+
+  // ADR 0062: you saw what was not met at the check step's stop and kept the work as it was.
+  it('says you approved the answer with checks not met', () => {
+    const missed: CheckItemResult = { verdict: 'not_met', item: 'Linked', evidence: 'claim 2' }
+    const unsure: CheckItemResult = { verdict: 'not_sure', item: 'Short', evidence: '' }
+    const approved = (items: CheckItemResult[]) => answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 3, items, approved: true }] })
+    expect(approved([missed, unsure])).toMatchObject({ tone: 'look', label: 'Approved with 2 checks not met', detail: 'You approved it as it was. Check not met: Linked (claim 2).' })
+    expect(approved([missed]).label).toBe('Approved with 1 check not met')
   })
 
   // A reply the daemon could not read checked nothing: one finding says so, not a Not sure per item.

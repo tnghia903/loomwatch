@@ -138,6 +138,42 @@ pub struct WaitingOn {
     /// The id of the row in `operator_questions` this is the open half of.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question_id: Option<String>,
+    /// Set when a check step stopped to ask (ADR 0062, `whenStillNotMet: ask`): what is still
+    /// not met. The stop is otherwise a review of the checked agent's work, so Approve and Send
+    /// back work as they do at a review stop, and a screen that does not know this field shows one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<CheckWait>,
+}
+
+/// What a check step that stopped to ask shows: the checks still not met after it sent the work
+/// back as often as it may, or after a round that fixed none of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckWait {
+    /// The agent whose work was checked; the stop's `handoverFrom` while it can be sent back.
+    pub checked: String,
+    /// How many times the work has gone back so far.
+    pub rounds: u32,
+    /// Why it stopped sending the work back: `rounds` (it went back as often as it may),
+    /// `no_progress` (the last round fixed none of what it went back for) or `not_open` (the
+    /// checked agent had finished and could not take it).
+    pub reason: String,
+    /// The checks that are not met, Not met or Not sure, with what the check step saw.
+    pub items: Vec<CheckWaitItem>,
+    /// How many checks are met.
+    pub met: usize,
+    /// The check step's own account of the problems, when it wrote one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub problems: String,
+}
+
+/// One check of a [`CheckWait`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckWaitItem {
+    /// `not_met` or `not_sure`.
+    pub verdict: String,
+    pub item: String,
+    pub evidence: String,
 }
 
 impl WaitingOn {
@@ -362,6 +398,10 @@ pub(crate) struct LiveTurn {
     /// `ask_answer` for another agent's question, `revision` for work a check step sent back.
     pub(crate) turn: &'static str,
     pub(crate) answer: oneshot::Sender<anyhow::Result<String>>,
+    /// A team-mode teammate's turn, held from the moment a call claims it until this turn's reply
+    /// is sent, so a call that finds it held starts a separate copy instead of waiting
+    /// (`TeamBus::reach`). `None` for every other kept-open session.
+    pub(crate) held: Option<tokio::sync::OwnedMutexGuard<()>>,
 }
 
 /// The narrow handle onto the waiting room that the pipeline and the Team Bus are given.
@@ -528,6 +568,7 @@ impl OperatorDesk {
                 from_operator: true,
                 turn: crate::agent::WORK,
                 answer,
+                held: None,
             })
             .await
             .map_err(|_| {
@@ -583,6 +624,7 @@ mod tests {
             park_note: ParkTier::Reloadable.sentence(Some("Researcher")),
             send_back_available: true,
             question_id: None,
+            check: None,
         };
         let value = waiting.to_value();
         assert_eq!(value["park"], "reloadable");

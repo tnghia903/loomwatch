@@ -40,6 +40,7 @@ use super::provider::{
 use super::skills::{SkillIndex, prompt_section};
 use super::spend::{Go, Spend, Unmetered};
 use super::tools::{Builtin, CommandSettings, Context, Output};
+use crate::you::AboutYou;
 
 /// The context size assumed for a model whose size isn't known.
 const DEFAULT_CONTEXT: u64 = 128_000;
@@ -163,6 +164,8 @@ pub struct SessionConfig {
     pub turned_off: Vec<String>,
     /// More instructions after the built-in ones, such as Ask `LoomWatch`'s.
     pub instructions: Option<String>,
+    /// What the person told their agents about themselves (ADR 0074), in the instructions.
+    pub person: Option<AboutYou>,
     /// The longest reply one model call may write.
     pub max_tokens: u32,
     /// The model's context size, from the model catalog.
@@ -198,6 +201,7 @@ impl SessionConfig {
             skill_focus: None,
             turned_off: Vec::new(),
             instructions: None,
+            person: None,
             max_tokens: 16_000,
             context_window: None,
             max_tool_calls: 200,
@@ -1212,6 +1216,7 @@ fn instructions(
     system_prompt(
         &config.cwd,
         abilities,
+        config.person.as_ref(),
         &prompt_section(skills, work),
         notes.as_deref(),
         config.instructions.as_deref(),

@@ -262,6 +262,23 @@ it('lets a review stop be approved without a comment, and names who work goes ba
   expect(onAnswer).toHaveBeenCalledWith()
 })
 
+// ADR 0062: a check step that stopped to ask is decided like a review, and the note says so.
+it('says what a check step’s stop decides: the work as it is, or back to be checked again', () => {
+  const check = { checked: 'writer', rounds: 2, reason: 'rounds' as const, met: 2, items: [{ verdict: 'not_met' as const, item: 'Cites the 2025 report', evidence: '' }] }
+  const waiting = { node: 'checker', name: 'Checker', kind: 'review_stop' as const, since: '2026-10-19T00:00:00Z', question: 'Writer’s work still misses 1 check.', park: 'reloadable' as const, parkNote: '', handoverFrom: 'writer', sendBackAvailable: true, check }
+  const onAnswer = vi.fn()
+  render(
+    <Composer
+      mode="pipeline" stepCount={2} state={{ kind: 'answering', waiting, sending: false }} value="" onChange={vi.fn()} onSubmit={vi.fn()} onStop={vi.fn()}
+      onRetry={vi.fn()} onNewRun={vi.fn()} onAnswer={onAnswer} agentNames={new Map([['writer', 'Writer']])}
+    />,
+  )
+  expect(screen.getByText('Your turn: approve Writer’s work as it is, or type what to change and send it back to be checked again.')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Send back to Writer' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+  expect(onAnswer).toHaveBeenCalledWith()
+})
+
 it('still requires words to answer an agent’s question', () => {
   const waiting = { node: 'writer', name: 'Writer', kind: 'question' as const, since: '2026-10-01T00:00:00Z', question: 'Which tone?', park: 'reloadable' as const, parkNote: 'parked', sendBackAvailable: false }
   render(

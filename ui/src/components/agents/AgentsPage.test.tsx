@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { forgetYou } from '../../lib/you/client'
 import { AgentsPage } from './AgentsPage'
 
 // The builder is its own page of tests; here it only has to say which job it started from.
@@ -14,7 +15,7 @@ beforeEach(() => {
     return new Response('{}', { status: 404 })
   }))
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/') })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/'); forgetYou() })
 
 const page = () => render(<AgentsPage skills={[]} skillsLoading={false} />)
 
@@ -40,5 +41,32 @@ describe('Building an agent', () => {
     fireEvent.click(within(screen.getByRole('region', { name: 'Start from a job' })).getByRole('button', { name: /^Blank/ }))
     expect(window.location.search).toBe('?from=blank')
     expect(screen.getByText('Builder from blank')).toBeInTheDocument()
+  })
+})
+
+// ADR 0074: every agent here is told what the person told them, and the list says so.
+describe('What your agents know about you', () => {
+  const answering = (you: unknown) => vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url === '/api/you') return new Response(JSON.stringify(you), { status: 200 })
+    if (url === '/api/jobs') return new Response(JSON.stringify({ folder: '.jobs', jobs: [], problems: [] }), { status: 200 })
+    if (url === '/api/teams') return new Response(JSON.stringify({ root: '/teams', files: [], teams: [] }), { status: 200 })
+    return new Response('{}', { status: 404 })
+  })
+
+  it('says the name they know you by, with the way to change it', async () => {
+    vi.stubGlobal('fetch', answering({ name: 'Mai', about: 'Keep it short.', skipped: false }))
+    window.history.replaceState({}, '', '/agents')
+    page()
+    expect(await screen.findByText(/Your agents know you as/)).toHaveTextContent('Your agents know you as Mai. Edit')
+    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/you')
+  })
+
+  it('says when they know nothing yet, even after Not now', async () => {
+    vi.stubGlobal('fetch', answering({ skipped: true }))
+    window.history.replaceState({}, '', '/agents')
+    page()
+    expect(await screen.findByRole('link', { name: 'Tell them about you' })).toHaveAttribute('href', '/you')
+    expect(screen.getByText(/Your agents don’t know you yet/)).toBeInTheDocument()
   })
 })

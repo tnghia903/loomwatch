@@ -136,6 +136,7 @@ import { AskButton } from './ask/AskButton'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
+import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-file/sendBack'
 import { baseName } from '../lib/files/paths'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
@@ -1394,15 +1395,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const inspectedUpdate = inspectedNode && !runView ? instructionUpdates.forAgent(inspectedNode.id) : null
   const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? inLibrary(capabilityInventory) : null, [inspectedNode, capabilityInventory])
   const { applyAgentFields } = doc
-  // A check step's panel says whose work it checks and holds its one switch (ADR 0062).
+  // A check step's panel says whose work it checks and how the work goes back (ADR 0062).
   const checkStepFor = (agent: AgentConfig) => {
     if (!agent.checks && !isCheckerRole(agent.role)) return undefined
     const checked = agent.checks ? doc.nodes.find((node) => node.id === agent.checks)?.data.agent : undefined
     return {
       checkedName: checked?.name,
       checkedHasDoneWhen: Boolean(checked?.doneWhen?.length),
-      sendBackOnce: Boolean(agent.sendBackOnce),
-      onSendBackOnce: (on: boolean) => applyAgentFields(agent.id, { sendBackOnce: on || undefined }),
+      sendBack: sendBackOf(agent),
+      onSendBack: (setting: SendBackSetting | null) => applyAgentFields(agent.id, sendBackFields(setting)),
     }
   }
   const inspectedEvidence: Evidence | null = inspectedEvidenceId ? projection.evidence.find((item) => item.id === inspectedEvidenceId) ?? null : null
@@ -2297,6 +2298,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     { label: notificationsOn ? 'Disable notifications' : 'Enable notifications', run: () => void enableNotifications() },
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'My agents…', run: () => window.location.assign('/agents') },
+    { label: 'About you…', run: () => window.location.assign('/you') },
     { label: 'Skills…', run: () => window.location.assign('/skills') },
     { label: 'Quests…', run: () => window.location.assign('/quests') },
     { label: 'Connections…', run: () => window.location.assign('/connections') },

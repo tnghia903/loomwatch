@@ -15,9 +15,10 @@ const CONSOLE_KEYS = 'https://platform.claude.com/settings/keys'
  * The person's Claude Max or Team plan, through its monthly API credit (ADR 0073): they link a
  * Claude Console organization to the plan, make an API key there and paste it here. LoomWatch checks
  * it with Anthropic first, then keeps it in this Mac's Keychain or Windows Credential Manager.
- * Anthropic doesn't let apps use a Claude sign-in, so a key is the only way.
+ * Anthropic doesn't let apps use a Claude sign-in, so a key is the only way. `onConnected` hears when
+ * a key is kept, as the first run waits to.
  */
-export function ClaudeCredit({ variant = 'section' }: { variant?: 'section' | 'card' }) {
+export function ClaudeCredit({ variant = 'section', onConnected }: { variant?: 'section' | 'card'; onConnected?: () => void }) {
   const ai = useAiStatus()
   const status: ClaudeStatus | null = ai?.anthropic ?? null
   const [key, setKey] = useState('')
@@ -36,6 +37,7 @@ export function ClaudeCredit({ variant = 'section' }: { variant?: 'section' | 'c
       void refreshModels().catch(() => {})
       if (value.problem) setError(value.problem)
       else setNotice(done)
+      if (value.connected && !value.problem) onConnected?.()
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Something went wrong. Try again.')
     } finally {

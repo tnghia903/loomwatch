@@ -4,9 +4,10 @@ import { Fragment, lazy, Suspense, useCallback, useContext, useEffect, useMemo, 
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../../lib/chat/baton'
 import { useFollow } from '../../lib/chat/follow'
-import type { ChatItem, ChatMessage } from '../../lib/chat/client'
+import type { ChatItem, ChatMessage, ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { clockTime, listNames, took } from '../../lib/chat/format'
+import { checkReactions, talkReactions, targets, yoursOn, type AgentReaction, type Face, type ReactionAbout } from '../../lib/chat/reactions'
 import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/runs/client'
 import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
 import { openStops, stopSentence } from '../../lib/runs/spend'
@@ -14,20 +15,23 @@ import { useRunSession } from '../../lib/runs/useRunSession'
 import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
-import type { Party } from '../../lib/story/conversation'
+import type { Bubble, Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
-import type { TeamMessage } from '../../lib/watch/messages'
+import { OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
 import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
 import { Markdown } from '../ui/Markdown'
+import { checkStopTip, checkStopTitle } from '../../lib/story/checkStop'
 import { AnswerTools } from './AnswerTools'
 import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
 import { Appearing, Swap } from './Appearing'
+import { Reactions } from './Reactions'
 import { Spool } from './Spool'
+import { ReplyQuote } from './ReplyQuote'
 
 const AgentMessages = lazy(() => import('../run/AgentMessages').then((module) => ({ default: module.AgentMessages })))
 
@@ -83,6 +87,12 @@ interface WorkPieceProps {
   onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
   /** A finding of the answer's review: its record, or the agent's work, opened in Details. */
   onOpenFinding: (runId: string, line: ReceiptLine) => void
+  /** Reply to something said in this piece — what an agent said, or the answer (ADR 0051). */
+  onReply?: (reply: ReplyTo) => void
+  /** Show what one of your replies replied to, where it was said; absent when the chat cannot. */
+  onShowReplied?: (reply: ReplyTo) => (() => void) | undefined
+  /** Put your face on something an agent said in this piece, or take it off. Absent, only the agents' faces show. */
+  onReact?: (runId: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>
 }
 
 /**
@@ -91,7 +101,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -99,9 +109,14 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const [toggled, setToggled] = useState<boolean | null>(null)
   // The record beside the chat asking to show one of this piece's messages opens its talk.
   const [revealed, setRevealed] = useState(reveal)
+  // A reply's quote can point at the answer itself, which is always in view: it is flashed, and
+  // the talk stays as it is.
+  const answerKey = `answer:${run.runId}`
+  const [answerFlash, setAnswerFlash] = useState<number | null>(null)
   if (reveal !== revealed) {
     setRevealed(reveal)
-    if (reveal) setToggled(true)
+    if (reveal?.id === answerKey) setAnswerFlash(reveal.at)
+    else if (reveal) setToggled(true)
   }
   const open = toggled ?? (live || newest)
   const setOpen = (next: (value: boolean) => boolean) => setToggled(next(open))
@@ -111,6 +126,12 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // has been on screen — not every piece of a long history the moment the chat opens.
   const piece = useRef<HTMLLIElement>(null)
   const seen = useSeen(piece)
+  useEffect(() => {
+    if (answerFlash === null) return
+    piece.current?.querySelector('.tc-answer')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    const timer = window.setTimeout(() => setAnswerFlash(null), 1800)
+    return () => window.clearTimeout(timer)
+  }, [answerFlash])
   // The record and its events: for work in progress, talk that is shown, and an answer you saw.
   const session = useRunSession(live || open || seen ? run.runId : null, run.responder)
   const name = (id: string) => team.names.get(id) ?? id
@@ -147,7 +168,10 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const working = (record.working ?? []).map(name)
   const waiting = live ? record.waitingOn ?? null : null
   const responder = session.projection.agents.find((agent) => agent.id === run.responder)
-  const streamed = live ? responder?.reply ?? '' : ''
+  // Work a check step checks is not the answer until the checks are done (ADR 0062): it may yet
+  // go back, or wait for you to approve it. Before then it is only in what the agents said.
+  const checked = [...(team.configs?.values() ?? [])].some((config) => config.checks === run.responder)
+  const streamed = live && !checked ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
   // The files the answer names, for its tools: a scan of the whole text, so once per answer.
   const finishedAnswer = isTerminalRun(record.status)
@@ -195,6 +219,28 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // A pass is named on the line; plain work keeps saying who is working.
   const pass = live && baton && baton.kind !== 'working' && baton.kind !== 'you' ? baton : null
   const passLine = pass ? batonWords(pass, name).line : null
+  // Reactions (lib/chat/reactions.ts). Yours go on what the agents said — their answer and their
+  // talk — and tell the team next time; your own words carry only the agents' faces, which are
+  // receipts read from the record: whoever took the work up looks up at what it was handed.
+  const checks = useMemo(() => checkReactions(session.projection.messages), [session.projection.messages])
+  const receipts = (agents: readonly AgentReaction[], about: string, mine = true) => (said: ReactNode) => (
+    <Reactions yours={null} agents={agents} about={about} name={name} hue={hue} mine={mine}>{said}</Reactions>
+  )
+  const reactOn = (target: string, about: string, agents: readonly AgentReaction[], what?: ReactionAbout) => (said: ReactNode) => (
+    <Reactions yours={yoursOn(item.reactions, target)} agents={agents} about={about} name={name} hue={hue} onReact={onReact && ((face) => onReact(run.runId, target, face, what))}>{said}</Reactions>
+  )
+  const isYou = (id: string | undefined) => id === OPERATOR_ID || (id !== undefined && team.operators.has(id))
+  const talkReacts = (bubble: Bubble, said: ReactNode) => {
+    const speaker = bubble.from[0]
+    const agents = talkReactions(bubble, team.operators, checks)
+    if (isYou(speaker) || !speaker) return receipts(agents, `your ${bubble.word}`, isYou(speaker))(said)
+    return reactOn(targets.talk(bubble), `${name(speaker)}'s ${bubble.word}`, agents, { agent: speaker, what: bubble.word, quote: bubble.text })(said)
+  }
+  // Your request carries who took it up while the work runs, and once it is done, everyone who
+  // worked on it and how long it took, as their faces rather than a line of words.
+  const onRequest: AgentReaction[] = record.status === 'succeeded'
+    ? workers.map((id) => ({ face: 'done', by: id, at: record.finishedAt ?? record.createdAt, detail: took_ || undefined }))
+    : pickedUpBy(workers[0], record, session.projection.agents)
   const permissionTurn = (message: TeamMessage) => {
     const request = asking.find((candidate) => candidate.id === message.permission?.requestId)
     return request ? (
@@ -239,28 +285,29 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   return (
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
-      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} />
-      {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} />)}
+      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={receipts(onRequest, run.trigger === 'schedule' ? "the schedule's request" : 'your request', run.trigger !== 'schedule')} />
+      {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} onShowReplied={onShowReplied} reactions={receipts(note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], `your note to ${name(note.agentId ?? '')}`)} />)}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
-        <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0 || stops.length > 0} status={record.status}>
-          {workers.map((id) => <AvatarFace key={id} id={id} hue={hue(id)} size={22} fontSize={9} text={initials(name(id))} className={weftState(id)} />)}
-        </Weft>
-        <Swap key={talkKey(live, waiting, [...asking.map((request) => request.id), ...stops.map((stop) => stop.id)], working, run.status, pass)} className="tc-talk-line">
-          {live
-            ? waiting
-              ? <><b className="tc-wait">Waiting for you</b> · {waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
-              : asking.length > 0
-                ? <><b className="tc-wait">Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
-              : stops.length > 0
-                ? <><b className="tc-wait">Waiting for you</b> · {stopSentence(stops[0]).replace(/\.$/, '')}</>
-              : passLine
-                ? <>{passLine.map((part, index) => (part.name ? <b key={index}>{part.text}</b> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
-              : working.length > 0
-                ? <><b>{listNames(working)}</b> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
-                : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'
-            : `${listNames(workers.map(name))} worked on this${took_ ? ` · ${took_}` : ''}`}
-        </Swap>
+        {/* Done, the faces on your request say who worked on it; the line says only what is still happening. */}
+        {record.status !== 'succeeded' && (
+          <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0 || stops.length > 0} status={record.status}>
+            {workers.map((id) => <AvatarFace key={id} id={id} hue={hue(id)} size={22} fontSize={9} text={initials(name(id))} className={weftState(id)} />)}
+          </Weft>
+        )}
+        {live && <Swap key={talkKey(live, waiting, [...asking.map((request) => request.id), ...stops.map((stop) => stop.id)], working, run.status, pass)} className="tc-talk-line">
+          {waiting
+            ? <><b className="tc-wait">Waiting for you</b> · {waiting.check ? checkStopTitle(waiting.check, name, name(waiting.node)).replace(/\.$/, '') : waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
+            : asking.length > 0
+              ? <><b className="tc-wait">Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
+            : stops.length > 0
+              ? <><b className="tc-wait">Waiting for you</b> · {stopSentence(stops[0]).replace(/\.$/, '')}</>
+            : passLine
+              ? <>{passLine.map((part, index) => (part.name ? <b key={index}>{part.text}</b> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+            : working.length > 0
+              ? <><b>{listNames(working)}</b> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'}
+        </Swap>}
         <Spool spend={record.spend} stops={stops} name={name} hue={hue} />
         <span className="tc-talk-acts">
           <button type="button" className="tc-link" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
@@ -293,6 +340,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
                 reveal={revealed}
                 yourTurn={onTheMessage ? yourTurn : undefined}
                 permissionTurn={permissionTurn}
+                onReply={onReply ? (reply) => onReply({ ...reply, runId: run.runId }) : undefined}
+                reactions={talkReacts}
               />
             </AppearContext.Provider>
           </Suspense>
@@ -302,7 +351,43 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
 
       {live && !open && <Decisions messages={session.projection.messages} autoRan={session.projection.autoRan} operators={team.operators} name={name} />}
 
-      {waiting?.kind === 'review_stop' && !onTheMessage && (
+      {waiting?.kind === 'review_stop' && waiting.check && (
+        <Appearing key={`check:${waiting.since}`} reveal className="tc-decision check-stop" role="group" aria-label={`Decide on ${name(waiting.check.checked)}'s work`}>
+          <p><b>{checkStopTitle(waiting.check, name, name(waiting.node))}</b></p>
+          <ul className="tc-check-misses" aria-label="Checks still not met">
+            {waiting.check.items.map((item, index) => (
+              <li key={index}>
+                <span className={`tc-check-verdict ${item.verdict}`}>{item.verdict === 'not_met' ? 'Not met' : 'Not sure'}</span> {item.item}
+                {item.evidence && <span className="t-meta"> — {item.evidence}</span>}
+              </li>
+            ))}
+          </ul>
+          {waiting.check.problems && (
+            <details className="tc-handover">
+              <summary>What {name(waiting.node)} wrote about it</summary>
+              <div className="chat-text"><Markdown>{waiting.check.problems}</Markdown></div>
+            </details>
+          )}
+          {waiting.context && (
+            <details className="tc-handover">
+              <summary>Read {name(waiting.check.checked)}’s work</summary>
+              <div className="chat-text"><Markdown>{waiting.context}</Markdown></div>
+            </details>
+          )}
+          <div className="tc-acts">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>
+              {draft.trim() ? 'Approve with your note' : 'Approve as it is'}
+            </button>
+            {waiting.sendBackAvailable && waiting.handoverFrom && (
+              <button type="button" className="btn" disabled={busy || !draft.trim()} onClick={sendBack}>
+                Send back to {name(waiting.handoverFrom)}
+              </button>
+            )}
+          </div>
+          <p className="tc-tip">{waiting.sendBackAvailable ? checkStopTip(waiting.check, name, name(waiting.node)) : 'Approve keeps the work as it is, with what wasn’t met marked on it.'}</p>
+        </Appearing>
+      )}
+      {waiting?.kind === 'review_stop' && !waiting.check && !onTheMessage && (
         <Appearing key={`review:${waiting.since}`} reveal className="tc-decision" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
           <p><b>{name(waiting.handoverFrom ?? '')}</b> handed over its work for your review.</p>
           {waiting.context && (
@@ -334,7 +419,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
       {stops.length > 0 && <SpendStopCard inline run={{ runId: run.runId, spendStops: stops }} onDecide={pin} onRun={onRun} />}
 
-      <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} solo={Boolean(team.solo)} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
+      <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -345,6 +430,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
           reviewed={reviewedText === answer}
           onReviewed={() => setReviewedText(answer)}
           onOpenFinding={(line) => onOpenFinding(run.runId, line)}
+          onReply={onReply && answer.trim() ? () => onReply({ runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer }) : undefined}
+          replyLabel={`Reply to ${name(run.responder)}'s answer`}
         />
       </Outcome>
 
@@ -420,7 +507,7 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
 }
 
 /** What started this piece: your message, the schedule's, or your Continue. */
-function Request({ run, request, continuedFrom, name, solo }: { run: RunRecord; request: ChatMessage | null; continuedFrom: string | null; name: (id: string) => string; solo?: string }) {
+function Request({ run, request, continuedFrom, name, solo, onShowReplied, reactions }: { run: RunRecord; request: ChatMessage | null; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   if (continuedFrom) {
     return <div className="chat-notice"><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
   }
@@ -432,7 +519,7 @@ function Request({ run, request, continuedFrom, name, solo }: { run: RunRecord; 
         <span className="chat-gutter"><i className="chat-avatar hue-quiet tc-schedule" style={{ width: 28, height: 28 }}><CalendarClock size={14} aria-hidden="true" /></i></span>
         <div className="chat-stack">
           <div className="chat-meta"><span className="chat-name hue-quiet">The schedule</span><span className="tc-to">to the team</span><time>{clockTime(run.createdAt)}</time></div>
-          <div className="chat-bubble"><div className="chat-text"><Markdown>{text}</Markdown></div></div>
+          {reactions(<div className="chat-bubble"><div className="chat-text"><Markdown>{text}</Markdown></div></div>)}
         </div>
       </div>
     )
@@ -441,14 +528,17 @@ function Request({ run, request, continuedFrom, name, solo }: { run: RunRecord; 
     <div className="chat-msg mine">
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(request?.createdAt ?? run.createdAt)}</time></div>
-        <div className="chat-bubble"><div className="chat-text tc-plain">{text}</div></div>
+        {reactions(<div className="chat-bubble">
+          {request?.replyTo && <ReplyQuote reply={request.replyTo} name={name} onShow={onShowReplied?.(request.replyTo)} />}
+          <div className="chat-text tc-plain">{text}</div>
+        </div>)}
       </div>
     </div>
   )
 }
 
 /** A note you sent into this piece while an agent worked. */
-function Note({ note, live, name }: { note: ChatMessage; live: boolean; name: (id: string) => string }) {
+function Note({ note, live, name, onShowReplied, reactions }: { note: ChatMessage; live: boolean; name: (id: string) => string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   const appear = useAppear()
   const state = note.deliveredAt ? `${name(note.agentId ?? '')} took it in its next turn`
     : live ? note.now ? `Stopping ${name(note.agentId ?? '')}'s current step…` : `Waits for ${name(note.agentId ?? '')}'s current step to end`
@@ -457,7 +547,10 @@ function Note({ note, live, name }: { note: ChatMessage; live: boolean; name: (i
     <div className={`chat-msg mine tc-note${appear ? ' tc-appear' : ''}${note.deliveredAt ? ' taken' : ''}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">Note → {name(note.agentId ?? '')}</span><time>{clockTime(note.createdAt)}</time></div>
-        <div className="chat-bubble"><div className="chat-text tc-plain">{note.text}</div></div>
+        {reactions(<div className="chat-bubble">
+          {note.replyTo && <ReplyQuote reply={note.replyTo} name={name} onShow={onShowReplied?.(note.replyTo)} />}
+          <div className="chat-text tc-plain">{note.text}</div>
+        </div>)}
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
       </div>
     </div>
@@ -473,9 +566,13 @@ interface AnswerProps {
   hue: (id: string) => number
   /** A document answer is open in the pane beside the chat. */
   open: boolean
+  /** A reply's quote asked to show this answer. */
+  flash?: boolean
   onOpen: () => void
   /** An agent's own chat: every answer is to you, there being no team. */
   solo: boolean
+  /** The answer with its reactions under it. */
+  reactions: (said: ReactNode) => ReactNode
   children: ReactNode
 }
 
@@ -521,18 +618,18 @@ function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (
  * message. A long one, or one with a title, is a document: a card with its title, its opening
  * words and its length, read in full in the pane beside the chat (lib/chat/document.ts).
  */
-function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, solo, children }: AnswerProps) {
+function Answer({ tour, run, answer, streaming, name, hue, open, flash = false, onOpen, solo, reactions, children }: AnswerProps) {
   const appear = useAppear()
   // Names listed under a folder read as files in the sentence too; copy and save keep the agent's words.
   const shown = useMemo(() => withFolderPaths(answer), [answer])
   const facts = useMemo(() => (isDocument(answer) ? describeDocument(answer) : null), [answer])
   const responder = run.responder
   return (
-    <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}`} data-tour={tour ? 'output' : undefined}>
+    <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}${flash ? ' flash' : ''}`} data-tour={tour ? 'output' : undefined}>
       <span className="chat-gutter"><AgentFace id={responder}><AvatarFace id={responder} hue={hue(responder)} size={28} text={initials(name(responder))} /></AgentFace></span>
       <div className="chat-stack">
         <div className={`chat-meta hue-${hue(responder)}`}><span className="chat-name">{name(responder)}</span><span className="tc-to">{run.onlyAgent || solo ? 'to you' : "the team's answer"}</span><time>{clockTime(run.finishedAt)}</time></div>
-        {facts ? (
+        {reactions(facts ? (
           <button type="button" className={`tc-doc${open ? ' open' : ''}${streaming ? ' streaming' : ''}`} aria-pressed={open} aria-label={`${facts.title}, ${streaming ? 'being written' : documentSize(facts)}. ${open ? 'Showing beside the chat' : 'Open'}`} onClick={onOpen}>
             <span className="tc-doc-icon" aria-hidden="true"><FileText size={18} /></span>
             <span className="tc-doc-body">
@@ -548,7 +645,7 @@ function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, solo, c
           <div className={`chat-bubble${streaming ? ' streaming' : ''}`} data-tick={streaming ? answer.length % 2 : undefined}>
             <div className="chat-text"><Markdown>{shown}</Markdown></div>
           </div>
-        )}
+        ))}
         {children}
       </div>
     </div>
@@ -617,6 +714,18 @@ function nextSteps(run: RunRecord, team: TeamView, name: (id: string) => string)
   const reviewed = after[0] && team.operators.has(after[0])
   const next = after.filter((id) => !team.operators.has(id)).map(name)
   return `${reviewed ? 'Counts as your review, then ' : ''}${listNames(next)} ${next.length === 1 ? 'picks' : 'pick'} up from this version.`
+}
+
+/**
+ * Who took the work up, and when: the agent the piece starts with, from its first recorded event,
+ * or — before the events are read — from the run saying it works or finished well.
+ */
+function pickedUpBy(first: string | undefined, run: RunRecord, agents: readonly { id: string; firstTs: string }[]): AgentReaction[] {
+  if (!first) return []
+  const recorded = agents.find((agent) => agent.id === first)
+  if (recorded) return [{ face: 'seen', by: first, at: recorded.firstTs }]
+  if (run.working?.includes(first) || run.status === 'succeeded') return [{ face: 'seen', by: first, at: run.startedAt ?? run.createdAt }]
+  return []
 }
 
 function initials(name: string): string {

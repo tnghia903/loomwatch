@@ -458,6 +458,11 @@ pub enum PromptSectionKind {
     /// them would make the packet inspector unable to say which. A one-agent turn (ADR 0051)
     /// renders the same kind as `## Your previous output`: what that agent itself wrote last time.
     PreviousOutput,
+    /// `## The message this replies to` — a message from the team's work that the operator's task
+    /// replies to (ADR 0051), quoted as the chat showed it. Straight above the task it is about.
+    /// Source material: it is an agent's words. Added here and in `ui/src/lib/watch/events.ts` in
+    /// one change.
+    ReplyTo,
     /// The operator's own words. This is what the Prompt node shows. After everything the agent is
     /// handed, so the request is what it reads last before it starts (ADR 0051).
     Task,
@@ -3703,7 +3708,7 @@ mod tests {
             turned_off: Vec::new(),
             done_when: Vec::new(),
             checks: None,
-            send_back_once: false,
+            send_back: None,
             spend: crate::spend::SpendConfig::default(),
         }
     }

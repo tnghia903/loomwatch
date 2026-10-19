@@ -28,10 +28,13 @@ function welcomed(): boolean {
 /**
  * The person's ChatGPT Plus or Pro plan (ADR 0073): one click opens ChatGPT's own page in a new tab,
  * where they sign in and allow LoomWatch; this card carries on by itself when they come back.
- * LoomWatch never sees the password, and agents never see the sign-in.
+ * LoomWatch never sees the password, and agents never see the sign-in. `onConnected` hears when a
+ * sign-in it started comes back with plan use on, as the first run waits to.
  */
-export function ChatGptPlan({ variant = 'section' }: { variant?: 'section' | 'card' }) {
+export function ChatGptPlan({ variant = 'section', onConnected }: { variant?: 'section' | 'card'; onConnected?: () => void }) {
   const ai = useAiStatus()
+  const connectedHeard = useRef(onConnected)
+  useEffect(() => { connectedHeard.current = onConnected })
   const status: ChatGptStatus | null = ai?.chatgpt ?? null
   const [consent, setConsent] = useState<{ url: string; at: number } | null>(null)
   const [waiting, setWaiting] = useState(false)
@@ -70,6 +73,7 @@ export function ChatGptPlan({ variant = 'section' }: { variant?: 'section' | 'ca
         setWaiting(false)
         setError('')
         void refreshModels().catch(() => {})
+        if (latest.chatgpt.planUse) connectedHeard.current?.()
       }
     }
     let channel: BroadcastChannel | null = null

@@ -4,7 +4,9 @@ import { parse } from 'yaml'
 
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
-import { readTourState, resetTourForTests } from '../../lib/tour/store'
+import { resetFirstRunForTests } from '../../lib/firstrun/store'
+import { readTourState, resetTourForTests, startTour } from '../../lib/tour/store'
+import { forgetYou } from '../../lib/you/client'
 import type { TeamDocument } from '../../lib/team-file/types'
 import { Home } from './Home'
 
@@ -21,6 +23,7 @@ beforeEach(() => {
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
   forgetKeyStatus()
+  forgetYou()
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
@@ -285,23 +288,42 @@ describe('Home', () => {
 
 })
 
-describe('Home and the getting-started guide', () => {
-  beforeEach(() => resetTourForTests())
+describe('Home, the first run and the getting-started guide', () => {
+  beforeEach(() => { resetTourForTests(); resetFirstRunForTests() })
 
   const demoTeam = { root: '/teams', files: ['operator-stop.yaml'], teams: [{ path: 'operator-stop.yaml', name: 'Review stop demo', agentCount: 3, modifiedAt: null }] }
 
-  it('offers the guide to someone who has never run a team, though the demo team is there', async () => {
+  // ADR 0075: a newcomer makes something first. The guide no longer opens by itself over it.
+  it('opens on the first run for someone who has never run anything, though the demo team is there', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
     renderHome()
-    await screen.findByText('Review stop demo')
-    await waitFor(() => expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' }))
+    expect(await screen.findByText('What shall we make first?')).toBeInTheDocument()
+    expect(screen.queryByText('Put AI agents to work as a team.')).toBeNull()
+    expect(readTourState()).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Just look around' }))
+    expect(await screen.findByText('Review stop demo')).toBeInTheDocument()
+    expect(localStorage.getItem('loomwatch:first-run')).toBe('skipped')
+    expect(readTourState()).toBeNull()
   })
 
-  it('leaves someone who has run a team alone, but lets them start it', async () => {
+  it('is Home for someone who has met the guide, or looked around before', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
+    for (const before of [() => startTour(), () => localStorage.setItem('loomwatch:first-run', 'skipped')]) {
+      resetTourForTests(); resetFirstRunForTests()
+      before()
+      renderHome()
+      expect(await screen.findByText('Review stop demo')).toBeInTheDocument()
+      expect(screen.queryByText('What shall we make first?')).toBeNull()
+      cleanup()
+    }
+  })
+
+  it('leaves someone who has run a team on Home, and lets them start the guide', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [{ runId: 'run-1', teamPath: 'operator-stop.yaml', status: 'succeeded' }] : demoTeam))
     renderHome()
     await screen.findByText('Review stop demo')
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
+    expect(screen.queryByText('What shall we make first?')).toBeNull()
     expect(readTourState()).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Take the 3-minute guide/ }))
     expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })

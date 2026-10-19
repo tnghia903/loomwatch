@@ -569,6 +569,8 @@ $defs:
         required:
           - name
           - model
+        not:
+          required: [sendBack, sendBackOnce]
       - title: Operator node
         description: >-
           A review stop. `spawn`, `model` and `thinkingEffort` are not merely optional here but
@@ -588,6 +590,7 @@ $defs:
             - required: [doneWhen]
             - required: [checks]
             - required: [sendBackOnce]
+            - required: [sendBack]
             - required: [allow]
             - required: [turnedOff]
             - required: [spend]
@@ -661,10 +664,33 @@ $defs:
         $ref: "#/$defs/Identifier"
       sendBackOnce:
         description: >-
-          With `checks`: when a check is not met, send the findings back to the checked agent once
-          and check its revised work once more. Off unless set.
+          The older way to say `sendBack: {rounds: 1, whenStillNotMet: answer}`, still read: with
+          `checks`, when a check is not met, send the findings back to the checked agent once,
+          check its revised work once more, and show the answer. Write `sendBack` instead; a file
+          may not set both.
         type: boolean
         default: false
+      sendBack:
+        description: >-
+          With `checks`: when a check is not Met (Not met or Not sure), send the findings back to
+          the checked agent's open session and check its revised work again, up to `rounds` times.
+          It stops early when every check is met, or when a round meets none of what it went back
+          for. `whenStillNotMet` says what happens when checks are still not met after that:
+          `answer` shows the answer with them marked, `ask` stops the run on a review of the work,
+          with the checks beside it, until the person approves it or sends it back. A scheduled run
+          waits for them too. Nothing is sent back unless set.
+        type: object
+        additionalProperties: false
+        properties:
+          rounds:
+            description: How many times the work may go back. Each round helps less than the one before.
+            type: integer
+            minimum: 1
+            maximum: 3
+            default: 1
+          whenStillNotMet:
+            enum: [answer, ask]
+            default: answer
       budget:
         $ref: "#/$defs/RetiredBudget"
       spend:

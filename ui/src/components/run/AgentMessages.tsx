@@ -1,13 +1,15 @@
-import { FileSearch, FileText, Info, ShieldQuestionMark } from 'lucide-react'
+import { FileSearch, FileText, Info, Reply, ShieldQuestionMark } from 'lucide-react'
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { bubbles as layOut, callsWhileWaiting, converse, fold, waited, type Bubble, type Party } from '../../lib/story/conversation'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { clockTime } from '../../lib/chat/format'
+import type { ReplyKind, ReplyTo } from '../../lib/chat/client'
+import { questionBackOf } from '../../lib/chat/reply'
 import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
-import type { AskRefusal, PermissionOutcome, TeamMessage } from '../../lib/watch/messages'
+import { REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
 import { useAgentFaces } from '../../lib/chat/faces'
 import { AgentFace } from '../chat/AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
@@ -44,6 +46,16 @@ interface AgentMessagesProps {
    * `undefined` for a request that no longer waits — answered elsewhere, or about to be.
    */
   permissionTurn?: (message: TeamMessage) => ReactNode
+  /**
+   * Reply to what an agent said (the team's chat, ADR 0051): a Reply under each agent's message,
+   * which hands it to the message box as the message being answered. Absent, there is none.
+   */
+  onReply?: (reply: Omit<ReplyTo, 'runId'>) => void
+  /**
+   * Inside the team's chat: each thing said with its reactions under it (components/chat/Reactions.tsx).
+   * Given the bubble and the message as drawn, it returns what to draw in its place.
+   */
+  reactions?: (bubble: Bubble, said: ReactNode) => ReactNode
 }
 
 /** A member of the chat, as its messages show it. */
@@ -67,7 +79,7 @@ const LONG = { lines: 7, chars: 520 }
  * document someone shared, and "… is typing" while an answer is on its way. Read only: this is the
  * record of the run, and reopening it never runs the agents again.
  */
-export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, bare = false, yourTurn, permissionTurn }: AgentMessagesProps) {
+export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, bare = false, yourTurn, permissionTurn, onReply, reactions }: AgentMessagesProps) {
   // What an agent was handed again from the work this follows is said once, as picked up, rather
   // than drawn as a handover and a review sent just now (ADR 0051).
   const { carried, fresh } = useMemo(() => ({ carried: messages.filter((message) => message.carried), fresh: messages.filter((message) => !message.carried) }), [messages])
@@ -76,6 +88,8 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
     const conversation = converse(fresh, order, predecessors)
     return { lanes: conversation.lanes, said: layOut(fold(conversation.lines, conversation.lanes), conversation.lanes, live, APPROVAL_TEXT) }
   }, [fresh, order, predecessors, live])
+  // A clarification answers the question back before it, so it quotes it, as any reply does.
+  const backs = useMemo(() => questionsBack(said), [said])
   const figures = useContext(TeamFiguresContext)
   const members = useMemo(() => membersOf(lanes, order, figures), [lanes, order, figures])
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
@@ -86,7 +100,8 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
   // events are still being read is honoured once it is there.
   const [honoured, setHonoured] = useState<typeof reveal>(null)
   if (reveal !== honoured) {
-    const bubble = reveal ? said.find((candidate) => candidate.item.ids.includes(reveal.id)) : undefined
+    // By the bubble a reply quoted, or by any message folded into a row.
+    const bubble = reveal ? said.find((candidate) => candidate.key === reveal.id) ?? said.find((candidate) => candidate.item.ids.includes(reveal.id)) : undefined
     const picked = reveal ? carried.some((message) => message.id === reveal.id) : false
     if (bubble || picked || !reveal) setHonoured(reveal)
     if (bubble) {
@@ -153,6 +168,9 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
               onInspectHandover={onInspectHandover}
               yourTurn={bubble.item.line.message.kind === 'permission' ? permissionTurn?.(bubble.item.line.message) : yourTurn}
               when={when}
+              answers={backs.get(bubble.key) ?? null}
+              onReply={onReply}
+              reactions={reactions}
             />
           )
         })}
@@ -269,6 +287,16 @@ function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: 
       </li>
     )
   }
+  const stop = bubble.item.line.message.checkStop
+  if (stop) {
+    // Approved at a check step's stop (ADR 0062): the work as it was, with what was still open.
+    return (
+      <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, You: approved`}>
+        <span>You approved {member(stop.checked).name}’s work as it was, with {stop.open === 1 ? '1 check' : `${stop.open} checks`} not met</span>
+        <time dateTime={bubble.ts}>{when(bubble)}</time>
+      </li>
+    )
+  }
   const onward = bubble.to.map((id) => member(id).name)
   return (
     <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, You: approved`}>
@@ -294,9 +322,13 @@ interface ChatMessageProps {
   onInspectHandover?: (agentId: string) => void
   yourTurn?: ReactNode
   when: (bubble: Bubble) => string
+  /** For a clarification: the question back it answers, which it quotes. */
+  answers: Bubble | null
+  onReply?: (reply: Omit<ReplyTo, 'runId'>) => void
+  reactions?: (bubble: Bubble, said: ReactNode) => ReactNode
 }
 
-function ChatMessage({ bubble, member, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when }: ChatMessageProps) {
+function ChatMessage({ bubble, member, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when, answers, onReply, reactions }: ChatMessageProps) {
   const { item, part, text } = bubble
   const { message } = item.line
   const speaker = bubble.from[0] ? member(bubble.from[0]) : null
@@ -309,20 +341,30 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
   const [more, setMore] = useState(false)
   const reply = message.reply
   const name = (person: Member) => (person.you ? 'You' : person.name)
+  const withReactions = (said: ReactNode) => (reactions ? reactions(bubble, said) : said)
   const label = `${when(bubble)}, ${speaker ? name(speaker) : 'Someone'}${mentions.length ? ` to ${mentions.map((person) => (person.you ? 'you' : person.name)).join(' and ')}` : ''}: ${bubble.word}`
   // What the message's info holds: the record behind it, what a stage was given in full.
   const handedTo = handover ? mentions.filter((person) => !person.you) : part === 'reply' ? item.passedOn.map((passed) => member(passed.to)) : []
   const info = part !== 'waiting' && (part === 'reply' ? Boolean(reply) : Boolean(message.evidenceId || message.context || handedTo.length > 0 || item.line.derived))
-  // An answer quotes what it answers: the question, or for your review, the handover you read.
-  const quoted = part === 'reply' ? { who: speakerOf(item.line.senders[0], member), text: message.kind === 'handover' ? `Handover: ${oneLine(message.text)}` : oneLine(message.text) } : null
+  // An answer quotes what it answers: the question, or for your review, the handover you read; a
+  // clarification, the question back it answers.
+  const quoted = part === 'reply' ? { who: speakerOf(item.line.senders[0], member), text: message.kind === 'handover' ? `Handover: ${oneLine(message.text)}` : oneLine(message.text) }
+    : answers ? { who: speakerOf(answers.from[0], member), text: oneLine(questionBackOf(answers.text)) } : null
+  // What you can reply to: anything an agent said, other than a permission request (answered with
+  // its own buttons) and a message that never arrived.
+  const toReply = onReply && speaker && !mine && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions) : null
   // A reply's quote already says whom it answers; it names someone only when it goes elsewhere, as
   // your approval does when it passes the work on.
   const addressed = part === 'reply' ? mentions.filter((person) => !item.line.senders.includes(person.id)) : mentions
-  const caption = part === 'reply' && message.kind === 'handover'
+  const kindWord = part === 'reply' && message.kind === 'handover'
     ? bubble.word === 'sent back' ? 'sent back' : `approved${item.passedOn.length ? ` · passed on to ${nameList(item.passedOn.map((passed) => member(passed.to).name))}` : ''}`
     : message.kind === 'check' && part !== 'waiting'
       ? `${bubble.word}${message.check && message.check.round > 1 ? ` · round ${message.check.round}` : ''}`
       : bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' ? bubble.word : null
+  // In a team with no fixed order: whether the teammate carried on in its conversation or a fresh
+  // copy took it, said under the work handed out, and under a teammate's answer.
+  const reach = message.reached && (message.kind === 'ask' ? part === 'reply' : part === 'said') ? REACHED_WORD[message.reached] : null
+  const caption = reach ? `${kindWord ?? bubble.word} · ${reach}` : kindWord
 
   return (
     <li
@@ -346,7 +388,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
             {live && <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>}
             <span className="chat-typing-word">{typing(bubble.word, speaker, live)}</span>
           </div>
-        ) : (
+        ) : withReactions(
           <div className="chat-bubble">
             {quoted && (
               <blockquote className="chat-quote">
@@ -373,15 +415,20 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
             )}
             {failed && <p className="chat-failed" role="note">Not delivered{message.error ? `: ${message.error}` : ''}</p>}
             {long && <button type="button" className="chat-more" aria-expanded={more} onClick={() => setMore((value) => !value)}>{more ? 'Show less' : 'Read more'}</button>}
-          </div>
+          </div>,
         )}
-        {(caption || info || continued) && (
+        {(caption || info || continued || toReply) && (
           <p className="chat-under">
             {caption && <span>{caption}</span>}
             {continued && <time dateTime={bubble.ts}>{when(bubble)}</time>}
             {info && (
               <button type="button" className={`chat-info ${open ? 'open' : ''}`} aria-expanded={open} onClick={onToggle}>
                 <Info size={12} aria-hidden="true" />{open ? 'Hide info' : 'Info'}
+              </button>
+            )}
+            {toReply && onReply && (
+              <button type="button" className="chat-reply" aria-label={`Reply to ${speaker ? name(speaker) : 'this'}: ${bubble.word}`} onClick={() => onReply(toReply)}>
+                <Reply size={12} aria-hidden="true" />Reply
               </button>
             )}
           </p>
@@ -396,6 +443,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
               </p>
             )}
             {part === 'said' && message.context && <p><b>Context:</b> {message.context}</p>}
+            {part === 'said' && message.reached && mentions[0] && <p>{reachedLine(message.reached, name(mentions[0]))}</p>}
             {calls.length > 0 && (
               <details className="chat-calls">
                 <summary>{speaker ? name(speaker) : 'It'} made {calls.length === 1 ? 'one call' : `${calls.length} calls`} before answering</summary>
@@ -414,6 +462,42 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
       </div>
     </li>
   )
+}
+
+/** What kind of message a bubble is, for a reply to it (`chat::ReplyKind`). */
+function replyKind(bubble: Bubble): ReplyKind {
+  const { message } = bubble.item.line
+  if (bubble.part === 'reply') return message.reply?.asksBack ? 'question_back' : 'answer'
+  if (message.kind === 'handover' || message.kind === 'handoff') return 'handover'
+  if (message.kind === 'ask') return message.clarifies ? 'answer' : 'question'
+  if (message.kind === 'question') return 'question'
+  if (message.kind === 'dispatch') return 'task'
+  if (message.kind === 'check') return 'check'
+  return 'message'
+}
+
+/** A reply to this bubble: who said it, to which agent (none when it was to you), and its words. */
+function replyFor(bubble: Bubble, from: string, mentions: readonly Member[]): Omit<ReplyTo, 'runId'> {
+  return { messageId: bubble.key, from, to: mentions.find((person) => !person.you)?.id ?? null, kind: replyKind(bubble), text: bubble.text }
+}
+
+/**
+ * The question back each clarification answers: the latest answer before it that asked back, from
+ * the agent the clarification goes to, to the agent that sends it.
+ */
+function questionsBack(said: readonly Bubble[]): Map<string, Bubble> {
+  const backs = new Map<string, Bubble>()
+  said.forEach((bubble, index) => {
+    if (bubble.part !== 'said' || !bubble.item.line.message.clarifies) return
+    for (let at = index - 1; at >= 0; at--) {
+      const earlier = said[at]
+      if (earlier.part === 'reply' && earlier.item.line.message.reply?.asksBack && earlier.from[0] === bubble.to[0] && earlier.to[0] === bubble.from[0]) {
+        backs.set(bubble.key, earlier)
+        return
+      }
+    }
+  })
+  return backs
 }
 
 /** What a message still owed says: who is writing it, or that it waits on you; or that none came. */

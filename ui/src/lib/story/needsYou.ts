@@ -3,6 +3,7 @@ import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
 import { dollars, openStops, stopActions, stopSentence } from '../runs/spend'
+import { checkStopLines } from './checkStop'
 
 /**
  * The needs-you tray: every moment, across every team, where a team is waiting on the operator.
@@ -96,7 +97,8 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         sendBackTo: waiting.sendBackAvailable ? waiting.handoverFrom ?? null : null,
         asker: waiting.name,
         text: waiting.question,
-        context: waiting.context?.trim() || null,
+        // A check step's stop leads with what is still not met: that is what is being decided.
+        context: (waiting.check ? [...checkStopLines(waiting.check), waiting.context?.trim() ?? ''].filter(Boolean).join('\n') : waiting.context?.trim()) || null,
         since: waiting.since,
       })
     } else if (record.status === 'failed' && !dismissed.has(record.runId)) {

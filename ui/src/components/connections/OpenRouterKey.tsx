@@ -101,11 +101,11 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
         </div>
       </>}
       {status && !connected && <>
-        <p className="t-body">LoomWatch’s agents run on AI models through <strong>OpenRouter</strong>. One key reaches models from Anthropic, OpenAI, Google and others, including some free ones.</p>
+        <p className="t-body">LoomWatch’s agents run on AI models through <strong>OpenRouter</strong>. One key reaches models from Anthropic, OpenAI, Google and others. You pay as you go, from credit you add at OpenRouter.</p>
         <ol className="t-body lw-settings-steps">
           <li><a className="link" href={KEYS_PAGE} target="_blank" rel="noreferrer">Open OpenRouter’s keys page</a>, sign in or make an account, and create a key.</li>
           <li>Copy the key and paste it here. It starts with <span className="mono">sk-or-</span>.</li>
-          <li>To use models that aren’t free, <a className="link" href={CREDITS_PAGE} target="_blank" rel="noreferrer">add a few dollars of credit</a>. A short run on a small model costs a cent or less.</li>
+          <li><a className="link" href={CREDITS_PAGE} target="_blank" rel="noreferrer">Add a few dollars of credit</a>: your agents spend it as they work. A short run on a small model costs a cent or less.</li>
         </ol>
         <form className="field" onSubmit={(event) => {
           event.preventDefault()

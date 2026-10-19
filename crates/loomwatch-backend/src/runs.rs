@@ -287,6 +287,10 @@ pub struct QueuedNote {
     /// Whether the operator asked for it to go in at once ("Send now"), stopping the agent's turn.
     #[serde(default)]
     pub now: bool,
+    /// The message this note replies to, as the agent is shown it: who said it and its words
+    /// (`Replied::quoted`). `None` for a note that replies to nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
 }
 
 /// "Send now" (ADR 0051): a request to stop an agent's current turn so a note can go in at once.
@@ -1802,6 +1806,10 @@ pub(crate) struct StartRunRequest {
     /// A one-agent turn (ADR 0051): run only this agent, given its own last output, and stop.
     #[serde(default)]
     only_agent: Option<String>,
+    /// What a chat message that starts work replies to, as every agent of the run is shown it.
+    /// Only the chat sets it: `POST /api/runs` has no reply to give.
+    #[serde(skip)]
+    reply: Option<crate::Replied>,
 }
 
 impl StartRunRequest {
@@ -1824,6 +1832,13 @@ impl StartRunRequest {
     #[must_use]
     pub(crate) fn only(mut self, agent: &str) -> Self {
         self.only_agent = Some(agent.to_owned());
+        self
+    }
+
+    /// The message the request replies to, as the agents are handed it.
+    #[must_use]
+    pub(crate) fn replying(mut self, reply: Option<crate::Replied>) -> Self {
+        self.reply = reply;
         self
     }
 
@@ -2087,6 +2102,7 @@ pub(crate) async fn launch_manual(
         Some(only) => resolve_one_agent(registry, &mut prepared, only).await?,
         None => resolve_continuation(registry, &mut prepared, request).await?,
     }
+    prepared.lineage.reply.clone_from(&request.reply);
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.
@@ -6426,6 +6442,7 @@ pub(crate) mod tests {
             park_note: "The turn is still finishing.".into(),
             send_back_available: false,
             question_id: None,
+            check: None,
         };
         let first = desk.park(&run_id, waiting("solo")).await.unwrap();
         assert!(
