@@ -7,12 +7,15 @@
 //! - `POST /api/ai/openrouter/check` asks `OpenRouter` about the kept key again.
 //! - `DELETE /api/ai/openrouter` forgets it.
 //! - `GET /api/models` lists the models an agent can use.
+//! - `/api/models/reading` reads an agent's whole setup to suggest a model, when the operator turns
+//!   that on (`reading.rs`).
 //!
 //! The router must only be mounted on a loopback listener. Changing requests need the
 //! `X-LoomWatch-Request: 1` header the app sends, so another site can't set a key.
 
 mod keys;
 mod models;
+mod reading;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,6 +38,7 @@ pub use models::{
     Catalog, DEFAULT_MODEL, FAST_MODEL, JobNeeds, MODEL_TIERS, Model, ModelTiers, Models,
     openrouter_id,
 };
+use reading::Reader;
 
 use crate::agent::{ApiKey, base_url, is_loopback_http};
 use crate::api::ApiError;
@@ -59,6 +63,7 @@ struct Inner {
     status_file: PathBuf,
     key_url: String,
     client: Option<reqwest::Client>,
+    reader: Reader,
 }
 
 /// The one [`Ai`] the daemon's runs use, set once at startup.
@@ -145,6 +150,10 @@ impl Ai {
                 status_file: state_dir.join(STATUS_FILE),
                 key_url: key_url.to_owned(),
                 client,
+                reader: Reader::new(
+                    state_dir,
+                    &reading::decisions_url(key_url.strip_suffix("/key").unwrap_or(key_url)),
+                ),
             }),
         }
     }
@@ -252,6 +261,14 @@ pub fn router(ai: Ai) -> Router {
         .route("/api/ai/openrouter/check", post(recheck))
         .route("/api/models", get(list_models))
         .layer(DefaultBodyLimit::max(4096))
+        // A setup carries an agent's whole instructions.
+        .route(
+            "/api/models/reading",
+            get(reading::status)
+                .put(reading::change)
+                .post(reading::read)
+                .layer(DefaultBodyLimit::max(64 * 1024)),
+        )
         .route_layer(middleware::from_fn(protect))
         .with_state(ai)
 }

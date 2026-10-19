@@ -583,6 +583,7 @@ $defs:
           anyOf:
             - required: [spawn]
             - required: [model]
+            - required: [followsSuggestion]
             - required: [thinkingEffort]
             - required: [doneWhen]
             - required: [checks]
@@ -623,6 +624,12 @@ $defs:
           OpenRouter model.
         type: string
         minLength: 1
+      followsSuggestion:
+        description: >-
+          True when `model` follows the model the app suggests for this agent (ADR 0072): when its
+          configuration changes, the app moves `model` to the new suggestion. Picking another model
+          takes it out. A run always uses `model`; the daemon does not read this.
+        type: boolean
       thinkingEffort:
         description: >-
           How hard the model reasons: none, minimal, low, medium, high, xhigh or max. Absent uses

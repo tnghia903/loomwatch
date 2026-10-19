@@ -7,13 +7,13 @@ import type { JobSpec, SavedJob } from '../../lib/library/jobs'
 import { linkState } from '../../lib/library/link'
 import { draftFromTeamAgent, readsOf, teamKnowledge, type TeamKnowledge } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
-import { suggestModel } from '../../lib/team-file/modelSuggestion'
+import type { ModelMove } from '../../lib/team-file/useModelFollowing'
 import type { AgentConfig } from '../../lib/team-file/types'
 import { agentFigure, figureFor } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { AgentAnswer, AgentChat } from '../agents/AgentChat'
 import { AgentBuilder, AgentViewTabs } from '../agents/AgentBuilder'
-import { ByHand } from '../agents/ByHand'
+import { ByHand, type ByHandProps } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
 import { LinkedAgent } from '../canvas/LinkedAgent'
 import { withAllowed } from '../../lib/tools/allow'
@@ -41,7 +41,15 @@ export interface TeamAgentsProps {
   onShowWorkflow: () => void
   /** Put one of Your agents in this team. Absent when the team can't be changed here. */
   onAdd?: (job: SavedJob) => void
+  /** A model picked for a team's own agent, and whether it now follows its suggestion (ADR 0072).
+      Absent: the pick only sets its model. */
+  onPickModel?: (agentId: string, model: string, follow: boolean) => void
+  /** Agents whose model just moved with their configuration, and Undo. */
+  modelMoves?: ReadonlyMap<string, ModelMove>
+  onUndoModelMove?: (agentId: string) => void
 }
+
+const NO_MOVES: ReadonlyMap<string, ModelMove> = new Map()
 
 /**
  * THE TEAM'S AGENTS, the first of a team's three views (Agents, Workflow, Chat): every agent of the
@@ -50,7 +58,7 @@ export interface TeamAgentsProps {
  * team, like a canvas edit. One placed from Your agents opens its saved version: saving it makes the
  * next version and moves this team to it.
  */
-export function TeamAgents({ agents, responder, selected, onSelect, teamName, teamPath, editable, skills, skillsLoading, savedJobs, onEdit, onApplyVersion, onUnlink, onShowWorkflow, onAdd }: TeamAgentsProps) {
+export function TeamAgents({ agents, responder, selected, onSelect, teamName, teamPath, editable, skills, skillsLoading, savedJobs, onEdit, onApplyVersion, onUnlink, onShowWorkflow, onAdd, onPickModel, modelMoves = NO_MOVES, onUndoModelMove }: TeamAgentsProps) {
   const agent = agents.find((candidate) => candidate.id === selected) ?? agents[0] ?? null
   const link = agent ? linkState(agent, savedJobs) : null
   // What the team gives it to read, kept the same list while the team file doesn't change it.
@@ -93,7 +101,12 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
         </div>
       )}
 
-      {agent && !link && <OwnAgent key={agent.id} agent={agent} team={{ agents, responder }} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} knowledge={knowledge} onShowWorkflow={onShowWorkflow} />}
+      {agent && !link && <OwnAgent key={agent.id} agent={agent} team={{ agents, responder }} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} knowledge={knowledge} onShowWorkflow={onShowWorkflow}
+        following={{
+          follows: agent.followsSuggestion === true,
+          moved: modelMoves.get(agent.id) && { from: (modelMoves.get(agent.id) as ModelMove).from, onUndo: () => onUndoModelMove?.(agent.id) },
+          onPick: (model, follow) => { if (!editable) return; if (onPickModel) onPickModel(agent.id, model, follow); else onEdit(agent.id, 'model', model) },
+        }} />}
     </div>
   )
 }
@@ -136,7 +149,7 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkfl
  * A team's own agent on the workbench, written straight into the team file, with the same two tabs
  * as one of Your agents: Build, and Chat, where you talk to it on its own.
  */
-function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEdit, knowledge, onShowWorkflow }: { agent: AgentConfig; team: { agents: readonly AgentConfig[]; responder: string | null }; teamPath: string | null; editable: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; knowledge: TeamKnowledge; onShowWorkflow: () => void }) {
+function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEdit, knowledge, onShowWorkflow, following }: { agent: AgentConfig; team: { agents: readonly AgentConfig[]; responder: string | null }; teamPath: string | null; editable: boolean; skills: readonly DetectedCapability[]; skillsLoading: boolean; onEdit: TeamAgentsProps['onEdit']; knowledge: TeamKnowledge; onShowWorkflow: () => void; following: NonNullable<ByHandProps['following']> }) {
   const draft = useMemo(() => draftFromTeamAgent(agent), [agent])
   // Its chat reads what it reads as `knowledge`, named again from the chat's folder; its draft's
   // reads name a file added beside the team from the team file's folder, so they stay out of it.
@@ -158,7 +171,7 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
         <AgentViewTabs view={view} onView={setView} />
       </div>
       <ByHand
-        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} modelSuggestion={suggestModel({ agent, team })}
+        draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} suggestFor={{ agent, team }} following={following}
         chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}

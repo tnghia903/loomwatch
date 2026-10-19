@@ -6,7 +6,7 @@ import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
 import type { AgentUsage } from '../../lib/team-file/runLessons'
 import type { AgentPlace } from '../../lib/team-file/agentPlace'
-import type { ModelSuggestion } from '../../lib/team-file/modelSuggestion'
+import type { ModelSuggestionInput } from '../../lib/team-file/modelSuggestion'
 import type { AllowSwitch, CapabilityRef, TurnedOff } from '../../lib/team-file/types'
 import { holdsTeamFile } from '../../lib/team-file/workFolder'
 import type { AgentField, AgentFieldProblems } from '../../lib/team-file/validation'
@@ -37,7 +37,10 @@ export interface InspectorProps {
   teamPath?: string | null
   onAddKnowledge?: (added: CapabilityRef[]) => void
   onRename: (field: 'name' | 'role', value: string) => void
-  onModelChange: (value: string) => void
+  /** The model picked, and whether it now follows its suggestion (ADR 0072). */
+  onModelChange: (value: string, follow: boolean) => void
+  /** Its model just moved with its configuration (ADR 0072): from what, and Undo. */
+  modelMove?: { from: string; onUndo: () => void }
   /** The agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
   onSpendChange?: (perRun: number | null) => void
   /** `undefined` takes the effort out, so the model runs at its own default. */
@@ -46,8 +49,8 @@ export interface InspectorProps {
   onDoneWhenChange?: (items: string[]) => void
   /** Set on a check step (ADR 0062): whose work it checks, and its send-back switch. */
   checkStep?: Omit<CheckStepProps, 'readOnly'>
-  /** The model this agent's job and place in the team suit, listed first in the model picker. */
-  modelSuggestion?: ModelSuggestion
+  /** This agent and its team: the model its job and place suit is listed first in the model picker. */
+  suggestFor?: ModelSuggestionInput
   onCwdChange: (value: string) => void
   onAllowRecruitingChange: (allow: boolean) => void
   /** ADR 0037: one "Allowed without asking" switch. */
@@ -92,7 +95,7 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in the team file).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, modelSuggestion, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, modelMove, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, suggestFor, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
   // The fields a link to Your agents copies are changed there, or after unlinking.
   const locked = readOnly || Boolean(linked)
   const roleField = useRef<HTMLTextAreaElement>(null)
@@ -156,7 +159,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         </div>
         {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}
         <div className={`field ${zoneClass('model')}`}>
-          <ModelPicker field="model" value={openRouterId(agent.model)} disabled={locked} suggestion={modelSuggestion} onChange={(id) => { onModelChange(id); onFieldBlur('model') }} />
+          <ModelPicker field="model" value={openRouterId(agent.model)} disabled={locked} suggestFor={suggestFor} follows={linked ? undefined : agent.followsSuggestion === true} moved={modelMove} onChange={(id, follow) => { onModelChange(id, follow); onFieldBlur('model') }} />
           <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with. Its price is per million tokens, the way OpenRouter shows it.')}</span>
         </div>
         <EffortSlider model={openRouterId(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={locked} onChange={onThinkingEffortChange} />

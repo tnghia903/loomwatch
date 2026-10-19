@@ -51,7 +51,9 @@ describe('ComponentPalette jobs', () => {
     expect(await within(yours).findByText('None yet')).toBeInTheDocument()
     expect(within(yours).getByRole('link', { name: 'Build a new agent' })).toHaveAttribute('href', '/agents/new?team=desk%2Fresearch.yaml')
     fireEvent.click(within(yours).getByRole('button', { name: 'About My agents' }))
-    expect(await screen.findByText(/select it and choose/)).toBeInTheDocument()
+    // Agents are built in My agents before a team uses them, so it no longer offers to keep a team's own.
+    expect(await screen.findByText(/Build one in/)).toBeInTheDocument()
+    expect(screen.queryByText(/Add to My agents/)).toBeNull()
     // The review step is a step of the workflow, not an agent, so it stays here.
     expect(within(section('Workflow steps')).getByRole('button', { name: /^You \(review step\)/ })).toBeInTheDocument()
   })

@@ -22,7 +22,8 @@ import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
 import { INSTRUCTION_PARTS, instructionShape } from '../../lib/team-file/checkup'
-import { suggestModel, type ModelSuggestion } from '../../lib/team-file/modelSuggestion'
+import { suggestedOfDraft } from '../../lib/team-file/agentSetup'
+import type { ModelSuggestionInput } from '../../lib/team-file/modelSuggestion'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { DoneWhen } from '../canvas/DoneWhen'
 import { FolderPicker } from '../canvas/FolderPicker'
@@ -84,8 +85,12 @@ export interface ByHandProps {
   teamOwn?: { teamPath: string | null }
   /** In a team: open its Workflow, where the team gives it more to read with a line. */
   onShowWorkflow?: () => void
-  /** In a team: the model its job and place in the team suit. Absent, its job alone decides. */
-  modelSuggestion?: ModelSuggestion
+  /** In a team: the agent and its team, which the suggested model is read from. Absent, its own
+      setup alone decides. */
+  suggestFor?: ModelSuggestionInput
+  /** A team's own agent (ADR 0072): whether its model follows its suggestion, a move to show with
+      Undo, and what a pick writes, in place of setting `model` on the draft. */
+  following?: { follows: boolean; moved?: { from: string; onUndo: () => void }; onPick: (id: string, follow: boolean) => void }
   /**
    * Its chat (its Chat tab), shown beside the bench instead of the blocks: the figure
    * works there as the chat's newest run says. The bench stays the same one, so it is never drawn
@@ -109,7 +114,7 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, modelSuggestion, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, suggestFor, following, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -320,7 +325,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           </>)}
 
           {block('mind', <>
-            <ModelPicker value={draft.model} disabled={readOnly} suggestion={modelSuggestion ?? suggestModel({ agent: { id: '', name: draft.name, role: draft.instructions } })} onChange={(id) => set('model', id)} />
+            <ModelPicker value={draft.model} disabled={readOnly} suggestFor={suggestFor ?? { agent: suggestedOfDraft(draft) }} follows={following?.follows} moved={following?.moved} onChange={(id, follow) => { if (readOnly) return; if (following) following.onPick(id, follow); else set('model', id) }} />
             <EffortSlider className="thinking-field agent-field" model={draft.model} value={draft.effort} disabled={readOnly} onChange={(effort) => set('effort', effort ?? '')} />
             <p className="t-meta">A bigger model can think more through, and costs more per run. The price is per million tokens, the way OpenRouter shows it.</p>
           </>)}

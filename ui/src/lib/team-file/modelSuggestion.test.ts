@@ -1,25 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, type ModelTier } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
 import { CHECKER_ROLE } from '../library/checker'
+import { onTheFastTier } from '../library/onTheFastTier'
 import { ROLE_PRESETS } from '../library/roles'
+import type { SetupReading } from './agentSetup'
 import { suggestModel } from './modelSuggestion'
 
 const researcher = { id: 'researcher', name: 'Researcher', role: 'Find sources on the topic and pass them on.' }
 const writer = { id: 'writer', name: 'Writer', role: 'Write the article from what you are handed.', model: DEFAULT_MODEL }
-
-// No built-in job is on the fast tier while quality comes first (schemas/model-tiers.json). The
-// gatherer cases are for when the table moves the Researcher there, so these move it meanwhile.
-const onTheFastTier = (check: () => void) => () => {
-  const job = ROLE_PRESETS.find((candidate) => candidate.id === 'researcher') as { tier?: ModelTier }
-  const tier = job.tier
-  job.tier = 'fast'
-  try {
-    check()
-  } finally {
-    job.tier = tier
-  }
-}
 
 describe('suggestModel', () => {
   it('keeps a researcher on the strongest model while its job is on the strong tier', () => {
@@ -63,5 +52,47 @@ describe('suggestModel', () => {
     const suggestion = suggestModel({ agent: { id: 'x', name: 'Helper', role: '' } })
     expect(suggestion.model).toBe(DEFAULT_MODEL)
     expect(suggestion.why).toContain('don’t say what kind of work it does')
+  })
+
+  it('places an agent holding a built-in job’s own instructions on that job, whatever it is called', () => {
+    const lead = ROLE_PRESETS.find((preset) => preset.id === 'lead')!
+    // "Step 2" names nothing, and the lead's instructions mention research: it was put on the faster model.
+    expect(suggestModel({ agent: { id: 's', name: 'Step 2', role: lead.role } }).model).toBe(DEFAULT_MODEL)
+  })
+})
+
+describe('suggestModel with a reading of the whole setup', () => {
+  const gatherer = { id: 'gatherer', name: 'Gatherer', role: 'Find what happened in tech today. Do not judge the stories or write them: the Writer does.' }
+  const sure = (kind: SetupReading['kind'], probability = 0.9): SetupReading => ({ kind, probabilities: { [kind]: probability }, confidence: 0.9 })
+  const team = { agents: [gatherer, writer], responder: 'writer' }
+
+  it('puts a gatherer the keywords call a writer on the faster model, and says it was read', () => {
+    expect(suggestModel({ agent: gatherer, team }).model).toBe(DEFAULT_MODEL)
+    const read = suggestModel({ agent: gatherer, team, reading: sure('gather') })
+    expect(read).toEqual({ model: FAST_MODEL, read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
+  })
+
+  it('keeps the team’s answer on the strongest model whatever the reading says', () => {
+    expect(suggestModel({ agent: gatherer, team: { agents: [gatherer], responder: 'gatherer' }, reading: sure('gather') }).model).toBe(DEFAULT_MODEL)
+  })
+
+  it('puts a check step without checks: on another maker’s model', () => {
+    const checker = { id: 'checker', name: 'Checker', role: 'You run on a different company’s model from the teacher on purpose. Make every rung follow.' }
+    expect(suggestModel({ agent: checker, reading: sure('check') })).toMatchObject({ model: CHECK_MODEL, read: true })
+  })
+
+  it('lets checks: decide over any reading', () => {
+    const checker = { id: 'checker', name: 'Step 3', role: 'Read the draft.', checks: 'writer' }
+    expect(suggestModel({ agent: checker, team: { agents: [writer, checker], responder: 'writer' }, reading: sure('produce') }).model).toBe(CHECK_MODEL)
+  })
+
+  it('keeps work the reading says decides the result on the strongest model, even where keywords said gatherer', onTheFastTier(() => {
+    const lead = { id: 'lead', name: 'Step 1', role: 'Plan the research, hand each question out to a teammate, and judge when the answers are enough.' }
+    expect(suggestModel({ agent: lead }).model).toBe(FAST_MODEL)
+    expect(suggestModel({ agent: lead, reading: sure('produce') })).toMatchObject({ model: DEFAULT_MODEL, read: true })
+  }))
+
+  it('ignores a reading that isn’t sure, and falls back to the keywords', () => {
+    expect(suggestModel({ agent: gatherer, team, reading: sure('gather', 0.7) })).toEqual(suggestModel({ agent: gatherer, team }))
   })
 })

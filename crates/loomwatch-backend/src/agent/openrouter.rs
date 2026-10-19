@@ -71,8 +71,8 @@ pub fn is_loopback_http(url: &str) -> bool {
     })
 }
 /// How `OpenRouter` names `LoomWatch` on its dashboards.
-const REFERER: &str = "https://github.com/tnghia903/loomwatch";
-const TITLE: &str = "LoomWatch";
+pub(crate) const REFERER: &str = "https://github.com/tnghia903/loomwatch";
+pub(crate) const TITLE: &str = "LoomWatch";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// Silence allowed between two pieces of a stream. `OpenRouter` sends a comment every few seconds
 /// while a model thinks, so this much silence means the connection is gone.
