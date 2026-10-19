@@ -4,7 +4,8 @@
 //! 1. The prompt joins the conversation.
 //! 2. The model's reply streams to the [`EventSink`] as it is written.
 //! 3. Every tool call it asks for is worked out, allowed or declined by [`Permissions`], run, and
-//!    its result goes back to the model.
+//!    its result goes back to the model. The calls are asked about one at a time, in order. The
+//!    reads among them run at the same time, and every other call runs on its own in its place.
 //! 4. That repeats until the model replies without a tool call, the turn hits its tool-call cap,
 //!    the run's spool says no more ([`Spend`]), or someone cancels it. A reply the length limit cut
 //!    off is carried on instead of ending the turn.
@@ -531,24 +532,65 @@ impl Session {
                 };
                 return Ok(ended(reason, turn, &reply));
             }
-            for call in &calls {
-                let content = if calls_made >= self.config.max_tool_calls {
-                    "Not run: this turn reached its limit of tool calls.".to_owned()
-                } else if cancel.is_cancelled() {
-                    "Not run: the turn was cancelled.".to_owned()
-                } else {
-                    calls_made += 1;
-                    self.run_tool(call, cut, &cancel).await?
-                };
-                self.history.push(Message::Tool {
-                    tool_call_id: call.id.clone(),
-                    content,
-                });
-            }
+            self.run_calls(&calls, cut, &cancel, &mut calls_made)
+                .await?;
             if calls_made >= self.config.max_tool_calls {
                 return Ok(ended(StopReason::MaxTurnRequests, turn, &reply));
             }
         }
+    }
+
+    /// Runs the tool calls of one model message, and adds their results to the conversation in
+    /// the order the model asked for them. `calls_made` counts the calls the turn has run.
+    async fn run_calls(
+        &mut self,
+        calls: &[ToolCall],
+        cut: bool,
+        cancel: &Cancel,
+        calls_made: &mut usize,
+    ) -> Result<(), AgentError> {
+        // Reads are asked about one by one and then run at the same time. Any other call waits for
+        // the reads before it and runs on its own, so the calls take effect in the model's order,
+        // and their answers go back in that order whichever finished first.
+        let mut answers: Vec<Option<String>> = vec![None; calls.len()];
+        let mut reads: Vec<Read> = Vec::new();
+        for (place, call) in calls.iter().enumerate() {
+            let read = self.read_tool(call, &reads);
+            if read.is_none() {
+                self.run_reads(&mut reads, &mut answers, cancel).await?;
+            }
+            let answer = if *calls_made >= self.config.max_tool_calls {
+                "Not run: this turn reached its limit of tool calls.".to_owned()
+            } else if cancel.is_cancelled() {
+                "Not run: the turn was cancelled.".to_owned()
+            } else {
+                *calls_made += 1;
+                match read {
+                    Some(tool) => match self.begin_read(tool, call, cut).await? {
+                        Begun::Allowed(input) => {
+                            reads.push(Read {
+                                place,
+                                call,
+                                tool,
+                                input,
+                            });
+                            continue;
+                        }
+                        Begun::Answered(answer) => answer,
+                    },
+                    None => self.run_tool(call, cut, cancel).await?,
+                }
+            };
+            answers[place] = Some(answer);
+        }
+        self.run_reads(&mut reads, &mut answers, cancel).await?;
+        for (call, answer) in calls.iter().zip(answers) {
+            self.history.push(Message::Tool {
+                tool_call_id: call.id.clone(),
+                content: answer.unwrap_or_default(),
+            });
+        }
+        Ok(())
     }
 
     /// The turn's prompt joins the conversation, dated.
@@ -744,33 +786,7 @@ impl Session {
         cancel: &Cancel,
     ) -> Result<String, AgentError> {
         let Ok(input @ Value::Object(_)) = serde_json::from_str::<Value>(&call.arguments) else {
-            // Told why, or the model makes the same call again and is cut off at the same place.
-            let said = if cut {
-                format!(
-                    "Not run: your message reached the length limit of one reply before this call \
-                     to {} was complete. Make it smaller: split the work into several calls (write \
-                     a long file in parts, the first with write_file and the rest with edit_file), \
-                     and keep your thinking short.",
-                    call.name
-                )
-            } else {
-                format!(
-                    "The arguments for {} weren't a JSON object. Call it again with valid \
-                     arguments.",
-                    call.name
-                )
-            };
-            self.emit(events::tool_call(
-                &call.id,
-                &call.name,
-                ToolKind::Other,
-                &json!({}),
-                &[],
-            ))
-            .await?;
-            self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
-                .await?;
-            return Ok(said);
+            return self.broken_arguments(call, cut).await;
         };
         let output = match Builtin::named(&call.name).filter(|tool| self.offers(*tool)) {
             Some(tool) => self.run_builtin(tool, call, input, cancel).await?,
@@ -797,6 +813,89 @@ impl Session {
             }
         };
         Ok(self.for_conversation(&call.id, output.text))
+    }
+
+    /// What the model is told about a call whose arguments aren't a JSON object, recorded as a
+    /// failed call. `cut` says the length limit cut its message off before the call was finished.
+    async fn broken_arguments(&self, call: &ToolCall, cut: bool) -> Result<String, AgentError> {
+        // Told why, or the model makes the same call again and is cut off at the same place.
+        let said = if cut {
+            format!(
+                "Not run: your message reached the length limit of one reply before this call to \
+                 {} was complete. Make it smaller: split the work into several calls (write a long \
+                 file in parts, the first with write_file and the rest with edit_file), and keep \
+                 your thinking short.",
+                call.name
+            )
+        } else {
+            format!(
+                "The arguments for {} weren't a JSON object. Call it again with valid arguments.",
+                call.name
+            )
+        };
+        self.emit(events::tool_call(
+            &call.id,
+            &call.name,
+            ToolKind::Other,
+            &json!({}),
+            &[],
+        ))
+        .await?;
+        self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
+            .await?;
+        Ok(said)
+    }
+
+    /// The read-only built-in `call` is for, when it can run at the same time as `reads`: any
+    /// read but one of a set-aside output that a read among them has still to set aside.
+    fn read_tool(&self, call: &ToolCall, reads: &[Read<'_>]) -> Option<Builtin> {
+        let tool = Builtin::named(&call.name).filter(|tool| tool.only_reads())?;
+        if tool == Builtin::ReadToolOutput {
+            let input = serde_json::from_str::<Value>(&call.arguments).ok();
+            let id = input.as_ref().and_then(|input| input.get("id")?.as_str());
+            if reads.iter().any(|read| Some(read.call.id.as_str()) == id) {
+                return None;
+            }
+        }
+        self.offers(tool).then_some(tool)
+    }
+
+    /// A read worked out, recorded and asked about, as [`Self::run_tool`] would, but not run yet.
+    async fn begin_read(
+        &mut self,
+        tool: Builtin,
+        call: &ToolCall,
+        cut: bool,
+    ) -> Result<Begun, AgentError> {
+        let Ok(input @ Value::Object(_)) = serde_json::from_str::<Value>(&call.arguments) else {
+            return self.broken_arguments(call, cut).await.map(Begun::Answered);
+        };
+        Ok(match self.allow_builtin(tool, call, input).await? {
+            Ok(input) => Begun::Allowed(input),
+            Err(output) => Begun::Answered(self.for_conversation(&call.id, output.text)),
+        })
+    }
+
+    /// Runs the allowed `reads` all at once, and puts each one's answer in its place.
+    async fn run_reads(
+        &mut self,
+        reads: &mut Vec<Read<'_>>,
+        answers: &mut [Option<String>],
+        cancel: &Cancel,
+    ) -> Result<(), AgentError> {
+        if reads.is_empty() {
+            return Ok(());
+        }
+        let outputs = futures_util::future::join_all(
+            reads
+                .iter()
+                .map(|read| self.finish_builtin(read.tool, read.call, &read.input, cancel)),
+        )
+        .await;
+        for (read, output) in reads.drain(..).zip(outputs) {
+            answers[read.place] = Some(self.for_conversation(&read.call.id, output?.text));
+        }
+        Ok(())
     }
 
     fn offers(&self, tool: Builtin) -> bool {
@@ -872,12 +971,26 @@ impl Session {
     }
 
     async fn run_builtin(
-        &mut self,
+        &self,
+        tool: Builtin,
+        call: &ToolCall,
+        input: Value,
+        cancel: &Cancel,
+    ) -> Result<Output, AgentError> {
+        match self.allow_builtin(tool, call, input).await? {
+            Ok(input) => self.finish_builtin(tool, call, &input, cancel).await,
+            Err(answered) => Ok(answered),
+        }
+    }
+
+    /// Works the call out, records it and asks [`Permissions`]: the arguments to run it with,
+    /// which the person may have changed, or what it is answered with instead of running.
+    async fn allow_builtin(
+        &self,
         tool: Builtin,
         call: &ToolCall,
         mut input: Value,
-        cancel: &Cancel,
-    ) -> Result<Output, AgentError> {
+    ) -> Result<Result<Value, Output>, AgentError> {
         let prepared = match tool.prepare(&input, &self.config.cwd) {
             Ok(prepared) => prepared,
             Err(said) => {
@@ -891,7 +1004,7 @@ impl Session {
                 .await?;
                 self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                     .await?;
-                return Ok(Output::failed(said));
+                return Ok(Err(Output::failed(said)));
             }
         };
         self.emit(events::tool_call(
@@ -918,7 +1031,7 @@ impl Session {
                         let said = format!("The person's change didn't work: {said}");
                         self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                             .await?;
-                        return Ok(Output::failed(said));
+                        return Ok(Err(Output::failed(said)));
                     }
                     input = edited;
                 }
@@ -928,19 +1041,30 @@ impl Session {
                         .to_owned();
                     self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                         .await?;
-                    return Ok(Output::failed(said));
+                    return Ok(Err(Output::failed(said)));
                 }
                 Decision::Answer(answer) => {
                     let said = format!("The person answered instead of letting this run: {answer}");
                     self.emit(events::tool_update(&call.id, ToolStatus::Completed, &said))
                         .await?;
-                    return Ok(Output::ok(said));
+                    return Ok(Err(Output::ok(said)));
                 }
             }
         }
+        Ok(Ok(input))
+    }
+
+    /// Runs an allowed call and records how it ended.
+    async fn finish_builtin(
+        &self,
+        tool: Builtin,
+        call: &ToolCall,
+        input: &Value,
+        cancel: &Cancel,
+    ) -> Result<Output, AgentError> {
         let output = match tool {
-            Builtin::UpdatePlan => self.update_plan(&input).await?,
-            Builtin::ReadToolOutput => self.read_output(&input),
+            Builtin::UpdatePlan => self.update_plan(input).await?,
+            Builtin::ReadToolOutput => self.read_output(input),
             _ => {
                 let settings = CommandSettings {
                     network: self.config.tools.web,
@@ -951,7 +1075,7 @@ impl Session {
                     cancel,
                     command: &settings,
                 };
-                tool.run(&input, &context).await
+                tool.run(input, &context).await
             }
         };
         let status = if output.failed {
@@ -1163,6 +1287,24 @@ fn carry_on(wrote_nothing: bool) -> &'static str {
         "Your reply was cut off: it reached the length limit of one message. Carry on from exactly \
          where it stopped, without repeating anything or saying that you are carrying on."
     }
+}
+
+/// A read the model asked for, allowed and waiting to run with the reads beside it.
+struct Read<'c> {
+    /// Where its answer goes among its message's calls.
+    place: usize,
+    call: &'c ToolCall,
+    tool: Builtin,
+    /// The arguments it runs with, which the person may have changed.
+    input: Value,
+}
+
+/// Where a read stands once it was asked about.
+enum Begun {
+    /// Allowed, with the arguments to run it with.
+    Allowed(Value),
+    /// Answered without running: declined, answered by the person, or not a call it could make.
+    Answered(String),
 }
 
 /// What a model call is for.

@@ -114,6 +114,14 @@ impl Builtin {
         Self::ALL.into_iter().find(|tool| tool.name() == name)
     }
 
+    /// Whether the tool only reads: it changes nothing, so several of its calls can run at once.
+    pub(crate) fn only_reads(self) -> bool {
+        matches!(
+            self,
+            Self::ListFiles | Self::ReadFile | Self::SearchFiles | Self::ReadToolOutput
+        )
+    }
+
     #[allow(clippy::too_many_lines)] // One table: each tool's description and argument schema.
     pub(crate) fn spec(self) -> ToolSpec {
         let (description, parameters) = match self {
