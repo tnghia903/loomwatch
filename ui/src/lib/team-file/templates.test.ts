@@ -110,11 +110,13 @@ describe('team templates', () => {
 
   // ADR 0062: the checked starter team ends on a check step that checks the writer, so the writer's
   // piece stays the answer and the daemon accepts the file as it stands. A missed check goes back
-  // to the writer once: without that, the check costs about half a run and changes nothing.
+  // to the writer up to twice, then asks you: without that, the check costs about half a run and
+  // changes nothing.
   it('ends the checked team on a Checker that checks the writer and sends a miss back', () => {
     const doc = parse(templateTeamYaml('research-write-check', 'Brief')) as TeamDocument
     expect(doc.agents.map((agent) => agent.id)).toEqual(['researcher', 'writer', 'checker'])
-    expect(doc.agents[2]).toMatchObject({ checks: 'writer', sendBackOnce: true, allow: { web: true } })
+    expect(doc.agents[2]).toMatchObject({ checks: 'writer', sendBack: { rounds: 2, whenStillNotMet: 'ask' }, allow: { web: true } })
+    expect(doc.agents[2]).not.toHaveProperty('sendBackOnce')
     expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['researcher->writer', 'writer->checker'])
   })
 

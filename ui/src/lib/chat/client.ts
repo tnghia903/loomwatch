@@ -1,5 +1,6 @@
 import { daemonFetch } from '../daemonFetch'
 import { readRun, type RunRecord } from '../runs/client'
+import type { Face, Reaction, ReactionAbout } from './reactions'
 
 /**
  * A team's chat (ADR 0051): its runs and what you wrote to it, read as one conversation.
@@ -8,6 +9,9 @@ import { readRun, type RunRecord } from '../runs/client'
  * the message box can say it before you send: `@team` starts the whole team, `@<agent>` starts
  * that agent alone (or, while it works, becomes a note for its next turn), and anything without an
  * @ is a note — to the agent at work, or to the whole team for next time.
+ *
+ * A message can also be a reply to something said in the team's work (`ReplyTo`): it goes where its
+ * @ sends it, as any message does, and carries the quote, which the agent is handed with it.
  */
 
 /** How a message was routed. */
@@ -29,12 +33,35 @@ export interface ChatMessage {
   deliveredAt: string | null
   /** "Send now": it stopped the agent's turn rather than waiting for it. */
   now: boolean
+  /** The message it replies to, when it was written as one. Absent from chats before replies. */
+  replyTo?: ReplyTo | null
+}
+
+/** What kind of message a reply answers, in the daemon's words (`chat::ReplyKind`). */
+export type ReplyKind = 'handover' | 'question' | 'question_back' | 'answer' | 'task' | 'check' | 'message'
+
+/**
+ * The message a reply answers, as you saw it when you pressed Reply: kept with your message, so the
+ * chat can show the quote again and the agent is handed the words you pointed at.
+ */
+export interface ReplyTo {
+  /** The piece of work it was said in. */
+  runId: string | null
+  /** Which message of that piece, as the chat keys it: a talk bubble's key, or `answer:<runId>`. */
+  messageId: string
+  /** Who said it: an agent's id. */
+  from: string
+  /** Whom it was for: another agent's id; `null` when it was for you or the team. */
+  to: string | null
+  kind: ReplyKind
+  /** Its words, verbatim. */
+  text: string
 }
 
 /** One item of the chat, newest first from the daemon. */
 export type ChatItem =
   /** A piece of work: a run, the message that started it, and the notes you sent into it. */
-  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[] }
+  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[] }
   /** A team note: it started nothing, and the next work reads it. */
   | { kind: 'note'; message: ChatMessage }
 
@@ -58,6 +85,8 @@ export interface SendOptions {
   expectedRevision?: string | null
   /** One key for the life of one send attempt, so a lost answer never starts work twice. */
   startKey?: string
+  /** The message this one replies to. */
+  replyTo?: ReplyTo | null
   signal?: AbortSignal
 }
 
@@ -84,7 +113,7 @@ export async function fetchChatPage(teamPath: string, before?: string | null, li
   return readRun<ChatPage>(response)
 }
 
-export async function sendChatMessage({ teamPath, text, to, now, expectedRevision, startKey, signal }: SendOptions): Promise<SendResult> {
+export async function sendChatMessage({ teamPath, text, to, now, expectedRevision, startKey, replyTo, signal }: SendOptions): Promise<SendResult> {
   const response = await daemonFetch('/api/chat/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -95,6 +124,7 @@ export async function sendChatMessage({ teamPath, text, to, now, expectedRevisio
       ...(now ? { now } : {}),
       ...(expectedRevision ? { expectedRevision } : {}),
       ...(startKey ? { startKey } : {}),
+      ...(replyTo ? { replyTo } : {}),
     }),
     signal,
     cache: 'no-store',
@@ -122,4 +152,18 @@ export async function continueWithTeam(runId: string, expectedRevision?: string 
     cache: 'no-store',
   })
   return readRun<{ route: 'team'; run: RunRecord }>(response)
+}
+
+/**
+ * Put one face on something an agent said in a piece of work, or take yours off with `null`. A line
+ * of talk goes with what it was, for the next work's conversation; an answer is read from its run.
+ */
+export async function reactTo(teamPath: string, runId: string, target: string, face: Face | null, about?: ReactionAbout): Promise<{ anchor: string; reactions: Reaction[] }> {
+  const response = await daemonFetch('/api/chat/reactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ teamPath, anchor: runId, target, face, ...(about ? { about } : {}) }),
+    cache: 'no-store',
+  })
+  return readRun<{ anchor: string; reactions: Reaction[] }>(response)
 }

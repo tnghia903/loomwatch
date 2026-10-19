@@ -296,6 +296,13 @@ as one more turn, once all of that agent's delegated work has finished, so the w
 answer. An agent answering an `ask` may not start another agent. An `ask` is withdrawn when the
 agent that asked ends its turn first: an answer nobody waits for is never worth its tokens.
 
+In team mode each teammate keeps one conversation for the run. A lead that sends work back ("fix
+this") reaches the same conversation, so the teammate keeps its sources and what it was told, and
+the lead need not paste the earlier work back in. A teammate still working is never waited for: a
+call that finds it busy starts a separate copy, as before. At most `guards.maxConcurrentDispatches`
+teammates hold a conversation; past that, each call starts fresh. Every kept conversation closes
+when the run ends.
+
 ---
 
 ## 4. Two execution modes

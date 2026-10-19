@@ -154,11 +154,31 @@ depend on the document as a whole:
 - Optional `Agent.doneWhen` is up to five short statements (each at most 160 characters) that
   the finished result must satisfy. They are stated under the role as `## Done when`; the agent
   checks its result against them before it replies, fixes what it can, and lists any it could not
-  meet under `## Not met`. A later stage and any check step read it with the work. On the team's
-  answer, the daemon takes it off the end, with a `## Missing` list (the Writer job's) and
-  `## Not changed` (below). It records them as a `session_meta` `answer_notes` event, which the
-  verdict beside the answer shows, so what is delivered is the work alone. No second turn
-  is taken on the agent's own say-so: a check step with `sendBackOnce` is what sends work back.
+  meet under `## Not met`. A later stage and any check step read it with the work. No second turn
+  is taken on the agent's own say-so: a check step with `sendBack` is what sends work back.
+- **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
+  operator, not the answer's reader:
+  - `## Not met`: the `doneWhen` items it could not meet.
+  - `## Missing`: what it needed and was not given (the Writer job's), and what the Editor job
+    flagged.
+  - `## Not changed`: the findings of a send-back it kept its work against (below).
+  - `## Changes`: the edits it made to the work it was handed (the Editor job's).
+
+  When the team's answer ends with any of these, in any order, the daemon takes them off it. It
+  also drops a `---` rule drawn above them. It records them as a `session_meta` `answer_notes`
+  event (`not_met`, `missing`, `not_changed`, `changes`), so what is delivered and copied is the
+  work alone.
+  - **How they are read.** A heading counts written as `## Changes`, `**Changes**`, or `Changes:`
+    alone on its line, so a role written before these were headings still works.
+  - **When they stay in the answer.** A section with any other section after it is part of the
+    work. So is an answer that is nothing but notes.
+  - **The cost.** A piece whose own last section is headed `Changes`, such as release notes, has it
+    set aside too, and it shows in the review instead of the answer.
+  - **Where they show.** In the review beside the answer. The first three are worth a look and
+    are counted on its badge. Changes are listed apart from them and not counted, because an edit
+    is not a problem.
+  - **Between stages.** A stage's notes are handed on with its work: the Editor carries the Writer's
+    `## Missing` into its own.
 - Optional `Agent.checks` makes a pipeline agent a check step. It names the agent whose work it
   checks, which must hand its work straight to it. That agent writes no summary for it.
   - **What it is handed.**
@@ -188,25 +208,64 @@ depend on the document as a whole:
     agent's reply is the team's answer, and the checks show beside it.
   - **A check step mid-pipeline.** It hands the stages after it the work it checked (as revised),
     followed by what it could not confirm. Its own reply is not handed on, and it writes no handover.
-  - **`sendBackOnce: true`.**
-    - Missed checks go back to the checked agent's open session once, with what the check step
-      wrote about the problems.
-    - They go as findings that can be wrong: the agent changes a fact only when a finding's
-      evidence is stronger than its own source. It lists what it kept under `## Not changed`,
-      which is set aside from the answer like `## Not met`.
-    - The recheck covers only the items that were Not met or Not sure, plus what the revision
-      changed. It is told that a reason under `## Not changed` is not evidence. An item it leaves
-      out keeps a Met it had.
+  - **`sendBack`.** What happens when a check is not Met.
+
+    ```yaml
+    sendBack:
+      rounds: 2               # 1–3: how many times the work may go back
+      whenStillNotMet: ask    # answer (the default) or ask
+    ```
+
+    - **Each round.** What is not Met goes back to the checked agent's open session, with what
+      the check step wrote about the problems. Not met goes as "found these not met"; Not sure
+      goes as "could not confirm these", for the agent to show where it comes from or correct.
+      Only Met is quality reached.
+    - **Findings, not direction.** They can be wrong: the agent changes a fact only when a
+      finding's evidence is stronger than its own source. It lists what it kept under
+      `## Not changed`, which is set aside from the answer like `## Not met`.
+    - **The recheck** covers only the items that were open, plus what the revision changed. It is
+      told that a reason under `## Not changed` is not evidence. An item it leaves out keeps a
+      Met it had. With more than one round, the send-back says which round it is ("round 2 of
+      3"), and only the last round's recheck says it is the last.
+    - **It stops** when every check is Met; when the work has gone back `rounds` times; when a
+      round met none of what it went back for (another would cost the same and most likely fix
+      nothing); when what is still open is the check step's own gap (an item it gave no verdict,
+      or Met without evidence), which the agent cannot fix; or when the checked agent had already
+      finished.
+    - **`whenStillNotMet: answer`** shows the answer with what is still not met marked.
+    - **`whenStillNotMet: ask`** stops the run on a review of the checked agent's latest work,
+      with the checks beside it. It is the review stop's park: `waiting_on` has `kind:
+      review_stop`, `node` is the check step, `handoverFrom` is the checked agent, and a `check`
+      block holds the open checks, how many are met, how many times the work went back, why it
+      stopped, and the check step's account of the problems. It waits in Needs you, a scheduled
+      run too, and nothing is shown or delivered until the person answers. Nothing runs while it
+      waits.
+      - **Approve** keeps the work as it is: it is the answer, or is handed on with what the check
+        step could not confirm, and what the person wrote is direction for the stages after it.
+        It is recorded as `check_approved`.
+      - **Send back** sends the person's note to the checked agent as direction, with the checks
+        still open, and to the check step beside the recheck. Still not met, it asks again. Each
+        send-back is one more round past `rounds`, bounded by the person's click.
+      - A `loomwatchd run` has nobody to ask, so its run fails, saying what was not met, rather
+        than show the work.
+    - **Spend limits** (ADR 0068) stop a loop as they stop any call: each call checks the spool
+      first, and the next call waits at the spend card when it is used. A scheduled run stops at
+      once and delivers nothing.
+    - **`sendBackOnce: true`**, the older form, still reads as `sendBack: {rounds: 1,
+      whenStillNotMet: answer}`. A file may not set both.
   - **What is recorded.** Every round is recorded as a `check_result` event. A send-back is
-    recorded as `check_sent_back` (with its round, findings and problem text) before the turn it
-    starts, or as `check_send_back_skipped` when the checked agent had already finished. The team
-    chat shows each round as an exchange: what was sent back, the revised work as the reply, and
-    the next verdict. A round with nothing missing is one line.
+    recorded as `check_sent_back` (with its round, findings, problem text, and the person's
+    `direction` when it was they who sent it back) before the turn it starts, or as
+    `check_send_back_skipped` when the checked agent had already finished. How the rounds ended
+    is `check_stopped`, with the last round, how many times the work went back, the `reason`
+    (`all_met`, `rounds`, `no_progress`, `unchecked` or `not_open`) and the `exit` (`answer` or
+    `ask`). The team chat shows each round as an exchange: what was sent back, the revised work
+    as the reply, and the next verdict. A round with nothing missing is one line.
   - **Defaults.**
-    - The daemon treats a missing `sendBackOnce` as off, so existing files behave as before.
-    - LoomWatch's editor turns it on whenever it makes a check step: the "Research, write and
-      check" template, and connecting work into a Checker.
-    - So does Ask's `propose_team`, for a proposed check step that does not set it.
+    - The daemon treats a missing `sendBack` as off, so existing files behave as before.
+    - LoomWatch's editor sets `sendBack: {rounds: 2, whenStillNotMet: ask}` whenever it makes a
+      check step: the "Research, write and check" template, and connecting work into a Checker.
+    - So does Ask's `propose_team`, for a proposed check step that does not say.
     - The checkup suggests it for any other check step. Without it, the check costs about half a
       run and changes nothing in the answer.
     - The editor sets the check step's effort from one table keyed by the checked agent's job:
@@ -267,6 +326,20 @@ depend on the document as a whole:
   of its delegated work has finished, that agent gets one more turn with each reply (or why it
   failed), and its reply to that turn is its answer. Each result is also archived as a
   `session_meta` event with `phase: "delegated_result"`.
+- In a team with no fixed order (team mode), each teammate keeps one conversation for the whole
+  run. A `dispatch`, `handoff` or `ask` that reaches a teammate whose last turn has ended
+  continues that conversation, so the teammate builds on what it already did and was told.
+  - A call that reaches a teammate still working starts a separate copy, which is closed after its
+    turn. Nothing ever waits for a busy teammate.
+  - At most `guards.maxConcurrentDispatches` teammates hold a conversation at once. Past that, a
+    teammate starts fresh each time and is closed after its turn.
+  - The call's result says which happened: `continues: true`, or `fresh: "busy"` or
+    `fresh: "limit"`.
+  - Each turn of a kept teammate ends with a `session_meta` event with `phase: "kept_open"`.
+    Every kept conversation closes when the run ends, and records its exit then.
+  - A teammate whose round failed, or that was stopped at its own spending limit, is closed; the
+    next call starts it fresh.
+  - Pipeline stages and the helpers they recruit are unchanged.
 - An agent answering an `ask` answers from what it has: it may not start another agent with `ask`,
   `dispatch` or `handoff`, though it may still `ask` an agent whose session is open. An `ask` is
   withdrawn when the agent that asked ends its turn before the answer comes back; the answering
@@ -672,7 +745,7 @@ the frame it was recorded from.
 
 A pipeline agent may declare `kind: operator` with `role` as its question and optional `name`
 (default `You`). It must omit `spawn`, `model`, `followsSuggestion`, `thinkingEffort`, `allow`, `turnedOff`,
-`doneWhen`, `checks` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
+`doneWhen`, `checks`, `sendBack` and `sendBackOnce`. Operator nodes cannot be the entrypoint or appear in team
 mode; consecutive stops are allowed. A pipeline with stops must be started from the app, so that
 someone can answer: `loomwatchd run` on the command line has nobody to ask, so its run fails when
 it reaches a stop.

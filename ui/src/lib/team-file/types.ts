@@ -129,6 +129,16 @@ export interface WebLimitsConfig {
   maxSteps?: number
 }
 
+/**
+ * A check step's `sendBack` (ADR 0062): send what is not met back to the checked agent up to
+ * `rounds` times, checking again after each; then, if checks are still not met, show the answer
+ * anyway (`answer`, the default) or stop and ask the person (`ask`).
+ */
+export interface SendBack {
+  rounds?: number
+  whenStillNotMet?: 'answer' | 'ask'
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -146,7 +156,10 @@ export interface AgentConfig {
   doneWhen?: string[]
   /** Makes it a check step (ADR 0062): the agent whose work it checks, its direct predecessor. */
   checks?: string
-  /** With `checks`: send the work back once when a check is not met. */
+  /** With `checks`: what happens when a check is not met. Read it through `sendBackOf`. */
+  sendBack?: SendBack
+  /** The older form of `sendBack: { rounds: 1, whenStillNotMet: 'answer' }`, still read. The
+      editor writes `sendBack` and removes this when the setting is changed. */
   sendBackOnce?: boolean
   allowRecruiting?: boolean
   /** Capabilities the daemon delivers into this agent's workspace before the run. Executable, so

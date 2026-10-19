@@ -91,6 +91,43 @@ describe('teamSentence', () => {
   it('is empty for an empty team', () => {
     expect(teamSentence({ agents: [], edges: [], steps: [], entrypoint: '', responder: null })).toEqual([])
   })
+
+  it('says whose work a check step checks and how the work goes back (ADR 0062)', () => {
+    const say = (checker: Partial<SentenceAgent>) => sentenceText(teamSentence({
+      agents: [writer, { id: 'checker', name: 'Checker', role: 'Check the work.', checks: 'writer', ...checker }],
+      edges: [{ from: 'writer', to: 'checker' }],
+      steps: [{ id: 'writer', joinFrom: [] }, { id: 'checker', joinFrom: [] }],
+      entrypoint: 'writer',
+      responder: 'writer',
+    }))
+    const opening = 'When you ask, Writer writes, and finally Checker checks Writer’s work'
+    const closing = '. The answer you see comes from Writer.'
+    expect(say({})).toBe(`${opening}${closing}`)
+    expect(say({ sendBackOnce: true })).toBe(`${opening} and sends it back once if a check isn’t met${closing}`)
+    expect(say({ sendBack: { rounds: 1 } })).toBe(`${opening} and sends it back once if a check isn’t met${closing}`)
+    expect(say({ sendBack: { rounds: 3, whenStillNotMet: 'answer' } })).toBe(`${opening} and sends it back up to 3 times if a check isn’t met${closing}`)
+    expect(say({ sendBack: { rounds: 2, whenStillNotMet: 'ask' } })).toBe(`${opening}, sends it back up to 2 times, and asks you if a check still isn’t met${closing}`)
+    expect(say({ sendBack: { rounds: 1, whenStillNotMet: 'ask' } })).toBe(`${opening}, sends it back once, and asks you if a check still isn’t met${closing}`)
+  })
+
+  it('makes the checked agent in a check step’s phrase a button, and keeps a stray checks quiet', () => {
+    const parts = teamSentence({
+      agents: [writer, { id: 'checker', name: 'Checker', role: 'Check the work.', checks: 'writer', sendBack: { rounds: 2, whenStillNotMet: 'ask' } }],
+      edges: [{ from: 'writer', to: 'checker' }],
+      steps: [{ id: 'writer', joinFrom: [] }, { id: 'checker', joinFrom: [] }],
+      entrypoint: 'writer',
+      responder: 'writer',
+    })
+    expect(parts.filter((part) => part.kind === 'agent').map((part) => part.kind === 'agent' && part.name)).toEqual(['Writer', 'Checker', 'Writer’s', 'Writer'])
+    const stray = teamSentence({
+      agents: [writer, { id: 'checker', name: 'Checker', role: 'Check the work.', checks: 'ghost' }],
+      edges: [{ from: 'writer', to: 'checker' }],
+      steps: [{ id: 'writer', joinFrom: [] }, { id: 'checker', joinFrom: [] }],
+      entrypoint: 'writer',
+      responder: 'checker',
+    })
+    expect(sentenceText(stray)).toBe('When you ask, Writer writes, and finally Checker checks the work and replies.')
+  })
 })
 
 describe('verbFor', () => {

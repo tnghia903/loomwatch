@@ -28,9 +28,34 @@ describe('checkEffort', () => {
 })
 
 describe('checkStepFields', () => {
-  it('checks the work, sends a miss back once, and sets an effort only on a model that has one', () => {
-    expect(checkStepFields({ thinkingEffort: 'medium' }, job('writer'))).toEqual({ checks: 'writer', sendBackOnce: true, thinkingEffort: 'high' })
-    expect(checkStepFields({}, job('coder'))).toEqual({ checks: 'coder', sendBackOnce: true })
+  it('checks the work, sends a miss back up to twice then asks you, and sets an effort only on a model that has one', () => {
+    expect(checkStepFields({ thinkingEffort: 'medium' }, job('writer'))).toEqual({ checks: 'writer', sendBack: { rounds: 2, whenStillNotMet: 'ask' }, thinkingEffort: 'high' })
+    expect(checkStepFields({}, job('coder'))).toEqual({ checks: 'coder', sendBack: { rounds: 2, whenStillNotMet: 'ask' } })
+  })
+})
+
+describe('the Writer job’s sources', () => {
+  // Read word for word, "each source link beside its claim" was Not met on a rewrite whose facts all
+  // came in the request, and the round it was sent back for could not meet it (quality bench
+  // pilot-1, W1). The daemon tells every check step such an item does not apply (lib.rs
+  // check_material); the job says so itself, and still holds work whose facts came with links.
+  it('asks for a link beside each claim only when the facts came with links', () => {
+    const writer = ROLE_PRESETS.find((preset) => preset.id === 'writer')
+    expect(writer?.doneWhen).toEqual([
+      'Answers what the request asked, in the format and length it named',
+      'Uses only facts you were given; if they came with source links, each claim has its link beside it',
+    ])
+  })
+
+  // Given linked findings and one "some blogs say" with no link, every Writer on the bench's L1
+  // probe kept it, ending its paragraph with a link that backs only the rest of the sentence. Told
+  // only to drop what "has no source", it took the blogs for the source, or wrote "You may read
+  // that…" instead.
+  it('leaves out, or says it has no source, a report of what others say', () => {
+    const writer = ROLE_PRESETS.find((preset) => preset.id === 'writer')
+    expect(writer?.role).toContain(
+      '- A report of what others say, such as "some blogs say", has no source unless it links to them: leave it out, or say plainly that it has none. Do not reword it to hide that.',
+    )
   })
 })
 

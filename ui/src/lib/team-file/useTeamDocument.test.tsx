@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CHECKER_ROLE } from '../library/checker'
 import { absoluteTeamPath, slugifyTeamName, useTeamDocument } from './useTeamDocument'
+import { sendBackFields, sendBackOf } from './sendBack'
 
 const TEAM_YAML = `schemaVersion: 1
 id: research-team
@@ -968,7 +969,45 @@ describe('useTeamDocument', () => {
       expect(result.current.pendingEdgeRemoval).toBeNull()
     })
 
-    it('connecting work into a Checker makes it check that work, send a miss back once, and think as the effort table says (ADR 0062)', async () => {
+    it('changing how a check step sends work back writes sendBack and takes an older file’s sendBackOnce out (ADR 0062)', async () => {
+      const yaml = `schemaVersion: 1
+id: checked-team
+name: Checked
+entrypoint: writer
+agents:
+  - id: writer
+    name: Writer
+    role: Write it.
+    model: anthropic/claude-sonnet-5.5
+  - id: checker
+    name: Checker
+    role: Check it.
+    model: openai/gpt-6.1-sol
+    checks: writer
+    sendBackOnce: true
+edges:
+  - { from: writer, to: checker, layer: configured, kind: sequence, ts: "2026-10-19T00:00:00Z" }
+`
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { path: '/teams/checked.yaml', yaml })))
+      const { result } = renderHook(() => useTeamDocument())
+      await waitFor(() => expect(result.current.saveState).toBe('clean'))
+      const checker = () => result.current.nodes.find((node) => node.id === 'checker')?.data.agent
+      expect(sendBackOf(checker() ?? {})).toEqual({ rounds: 1, whenStillNotMet: 'answer' })
+      act(() => result.current.applyAgentFields('checker', sendBackFields({ rounds: 3, whenStillNotMet: 'ask' })))
+      expect(result.current.yamlPreview).toContain('checks: writer\n    sendBack:\n      rounds: 3\n      whenStillNotMet: ask')
+      expect(result.current.yamlPreview).not.toContain('sendBackOnce')
+      expect(sendBackOf(checker() ?? {})).toEqual({ rounds: 3, whenStillNotMet: 'ask' })
+      // Off is off: neither field is left in the file.
+      act(() => result.current.applyAgentFields('checker', sendBackFields(null)))
+      expect(result.current.yamlPreview).not.toContain('sendBack')
+      act(() => result.current.applyAgentFields('checker', sendBackFields({ rounds: 2, whenStillNotMet: 'answer' })))
+      // A check step whose work is no longer handed to it stops being one, sending back and all.
+      act(() => result.current.removeEdgeBetween('writer', 'checker'))
+      expect(result.current.yamlPreview).not.toContain('checks:')
+      expect(result.current.yamlPreview).not.toContain('sendBack')
+    })
+
+    it('connecting work into a Checker makes it check that work, send a miss back up to twice then ask, and think as the effort table says (ADR 0062)', async () => {
       const checkerYaml = (from: { id: string; name: string; role: string }, role: string) => `schemaVersion: 1
 id: checked-team
 name: Checked
@@ -997,11 +1036,11 @@ edges: []
       }
       const writer = { id: 'writer', name: 'Writer', role: 'Write the piece from what you were given.' }
       const written = await connect(checkerYaml(writer, CHECKER_ROLE), 'writer')
-      expect(written.agent).toMatchObject({ checks: 'writer', sendBackOnce: true, thinkingEffort: 'high' })
-      expect(written.yamlPreview).toContain('sendBackOnce: true')
+      expect(written.agent).toMatchObject({ checks: 'writer', sendBack: { rounds: 2, whenStillNotMet: 'ask' }, thinkingEffort: 'high' })
+      expect(written.yamlPreview).toContain('sendBack:\n      rounds: 2\n      whenStillNotMet: ask')
       expect(written.yamlPreview).toContain('thinkingEffort: high')
       const coder = { id: 'coder', name: 'Coder', role: 'Change the code in this folder.' }
-      expect((await connect(checkerYaml(coder, CHECKER_ROLE), 'coder')).agent).toMatchObject({ checks: 'coder', sendBackOnce: true, thinkingEffort: 'high' })
+      expect((await connect(checkerYaml(coder, CHECKER_ROLE), 'coder')).agent).toMatchObject({ checks: 'coder', sendBack: { rounds: 2, whenStillNotMet: 'ask' }, thinkingEffort: 'high' })
       // Any other agent connected into a non-Checker is only connected.
       expect((await connect(checkerYaml(writer, 'Read the piece and say what you think.'), 'writer')).agent).not.toHaveProperty('checks')
     })
