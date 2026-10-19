@@ -19,6 +19,7 @@ pub fn router(archive: Option<EventArchive>) -> Router {
         .route("/api/sessions", get(sessions))
         .route("/api/session/events", get(events))
         .route("/api/session/stream", get(stream))
+        .route("/api/usage", get(usage))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(archive)
 }
@@ -83,6 +84,36 @@ async fn sessions(State(archive): State<Option<EventArchive>>) -> Response {
     };
     match archive.list_sessions().await {
         Ok(sessions) => Json(sessions).into_response(),
+        Err(_) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "The run archive could not be read. The window running LoomWatch says why.",
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct UsageQuery {
+    #[serde(default = "usage_days")]
+    days: u32,
+}
+const fn usage_days() -> u32 {
+    30
+}
+
+/// What the model calls of the last `days` days used, by source, day and agent (ADR 0073): the
+/// Usage page's figures. Read from the archive only; no provider is asked.
+async fn usage(
+    State(archive): State<Option<EventArchive>>,
+    Query(query): Query<UsageQuery>,
+) -> Response {
+    if !(1..=366).contains(&query.days) {
+        return error(StatusCode::BAD_REQUEST, "Use days between 1 and 366.");
+    }
+    let Some(archive) = archive else {
+        return disabled();
+    };
+    match archive.model_usage(chrono::Utc::now(), query.days).await {
+        Ok(report) => Json(report).into_response(),
         Err(_) => error(
             StatusCode::SERVICE_UNAVAILABLE,
             "The run archive could not be read. The window running LoomWatch says why.",

@@ -66,34 +66,81 @@ A session reports its work in the update shapes the archive has always stored
 run recorded when LoomWatch still drove other AI apps opens and replays the same way as a new one.
 
 An agent's configuration is its role, its model, its work folder and what it may do without
-asking. The model is an OpenRouter id (`vendor/model`), with an optional reasoning effort
-(`vendor/model[high]`). `ai::openrouter_id` maps model names from older team files to OpenRouter
-ids: Claude Code's `opus` and `sonnet` become Anthropic's, `gpt-…` becomes OpenAI's and `gemini-…`
-Google's. A name it doesn't know runs on the default model. Older team files still have
+asking. The model says how it is paid (ADR 0073), with an optional reasoning effort
+(`vendor/model[high]`):
+
+| Paid by | `model` | Example |
+| --- | --- | --- |
+| OpenRouter | an OpenRouter id, `openrouter:…`, or an older short name | `anthropic/claude-opus-5.5` |
+| The operator's ChatGPT plan | `chatgpt:<slug from the plan's model list>` | `chatgpt:gpt-6.1-sol` |
+| The operator's Claude API credit | `anthropic:<Anthropic model id>` | `anthropic:claude-opus-5-5` |
+
+`ai::ModelRef` reads it (`parseModelRef` in `ui/src/lib/ai/modelIds.ts` is its twin, with the same
+test cases), and `ModelRef::on` names the same model on another source:
+`anthropic:claude-opus-5-5` is `anthropic/claude-opus-5.5` on OpenRouter, and `chatgpt:<slug>` is
+`openai/<slug>`. A model never moves to another source by itself: an agent on a source that isn't
+connected stops with a problem that names it. For anything that isn't `chatgpt:` or `anthropic:`,
+`ai::openrouter_id` maps model names from older team files to OpenRouter ids: Claude Code's
+`opus` and `sonnet` become Anthropic's, `gpt-…` becomes OpenAI's and `gemini-…` Google's. A name
+it doesn't know runs on the default model. Older team files still have
 `spawn.cmd`, `args` and `env`, which are read and ignored. Putting the reviewer on a different
 model is a change to one row of the team file, not to code.
 
-### The key
+### Keys and sign-ins
 
-Models are reached through OpenRouter with the operator's own API key, entered on the
-Connections page. The backend handles exactly one key, and it guards it:
+Models are reached three ways, each connected on the Connections page (ADR 0073): the operator's
+OpenRouter key; a Claude API key from the Console organization linked to their Claude Max or Team
+plan, which spends the plan's monthly API credit; and their ChatGPT Plus or Pro plan, through
+OpenAI's Sign in with ChatGPT for open-source apps (`ai/chatgpt.rs`: PKCE, a callback on
+`127.0.0.1` under `/api/ai/chatgpt/callback`, the ID token's issuer, audience, expiry and nonce
+checked). A Claude sign-in is never used: Anthropic doesn't allow it in other apps. The ChatGPT
+source is behind the `chatgpt` Cargo feature, on by default, so a build can leave it out. The
+backend guards all three:
 
-- **Where it is kept.** `ai/keys.rs` keeps it in the macOS Keychain as `LoomWatch.OpenRouter`,
-  and on Windows in Credential Manager (the `keyring` crate's Windows backend) as
-  `api-key.LoomWatch.OpenRouter`. On Linux it is in `<state dir>/keys.json`, readable by this
+- **Where they are kept.** `ai/keys.rs` keeps the OpenRouter key in the macOS Keychain as
+  `LoomWatch.OpenRouter`, and on Windows in Credential Manager (the `keyring` crate's Windows
+  backend) as `api-key.LoomWatch.OpenRouter`. The Claude key and the ChatGPT refresh token share
+  one more item, `LoomWatch.Plans` (`plans.LoomWatch.Plans` on Windows), so updating LoomWatch
+  asks about one more Keychain item, not two. ChatGPT's access token lives in memory only. On
+  Linux they are in `<state dir>/keys.json` and `<state dir>/plans.json`, readable by this
   account only. `LOOMWATCH_KEY_STORE=file` uses the file on a Mac and Windows too, for trial
   copies. It covers connected tools' sign-ins as well (Notion's among them, ADR 0070), which then
   go in `<state dir>/tool-credentials.json`, so a trial copy with its own state folder never reads
   or writes any of the installed app's credentials. An
-  `OPENROUTER_API_KEY` in the daemon's environment is ignored, and LoomWatch never looks for
-  another app's credentials.
-- **How it is checked.** A key is checked with OpenRouter before it is kept
-  (`PUT /api/ai/openrouter`), and a key OpenRouter refuses is never kept. `GET /api/ai` reports
-  the last check without reading the key, so opening the app never brings up a Keychain prompt.
-- **Where it goes.** The key is held in an `ApiKey`: its `Debug` hides it and it has no
-  `Display`. It goes into the one request header that carries it, and nowhere else. It never
-  reaches an agent, a command's environment, a file, the archive or a log. Agents cannot read
-  the state folder without asking, except its `skills` folder.
+  `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the daemon's environment is
+  ignored, and LoomWatch never looks for another app's credentials.
+- **How they are checked.** A key is checked with its company before it is kept
+  (`PUT /api/ai/openrouter`, `PUT /api/ai/anthropic`, which lists the key's models for free), and
+  a key that is refused is never kept. A ChatGPT sign-in is kept only once its ID token checks
+  out, and lists the plan's models. `GET /api/ai` reports each one's last check from status files
+  (`openrouter.json`, `anthropic.json`, `chatgpt.json`) without reading a secret, so opening the
+  app never brings up a Keychain prompt.
+- **Where they go.** A key is held in an `ApiKey`: its `Debug` hides it and it has no `Display`.
+  It goes into the one request header that carries it, and nowhere else. It never reaches an
+  agent, a command's environment, a file, the archive or a log, and `redact` cuts anything shaped
+  like a key or a JWT out of an error. Agents cannot read the state folder without asking, except
+  its `skills` folder.
+
+### How a model is paid
+
+`engine::provider_for` turns an agent's `ModelRef` into its provider: `agent/openrouter.rs` (Chat
+Completions), `agent/anthropic.rs` (the Messages API: thinking blocks replayed byte for byte, with
+the `thinking-binding-controls` beta as a safety net, and summaries sent with the same tools and
+`tool_choice: none`) or `agent/chatgpt.rs` (the Responses API as plan usage takes it: `store:
+false`, the system prompt in `instructions`, tools in a `loomwatch` namespace, reasoning items
+replayed). Each call's `Usage` says who paid (`paid_by`): a ChatGPT call costs $0 and counts against
+the plan, and a Claude call is priced from the list prices OpenRouter's catalogue shows (or
+`agent::list_price`), marked `cost_estimated`. Spend limits count dollars only. A refusal comes back
+as a `Problem` (`not_connected`, `key_refused`, `out_of_credits`, `plan_limit`,
+`plan_not_eligible`, `plan_use_off`, `sign_in_again`) that the app turns into a button, such as
+Manage usage. Every call is a row in `model_calls`, filled from the run events, and
+`GET /api/usage` sums it by source, day and agent for the Usage page: neither OpenAI nor Anthropic
+tells an app how much of a plan or credit is left. `scripts/mock-vendors.py` stands in for both
+companies in end-to-end checks.
+
+Each model tier (`schemas/model-tiers.json`, ADR 0057) names its model first; then a connected plan
+that offers it pays, else OpenRouter, else a connected plan's own model for the tier
+(`ModelTiers::model_on`, and `modelForTier` in the app).
 
 `ai/models.rs` holds the model catalogue. It is OpenRouter's public model list, cut down to the
 models that can use tools. It is fetched when first asked for, kept for an hour, and saved in
@@ -132,8 +179,10 @@ own agent added in the app starts that way, picking the suggestion in its model 
 picking any other model takes it out. `ui/src/lib/team-file/useModelFollowing.ts` watches the open
 team: when a following agent's configuration settles after a change, it works the suggestion out
 again (with a reading when Let AI choose is on) and moves `model`, and the model list says what it
-was, with Undo, which pins it back. The team as it opened is left as it is. The daemon never reads
-the flag; a run uses `model`.
+was, with Undo, which pins it back. The team as it opened is left as it is, except who pays: a
+following agent whose model a plan connected since offers moves onto that plan. A following agent
+moves from OpenRouter onto a plan, or onto its tier's first choice, but never onto OpenRouter by
+itself. The daemon never reads the flag; a run uses `model`.
 
 ---
 
@@ -142,7 +191,8 @@ the flag; a run uses `model`.
 The backend is `loomwatchd`, a single binary the user runs locally. Its job:
 
 - **Agent engine:** every agent's session, its tools and its run record (see §1)
-- **Models:** the operator's OpenRouter key and the model catalogue (`ai/`)
+- **Models:** the operator's keys and ChatGPT sign-in, the model catalogue, and what each call
+  used (`ai/`, `archive/usage.rs`)
 - **Permissions:** what each agent may do without asking, and the operator's cards for the rest
   (`permissions.rs`, `auto_mode.rs`)
 - **Team Bus:** the delegation tools agents call (see §3)
@@ -181,7 +231,7 @@ which is what makes a run replayable. How it stays fast as history grows:
 launcher saves one before every update. Versions before 0.5 kept the history in PostgreSQL in
 Docker; 0.5.0 is the last release that copies such a history into the file. `loomwatchd` runs as a native process. The container
 image (`Dockerfile`, `docker-compose.yml`) runs the same binary, with the state folder on a
-volume. There the key is in `keys.json`.
+volume. There the keys are in `keys.json` and `plans.json`.
 
 ### Permissions
 

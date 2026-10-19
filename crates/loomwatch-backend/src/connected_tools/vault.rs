@@ -282,7 +282,7 @@ async fn keychain_read() -> Result<Option<String>, String> {
         }
         #[cfg(windows)]
         {
-            credential_manager::read()
+            credential_manager::read(SERVICE, ACCOUNT).map_err(|()| storage_error())
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         {
@@ -311,7 +311,8 @@ async fn keychain_write(value: Option<String>) -> Result<(), String> {
         }
         #[cfg(windows)]
         {
-            credential_manager::write(value.as_deref())
+            credential_manager::write(SERVICE, ACCOUNT, value.as_deref())
+                .map_err(|()| storage_error())
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         {
@@ -382,56 +383,56 @@ pub(crate) fn join_secret(
 }
 
 /// Credential Manager refuses a secret over 2,560 bytes, so a long one is kept in several saved
-/// credentials, `connected-tools`, `connected-tools#2`, …, the first of which says how many there
-/// are ([`split_secret`]).
+/// credentials, `<account>`, `<account>#2`, …, the first of which says how many there are
+/// ([`split_secret`]). The model sources' item (`crate::ai::Keys`) is kept the same way.
 #[cfg(windows)]
-mod credential_manager {
-    use super::{ACCOUNT, MAX_SECRET_PARTS, SERVICE, join_secret, split_secret, storage_error};
+pub(crate) mod credential_manager {
+    use super::{MAX_SECRET_PARTS, join_secret, split_secret};
 
-    fn entry(part: usize) -> Result<keyring::Entry, String> {
+    fn entry(service: &str, account: &str, part: usize) -> Result<keyring::Entry, ()> {
         let account = if part == 0 {
-            ACCOUNT.to_owned()
+            account.to_owned()
         } else {
-            format!("{ACCOUNT}#{}", part + 1)
+            format!("{account}#{}", part + 1)
         };
-        keyring::Entry::new(SERVICE, &account).map_err(|_| storage_error())
+        keyring::Entry::new(service, &account).map_err(|_| ())
     }
 
-    fn get(part: usize) -> Result<Option<String>, String> {
-        match entry(part)?.get_secret() {
-            Ok(bytes) => String::from_utf8(bytes)
-                .map(Some)
-                .map_err(|_| storage_error()),
+    fn get(service: &str, account: &str, part: usize) -> Result<Option<String>, ()> {
+        match entry(service, account, part)?.get_secret() {
+            Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| ()),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err(storage_error()),
+            Err(_) => Err(()),
         }
     }
 
-    fn delete(part: usize) -> Result<(), String> {
-        match entry(part)?.delete_credential() {
+    fn delete(service: &str, account: &str, part: usize) -> Result<(), ()> {
+        match entry(service, account, part)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err(storage_error()),
+            Err(_) => Err(()),
         }
     }
 
-    pub(super) fn read() -> Result<Option<String>, String> {
-        let Some(first) = get(0)? else {
+    /// The secret kept under `service` and `account`, joined from its parts.
+    pub(crate) fn read(service: &str, account: &str) -> Result<Option<String>, ()> {
+        let Some(first) = get(service, account, 0)? else {
             return Ok(None);
         };
-        join_secret(&first, |part| get(part).ok().flatten())
+        join_secret(&first, |part| get(service, account, part).ok().flatten())
             .map(Some)
-            .ok_or_else(storage_error)
+            .ok_or(())
     }
 
-    pub(super) fn write(value: Option<&str>) -> Result<(), String> {
+    /// Keeps `value` under `service` and `account`, in as many parts as it needs; `None` removes it.
+    pub(crate) fn write(service: &str, account: &str, value: Option<&str>) -> Result<(), ()> {
         let parts = value.map(split_secret).unwrap_or_default();
         for (part, text) in parts.iter().enumerate() {
-            entry(part)?
+            entry(service, account, part)?
                 .set_secret(text.as_bytes())
-                .map_err(|_| storage_error())?;
+                .map_err(|_| ())?;
         }
         for part in parts.len()..MAX_SECRET_PARTS {
-            delete(part)?;
+            delete(service, account, part)?;
         }
         Ok(())
     }

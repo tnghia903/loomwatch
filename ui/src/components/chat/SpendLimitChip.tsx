@@ -1,6 +1,7 @@
 import { ChevronDown, Coins } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { CHATGPT_USAGE_PAGE } from '../../lib/ai/sources'
 import { dollarField, dollars, NEW_TEAM_PER_RUN_USD, typedDollars } from '../../lib/runs/spend'
 
 export interface SpendLimitControl {
@@ -8,14 +9,18 @@ export interface SpendLimitControl {
   perRun: number | null
   /** Absent when the team file cannot be changed from here. */
   onChange?: (perRun: number | null) => void
+  /** Whether some of the team's agents run on a plan (ADR 0073), whose calls count differently. */
+  plans?: { chatgpt: boolean; anthropic: boolean }
 }
 
 /**
  * What one run of the team may spend (ADR 0068), beside the box that starts the work and the Auto
  * mode switch: "Each run · $1.00". Past it, the run waits for you to add more or to finish with
- * what it has. The monthly cap is a limit on the OpenRouter key itself.
+ * what it has. The monthly cap is a limit on the OpenRouter key itself. Only dollars count: calls on
+ * the ChatGPT plan cost none and stop at the plan's own limit, and the menu says so when the team
+ * has agents on it.
  */
-export function SpendLimitChip({ perRun, onChange }: SpendLimitControl) {
+export function SpendLimitChip({ perRun, onChange, plans }: SpendLimitControl) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const root = useRef<HTMLDivElement>(null)
@@ -72,6 +77,8 @@ export function SpendLimitChip({ perRun, onChange }: SpendLimitControl) {
               onChange={(event) => setText(event.target.value)} />
           </span>
           <p className="tc-mode-foot">Past it, the agents wait for you to add more or to finish with what they have.</p>
+          {plans?.anthropic && <p className="tc-mode-foot">Calls on your Claude credit count at Claude’s list prices.</p>}
+          {plans?.chatgpt && <p className="tc-mode-foot">Calls on your ChatGPT plan cost no dollars, so they don’t count toward this. They stop at your plan’s own limit: see <a className="link" href={CHATGPT_USAGE_PAGE} target="_blank" rel="noreferrer">Manage usage</a>.</p>}
           <span className="tc-spend-acts">
             <button type="submit" className="btn btn-primary" disabled={typed === null}>Save</button>
             {perRun !== null && <button type="button" className="btn" onClick={() => save(null)}>No limit</button>}

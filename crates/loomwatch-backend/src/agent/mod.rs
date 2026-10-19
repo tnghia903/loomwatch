@@ -21,6 +21,8 @@
 //! The API key lives in an [`ApiKey`]. It is sent to the provider and nowhere else: not into the
 //! events, not into errors, and not into the environment of a command an agent runs.
 
+mod anthropic;
+mod chatgpt;
 mod demo;
 mod error;
 mod events;
@@ -44,14 +46,18 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+pub use anthropic::{Anthropic, Price, list_price};
+pub use chatgpt::{ChatGptPlan, PlanAccess};
 pub use demo::{Demo, Hold, OFFLINE_MODEL, Respond, SeenRequest};
-pub use error::AgentError;
+pub(crate) use error::hide_secret;
+pub use error::{AgentError, CHATGPT_USAGE_URL, Problem, ProblemKind};
 pub use events::{EventSink, ToolKind, ToolStatus};
 pub use openrouter::{BASE_URL_ENV, DEFAULT_BASE_URL, OpenRouter, base_url, is_loopback_http};
 pub(crate) use openrouter::{REFERER as OPENROUTER_REFERER, TITLE as OPENROUTER_TITLE};
 pub use permission::{AllowAll, Decision, DenyAll, PermissionRequest, Permissions};
 pub use provider::{
-    Completion, Finish, Message, Provider, ServerTools, ToolCall, ToolSpec, Usage, WebLimits,
+    Completion, Finish, Message, Native, Provider, ServerTools, ToolCall, ToolSpec, Usage,
+    WebLimits,
 };
 pub use session::{
     CancelHandle, HostAsk, HostTools, NoHostTools, Session, SessionConfig, Snapshot, StopReason,

@@ -32,6 +32,7 @@ const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.
 let fetchMock: ReturnType<typeof vi.fn>
 let assign: ReturnType<typeof vi.fn>
 let connected: boolean
+let ai: unknown
 let you: Record<string, unknown>
 let started: number
 
@@ -39,13 +40,14 @@ beforeEach(() => {
   resetFirstRunForTests(); forgetKeyStatus(); forgetYou()
   runs.records.clear()
   connected = true
+  ai = null
   you = { skipped: false }
   started = 0
   assign = vi.fn()
   Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign } })
   fetchMock = vi.fn((url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
-    if (url === '/api/ai') return json({ openrouter: { connected } })
+    if (url === '/api/ai') return json(ai ?? { openrouter: { connected } })
     if (url === '/api/ai/openrouter' && method === 'PUT') { connected = true; return json({ openrouter: { connected: true, label: 'sk-or-v1-tes...est' } }) }
     if (url === '/api/you') return json(method === 'PUT' ? JSON.parse(String(init?.body)) : you)
     if (url === '/api/bench') return json({ folder: '.jobs/.bench' })
@@ -87,11 +89,14 @@ describe('The first run', () => {
 
     const sheet = await screen.findByRole('dialog', { name: 'Which AI should answer?' })
     expect(within(sheet).getByRole('button', { name: /OpenRouter key/ })).toHaveTextContent('Pay as you go: add credit at OpenRouter.')
+    // A Claude plan's credit is offered with the same weight (ADR 0073); the ChatGPT plan too, where this copy offers it.
+    expect(within(sheet).getByRole('button', { name: /Claude Max or Team/ })).toHaveTextContent('Spends your plan’s monthly API credit.')
     // The ruling: nothing on the way in calls OpenRouter free.
     expect(sheet.textContent).not.toMatch(/\bfree\b/i)
     expect(sent('/api/chat/messages')).toHaveLength(0)
 
     // The key form inside the sheet connects it, as a newcomer would.
+    fireEvent.click(within(sheet).getByRole('button', { name: /OpenRouter key/ }))
     fireEvent.change(await within(sheet).findByLabelText('OpenRouter key'), { target: { value: 'sk-or-v1-test' } })
     fireEvent.click(within(sheet).getByRole('button', { name: 'Save key' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -100,6 +105,17 @@ describe('The first run', () => {
     expect(message).toMatchObject({ teamPath: '.jobs/.bench/helper.yaml', text: 'Plan a 30-minute lesson about animals', to: { kind: 'agent', agent: chatAgentId('helper') }, expectedRevision: 'r1' })
     expect(String(sent('/api/team', 'PUT')[0].yaml)).toContain('name: Helper')
     expect(screen.getByText('Connected.')).toBeInTheDocument()
+    expect(screen.getByText(/I’m answering through OpenRouter\./)).toBeInTheDocument()
+  })
+
+  it('answers on a plan already connected, on that plan’s model, without asking (ADR 0073)', async () => {
+    ai = { openrouter: { connected: false }, anthropic: { connected: true } }
+    render(<FirstRun onLookAround={vi.fn()} onDone={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/Your first agent · Claude credit/)).toBeInTheDocument())
+    await ask('Explain how compound interest works')
+    await waitFor(() => expect(sent('/api/chat/messages')).toHaveLength(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(String(sent('/api/team', 'PUT')[0].yaml)).toContain('anthropic:claude-opus-5-5')
   })
 
   it('shows the first answer, takes what the person tells about themselves, and answers the same request again for them', async () => {

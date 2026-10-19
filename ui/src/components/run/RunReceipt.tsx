@@ -67,7 +67,7 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow, earned = [] }:
                   {tokensOpen ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
                 </button>
               </dd>
-              {receipt.tokens.cost && <><dt>Cost</dt><dd title="What OpenRouter charged for this run’s model calls">{receipt.tokens.cost}</dd></>}
+              {receipt.tokens.cost && <><dt>Cost</dt><dd title="What this run’s model calls cost: OpenRouter’s charge, your Claude credit at list prices (≈), or your ChatGPT plan">{receipt.tokens.cost}</dd></>}
             </>
           )}
         </dl>

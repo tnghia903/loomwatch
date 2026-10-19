@@ -52,12 +52,12 @@ impl HostTools for ControlTools {
 }
 
 /// What the assistant is told once, at the top of its first turn.
-pub(super) const INSTRUCTIONS: &str = r#"You are Ask LoomWatch, the assistant built into LoomWatch. LoomWatch runs teams of AI agents on this person's computer: each agent runs on an AI model through OpenRouter, and the agents work through a pipeline, handing work from one to the next. A "You" step is a review stop where the team waits for the person.
+pub(super) const INSTRUCTIONS: &str = r#"You are Ask LoomWatch, the assistant built into LoomWatch. LoomWatch runs teams of AI agents on this person's computer: each agent runs on an AI model, paid through the person's ChatGPT plan, their Claude API credit or OpenRouter, and the agents work through a pipeline, handing work from one to the next. A "You" step is a review stop where the team waits for the person.
 
 You help by reading their teams and runs and by proposing changes, using your tools. Rules:
 - You cannot save files or start runs yourself. `propose_team` shows the person a proposal on the canvas; nothing is saved until they press Apply. `start_run` asks them to start the run, unless they have allowed you to start runs directly; its result tells you which. Never say something was saved, applied or started unless a tool result says so.
 - Review stops belong to the person. You may explain what a team is waiting for and use `draft_review_note` to suggest a note; only they approve or send work back.
-- Give each agent a model from `list_models`: its recommended models, or another OpenRouter model id the person names. Never invent a model id.
+- Give each agent a model from `list_models`: its tiers, which are on the ways of paying the person has connected, its recommended models, or another model id the person names. Never invent a model id.
 - Reply in plain words, in one to three short sentences. Don't paste team files into the chat: the proposal card shows the changes. Don't use tables.
 
 Set agents up the way that works best, every time, without being asked; the person won't know to ask:
@@ -264,7 +264,8 @@ async fn list_models() -> Result<Value, String> {
             "dollarsPerMillionInput": model.input_price,
             "dollarsPerMillionOutput": model.output_price,
         })).collect::<Vec<_>>(),
-        "otherModels": "Any other OpenRouter model id that can use tools works too, if the person names one.",
+        "otherModels": "Any other OpenRouter model id that can use tools works too, if the person names one. A model on the person's ChatGPT plan is written chatgpt:<slug>, and one on their Claude API credit anthropic:<id>; use those only when that way of paying is connected, as the tiers above are.",
+        "connected": crate::ai::installed().map(crate::ai::Ai::connected_sources).unwrap_or_default(),
     }))
 }
 
@@ -272,14 +273,15 @@ async fn list_models() -> Result<Value, String> {
 /// is for, what each effort tier is for, and the model and effort of each usual kind of agent.
 pub(super) fn choosing() -> Value {
     let tiers = &*crate::ai::MODEL_TIERS;
+    // Each tier's model, paid by a connected plan that offers it, else OpenRouter (ADR 0073).
     let pick = |needs: &crate::ai::JobNeeds| {
-        let (model, effort) = tiers.choose(needs);
-        json!({"model": model, "thinkingEffort": effort})
+        let (_, effort) = tiers.choose(needs);
+        json!({"model": super::tier_model(&needs.tier), "thinkingEffort": effort})
     };
     json!({
-        "tiers": tiers.models.iter().map(|(tier, model)| json!({
+        "tiers": tiers.models.keys().map(|tier| json!({
             "tier": tier,
-            "model": model,
+            "model": super::tier_model(tier),
             "for": tiers.tiers.get(tier),
         })).collect::<Vec<_>>(),
         "efforts": tiers.efforts.iter().map(|(tier, effort)| json!({
@@ -303,7 +305,7 @@ fn models_used(team: &TeamConfig) -> Vec<String> {
         .iter()
         .filter(|agent| agent.kind != AgentKind::Operator)
     {
-        let model = crate::ai::openrouter_id(&agent.model);
+        let model = crate::ai::ModelRef::parse(&agent.model).selector();
         if !models.contains(&model) {
             models.push(model);
         }

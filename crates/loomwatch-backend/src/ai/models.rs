@@ -54,6 +54,12 @@ pub struct ModelTiers {
     pub new_agent: JobNeeds,
     /// Each built-in job, by id.
     pub jobs: BTreeMap<String, JobNeeds>,
+    /// The tiers' models on the sources besides `OpenRouter`: source → tier → model, as a team file
+    /// writes it.
+    pub by_source: BTreeMap<Source, BTreeMap<String, String>>,
+    /// For each tier, which source to take a model from first, when several are connected. The ones
+    /// the person already pays for as a plan come first.
+    pub preference: BTreeMap<String, Vec<Source>>,
 }
 
 /// One kind of agent's model tier and effort tier.
@@ -75,6 +81,49 @@ impl ModelTiers {
                 .get(&needs.effort)
                 .map_or("medium", String::as_str),
         )
+    }
+
+    /// The model `tier` runs on (ADR 0073, ruled 2026-10-19). The tier names its model first
+    /// (`models`), and then who pays: a connected plan that offers it (the Claude credit for
+    /// Anthropic's models, the `ChatGPT` plan for `OpenAI`'s), else `OpenRouter` when its key is in.
+    /// Only when neither can run it does a connected plan's own model for the tier stand in
+    /// (`bySource`, in `preference` order), so an agent made with just a `ChatGPT` plan still runs.
+    /// With nothing connected it is the `OpenRouter` model. `offers` says whether a connected plan
+    /// lists a model. The same rules live in `ui/src/lib/ai/modelIds.ts` (`modelForTier`).
+    #[must_use]
+    pub fn model_on(
+        &self,
+        tier: &str,
+        connected: &[Source],
+        offers: &dyn Fn(&ModelRef) -> bool,
+    ) -> String {
+        let first = self
+            .models
+            .get(tier)
+            .map_or(DEFAULT_MODEL, String::as_str)
+            .to_owned();
+        let named = ModelRef {
+            source: Source::OpenRouter,
+            id: first.clone(),
+        };
+        let paid_by_plan = [Source::Anthropic, Source::ChatGpt]
+            .into_iter()
+            .filter(|plan| connected.contains(plan))
+            .filter_map(|plan| named.on(plan))
+            .find(|on| offers(on));
+        if let Some(on) = paid_by_plan {
+            return on.selector();
+        }
+        if connected.contains(&Source::OpenRouter) {
+            return first;
+        }
+        self.preference
+            .get(tier)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter(|source| **source != Source::OpenRouter && connected.contains(source))
+            .find_map(|source| self.by_source.get(source)?.get(tier).cloned())
+            .unwrap_or(first)
     }
 }
 
@@ -135,6 +184,174 @@ pub fn openrouter_id(model: &str) -> String {
     DEFAULT_MODEL.to_owned()
 }
 
+/// Who pays for a model call. Each costs differently, so a team file says which one an agent uses
+/// in its `model` (ADR 0073): `chatgpt:<slug>`, `anthropic:<id>`, or an `OpenRouter` id as before.
+/// A call never moves from one to another by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    /// An `OpenRouter` key: every maker's models, each call paid from `OpenRouter` credit.
+    OpenRouter,
+    /// The person's `ChatGPT` Plus or Pro plan, through Sign in with `ChatGPT`.
+    #[serde(rename = "chatgpt")]
+    ChatGpt,
+    /// An Anthropic API key, such as the one that spends a Claude Max or Team plan's monthly API
+    /// credit.
+    Anthropic,
+}
+
+impl Source {
+    /// Every source, in the order the model picker shows them.
+    pub const ALL: [Self; 3] = [Self::ChatGpt, Self::Anthropic, Self::OpenRouter];
+
+    /// The name a team file and the app use for it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenRouter => "openrouter",
+            Self::ChatGpt => "chatgpt",
+            Self::Anthropic => "anthropic",
+        }
+    }
+
+    /// How a sentence names it: "on your `ChatGPT` plan".
+    #[must_use]
+    pub const fn said(self) -> &'static str {
+        match self {
+            Self::OpenRouter => "OpenRouter",
+            Self::ChatGpt => "your ChatGPT plan",
+            Self::Anthropic => "your Claude API credit",
+        }
+    }
+
+    /// Whether the person already pays for it as a plan, rather than per call.
+    #[must_use]
+    pub const fn is_subscription(self) -> bool {
+        !matches!(self, Self::OpenRouter)
+    }
+
+    /// Whether a call through it costs dollars a run's spending limit can count. A `ChatGPT` plan's
+    /// calls are paid by the plan's own allowance instead.
+    #[must_use]
+    pub const fn counts_dollars(self) -> bool {
+        !matches!(self, Self::ChatGpt)
+    }
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A team file's `model`, read for where it is paid and what the provider calls it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModelRef {
+    pub source: Source,
+    /// The model as its source names it: `gpt-6.1-sol`, `claude-opus-5-5`, or an `OpenRouter` id.
+    pub id: String,
+}
+
+impl ModelRef {
+    /// Reads `model` without its `[effort]` suffix. `chatgpt:` and `anthropic:` name their source;
+    /// anything else is read the way it always was, by [`openrouter_id`]. A prefix with nothing
+    /// after it keeps its source, so the run fails plainly instead of quietly running on
+    /// `OpenRouter`.
+    #[must_use]
+    pub fn parse(model: &str) -> Self {
+        let mut model = model.trim();
+        if let Some((base, suffix)) = model.rsplit_once('[')
+            && suffix
+                .strip_suffix(']')
+                .is_some_and(crate::config::is_known_effort)
+        {
+            model = base.trim_end();
+        }
+        if let Some((prefix, id)) = model.split_once(':') {
+            let source = match prefix.to_ascii_lowercase().as_str() {
+                "chatgpt" => Some(Source::ChatGpt),
+                "anthropic" => Some(Source::Anthropic),
+                _ => None,
+            };
+            if let Some(source) = source {
+                return Self {
+                    source,
+                    id: id.trim().to_owned(),
+                };
+            }
+        }
+        Self {
+            source: Source::OpenRouter,
+            id: openrouter_id(model),
+        }
+    }
+
+    /// `model` as a team file should write it, its `[effort]` kept: `sonnet[high]` becomes
+    /// `anthropic/claude-sonnet-5.5[high]`, `chatgpt:gpt-6.1-sol` stays as it is.
+    #[must_use]
+    pub fn normalized(model: &str) -> String {
+        let model = model.trim();
+        let effort = model
+            .rsplit_once('[')
+            .and_then(|(_, suffix)| suffix.strip_suffix(']'))
+            .filter(|effort| crate::config::is_known_effort(effort));
+        let selector = Self::parse(model).selector();
+        effort.map_or_else(
+            || selector.clone(),
+            |effort| format!("{selector}[{effort}]"),
+        )
+    }
+
+    /// As a team file writes it.
+    #[must_use]
+    pub fn selector(&self) -> String {
+        match self.source {
+            Source::OpenRouter => self.id.clone(),
+            Source::ChatGpt => format!("chatgpt:{}", self.id),
+            Source::Anthropic => format!("anthropic:{}", self.id),
+        }
+    }
+
+    /// The same model in `OpenRouter`'s catalog, where its context size and prices are listed.
+    #[must_use]
+    pub fn openrouter_equivalent(&self) -> String {
+        match self.source {
+            Source::OpenRouter => self.id.clone(),
+            Source::ChatGpt => format!("openai/{}", self.id),
+            Source::Anthropic => openrouter_id(&self.id),
+        }
+    }
+
+    /// The same model through `source`, when it can be named there. Whether that source really
+    /// offers it is for the caller to check against its list.
+    #[must_use]
+    pub fn on(&self, source: Source) -> Option<Self> {
+        if source == self.source {
+            return Some(self.clone());
+        }
+        let openrouter = self.openrouter_equivalent();
+        let id = match source {
+            Source::OpenRouter => openrouter,
+            Source::ChatGpt => openrouter.strip_prefix("openai/")?.to_owned(),
+            Source::Anthropic => {
+                let name = openrouter.strip_prefix("anthropic/")?;
+                // A variant (`:thinking`) or an alias (`~anthropic/…`) has no Anthropic id.
+                if name.contains(':') || !name.starts_with("claude-") {
+                    return None;
+                }
+                name.replace('.', "-")
+            }
+        };
+        Some(Self { source, id })
+    }
+}
+
+impl std::fmt::Display for ModelRef {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.selector())
+    }
+}
+
 /// Models worth a newcomer's first look, in order, with why. One that leaves the catalog is left
 /// out; the rest of the catalog is still there to search.
 const RECOMMENDED: [(&str, &str); 9] = [
@@ -168,6 +385,10 @@ pub struct Model {
     /// Dollars per million prompt tokens served from the cache, when the model caches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cached_input_price: Option<f64>,
+    /// Dollars per million prompt tokens written to the cache, when writing costs more than
+    /// reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_price: Option<f64>,
     /// Costs nothing; such models are limited per day and may learn from what they're sent.
     pub free: bool,
     /// Takes a reasoning effort.
@@ -430,6 +651,7 @@ fn model_from(entry: &Value) -> Option<Model> {
         input_price,
         output_price,
         cached_input_price: price("input_cache_read"),
+        cache_write_price: price("input_cache_write"),
         reasoning,
         note: None,
         id,
@@ -536,6 +758,156 @@ mod tests {
             ("something-unknown", DEFAULT_MODEL),
         ] {
             assert_eq!(openrouter_id(given), expected, "{given}");
+        }
+    }
+
+    /// The same cases are in `ui/src/lib/ai/modelIds.test.ts`.
+    #[test]
+    fn a_model_says_where_it_is_paid() {
+        for (given, source, id) in [
+            ("chatgpt:gpt-6.1-sol", Source::ChatGpt, "gpt-6.1-sol"),
+            ("ChatGPT: gpt-6-luna ", Source::ChatGpt, "gpt-6-luna"),
+            (
+                "anthropic:claude-opus-5-5",
+                Source::Anthropic,
+                "claude-opus-5-5",
+            ),
+            // A prefix with nothing after it keeps its source rather than running on OpenRouter.
+            ("chatgpt:", Source::ChatGpt, ""),
+            (
+                "anthropic:claude-opus-5-5[high]",
+                Source::Anthropic,
+                "claude-opus-5-5",
+            ),
+            (
+                "anthropic/claude-opus-5.5[max]",
+                Source::OpenRouter,
+                "anthropic/claude-opus-5.5",
+            ),
+            (
+                "claude-opus-5-5[1m]",
+                Source::OpenRouter,
+                "anthropic/claude-opus-5.5",
+            ),
+            (
+                "anthropic/claude-opus-5.5",
+                Source::OpenRouter,
+                "anthropic/claude-opus-5.5",
+            ),
+            (
+                "openrouter:openai/gpt-6.1-sol",
+                Source::OpenRouter,
+                "openai/gpt-6.1-sol",
+            ),
+            (
+                "google/gemma-4-31b-it:free",
+                Source::OpenRouter,
+                "google/gemma-4-31b-it:free",
+            ),
+            ("sonnet", Source::OpenRouter, "anthropic/claude-sonnet-5.5"),
+            ("", Source::OpenRouter, DEFAULT_MODEL),
+        ] {
+            let model = ModelRef::parse(given);
+            assert_eq!((model.source, model.id.as_str()), (source, id), "{given}");
+        }
+        assert_eq!(
+            ModelRef::parse("anthropic:claude-opus-5-5").selector(),
+            "anthropic:claude-opus-5-5"
+        );
+        assert_eq!(
+            ModelRef::parse("sonnet").selector(),
+            "anthropic/claude-sonnet-5.5"
+        );
+        assert_eq!(
+            ModelRef::normalized("sonnet[high]"),
+            "anthropic/claude-sonnet-5.5[high]"
+        );
+        assert_eq!(
+            ModelRef::normalized(" chatgpt:gpt-6.1-sol "),
+            "chatgpt:gpt-6.1-sol"
+        );
+        assert_eq!(ModelRef::normalized("x/y[max]"), "x/y[max]");
+    }
+
+    #[test]
+    fn the_same_model_is_named_on_each_source() {
+        let claude = ModelRef::parse("anthropic/claude-opus-5.5");
+        let direct = claude.on(Source::Anthropic).unwrap();
+        assert_eq!(direct.selector(), "anthropic:claude-opus-5-5");
+        assert_eq!(direct.openrouter_equivalent(), "anthropic/claude-opus-5.5");
+        assert_eq!(direct.on(Source::OpenRouter).unwrap(), claude);
+        assert_eq!(claude.on(Source::ChatGpt), None);
+        let gpt = ModelRef::parse("chatgpt:gpt-6.1-sol");
+        assert_eq!(gpt.openrouter_equivalent(), "openai/gpt-6.1-sol");
+        assert_eq!(
+            ModelRef::parse("openai/gpt-6.1-sol")
+                .on(Source::ChatGpt)
+                .unwrap(),
+            gpt
+        );
+        assert_eq!(gpt.on(Source::Anthropic), None);
+        // Variants and aliases have no Anthropic id.
+        assert_eq!(
+            ModelRef::parse("anthropic/claude-opus-5.5:thinking").on(Source::Anthropic),
+            None
+        );
+        assert_eq!(
+            ModelRef::parse("~anthropic/claude-opus-latest").on(Source::Anthropic),
+            None
+        );
+    }
+
+    /// The tier names the model, a connected plan that offers it pays, else `OpenRouter`, else a
+    /// connected plan's own model stands in; with nothing connected the tiers are `OpenRouter`'s.
+    #[test]
+    fn a_tier_names_its_model_then_a_plan_that_offers_it_pays_else_openrouter() {
+        let tiers = &*MODEL_TIERS;
+        let all = |_: &ModelRef| true;
+        assert_eq!(tiers.model_on("strong", &[], &all), DEFAULT_MODEL);
+        assert_eq!(
+            tiers.model_on("strong", &[Source::OpenRouter], &all),
+            DEFAULT_MODEL
+        );
+        let everything = [Source::OpenRouter, Source::ChatGpt, Source::Anthropic];
+        assert_eq!(
+            tiers.model_on("strong", &everything, &all),
+            "anthropic:claude-opus-5-5"
+        );
+        assert_eq!(
+            tiers.model_on("check", &everything, &all),
+            "chatgpt:gpt-6.1-sol"
+        );
+        // The ChatGPT plan doesn't offer Claude Opus: OpenRouter pays for it, not the plan's own model.
+        assert_eq!(
+            tiers.model_on("strong", &[Source::OpenRouter, Source::ChatGpt], &all),
+            "anthropic/claude-opus-5.5"
+        );
+        assert_eq!(
+            tiers.model_on("check", &[Source::OpenRouter, Source::Anthropic], &all),
+            "openai/gpt-6.1-sol"
+        );
+        // Nothing connected can run the first choice: the plan's own model for the tier stands in.
+        assert_eq!(
+            tiers.model_on("strong", &[Source::ChatGpt], &all),
+            "chatgpt:gpt-6.1-sol"
+        );
+        assert_eq!(
+            tiers.model_on("check", &[Source::Anthropic], &all),
+            "anthropic:claude-opus-5-5"
+        );
+        // A plan that doesn't list the model doesn't pay for it.
+        let no_opus = |model: &ModelRef| model.id != "claude-opus-5-5";
+        assert_eq!(
+            tiers.model_on("strong", &[Source::OpenRouter, Source::Anthropic], &no_opus),
+            DEFAULT_MODEL
+        );
+        // Every tier has a model on every source alone, and every source is in the preferences.
+        for tier in tiers.models.keys() {
+            for source in Source::ALL {
+                assert!(tiers.preference[tier].contains(&source), "{tier} {source}");
+                let model = ModelRef::parse(&tiers.model_on(tier, &[source], &all));
+                assert_eq!(model.source, source, "{tier}");
+            }
         }
     }
 

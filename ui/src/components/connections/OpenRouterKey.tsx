@@ -1,8 +1,12 @@
 import { useEffect, useId, useState } from 'react'
 
 import { type KeyStatus, fetchKeyStatus, recheckOpenRouterKey, removeOpenRouterKey, saveOpenRouterKey } from '../../lib/ai/client'
+import { sourceMaker } from '../../lib/ai/makers'
+import { SOURCE_INFO } from '../../lib/ai/sources'
+import { refreshModels } from '../../lib/ai/useModels'
 import { announceKeyStatus } from '../../lib/ai/useKeyStatus'
 import { keyStore } from '../../lib/platform'
+import { MakerMark } from '../models/MakerMark'
 
 const KEYS_PAGE = 'https://openrouter.ai/keys'
 const CREDITS_PAGE = 'https://openrouter.ai/settings/credits'
@@ -28,9 +32,10 @@ function said(status: KeyStatus): string {
  * keeps it in this Mac's Keychain, or Windows Credential Manager. The key is never shown again,
  * only what OpenRouter says about it.
  *
- * `variant="card"` is the short form Home shows when no key is set yet.
+ * `variant="card"` is the short form Home shows when no key is set yet; `variant="source"` is the
+ * same card beside the ChatGPT and Claude ones, headed like them (ADR 0073).
  */
-export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'section' | 'card'; onChange?: (status: KeyStatus) => void }) {
+export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'section' | 'card' | 'source'; onChange?: (status: KeyStatus) => void }) {
   const [status, setStatus] = useState<KeyStatus | null>(null)
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
@@ -55,6 +60,7 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
       const value = await work()
       setStatus(value)
       announceKeyStatus(value)
+      void refreshModels().catch(() => {})
       onChange?.(value)
       setNotice(done)
     } catch (caught) {
@@ -65,10 +71,16 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
   }
 
   const connected = status?.connected === true
-  const heading = <h2 id={headingId} className="t-title">{variant === 'card' ? 'Add your OpenRouter key' : 'AI models'}</h2>
+  const heading = variant === 'source'
+    ? <>
+        <h2 id={headingId} className="t-title lw-source-title"><MakerMark maker={sourceMaker('openrouter')} />{SOURCE_INFO.openrouter.heading}</h2>
+        <p className="t-meta lw-source-cost">{SOURCE_INFO.openrouter.cost}</p>
+      </>
+    : <h2 id={headingId} className="t-title">{variant === 'card' ? 'Add your OpenRouter key' : 'AI models'}</h2>
+  const sectionClass = variant === 'card' ? 'e1 lw-settings-section lw-key-card' : variant === 'source' ? 'e1 lw-settings-section lw-source-card' : 'e1 lw-settings-section'
 
   return (
-    <section className={variant === 'card' ? 'e1 lw-settings-section lw-key-card' : 'e1 lw-settings-section'} aria-labelledby={headingId} aria-busy={busy}>
+    <section className={sectionClass} aria-labelledby={headingId} aria-busy={busy}>
       {heading}
       {error && <p role="alert" className="inline-error t-body"><span className="detail">{error}</span></p>}
       {notice && <p role="status" className="lw-notice t-meta">{notice}</p>}

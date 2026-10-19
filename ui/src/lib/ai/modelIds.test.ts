@@ -4,7 +4,8 @@ import tiers from '../../../../schemas/model-tiers.json'
 import { BLANK_DRAFT } from '../library/draft'
 import { buildAgentFromSource } from '../library/createAgent'
 import { ROLE_PRESETS } from '../library/roles'
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, jobNeeds, modelForJob, modelNameFromId, NEW_AGENT, openRouterId } from './modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, jobNeeds, modelForJob, modelNameFromId, modelOn, modelSelector, NEW_AGENT, normalizeModel, openRouterEquivalent, openRouterId, parseModelRef } from './modelIds'
+import { makerOf } from './makers'
 
 describe('openRouterId', () => {
   // The same cases as `old_model_names_become_openrouter_ids` in the daemon's ai/models.rs.
@@ -25,6 +26,53 @@ describe('openRouterId', () => {
     ['something-unknown', DEFAULT_MODEL],
   ])('reads %s as %s', (given, expected) => {
     expect(openRouterId(given)).toBe(expected)
+  })
+})
+
+describe('parseModelRef', () => {
+  // The same cases as `a_model_says_where_it_is_paid` in the daemon's ai/models.rs.
+  it.each([
+    ['chatgpt:gpt-6.1-sol', 'chatgpt', 'gpt-6.1-sol'],
+    ['ChatGPT: gpt-6-luna ', 'chatgpt', 'gpt-6-luna'],
+    ['anthropic:claude-opus-5-5', 'anthropic', 'claude-opus-5-5'],
+    ['chatgpt:', 'chatgpt', ''],
+    ['anthropic:claude-opus-5-5[high]', 'anthropic', 'claude-opus-5-5'],
+    ['anthropic/claude-opus-5.5[max]', 'openrouter', 'anthropic/claude-opus-5.5'],
+    ['claude-opus-5-5[1m]', 'openrouter', 'anthropic/claude-opus-5.5'],
+    ['anthropic/claude-opus-5.5', 'openrouter', 'anthropic/claude-opus-5.5'],
+    ['openrouter:openai/gpt-6.1-sol', 'openrouter', 'openai/gpt-6.1-sol'],
+    ['google/gemma-4-31b-it:free', 'openrouter', 'google/gemma-4-31b-it:free'],
+    ['sonnet', 'openrouter', 'anthropic/claude-sonnet-5.5'],
+    ['', 'openrouter', DEFAULT_MODEL],
+  ])('reads %s as %s %s', (given, source, id) => {
+    expect(parseModelRef(given)).toEqual({ source, id })
+  })
+
+  it('writes a model back as a team file does, its effort kept', () => {
+    expect(modelSelector(parseModelRef('anthropic:claude-opus-5-5'))).toBe('anthropic:claude-opus-5-5')
+    expect(normalizeModel('sonnet[high]')).toBe('anthropic/claude-sonnet-5.5[high]')
+    expect(normalizeModel(' chatgpt:gpt-6.1-sol ')).toBe('chatgpt:gpt-6.1-sol')
+  })
+
+  // The same cases as `the_same_model_is_named_on_each_source`.
+  it('names the same model on each source', () => {
+    const claude = parseModelRef('anthropic/claude-opus-5.5')
+    const direct = modelOn(claude, 'anthropic')
+    expect(direct).toEqual({ source: 'anthropic', id: 'claude-opus-5-5' })
+    expect(openRouterEquivalent(direct!)).toBe('anthropic/claude-opus-5.5')
+    expect(modelOn(direct!, 'openrouter')).toEqual(claude)
+    expect(modelOn(claude, 'chatgpt')).toBeUndefined()
+    expect(modelOn(parseModelRef('openai/gpt-6.1-sol'), 'chatgpt')).toEqual({ source: 'chatgpt', id: 'gpt-6.1-sol' })
+    expect(modelOn(parseModelRef('chatgpt:gpt-6.1-sol'), 'anthropic')).toBeUndefined()
+    expect(modelOn(parseModelRef('anthropic/claude-opus-5.5:thinking'), 'anthropic')).toBeUndefined()
+    expect(modelOn(parseModelRef('~anthropic/claude-opus-latest'), 'anthropic')).toBeUndefined()
+  })
+
+  it('names and marks a model a plan pays for by its maker', () => {
+    expect(modelNameFromId('anthropic:claude-opus-5-5')).toBe('Claude Opus 5.5')
+    expect(modelNameFromId('chatgpt:gpt-6.1-sol')).toBe('GPT-6.1 Sol')
+    expect(makerOf('chatgpt:gpt-6.1-sol').name).toBe(makerOf('openai/gpt-6.1-sol').name)
+    expect(makerOf('anthropic:claude-opus-5-5').name).toBe(makerOf('anthropic/claude-opus-5.5').name)
   })
 })
 

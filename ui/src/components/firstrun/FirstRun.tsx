@@ -1,9 +1,11 @@
 import { ArrowUp } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 
-import { makerOf } from '../../lib/ai/makers'
-import { useKeyStatus } from '../../lib/ai/useKeyStatus'
-import { FIRST_FIGURE, askFirstAgent, forMeRequest, keepFirstAgent } from '../../lib/firstrun/firstAgent'
+import type { AiStatus } from '../../lib/ai/client'
+import { sourceMaker } from '../../lib/ai/makers'
+import { SOURCE_INFO, connectedSources, sourceOf } from '../../lib/ai/sources'
+import { useAiStatus } from '../../lib/ai/useKeyStatus'
+import { FIRST_FIGURE, askFirstAgent, firstAgentNow, forMeRequest, keepFirstAgent } from '../../lib/firstrun/firstAgent'
 import { EMPTY_ABOUT, LANGUAGE, LENGTH, WORK, aboutFrom, aboutLine, type QuickAbout } from '../../lib/firstrun/quickAbout'
 import { markFirstRun } from '../../lib/firstrun/store'
 import { plainRunError } from '../../lib/runs/errors'
@@ -11,24 +13,48 @@ import { isTerminalRun, type RunRecord } from '../../lib/runs/client'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { announceYou, saveYou, toldNothing, useYou } from '../../lib/you/client'
 import { FigureStill } from '../agents/FigureStill'
+import { ChatGptPlan } from '../connections/ChatGptPlan'
+import { ClaudeCredit } from '../connections/ClaudeCredit'
 import { OpenRouterKey } from '../connections/OpenRouterKey'
 import { MakerMark } from '../models/MakerMark'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
 import { ConnectSheet, type AiOption } from './ConnectSheet'
 
-/** The colour the first run shows an OpenRouter key in: LoomWatch's own indigo, not OpenRouter's brand. */
-const OPENROUTER_COLOR = '#5867A8'
+/** The colour the first run shows a connected AI in: LoomWatch's own indigo, not a brand's. */
+const AI_COLOR = '#5867A8'
 
-/** The AIs the first agent can answer with, in the sheet that asks for one; each form says when it connects. */
-const optionsFor = (connected: () => void): readonly AiOption[] => [{
-  id: 'openrouter',
-  title: 'OpenRouter key',
-  cost: 'Pay as you go: add credit at OpenRouter. Most tasks cost a few cents.',
-  color: OPENROUTER_COLOR,
-  logo: <MakerMark maker={makerOf('openrouter/auto')} />,
-  connect: <OpenRouterKey variant="card" onChange={(status) => { if (status.connected) connected() }} />,
-}]
+/**
+ * The AIs the first agent can answer with, in the sheet that asks for one (ADR 0073): the plans the
+ * person may already pay for, then an OpenRouter key, each with what it costs. Each form says when
+ * it connects, and the first run goes on with the Send that asked.
+ */
+const optionsFor = (status: AiStatus | null, connected: () => void): readonly AiOption[] => [
+  ...(status?.chatgpt.available ? [{
+    id: 'chatgpt',
+    title: 'ChatGPT Plus or Pro',
+    cost: 'Uses your plan’s allowance, at no extra charge, until its limit.',
+    color: AI_COLOR,
+    logo: <MakerMark maker={sourceMaker('chatgpt')} />,
+    connect: <ChatGptPlan variant="card" onConnected={connected} />,
+  }] : []),
+  {
+    id: 'anthropic',
+    title: 'Claude Max or Team',
+    cost: 'Spends your plan’s monthly API credit. Each task has a price.',
+    color: AI_COLOR,
+    logo: <MakerMark maker={sourceMaker('anthropic')} />,
+    connect: <ClaudeCredit variant="card" onConnected={connected} />,
+  },
+  {
+    id: 'openrouter',
+    title: 'OpenRouter key',
+    cost: 'Pay as you go: add credit at OpenRouter. Most tasks cost a few cents.',
+    color: AI_COLOR,
+    logo: <MakerMark maker={sourceMaker('openrouter')} />,
+    connect: <OpenRouterKey variant="card" onChange={(key) => { if (key.connected) connected() }} />,
+  },
+]
 
 const EXAMPLES = ['Plan a 30-minute lesson about animals', 'Reply to a customer whose order is late', 'Explain how compound interest works']
 
@@ -51,9 +77,11 @@ const message = (failed: unknown) => (failed instanceof Error ? failed.message :
  * in My agents, or going Home. Plain words throughout: no metaphor a newcomer has to decode.
  */
 export function FirstRun({ onLookAround, onDone }: { onLookAround: () => void; onDone: () => void }) {
-  const key = useKeyStatus()
+  const ai = useAiStatus()
   const you = useYou()
-  const connected = key?.connected === true
+  const connected = ai !== null && connectedSources(ai).length > 0
+  // How the first agent is paid with what is connected now.
+  const using = connected ? SOURCE_INFO[sourceOf(firstAgentNow().model)] : null
   const [text, setText] = useState('')
   const [pending, setPending] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
@@ -99,7 +127,7 @@ export function FirstRun({ onLookAround, onDone }: { onLookAround: () => void; o
     setPending(null)
     if (pending) void start(pending, false)
   }, [pending, start])
-  const options = useMemo(() => optionsFor(onConnected), [onConnected])
+  const options = useMemo(() => optionsFor(ai, onConnected), [ai, onConnected])
 
   const onSettled = useCallback((turn: Turn, record: RunRecord) => {
     setSettled((was) => (was[turn.runId] === record.status ? was : { ...was, [turn.runId]: record.status }))
@@ -142,11 +170,11 @@ export function FirstRun({ onLookAround, onDone }: { onLookAround: () => void; o
   const say = madeForYou
     ? { head: `Done${name ? `, ${name}` : ''}. That one was made for you.`, sub: 'Every agent you make reads what you told me. Change it any time in About you.' }
     : justConnected
-      ? { head: 'Connected.', sub: 'I’m using OpenRouter. Change it any time in Connections.' }
+      ? { head: 'Connected.', sub: `I’m answering ${using?.on ?? 'with what you connected'}. Change it any time in Connections.` }
       : { head: 'What shall we make first?', sub: 'Ask for anything. I’ll only stop to ask you something when I need it.' }
 
   return (
-    <div className="lw-home fr" data-first-run style={connected ? { ['--fr-ai' as string]: OPENROUTER_COLOR } : undefined}>
+    <div className="lw-home fr" data-first-run style={connected ? { ['--fr-ai' as string]: AI_COLOR } : undefined}>
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
         <span className="home-brand"><LoomMark size={28} /><LoomWordmark height={19} /></span>
@@ -164,7 +192,7 @@ export function FirstRun({ onLookAround, onDone }: { onLookAround: () => void; o
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
           <div className="fr-composer-bar">
-            <span className="fr-who"><i style={connected ? { background: OPENROUTER_COLOR } : undefined} />Your first agent{connected ? ' · using OpenRouter' : ''}</span>
+            <span className="fr-who"><i style={connected ? { background: AI_COLOR } : undefined} />Your first agent{using ? ` · ${using.chip}` : ''}</span>
             <button type="submit" className="fr-send" aria-label="Send" disabled={!text.trim() || sending || working}><ArrowUp size={18} aria-hidden="true" /></button>
           </div>
         </form>

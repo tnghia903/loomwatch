@@ -50,6 +50,8 @@ export interface FeedbackContext {
   screen?: FeedbackScreen
   /** An error to report, such as the one the crash screen shows. */
   error?: string
+  /** Whether each plan is connected (ADR 0073): yes or no, never the key, the sign-in or the account. */
+  plans?: { chatgpt: boolean; anthropic: boolean }
 }
 
 const SCREENS: Record<FeedbackScreen, string> = { home: 'Home', build: 'Build (editing a team)', run: 'Run (watching a run)' }
@@ -87,8 +89,8 @@ export function withoutHomeFolder(text: string): string {
 
 /**
  * The details added to a report, one fact per line. It names the build, the system, the browser,
- * the screen and whether an OpenRouter key is added, never the key, a team, a file, a prompt or a
- * run's contents.
+ * the screen and which ways of paying for models are connected, never a key, a sign-in, a team, a
+ * file, a prompt or a run's contents.
  */
 export function describeSystem(
   about: AboutLoomWatch | null,
@@ -106,6 +108,8 @@ export function describeSystem(
   }
   lines.push(`Browser: ${browserName(userAgent)}`)
   if (context.screen) lines.push(`Screen: ${SCREENS[context.screen]}`)
+  if (context.plans) lines.push(`ChatGPT plan: ${context.plans.chatgpt ? 'connected' : 'not connected'}`)
+  if (context.plans) lines.push(`Claude API credit: ${context.plans.anthropic ? 'connected' : 'not connected'}`)
   if (key) lines.push(`OpenRouter key: ${key.connected ? `added${key.freeTier ? ', free models only' : ''}` : 'not added'}`)
   if (context.error) lines.push(`Error: ${context.error.slice(0, 1200)}`)
   const text = withoutHomeFolder(lines.join('\n'))

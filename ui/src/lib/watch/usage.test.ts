@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, type RunEvent } from './events'
-import { formatCost, formatTokens, summarizeUsage, turnUsage, type TurnUsage } from './usage'
+import { costWords, formatCost, formatTokens, summarizeUsage, turnUsage, type TurnUsage } from './usage'
 
 /**
  * Runs as LoomWatch's engine records them (crates/loomwatch-backend/src/engine/mod.rs): a prompt,
@@ -167,4 +167,15 @@ it('writes counts in three figures', () => {
 
 it('writes a cost the way the receipt prints it', () => {
   expect([0, 0.00004, 0.0123456, 0.5, 1.237].map(formatCost)).toEqual(['$0', 'less than $0.0001', '$0.0123', '$0.5', '$1.24'])
+})
+
+describe('costWords', () => {
+  it('says who paid: dollars, worked out, the ChatGPT plan, or both', () => {
+    expect(costWords({ costUsd: 0.0123, costComplete: true })).toBe('$0.0123')
+    expect(costWords({ costUsd: 0.12, costComplete: true, costEstimated: true })).toBe('≈ $0.12')
+    expect(costWords({ costUsd: 0, costComplete: true, onPlan: true })).toBe('ChatGPT plan')
+    expect(costWords({ costUsd: 0.12, costComplete: true, onPlan: true })).toBe('$0.12 + ChatGPT plan')
+    expect(costWords({ costUsd: 0.12, costComplete: false })).toBe('at least $0.12')
+    expect(costWords({ costComplete: true })).toBeNull()
+  })
 })

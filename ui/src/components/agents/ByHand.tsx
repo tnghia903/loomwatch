@@ -327,7 +327,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           {block('mind', <>
             <ModelPicker value={draft.model} disabled={readOnly} suggestFor={suggestFor ?? { agent: suggestedOfDraft(draft) }} follows={following?.follows} moved={following?.moved} onChange={(id, follow) => { if (readOnly) return; if (following) following.onPick(id, follow); else set('model', id) }} />
             <EffortSlider className="thinking-field agent-field" model={draft.model} value={draft.effort} disabled={readOnly} onChange={(effort) => set('effort', effort ?? '')} />
-            <p className="t-meta">A bigger model can think more through, and costs more per run. The price is per million tokens, the way OpenRouter shows it.</p>
+            <p className="t-meta">A bigger model can think more through, and costs more per run or uses more of your plan. Prices are per million tokens.</p>
           </>)}
 
           {block('skills', <Shelf kind="skill" chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} onMarket={readOnly ? undefined : (query) => setMarket({ query })} fromMarket={fromMarket.filter((skill) => draft.skills.includes(skill))} />)}

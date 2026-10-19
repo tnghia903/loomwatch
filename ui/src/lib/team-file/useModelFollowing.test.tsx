@@ -19,14 +19,16 @@ const gathering = { ...helper, role: roleOf('researcher') }
 let readingOn = false
 let readings = 0
 let readingFails = false
+let ai: unknown = { openrouter: { connected: true } }
 
 beforeEach(() => {
   vi.useFakeTimers()
   forgetReadings(); forgetKeyStatus()
   readingOn = false; readings = 0; readingFails = false
+  ai = { openrouter: { connected: true } }
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
-    if (path === '/api/ai') return json({ openrouter: { connected: true } })
+    if (path === '/api/ai') return json(ai)
     if (path === '/api/models/reading' && init?.method === 'POST') {
       readings += 1
       if (readingFails) return json({ error: 'Reading failed a moment ago.', code: 'resting' }, 409)
@@ -48,6 +50,21 @@ function follow(agents: readonly AgentConfig[]) {
 const settle = () => act(() => vi.advanceTimersByTimeAsync(SETTLE_MS + 10))
 
 describe('useModelFollowing', () => {
+  it('moves a following agent onto a plan connected since that pays for its model, and never onto OpenRouter by itself', onTheFastTier(async () => {
+    ai = { openrouter: { connected: true }, anthropic: { connected: true } }
+    // The helper follows and is on Claude Opus through OpenRouter; the Claude credit now pays for it.
+    const { result, move } = follow([writer, { ...helper }, { ...helper, id: 'planned', model: 'chatgpt:gpt-6.1-sol' }])
+    // The first pause reads what is connected; the move waits a pause after that.
+    await settle()
+    await settle()
+    expect(move).toHaveBeenCalledTimes(1)
+    expect(move).toHaveBeenCalledWith('helper', 'anthropic:claude-opus-5-5')
+    expect(result.current.moves.get('helper')).toEqual({ from: DEFAULT_MODEL, to: 'anthropic:claude-opus-5-5' })
+    // The pinned writer stays put, and the agent on the ChatGPT plan isn't moved off it.
+    expect(move).not.toHaveBeenCalledWith('writer', expect.anything())
+    expect(move).not.toHaveBeenCalledWith('planned', expect.anything())
+  }))
+
   it('takes the team as it opened, and moves a following agent once its configuration settles', onTheFastTier(async () => {
     // Opened gathering, yet on the strongest model: nothing changed, so nothing moves.
     const { rerender, result, move } = follow([writer, { ...gathering }])

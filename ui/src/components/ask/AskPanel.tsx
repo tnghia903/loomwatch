@@ -7,7 +7,7 @@ import type { AskStep, AssistantTurn } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import { StatusGlyph } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
-import { OpenRouterKey } from '../connections/OpenRouterKey'
+import { Sources } from '../connections/Sources'
 import { AskCardView, type CardActions } from './AskCards'
 import { AskModelPicker } from './AskModelPicker'
 
@@ -156,7 +156,7 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
       </header>
 
       <div className="ask-scroll" ref={scroller}>
-        {ask.needsKey && <div className="ask-key"><OpenRouterKey variant="card" /></div>}
+        {ask.needsKey && <div className="ask-key"><Sources title="Choose how Ask’s model is paid" intro={false} /></div>}
         {ask.needsKey ? null : empty ? (
           <div className="ask-empty">
             <p className="ask-empty-title">What should your team do?</p>

@@ -3,8 +3,8 @@ import '@xyflow/react/dist/style.css'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import { shortName } from '../lib/ai/client'
-import { OFFLINE_MODEL, openRouterId } from '../lib/ai/modelIds'
-import { useKeyStatus } from '../lib/ai/useKeyStatus'
+import { useAiStatus } from '../lib/ai/useKeyStatus'
+import { SOURCE_INFO, missingSourceSaid, missingSources, sourceOf } from '../lib/ai/sources'
 import { useModels } from '../lib/ai/useModels'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import { nodeFromDrop, type AgentNode } from '../lib/library/nodeFromDrop'
@@ -138,7 +138,6 @@ import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './a
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
 import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-file/sendBack'
 import { baseName } from '../lib/files/paths'
-import { keyStore } from '../lib/platform'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
 const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default: module.AskPanel })))
@@ -534,12 +533,18 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const ownAgents = useMemo(() => doc.nodes.filter((node) => node.data.agent.kind !== 'operator' && !node.data.agent.from).map((node) => ({ id: node.id, name: node.data.label || node.id })), [doc.nodes])
   const agentIds = useMemo(() => doc.nodes.map((node) => node.id), [doc.nodes])
   const docAgents = useMemo(() => doc.nodes.map((node) => node.data.agent), [doc.nodes])
-  // Every agent thinks on the person's OpenRouter key, so a team can't run without one. The offline
-  // demo calls no model and runs without it.
-  const key = useKeyStatus()
-  const needsKey = key !== null && !key.connected && docAgents.some((agent) => agent.kind !== 'operator' && openRouterId(agent.model) !== OFFLINE_MODEL)
-  const keyProblem = needsKey ? `Add your OpenRouter key so these agents can think. LoomWatch keeps it in ${keyStore()}.` : null
+  // Each agent thinks on the source its model names (ADR 0073), so a team can't run while one of
+  // them isn't connected. The offline demo calls no model and runs without any.
+  const ai = useAiStatus()
   const { catalog: modelCatalog } = useModels()
+  const missing = useMemo(() => (ai ? missingSources(docAgents.map((agent) => ({ id: agent.id, name: agent.name, model: agent.model, kind: agent.kind })), ai, modelCatalog) : []), [ai, docAgents, modelCatalog])
+  const needsKey = missing.length > 0
+  const keyProblem = needsKey ? missingSourceSaid(missing[0]) : null
+  /** Moves the agents a missing source paid for onto the connected one that has their models. */
+  const switchSource = useMemo(() => {
+    const moves = missing[0]?.switchTo?.models
+    return moves ? () => { for (const { agentId, model } of moves) doc.applyAgentFields(agentId, { model }) } : undefined
+  }, [missing, doc])
   const modelNames = useMemo(() => new Map((modelCatalog?.models ?? []).map((model) => [model.id, shortName(model)])), [modelCatalog])
   // Planned capability wiring lives in a sidecar, never in the team file the daemon runs.
   const composerLayout = useComposerLayout(doc.path, agentIds, doc.saveState !== 'new')
@@ -1701,7 +1706,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     const said = perRun === null ? 'Runs of this team have no limit on what they spend.' : `Each run of this team may spend up to ${dollars(perRun)}. Past it, the agents wait for you.`
     setStatusAnnouncement(saved ? said : `${said} It applies once the team is saved.`)
   }, [doc])
-  const spendLimit = useMemo(() => ({ perRun: doc.teamSpendPerRun, onChange: editable ? (perRun: number | null) => void chooseSpend(perRun) : undefined }), [doc.teamSpendPerRun, editable, chooseSpend])
+  // Which plans pay for some of the team's agents, so the spend menu says how their calls count.
+  const plansPaying = useMemo(() => {
+    const paid = new Set(docAgents.filter((agent) => agent.kind !== 'operator').map((agent) => sourceOf(agent.model)))
+    return { chatgpt: paid.has('chatgpt'), anthropic: paid.has('anthropic') }
+  }, [docAgents])
+  const spendLimit = useMemo(() => ({ perRun: doc.teamSpendPerRun, onChange: editable ? (perRun: number | null) => void chooseSpend(perRun) : undefined, plans: plansPaying }), [doc.teamSpendPerRun, editable, chooseSpend, plansPaying])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -2252,14 +2262,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     if (doc.nodes.length === 0) return { kind: 'blocked', reason: 'Add an agent before running.' }
     if (!doc.isValid && problems.length > 0) return { kind: 'blocked', reason: `${problems.length} thing${problems.length === 1 ? '' : 's'} to fix before this team can run.`, action: { label: 'Review', run: () => setProblemsOpen(true) } }
     // The run would fail on its first model call, so it is not offered.
-    if (needsKey) return { kind: 'blocked', reason: 'Add your OpenRouter key to run this team.', action: { label: 'Add key', run: () => window.location.assign('/connections') } }
+    if (needsKey) return { kind: 'blocked', reason: missingSourceSaid(missing[0]), action: switchSource && missing[0].switchTo ? { label: `Use ${SOURCE_INFO[missing[0].switchTo.source].chip}`, run: switchSource } : { label: 'Connect', run: () => window.location.assign('/connections') } }
     if (doc.mode === 'pipeline' && terminals === 0) return { kind: 'blocked', reason: 'A pipeline run needs exactly one final agent. Every agent in this one hands off to another, so it has none.' }
     if (doc.mode === 'pipeline' && terminals !== 1) return { kind: 'blocked', reason: `A pipeline run needs exactly one final agent. This one has ${terminals}: ${terminalIds.map((id) => nodeNames.get(id) ?? id).join(', ')}.`, action: { label: 'Show on canvas', run: () => { doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: terminalIds.includes(node.id) }))); void flow.fitView({ nodes: doc.nodes.filter((node) => terminalIds.includes(node.id)), padding: 0.35, maxZoom: 1, duration: 300 }) } } }
     if (doc.readOnlyReason) return { kind: 'blocked', reason: doc.readOnlyReason }
     if (doc.documentChipState === 'saving') return { kind: 'saving', filename }
     if (['dirty', 'new'].includes(doc.documentChipState)) return { kind: 'dirty', filename }
     return { kind: 'ready' }
-  }, [waiting, answerSending, history.unavailable, runView, session.terminal, record, phase, starting, pendingPrompt, doc, problems.length, needsKey, terminals, terminalIds, nodeNames, filename, flow])
+  }, [waiting, answerSending, history.unavailable, runView, session.terminal, record, phase, starting, pendingPrompt, doc, problems.length, needsKey, missing, switchSource, terminals, terminalIds, nodeNames, filename, flow])
 
   // ---- commands + keys ----------------------------------------------------------------------
   // With a team open the dialog belongs to the workspace; on Home, Home owns it.

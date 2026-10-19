@@ -259,7 +259,7 @@ impl TurnEnd {
     /// `_meta`.
     #[must_use]
     pub fn as_result(&self) -> Value {
-        json!({
+        let mut result = json!({
             "stopReason": self.stop_reason.as_str(),
             "usage": {
                 "inputTokens": self.usage.input_tokens,
@@ -274,7 +274,9 @@ impl TurnEnd {
                 "webSearches": self.usage.web_searches,
                 "webFetches": self.usage.web_fetches,
             }},
-        })
+        });
+        super::events::mark_payer(&mut result["_meta"]["loomwatch"], &self.usage);
+        result
     }
 }
 
@@ -507,6 +509,7 @@ impl Session {
                 content: completion.content,
                 reasoning_details: completion.reasoning_details,
                 tool_calls: completion.tool_calls,
+                native: completion.native,
             });
             cut_offs = if cut { cut_offs + 1 } else { 0 };
             carrying_on = false;
@@ -603,7 +606,8 @@ impl Session {
     async fn call_model(&mut self, cancel: &Cancel, call: Call) -> Result<Completion, CallError> {
         self.messages_written += 1;
         let message_id = format!("{}-{}", self.config.session_id, self.messages_written);
-        let offered = call != Call::BareSummary;
+        let bare = call == Call::BareSummary;
+        let offered = !bare || self.provider.keeps_tools_for_summaries();
         let tools = if offered {
             self.tool_specs()
         } else {
@@ -625,6 +629,7 @@ impl Session {
                 ServerTools::default()
             },
             max_tokens: self.config.max_tokens,
+            tools_off: bare && offered,
             session_key: &self.config.session_id,
             agent_id: &self.config.agent_id,
         };

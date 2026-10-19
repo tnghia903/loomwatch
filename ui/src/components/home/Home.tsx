@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { openFeedback } from '../../lib/feedback/report'
 import { relativeTime } from '../../lib/format'
-import { useKeyStatus } from '../../lib/ai/useKeyStatus'
+import { useAiStatus } from '../../lib/ai/useKeyStatus'
+import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
 import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, teamViewFor, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
@@ -17,7 +18,8 @@ import { chatPreview, listTime } from '../../lib/chat/preview'
 import { isUnread } from '../../lib/chat/seen'
 import { fabricFor } from '../../lib/story/fabric'
 import { TeamFabric } from './TeamFabric'
-import { OpenRouterKey } from '../connections/OpenRouterKey'
+import { Sources } from '../connections/Sources'
+import { UsageNotices } from '../usage/UsageNotices'
 import { UpdateBadge } from '../updates/Updates'
 import { QuestsLink } from '../quests/QuestsLink'
 import { SkillsLink } from '../skills/SkillsLink'
@@ -96,11 +98,13 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
   const [deleting, setDeleting] = useState<TeamSummary | null>(null)
   const [deleted, setDeleted] = useState<DeletedTeam | null>(null)
   const [query, setQuery] = useState('')
-  const key = useKeyStatus()
-  // The key card stays until the key is in, and for the moment after, so the person sees that
-  // OpenRouter accepted it before the card makes way.
+  const ai = useAiStatus()
+  const key = ai?.openrouter ?? null
+  const sources = ai ? connectedSources(ai) : []
+  // The three cards stay until a way to pay for models is in, and for the moment after, so the
+  // person sees it accepted before the cards make way (ADR 0073).
   const [keyCard, setKeyCard] = useState(false)
-  if (key && !key.connected && !keyCard) setKeyCard(true)
+  if (ai && sources.length === 0 && !keyCard) setKeyCard(true)
   // Someone who has never had anything made opens on the first run (ADR 0075),
   // instead of this page; see lib/firstrun/store.ts. Asked once per visit. It replaces the
   // getting-started guide opening by itself, which stays a link here and in the menu.
@@ -131,14 +135,24 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
     return <FirstRun onLookAround={() => { markFirstRun('skipped'); setFirstRun('off') }} onDone={() => setFirstRun('off')} />
   }
 
-  // What the footer says about the one thing every run needs: the OpenRouter key.
+  // What the footer says about the one thing every run needs: a way to pay for its models.
   let status: { state: 'dirty' | 'saved' | 'incomplete' | 'invalid'; text: string; action?: ReactNode }
-  const manage = <a className="link" href="/connections">{key?.connected ? 'Manage key' : 'Add a key'}</a>
-  if (!key) status = { state: 'dirty', text: 'Checking your OpenRouter key…' }
-  else if (!key.connected) status = { state: 'incomplete', text: 'Add your OpenRouter key so your agents can run.', action: keyCard ? undefined : manage }
-  else if (key.problem) status = { state: 'invalid', text: `OpenRouter: ${key.problem}`, action: manage }
-  else if (key.freeTier) status = { state: 'incomplete', text: 'Your OpenRouter account has no credits yet, so only free models work.', action: manage }
-  else status = { state: 'saved', text: `Agents run on OpenRouter${key.label ? ` with key ${key.label}` : ''}${key.spentThisMonth === undefined ? '' : ` · ${dollars(key.spentThisMonth)} this month`}`, action: manage }
+  const manage = <a className="link" href="/connections">{sources.length ? 'Manage' : 'Connect'}</a>
+  const usage = <a className="link" href="/usage">Usage</a>
+  // A connected source that said something is wrong, named, so the person knows which to fix.
+  const problem = ai && [
+    ai.chatgpt.connected && ai.chatgpt.problem ? `ChatGPT: ${ai.chatgpt.problem}` : undefined,
+    ai.anthropic.connected && ai.anthropic.problem ? `Claude: ${ai.anthropic.problem}` : undefined,
+    key?.connected && key.problem ? `OpenRouter: ${key.problem}` : undefined,
+  ].find(Boolean)
+  if (!ai || !key) status = { state: 'dirty', text: 'Checking how your agents’ models are paid…' }
+  else if (sources.length === 0) status = { state: 'incomplete', text: 'Connect your ChatGPT plan, your Claude API credit or an OpenRouter key so your agents can run.', action: keyCard ? undefined : manage }
+  else if (problem) status = { state: 'invalid', text: problem, action: manage }
+  else if (sources.length === 1 && key.connected && key.freeTier) status = { state: 'incomplete', text: 'Your OpenRouter account has no credits yet, so only free models work.', action: manage }
+  else {
+    const spent = key.connected && key.spentThisMonth !== undefined ? ` · OpenRouter ${dollars(key.spentThisMonth)} this month` : ''
+    status = { state: 'saved', text: `Agents can run on ${sources.map((source) => SOURCE_INFO[source].chip).join(', ')}${spent}`, action: <>{usage}{manage}</> }
+  }
 
   return (
     <div className="lw-home" data-tour="home">
@@ -174,7 +188,9 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
           </ol>
         </section>
 
-        {keyCard && <div className="home-key" data-tour="key"><OpenRouterKey variant="card" /></div>}
+        {keyCard && <div className="home-key" data-tour="key"><Sources title="First, choose how your agents’ models are paid" /></div>}
+
+        <UsageNotices />
 
         {/* In the order the work is done: agents first, then the teams they work in. */}
         <YourAgentsShelf />

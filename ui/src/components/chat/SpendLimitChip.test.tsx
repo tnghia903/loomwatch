@@ -17,6 +17,19 @@ describe('what one run may spend (ADR 0068)', () => {
     expect(onChange).toHaveBeenCalledWith(2.5)
   })
 
+  it('says how calls on a plan count, only for a team with agents on one (ADR 0073)', () => {
+    const { unmount } = render(<SpendLimitChip perRun={1} onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Each run/ }))
+    expect(screen.queryByText(/ChatGPT plan/)).toBeNull()
+    expect(screen.queryByText(/Claude credit/)).toBeNull()
+    unmount()
+    render(<SpendLimitChip perRun={1} onChange={vi.fn()} plans={{ chatgpt: true, anthropic: true }} />)
+    fireEvent.click(screen.getByRole('button', { name: /Each run/ }))
+    expect(screen.getByText(/Calls on your ChatGPT plan cost no dollars/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Manage usage' })).toHaveAttribute('href', 'https://chatgpt.com/settings/usage')
+    expect(screen.getByText('Calls on your Claude credit count at Claude’s list prices.')).toBeInTheDocument()
+  })
+
   it('opens a limit under a cent as written, not as 0.00', () => {
     render(<SpendLimitChip perRun={0.003} onChange={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Each run · \$0\.003/ }))

@@ -4,7 +4,7 @@ import type { AgentRuntime } from '../runs/graph'
 import { spendNote } from '../runs/spend'
 import type { AgentAllow, AllowSwitch } from '../team-file/types'
 import type { Evidence, RunPhase, RunProjection } from '../watch/events'
-import { formatCost, formatTokens, type TokenSummary, type TurnPurpose } from '../watch/usage'
+import { formatTokens, type TokenSummary, type TurnPurpose, costWords } from '../watch/usage'
 import { failuresOf, readPhrase, workCount } from './reads'
 import { describeEvidence } from './weft'
 
@@ -196,11 +196,12 @@ export function receiptTokens(summary: TokenSummary | null | undefined, names: R
     // Beside each agent's tokens, what its calls cost, when every one of them said.
     agents: summary.agents.filter((agent) => agent.total > 0).map((agent) => {
       const row = tokenRow(names.get(agent.agentId) ?? agent.agentId, agent)
-      return agent.costUsd === undefined ? row : { ...row, value: `${row.value} · ${formatCost(agent.costUsd)}` }
+      const cost = costWords({ ...agent, costComplete: true })
+      return cost === null ? row : { ...row, value: `${row.value} · ${cost}` }
     }),
     purposes: summary.purposes.filter((purpose) => purpose.total > 0).map((purpose) => tokenRow(PURPOSE_WORDS[purpose.purpose], purpose)),
     estimate: why.length > 0 ? `~ ${why.join(' ')}` : null,
-    cost: summary.costUsd === undefined ? null : `${summary.costComplete ? '' : 'at least '}${formatCost(summary.costUsd)}`,
+    cost: costWords(summary),
   }
 }
 

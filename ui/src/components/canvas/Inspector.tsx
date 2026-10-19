@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { createElement, useRef, type ReactNode } from 'react'
 
-import { openRouterId } from '../../lib/ai/modelIds'
+import { canonicalModel } from '../../lib/ai/modelIds'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { splitModelSelector } from '../../lib/models'
 import type { AgentUsage } from '../../lib/team-file/runLessons'
@@ -159,10 +159,10 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         </div>
         {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}
         <div className={`field ${zoneClass('model')}`}>
-          <ModelPicker field="model" value={openRouterId(agent.model)} disabled={locked} suggestFor={suggestFor} follows={linked ? undefined : agent.followsSuggestion === true} moved={modelMove} onChange={(id, follow) => { onModelChange(id, follow); onFieldBlur('model') }} />
-          <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with. Its price is per million tokens, the way OpenRouter shows it.')}</span>
+          <ModelPicker field="model" value={canonicalModel(agent.model)} disabled={locked} suggestFor={suggestFor} follows={linked ? undefined : agent.followsSuggestion === true} moved={modelMove} onChange={(id, follow) => { onModelChange(id, follow); onFieldBlur('model') }} />
+          <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with, and which of your connections pays for it. Prices are per million tokens.')}</span>
         </div>
-        <EffortSlider model={openRouterId(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={locked} onChange={onThinkingEffortChange} />
+        <EffortSlider model={canonicalModel(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={locked} onChange={onThinkingEffortChange} />
         {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}
         {onSpendChange && <AgentSpendGuard perRun={agent.spend?.perRun ?? null} readOnly={locked} onChange={onSpendChange} />}
       </div>

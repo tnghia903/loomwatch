@@ -15,9 +15,10 @@ See [`examples/research-team.yaml`](../examples/research-team.yaml) for a comple
 ## Agents
 
 Every agent runs on LoomWatch's own agent, inside the `loomwatchd` daemon. Nothing else is
-started, and there is no other app to install or sign in to. Each agent is a session in the daemon.
-It calls its model through [OpenRouter](https://openrouter.ai) with your OpenRouter API key, and
-works with LoomWatch's own tools (see [Tools an agent has](#tools-an-agent-has)).
+started, and there is no other app to install. Each agent is a session in the daemon. It calls its
+model the way its `model` says it is paid: on your ChatGPT plan, on your Claude API credit, or
+through [OpenRouter](https://openrouter.ai) with your OpenRouter API key. It works with LoomWatch's
+own tools (see [Tools an agent has](#tools-an-agent-has)).
 
 An agent needs an `id`, a `name`, a `role` and a `model`:
 
@@ -32,26 +33,39 @@ agents:
       web: true
 ```
 
-- **The key.** You enter it in LoomWatch, with **Add your OpenRouter key** on Home or under
-  **AI models** in **Connections…**. LoomWatch checks a key with OpenRouter and keeps it only if
-  OpenRouter accepts it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`, and on
-  Windows in Windows Credential Manager. On Linux it is kept in `<state dir>/keys.json`, which only
-  your account can read. An `OPENROUTER_API_KEY`
-  in the environment is ignored. The key goes to OpenRouter and nowhere else: never to an agent, a
-  command an agent runs, a team file, the run archive or a log. Without a key, a run stops before
-  its first model call and says to add one.
-- **`model`** is an OpenRouter model id (`vendor/model`), such as `anthropic/claude-opus-5.5` (what
-  new agents get) or `openai/gpt-6.1-sol`. The model picker lists the OpenRouter models that can use
-  tools. `fake/offline` is the offline demo model: it answers with fixed text and calls no model,
-  so it needs no key.
+- **How it is paid.** You connect each way on Home or in **Connections…** (ADR 0073): **Continue
+  with ChatGPT** for a ChatGPT Plus or Pro plan, a Claude API key from the Console organization
+  linked to a Claude Max or Team plan, or an OpenRouter key. LoomWatch checks each with its company
+  and keeps it only if it is accepted. On a Mac the OpenRouter key is kept in the Keychain as
+  `LoomWatch.OpenRouter`, and the Claude key and ChatGPT sign-in as `LoomWatch.Plans`; on Windows
+  they are in Windows Credential Manager. On Linux they are kept in `<state dir>/keys.json` and
+  `<state dir>/plans.json`, which only your account can read. An `OPENROUTER_API_KEY`,
+  `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the environment is ignored. Each key goes to its own
+  company and nowhere else: never to an agent, a command an agent runs, a team file, the run
+  archive or a log. An agent whose way of paying isn't connected stops before its first model call
+  and says which one to connect. It never moves to another way by itself.
+- **`model`** says the model and how it is paid:
+
+  | Paid by | `model` | Example |
+  |---|---|---|
+  | OpenRouter | an OpenRouter model id (`vendor/model`) | `anthropic/claude-opus-5.5`, `openai/gpt-6.1-sol` |
+  | Your ChatGPT plan | `chatgpt:<slug>`, a model your plan lists | `chatgpt:gpt-6.1-sol` |
+  | Your Claude API credit | `anthropic:<Anthropic model id>` | `anthropic:claude-opus-5-5` |
+
+  The model picker shows each way of paying in its own section, with what it costs, and lists only
+  models that can use tools. Its suggestion picks the model first, then a plan you've connected
+  that offers it, else OpenRouter, else your plan's own model for that kind of work. `fake/offline`
+  is the offline demo model: it answers with fixed text and calls no model, so it needs no key.
 - **`followsSuggestion: true`** says the agent's `model` follows the model LoomWatch suggests for
   it (ADR 0072). An agent added in the app starts that way. When its configuration changes there,
   LoomWatch moves `model` to the new suggestion and shows what it was, with Undo. Picking any other
   model in its model list takes the line out, and the model stays as picked. A run always uses
   `model`, so a file edited elsewhere keeps its model until the agent is next changed in the app.
-- **`thinkingEffort`** says how hard the model reasons. LoomWatch sends it to OpenRouter as
-  `reasoning.effort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, with `ultra`
-  read as `max`. If it is absent or set to `default`, the model decides. The older combined form
+- **`thinkingEffort`** says how hard the model reasons: `none`, `minimal`, `low`, `medium`, `high`,
+  `xhigh` or `max`. LoomWatch sends it to OpenRouter as `reasoning.effort`, with `ultra` read as
+  `max`. On the Claude credit it goes as `output_config.effort`, with `none` and `minimal` read as
+  `low`; on the ChatGPT plan as `reasoning.effort`, with `minimal` read as `low`. Either takes the
+  nearest effort the model offers. If it is absent or set to `default`, the model decides. The older combined form
   `model[effort]`, such as `openai/gpt-6.1-sol[high]`, still works, and `thinkingEffort` wins when
   a file has both. LoomWatch's built-in jobs and starter teams set the effort by job: `low` for
   tidying, `medium` for most work, `high` for checking, analysis and code.
@@ -78,7 +92,8 @@ as they are:
 
 - `spawn.cmd`, `spawn.args` and `spawn.env` are accepted and ignored, like the retired `budget`.
   Nothing is started, and no variable in `env` reaches anything. Writers must not add them.
-- An old `model` name is read as an OpenRouter id, by the daemon and by the app alike:
+- A `model` that doesn't start `chatgpt:` or `anthropic:` is OpenRouter's, and an old name is read
+  as an OpenRouter id, by the daemon and by the app alike:
 
   | In the team file | Read as |
   |---|---|
@@ -274,8 +289,9 @@ depend on the document as a whole:
   - Operator nodes may not set either field.
 - `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
   means no limit; new teams and the starter teams are written with `1.00`. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
-  summaries, checkpoints and handovers. The daemon adds up the exact cost OpenRouter reports for
-  each call. Before each call, an agent whose run has used its figure waits, and the run shows a
+  summaries, checkpoints and handovers. The daemon adds up each call's dollars: the exact cost
+  OpenRouter reports, or for a call on the Claude credit its cost at Claude's list prices. A call on
+  the ChatGPT plan costs no dollars and counts against the plan's limits instead. Before each call, an agent whose run has used its figure waits, and the run shows a
   stop: "Add $0.50 and carry on" grows this run's figure (the file is not changed), and "Finish
   with what it has" ends the run as done, with the last words an agent wrote as its answer, stop
   reason `spend_limit`, and its checkpoints kept. A scheduled run has nobody to ask: it fails with
@@ -285,8 +301,9 @@ depend on the document as a whole:
 - `spend.perRun` on an agent is that agent's own guard, for an agent that runs away; there is
   none unless set. At it, that agent waits, and "Stop it here" ends its turn with what it wrote
   while the rest of the team carries on. Operator nodes spend nothing and may not set it. The
-  monthly cap, which also covers Ask LoomWatch and every schedule, is a limit on the OpenRouter
-  key itself, set at openrouter.ai.
+  monthly cap, which also covers Ask LoomWatch and every schedule, is set with each company: a
+  limit on the OpenRouter key at openrouter.ai, a spend limit on the Claude key's workspace in the
+  Claude Console, and LoomWatch's share of the ChatGPT plan in ChatGPT's settings.
 - `spend.web` (team or agent level) is how much web reading one model call may do, for an agent
   allowed the web. A page read stays in the conversation and is read again on every later call.
   - `maxPageTokens` (default 16000, about 12,000 words): how much of one page is read. A longer page
@@ -307,8 +324,11 @@ depend on the document as a whole:
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
   add it. `spend` replaced it.
 - `usage` payloads are discriminated (`$defs.UsagePayload` in the schema). An agent's
-  `sessionUpdate: "usage_update"` carries how much of the model's context is in use and the cost
-  OpenRouter reported. Older runs may also hold a bare `costUsd` delta. Both are archived as a
+  `sessionUpdate: "usage_update"` carries how much of the model's context is in use and the call's
+  cost: what OpenRouter reported, or, with `paidBy: "anthropic"` and `costEstimated: true`, a Claude
+  call priced from list prices, or, with `paidBy: "chatgpt"`, $0 for a call the ChatGPT plan paid.
+  Older runs have neither field and were all paid through OpenRouter. Older runs may also hold a
+  bare `costUsd` delta. Both are archived as a
   record only. Older runs may also hold LoomWatch's own `phase: "budget_warning"` events; nothing
   writes them now.
 - `guards.maxDispatchDepth` and `guards.maxConcurrentDispatches` both default to `8` when

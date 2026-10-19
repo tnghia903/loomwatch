@@ -168,7 +168,20 @@ pub(crate) fn usage_update(
     if let Some(size) = size {
         update["size"] = json!(size);
     }
+    mark_payer(&mut update["_meta"]["loomwatch"]["call"], usage);
     update
+}
+
+/// Who paid for a usage that `OpenRouter` didn't, so the app says "`ChatGPT` plan" rather than $0,
+/// and "≈" before a cost worked out from list prices. Nothing is added for `OpenRouter`, so records
+/// from before other sources read as they always did.
+pub(crate) fn mark_payer(record: &mut Value, usage: &super::provider::Usage) {
+    if let Some(source) = usage.paid_by {
+        record["paidBy"] = json!(source);
+    }
+    if usage.cost_estimated {
+        record["costEstimated"] = json!(true);
+    }
 }
 
 pub(crate) fn locations_json(locations: &[PathBuf]) -> Value {
@@ -178,4 +191,63 @@ pub(crate) fn locations_json(locations: &[PathBuf]) -> Value {
             .map(|path| json!({"path": path.to_string_lossy()}))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::provider::Usage;
+    use super::super::session::{StopReason, TurnEnd};
+    use super::*;
+    use crate::ai::Source;
+
+    /// A plan's call says it was the plan's, a Claude cost says it was worked out, and an
+    /// `OpenRouter` call reads as every record before other sources did.
+    #[test]
+    fn a_cost_says_who_paid_it() {
+        let plan = Usage {
+            output_tokens: 10,
+            paid_by: Some(Source::ChatGpt),
+            ..Usage::default()
+        };
+        let claude = Usage {
+            cost_usd: 0.12,
+            paid_by: Some(Source::Anthropic),
+            cost_estimated: true,
+            ..Usage::default()
+        };
+        let record = |usage: &Usage| {
+            usage_update(
+                1,
+                None,
+                usage.cost_usd,
+                &CallRecord {
+                    call: "work",
+                    turn: "work",
+                    model: "m",
+                    usage,
+                },
+            )["_meta"]["loomwatch"]["call"]
+                .clone()
+        };
+        assert_eq!(record(&plan)["paidBy"], "chatgpt");
+        assert_eq!(record(&plan)["costUsd"], 0.0);
+        assert_eq!(record(&claude)["paidBy"], "anthropic");
+        assert_eq!(record(&claude)["costEstimated"], true);
+        let openrouter = record(&Usage::default());
+        assert!(openrouter.get("paidBy").is_none() && openrouter.get("costEstimated").is_none());
+
+        let end = TurnEnd {
+            stop_reason: StopReason::EndTurn,
+            usage: plan,
+            reply: String::new(),
+        };
+        assert_eq!(end.as_result()["_meta"]["loomwatch"]["paidBy"], "chatgpt");
+        // A record written before the field existed still reads.
+        let old: Usage = serde_json::from_value(json!({
+            "inputTokens": 1, "cachedReadTokens": 0, "cachedWriteTokens": 0, "outputTokens": 2,
+            "reasoningTokens": 0, "costUsd": 0.5
+        }))
+        .unwrap();
+        assert_eq!((old.paid_by, old.cost_estimated), (None, false));
+    }
 }

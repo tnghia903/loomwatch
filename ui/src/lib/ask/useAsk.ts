@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { DEFAULT_MODEL } from '../ai/modelIds'
-import { useKeyStatus } from '../ai/useKeyStatus'
+import { modelForTier } from '../ai/modelIds'
+import { SOURCE_INFO, canRun, connectedSources, sourceOf } from '../ai/sources'
+import { useAiStatus } from '../ai/useKeyStatus'
 import { useSessionEvents } from '../watch/useSessionEvents'
 import {
   AskApiError, fetchConversation, sendAskMessage, setAskBeforeRun as saveAskBeforeRun,
@@ -39,7 +40,7 @@ export interface AskController {
   /** Use this model from now on. A conversation on a different one is ended, because a
       conversation is one session on one model. */
   chooseModel: (model: string) => void
-  /** No OpenRouter key is set, so Ask can't answer until one is added. */
+  /** No way to pay for models is connected, so Ask can't answer until one is (ADR 0073). */
   needsKey: boolean
   conversationId: string | null
   /** Why Ask can't be used here, in plain words, or null when it can. */
@@ -82,7 +83,7 @@ export function useAsk(context: AskContext): AskController {
   const [choice, setChoice] = useState<string | null>(() => readStore(local, MODEL_KEY))
   /** The model the live conversation was started with, as the daemon reported it. */
   const [conversationModel, setConversationModel] = useState<string | null>(null)
-  const key = useKeyStatus()
+  const ai = useAiStatus()
   // Read when a message is sent, so a send always carries where the person is at that moment.
   const contextRef = useRef(context)
   useEffect(() => { contextRef.current = context })
@@ -114,7 +115,8 @@ export function useAsk(context: AskContext): AskController {
     return () => controller.abort()
   }, [conversationId])
 
-  const selectedModel = choice || DEFAULT_MODEL
+  // The strongest model on the sources connected, the plans the person pays for first.
+  const selectedModel = choice || modelForTier('strong', ai ? connectedSources(ai) : undefined)
 
   const begin = useCallback(async (): Promise<string> => {
     const info = await startConversation(askBeforeRun, selectedModel)
@@ -186,8 +188,12 @@ export function useAsk(context: AskContext): AskController {
 
   // No key, no Ask: the panel shows the key card in its place. Until the daemon has said, Ask is
   // usable, and a message sent without a key is refused with the daemon's own words.
-  const needsKey = key !== null && !key.connected
-  const unavailable = needsKey ? 'Ask runs on your OpenRouter key. Add it to start.' : null
+  const needsKey = ai !== null && connectedSources(ai).length === 0
+  const unavailable = needsKey
+    ? 'Ask needs a way to pay for its model. Connect your ChatGPT plan, your Claude API credit or an OpenRouter key to start.'
+    : ai !== null && !canRun(selectedModel, ai)
+      ? `Ask’s model runs ${SOURCE_INFO[sourceOf(selectedModel)].on}, which isn’t connected. Choose another model for Ask.`
+      : null
 
   return {
     open, setOpen, selectedModel, chooseModel, needsKey, conversationId, unavailable, thread,

@@ -221,6 +221,38 @@ fn collect_due(
     due
 }
 
+/// Why the team at `key` can't run now: an agent whose model is paid through a source not in
+/// `connected` (ADR 0073), said with what to connect. `None` when every agent can run, or the file
+/// can't be read here (the run itself then says why).
+fn unconnected_source(
+    teams_root: &Path,
+    key: &str,
+    connected: &[crate::ai::Source],
+) -> Option<String> {
+    let text = fs::read_to_string(teams_root.join(key)).ok()?;
+    let team = TeamConfig::parse(&text).ok()?;
+    team.agents
+        .iter()
+        .filter(|agent| agent.kind != crate::config::AgentKind::Operator)
+        .find_map(|agent| {
+            let model = crate::ai::ModelRef::parse(&agent.model);
+            let offline = model.id == crate::agent::OFFLINE_MODEL || model.id.starts_with("demo/");
+            if offline || connected.contains(&model.source) {
+                return None;
+            }
+            let name = if agent.name.trim().is_empty() {
+                agent.id.as_str()
+            } else {
+                agent.name.trim()
+            };
+            Some(format!(
+                "{name} runs on {}, which isn't connected on this computer. Connect it on \
+                 LoomWatch's Connections page, and the routine runs at its next time.",
+                model.source.said()
+            ))
+        })
+}
+
 /// What a rescan learned about one team file.
 #[derive(Debug)]
 enum Scanned {
@@ -522,6 +554,18 @@ impl Scheduler {
         archive: &EventArchive,
         teams_root: &Path,
     ) -> Result<RunRecord, ApiError> {
+        // A run whose agent's source isn't connected would only fail: the routine says why
+        // instead, and tries again at its next time.
+        if let Some(problem) = crate::ai::installed()
+            .and_then(|ai| unconnected_source(teams_root, &plan.key, &ai.connected_sources()))
+        {
+            let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
+            if let Some(entry) = entries.get_mut(&plan.key) {
+                entry.problem = Some(Problem::Fire(problem.clone()));
+            }
+            eprintln!("schedule: {}: not started: {problem}", plan.key);
+            return Err(ApiError::new(StatusCode::CONFLICT, problem));
+        }
         let result = runs::launch(
             registry,
             Some(archive.clone()),
@@ -1397,5 +1441,27 @@ mod tests {
         let second: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
         assert_ne!(second.run_id, first.run_id);
         let _cancelled = registry.cancel(&second.run_id);
+    }
+
+    /// A routine whose agent runs on a source that isn't connected says so, rather than starting
+    /// a run that would only fail; an offline demo needs nothing connected.
+    #[test]
+    fn a_routine_names_the_source_its_agent_needs() {
+        let root =
+            std::env::temp_dir().join(format!("loomwatch-schedule-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("team.yaml"),
+            "schemaVersion: 1\nentrypoint: w\nagents:\n  - id: w\n    name: Writer\n    model: chatgpt:gpt-6.1-sol\n  - id: d\n    name: Demo\n    model: fake/offline\n",
+        )
+        .unwrap();
+        let said =
+            unconnected_source(&root, "team.yaml", &[crate::ai::Source::OpenRouter]).unwrap();
+        assert!(
+            said.starts_with("Writer runs on your ChatGPT plan"),
+            "{said}"
+        );
+        assert!(unconnected_source(&root, "team.yaml", &[crate::ai::Source::ChatGpt]).is_none());
+        let _ = fs::remove_dir_all(&root);
     }
 }

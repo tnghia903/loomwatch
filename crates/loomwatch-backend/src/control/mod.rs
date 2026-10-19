@@ -265,8 +265,30 @@ impl Control {
             .ask_model
             .clone()
             .or(chosen)
-            .unwrap_or_else(|| crate::ai::DEFAULT_MODEL.to_owned())
+            .unwrap_or_else(|| tier_model("strong"))
     }
+}
+
+/// The model `tier` runs on, paid by a connected plan that offers it, else `OpenRouter` (ADR 0073,
+/// `ModelTiers::model_on`); `OpenRouter`'s when nothing says.
+pub(crate) fn tier_model(tier: &str) -> String {
+    use crate::ai::{ModelRef, Source};
+    let Some(ai) = crate::ai::installed() else {
+        return crate::ai::MODEL_TIERS.model_on(tier, &[], &|_| true);
+    };
+    let claude = ai.claude_status();
+    let plan = ai.chatgpt_status();
+    // A plan whose list isn't known yet is taken to offer its maker's models.
+    let offers = |model: &ModelRef| match model.source {
+        Source::Anthropic => {
+            claude.models.is_empty() || claude.models.iter().any(|known| known.id == model.id)
+        }
+        Source::ChatGpt => {
+            plan.models.is_empty() || plan.models.iter().any(|known| known.slug == model.id)
+        }
+        Source::OpenRouter => true,
+    };
+    crate::ai::MODEL_TIERS.model_on(tier, &ai.connected_sources(), &offers)
 }
 
 fn encode_query(value: &str) -> String {

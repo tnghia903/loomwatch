@@ -3,8 +3,10 @@
 #   1. install.ps1 (irm | iex) into a folder with a space, then loomwatch.cmd: help, version, start,
 #      the offline demo team through its review stop to the end, an agent on an OpenRouter model
 #      (scripts/mock-openrouter.py standing in for OpenRouter) that keeps its key in Credential
-#      Manager (on a CI runner only) and runs a command with cmd.exe, stop, then update to a newer
-#      release (made from this one) and roll back from it;
+#      Manager (on a CI runner only) and runs a command with cmd.exe, a Claude API key and a ChatGPT
+#      sign-in kept together in Credential Manager with an agent on each (scripts/mock-vendors.py
+#      standing in for Anthropic and OpenAI), stop, then update to a newer release (made from this
+#      one) and roll back from it;
 #   2. LoomWatch.exe, the app beside the clock: it starts LoomWatch, a second one starts nothing,
 #      and LoomWatch.exe --quit stops both;
 #   3. LoomWatch-windows-setup.exe, when -Dist has it: a silent install, its Start menu entry, the
@@ -12,8 +14,9 @@
 #      release, made from this one, checks it, saves the run history and runs it, which opens
 #      LoomWatch again), and the uninstaller quitting it and removing it.
 #
-# CI runs this on a Windows runner; nothing in it contacts a model provider. The stand-in for
-# OpenRouter answers on 127.0.0.1 only, and the key it takes is a made-up one.
+# CI runs this on a Windows runner; nothing in it contacts a model provider. The stand-ins for
+# OpenRouter, Anthropic and OpenAI answer on 127.0.0.1 only, and the keys and sign-in they take are
+# made-up ones.
 #
 #   scripts\smoke-windows.ps1 -Dist dist
 #
@@ -86,6 +89,13 @@ $env:MOCK_OPENROUTER_LOG = Join-Path $work 'mock'
 New-Item -ItemType Directory -Force -Path $env:MOCK_OPENROUTER_LOG | Out-Null
 $mock = Start-Process -FilePath $python -ArgumentList @("`"$(Join-Path $repo 'scripts\mock-openrouter.py')`"", '4100') -PassThru -WindowStyle Hidden
 $env:LOOMWATCH_OPENROUTER_URL = 'http://127.0.0.1:4100/api/v1'
+# Anthropic's stand-in on 4200 and OpenAI's on 4201, for the Claude API credit and the ChatGPT plan
+# (ADR 0073). Their addresses, too, are honoured only on this computer.
+$env:MOCK_VENDORS_LOG = $env:MOCK_OPENROUTER_LOG
+$vendors = Start-Process -FilePath $python -ArgumentList @("`"$(Join-Path $repo 'scripts\mock-vendors.py')`"", '4200') -PassThru -WindowStyle Hidden
+$env:LOOMWATCH_ANTHROPIC_URL = 'http://127.0.0.1:4200'
+$env:LOOMWATCH_OPENAI_AUTH_URL = 'http://127.0.0.1:4201'
+$env:LOOMWATCH_OPENAI_URL = 'http://127.0.0.1:4201'
 $daemonLog = Join-Path $work 'loomwatch.log'
 $appLog = Join-Path $env:LOOMWATCH_STATE_DIR 'Logs\loomwatchd.log'
 $launcher = $null
@@ -198,6 +208,73 @@ try {
   if ($realKeyStore) {
     $credentials = & cmdkey.exe /list 2>&1 | Out-String
     Check (-not ($credentials -match 'LoomWatch\.OpenRouter')) 'removing the key takes it out of Credential Manager'
+  }
+
+  # The Claude API credit and the ChatGPT plan. The Claude key and the ChatGPT sign-in share one
+  # more Credential Manager item, LoomWatch.Plans, kept in parts when it is too long for one.
+  $claudeKey = @{ 'x-api-key' = 'sk-ant-api03-mock-windows-smoke' }
+  Wait-Until { try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:4200/v1/models' -Headers $claudeKey).StatusCode -eq 200 } catch { $false } } 30 'the stand-ins for Anthropic and OpenAI' | Out-Null
+  $claude = Invoke-RestMethod -Method Put -Uri "$url/api/ai/anthropic" -Headers $fromApp -ContentType 'application/json' -Body (@{ key = 'sk-ant-api03-mock-windows-smoke' } | ConvertTo-Json)
+  Check ([bool]$claude.anthropic.connected) 'the Claude API key is checked and kept'
+  # Continue with ChatGPT, as a browser does it: LoomWatch names the sign-in page, and the
+  # stand-in's Continue sends the browser back to LoomWatch on 127.0.0.1.
+  $signIn = Invoke-RestMethod -Method Post -Uri "$url/api/ai/chatgpt/sign-in" -Headers $fromApp
+  $consent = (Invoke-WebRequest -UseBasicParsing -Uri $signIn.url).Content
+  $continue = [Net.WebUtility]::HtmlDecode([regex]::Match($consent, 'href="([^"]+)"').Groups[1].Value)
+  $landing = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:4201$continue"
+  Check ($landing.Content -match 'Connected') 'the ChatGPT sign-in comes back to LoomWatch'
+  $ai = Invoke-RestMethod -Uri "$url/api/ai"
+  Check ($ai.chatgpt.connected -and $ai.chatgpt.planUse) 'LoomWatch may use the ChatGPT plan'
+  $plansFile = Join-Path $env:LOOMWATCH_STATE_DIR 'plans.json'
+  if ($realKeyStore) {
+    Check (-not (Test-Path -LiteralPath $plansFile)) 'the Claude key and the ChatGPT sign-in are not kept in a file'
+    $credentials = & cmdkey.exe /list 2>&1 | Out-String
+    Check ($credentials -match 'LoomWatch\.Plans') 'they are in Windows Credential Manager'
+  } else {
+    Check (Test-Path -LiteralPath $plansFile) 'they are kept in this smoke''s own state folder'
+  }
+  # One agent on each: Writer on the Claude credit, Checker on the ChatGPT plan.
+  $plansTeam = @(
+    'schemaVersion: 1',
+    'id: windows-plans',
+    'name: Windows plans check',
+    'entrypoint: writer',
+    'agents:',
+    '  - id: writer',
+    '    name: Writer',
+    '    role: Write a short note that answers the task.',
+    '    model: anthropic:claude-opus-5-5',
+    '  - id: checker',
+    '    name: Checker',
+    '    role: Check the Writer''s note and say whether it answers the task.',
+    '    model: chatgpt:gpt-6.1-sol',
+    'edges:',
+    '  - from: writer',
+    '    to: checker',
+    '    layer: configured',
+    '    kind: sequence',
+    '    ts: "2026-10-19T00:00:00Z"'
+  ) -join "`n"
+  [IO.File]::WriteAllText((Join-Path $teams 'windows-plans.yaml'), "$plansTeam`n")
+  $plansBody = @{ teamPath = 'windows-plans.yaml'; prompt = 'Write two lines on why short guides work.' } | ConvertTo-Json
+  $review = Invoke-RestMethod -Method Post -Uri "$url/api/runs" -ContentType 'application/json' -Body $plansBody -SkipHttpErrorCheck -StatusCodeVariable reviewStatus
+  Check ($reviewStatus -eq 409 -and $review.code -eq 'team_needs_review') "the plans team waits for approval ($reviewStatus)"
+  Invoke-RestMethod -Method Post -Uri "$url/api/team/approve" -ContentType 'application/json' -Body (@{ teamPath = 'windows-plans.yaml'; teamRevision = $review.teamRevision } | ConvertTo-Json) | Out-Null
+  $plansRun = (Invoke-RestMethod -Method Post -Uri "$url/api/runs" -ContentType 'application/json' -Body $plansBody).runId
+  $plansDone = Wait-Until {
+    $run = Invoke-RestMethod -Uri "$url/api/runs/$plansRun"
+    if ($run.status -in @('succeeded', 'failed', 'cancelled')) { $run }
+  } 120 'the plans run to finish'
+  Check ($plansDone.status -eq 'succeeded') "an agent on each plan runs ($($plansDone.status))"
+  $calls = Get-Content -LiteralPath (Join-Path $env:MOCK_VENDORS_LOG 'vendors.jsonl') -Raw
+  Check ($calls -match '"n": \d+, "vendor": "anthropic"') 'Writer called Anthropic'
+  Check ($calls -match '"n": \d+, "vendor": "openai"') 'Checker called OpenAI'
+  Invoke-RestMethod -Method Delete -Uri "$url/api/ai/anthropic" -Headers $fromApp | Out-Null
+  $signedOut = Invoke-RestMethod -Method Delete -Uri "$url/api/ai/chatgpt" -Headers $fromApp
+  Check ([bool]$signedOut.revoked) 'signing out of ChatGPT revokes the sign-in'
+  if ($realKeyStore) {
+    $credentials = & cmdkey.exe /list 2>&1 | Out-String
+    Check (-not ($credentials -match 'LoomWatch\.Plans')) 'removing both takes LoomWatch.Plans out of Credential Manager'
   }
 
   # Stop it the way a person does.
@@ -335,6 +412,7 @@ try {
   if ($launcher -and -not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
   if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
   if ($mock -and -not $mock.HasExited) { Stop-Process -Id $mock.Id -Force -ErrorAction SilentlyContinue }
+  if ($vendors -and -not $vendors.HasExited) { Stop-Process -Id $vendors.Id -Force -ErrorAction SilentlyContinue }
 }
 
 if ($failures -gt 0) {

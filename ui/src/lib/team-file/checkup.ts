@@ -10,7 +10,7 @@
 //
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
-import { CHECK_MODEL, DEFAULT_MODEL, OVERTHINKING_EFFORTS, modelForJob, modelNameFromId, openRouterId } from '../ai/modelIds'
+import { OVERTHINKING_EFFORTS, canonicalModel, makerSlug, modelForJob, modelForTier, modelNameFromId, parseModelRef, tierOfModel } from '../ai/modelIds'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
 import type { TeamUsage } from './runLessons'
 import { NEW_SEND_BACK, sendBackOf } from './sendBack'
@@ -348,14 +348,15 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
     // agent whose reply is the team's answer, and only for one on the default strong model: a model
     // the operator chose on purpose is theirs.
     const job = jobFor(agent)
-    if (job?.tier === 'fast' && !final && openRouterId(agent.model) === DEFAULT_MODEL) {
-      const fast = modelForJob(job)
+    if (job?.tier === 'fast' && !final && tierOfModel(agent.model ?? '') === 'strong') {
+      // The faster model on the agent's own source: how it is paid stays as the person chose.
+      const fast = { ...modelForJob(job), model: modelForTier('fast', [parseModelRef(agent.model).source]) }
       const named = (id: string) => modelNames?.get(id) ?? modelNameFromId(id)
       const writer = responder ? name(responder) : 'the next step'
       add({
         rule: 'strong-gatherer', severity: 'improve', agentId: agent.id,
         title: `${agent.name} could gather on ${named(fast.model)}`,
-        why: `It collects facts for ${writer} to write up. A faster model does that well, for less, and leaves ${named(DEFAULT_MODEL)} for the step that writes the answer.${shareOfTeam(usage, agent.id)}`,
+        why: `It collects facts for ${writer} to write up. A faster model does that well, for less, and leaves ${named(canonicalModel(agent.model))} for the step that writes the answer.${shareOfTeam(usage, agent.id)}`,
         fix: {
           label: `Use ${named(fast.model)}`,
           change: { kind: 'model', agentId: agent.id, model: fast.model, ...(fast.thinkingEffort ? { thinkingEffort: fast.thinkingEffort } : {}) },
@@ -444,10 +445,17 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
   for (const checker of workers) {
     const checked = checker.checks ? byId.get(checker.checks) : undefined
     if (!checked || checked.kind === 'operator') continue
-    const theirs = openRouterId(checked.model)
-    if (theirs && openRouterId(checker.model) === theirs) {
+    const theirs = canonicalModel(checked.model)
+    if (theirs && canonicalModel(checker.model) === theirs) {
       // The other maker's model, as the model picker suggests it (modelSuggestion.ts).
-      const other = theirs.split('/')[0] === CHECK_MODEL.split('/')[0] ? DEFAULT_MODEL : CHECK_MODEL
+      // On the checker's own source where it has another maker's model; else from the sources
+      // connected, the plans first.
+      const own = [parseModelRef(checker.model).source]
+      const pick = (sources?: readonly ('openrouter' | 'chatgpt' | 'anthropic')[]) => {
+        const check = modelForTier('check', sources)
+        return makerSlug(theirs) === makerSlug(check) ? modelForTier('strong', sources) : check
+      }
+      const other = makerSlug(pick(own)) === makerSlug(theirs) ? pick() : pick(own)
       add({
         rule: 'check-same-model', severity: 'improve', agentId: checker.id, agentIds: [checker.id, checked.id],
         title: `${checker.name} checks ${checked.name}’s work on the same model that wrote it`,

@@ -148,22 +148,27 @@ describe('Home', () => {
     expect(await screen.findByRole('button', { name: /research-team/ })).toBeInTheDocument()
   })
 
-  it('says how to start when there are no teams, and asks for an OpenRouter key until there is one', async () => {
+  it('says how to start when there are no teams, and asks how models are paid until one is connected', async () => {
     fetchMock.mockImplementation(keyed({ connected: false }))
     renderHome()
     expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
-    expect(await screen.findByRole('region', { name: 'Add your OpenRouter key' })).toBeInTheDocument()
-    expect(screen.getByText('Add your OpenRouter key so your agents can run.')).toBeInTheDocument()
-    // The card asks for the key's state itself, so its field comes once that answer does.
+    // The ways to pay side by side, with the same weight (ADR 0073).
+    expect(await screen.findByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Your Claude API credit' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'OpenRouter (pay per use)' })).toBeInTheDocument()
+    expect(screen.getByText('Connect your ChatGPT plan, your Claude API credit or an OpenRouter key so your agents can run.')).toBeInTheDocument()
+    // The OpenRouter card asks for the key's state itself, so its field comes once that answer does.
     expect(await screen.findByLabelText('OpenRouter key')).toHaveAttribute('type', 'password')
+    expect(screen.getByLabelText('Claude API key')).toHaveAttribute('type', 'password')
   })
 
-  it('keeps the key card away once a key is added, and says the agents run on OpenRouter', async () => {
+  it('keeps the cards away once a way to pay is connected, and says what agents can run on', async () => {
     fetchMock.mockImplementation(keyed({ connected: true, label: 'sk-or-v1-abc...xyz' }))
     renderHome()
-    expect(await screen.findByText('Agents run on OpenRouter with key sk-or-v1-abc...xyz')).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Add your OpenRouter key' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Manage key' })).toHaveAttribute('href', '/connections')
+    expect(await screen.findByText('Agents can run on OpenRouter')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/connections')
+    expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/usage')
   })
 
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {

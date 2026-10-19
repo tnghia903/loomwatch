@@ -13,7 +13,7 @@ const writer = { id: 'writer', name: 'Writer', role: 'Write the article from wha
 describe('suggestModel', () => {
   it('keeps a researcher on the strongest model while its job is on the strong tier', () => {
     const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher, writer], responder: 'writer' } })
-    expect(suggestion).toEqual({ model: DEFAULT_MODEL, why: 'A researcher finds and checks sources. That work decides the result, so it gets the strongest model.' })
+    expect(suggestion).toEqual({ model: DEFAULT_MODEL, tier: 'strong', why: 'A researcher finds and checks sources. That work decides the result, so it gets the strongest model.' })
   })
 
   it('puts a gatherer on the faster model when another agent writes the answer', onTheFastTier(() => {
@@ -29,7 +29,7 @@ describe('suggestModel', () => {
   }))
 
   it('follows the job alone while the agent is built on its own', onTheFastTier(() => {
-    expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, why: expect.stringContaining('for another agent to write up') })
+    expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, tier: 'fast', why: expect.stringContaining('for another agent to write up') })
   }))
 
   it('reads a check on another maker’s model than the work it checks', () => {
@@ -44,7 +44,7 @@ describe('suggestModel', () => {
   })
 
   it('gives work that decides the result the strongest model, and says why in the job’s words', () => {
-    expect(suggestModel({ agent: writer })).toEqual({ model: DEFAULT_MODEL, why: 'A writer drafts the finished piece. That work decides the result, so it gets the strongest model.' })
+    expect(suggestModel({ agent: writer })).toEqual({ model: DEFAULT_MODEL, tier: 'strong', why: 'A writer drafts the finished piece. That work decides the result, so it gets the strongest model.' })
     expect(suggestModel({ agent: { id: 'a', name: 'Numbers', role: 'Analyse the sales sheet.' } }).why).toMatch(/^An analyst makes sense of data\./)
   })
 
@@ -69,7 +69,7 @@ describe('suggestModel with a reading of the whole setup', () => {
   it('puts a gatherer the keywords call a writer on the faster model, and says it was read', () => {
     expect(suggestModel({ agent: gatherer, team }).model).toBe(DEFAULT_MODEL)
     const read = suggestModel({ agent: gatherer, team, reading: sure('gather') })
-    expect(read).toEqual({ model: FAST_MODEL, read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
+    expect(read).toEqual({ model: FAST_MODEL, tier: 'fast', read: true, why: 'Its configuration says it gathers for Writer rather than writing the answer. A faster model does that well, for less, and leaves the strongest one for the step that writes.' })
   })
 
   it('keeps the team’s answer on the strongest model whatever the reading says', () => {

@@ -8,9 +8,12 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 use super::BoxFuture;
+use super::anthropic::Anthropic;
+use super::chatgpt::ChatGptPlan;
 use super::demo::Demo;
 use super::error::CallError;
 use super::openrouter::OpenRouter;
+use crate::ai::Source;
 
 /// One message of the conversation, in the agent's own order. It is append-only: a model that
 /// signs its reasoning (Claude's "preserved thinking") refuses a history whose earlier turns were
@@ -31,11 +34,23 @@ pub enum Message {
         reasoning_details: Vec<Value>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
+        /// The message as a provider other than `OpenRouter` wrote it, sent back to that provider
+        /// unchanged: Claude refuses a history whose signed thinking was rewritten.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native: Option<Native>,
     },
     Tool {
         tool_call_id: String,
         content: String,
     },
+}
+
+/// A message in the shape one provider writes it: Anthropic's content blocks or the Responses API's
+/// output items. Only that provider reads it back; any other ignores it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Native {
+    pub source: Source,
+    pub items: Vec<Value>,
 }
 
 /// A tool the model asked to call. `arguments` is the JSON text the model wrote, kept as text so
@@ -130,6 +145,10 @@ pub struct ChatRequest<'a> {
     pub tools: &'a [ToolSpec],
     pub server_tools: ServerTools,
     pub max_tokens: u32,
+    /// The tools are offered only so the conversation stays as it was: the model must not call
+    /// one. A summary on a provider that signs its reasoning asks this rather than offering none,
+    /// which would change what came before and undo the signatures and the prompt cache.
+    pub tools_off: bool,
     /// Groups the calls of one session, so the provider keeps routing them to the same place and
     /// its prompt cache keeps working.
     pub session_key: &'a str,
@@ -165,6 +184,13 @@ pub struct Usage {
     pub web_searches: u64,
     #[serde(default)]
     pub web_fetches: u64,
+    /// Who paid, when it was not `OpenRouter`. A `ChatGPT` plan's calls cost the plan's allowance,
+    /// not dollars, so their `cost_usd` is zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_by: Option<Source>,
+    /// `cost_usd` was worked out from list prices rather than reported by the provider.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cost_estimated: bool,
 }
 
 impl Usage {
@@ -177,6 +203,8 @@ impl Usage {
         self.cost_usd += other.cost_usd;
         self.web_searches += other.web_searches;
         self.web_fetches += other.web_fetches;
+        self.paid_by = self.paid_by.or(other.paid_by);
+        self.cost_estimated |= other.cost_estimated;
     }
 
     /// Every prompt token, cached or not: how full the model's context was for this call.
@@ -201,6 +229,8 @@ pub struct Completion {
     pub usage: Usage,
     /// Searches and fetches the provider ran on the model's behalf, for the record.
     pub server_tool_calls: Vec<Value>,
+    /// The message as the provider wrote it, when it is not `OpenRouter`: see [`Native`].
+    pub native: Option<Native>,
 }
 
 impl Completion {
@@ -214,6 +244,7 @@ impl Completion {
             finish: Finish::Stop,
             usage: Usage::default(),
             server_tool_calls: Vec::new(),
+            native: None,
         }
     }
 
@@ -238,6 +269,10 @@ pub(crate) trait DeltaSink: Send + Sync {
 #[derive(Debug, Clone)]
 pub enum Provider {
     OpenRouter(Arc<OpenRouter>),
+    /// The person's own Claude API key (ADR 0073).
+    Anthropic(Arc<Anthropic>),
+    /// The person's `ChatGPT` plan, through the sign-in with `ChatGPT` (ADR 0073).
+    ChatGpt(Arc<ChatGptPlan>),
     Demo(Demo),
 }
 
@@ -251,6 +286,9 @@ impl Provider {
     ) -> Result<Completion, CallError> {
         match self {
             Self::OpenRouter(provider) => provider.complete(request, deltas, cancel).await,
+            // Boxed: a provider's call is a large future, and Windows builds count it larger still.
+            Self::Anthropic(provider) => Box::pin(provider.complete(request, deltas, cancel)).await,
+            Self::ChatGpt(provider) => Box::pin(provider.complete(request, deltas, cancel)).await,
             // A stopped turn stops the demo too, as it stops a stream.
             Self::Demo(demo) => tokio::select! {
                 completion = demo.complete(request, deltas) => completion,
@@ -263,6 +301,14 @@ impl Provider {
     #[must_use]
     pub fn is_demo(&self) -> bool {
         matches!(self, Self::Demo(_))
+    }
+
+    /// Whether a summary keeps the session's tools, asking the model not to call them
+    /// ([`ChatRequest::tools_off`]), rather than going without: true where the conversation is signed
+    /// and must not change under it.
+    #[must_use]
+    pub fn keeps_tools_for_summaries(&self) -> bool {
+        !matches!(self, Self::OpenRouter(_) | Self::Demo(_))
     }
 }
 

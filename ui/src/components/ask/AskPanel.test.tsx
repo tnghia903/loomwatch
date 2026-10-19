@@ -19,7 +19,7 @@ beforeEach(() => {
   forgetModels()
   forgetKeyStatus()
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-    const body = String(input) === '/api/ai' ? { openrouter: { connected: false } } : catalog
+    const body = String(input) === '/api/ai' ? { openrouter: { connected: true } } : catalog
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }))
 })
@@ -88,10 +88,11 @@ describe('AskPanel', () => {
     await vi.waitFor(() => expect(ask.setDraft).toHaveBeenLastCalledWith('Add a fact-checker'))
   })
 
-  it('shows the key card in place of the conversation until an OpenRouter key is added, and keeps the box closed', async () => {
-    render(<AskPanel ask={controller({ needsKey: true, unavailable: 'Ask runs on your OpenRouter key. Add it to start.' })} view="home" cards={cards()} />)
-    expect(screen.getByText(/Ask runs on your OpenRouter key/)).toBeInTheDocument()
-    expect(await screen.findByRole('region', { name: 'Add your OpenRouter key' })).toBeInTheDocument()
+  it('shows the ways to pay in place of the conversation until one is connected, and keeps the box closed', async () => {
+    render(<AskPanel ask={controller({ needsKey: true, unavailable: 'Ask needs a way to pay for its model.' })} view="home" cards={cards()} />)
+    expect(screen.getByText(/Ask needs a way to pay for its model/)).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Choose how Ask’s model is paid' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'OpenRouter (pay per use)' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Message to Ask LoomWatch' })).toBeDisabled()
     expect(screen.queryByRole('list', { name: 'Try asking' })).toBeNull()
   })
@@ -154,7 +155,7 @@ describe('Choosing the model', () => {
     const ask = controller()
     render(<AskPanel ask={ask} view="home" cards={cards()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' }))
-    const list = await screen.findByRole('listbox', { name: 'Recommended models' })
+    const list = await screen.findByRole('listbox', { name: 'Models by how they are paid' })
     fireEvent.click(within(list).getByRole('option', { name: /Claude Haiku 5\.5/ }))
     expect(ask.chooseModel).toHaveBeenCalledWith(haiku.id)
     expect(screen.queryByRole('dialog', { name: 'Choose the model Ask runs on' })).not.toBeInTheDocument()
@@ -167,7 +168,7 @@ describe('Choosing the model', () => {
     render(<AskPanel ask={ask} view="build" cards={cards()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Model: Claude Opus 5.5. Change' }))
     expect(screen.getByText('Changing the model starts a new conversation.')).toBeInTheDocument()
-    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Recommended models' })).getByRole('option', { name: /Claude Opus 5\.5/ }))
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Models by how they are paid' })).getByRole('option', { name: /Claude Opus 5\.5/ }))
     expect(ask.chooseModel).not.toHaveBeenCalled()
   })
 

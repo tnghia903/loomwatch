@@ -16,27 +16,39 @@ Only the newest release, and `main`, get security fixes.
 ## What LoomWatch protects, and what it doesn't
 
 LoomWatch runs AI agents on your computer and lets them work. Each agent runs inside LoomWatch
-itself and thinks with the model you chose, reached through OpenRouter with your OpenRouter key. It
-is not a full sandbox: what you let an agent do, it does as you, with your files. Here is what
-LoomWatch does about that, so you can judge it for yourself.
+itself and thinks with the model you chose: on your ChatGPT plan, on your Claude API credit, or
+through OpenRouter with your OpenRouter key. It is not a full sandbox: what you let an agent do, it
+does as you, with your files. Here is what LoomWatch does about that, so you can judge it for
+yourself.
 
 **It does:**
 
 - **Stay on your computer.** The app and its API answer only on `127.0.0.1`. Requests from other
   websites, and from pages that rebind their address to `127.0.0.1`, are refused. In Docker, its
   port is published on `127.0.0.1` only.
-- **Keep your OpenRouter key to itself.** You paste the key into LoomWatch, which checks it with
-  OpenRouter before keeping it. On a Mac it is kept in the Keychain as `LoomWatch.OpenRouter`. On
-  Windows it is kept in Windows Credential Manager, as `api-key.LoomWatch.OpenRouter`, which only
-  your Windows account can read (as with every credential there, so can any program you run). On
-  Linux it is kept in `keys.json` in LoomWatch's state folder, readable by your account only. Your
-  Notion connection is kept the same way, as `LoomWatch.Notion`, except that Linux keeps none. The
-  key is sent to OpenRouter and nowhere else: never to agents or the commands they run, and never
-  into team files, the run history or logs. Anything shaped like a key is cut out of an error
-  message before it is shown or kept. Only a key entered in LoomWatch is used: an
-  `OPENROUTER_API_KEY` in the environment is ignored, LoomWatch never reads another app's
-  credentials or sign-in, and it never uses an AI subscription. Other websites can't set or change
-  the key.
+- **Keep your keys and your ChatGPT sign-in to itself.** You paste an OpenRouter or Claude API key
+  into LoomWatch, which checks it with its company before keeping it. LoomWatch takes only a Claude
+  API key: it refuses a Claude sign-in token (`sk-ant-oat…`) and an Admin key. On a Mac the
+  OpenRouter key is kept in the Keychain as `LoomWatch.OpenRouter`, and the Claude key and the
+  ChatGPT sign-in together as `LoomWatch.Plans`. On Windows they are kept in Windows Credential
+  Manager, as `api-key.LoomWatch.OpenRouter` and `plans.LoomWatch.Plans`, which only your Windows
+  account can read (as with every credential there, so can any program you run). On Linux they are
+  kept in `keys.json` and `plans.json` in LoomWatch's state folder, readable by your account only.
+  Your Notion connection is kept the same way, as `LoomWatch.Notion`, except that Linux keeps none.
+  Each key is sent to its own company and nowhere else: never to agents or the commands they run,
+  and never into team files, the run history or logs. Anything shaped like a key or a sign-in token
+  is cut out of an error message before it is shown or kept. Only what you enter or sign in to in
+  LoomWatch is used: an `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the
+  environment is ignored, and LoomWatch never reads another app's credentials or sign-in. Other
+  websites can't set or change a key.
+- **Sign in with ChatGPT the way OpenAI asks.** **Continue with ChatGPT** opens ChatGPT's own page,
+  so LoomWatch never sees your password. It uses PKCE, and it takes the answer only on
+  `127.0.0.1`, only for a sign-in it started in the last 10 minutes, and only with that sign-in's
+  random `state`. It checks that the ID token was issued by OpenAI, for LoomWatch, for this sign-in
+  and not expired. It keeps only the refresh token; each hour's access token stays in memory.
+  **Sign out** asks OpenAI to revoke the sign-in, then forgets it; if OpenAI couldn't be reached,
+  LoomWatch says so, and you can remove it in ChatGPT's settings. An agent on your ChatGPT plan
+  never moves to another way of paying by itself, even at the plan's limit.
 - **Check a team before it first runs.** A team file you didn't build in LoomWatch shows what it
   does before its first run. That covers a file you downloaded, unzipped or edited by hand. You see
   each agent and the model it runs on ("Writer runs on LoomWatch with anthropic/claude-opus-5.5"),
@@ -86,8 +98,12 @@ LoomWatch does about that, so you can judge it for yourself.
   as a command, which asks like any other. **Look on this computer** copies skills from your AI
   apps' skill folders only when you click it, and reads nothing there but skill folders.
 - **Collect nothing about you.** LoomWatch has no account and no telemetry. It contacts only:
-  - OpenRouter, for the model calls your agents and Ask make, to check your key, and for its
-    public list of models. Once you turn on **Let AI choose** under an agent's suggestion in its
+  - OpenAI, once you sign in with ChatGPT: `auth.openai.com` for the sign-in, and
+    `api.openai.com` for your plan's models and the model calls of agents on your plan;
+  - Anthropic, once you add a Claude API key: `api.anthropic.com` to check the key, list its
+    models, and make the model calls of agents on your Claude credit;
+  - OpenRouter, for the model calls of agents and Ask paid through it, to check your key, and for
+    its public list of models, which also gives the list prices used for Claude amounts. Once you turn on **Let AI choose** under an agent's suggestion in its
     model list (it is off until you do), OpenRouter is also asked to read any agent whose job its
     name and instructions don't make plain, when you open its model list or, for an agent whose
     model follows its suggestion, when you change it.
@@ -103,12 +119,14 @@ LoomWatch does about that, so you can judge it for yourself.
 
 - Stop an approved team from doing what you allowed. Read the review, and only trust teams from
   people you trust.
-- Keep your prompts and files on your computer. Everything an agent works with goes to OpenRouter
-  and on to the model's provider: its instructions, your prompt, the team's Brief and notes, the
+- Keep your prompts and files on your computer. Everything an agent works with goes to the
+  company whose model it uses (OpenAI on your ChatGPT plan, Anthropic on your Claude credit), or to
+  OpenRouter and on to that company: its instructions, your prompt, the team's Brief and notes, the
   Notion pages you give it, what its teammates hand it, and what its tools return, such as the
   files it reads and the output of its commands.
-- Ask before each web search. An agent allowed the web searches and reads pages through OpenRouter,
-  which runs them for it; each one shows in the run afterwards.
+- Ask before each web search. An agent allowed the web searches and reads pages through the company
+  that runs its model (OpenAI, Anthropic or OpenRouter), which runs them for it; each one shows in
+  the run afterwards.
 - Limit what an allowed command reads. The sandbox limits where a command writes and whether it
   reaches the network, not which of your files it reads.
 - Sandbox commands on Windows. A command an agent runs there can read and change every file your

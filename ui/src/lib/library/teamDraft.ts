@@ -1,4 +1,4 @@
-import { openRouterId } from '../ai/modelIds'
+import { canonicalModel } from '../ai/modelIds'
 import { chosenIsFile, chosenName } from '../knowledge/chosen'
 import type { AgentConfig, CapabilityRef } from '../team-file/types'
 import type { AgentDraft } from './draft'
@@ -21,7 +21,7 @@ export function draftFromTeamAgent(agent: AgentConfig): AgentDraft {
     instructions: agent.role,
     // A name written for an AI app reads as the model it maps to; it is written back only when
     // the operator chooses a model.
-    model: openRouterId(agent.model),
+    model: canonicalModel(agent.model),
     effort: agent.thinkingEffort ?? '',
     skills: (agent.capabilities ?? []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name),
     tools: toolsOf(agent),

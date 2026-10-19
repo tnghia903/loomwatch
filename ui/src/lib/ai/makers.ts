@@ -7,6 +7,8 @@
 
 import { COLOUR_MARKS, type ColourMark } from './makerColours'
 
+import { type ModelSource, openRouterEquivalent, parseModelRef } from './modelIds'
+
 export interface Maker {
   /** The name people know the company by, or OpenRouter's own word for it when this list has none. */
   name: string
@@ -92,15 +94,28 @@ const MAKERS: Record<string, { name: string; mark?: string }> = {
 }
 
 /**
- * Who made a model, from its OpenRouter id ("anthropic/claude-opus-5.5"). A "~" in front is
- * OpenRouter's always-the-latest alias ("~anthropic/claude-opus-latest"), the same maker.
+ * Who made a model, from its id: an OpenRouter id ("anthropic/claude-opus-5.5") or one a plan pays
+ * for ("chatgpt:gpt-6.1-sol" is OpenAI's). A "~" in front is OpenRouter's always-the-latest alias
+ * ("~anthropic/claude-opus-latest"), the same maker. OpenRouter's own models ("openrouter/auto")
+ * are OpenRouter's: read as an older name, that prefix would be taken off.
  */
 export function makerOf(id: string): Maker {
-  const slug = (id.split('/')[0] ?? '').replace(/^~/, '')
+  const own = /^~?openrouter\//.test(id.trim())
+  const openrouter = own ? id.trim() : openRouterEquivalent(parseModelRef(id))
+  return makerNamed((openrouter.split('/')[0] ?? '').replace(/^~/, ''))
+}
+
+/** A maker by OpenRouter's word for it, with its marks. */
+function makerNamed(slug: string): Maker {
   const known = Object.hasOwn(MAKERS, slug) ? MAKERS[slug] : undefined
   if (!known) return { name: slug }
   if (!known.mark) return { name: known.name }
   const mark = Object.hasOwn(MARKS, known.mark) ? MARKS[known.mark] : undefined
   const colour = Object.hasOwn(COLOUR_MARKS, known.mark) ? COLOUR_MARKS[known.mark] : undefined
   return { name: known.name, ...(mark ? { mark } : {}), ...(colour ? { colour } : {}) }
+}
+
+/** The company behind a way of paying: OpenAI for the ChatGPT plan, Anthropic for the Claude credit, OpenRouter for itself. */
+export function sourceMaker(source: ModelSource): Maker {
+  return makerNamed(source === 'chatgpt' ? 'openai' : source)
 }

@@ -30,6 +30,7 @@ use super::provider::{
     Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, ServerTools, ToolCall, Usage,
 };
 use super::sse::SseDecoder;
+use crate::ai::Source;
 
 /// Where `OpenRouter`'s API lives.
 pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
@@ -177,7 +178,11 @@ impl OpenRouter {
                     self.wait(attempt, None, cancel).await?;
                     continue;
                 }
-                Err(error) => return Err(AgentError::Network(network_error(&error)).into()),
+                Err(error) => {
+                    return Err(
+                        AgentError::Network(Source::OpenRouter, network_error(&error)).into(),
+                    );
+                }
             };
             let status = response.status();
             if status.is_success() {
@@ -347,6 +352,7 @@ fn wire_message(message: &Message) -> Value {
             content,
             reasoning_details,
             tool_calls,
+            ..
         } => {
             let mut wire = Map::new();
             wire.insert("role".into(), json!("assistant"));
@@ -441,8 +447,10 @@ async fn read_stream(
             () = cancel.cancelled() => return Err(CallError::Cancelled),
         };
         let chunk = match chunk {
-            Err(_) => return Err(AgentError::Stalled.into()),
-            Ok(Err(error)) => return Err(AgentError::Network(network_error(&error)).into()),
+            Err(_) => return Err(AgentError::Stalled(Source::OpenRouter).into()),
+            Ok(Err(error)) => {
+                return Err(AgentError::Network(Source::OpenRouter, network_error(&error)).into());
+            }
             Ok(Ok(None)) => break,
             Ok(Ok(Some(bytes))) => bytes,
         };
@@ -465,7 +473,7 @@ async fn read_stream(
         }
     }
     if message.finish.is_none() && message.content.is_empty() && message.calls.is_empty() {
-        return Err(AgentError::Stalled.into());
+        return Err(AgentError::Stalled(Source::OpenRouter).into());
     }
     Ok(Streamed::Whole(finish(message)))
 }
@@ -534,6 +542,7 @@ async fn take_event(
             "content_filter" => Finish::ContentFilter,
             "error" => {
                 return Err(AgentError::Provider(
+                    Source::OpenRouter,
                     "the model stopped with an error partway through its reply".to_owned(),
                 )
                 .into());
@@ -664,6 +673,7 @@ fn finish(message: Assembled) -> Completion {
         finish,
         usage,
         server_tool_calls,
+        native: None,
     }
 }
 
@@ -682,6 +692,7 @@ fn read_usage(usage: &Value) -> Usage {
         cost_usd: usage.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
         web_searches: web.searches,
         web_fetches: web.fetches,
+        ..Usage::default()
     }
 }
 
@@ -743,11 +754,13 @@ fn status_error(status: StatusCode, said: &str, model: &str) -> AgentError {
     let said = redact(said);
     let lower = said.to_lowercase();
     match status {
-        StatusCode::UNAUTHORIZED => AgentError::KeyRefused,
-        StatusCode::PAYMENT_REQUIRED => AgentError::OutOfCredits,
-        StatusCode::TOO_MANY_REQUESTS => AgentError::RateLimited,
-        StatusCode::NOT_FOUND => AgentError::ModelUnavailable(model.to_owned()),
-        StatusCode::FORBIDDEN if lower.contains("key") => AgentError::KeyRefused,
+        StatusCode::UNAUTHORIZED => AgentError::KeyRefused(Source::OpenRouter),
+        StatusCode::PAYMENT_REQUIRED => AgentError::OutOfCredits(Source::OpenRouter),
+        StatusCode::TOO_MANY_REQUESTS => AgentError::RateLimited(Source::OpenRouter),
+        StatusCode::NOT_FOUND => AgentError::ModelUnavailable(Source::OpenRouter, model.to_owned()),
+        StatusCode::FORBIDDEN if lower.contains("key") => {
+            AgentError::KeyRefused(Source::OpenRouter)
+        }
         _ if lower.contains("context length")
             || lower.contains("context window")
             || lower.contains("maximum context")
@@ -762,10 +775,12 @@ fn status_error(status: StatusCode, said: &str, model: &str) -> AgentError {
             && !lower.contains("tool"))
             || lower.contains("no endpoints found") =>
         {
-            AgentError::ModelUnavailable(model.to_owned())
+            AgentError::ModelUnavailable(Source::OpenRouter, model.to_owned())
         }
-        _ if said.is_empty() => AgentError::Provider(format!("HTTP {}", status.as_u16())),
-        _ => AgentError::Provider(said),
+        _ if said.is_empty() => {
+            AgentError::Provider(Source::OpenRouter, format!("HTTP {}", status.as_u16()))
+        }
+        _ => AgentError::Provider(Source::OpenRouter, said),
     }
 }
 
@@ -829,6 +844,7 @@ mod tests {
                 limits: crate::agent::WebLimits::default(),
             },
             max_tokens: 8192,
+            tools_off: false,
             session_key: "s-1",
             agent_id: "writer",
         }
@@ -850,6 +866,7 @@ mod tests {
                     name: "read_file".into(),
                     arguments: "{\"path\":\"a.md\"}".into(),
                 }],
+                native: None,
             },
             Message::Tool {
                 tool_call_id: "call_1".into(),
@@ -1155,11 +1172,11 @@ mod tests {
         let model = "anthropic/claude-opus-5.5";
         assert!(matches!(
             status_error(StatusCode::UNAUTHORIZED, "No auth", model),
-            AgentError::KeyRefused
+            AgentError::KeyRefused(Source::OpenRouter)
         ));
         assert!(matches!(
             status_error(StatusCode::PAYMENT_REQUIRED, "Insufficient credits", model),
-            AgentError::OutOfCredits
+            AgentError::OutOfCredits(Source::OpenRouter)
         ));
         assert!(matches!(
             status_error(
@@ -1175,9 +1192,9 @@ mod tests {
                 "x/y is not a valid model ID",
                 model
             ),
-            AgentError::ModelUnavailable(_)
+            AgentError::ModelUnavailable(Source::OpenRouter, _)
         ));
-        let AgentError::Provider(said) = status_error(
+        let AgentError::Provider(Source::OpenRouter, said) = status_error(
             StatusCode::BAD_REQUEST,
             "bad key sk-or-v1-abcdefabcdefabcdef",
             model,

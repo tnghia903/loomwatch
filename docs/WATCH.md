@@ -84,7 +84,8 @@ it happens; older pieces fold it to one line. **Details** on a piece opens this 
 chat, and Esc closes it. The chat holds what was said and Details how it was made: a piece's
 answer is read only in the chat, with its record's verdict (which opens the review), the files it
 names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt (the
-run's tokens, and its exact cost as OpenRouter reported it on each turn's `turn_end`), timeline,
+run's tokens, and its cost on each turn's `turn_end`: as OpenRouter reported it, ≈ at Claude's list
+prices, or "ChatGPT plan"), timeline,
 stages and tools. A long answer (or a titled one past a few lines) is a document: the
 chat shows a card with its title, opening words and length, and **Open** shows it in full in the
 pane beside the chat, under an **Answer** tab next to **Details**. Once a document answer
@@ -232,8 +233,9 @@ Response (`202 Accepted`):
 - `spend` is what the run has spent and may spend on model calls, in US dollars: `{limitUsd,
   spentUsd, agents: {id: {spentUsd, limitUsd?, stopped?}}, added: [{agent?, atUsd, addUsd}],
   stopped?}`. `limitUsd` is the team's `spend.perRun` plus whatever was added this run (absent: no limit);
-  an agent's `limitUsd` is its own guard. `spentUsd` adds up the exact cost OpenRouter reported for
-  every call of the run. `stopped` is `finished` once the operator finished the run at its limit,
+  an agent's `limitUsd` is its own guard. `spentUsd` adds up the dollars of every call of the run:
+  the exact cost OpenRouter reported, or a Claude call's cost at list prices. Calls on the ChatGPT
+  plan cost no dollars. `stopped` is `finished` once the operator finished the run at its limit,
   or `nobody_to_ask` once a scheduled run stopped there. It is stored with the run; runs recorded
   before spend limits have none.
 - `spendStops` lists the limits the run is waiting at: `{id, agent?, name?, limitUsd, spentUsd,
@@ -368,8 +370,11 @@ every request that an agent's `allow:` switches (or the team's Auto mode) do not
 declined at once, recorded as `not_asked`, and the agent carries on without it. Reading inside an
 agent's own folder and what it was given needs no switch; for a news digest, `web: true` is all
 the agents need. [`examples/usecases/daily-tech-digest.yaml`](../examples/usecases/daily-tech-digest.yaml)
-is the worked example: only its web switches are on. A routine also needs the OpenRouter key and
-credit for its models; one that fails for that reason shows up as a `failed` run, not a delivery.
+is the worked example: only its web switches are on. A routine also needs each of its agents' ways
+of paying connected, and credit or plan allowance for its models. Before it fires, it checks every
+agent's way of paying is connected; one that isn't is recorded as the routine's problem instead of
+a failed run each time. One that fails for credit or a plan's limit mid-run shows up as a `failed`
+run, not a delivery.
 
 ## Team-file revisions
 
@@ -384,12 +389,13 @@ write lock can still change a file between its check and replacement. Save a cop
 silently overwrites an existing destination. The UI preserves local edits after a 412 and
 lets the user compare, reload, or explicitly keep the local version.
 
-## Models and the OpenRouter key
+## Models and how they are paid
 
 Every agent is a session of LoomWatch's own agent inside the daemon, and calls the model its team
-file names through OpenRouter, with the operator's OpenRouter key. The key is entered in LoomWatch:
-**Add your OpenRouter key** on Home, or **AI models** in Connections. Like the Notion connection,
-these routes are mounted only on a loopback listener:
+file names, paid the way its `model` says (ADR 0073): on the operator's ChatGPT plan, on their
+Claude API credit, or through OpenRouter with their OpenRouter key. Each is connected in LoomWatch,
+on Home or in Connections. Like the Notion connection, these routes are mounted only on a loopback
+listener:
 
 | Route | Result |
 |---|---|
@@ -397,24 +403,44 @@ these routes are mounted only on a loopback listener:
 | `PUT /api/ai/openrouter` | `{ "key": "sk-or-…" }`: checks the key with OpenRouter, then keeps it. A key OpenRouter refuses is never kept (400) |
 | `POST /api/ai/openrouter/check` | Asks OpenRouter about the kept key again |
 | `DELETE /api/ai/openrouter` | Forgets the key |
-| `GET /api/models` | The models an agent can use: OpenRouter's public catalog, cut down to the models that can call tools, with a short recommended list and the default. Fetched when first asked for and kept an hour; the last copy is saved in the state folder, so the list still shows offline. 502 when there is no list at all |
+| `GET /api/ai`, `anthropic` | `{ connected, label, models, checkedAt, problem }` for the Claude API key, from its last check |
+| `PUT /api/ai/anthropic` | `{ "key": "sk-ant-api…" }`: lists the key's models with Anthropic, which costs nothing, then keeps it. A key Anthropic refuses, a Claude sign-in token (`sk-ant-oat…`) or an Admin key is never kept (400) |
+| `POST /api/ai/anthropic/check` | Lists the kept key's models again |
+| `DELETE /api/ai/anthropic` | Forgets the key |
+| `GET /api/ai`, `chatgpt` | `{ available, connected, email, planUse, models, signedInAt, problem }`. `available` is false in a build without the `chatgpt` feature; `planUse` says whether the sign-in allowed plan use |
+| `POST /api/ai/chatgpt/sign-in` | `{ "url": … }`: the address of ChatGPT's sign-in page for a new sign-in, which comes back to `GET /api/ai/chatgpt/callback` on `127.0.0.1` within 10 minutes |
+| `POST /api/ai/chatgpt/check` | Lists the plan's models again, which also proves the sign-in still works |
+| `DELETE /api/ai/chatgpt` | `{ chatgpt, revoked }`: asks OpenAI to revoke the sign-in, then forgets it; `revoked` says whether OpenAI confirmed |
+| `GET /api/models` | The models an agent can use: OpenRouter's public catalog, cut down to the models that can call tools, with a short recommended list and the default, plus `anthropic` (the Claude key's models, ids `anthropic:…`, priced as OpenRouter lists them) and `chatgpt` (the plan's models, ids `chatgpt:…`, no price). Fetched when first asked for and kept an hour; the last copy is saved in the state folder, so the list still shows offline. 502 when there is no list at all |
 
-Requests that change the key need the `X-LoomWatch-Request: 1` header the app sends, so another
-site cannot set one.
+Requests that change a key or a sign-in need the `X-LoomWatch-Request: 1` header the app sends, so
+another site cannot set one.
 
-`model` is an OpenRouter id such as `anthropic/claude-opus-5.5`, and `thinkingEffort` its
-reasoning effort (an effort written into the model, `…[high]`, still reads). Names written for an
-earlier LoomWatch still load and are read as OpenRouter ids: `opus`, `sonnet` and `haiku` become
+`GET /api/usage?days=30`, served with the run history, says what LoomWatch's model calls used over
+the last days: by source (with the last five hours and seven days), by day and by agent, from the
+`model_calls` table every recorded call fills. Neither OpenAI nor Anthropic tells an app what is
+left of a plan or credit, so the Usage page shows LoomWatch's own count and links to each company
+for the rest.
+
+`model` is `chatgpt:<slug>` on the ChatGPT plan, `anthropic:<id>` on the Claude credit, or an
+OpenRouter id such as `anthropic/claude-opus-5.5`, and `thinkingEffort` its reasoning effort (an
+effort written into the model, `…[high]`, still reads). Names written for an earlier LoomWatch
+still load and are read as OpenRouter ids: `opus`, `sonnet` and `haiku` become
 Anthropic's models, `gpt-…` OpenAI's and `gemini-…` Google's, an `openrouter/` prefix is dropped,
 and a name LoomWatch does not know becomes the default model. `fake/offline` is the offline demo
 (*Verifying without a model provider*, above).
 
-Build blocks Run while no key is added and any agent needs a model: the composer says "Add your
-OpenRouter key to run this team." with **Add key**. A run started anyway (a routine, or a client of
-`POST /api/runs`) fails at its first agent with "Agents need an OpenRouter key to run." and the
-way to add one. A key OpenRouter refuses later, or an account out of credit, fails the turn with a
-reason in plain words, such as "Your OpenRouter account is out of credits." A team whose agents
-all run on `fake/offline` needs no key.
+Build blocks Run while an agent's way of paying isn't connected: the composer names it and who
+needs it, and offers to move those agents to a connected source with the same models in one
+click, or to connect it. A run started anyway (a routine, or a client of `POST /api/runs`) fails at
+that agent with, for example, "This agent runs on your ChatGPT plan. Sign in with ChatGPT on
+LoomWatch's Connections page, then run the team again." An agent never moves to another way of
+paying by itself. A key refused later, credit run out or a plan's limit fails the turn with a
+reason in plain words, such as "Your Claude API credit is used up." Its `turn_failed` note carries
+`problem: { kind, source, url? }`, with `kind` one of `not_connected`, `key_refused`,
+`out_of_credits`, `rate_limited`, `plan_limit`, `plan_not_eligible`, `plan_use_off` and
+`sign_in_again`, so the app can offer the fix, such as **Manage usage**. A team whose agents all
+run on `fake/offline` needs nothing connected.
 
 A team file written for an earlier LoomWatch may carry a `spawn` block naming an AI app to start.
 Only its `cwd`, the agent's folder, is read; `cmd`, `args` and `env` are accepted and ignored, and

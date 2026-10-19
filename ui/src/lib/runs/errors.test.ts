@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { failedAgent, plainRunError } from './errors'
+import { failedAgent, plainRunError, problemAction } from './errors'
 
 const agents = new Map([['helper', { name: 'Helper' }]])
 
@@ -43,5 +43,23 @@ describe('failedAgent', () => {
   it('is nobody when the run didn’t fail, or its error names no one among many', () => {
     expect(failedAgent({ ...failed('pipeline node gatherer failed: boom'), status: 'cancelled' })).toBeNull()
     expect(failedAgent(failed('protocol failure: session execution failed'))).toBeNull()
+  })
+})
+
+describe('problemAction', () => {
+  // The daemon's sentences, as agent/error.rs and engine/mod.rs write them.
+  it.each([
+    ['LoomWatch has reached a usage limit on your ChatGPT plan: the plan’s own limit, or the share you allowed LoomWatch. See it under Manage usage in ChatGPT’s settings.', 'Manage usage'],
+    ['Your Claude API credit is used up. It comes back with your plan’s next bill, or add credits in the Claude Console.', 'See your Claude balance'],
+    ['Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.', 'Add OpenRouter credits'],
+    ['This agent runs on your ChatGPT plan. Sign in with ChatGPT on LoomWatch’s Connections page, then run the team again.', 'Open Connections'],
+    ['LoomWatch’s sign-in with ChatGPT has ended. Sign in with ChatGPT again on LoomWatch’s Connections page.', 'Open Connections'],
+  ])('offers the way out of %s', (message, label) => {
+    expect(problemAction(message)?.label).toBe(label)
+  })
+
+  it('offers nothing for a stop it can’t place', () => {
+    expect(problemAction('The model stopped with an error partway through its reply.')).toBeNull()
+    expect(problemAction(null)).toBeNull()
   })
 })

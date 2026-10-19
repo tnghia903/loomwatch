@@ -13,7 +13,7 @@ it('lists only what no other control on the screen does', () => {
   render(<WorkspaceMenu runView onMemory={vi.fn()} />)
   fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
   expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-    'Team memory', 'My agents…', 'About you…', 'Connections…', 'Getting started guide', 'Send feedback…',
+    'Team memory', 'My agents…', 'About you…', 'Connections…', 'Usage…', 'Getting started guide', 'Send feedback…',
   ])
 })
 

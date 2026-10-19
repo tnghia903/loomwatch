@@ -82,7 +82,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'Welcome to LoomWatch',
-      body: 'LoomWatch puts AI agents to work as a team, on your computer, with your OpenRouter key. This guide takes you the whole way once: build an agent, put it in a team, then give the team work in its chat. You do each step yourself, and it takes about three minutes.',
+      body: 'LoomWatch puts AI agents to work as a team, on your computer, on your ChatGPT plan, your Claude API credit or an OpenRouter key. This guide takes you the whole way once: build an agent, put it in a team, then give the team work in its chat. You do each step yourself, and it takes about three minutes.',
       advance: 'start',
     }),
   },
@@ -92,8 +92,8 @@ export const TOUR_STEPS: readonly TourStep[] = [
     // Opening the builder is a new page, Your agents, where the guide carries on by itself.
     view: ({ keyReady, keyLoading }) => !keyLoading && !keyReady
       ? {
-          title: 'Add your OpenRouter key first',
-          body: 'Agents think with AI models, which LoomWatch reaches through OpenRouter with one key. The card here shows how to make one and paste it in. Then click Build an agent.',
+          title: 'Choose how your models are paid first',
+          body: 'Agents think with AI models. Use your ChatGPT Plus or Pro plan, your Claude Max or Team plan’s API credit, or an OpenRouter key: the cards here show how. Then click Build an agent.',
           target: ['[data-tour="key"]'],
           sides: ['bottom', 'top', 'right'],
           advance: 'action',

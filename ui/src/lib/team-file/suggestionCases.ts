@@ -12,7 +12,7 @@
 // Every case sits in a team whose answer comes from a Writer, unless it says otherwise, so a
 // gatherer can be told apart from the agent that writes the answer.
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, openRouterId } from '../ai/modelIds'
+import { DEFAULT_MODEL, canonicalModel, tierOfModel } from '../ai/modelIds'
 import { ROLE_PRESETS } from '../library/roles'
 import type { SuggestedAgent } from './agentSetup'
 import { pipelineTerminal } from './pipelineOrder'
@@ -20,7 +20,8 @@ import { answeringAgent } from '../library/checker'
 import type { TeamDocument } from './types'
 
 export type Tier = 'strong' | 'fast' | 'check'
-export const tierOf = (model: string): Tier | null => (model === DEFAULT_MODEL ? 'strong' : model === FAST_MODEL ? 'fast' : model === CHECK_MODEL ? 'check' : null)
+/** The tier `model` is, on whichever source it is paid through. */
+export const tierOf = (model: string): Tier | null => tierOfModel(model)
 
 export interface SuggestionCase {
   source: 'example' | 'renamed' | 'written'
@@ -41,7 +42,7 @@ export function exampleCases(teams: Record<string, TeamDocument>): SuggestionCas
     const responder = doc.responder ?? answeringAgent(terminal, doc.agents)
     const agents = doc.agents.filter((agent) => agent.kind !== 'operator')
     for (const agent of agents) {
-      const want = tierOf(openRouterId(agent.model))
+      const want = tierOf(canonicalModel(agent.model))
       // The offline demo's agents run no model, so they have no label.
       if (!want) continue
       cases.push({ source: 'example', label: `${file}: ${agent.name}`, agent, team: { agents, responder }, want })

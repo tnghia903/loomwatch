@@ -14,6 +14,12 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+default = ["chatgpt"]
+# Agents may run on the person's ChatGPT plan (ADR 0073). A paid build ships without it until
+# OpenAI approves one.
+chatgpt = []
+
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["ws"] }

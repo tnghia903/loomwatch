@@ -1,6 +1,6 @@
 import { sendChatMessage } from '../chat/client'
 import { joinUnderRoot } from '../files/paths'
-import { BLANK_DRAFT, chatAgentId, chatTeamYaml, specFromDraft, type AgentDraft } from '../library/draft'
+import { BLANK_DRAFT, blankDraft, chatAgentId, chatTeamYaml, specFromDraft, type AgentDraft } from '../library/draft'
 import type { FigureChoice } from '../library/figures'
 import { benchFolder, jobIdFor, saveJob } from '../library/jobs'
 import { newStartKey, type RunRecord } from '../runs/client'
@@ -19,12 +19,19 @@ export const FIRST_FIGURE: FigureChoice = { kind: 'spool', color: 'butter' }
 export const FIRST_AGENT: AgentDraft = { ...BLANK_DRAFT, name: 'Helper', does: 'Helps with whatever you ask', figure: FIRST_FIGURE }
 export const FIRST_CHAT = jobIdFor(FIRST_AGENT.name)
 
+/** The first agent as it works now: on the model a new agent gets with what is connected (ADR 0073). */
+export function firstAgentNow(): AgentDraft {
+  const { model, effort } = blankDraft()
+  return { ...FIRST_AGENT, model, effort }
+}
+
 /** Start one piece of work for the first agent, and the run it started. */
 export async function askFirstAgent(text: string): Promise<RunRecord> {
   const path = joinUnderRoot(await benchFolder(), `${FIRST_CHAT}.yaml`)
   let revision: string | null = null
   try { revision = (await fetchTeamFile(path)).revision ?? null } catch { revision = null }
-  const saved = await saveTeamFile(path, chatTeamYaml(FIRST_AGENT, FIRST_AGENT.model, FIRST_CHAT), revision)
+  const agent = firstAgentNow()
+  const saved = await saveTeamFile(path, chatTeamYaml(agent, agent.model, FIRST_CHAT), revision)
   const sent = await sendChatMessage({
     teamPath: path,
     text,
@@ -46,7 +53,7 @@ export const forMeRequest = (request: string): string => `Answer this again for 
 /** Keep the first agent in My agents, under its chat's name. Returns its id. */
 export async function keepFirstAgent(): Promise<string> {
   try {
-    await saveJob(FIRST_CHAT, specFromDraft(FIRST_AGENT))
+    await saveJob(FIRST_CHAT, specFromDraft(firstAgentNow()))
   } catch (failed) {
     // Kept already (a second tab, or a click that didn't hear back): it is there to open.
     if (!(failed instanceof Error && /already have an agent/i.test(failed.message))) throw failed

@@ -377,7 +377,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
     {
         return Err("That model id is too long.".into());
     }
-    let model = model.map(|model| crate::ai::openrouter_id(&model));
+    let model = model.map(|model| crate::ai::ModelRef::normalized(&model));
     let thinking_effort = spec
         .thinking_effort
         .map(|effort| effort.trim().to_owned())
