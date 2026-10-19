@@ -20,7 +20,8 @@ export function replyOf(reply: ReplyTo): ReplyTo {
   return { ...reply, text: `${chars.slice(0, half).join('')}\n\n[… cut …]\n\n${chars.slice(-half).join('')}` }
 }
 
-const SAID: Record<ReplyKind, string> = {
+/** What a kind of message is called in a reply's quote: "Writer's question back". */
+export const SAID: Record<ReplyKind, string> = {
   handover: 'handover',
   question: 'question',
   question_back: 'question back',
