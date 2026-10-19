@@ -106,7 +106,8 @@ export const WORKING_WINDOW_MS = 3000
  * its figure acts it out and its chat shows it:
  *
  * - `reading`: it reads the message it was given, before anything comes back from its model.
- * - `thinking`: its model reasons, or is quiet working out what to do next. A bulb glows over its head.
+ * - `thinking`: its model reasons, or is quiet working out what to do next. A comic thought bubble
+ *   over its head says what it is thinking about, from its reasoning (lib/watch/workPhase.ts).
  * - `tools`: it uses a tool (a web search, a file, a command): it works at its laptop, whose
  *   screen flashes.
  * - `typing`: it writes its reply, and the chat shows it typing.

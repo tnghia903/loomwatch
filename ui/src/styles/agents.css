@@ -181,6 +181,26 @@
 .bench-tag:focus-visible > span { box-shadow: 0 0 0 2px #E9C46A; }
 .bench-tag.plate { width: 140px; height: 40px; margin: -20px 0 0 -70px; border-radius: 12px; pointer-events: none; }
 .bench-tag.plate:focus-visible { outline: 2px solid #E9C46A; outline-offset: 2px; }
+/* What its model is thinking about, in a comic thought bubble over its head while it thinks (AgentFigure):
+   a cloud in the bench's own bone and ink, and two little puffs trailing down to its head. It breathes. */
+.bench-thought { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .3s ease; }
+.bench-thought.on { opacity: 1; }
+.bench-thought-cloud { position: absolute; left: 12px; bottom: 19px; box-sizing: border-box; width: max-content; max-width: min(270px, 44cqw); padding: 7px 14px; border-radius: 20px; background: #F7F4EE; color: #17150F; font: 500 12.5px/1.35 var(--font-sans); box-shadow: 0 0 0 1.5px rgba(23, 21, 15, .22), 0 6px 18px rgba(0, 0, 0, .35); transform-origin: 0 100%; animation: bench-thought-breathe 3.2s ease-in-out infinite; }
+/* One line, so it stays clear of the labels along the pegboard's top. */
+.bench-thought-cloud p { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bench-thought-cloud .chat-dots { display: flex; padding: 3px 2px; }
+.bench-thought-cloud .chat-dots i { background: #8A8476; }
+.bench-thought-dot { position: absolute; border-radius: 50%; background: #F7F4EE; box-shadow: 0 0 0 1.5px rgba(23, 21, 15, .22); }
+.bench-thought-dot.near { left: 6px; bottom: 8px; width: 9px; height: 9px; }
+.bench-thought-dot.far { left: -1px; bottom: 0; width: 5px; height: 5px; }
+.bench-thought.flip .bench-thought-cloud { left: auto; right: 12px; transform-origin: 100% 100%; }
+.bench-thought.flip .bench-thought-dot.near { left: -16px; }
+.bench-thought.flip .bench-thought-dot.far { left: -5px; }
+@keyframes bench-thought-breathe { 0%, 100% { transform: scale(1); } 50% { transform: translateY(-2px) scale(1.035); } }
+@media (prefers-reduced-motion: reduce) {
+  .bench-thought { transition: none; }
+  .bench-thought-cloud { animation: none; }
+}
 /* The words on the nameplate, the job sheet and the laptop's lid: page text laid over each face at
    the size the face has on screen (AgentFigure), sized in the face's own units so they fill it. */
 .bench-faces { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }

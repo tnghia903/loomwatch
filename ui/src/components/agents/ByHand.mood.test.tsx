@@ -67,13 +67,15 @@ describe('the figure at the bench, while its run works', () => {
     const page = render(bench(run('running')))
     await waitFor(() => expect(shown.view?.phase).toBe('reading'))
     for (const [next, phase] of [
-      [event('thought'), 'thinking'],
+      [event('thought', { content: { type: 'text', text: '**Weighing the claims**' } }), 'thinking'],
       [event('tool_call', { callId: 'w', title: 'Search the web: claims', toolKind: 'fetch', status: 'in_progress' }), 'tools'],
       [event('message', { role: 'agent' }), 'typing'],
     ] as const) {
       stream.events = [...stream.events, next]
       page.rerender(bench(run('running')))
       expect(shown.view?.phase).toBe(phase)
+      // Only while it thinks does its bubble say what about.
+      expect(shown.view?.thought ?? null).toBe(phase === 'thinking' ? 'Weighing the claims' : null)
     }
     // Its words stopped a few seconds ago: its model is working out what comes next.
     act(() => { vi.advanceTimersByTime(4000) })

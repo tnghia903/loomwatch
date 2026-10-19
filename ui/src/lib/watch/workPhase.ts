@@ -1,5 +1,5 @@
 import { WORKING_WINDOW_MS, type BenchUse, type ReadSource, type WorkPhase } from '../library/figure'
-import type { RunEvent } from './events'
+import { eventText, type RunEvent } from './events'
 
 /** How long it reads the message it was given before, with nothing back from its model yet, it is thinking. */
 export const READING_MS = 6000
@@ -47,6 +47,34 @@ export function workPhase(events: readonly RunEvent[], agent: string | null, now
     }
   }
   return 'reading'
+}
+
+/** How much of its reasoning the bubble over its figure's head shows, at most. */
+export const THOUGHT_CHARS = 38
+
+/**
+ * What its model is thinking about now, in a few words, for the comic bubble over its figure's head:
+ * the heading of its latest reasoning (reasoning summaries start each step with one, in bold), or,
+ * without one, how its reasoning ends so far. Null when it hasn't reasoned since its last step (a
+ * tool call, its own words): the bubble then shows only that it is thinking.
+ */
+export function thoughtLine(events: readonly RunEvent[], agent: string | null): string | null {
+  const parts: string[] = []
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if ((agent !== null && event.agentId !== agent) || SILENT.has(event.kind)) continue
+    if (event.kind !== 'thought') break
+    parts.unshift(eventText(event))
+  }
+  const text = parts.join('')
+  const headings = [...text.matchAll(/\*\*([^*\n]{2,120})\*\*/g)]
+  const heading = headings.at(-1)?.[1].trim()
+  if (heading) return heading.length > THOUGHT_CHARS ? `${heading.slice(0, THOUGHT_CHARS - 1).trimEnd()}…` : heading
+  const said = text.replace(/[*#`_]/g, '').replace(/\s+/g, ' ').trim()
+  if (!said) return null
+  if (said.length <= THOUGHT_CHARS) return said
+  // The end of what it has reasoned so far, from a whole word.
+  return `…${said.slice(-THOUGHT_CHARS).replace(/^\S*\s+/, '')}`
 }
 
 /** What the bench holds that a tool call can use: its skills, what it reads, and its tools' names. */

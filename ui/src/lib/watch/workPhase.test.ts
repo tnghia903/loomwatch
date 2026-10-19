@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { WORKING_WINDOW_MS } from '../library/figure'
 import type { RunEvent } from './events'
-import { benchUses, FETCH_WITHIN_MS, READING_MS, workPhase, type BenchKit } from './workPhase'
+import { benchUses, FETCH_WITHIN_MS, READING_MS, THOUGHT_CHARS, thoughtLine, workPhase, type BenchKit } from './workPhase'
 
 const NOW = Date.parse('2026-10-19T14:10:00.000Z')
 let seq = 0
@@ -92,5 +92,30 @@ describe('what on its bench it just used, for its figure to go and get', () => {
     const theirs = call(500, { name: 'mcp__deepwiki__ask_question' }, 'writer')
     expect(benchUses([skill, tool, theirs], 'coby', NOW, kit)).toEqual([{ kind: 'skill', name: 'claude-design', id: skill.id }, { kind: 'tool', name: 'DeepWiki', id: tool.id }])
     expect(benchUses([call(FETCH_WITHIN_MS + 1, { name: 'mcp__deepwiki__ask_question' })], 'coby', NOW, kit)).toEqual([])
+  })
+})
+
+describe('what its model is thinking about, for the bubble over its head', () => {
+  const thought = (ago: number, text: string, agent = 'coby') => at(ago, 'thought', { role: 'thought', content: { type: 'text', text } }, agent)
+
+  it('says the heading of its latest reasoning, as its summaries give one', () => {
+    const run = [prompt(9000), thought(5000, '**Reading the request**\n\nThe user wants'), thought(4000, ' a guide.\n\n**Comparing'), thought(3900, ' transformer recommenders**\n\nSASRec and')]
+    expect(thoughtLine(run, 'coby')).toBe('Comparing transformer recommenders')
+  })
+
+  it('without a heading, says how its reasoning ends so far, from a whole word', () => {
+    expect(thoughtLine([thought(500, 'Clicks are the words here.')], 'coby')).toBe('Clicks are the words here.')
+    const long = 'A transformer reads every word at once and lets each word look at the others, so for recommendations the clicks are the words.'
+    const line = thoughtLine([thought(500, long)], 'coby')!
+    expect(line.startsWith('…')).toBe(true)
+    expect(line.length).toBeLessThanOrEqual(THOUGHT_CHARS + 1)
+    expect(long.endsWith(line.slice(1))).toBe(true)
+    expect(line.slice(1, 2)).not.toBe(' ')
+  })
+
+  it('says nothing once it has moved on from its reasoning, and only its own agent’s', () => {
+    expect(thoughtLine([thought(3000, '**Planning**'), at(100, 'tool_call', { title: 'Run: npm test', toolKind: 'execute' })], 'coby')).toBeNull()
+    expect(thoughtLine([prompt(500)], 'coby')).toBeNull()
+    expect(thoughtLine([thought(500, '**Theirs**', 'writer'), thought(400, '**Mine**'), at(300, 'usage', {})], 'coby')).toBe('Mine')
   })
 })

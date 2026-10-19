@@ -1,5 +1,4 @@
 import {
-  AdditiveBlending,
   Box3,
   BoxGeometry,
   Color,
@@ -7,7 +6,6 @@ import {
   ExtrudeGeometry,
   Group,
   HemisphereLight,
-  LatheGeometry,
   MathUtils,
   Mesh,
   MeshPhysicalMaterial,
@@ -27,8 +25,6 @@ import {
   Shape,
   ShapeGeometry,
   SphereGeometry,
-  Sprite,
-  SpriteMaterial,
   Texture,
   Vector2,
   Vector3,
@@ -41,7 +37,7 @@ import { BUSY, BUSY_SECONDS, CARD_SLOTS, FIGURE_KEYS, nextBusy, partOfNode, reac
 import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { dress, type Dressed } from './accessoryMeshes'
-import { cardTexture, glowTexture, keyLabelTexture, pegboardTexture, toolTexture, woundTexture } from './benchTextures'
+import { cardTexture, keyLabelTexture, pegboardTexture, toolTexture, woundTexture } from './benchTextures'
 import { benchMaterial, fitCanvas, LIVE, readModel, readyToDraw } from './workbenchModel'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
@@ -62,6 +58,11 @@ export interface BenchView {
    * events arrive and rests its hands on the keys while they don't.
    */
   phase?: WorkPhase
+  /**
+   * What its model is thinking about while it thinks, in a few words from its reasoning
+   * (thoughtLine), for the comic bubble AgentFigure lays over its head; null when it hasn't said.
+   */
+  thought?: string | null
   /**
    * What its agent just used from the bench (BenchUse): a skill, a folder it reads, a tool. It goes
    * and gets each one, and carries it back to the desk. Left out, as on the landing page, it stays.
@@ -91,7 +92,7 @@ export interface BenchTool {
   icon: string | null
 }
 
-export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply'
+export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply' | 'thought'
 export type BenchAnchors = Record<BenchAnchor, { x: number; y: number }>
 /** The faces that carry words: the nameplate, the job sheet and the laptop's lid. */
 export type BenchFace = 'name' | 'job' | 'app'
@@ -119,15 +120,6 @@ export function placeFace(element: HTMLElement, { x, y, ux, uy, vx, vy }: BenchQ
   element.style.width = `${across.toFixed(1)}px`
   element.style.height = `${down.toFixed(1)}px`
   element.style.transform = transform
-}
-
-export interface BenchOptions {
-  /**
-   * It acts out what its agent is at while it works (BenchView.phase), and builds the bulb that
-   * glows over its head while it thinks, whose halo is one more shader to compile at load. The app's
-   * bench does; the landing page's bench, which shows no phase, doesn't.
-   */
-  phases?: boolean
 }
 
 export interface BenchCallbacks {
@@ -186,7 +178,7 @@ const HEAD_TURN = 0.5
 const HEAD_NOD = 0.24
 
 /** The figure's pose, as offsets the frame eases toward. Arms at rest reach out to the laptop. */
-const REST = { bodyY: 0, bodyRX: 0, bodyRY: 0, neckRX: 0, neckRZ: 0, lookX: 0, lookY: -0.3, armLRX: -1.42, armLRZ: -0.05, armRRX: -1.42, armRRZ: 0.05, scale: 1, band: 0, screen: 0.12, typing: 0, hands: 0, click: 0, bulb: 0 }
+const REST = { bodyY: 0, bodyRX: 0, bodyRY: 0, neckRX: 0, neckRZ: 0, lookX: 0, lookY: -0.3, armLRX: -1.42, armLRZ: -0.05, armRRX: -1.42, armRRZ: 0.05, scale: 1, band: 0, screen: 0.12, typing: 0, hands: 0, click: 0 }
 type Pose = typeof REST
 type Channel = keyof Pose
 
@@ -223,10 +215,8 @@ const LOOK_S = 1.6
 const BENCH_END = 1.2
 const FLOOR_Y = 0.12
 const UP = new Vector3(0, 1, 0)
-/** The bulb over its head while it thinks: how long one breath takes, in seconds, its size, and its gap above the head. */
-const BREATH = 3.2
-const BULB_SIZE = 1.5
-const BULB_GAP = 0.1
+/** How far above the top of its head (and what it wears there) its thought bubble starts. */
+const THOUGHT_GAP = 0.06
 interface Tween { node: Object3D; fromP: Vector3; toP: Vector3; fromQ: Quaternion; toQ: Quaternion; fromS: number; toS: number; start: number; duration: number; arc: number; done?: () => void }
 
 const smooth = (edge0: number, edge1: number, x: number) => MathUtils.smoothstep(x, edge0, edge1)
@@ -305,13 +295,12 @@ function corners(mesh: Mesh): Vector3[] {
  * and the figure it wears, lets each object on the bench be picked up or clicked, and moves the
  * figure. It moves for two reasons only: a change you just made (it looks at what changed) and the
  * run in its chat. While the run works, it acts out what the run's events say its agent is at
- * (BenchView.phase): it reads its message, thinks (scratching its head, chin on a hand, a bulb
- * breathing over its head), uses the laptop while a tool runs (its screen flashing), and types its
+ * (BenchView.phase): it reads its message, thinks (scratching its head, chin on a hand, a thought
+ * bubble over its head saying what about), uses the laptop while a tool runs (its screen flashing), and types its
  * reply; when it uses something on the bench (a skill, a folder, a tool), it goes and gets it and
  * carries it back to the desk. It points at your dish when it waits on you for a key, and hands its reply to the tray
  * when it is done. Between runs it looks around and blinks. Reduced motion keeps every pose and
- * drops the motion: while it works it keeps its hands on the keys and its eyes on the screen, the
- * bulb lit and still while it thinks.
+ * drops the motion: while it works it keeps its hands on the keys and its eyes on the screen.
  */
 export class WorkbenchScene {
   private readonly renderer: WebGLRenderer
@@ -319,7 +308,6 @@ export class WorkbenchScene {
   private readonly camera = new PerspectiveCamera(24, 1, 0.1, 40)
   private readonly callbacks: BenchCallbacks
   private readonly reduced: boolean
-  private readonly options: BenchOptions
   private readonly raycaster = new Raycaster()
   private readonly nodes = new Map<string, Object3D>()
   private readonly roles = new Map<Mesh, string>()
@@ -366,10 +354,8 @@ export class WorkbenchScene {
   /** While it uses a tool, its screen flashes now and then as pages and results come up: how bright now, and when next. */
   private flash = 0
   private nextFlash = 0
-  /** The bulb over its head while it thinks, and its glass, which glows. */
-  private bulb: Group | null = null
-  private bulbGlass: MeshStandardMaterial | null = null
-  private bulbHalo: SpriteMaterial | null = null
+  /** Where its thought bubble starts: a point riding on its head, just above the top of it. */
+  private readonly thoughtMark = new Object3D()
   /** Things it used, waiting to be fetched; the uses it has seen; the trip it is on; and where it stands at the desk. */
   private errands: BenchUse[] = []
   private readonly seenUses = new Set<string>()
@@ -383,10 +369,9 @@ export class WorkbenchScene {
   /** What it wears from the wardrobe (docs/QUESTS.md), fitted to the head it wears now. */
   private dressed: Dressed | null = null
 
-  constructor(canvas: HTMLCanvasElement, callbacks: BenchCallbacks, reduced: boolean, options: BenchOptions = {}) {
+  constructor(canvas: HTMLCanvasElement, callbacks: BenchCallbacks, reduced: boolean) {
     this.callbacks = callbacks
     this.reduced = reduced
-    this.options = options
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'low-power' })
     this.renderer.setClearColor(0x000000, 0)
     // Neutral keeps the bench's bone, graphite and gold close to the app's own tokens.
@@ -464,49 +449,24 @@ export class WorkbenchScene {
     }
     this.lights()
     this.figureHome.copy(this.node('figure').position)
-    if (this.options.phases) this.buildBulb()
+    this.node('head').add(this.thoughtMark)
+    this.placeThought()
     // Every shader it draws with, the hidden parts' too, compiled before its first frame (readyToDraw).
     await readyToDraw(this.renderer, this.scene, this.camera)
-    if (this.bulb) this.bulb.visible = false
     this.loaded = true
     this.frame()
     if (this.view) this.apply(null, this.view)
   }
 
-  /**
-   * The bulb that glows over its head while it thinks: warm glass on a gold screw base, drawn with
-   * the same kind of material as the rest of the bench, and a soft halo around it. It is shown
-   * while its shaders compile (readyToDraw takes only what is shown), then hidden until it thinks;
-   * it rides on its head, above whichever one it wears (placeBulb).
-   */
-  private buildBulb() {
-    const glass = new LatheGeometry([[0, 0], [0.021, 0], [0.03, 0.022], [0.048, 0.05], [0.056, 0.075], [0.053, 0.098], [0.041, 0.117], [0.022, 0.13], [0, 0.134]].map(([x, y]) => new Vector2(x, y)), 20)
-    const screw = new LatheGeometry([[0, -0.042], [0.016, -0.042], [0.021, -0.036], [0.025, -0.03], [0.022, -0.024], [0.025, -0.018], [0.022, -0.012], [0.025, -0.006], [0.022, 0], [0, 0.004]].map(([x, y]) => new Vector2(x, y)), 20)
-    this.bulbGlass = new MeshStandardMaterial({ color: '#FFF1C9', emissive: '#FFC24A', emissiveIntensity: 0.6, roughness: 0.25 })
-    const bulb = new Group()
-    bulb.name = 'bulb'
-    this.bulbHalo = this.own(new SpriteMaterial({ map: this.own(glowTexture()), color: '#FFC24A', blending: AdditiveBlending, depthWrite: false, opacity: 0 }))
-    const halo = new Sprite(this.bulbHalo)
-    halo.position.y = 0.07
-    halo.scale.setScalar(0.3)
-    bulb.add(new Mesh(glass, this.bulbGlass), new Mesh(screw, new MeshStandardMaterial({ color: '#E2B451', roughness: 0.3, metalness: 1 })), halo)
-    this.disposables.push(glass, screw)
-    this.node('head').add(bulb)
-    this.bulb = bulb
-    this.placeBulb()
-  }
-
-  /** Stand the bulb just above the head it wears now, and what it wears on it. */
-  private placeBulb() {
-    const bulb = this.bulb
-    if (!bulb) return
+  /** Put the point its thought bubble starts from just above the head it wears now, and what it wears on it. */
+  private placeThought() {
     const head = this.node('head')
     head.updateWorldMatrix(true, true)
     const box = new Box3()
-    head.traverse((object) => { if (object instanceof Mesh && object.parent !== bulb && shown(object)) box.expandByObject(object) })
+    head.traverse((object) => { if (object instanceof Mesh && shown(object)) box.expandByObject(object) })
     if (box.isEmpty()) return
     const top = head.worldToLocal(new Vector3(0, box.max.y, 0).setX((box.min.x + box.max.x) / 2).setZ((box.min.z + box.max.z) / 2))
-    bulb.position.set(0, top.y + BULB_GAP, 0)
+    this.thoughtMark.position.set(0, top.y + THOUGHT_GAP, 0)
   }
 
   /** The laptop screen's light on the figure, off until it works. */
@@ -671,7 +631,7 @@ export class WorkbenchScene {
     const deep = skin.clone().multiplyScalar(0.86)
     for (const mesh of this.meshes('skin_deep')) (mesh.material as MeshStandardMaterial).color.copy(deep)
     this.dress(figure)
-    this.placeBulb()
+    this.placeThought()
   }
 
   /** Put on what it wears from the wardrobe, fitted to the head it wears (accessoryMeshes.ts). */
@@ -1208,7 +1168,6 @@ export class WorkbenchScene {
     this.node('arm_r').rotation.set(p.armRRX, 0, p.armRRZ)
     this.mittens(p, motion)
     this.blink()
-    this.breathe(p.bulb)
 
     const light = this.node('laptop_light') as Mesh
     const band = light.material as MeshStandardMaterial
@@ -1247,7 +1206,7 @@ export class WorkbenchScene {
   }
 
   /**
-   * What it does while it works, in `phase`: the screen and the bulb that go with it, and one short
+   * What it does while it works, in `phase`: the screen that goes with it, and one short
    * action after another (BUSY), each easing in and out of the hands-on-the-keys pose. It returns
    * where it looks. Reduced motion keeps the pose still: hands on the keys, eyes on the screen.
    */
@@ -1255,8 +1214,8 @@ export class WorkbenchScene {
     const t = this.now
     switch (phase) {
       case 'reading': target.screen = 0.6; break
-      // Thinking, it looks away from a dimmer screen, and the bulb over its head glows.
-      case 'thinking': target.screen = 0.3; target.bulb = 1; break
+      // Thinking, it looks away from a dimmer screen (AgentFigure shows its thought bubble).
+      case 'thinking': target.screen = 0.3; break
       case 'tools':
         // Using the computer: its screen flashes as pages and results come up.
         target.screen = 0.9
@@ -1319,7 +1278,7 @@ export class WorkbenchScene {
         at = above(-0.5 + 0.12 * Math.sin(t * 0.7), 0.5 + 0.06 * Math.sin(t * 1.1), 0.5)
         break
       case 'lookUp':
-        // Hands off the keys, it sits back and looks up, toward the bulb.
+        // Hands off the keys, it sits back and looks up, toward its thought.
         set('armLRX', -1.2)
         set('armRRX', -1.2)
         set('bodyRX', -0.05)
@@ -1497,18 +1456,6 @@ export class WorkbenchScene {
     this.tween(trip.item, trip.home.p, trip.home.q, 0.6, 0.12, undefined, false, trip.home.s)
   }
 
-  /** While it thinks, the bulb over its head breathes: it glows up and dims, slowly. Still under reduced motion. */
-  private breathe(level: number) {
-    const bulb = this.bulb
-    if (!bulb || !this.bulbGlass || !this.bulbHalo) return
-    bulb.visible = level > 0.02
-    if (!bulb.visible) return
-    const breath = this.reduced ? 1 : 0.5 - 0.5 * Math.cos((this.now * Math.PI * 2) / BREATH)
-    bulb.scale.setScalar(BULB_SIZE * level * (0.94 + 0.06 * breath))
-    this.bulbGlass.emissiveIntensity = 0.35 + 1.15 * breath
-    this.bulbHalo.opacity = level * (0.12 + 0.5 * breath)
-  }
-
   /** Now and then it blinks: both eyes close for a moment. Not under reduced motion. */
   private blink() {
     if (this.reduced) return
@@ -1554,6 +1501,7 @@ export class WorkbenchScene {
     const cards = world('card_1', [0, 0, 0]).lerp(world('card_2', [0, 0, 0]), 0.5).add(new Vector3(0, 0.11, 0))
     return {
       mind: this.screen(world('neck', [0.33, 0.3, 0])),
+      thought: this.screen(this.thoughtMark.getWorldPosition(new Vector3())),
       app: this.screen(world('laptop_face', [0, 0, 0])),
       name: this.screen(world('nameplate', [0, 0, 0])),
       job: this.screen(world('job', [0, 0.3, -0.12])),

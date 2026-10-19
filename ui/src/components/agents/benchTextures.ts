@@ -198,15 +198,3 @@ export function woundTexture(): Texture {
   made.wrapT = RepeatWrapping
   return made
 }
-
-/** A soft round glow, white in the middle and fading to nothing at the edge: the bulb's halo. */
-export function glowTexture(): Texture {
-  const [element, context] = canvas(64, 64)
-  const fade = context.createRadialGradient(32, 32, 0, 32, 32, 32)
-  fade.addColorStop(0, 'rgba(255,255,255,1)')
-  fade.addColorStop(0.35, 'rgba(255,255,255,0.45)')
-  fade.addColorStop(1, 'rgba(255,255,255,0)')
-  context.fillStyle = fade
-  context.fillRect(0, 0, 64, 64)
-  return texture(element)
-}

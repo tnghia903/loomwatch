@@ -20,7 +20,7 @@ import type { FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { useNow } from '../../lib/useNow'
 import { useSessionEvents } from '../../lib/watch/useSessionEvents'
-import { benchUses, workPhase, type BenchKit } from '../../lib/watch/workPhase'
+import { benchUses, thoughtLine, workPhase, type BenchKit } from '../../lib/watch/workPhase'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
@@ -201,7 +201,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   }
 
   const kit = useMemo<BenchKit>(() => ({ skills: draft.skills, reads, tools: draft.tools }), [draft.skills, reads, draft.tools])
-  const { mood, events, phase, uses } = useFigureMood(record, kit)
+  const { mood, events, phase, thought, uses } = useFigureMood(record, kit)
 
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.model, model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },
@@ -213,13 +213,14 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     mood,
     events,
     phase,
+    thought,
     uses,
     asked,
     open: focus,
     dropping: dragging === 'skill',
     reads,
     tools: benchTools,
-  }), [draft, figure, model, mood, events, phase, uses, asked, focus, dragging, reads, benchTools])
+  }), [draft, figure, model, mood, events, phase, thought, uses, asked, focus, dragging, reads, benchTools])
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (target: FigurePart) => {
@@ -440,8 +441,8 @@ function showBlock(block: HTMLElement | undefined) {
 /**
  * The figure's mood, from the run record, on the shared clock while the run is live, to tell working
  * from quiet; the run's events so far, each one flickering its screen; and, while it runs, what its
- * agent is at (reading, thinking, using a tool or typing), and what on its bench it just used (a
- * skill, a folder, a tool) for its figure to go and get, from those events. The record counts its
+ * agent is at (reading, thinking, using a tool or typing), what it is thinking about, and what on
+ * its bench it just used (a skill, a folder, a tool) for its figure to go and get, from those events. The record counts its
  * events only once the run is over, so while it runs they are counted as they arrive.
  */
 function useFigureMood(record: RunRecord | null, kit: BenchKit) {
@@ -455,11 +456,12 @@ function useFigureMood(record: RunRecord | null, kit: BenchKit) {
   // When the run moves, note when (adjusting state while rendering, not in an effect).
   if (run && (moved?.run !== run || moved.events !== events)) setMoved({ run, events, at: now })
   const phase = live ? workPhase(followed, record.responder || null, now) : undefined
+  const thought = live && phase === 'thinking' ? thoughtLine(followed, record.responder || null) : null
   // The same uses keep the same list, so the bench is told only when there is a new one.
   const fresh = live ? benchUses(followed, record.responder || null, now, kit) : []
   const [uses, setUses] = useState<readonly BenchUse[]>([])
   if (fresh.length > 0 && fresh.map((use) => use.id).join() !== uses.map((use) => use.id).join()) setUses(fresh)
-  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events, phase, uses }
+  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events, phase, thought, uses }
 }
 
 /** What the skills shelf says: recipe cards on the pegboard. */
