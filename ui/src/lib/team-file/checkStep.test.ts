@@ -34,6 +34,20 @@ describe('checkStepFields', () => {
   })
 })
 
+describe('the Writer job’s Done when', () => {
+  // Read word for word, "each source link beside its claim" was Not met on a rewrite whose facts all
+  // came in the request, and the round it was sent back for could not meet it (quality bench
+  // pilot-1, W1). The daemon tells every check step such an item does not apply (lib.rs
+  // check_material); the job says so itself, and still holds work whose facts came with links.
+  it('asks for a link beside each claim only when the facts came with links', () => {
+    const writer = ROLE_PRESETS.find((preset) => preset.id === 'writer')
+    expect(writer?.doneWhen).toEqual([
+      'Answers what the request asked, in the format and length it named',
+      'Uses only facts you were given; if they came with source links, each claim has its link beside it',
+    ])
+  })
+})
+
 describe('isCheckerRole', () => {
   // A Checker placed before its instructions changed is still a Checker.
   it('knows the Checker job’s instructions, old and new', () => {
