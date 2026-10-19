@@ -105,6 +105,14 @@ describe('what search engines read on the landing page', () => {
     expect(build).toContain('cp "$root"/site/robots.txt "$out/"')
     expect(build).toContain('"$root"/site/sitemap.sh "$out"')
   })
+
+  it('publishes the file Google Search Console asked for, to prove the site is ours', () => {
+    const proofs = readdirSync(path.join(repo, 'site')).filter((name) => /^google[0-9a-f]+\.html$/.test(name))
+    expect(proofs).toHaveLength(1)
+    // Search Console reads the file at the top of the site, and wants exactly this line in it.
+    expect(read(`site/${proofs[0]}`).trim()).toBe(`google-site-verification: ${proofs[0]}`)
+    expect(read('site/build.sh')).toContain('cp "$root"/site/google*.html "$out/"')
+  })
 })
 
 describe('what search engines read on every page', () => {
