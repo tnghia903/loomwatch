@@ -228,17 +228,47 @@ pub fn reading(in_team: bool, checks: bool) -> String {
 /// that will not run and a final answer it is not writing. What it is asked for is a new version
 /// of its own work — the brief the operator's message is the objective of — so the boundaries are
 /// stated here: the whole result, and nothing changed that was not asked for.
+///
+/// Asked about a part of a file (ADR 0077), it still answers alone when the answer is its job,
+/// and when it is a teammate's job it asks that teammate (`ask`, which the run's bus offers it,
+/// `TeamBus::lets_ask_teammates`) and answers with what it says, so it is told who is on the team
+/// and what each one is for.
 #[must_use]
-pub fn for_one_agent(team: &TeamConfig, agent: &AgentConfig) -> String {
-    format!(
-        "You are {}, on {}. The operator wrote to you directly, so this time you work alone: \
-         nobody else on the team runs, and your reply goes straight back to the operator.\n\
-         When the task asks you to change your work, reply with the complete new version of it, \
+pub fn for_one_agent(team: &TeamConfig, agent: &AgentConfig, about_a_part: bool) -> String {
+    let teammates = team
+        .agents
+        .iter()
+        .filter(|other| about_a_part && other.id != agent.id && !other.is_operator())
+        .collect::<Vec<_>>();
+    let mut text = if teammates.is_empty() {
+        format!(
+            "You are {}, on {}. The operator wrote to you directly, so this time you work alone: \
+             nobody else on the team runs, and your reply goes straight back to the operator.",
+            agent.name,
+            team_label(team)
+        )
+    } else {
+        let mut text = format!(
+            "You are {}, on {}. The operator asked you directly about a part of a file, and your \
+             reply goes straight back to the operator.\n\
+             Answer it yourself when the answer is within your job. When it needs a teammate's \
+             job, ask that teammate with your Team Bus `ask` tool, sending the part, the question \
+             and what you need back, then answer with what it says and name who you asked. Your \
+             teammates:",
+            agent.name,
+            team_label(team)
+        );
+        for teammate in &teammates {
+            let _ = write!(text, "\n{}", teammate_line(teammate));
+        }
+        text
+    };
+    text.push_str(
+        "\nWhen the task asks you to change your work, reply with the complete new version of it, \
          not a description of what changed, and keep everything the task does not ask you to \
          change. When it asks something else, such as a question about your work, answer that.",
-        agent.name,
-        team_label(team)
-    )
+    );
+    text
 }
 
 /// A helper another agent brought in through the Team Bus.
@@ -433,6 +463,50 @@ mod tests {
 
     fn order() -> Vec<String> {
         ["research", "check", "write"].map(str::to_owned).to_vec()
+    }
+
+    #[test]
+    fn an_agent_asked_about_a_part_of_a_file_is_told_whom_to_ask_when_it_is_not_its_job() {
+        let team = pipeline();
+        let writer = &team.agents[2];
+        let text = for_one_agent(&team, writer, true);
+        assert!(
+            text.starts_with(
+                "You are Writer, on the News desk team. The operator asked you directly about a \
+                 part of a file"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("Answer it yourself when the answer is within your job."),
+            "{text}"
+        );
+        assert!(
+            text.contains("ask that teammate with your Team Bus `ask` tool"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n- Researcher (`research`): Find sources."),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n- Fact-checker (`check`): Verify the research."),
+            "{text}"
+        );
+        assert!(!text.contains("- Writer ("), "{text}");
+        assert!(!text.contains("nobody else"), "{text}");
+        // Written to with a message, it works alone, as it always did.
+        let plain = for_one_agent(&team, writer, false);
+        assert!(
+            plain.contains("this time you work alone: nobody else on the team runs"),
+            "{plain}"
+        );
+        assert!(!plain.contains("`ask`"), "{plain}");
+        // With nobody else on the team, a part is answered alone too.
+        let mut alone = pipeline();
+        alone.agents.truncate(1);
+        let text = for_one_agent(&alone, &alone.agents[0], true);
+        assert!(text.contains("nobody else on the team runs"), "{text}");
     }
 
     #[test]

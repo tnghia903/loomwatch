@@ -50,6 +50,9 @@ pub(crate) struct TeamBus {
 struct TeamBusState {
     team: Arc<TeamConfig>,
     team_path: PathBuf,
+    /// The one agent of a one-agent turn asked about a part of a file (ADR 0077). The answer may
+    /// be a teammate's job, so it may `ask` any teammate, from any seat.
+    asks_teammates: std::sync::OnceLock<String>,
     /// The team's Brief, read once at run acceptance. Delegated helpers are supplied it here:
     /// before this, `run_agent_inner` handed a helper its role and the one string its caller
     /// typed, which is the single largest context loss in the system (`docs/TEAM_MEMORY.md`).
@@ -381,6 +384,7 @@ impl TeamBus {
         let state = Arc::new(TeamBusState {
             team,
             team_path: team_path.to_path_buf(),
+            asks_teammates: std::sync::OnceLock::new(),
             memory,
             archive,
             exit_timeout,
@@ -448,6 +452,25 @@ impl TeamBus {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(agent_id)
             .map(|copy| copy.config.clone())
+    }
+
+    /// ADR 0077: `agent_id` was asked about a part of a file, alone. When the answer is another
+    /// agent's job it asks that agent, so it is offered `ask` and may start any teammate with it,
+    /// whatever its seat and `allowRecruiting` say. Set once, before the agent starts.
+    pub(crate) fn lets_ask_teammates(&self, agent_id: &str) {
+        let _ = self.state.asks_teammates.set(agent_id.to_owned());
+    }
+
+    fn asks_teammates(&self, agent_id: &str) -> bool {
+        self.state
+            .asks_teammates
+            .get()
+            .is_some_and(|asked| asked == agent_id)
+    }
+
+    /// That agent in its own turn, not answering a question it was brought in for.
+    fn asks_any_teammate(&self, session: &AgentSession) -> bool {
+        !session.answering && self.asks_teammates(&session.agent_id)
     }
 
     pub(crate) async fn connection(&self, agent_id: &str) -> Result<TeamBusConnection> {
@@ -1328,14 +1351,16 @@ impl TeamBus {
             // The target is resolved leniently here: one that names nobody is not live, and the
             // refusal below is the right answer for it, as it was before names resolved.
             "ask"
-                if !self.agent(&session.agent_id)?.allow_recruiting && {
-                    let target = arguments
-                        .get("agent")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let target = self.resolve(target).unwrap_or_else(|_| target.to_owned());
-                    !self.is_live(&target).await && !self.is_finished(&target)
-                } =>
+                if !self.agent(&session.agent_id)?.allow_recruiting
+                    && !self.asks_any_teammate(session)
+                    && {
+                        let target = arguments
+                            .get("agent")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        let target = self.resolve(target).unwrap_or_else(|_| target.to_owned());
+                        !self.is_live(&target).await && !self.is_finished(&target)
+                    } =>
             {
                 Err(refused(
                     "not_recruiting",
@@ -3096,6 +3121,9 @@ pub(crate) struct BusSeat {
     pub(crate) has_stage_before: bool,
     /// Started by `ask` to answer one question, so it may not start other agents.
     pub(crate) answering: bool,
+    /// Asked about a part of a file, alone (ADR 0077): it may ask whichever teammate's job the
+    /// answer is.
+    pub(crate) asks_teammates: bool,
     pub(crate) notebook: bool,
     /// A person at the keyboard: a run started from the app, not the command line.
     pub(crate) operator: bool,
@@ -3142,6 +3170,7 @@ impl TeamBus {
                     .iter()
                     .any(|edge| edge.to == holder.agent_id && runs_on_a_model(&edge.from)),
             answering: holder.answering,
+            asks_teammates: !holder.answering && self.asks_teammates(&holder.agent_id),
             notebook: self.state.memory.notebook_enabled,
             operator: self.state.operator.is_some() && !copy,
             conversation: conversation && !copy,
@@ -3157,7 +3186,8 @@ impl TeamBus {
 ///   that is not answering a question (the bus refuses it).
 /// - `ask` needs someone to ask: in team mode, a teammate it may start; in a pipeline, the stage
 ///   before, kept open for it. A pipeline stage with none would only start a cold copy of another
-///   agent, which knows nothing of the work.
+///   agent, which knows nothing of the work, unless the agent was asked about a part of a file and
+///   the answer is that teammate's job (ADR 0077): then the cold copy is the expert it needs.
 /// - `roster` comes with any of those, to find the teammate.
 /// - `report` is never offered: only `roster` reads it, and the bus records each agent's status
 ///   itself. A call still works, for a model that remembers it.
@@ -3171,7 +3201,7 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
         && if team {
             !seat.answering
         } else {
-            seat.has_stage_before
+            seat.has_stage_before || seat.asks_teammates
         };
     let mut tools = Vec::new();
     // First, as the way an agent working alone has to share the work: it is told when that pays
@@ -3610,6 +3640,7 @@ mod tests {
                 teammates: 2,
                 has_stage_before: true,
                 answering: false,
+                asks_teammates: false,
                 notebook: true,
                 operator: true,
                 conversation: true,
@@ -4008,6 +4039,83 @@ mod tests {
             "may not recruit helpers within its own pipeline step",
         );
 
+        Ok(())
+    }
+
+    /// ADR 0077: an agent asked about a part of a file, alone, is offered `ask` and may start any
+    /// teammate with it, though its seat has no stage before it and it may not recruit; any other
+    /// agent on the same bus is held to its seat and its switch as before.
+    #[tokio::test]
+    async fn an_agent_asked_about_a_part_of_a_file_may_ask_any_teammate() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let mut writer = test_agent("writer", OFFLINE);
+        writer.allow_recruiting = false;
+        let mut editor = test_agent("editor", OFFLINE);
+        editor.allow_recruiting = false;
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "part-asked-team".into(),
+            name: "Part asked team".into(),
+            entrypoint: "writer".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![writer, test_agent("researcher", OFFLINE), editor],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(1),
+            TeamBusMode::Pipeline,
+            Arc::new(crate::memory::TeamMemory::default()),
+            None,
+        )?;
+        bus.lets_ask_teammates("writer");
+        let event_log = EventLog::new(archive.clone(), "part-asked-run".into());
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}});
+        let names = |listed: &Value| {
+            listed["result"]["tools"]
+                .as_array()
+                .expect("tools array")
+                .iter()
+                .map(|tool| tool["name"].as_str().expect("tool name").to_owned())
+                .collect::<Vec<_>>()
+        };
+        let ask = json!({
+            "jsonrpc": "2.0",
+            "id": Uuid::new_v4().to_string(),
+            "method": "tools/call",
+            "params": {"name": "ask", "arguments": {"agent": "researcher", "question": "Where does the 3% come from?"}}
+        });
+
+        let writer = bus.connection("writer").await?;
+        assert_eq!(
+            names(&post_json(&bus, &writer.token, &list).await?),
+            ["roster", "ask"]
+        );
+        writer.register(event_log.clone()).await;
+        let response = post_json(&bus, &writer.token, &ask).await?;
+        assert!(
+            !response.to_string().contains("may not recruit helpers"),
+            "{response}"
+        );
+
+        let editor = bus.connection("editor").await?;
+        assert!(names(&post_json(&bus, &editor.token, &list).await?).is_empty());
+        editor.register(event_log.clone()).await;
+        assert_tool_error_contains(
+            &post_json(&bus, &editor.token, &ask).await?,
+            "may not recruit helpers within its own pipeline step",
+        );
         Ok(())
     }
 
@@ -6910,12 +7018,13 @@ mod tests {
             teammates,
             has_stage_before,
             answering: false,
+            asks_teammates: false,
             notebook: false,
             operator: true,
             conversation: false,
             helpers: 0,
         };
-        let cases: [(&str, BusSeat, &[&str]); 10] = [
+        let cases: [(&str, BusSeat, &[&str]); 12] = [
             (
                 "one agent, team mode",
                 seat(TeamBusMode::Team, 0, false),
@@ -6935,6 +7044,22 @@ mod tests {
                 "a later stage",
                 seat(TeamBusMode::Pipeline, 2, true),
                 &["roster", "ask", "ask_user"],
+            ),
+            (
+                "asked about a part of a file, alone",
+                BusSeat {
+                    asks_teammates: true,
+                    ..seat(TeamBusMode::Pipeline, 2, false)
+                },
+                &["roster", "ask", "ask_user"],
+            ),
+            (
+                "asked about a part of a file, on a team of one",
+                BusSeat {
+                    asks_teammates: true,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &["ask_user"],
             ),
             (
                 "a lead",

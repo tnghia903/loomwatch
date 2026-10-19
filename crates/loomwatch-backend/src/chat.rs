@@ -249,6 +249,7 @@ impl ReplyTo {
         crate::Replied {
             named: format!("{}{work}{file}", capitalized(&self.described(team))),
             text: crate::cap_middle_text(self.text.trim(), QUOTE_HANDED_CHARS),
+            of_file: self.kind == ReplyKind::Passage,
         }
     }
 
@@ -4179,6 +4180,13 @@ mod tests {
         assert_eq!(
             passage.for_agents(&team).quoted(),
             "A part of market.md from Researcher (work 3f2a9c1e), in the file /Users/mai/reports/market.md:\n> Sales grew 12%\n> in Q3."
+        );
+        // ...and the run knows it is a part of a file, so the agent asked may ask a teammate.
+        assert!(passage.for_agents(&team).of_file);
+        assert!(
+            !reply(ReplyKind::Answer, None, "Short.")
+                .for_agents(&team)
+                .of_file
         );
         // An unknown kind from a newer chat still reads, as a message.
         let parsed: ReplyTo = serde_json::from_value(
