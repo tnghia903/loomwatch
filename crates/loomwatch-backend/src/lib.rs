@@ -2911,7 +2911,8 @@ fn check_items(team: &TeamConfig, checked: &str) -> Vec<String> {
 }
 
 /// What a check step is handed: the checked agent's work as written, what that agent was given,
-/// and what the work must satisfy, numbered as the `## Check` block answers them.
+/// and what the work must satisfy, numbered as the `## Check` block answers them, with how to
+/// read an item that cannot apply to this work.
 ///
 /// What it was given is what lets the checker trace a claim without opening its source: "uses only
 /// facts you were given" cannot be checked by a checker that was not given them. Nothing caps what
@@ -2951,6 +2952,17 @@ fn check_material(
     for (index, item) in check_items(team, checked).iter().enumerate() {
         let _ = writeln!(text, "{}. {item}", index + 1);
     }
+    // A Done when is written once for every task its agent gets. Read word for word, "each source
+    // link beside its claim" is Not met on a rewrite of a notice that came with no link, and a
+    // send-back no revision can meet spends a round for nothing (quality bench pilot-1, W1).
+    let _ = write!(
+        text,
+        "\nAn item, or part of one, about something that neither the request, what {name} was given \
+         nor the work has does not apply: source links when nothing came with one, tests in a \
+         project with none. Check the rest of that item; if none of it applies, mark it Met with \
+         \"{DOES_NOT_APPLY}\" and why as its evidence. Once any of them has what an item is about, \
+         it applies to all of the work.\n"
+    );
     text
 }
 
@@ -2965,6 +2977,8 @@ pub(crate) struct CheckItem {
 
 /// The evidence on an item a check step's reply gave no verdict.
 const NOT_CHECKED: &str = "Not checked";
+/// What the evidence on an item that cannot apply to the work starts with.
+const DOES_NOT_APPLY: &str = "Does not apply";
 /// The evidence on every item when a check step's reply had no block to read.
 const UNREADABLE: &str = "The check step's reply had no readable Check block.";
 
@@ -3212,6 +3226,8 @@ enum Verdict {
     NotMet,
     NotSure,
     Partly,
+    /// The item asks about something this work has none of: Met, once it says why.
+    DoesNotApply,
 }
 
 /// The verdict `line` starts with, and what follows it: a word, in bold or after a mark such as
@@ -3244,6 +3260,9 @@ fn verdict_words(line: &str) -> Option<(Verdict, &str)> {
         ("partially", Verdict::Partly),
         ("partial", Verdict::Partly),
         ("unsure", Verdict::NotSure),
+        ("does not apply", Verdict::DoesNotApply),
+        ("not applicable", Verdict::DoesNotApply),
+        ("n/a", Verdict::DoesNotApply),
         ("met", Verdict::Met),
     ]
     .into_iter()
@@ -3273,13 +3292,28 @@ fn checked_line(
 }
 
 /// A verdict and its evidence, holding a check to what it saw: Met with no evidence is Not sure,
-/// and partly met is Not met. Settled once the line is matched, which decides what its evidence is.
+/// and partly met is Not met. An item that does not apply is Met, saying so, once it says why.
+/// Settled once the line is matched, which decides what its evidence is.
 fn held_to_evidence(verdict: Verdict, evidence: String) -> (&'static str, String) {
+    let said = evidence.chars().any(char::is_alphanumeric);
     match verdict {
-        Verdict::Met if !evidence.chars().any(char::is_alphanumeric) => {
-            ("not_sure", "Marked Met without evidence".to_owned())
-        }
+        Verdict::Met if !said => ("not_sure", "Marked Met without evidence".to_owned()),
         Verdict::Met => ("met", evidence),
+        Verdict::DoesNotApply if !said => (
+            "not_sure",
+            "Marked Does not apply without saying why".to_owned(),
+        ),
+        Verdict::DoesNotApply => {
+            let says = evidence
+                .get(..DOES_NOT_APPLY.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(DOES_NOT_APPLY));
+            let evidence = if says {
+                evidence
+            } else {
+                format!("{DOES_NOT_APPLY}: {evidence}")
+            };
+            ("met", evidence)
+        }
         Verdict::NotMet => ("not_met", evidence),
         Verdict::NotSure => ("not_sure", evidence),
         Verdict::Partly if evidence.is_empty() => ("not_met", "Partly met".to_owned()),
@@ -4527,6 +4561,177 @@ mod tests {
         assert_eq!(
             evidence,
             [LIVE_EVIDENCE.to_vec(), vec![first, second, third, fourth]]
+        );
+        Ok(())
+    }
+
+    /// A Done when is written once for every task its agent gets, and every Writer placed before
+    /// 2026-10-19 asks for "each source link beside its claim". On a rewrite of a notice that came
+    /// with no link, the check step is told an item about links does not apply, so it is Met and
+    /// nothing goes back (quality bench pilot-1, W1: Not met in both rounds, "contains no source
+    /// links"). The writer stand-in has one turn: a send-back would prompt it a turn too many.
+    #[tokio::test]
+    async fn a_writing_task_with_no_sources_is_not_sent_back_for_links() -> Result<()> {
+        const NOTICE: &str =
+            "From 3 March, Zone B has no water from 10 pm to 4 am. Questions: call 555 0100.";
+        const LINK_ITEM: &str = "Uses only facts you were given, each source link beside its claim";
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) =
+            crate::test_support::stand_in(vec![crate::test_support::turn(&[], NOTICE)]);
+        let (checker, _) = crate::test_support::stand_in(vec![crate::test_support::turn(
+            &[
+                "### Work from Writer",
+                NOTICE,
+                "Only the request: nothing was handed to Writer.",
+                &format!("2. {LINK_ITEM}"),
+                "source links when nothing came with one",
+                "mark it Met with \"Does not apply\" and why as its evidence",
+            ],
+            &format!(
+                "No problems found.\n\n## Check\n\
+                 1. Met — Answers what the request asked — plain words, one short paragraph\n\
+                 2. Met — {LINK_ITEM} — Does not apply: every fact is in the notice, which came \
+                 with no link\n\
+                 3. Met — {CONTRADICTION_ITEM} — the date, hours and number match the notice"
+            ),
+        )]);
+        let mut writer_agent = named("writer", "Writer", &writer);
+        writer_agent.done_when = vec!["Answers what the request asked".into(), LINK_ITEM.into()];
+        let mut checker_agent = named("checker", "Checker", &checker);
+        checker_agent.checks = Some("writer".into());
+        checker_agent.send_back_once = true;
+        let team = check_team(
+            "no-sources",
+            vec![writer_agent, checker_agent],
+            &[("writer", "checker")],
+        );
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "Rewrite this notice in plain words: Water supply to Zone B will be interrupted \
+             between 22:00 and 04:00 from 3 March. Enquiries: 555 0100.",
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, NOTICE);
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.payload["phase"] == "check_sent_back"),
+            "nothing is sent back"
+        );
+        assert_eq!(
+            check_results(&events),
+            [(1, vec!["met".to_owned(); 3], true)]
+        );
+        let result = events
+            .iter()
+            .find(|event| event.payload["phase"] == "check_result")
+            .expect("the check is recorded");
+        assert_eq!(
+            result.payload["items"][1]["evidence"],
+            "Does not apply: every fact is in the notice, which came with no link"
+        );
+        Ok(())
+    }
+
+    /// The other side of an item that does not apply: once what the writer was given links its
+    /// sources, the item about links applies to every claim, and one left without a link still
+    /// goes back (quality bench pilot-1, R1: an unlinked claim about third-party guides, fixed in
+    /// the second round).
+    #[tokio::test]
+    async fn a_research_task_with_an_unlinked_claim_is_still_sent_back() -> Result<()> {
+        const LINK_ITEM: &str = "Uses only facts you were given; if they came with source links, \
+                                 each claim has its link beside it";
+        const RFC: &str = "https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3";
+        let unlinked = "\"Some guides list only 429 and 503\" has no link";
+        let pool = crate::db::Db::temp().await;
+        let (researcher, _) = crate::test_support::stand_in(vec![crate::test_support::turn(
+            &[],
+            &format!(
+                "## Findings\n- Retry-After takes seconds or a date ([RFC 9110]({RFC}))\n\
+                 - Some guides list only 429 and 503"
+            ),
+        )]);
+        let revised = format!("Retry-After takes seconds or a date ([RFC 9110]({RFC})).");
+        let (writer, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(
+                &["Retry-After takes seconds or a date"],
+                &format!("{revised} Some guides list only 429 and 503."),
+            ),
+            crate::test_support::turn(&["Sent back by Checker", unlinked], &revised),
+        ]);
+        let (checker, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(
+                &[
+                    "#### From Researcher",
+                    RFC,
+                    &format!("2. {LINK_ITEM}"),
+                    "Once any of them has what an item is about, it applies to all of the work.",
+                ],
+                &format!(
+                    "One claim has no source.\n\n## Check\n\
+                     1. Met — Answers what the request asked — a short brief on Retry-After\n\
+                     2. Not met — {LINK_ITEM} — {unlinked}\n\
+                     3. Met — {CONTRADICTION_ITEM} — RFC 9110 §10.2.3 says seconds or a date"
+                ),
+            ),
+            crate::test_support::turn(
+                &["The revised work", &format!("2. {LINK_ITEM} (Not met)")],
+                "## Check\n2. Met — the unlinked claim is gone, and the rest links RFC 9110",
+            ),
+        ]);
+        let mut writer_agent = named("writer", "Writer", &writer);
+        writer_agent.done_when = vec!["Answers what the request asked".into(), LINK_ITEM.into()];
+        let mut checker_agent = named("checker", "Checker", &checker);
+        checker_agent.checks = Some("writer".into());
+        checker_agent.send_back_once = true;
+        let team = check_team(
+            "unlinked-claim",
+            vec![
+                named("researcher", "Researcher", &researcher),
+                writer_agent,
+                checker_agent,
+            ],
+            &[("researcher", "writer"), ("writer", "checker")],
+        );
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "Write a short brief on the HTTP Retry-After header",
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, revised);
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        let sent = events
+            .iter()
+            .find(|event| event.payload["phase"] == "check_sent_back")
+            .expect("the unlinked claim is sent back");
+        assert_eq!(
+            sent.payload["findings"],
+            json!([{"verdict": "not_met", "item": LINK_ITEM, "evidence": unlinked}])
+        );
+        let verdicts = |list: [&str; 3]| list.map(str::to_owned).to_vec();
+        assert_eq!(
+            check_results(&events),
+            [
+                (1, verdicts(["met", "not_met", "met"]), true),
+                (2, verdicts(["met"; 3]), true),
+            ]
         );
         Ok(())
     }
@@ -6734,6 +6939,47 @@ mod tests {
         );
     }
 
+    /// An item about something the work has none of does not apply (`check_material`): Met, saying
+    /// so, in whichever shape the checker writes it, and Not sure when it does not say why. Read as
+    /// no verdict it was Not checked, and the check's own reason was lost.
+    #[test]
+    fn an_item_that_does_not_apply_is_met_once_the_check_says_why() {
+        let expected = [
+            "Every placeholder is marked as one",
+            "Uses only facts you were given, each source link beside its claim",
+            "The tests you ran pass",
+            "Says which checks you could not run",
+            "Lists every change that alters the meaning",
+        ];
+        assert_eq!(
+            settled(
+                "## Check\n1. N/A — Every placeholder is marked as one — there are none\n\
+                 2. Uses only facts you were given, each source link beside its claim — Does not \
+                 apply — nothing came with a link\n\
+                 | 3 | Not applicable | The tests you ran pass | the project has none |\n\
+                 4. Does not apply — Says which checks you could not run\n\
+                 5. Met — Lists every change that alters the meaning — does not apply: no change \
+                 alters it",
+                &expected,
+            ),
+            owned(&[
+                ("met", expected[0], "Does not apply: there are none"),
+                (
+                    "met",
+                    expected[1],
+                    "Does not apply: nothing came with a link"
+                ),
+                ("met", expected[2], "Does not apply: the project has none"),
+                (
+                    "not_sure",
+                    expected[3],
+                    "Marked Does not apply without saying why"
+                ),
+                ("met", expected[4], "does not apply: no change alters it"),
+            ])
+        );
+    }
+
     /// A recheck is asked only about what was open, so an item it leaves out keeps a Met it had,
     /// and one that was open and is left out is still not checked.
     #[test]
@@ -6959,11 +7205,17 @@ mod tests {
         );
         assert!(!text.contains("at most"), "{text}");
         assert!(
-            text.ends_with(&format!(
-                "must satisfy\n1. Every claim has a link\n2. {CONTRADICTION_ITEM}\n"
+            text.contains(&format!(
+                "must satisfy\n1. Every claim has a link\n2. {CONTRADICTION_ITEM}\n\n"
             )),
             "{text}"
         );
+        // Then how to read an item that cannot apply to this work.
+        assert!(
+            at(&format!("2. {CONTRADICTION_ITEM}")) < at("An item, or part of one"),
+            "{text}"
+        );
+        assert!(text.ends_with("it applies to all of the work.\n"), "{text}");
         assert!(text.chars().count() < 8_000 + 1_000);
         // A first stage was handed only the request, and an agent with no Done when is checked
         // against the request.
@@ -6975,8 +7227,8 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.ends_with(&format!(
-                "1. Does what the request asked\n2. {CONTRADICTION_ITEM}\n"
+            text.contains(&format!(
+                "1. Does what the request asked\n2. {CONTRADICTION_ITEM}\n\n"
             )),
             "{text}"
         );
@@ -7012,7 +7264,8 @@ mod tests {
         // None of it, when the team says so: the checker then checks what it needs itself.
         team.conversation.check.given_chars = 0;
         let text = check_material(&team, "writer", "The piece.", Some(&parts));
-        assert!(!text.contains("was given"), "{text}");
+        assert!(!text.contains("### What Writer was given"), "{text}");
+        assert!(!text.contains("Trace each claim"), "{text}");
         assert!(!text.contains("Market begins."), "{text}");
         assert!(text.contains("1. Does what the request asked"), "{text}");
     }

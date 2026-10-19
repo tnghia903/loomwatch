@@ -92,7 +92,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
   },
   {
     id: 'writer', label: 'Writer', does: 'Drafts the finished piece', icon: 'write', ...jobNeeds('writer'),
-    doneWhen: ['Answers what the request asked, in the format and length it named', 'Uses only facts you were given, each source link beside its claim'],
+    doneWhen: ['Answers what the request asked, in the format and length it named', 'Uses only facts you were given; if they came with source links, each claim has its link beside it'],
     role: lines(
       'You are the team’s writer. Turn the request, and anything earlier steps handed you, into the finished piece the request asks for.',
       '',
