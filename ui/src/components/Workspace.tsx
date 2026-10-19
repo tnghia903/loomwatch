@@ -2288,6 +2288,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     { label: notificationsOn ? 'Disable notifications' : 'Enable notifications', run: () => void enableNotifications() },
     { label: 'Copy file path', run: () => { if (doc.path) void navigator.clipboard?.writeText(doc.path) }, disabled: !doc.path },
     { label: 'My agents…', run: () => window.location.assign('/agents') },
+    { label: 'About you…', run: () => window.location.assign('/you') },
     { label: 'Skills…', run: () => window.location.assign('/skills') },
     { label: 'Quests…', run: () => window.location.assign('/quests') },
     { label: 'Connections…', run: () => window.location.assign('/connections') },

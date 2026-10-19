@@ -293,6 +293,10 @@ async fn main() -> Result<()> {
             // agent starts, and the model list when it is first asked for.
             let ai = loomwatch_backend::ai::Ai::new(&state_dir);
             loomwatch_backend::ai::install(ai.clone());
+            // What the person told their agents about themselves (ADR 0074), which every session
+            // reads when it opens. Read once here; the About you page changes it in memory too.
+            let you = loomwatch_backend::you::You::open(&state_dir);
+            loomwatch_backend::you::install(you.clone());
             // The tools the operator connected (ADR 0069), which a run offers the agents given
             // one. Opening reads nothing; the Keychain is read when a tool is first used.
             let connected_tools = loomwatch_backend::connected_tools::Tools::open(&state_dir)?;
@@ -396,7 +400,8 @@ async fn main() -> Result<()> {
                 .merge(updates_api)
                 .merge(loomwatch_backend::wardrobe::router(
                     loomwatch_backend::wardrobe::Wardrobe::open(&state_dir),
-                ));
+                ))
+                .merge(loomwatch_backend::you::router(you));
             if listen.ip().is_loopback() || allow_container_listener {
                 app = app.merge(loomwatch_backend::notion::router(
                     &state_dir,

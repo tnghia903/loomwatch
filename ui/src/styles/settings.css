@@ -103,6 +103,12 @@
 }
 .lw-settings-advanced > * + * { margin-top: var(--sp-3); }
 
+/* About you (ADR 0074): two fields, then the privacy line and the buttons. The hint under the
+   text box carries its character count at the right. */
+.lw-you-form { display: flex; flex-direction: column; gap: var(--sp-4); }
+.lw-you-form > p { margin: 0; }
+.lw-you-hint { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3); }
+.lw-you-count { flex: none; font-variant-numeric: tabular-nums; color: var(--color-ink-3); }
 /* Buttons that act on what a section shows, side by side. */
 .lw-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 

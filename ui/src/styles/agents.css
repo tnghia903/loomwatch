@@ -6,6 +6,9 @@
 /* The builder's workbench needs the room: the bench and the part you picked sit side by side. */
 .agents-main:has(.agent-builder) { width: min(1440px, 100%); }
 .agents-hero { max-width: 720px; }
+/* What every agent here is told about you (ADR 0074): a quiet line under the intro. */
+.agents-hero .agents-know-you { font-size: 13px; line-height: 1.45; color: var(--color-ink-3); }
+.agents-hero .agents-know-you strong { color: var(--color-ink); font-weight: 600; }
 .lw-agents a.home-brand { color: inherit; text-decoration: none; }
 
 /* ---------- start chooser ---------- */

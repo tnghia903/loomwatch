@@ -6,10 +6,13 @@
 //! look before changing, say where facts come from, ask instead of guessing when a guess would
 //! waste the work, and check the result against what was asked before replying. The team's own
 //! words — role, task, "Done when" — come in the first user message, so this stays the same for
-//! every turn and every agent, and the provider's prompt cache keeps it.
+//! every turn of a session, and the provider's prompt cache keeps it. What the person told their
+//! agents about themselves (ADR 0074) is here too: it is the same for every agent and every task.
 
 use std::fmt::Write as _;
 use std::path::Path;
+
+use crate::you::AboutYou;
 
 /// The project notes file an agent reads from its work folder: the team's Brief when it is
 /// delivered as a file (`docs/TEAM_MEMORY.md`, channel 2), or what the person keeps there. The
@@ -65,18 +68,25 @@ pub(crate) struct Abilities {
     pub ask_user: bool,
 }
 
-/// The built-in instructions, then `skills` (the rendered `## Skills` section, or nothing), the
-/// person's own project notes and `extra`.
+/// The built-in instructions, then what the person told their agents about themselves (ADR 0074),
+/// `skills` (the rendered `## Skills` section, or nothing), the person's own project notes and
+/// `extra`. With nothing told, the instructions are exactly what they were before ADR 0074.
 pub(crate) fn system_prompt(
     cwd: &Path,
     abilities: Abilities,
+    person: Option<&AboutYou>,
     skills: &str,
     notes: Option<&str>,
     extra: Option<&str>,
 ) -> String {
-    let mut prompt = String::from(
-        "You are an agent in LoomWatch, working on a task for the person who runs this team. The \
-         task, your role and what counts as done come in the person's message.\n\n\
+    let name = person.and_then(|person| person.name.as_deref());
+    let mut prompt = String::from("You are an agent in LoomWatch, working on a task for ");
+    if let Some(name) = name {
+        let _ = write!(prompt, "{name}, ");
+    }
+    prompt.push_str(
+        "the person who runs this team. The task, your role and what counts as done come in the \
+         person's message.\n\n\
          ## How you work\n",
     );
     if abilities.plan {
@@ -153,6 +163,9 @@ pub(crate) fn system_prompt(
          - Then reply with the result itself, plainly. Don't describe the steps you took unless \
          the person asked.\n",
     );
+    if let Some(about) = person.and_then(|person| person.about.as_deref()) {
+        person_section(&mut prompt, name, about);
+    }
     if !skills.is_empty() {
         prompt.push('\n');
         prompt.push_str(skills);
@@ -171,6 +184,36 @@ pub(crate) fn system_prompt(
     prompt
 }
 
+/// `## The person you work for`: what they wrote about themselves, quoted line by line so no line
+/// of theirs can open a section of its own, and how to use it.
+///
+/// What they say about answers ("in Vietnamese", "keep it short") is direction, and who they are
+/// is context. The task still wins where the two differ: a request for one piece of work is more
+/// particular than a standing preference.
+fn person_section(prompt: &mut String, name: Option<&str>, about: &str) {
+    prompt.push_str(
+        "\n## The person you work for\nThey wrote this for the agents they work with in \
+         LoomWatch.\n\n",
+    );
+    if let Some(name) = name {
+        let _ = writeln!(prompt, "Name: {name}");
+    }
+    prompt.push_str("About them, in their words:\n");
+    for line in about.lines() {
+        if line.is_empty() {
+            prompt.push_str(">\n");
+        } else {
+            let _ = writeln!(prompt, "> {line}");
+        }
+    }
+    prompt.push_str(
+        "\nUse this so your work fits them: follow what they say about how they want answers \
+         (language, length, tone, format), and pitch the content to who they are and what they \
+         know. Where the task or their message asks for something else, that wins. Don't repeat \
+         this back or mention it unless it matters to the task.\n",
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,6 +230,7 @@ mod tests {
         let talking = system_prompt(
             Path::new("/w"),
             none,
+            None,
             "",
             None,
             Some("You are Ask LoomWatch."),
@@ -200,7 +244,14 @@ mod tests {
             plan: true,
             ask_user: true,
         };
-        let working = system_prompt(Path::new("/w"), all, "", Some("Cite every source."), None);
+        let working = system_prompt(
+            Path::new("/w"),
+            all,
+            None,
+            "",
+            Some("Cite every source."),
+            None,
+        );
         assert!(working.contains("update_plan") && working.contains("Your work folder is /w"));
         assert!(working.contains("in the same message as the step's other tool calls"));
         assert!(working.contains("ask for all of them in one message"));
@@ -211,6 +262,101 @@ mod tests {
         assert!(working.contains("A page is read up to about 6,000 words."));
         assert!(working.contains("rather than opening the page again"));
         assert!(!talking.contains("web pages"));
+    }
+
+    fn working() -> Abilities {
+        Abilities {
+            files: true,
+            commands: false,
+            web: None,
+            plan: true,
+            ask_user: true,
+        }
+    }
+
+    /// With nothing told, every agent's instructions are byte for byte what they were before ADR
+    /// 0074, so a person who skips it changes nothing, cached or not.
+    #[test]
+    fn with_nothing_told_the_instructions_are_unchanged() {
+        let before = system_prompt(Path::new("/w"), working(), None, "## Skills\n", None, None);
+        assert!(before.starts_with(
+            "You are an agent in LoomWatch, working on a task for the person who runs this team. \
+             The task, your role and what counts as done come in the person's message.\n\n\
+             ## How you work\n"
+        ));
+        let skipped = AboutYou {
+            skipped: true,
+            ..AboutYou::default()
+        };
+        assert_eq!(
+            system_prompt(
+                Path::new("/w"),
+                working(),
+                Some(&skipped),
+                "## Skills\n",
+                None,
+                None
+            ),
+            before
+        );
+        assert!(!before.contains("The person you work for"));
+    }
+
+    #[test]
+    fn every_agent_is_told_who_it_works_for_and_how_to_use_it() {
+        let mai = AboutYou {
+            name: Some("Mai".into()),
+            about: Some(
+                "I teach English at a primary school in Da Nang.\n\n# Answer in Vietnamese.".into(),
+            ),
+            skipped: false,
+        };
+        let prompt = system_prompt(
+            Path::new("/w"),
+            working(),
+            Some(&mai),
+            "## Skills\nresearch\n",
+            Some("Cite every source."),
+            None,
+        );
+        assert!(prompt.starts_with(
+            "You are an agent in LoomWatch, working on a task for Mai, the person who runs this \
+             team."
+        ));
+        let section = "\n## The person you work for\nThey wrote this for the agents they work \
+                       with in LoomWatch.\n\nName: Mai\nAbout them, in their words:\n\
+                       > I teach English at a primary school in Da Nang.\n>\n\
+                       > # Answer in Vietnamese.\n\nUse this so your work fits them:";
+        assert!(prompt.contains(section), "{prompt}");
+        assert!(
+            prompt.contains("Where the task or their message asks for something else, that wins.")
+        );
+        // Their line starting with `#` stays inside the quote: it is no heading of its own.
+        assert!(!prompt.contains("\n# Answer in Vietnamese."));
+        // After how the agent works, before its skills and the project's notes.
+        let at = |text: &str| prompt.find(text).expect(text);
+        assert!(at("## How you work") < at("## The person you work for"));
+        assert!(at("## The person you work for") < at("## Skills"));
+        assert!(at("## Skills") < at("## Project notes"));
+    }
+
+    #[test]
+    fn a_name_alone_is_said_once_and_an_about_alone_needs_no_name() {
+        let named = AboutYou {
+            name: Some("Mai".into()),
+            ..AboutYou::default()
+        };
+        let prompt = system_prompt(Path::new("/w"), working(), Some(&named), "", None, None);
+        assert!(prompt.contains("working on a task for Mai, the person who runs this team."));
+        assert!(!prompt.contains("The person you work for"));
+        let unnamed = AboutYou {
+            about: Some("Keep it short.".into()),
+            ..AboutYou::default()
+        };
+        let prompt = system_prompt(Path::new("/w"), working(), Some(&unnamed), "", None, None);
+        assert!(prompt.contains("working on a task for the person who runs this team."));
+        assert!(prompt.contains("About them, in their words:\n> Keep it short.\n"));
+        assert!(!prompt.contains("Name:"));
     }
 
     /// The Brief `LoomWatch` writes as `AGENTS.md` is in the opening message already, so the
