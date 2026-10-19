@@ -12,7 +12,7 @@ import type { AgentConfig } from '../../lib/team-file/types'
 import { agentFigure, figureFor } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { AgentAnswer, AgentChat } from '../agents/AgentChat'
-import { AgentBuilder, AgentViewTabs } from '../agents/AgentBuilder'
+import { AgentBuilder, AgentHead } from '../agents/AgentBuilder'
 import { ByHand, type ByHandProps } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
 import { LinkedAgent } from '../canvas/LinkedAgent'
@@ -163,13 +163,15 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
   // A long answer from the chat, read in full over the bench.
   const [answerRun, setAnswerRun] = useState<string | null>(null)
   const figure = figureFor(agent.id)
-  const name = draft.name.trim() || agent.name
+  const name = draft.name.trim() || agent.name || 'New agent'
   return (
     <div className="team-agents-own">
-      <div className="team-agents-own-head">
-        <p className="t-meta team-agents-note">{editable ? 'This team’s own agent: what you change here is saved with the team, like a change on the canvas.' : 'This team can’t be changed here, so the bench shows it as it is.'}</p>
-        <AgentViewTabs view={view} onView={setView} />
-      </div>
+      {/* The same head as one of My agents (AgentHead): its name, how it is kept, its tabs. */}
+      <AgentHead
+        name={name}
+        status={<span className="agent-builder-note">{editable ? 'This team’s own agent: what you change here is saved with the team, like a change on the canvas.' : 'This team can’t be changed here, so the bench shows it as it is.'}</span>}
+        view={view} onView={setView}
+      />
       <ByHand
         draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} suggestFor={{ agent, team }} following={following}
         chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}

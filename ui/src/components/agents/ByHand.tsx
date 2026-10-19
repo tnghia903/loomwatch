@@ -69,7 +69,11 @@ export interface ByHandProps {
   figure: FigureChoice
   /** The run in its chat, if one is on screen: the figure works as its record and events say. */
   record: RunRecord | null
-  /** A team's own agent has no palette line ("what it does"): that belongs to Your agents. */
+  /**
+   * A team's own agent has no "What it does" line: it is the line under an agent's name in My
+   * agents and in the list a team adds agents from, where a team's own agent never is, and the team
+   * file has no field to keep it in. Its Name box stays where it is for one of My agents.
+   */
   hideDoes?: boolean
   /** Changes can't be kept here (a team you can't edit): every control shows, none applies. */
   readOnly?: boolean
@@ -317,8 +321,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
         {/* Kept while chatting, only hidden: what you were writing in a block is there when you come back. */}
         <div className="byhand-blocks" data-tour="agent-blocks" hidden={chatting}>
           {block('name', <div className="agent-field-row">
-            {/* Its only box is under the block's own "Name", so that word isn't shown twice. */}
-            <label className="agent-field">{hideDoes ? <span className="visually-hidden">Name</span> : 'Name'}<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
+            {/* Labelled, and where it is, whether or not "What it does" is beside it, so the block reads the same everywhere. */}
+            <label className="agent-field">Name<input value={draft.name} maxLength={80} onChange={(event) => set('name', event.target.value)} placeholder="e.g. Release notes writer" /></label>
             {!hideDoes && <label className="agent-field"><span>What it does <span className="optional">optional</span></span><input value={draft.does} maxLength={120} onChange={(event) => set('does', event.target.value)} placeholder="Shown under its name" /></label>}
           </div>)}
 

@@ -299,7 +299,7 @@ describe('ModelPicker', () => {
     expect(onChange).toHaveBeenCalledWith(opus.id, true)
   })
 
-  it('says Suggested on its button while the model follows its suggestion, and pins any other pick', async () => {
+  it('says Suggested on its button whenever its model is the suggestion, following or not, and pins any other pick', async () => {
     const onChange = vi.fn()
     const following = { ...writer, followsSuggestion: true }
     render(<ModelPicker value={opus.id} onChange={onChange} suggestFor={{ agent: following, team }} follows />)
@@ -319,6 +319,30 @@ describe('ModelPicker', () => {
     expect(suggestion).toHaveAccessibleDescription('Pick it, and this agent’s model follows its configuration from now on.')
     fireEvent.click(suggestion)
     expect(onChange).toHaveBeenLastCalledWith(opus.id, true)
+
+    // One of My agents, which never follows: on the suggested model, its button says so too.
+    cleanup()
+    render(<ModelPicker value={opus.id} onChange={onChange} suggestFor={{ agent: writer, team }} />)
+    expect(await screen.findByRole('button', { name: /Claude Opus 5\.5/ })).toHaveAccessibleName('Model Claude Opus 5.5 Suggested')
+
+    // Following, but on another model for now (its configuration hasn't settled): not said.
+    cleanup()
+    render(<ModelPicker value={haiku.id} onChange={onChange} suggestFor={{ agent: following, team }} follows />)
+    expect(await screen.findByRole('button', { name: /Claude Haiku 5\.5/ })).toHaveAccessibleName('Model Claude Haiku 5.5')
+  })
+
+  it('names on its closed button the suggestion AI read, without asking again', async () => {
+    reading = { ...reading, enabled: true }
+    const onChange = vi.fn()
+    const { rerender } = render(<ModelPicker value={opus.id} onChange={onChange} suggestFor={{ agent: gatherer, team }} />)
+    // The free reading suggests Opus for it, and nothing is read before the list opens.
+    fireEvent.click(await screen.findByRole('button', { name: 'Model Claude Opus 5.5 Suggested' }))
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Suggested for this agent' })).toHaveTextContent('Claude Sonnet 5.5'))
+    fireEvent.click(screen.getAllByRole('option')[0])
+    expect(onChange).toHaveBeenLastCalledWith(sonnet.id, true)
+    rerender(<ModelPicker value={sonnet.id} onChange={onChange} suggestFor={{ agent: gatherer, team }} />)
+    expect(screen.getByRole('button', { name: /Claude Sonnet 5\.5/ })).toHaveAccessibleName('Model Claude Sonnet 5.5 Suggested')
+    expect(readings()).toHaveLength(1)
   })
 
   it('says where its model moved from, with Undo, while the list is closed', async () => {

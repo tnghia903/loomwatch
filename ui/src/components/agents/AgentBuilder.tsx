@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, ExternalLink, History, MessagesSquare, Trash2, Wrench } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
@@ -182,17 +182,16 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
-      <header className="agent-builder-head">
-        {inTeam ? <span className="agent-backs t-meta">From My agents. Saving makes its next version, and moves {inTeam.name} to it.</span> : <span className="agent-backs">
+      <AgentHead
+        above={inTeam ? <span className="agent-backs t-meta">From My agents. Saving makes its next version, and moves {inTeam.name} to it.</span> : <span className="agent-backs">
           <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
           {/* Back to the team's agents: that is where an agent is added, or moved to a new version. */}
           {cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ` to update it to v${save.version}` : ''}</a>}
         </span>}
-        <div className="agent-builder-title">
-          <h1>{draft.name.trim() || 'New agent'}</h1>
-          <span className="agent-builder-version">{saved ? `v${version}${saved.savedAt ? ` · saved ${relativeTime(new Date(saved.savedAt))}` : ''}` : 'Not saved yet'}</span>
-          <AgentViewTabs view={view} onView={showView} tour={!inTeam} />
-        </div>
+        name={draft.name.trim() || 'New agent'}
+        status={<span className="agent-builder-version">{saved ? `v${version}${saved.savedAt ? ` · saved ${relativeTime(new Date(saved.savedAt))}` : ''}` : 'Not saved yet'}</span>}
+        view={view} onView={showView} tour={!inTeam}
+      >
         <div className="agent-builder-save">
           {saved && changed && bumps && <input className="agent-note" value={note} maxLength={200} onChange={(event) => setNote(event.target.value)} placeholder="What changed? Teams see this when they update" aria-label="What changed in this version" />}
           <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
@@ -202,7 +201,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
               : changed && base ? 'Unsaved changes' : problem ?? ''}
           </span>
         </div>
-      </header>
+      </AgentHead>
 
       <ByHand
         draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
@@ -259,9 +258,29 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 }
 
 /**
- * An agent's two tabs: Build, its workbench, and Chat, where you work with it on its own. In Your
- * agents they sit by its name (the getting-started guide points at them); a team's own agent has
- * them above its bench.
+ * The head of an agent's page, the same wherever an agent is edited: in My agents, and in a team's
+ * Agents tab for one from My agents or one of the team's own. Read top down: the way back or where
+ * it comes from (`above`), its name, how it is kept (`status`), then its two tabs, then the bench's
+ * summary below it. The tabs sit under the name, on the left, so they are read with the agent they
+ * belong to and right above what they switch; the far side (`children`) is for saving it.
+ */
+export function AgentHead({ above, name, status, view, onView, tour = false, children }: { above?: ReactNode; name: string; status: ReactNode; view: AgentView; onView: (view: AgentView) => void; tour?: boolean; children?: ReactNode }) {
+  return (
+    <header className="agent-builder-head">
+      {above}
+      <div className="agent-builder-title">
+        <h1>{name}</h1>
+        {status}
+        <AgentViewTabs view={view} onView={onView} tour={tour} />
+      </div>
+      {children}
+    </header>
+  )
+}
+
+/**
+ * An agent's two tabs: Build, its workbench, and Chat, where you work with it on its own. They sit
+ * under its name (AgentHead); in My agents the getting-started guide points at them.
  */
 export function AgentViewTabs({ view, onView, tour = false }: { view: AgentView; onView: (view: AgentView) => void; tour?: boolean }) {
   return (
