@@ -85,9 +85,17 @@ pub struct ClaudeModel {
     pub max_output: u64,
     /// It thinks adaptively, as every current Claude does.
     pub adaptive_thinking: bool,
+    /// It takes pictures, as every Claude since Claude 3 does: a check from before this was kept
+    /// says so.
+    #[serde(default = "crate::ai::anthropic::yes")]
+    pub sees_pictures: bool,
     /// The efforts it takes (`low` … `max`), none when it takes no effort.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub efforts: Vec<String>,
+}
+
+pub(crate) const fn yes() -> bool {
+    true
 }
 
 /// Why a key can't be kept, before Anthropic is asked.
@@ -221,6 +229,8 @@ fn model_from(entry: &Value) -> Option<ClaudeModel> {
             .unwrap_or(0),
         max_output: entry.get("max_tokens").and_then(Value::as_u64).unwrap_or(0),
         adaptive_thinking: supported("/thinking/types/adaptive"),
+        // A model listed without capabilities is from before they were listed, and sees pictures.
+        sees_pictures: entry.get("capabilities").is_none() || supported("/image_input"),
         efforts,
         id,
     })
@@ -295,22 +305,36 @@ mod tests {
             "id": "claude-opus-5-5", "display_name": "Claude Opus 5.5",
             "max_input_tokens": 1_000_000, "max_tokens": 128_000,
             "capabilities": {
+                "image_input": {"supported": true},
                 "thinking": {"supported": true, "types": {"enabled": {"supported": false}, "adaptive": {"supported": true}}},
                 "effort": {"supported": true, "low": {"supported": true}, "medium": {"supported": true},
                            "high": {"supported": true}, "xhigh": {"supported": true}, "max": {"supported": true}}
             }
         }))
         .unwrap();
-        assert!(opus.adaptive_thinking);
+        assert!(opus.adaptive_thinking && opus.sees_pictures);
         assert_eq!(opus.efforts, ["low", "medium", "high", "xhigh", "max"]);
         assert_eq!((opus.context_length, opus.max_output), (1_000_000, 128_000));
         let old = model_from(&json!({
             "id": "claude-haiku-4-5", "display_name": "Claude Haiku 4.5",
             "max_input_tokens": 200_000, "max_tokens": 64_000,
             "capabilities": {"thinking": {"supported": true, "types": {"enabled": {"supported": true}, "adaptive": {"supported": false}}},
-                             "effort": {"supported": false}}
+                             "effort": {"supported": false}, "image_input": {"supported": false}}
         }))
         .unwrap();
         assert!(!old.adaptive_thinking && old.efforts.is_empty());
+        assert!(!old.sees_pictures, "as its capabilities say");
+        let unsaid = model_from(&json!({"id": "claude-x", "max_input_tokens": 200_000})).unwrap();
+        assert!(
+            unsaid.sees_pictures,
+            "every Claude listed without capabilities sees pictures"
+        );
+        // A model kept by a check from before pictures were recorded.
+        let kept: ClaudeModel = serde_json::from_value(json!({
+            "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "contextLength": 1_000_000,
+            "maxOutput": 128_000, "adaptiveThinking": true
+        }))
+        .unwrap();
+        assert!(kept.sees_pictures);
     }
 }

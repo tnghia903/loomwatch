@@ -393,6 +393,9 @@ pub struct Model {
     pub free: bool,
     /// Takes a reasoning effort.
     pub reasoning: bool,
+    /// Takes pictures as well as text, so an agent on it can look at one.
+    #[serde(default)]
+    pub sees_pictures: bool,
     /// Why it is recommended, for the ones that are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -504,6 +507,17 @@ impl Models {
                 Ok(saved)
             }
         }
+    }
+
+    /// Whether `model` takes pictures, as the catalog says. Fetches the list when it is over an
+    /// hour old, as a Claude session's prices do: a picture sent to a model that takes none fails
+    /// the call. A model the list doesn't name takes none.
+    pub async fn sees_pictures(&self, model: &str) -> bool {
+        self.catalog()
+            .await
+            .ok()
+            .and_then(|catalog| catalog.find(model).map(|model| model.sees_pictures))
+            .unwrap_or(false)
     }
 
     /// The context size of `model`, if the catalog lists it. Never fetches: a run shouldn't wait
@@ -629,6 +643,10 @@ fn model_from(entry: &Value) -> Option<Model> {
         .get("supported_parameters")
         .and_then(Value::as_array)
         .is_some_and(|params| params.iter().any(|param| param == "reasoning"));
+    let sees_pictures = entry
+        .pointer("/architecture/input_modalities")
+        .and_then(Value::as_array)
+        .is_some_and(|kinds| kinds.iter().any(|kind| kind == "image"));
     let description: String = entry
         .get("description")
         .and_then(Value::as_str)
@@ -653,6 +671,7 @@ fn model_from(entry: &Value) -> Option<Model> {
         cached_input_price: price("input_cache_read"),
         cache_write_price: price("input_cache_write"),
         reasoning,
+        sees_pictures,
         note: None,
         id,
     })
@@ -688,13 +707,15 @@ mod tests {
         json!({"data": [
             {"id": "anthropic/claude-haiku-5.5", "name": "Anthropic: Claude Haiku 5.5", "created": 3, "context_length": 1_000_000,
              "pricing": {"prompt": "0.0000001", "completion": "0.0000005", "input_cache_read": "0.00000001"},
-             "supported_parameters": ["tools", "reasoning"]},
+             "supported_parameters": ["tools", "reasoning"],
+             "architecture": {"input_modalities": ["text", "image", "file"], "output_modalities": ["text"]}},
             {"id": "anthropic/claude-opus-5.5", "name": "Anthropic: Claude Opus 5.5", "created": 1, "context_length": 1_000_000,
              "pricing": {"prompt": "0.000004", "completion": "0.00002"}, "supported_parameters": ["tools", "reasoning"]},
             {"id": "someone/chat-only", "name": "No tools", "created": 9, "pricing": {"prompt": "0", "completion": "0"},
              "supported_parameters": ["temperature"]},
             {"id": "google/gemma-4-31b-it:free", "name": "Gemma 4 (free)", "created": 2, "context_length": 262_144,
-             "pricing": {"prompt": "0", "completion": "0"}, "supported_parameters": ["tools"]},
+             "pricing": {"prompt": "0", "completion": "0"}, "supported_parameters": ["tools"],
+             "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}},
         ]})
     }
 
@@ -718,6 +739,20 @@ mod tests {
         assert!((haiku.input_price - 0.1).abs() < 1e-9 && (haiku.output_price - 0.5).abs() < 1e-9);
         assert!(haiku.reasoning && !haiku.free);
         assert!(catalog.find("google/gemma-4-31b-it:free").unwrap().free);
+        // Which models see pictures, as the list says; one that doesn't say sees none.
+        assert!(haiku.sees_pictures);
+        assert!(
+            !catalog
+                .find("google/gemma-4-31b-it:free")
+                .unwrap()
+                .sees_pictures
+        );
+        assert!(
+            !catalog
+                .find("anthropic/claude-opus-5.5")
+                .unwrap()
+                .sees_pictures
+        );
         // Recommended keeps its own order and its reasons; missing ones are left out.
         let recommended: Vec<(&str, Option<&str>)> = catalog
             .recommended

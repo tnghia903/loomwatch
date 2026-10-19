@@ -11,6 +11,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use base64::Engine as _;
 use serde_json::{Value, json};
 
 use super::*;
@@ -193,7 +194,7 @@ async fn a_turn_writes_a_file_and_replies() {
     assert!(requests[0].tools.contains(&"write_file".to_owned()));
     assert!(matches!(
         requests[1].messages.last(),
-        Some(Message::Tool { tool_call_id, content }) if tool_call_id == "c1" && content.starts_with("Created")
+        Some(Message::Tool { tool_call_id, content, .. }) if tool_call_id == "c1" && content.starts_with("Created")
     ));
 }
 
@@ -1890,6 +1891,7 @@ fn claude(base: &str) -> Provider {
         context_length: 1_000_000,
         max_output: 128_000,
         adaptive_thinking: true,
+        sees_pictures: true,
         efforts: vec!["low".into(), "medium".into(), "high".into()],
     };
     let anthropic = base.strip_suffix("/api/v1").unwrap_or(base);
@@ -2288,4 +2290,125 @@ async fn a_plans_limit_stops_the_turn_and_a_refused_token_is_renewed() {
     assert_eq!(session.prompt("Hi").await.unwrap().reply, "Hi.");
     assert_eq!(access.renewed.load(std::sync::atomic::Ordering::Relaxed), 1);
     assert_eq!(renewing.bodies.lock().unwrap().len(), 2);
+}
+
+/// The tool results the second call carried: each one's words and pictures.
+async fn reads_of_two_pictures(
+    sees_pictures: bool,
+    max_pictures: usize,
+    max_picture_bytes: usize,
+) -> Vec<(String, usize)> {
+    let folder = Folder::new();
+    std::fs::write(
+        folder.0.join("shot.png"),
+        crate::test_support::png(40, 20, false),
+    )
+    .unwrap();
+    std::fs::write(
+        folder.0.join("chart.png"),
+        crate::test_support::png(30, 30, false),
+    )
+    .unwrap();
+    let demo = Demo::scripted(vec![
+        Completion::calls(
+            "",
+            vec![
+                call("a", "read_file", &json!({"path": "shot.png"})),
+                call("b", "read_file", &json!({"path": "chart.png"})),
+            ],
+        ),
+        Completion::text("Seen."),
+    ]);
+    let mut config = SessionConfig::new(
+        "session-1",
+        "writer",
+        folder.0.clone(),
+        "anthropic/claude-haiku-5.5",
+    );
+    config.sees_pictures = sees_pictures;
+    config.max_pictures = max_pictures;
+    config.max_picture_bytes = max_picture_bytes;
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    session.prompt("Look at both.").await.unwrap();
+    demo.requests()[1]
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool {
+                content, pictures, ..
+            } => Some((content.clone(), pictures.len())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_picture_reaches_a_model_that_sees_pictures_in_the_tools_result() {
+    let reads = reads_of_two_pictures(true, MAX_PICTURES, MAX_PICTURE_BYTES).await;
+    assert_eq!(
+        reads,
+        [
+            ("shot.png: a picture, 40×20 pixels.".to_owned(), 1),
+            ("chart.png: a picture, 30×30 pixels.".to_owned(), 1),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_model_that_cant_see_pictures_is_told_so_and_sent_none() {
+    let reads = reads_of_two_pictures(false, MAX_PICTURES, MAX_PICTURE_BYTES).await;
+    assert!(reads.iter().all(|(content, pictures)| {
+        *pictures == 0 && content.contains("The model you run on can't see pictures")
+    }));
+}
+
+#[tokio::test]
+async fn a_conversation_holds_no_more_pictures_than_its_limit() {
+    let reads = reads_of_two_pictures(true, 1, MAX_PICTURE_BYTES).await;
+    assert_eq!(reads[0].1, 1);
+    assert_eq!(reads[1].1, 0);
+    assert!(
+        reads[1].0.contains("already holds as many pictures"),
+        "{}",
+        reads[1].0
+    );
+}
+
+/// Every call sends the whole conversation, so the pictures it holds are kept under what a
+/// provider takes in one request.
+#[tokio::test]
+async fn a_conversation_holds_no_more_picture_data_than_its_limit() {
+    // Room for either picture alone, not for both: the second fits only while the first isn't
+    // counted.
+    let size = |picture: Vec<u8>| {
+        base64::engine::general_purpose::STANDARD
+            .encode(picture)
+            .len()
+    };
+    let both = size(crate::test_support::png(40, 20, false))
+        + size(crate::test_support::png(30, 30, false));
+    let reads = reads_of_two_pictures(true, MAX_PICTURES, both - 1).await;
+    assert_eq!(reads[0].1, 1);
+    assert_eq!(reads[1].1, 0);
+    assert!(
+        reads[1].0.contains("leave no room for one this large"),
+        "{}",
+        reads[1].0
+    );
+}
+
+/// A session kept before tool results could hold pictures reads back the same, and one without
+/// pictures is written as it always was.
+#[test]
+fn a_tool_result_without_pictures_is_stored_as_before() {
+    let before = json!({"role": "tool", "tool_call_id": "a", "content": "x"});
+    let message: Message = serde_json::from_value(before.clone()).unwrap();
+    assert!(matches!(&message, Message::Tool { pictures, .. } if pictures.is_empty()));
+    assert_eq!(serde_json::to_value(&message).unwrap(), before);
 }

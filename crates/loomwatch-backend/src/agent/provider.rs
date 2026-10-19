@@ -44,7 +44,30 @@ pub enum Message {
     Tool {
         tool_call_id: String,
         content: String,
+        /// Pictures the tool opened for the model to look at, after its words.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pictures: Vec<Picture>,
     },
+}
+
+/// A picture in the conversation, as every provider takes one: its bytes in base64, and what kind
+/// of picture they are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Picture {
+    /// The file it came from, as the agent named it.
+    pub name: String,
+    /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
+    pub media_type: String,
+    /// The picture's bytes in standard base64.
+    pub data: String,
+}
+
+impl Picture {
+    /// The picture as a `data:` address, the way the `OpenAI` APIs take one.
+    #[must_use]
+    pub fn data_url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.data)
+    }
 }
 
 /// A message in the shape one provider writes it: Anthropic's content blocks or the Responses API's

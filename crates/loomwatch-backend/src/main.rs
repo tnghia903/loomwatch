@@ -110,6 +110,10 @@ enum Commands {
         #[command(flatten)]
         database: DatabaseArgs,
     },
+    /// Read one document or picture and print it as JSON. `LoomWatch` reads each file an agent
+    /// opens this way, in a process of its own, so a damaged file costs nothing else.
+    #[command(hide = true)]
+    ReadDocument { path: PathBuf },
 }
 
 /// A durable registry with its cache already filled from the `runs` table, and every run the last
@@ -247,6 +251,10 @@ async fn stop_signal() -> i32 {
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
+    // Files agents open are read by a copy of this program (`read-document`).
+    if let Ok(program) = std::env::current_exe() {
+        loomwatch_backend::documents::use_helper(program);
+    }
     match Cli::parse().command {
         Commands::Serve {
             listen,
@@ -479,6 +487,9 @@ async fn main() -> Result<()> {
             if let Some(layout) = loomwatch_backend::db::layout(&database.database()?).await? {
                 println!("{layout}");
             }
+        }
+        Commands::ReadDocument { path } => {
+            println!("{}", loomwatch_backend::documents::answer(&path));
         }
     }
     Ok(())

@@ -288,6 +288,29 @@ impl Ai {
         &self.inner.models
     }
 
+    /// Whether `model` takes pictures, so an agent on it is shown the pictures it opens. A Claude
+    /// or a plan's model missing from its list is taken to, as every current one does; one
+    /// `OpenRouter` doesn't list is not, and the offline demo sees none.
+    pub async fn sees_pictures(&self, model: &ModelRef) -> bool {
+        match model.source {
+            Source::Anthropic => self
+                .claude_status()
+                .models
+                .iter()
+                .find(|listed| listed.id == model.id)
+                .is_none_or(|listed| listed.sees_pictures),
+            Source::ChatGpt => self
+                .chatgpt_status()
+                .models
+                .iter()
+                .find(|listed| listed.slug == model.id)
+                .is_none_or(|listed| listed.sees_pictures),
+            // The demo must not wait for the list either.
+            Source::OpenRouter if model.id == crate::agent::OFFLINE_MODEL => false,
+            Source::OpenRouter => self.models().sees_pictures(&model.id).await,
+        }
+    }
+
     /// `LoomWatch`'s own skills folder, `<state dir>/skills`: every agent can read what is in it.
     #[must_use]
     pub fn skills_folder(&self) -> PathBuf {
@@ -689,6 +712,7 @@ fn plan_listing(model: &ChatGptModel) -> Model {
         cache_write_price: None,
         free: false,
         reasoning: !model.efforts.is_empty(),
+        sees_pictures: model.sees_pictures,
         note: None,
     }
 }
@@ -733,6 +757,7 @@ fn claude_listing(model: &ClaudeModel, catalog: &Catalog) -> Model {
         cache_write_price,
         free: false,
         reasoning: model.adaptive_thinking || !model.efforts.is_empty(),
+        sees_pictures: model.sees_pictures,
         note: None,
     }
 }
@@ -744,6 +769,53 @@ mod tests {
     use axum::http::Request as HttpRequest;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    /// What each model list says decides whether an agent is shown pictures. The lists here are
+    /// the copies kept on disk, as after a restart with no network.
+    #[tokio::test]
+    async fn the_model_lists_say_who_sees_pictures() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-ai-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let catalog = crate::ai::models::catalog_from(&json!({"data": [
+            {"id": "openai/gpt-6.1-sol", "supported_parameters": ["tools"],
+             "architecture": {"input_modalities": ["text", "image"]}},
+            {"id": "z-ai/glm-5.3", "supported_parameters": ["tools"],
+             "architecture": {"input_modalities": ["text"]}},
+        ]}));
+        let kept = folder.join("models.json");
+        std::fs::write(&kept, serde_json::to_vec(&catalog).unwrap()).unwrap();
+        std::fs::write(
+            folder.join(anthropic::STATUS_FILE),
+            json!({"connected": true, "models": [{
+                "id": "claude-text-only", "name": "Text only", "contextLength": 200_000,
+                "maxOutput": 8_000, "adaptiveThinking": false, "seesPictures": false
+            }]})
+            .to_string(),
+        )
+        .unwrap();
+        let ai = Ai::with(
+            Keys::in_memory(),
+            Models::with_url("http://127.0.0.1:9/models", Some(kept)),
+            &folder,
+            "http://127.0.0.1:9/api/v1/key",
+        );
+        for (model, sees) in [
+            ("openai/gpt-6.1-sol", true),
+            ("z-ai/glm-5.3", false),
+            ("someone/unlisted", false),
+            (crate::agent::OFFLINE_MODEL, false),
+            ("anthropic:claude-opus-5-5", true),
+            ("anthropic:claude-text-only", false),
+            ("chatgpt:gpt-6.1-sol", true),
+        ] {
+            assert_eq!(
+                ai.sees_pictures(&ModelRef::parse(model)).await,
+                sees,
+                "{model}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 
     #[test]
     fn a_claude_model_is_priced_from_the_catalog_else_the_bundled_list_else_not_at_all() {
@@ -758,6 +830,7 @@ mod tests {
             context_length: 200_000,
             max_output: 64_000,
             adaptive_thinking: true,
+            sees_pictures: true,
             efforts: Vec::new(),
         };
         let listed = claude_listing(&claude("claude-opus-5-5"), &catalog);

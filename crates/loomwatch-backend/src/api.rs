@@ -1707,25 +1707,6 @@ fn windows_version(said: &str) -> Option<&str> {
     after.split_once(']').map(|(version, _)| version.trim())
 }
 
-pub(crate) fn find_executable(search_path: &std::ffi::OsStr, command: &str) -> Option<PathBuf> {
-    std::env::split_paths(search_path)
-        .flat_map(|directory| crate::platform::program_candidates(&directory.join(command)))
-        .find(|candidate| is_executable(candidate))
-}
-
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::metadata(path)
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-    path.is_file()
-}
-
 /// A JSON `{ "error": message }` response with an explicit status.
 #[derive(Debug)]
 pub(crate) struct ApiError {
