@@ -44,4 +44,15 @@ describe('the landing page and the app share their fonts', () => {
     expect(preload).not.toBeNull()
     expect(existsSync(path.join(repo, fontsDir, preload![1]))).toBe(true)
   })
+
+  it('sets Home’s headline in the landing headline’s type', () => {
+    const type = (file: string, selector: string) => {
+      const rule = read(file).match(new RegExp(`^${selector.replace(/\./g, '\\.')} \\{([^}]+)\\}`, 'm'))
+      if (!rule) throw new Error(`no ${selector} in ${file}`)
+      const font = rule[1].match(/font: (\d+) [^;]*var\(--(?:font-)?(\w+)\)/)
+      return { weight: font?.[1], family: font?.[2], tracking: rule[1].match(/letter-spacing: ([^;]+);/)?.[1] }
+    }
+    expect(type('ui/src/styles/home.css', '.home-headline')).toEqual(type('site/styles.css', '.hero h1'))
+    expect(type('site/styles.css', '.hero h1')).toEqual({ weight: '400', family: 'serif', tracking: '-.015em' })
+  })
 })
