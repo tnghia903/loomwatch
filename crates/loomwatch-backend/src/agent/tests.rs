@@ -1066,6 +1066,402 @@ async fn a_connected_tools_call_asks_first_and_runs_only_when_allowed() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Several calls in one message
+// ---------------------------------------------------------------------------------------------
+
+/// The tool results the model was sent, by call id, in the conversation's order.
+fn tool_results(messages: &[Message]) -> Vec<(String, String)> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool {
+                tool_call_id,
+                content,
+                ..
+            } => Some((tool_call_id.clone(), content.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The tool events recorded, as (kind, call id), in the order they came.
+fn tool_events(sink: &Recorded) -> Vec<(String, String)> {
+    sink.all()
+        .iter()
+        .filter(|update| {
+            matches!(
+                update["sessionUpdate"].as_str(),
+                Some("tool_call" | "tool_call_update")
+            )
+        })
+        .map(|update| {
+            (
+                update["sessionUpdate"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                update["toolCallId"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn event(kind: &str, id: &str) -> (String, String) {
+    (kind.to_owned(), id.to_owned())
+}
+
+/// A file a read can't finish until the test fills it: a named pipe, which a reader opens only
+/// once something opens it to write. The first receiver says a read has it open; the read ends
+/// when the sender fills it (or is dropped).
+#[cfg(unix)]
+fn pipe(
+    path: &std::path::Path,
+    content: &'static str,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+) {
+    use std::io::Write as _;
+    let made = std::process::Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(made.success(), "mkfifo {}", path.display());
+    let (opened, open) = tokio::sync::oneshot::channel();
+    let (fill, filled) = std::sync::mpsc::channel::<()>();
+    let path = path.to_owned();
+    std::thread::spawn(move || {
+        // Waits here until a read opens the pipe.
+        let mut writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let _ = opened.send(());
+        let _ = filled.recv();
+        writer.write_all(content.as_bytes()).unwrap();
+    });
+    (open, fill)
+}
+
+/// Waits until `done` says so, for up to ten seconds.
+#[cfg(unix)]
+async fn until(what: &str, done: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "never: {what}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// The reads of one message run at the same time: the second has its file open while the first
+/// is still waiting for its own. They finish in the other order, and their results still go back
+/// in the order the model asked for them, each one's record naming its call.
+#[cfg(unix)]
+#[tokio::test]
+async fn reads_in_one_message_run_at_the_same_time_and_answer_in_order() {
+    let folder = Folder::new();
+    let (a_open, fill_a) = pipe(&folder.0.join("a.txt"), "from a\n");
+    let (b_open, fill_b) = pipe(&folder.0.join("b.txt"), "from b\n");
+    let demo = Demo::scripted(vec![
+        Completion::calls(
+            "",
+            vec![
+                call("a", "read_file", &json!({"path": "a.txt"})),
+                call("b", "read_file", &json!({"path": "b.txt"})),
+            ],
+        ),
+        Completion::text("Read both."),
+    ]);
+    let sink = Arc::new(Recorded::default());
+    let answers = Answers::new(vec![]);
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        sink.clone(),
+        answers.clone(),
+    );
+    let turn = tokio::spawn(async move { session.prompt("Read a.txt and b.txt.").await });
+
+    // Neither read can finish yet, so both being open means both are under way at once.
+    let both_open = tokio::time::timeout(Duration::from_secs(10), async {
+        let _ = a_open.await;
+        let _ = b_open.await;
+    })
+    .await
+    .is_ok();
+    if !both_open {
+        // Let the reads finish one after the other, so the turn ends before the test does.
+        let _ = fill_a.send(());
+        let _ = fill_b.send(());
+        let _ = turn.await;
+        panic!("b.txt was never opened while a.txt was being read: the reads ran one at a time");
+    }
+    fill_b.send(()).unwrap();
+    until("b's read is recorded as finished", || {
+        tool_events(&sink).contains(&event("tool_call_update", "b"))
+    })
+    .await;
+    fill_a.send(()).unwrap();
+    let end = turn.await.unwrap().unwrap();
+
+    assert_eq!(end.stop_reason, StopReason::EndTurn);
+    let results = tool_results(&demo.requests()[1].messages);
+    assert_eq!(
+        results
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"],
+        "the results follow the calls, not the order they finished in"
+    );
+    assert!(results[0].1.contains("from a"), "{results:?}");
+    assert!(results[1].1.contains("from b"), "{results:?}");
+    // Each read was asked about in turn, before either ran.
+    let asked: Vec<String> = answers
+        .asked
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|request| request.tool_call_id.clone())
+        .collect();
+    assert_eq!(asked, ["a", "b"]);
+    assert_eq!(
+        tool_events(&sink),
+        [
+            event("tool_call", "a"),
+            event("tool_call", "b"),
+            event("tool_call_update", "b"),
+            event("tool_call_update", "a"),
+        ]
+    );
+}
+
+/// A write between reads waits for the reads before it, and the reads after it wait for it: the
+/// first read sees the file as it was, the last sees what was written, and every call is asked
+/// about in the model's order.
+#[tokio::test]
+async fn a_write_between_reads_runs_in_its_place() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "old notes\n").unwrap();
+    let demo = Demo::scripted(vec![
+        Completion::calls(
+            "",
+            vec![
+                call("before", "read_file", &json!({"path": "notes.md"})),
+                call(
+                    "write",
+                    "write_file",
+                    &json!({"path": "notes.md", "content": "new notes\n"}),
+                ),
+                call("after", "read_file", &json!({"path": "notes.md"})),
+                call("list", "list_files", &json!({})),
+            ],
+        ),
+        Completion::text("Updated."),
+    ]);
+    let sink = Arc::new(Recorded::default());
+    let answers = Answers::new(vec![]);
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        sink.clone(),
+        answers.clone(),
+    );
+    session.prompt("Update the notes.").await.unwrap();
+
+    let results = tool_results(&demo.requests()[1].messages);
+    let ids: Vec<&str> = results.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(ids, ["before", "write", "after", "list"]);
+    assert!(results[0].1.contains("old notes"), "{results:?}");
+    assert!(results[1].1.starts_with("Replaced notes.md"), "{results:?}");
+    assert!(results[2].1.contains("new notes"), "{results:?}");
+    assert!(results[3].1.contains("notes.md"), "{results:?}");
+    let asked: Vec<String> = answers
+        .asked
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|request| request.tool_call_id.clone())
+        .collect();
+    assert_eq!(asked, ["before", "write", "after", "list"]);
+    // The read before the write ended before the write began, and the write ended before the
+    // reads after it began.
+    let events = tool_events(&sink);
+    let place = |kind: &str, id: &str| {
+        events
+            .iter()
+            .position(|recorded| *recorded == event(kind, id))
+            .unwrap()
+    };
+    assert!(place("tool_call_update", "before") < place("tool_call", "write"));
+    assert!(place("tool_call_update", "write") < place("tool_call", "after"));
+    assert!(place("tool_call_update", "write") < place("tool_call", "list"));
+}
+
+/// Records every update, and cancels the turn when the call it watches finishes.
+struct CancelsAfter {
+    recorded: Recorded,
+    id: &'static str,
+    cancel: Mutex<Option<CancelHandle>>,
+}
+
+impl EventSink for CancelsAfter {
+    fn update(&self, update: Value) -> BoxFuture<'_, anyhow::Result<()>> {
+        if update["sessionUpdate"] == "tool_call_update"
+            && update["toolCallId"] == self.id
+            && let Some(cancel) = self.cancel.lock().unwrap().as_ref()
+        {
+            cancel.cancel();
+        }
+        self.recorded.update(update)
+    }
+}
+
+/// A cancel that comes while a message's reads run stops every call after them: the reads under
+/// way finish, and the write and the read after them are answered without running.
+#[tokio::test]
+async fn a_cancel_while_reads_run_stops_the_calls_after_them() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("a.md"), "first\n").unwrap();
+    std::fs::write(folder.0.join("b.md"), "second\n").unwrap();
+    let demo = Demo::scripted(vec![Completion::calls(
+        "",
+        vec![
+            call("a", "read_file", &json!({"path": "a.md"})),
+            call("b", "read_file", &json!({"path": "b.md"})),
+            call(
+                "c",
+                "write_file",
+                &json!({"path": "c.md", "content": "never\n"}),
+            ),
+            call("d", "read_file", &json!({"path": "a.md"})),
+        ],
+    )]);
+    let sink = Arc::new(CancelsAfter {
+        recorded: Recorded::default(),
+        id: "a",
+        cancel: Mutex::default(),
+    });
+    let answers = Answers::new(vec![]);
+    let config = SessionConfig::new(
+        "session-1",
+        "writer",
+        folder.0.clone(),
+        "anthropic/claude-haiku-5.5",
+    );
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        sink.clone(),
+        answers.clone(),
+        Arc::new(NoHostTools),
+    );
+    *sink.cancel.lock().unwrap() = Some(session.cancel_handle());
+    let end = tokio::time::timeout(Duration::from_secs(10), session.prompt("Go."))
+        .await
+        .expect("the turn ends")
+        .unwrap();
+
+    assert_eq!(end.stop_reason, StopReason::Cancelled);
+    assert_eq!(demo.requests().len(), 1, "no model call after the cancel");
+    assert!(!folder.0.join("c.md").exists());
+    let results = tool_results(&session.snapshot().history);
+    let ids: Vec<&str> = results.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(ids, ["a", "b", "c", "d"]);
+    assert!(results[0].1.contains("first"), "{results:?}");
+    assert!(results[1].1.contains("second"), "{results:?}");
+    assert_eq!(results[2].1, "Not run: the turn was cancelled.");
+    assert_eq!(results[3].1, "Not run: the turn was cancelled.");
+    let asked: Vec<String> = answers
+        .asked
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|request| request.tool_call_id.clone())
+        .collect();
+    assert_eq!(asked, ["a", "b"]);
+}
+
+/// Reads run together count against the turn's tool-call cap one by one, as calls run on their
+/// own do.
+#[tokio::test]
+async fn reads_run_together_count_against_the_tool_call_cap() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("a.md"), "a\n").unwrap();
+    let demo = Demo::scripted(vec![Completion::calls(
+        "",
+        vec![
+            call("one", "read_file", &json!({"path": "a.md"})),
+            call("two", "list_files", &json!({})),
+            call("three", "read_file", &json!({"path": "a.md"})),
+        ],
+    )]);
+    let mut config = SessionConfig::new(
+        "session-1",
+        "writer",
+        folder.0.clone(),
+        "anthropic/claude-haiku-5.5",
+    );
+    config.max_tool_calls = 2;
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    let end = session.prompt("Read.").await.unwrap();
+
+    assert_eq!(end.stop_reason, StopReason::MaxTurnRequests);
+    let results = tool_results(&session.snapshot().history);
+    assert_eq!(results.len(), 3);
+    assert!(results[0].1.contains("\ta"), "{results:?}");
+    assert!(results[1].1.contains("a.md"), "{results:?}");
+    assert_eq!(
+        results[2].1,
+        "Not run: this turn reached its limit of tool calls."
+    );
+}
+
+/// A long result is set aside as it always was, and a `read_tool_output` of it in the same
+/// message waits for it to be set aside instead of running beside it.
+#[tokio::test]
+async fn a_set_aside_read_in_the_same_message_waits_for_the_read_it_names() {
+    let folder = Folder::new();
+    let long = (0..2_000).fold(String::new(), |mut text, line| {
+        let _ = writeln!(text, "line {line} of the long file");
+        text
+    });
+    std::fs::write(folder.0.join("big.txt"), &long).unwrap();
+    let demo = Demo::scripted(vec![
+        Completion::calls(
+            "",
+            vec![
+                call("big", "read_file", &json!({"path": "big.txt"})),
+                call(
+                    "more",
+                    "read_tool_output",
+                    &json!({"id": "big", "offset": 6000, "limit": 10}),
+                ),
+            ],
+        ),
+        Completion::text("Read it."),
+    ]);
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    session.prompt("Read big.txt").await.unwrap();
+
+    let results = tool_results(&demo.requests()[1].messages);
+    assert!(results[0].1.contains("the rest was set aside"));
+    assert!(
+        results[1].1.contains("… characters 6000–6010 of "),
+        "{:?}",
+        results[1]
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
 // What each call costs and is told
 // ---------------------------------------------------------------------------------------------
 
@@ -1294,6 +1690,7 @@ fn result_of<'a>(request: &'a SeenRequest, id: &str) -> &'a str {
             Message::Tool {
                 tool_call_id,
                 content,
+                ..
             } if tool_call_id == id => Some(content.as_str()),
             _ => None,
         })
@@ -2411,4 +2808,127 @@ fn a_tool_result_without_pictures_is_stored_as_before() {
     let message: Message = serde_json::from_value(before.clone()).unwrap();
     assert!(matches!(&message, Message::Tool { pictures, .. } if pictures.is_empty()));
     assert_eq!(serde_json::to_value(&message).unwrap(), before);
+}
+
+/// The pictures among a message's reads: the reads beside them still run together, the results go
+/// back in the order the model asked, and the pictures count against the conversation's room in
+/// that order, though none of them is in the conversation until every call of the message is done.
+#[tokio::test]
+async fn pictures_among_reads_keep_their_place_and_their_limit() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("a.md"), "Notes A").unwrap();
+    std::fs::write(folder.0.join("b.md"), "Notes B").unwrap();
+    std::fs::write(
+        folder.0.join("shot.png"),
+        crate::test_support::png(40, 20, false),
+    )
+    .unwrap();
+    std::fs::write(
+        folder.0.join("chart.png"),
+        crate::test_support::png(30, 30, false),
+    )
+    .unwrap();
+    let demo = Demo::scripted(vec![
+        reads(&["a.md", "shot.png", "b.md", "chart.png"]),
+        Completion::text("Seen."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.sees_pictures = true;
+    config.max_pictures = 1;
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    session.prompt("Look at everything.").await.unwrap();
+    let results: Vec<(String, String, usize)> = demo.requests()[1]
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool {
+                tool_call_id,
+                content,
+                pictures,
+            } => Some((tool_call_id.clone(), content.clone(), pictures.len())),
+            _ => None,
+        })
+        .collect();
+    let ids: Vec<&str> = results.iter().map(|(id, ..)| id.as_str()).collect();
+    assert_eq!(ids, ["a.md", "shot.png", "b.md", "chart.png"]);
+    assert!(results[0].1.contains("Notes A") && results[2].1.contains("Notes B"));
+    assert_eq!(results[1].2, 1, "{}", results[1].1);
+    assert_eq!(results[3].2, 0);
+    assert!(
+        results[3].1.contains("already holds as many pictures"),
+        "{}",
+        results[3].1
+    );
+}
+
+/// A conversation refused as too long gives up the pictures in the results it cuts down: they are
+/// the largest part of it, and can be opened again.
+#[tokio::test]
+async fn a_conversation_refused_as_too_long_takes_its_pictures_out() {
+    const LIMIT: usize = 60_000;
+    let folder = Folder::new();
+    std::fs::write(
+        folder.0.join("shot.png"),
+        crate::test_support::png(40, 20, false),
+    )
+    .unwrap();
+    let texts = ["a", "b", "c", "d"];
+    for name in texts {
+        twenty_k_file(&folder, name);
+    }
+    let demo = Demo::limited(
+        vec![
+            reads(&["shot.png", "a", "b", "c", "d"]),
+            Completion::text("Summary: looked at shot.png and read four files."),
+            Completion::text("Finished."),
+        ],
+        |request| sent(request) > LIMIT,
+    );
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.sees_pictures = true;
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    let end = session
+        .prompt("Look at the shot and read the files.")
+        .await
+        .unwrap();
+    assert_eq!(end.reply, "Finished.");
+
+    let requests = demo.requests();
+    assert_eq!(requests.len(), 4, "work, refused, summary, work");
+    let pictures = |request: &SeenRequest| {
+        request
+            .messages
+            .iter()
+            .map(|message| match message {
+                Message::Tool { pictures, .. } => pictures.len(),
+                _ => 0,
+            })
+            .sum::<usize>()
+    };
+    assert_eq!(
+        pictures(&requests[1]),
+        1,
+        "the refused call held the picture"
+    );
+    let summary = &requests[2];
+    assert!(summary.prompt().contains("Write a summary"));
+    assert_eq!(pictures(summary), 0);
+    let shot = result_of(summary, "shot.png");
+    assert!(
+        shot.contains("Taken out to make room") && shot.contains("Open it again with read_file"),
+        "{shot}"
+    );
+    assert_eq!(requests[3].messages.len(), 2);
 }

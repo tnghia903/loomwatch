@@ -155,7 +155,14 @@ fn read(cwd: &Path, file: &Path, offset: usize, limit: usize, pictures: Pictures
     if metadata.is_dir() {
         return Output::failed(format!("{shown_path} is a folder; use list_files."));
     }
-    match Kind::of(file) {
+    // Only a plain file is a document or a picture. Looking into the start of a pipe would take
+    // what it carries, and the read after would wait for more.
+    let kind = if metadata.is_file() {
+        Kind::of(file)
+    } else {
+        None
+    };
+    match kind {
         Some(Kind::Picture) => return picture(&shown_path, file, pictures),
         Some(_) => {
             return match document_text(file, &metadata) {
