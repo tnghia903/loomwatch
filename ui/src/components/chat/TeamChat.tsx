@@ -351,6 +351,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     setBatons((now) => (sameBaton(now.get(runId) ?? null, next) ? now : new Map(now).set(runId, next)))
   }, [])
   const held = unreachable ? null : heldBy(live, batons, new Set(members.map((agent) => agent.id)))
+  // Who is typing now, in each live piece: the message box says so.
+  const [typingIn, setTypingIn] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map())
+  const onTyping = useCallback((runId: string, ids: readonly string[]) => {
+    setTypingIn((now) => ((now.get(runId) ?? []).join('\n') === ids.join('\n') ? now : new Map(now).set(runId, ids)))
+  }, [])
+  const typingNames = [...new Set([...typingIn.values()].flat())].map((id) => team.names.get(id) ?? id)
   const baton = held?.baton ?? null
   const batonText = baton ? batonWords(baton, (id) => members.find((agent) => agent.id === id)?.name || id) : null
   const holding = baton && batonText ? { agent: baton.agent, words: batonText.pill, hue: team.hues.get(baton.agent) ?? 1, waiting: baton.kind === 'you' } : null
@@ -555,7 +561,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
-                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
+                      detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onTyping={onTyping} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} />
                   : <TeamNote message={item.message} reactions={item.reactions} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} />}
               </Fragment>
@@ -581,6 +587,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         live={live}
         decision={decision}
         disabled={blocked}
+        typing={typingNames}
         value={draft}
         onChange={setDraft}
         onSend={async (text, to, now) => {
