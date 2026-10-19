@@ -1478,7 +1478,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     sessionState.events = busFailure()
     renderWorkspace('run-1')
     fireEvent.click(await screen.findByRole('button', { name: 'Show evidence' }))
-    await waitFor(() => expect(screen.getByRole('complementary', { name: /ask → market-researcher/ })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('complementary', { name: 'Researcher couldn’t ask market-researcher' })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: /fold its evidence/ })).toBeInTheDocument()
   })
 
@@ -1486,7 +1486,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     sessionState.events = busFailure()
     renderWorkspace('run-1', 'delivery')
     fireEvent.click(await screen.findByRole('button', { name: 'Show evidence' }))
-    await waitFor(() => expect(screen.getByRole('complementary', { name: /ask → market-researcher/ })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('complementary', { name: 'Researcher couldn’t ask market-researcher' })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: /Researcher/, pressed: true })).toHaveClass('delivery-stage-select')
     expect(screen.queryByRole('region', { name: 'Inspector' })).not.toBeInTheDocument()
   })

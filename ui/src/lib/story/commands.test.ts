@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { commandName, commandRedone } from './commands'
+import { commandName, commandOf, commandPlan, commandRedone } from './commands'
 
 // Shaped like the Editor's commands in a recorded run (6ca4befe), with the scripts cut short. Every
 // one starts in /tmp/build, which is what the receipt used to call them all.
@@ -106,5 +106,50 @@ describe('commandRedone', () => {
 
   it('never counts a title that is not a command', () => {
     expect(commandRedone('Terminal', ['Terminal'])).toBeNull()
+  })
+})
+
+describe('commandOf', () => {
+  it('reads the whole command from the input LoomWatch’s own engine recorded, not its cut title', () => {
+    const command = "python3 - <<'PY'\nprint(1)\nPY"
+    expect(commandOf({ name: "Run: python3 - <<'PY'…", rawInput: { command, timeout_seconds: 120 } })).toBe(command)
+    expect(commandName(commandOf({ name: 'Run: python3 build.py', rawInput: {} }))).toBe('python3 build.py')
+  })
+
+  it('reads the command a permission request asks about', () => {
+    expect(commandOf({ name: 'Run: npm test', rawInput: { toolCall: { kind: 'execute', rawInput: { command: 'cd app && npm test' } } } })).toBe('cd app && npm test')
+  })
+})
+
+describe('commandPlan', () => {
+  it('reads a script that fetches pages as fetching them, with the sites it reached', () => {
+    const script = "python3 - <<'PY'\nimport urllib.request\nfor u in ['https://docs.vllm.ai/en/latest/','https://huggingface.co/docs/transformers/']:\n urllib.request.urlopen(u)\nPY"
+    expect(commandPlan(script)).toEqual({ verb: ['fetch', 'fetched', 'fetching'], object: '2 web pages', targets: { label: 'Sites', items: ['docs.vllm.ai', 'huggingface.co'] } })
+    expect(commandPlan('curl -sL https://www.example.com/a.html -o a.html').object).toBe('a web page')
+  })
+
+  it('does not call a URL a fetch when nothing fetches it', () => {
+    expect(commandPlan('git clone https://github.com/x/y').object).toBe('“git clone https://github.com/x/y”')
+  })
+
+  it.each([
+    ['mkdir -p .verification; npm install --prefix .verification --no-package-lock jsdom@24', 'an add-on', ['jsdom']],
+    ['python3 -m pip install --quiet pypdf "pillow>=10"', 'add-ons', ['pypdf', 'pillow']],
+    ['pip install -r requirements.txt', 'add-ons', null],
+  ])('reads an install: %s', (command, object, items) => {
+    const plan = commandPlan(command)
+    expect(plan.verb[0]).toBe('install')
+    expect(plan.object).toBe(object)
+    expect(plan.targets?.items ?? null).toEqual(items)
+  })
+
+  it.each([
+    ['cd /tmp/build && python3 build.py', 'build.py'],
+    ['python3 -c "from PIL import Image"', 'a short Python program'],
+    ["node - <<'JS'\nconsole.log(1)\nJS", 'a short JavaScript program'],
+    ['./scripts/check.sh --fast', 'check.sh'],
+    ['git status', '“git status”'],
+  ])('names what it ran: %s', (command, object) => {
+    expect(commandPlan(command)).toMatchObject({ verb: ['run', 'ran', 'running'], object })
   })
 })

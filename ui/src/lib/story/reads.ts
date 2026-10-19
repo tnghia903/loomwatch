@@ -1,5 +1,5 @@
 import type { Evidence } from '../watch/events'
-import { commandRedone } from './commands'
+import { commandOf, commandRedone } from './commands'
 
 /**
  * What an agent's calls came to, judged by outcome rather than call by call.
@@ -94,7 +94,7 @@ export function mendOf<T extends Item>(miss: T, items: readonly T[]): Mend<T> | 
   // A command counts only once it ran again after the failure: fixing a script and rerunning it.
   if (miss.kind === 'command') {
     const later = items.slice(at + 1).filter((item) => item.kind === 'command' && item.status === 'succeeded')
-    const index = commandRedone(miss.name, later.map((item) => item.name))
+    const index = commandRedone(commandOf(miss), later.map(commandOf))
     return index === null ? null : { by: later[index], how: 'ran again' }
   }
   if (aboutSkill(miss)) {

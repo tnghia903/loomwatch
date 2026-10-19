@@ -186,6 +186,41 @@
 .lw-activity .ent-out { background: var(--color-ground); border: 1px solid var(--color-hairline); border-radius: var(--r-xs); padding: 6px 8px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-ink-2); margin: 0; }
 .lw-activity details summary { cursor: pointer; color: var(--color-ink-3); }
 .lw-activity details summary:hover { color: var(--color-ink); }
+/* How it went, in the crew's face and one word: jade worked, red didn't, gold is you. */
+.lw-activity { --act-tone: var(--color-ink-2); }
+.lw-activity.tone-ok { --act-tone: var(--color-ok); }
+.lw-activity.tone-bad { --act-tone: var(--color-alert); }
+.lw-activity.tone-you { --act-tone: var(--color-accent); }
+.act-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.act-face { position: relative; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 15px; color: var(--act-tone); background: color-mix(in srgb, var(--act-tone) 9%, transparent); }
+.act-stitch { position: absolute; inset: 0; overflow: visible; }
+.act-stitch rect { fill: none; stroke: var(--act-tone); stroke-width: 1.5px; stroke-dasharray: 4 3; stroke-linecap: round; opacity: .55; }
+.act-said { display: flex; flex-direction: column; gap: 4px; }
+.act-title { margin: 0; font-size: 17px; line-height: 23px; color: var(--color-ink); overflow-wrap: anywhere; }
+.act-state { margin: 0; color: var(--color-ink-3); }
+.act-word { color: var(--act-tone); font-weight: 600; }
+.act-rows { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px 10px; margin: 0; font-size: 13px; line-height: 19px; }
+.act-rows dt { color: var(--color-ink-3); font-size: 12px; }
+.act-rows dd { margin: 0; color: var(--color-ink); min-width: 0; }
+.act-rows .insp-mend { margin-top: 0; }
+.act-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.act-chip { max-width: 100%; overflow: hidden; padding: 0 8px; border: 1px solid var(--color-hairline); border-radius: 999px; color: var(--color-ink-2); font-size: 12px; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.act-code { margin-left: 6px; padding: 0 5px; border: 1px solid var(--color-hairline); border-radius: 4px; color: var(--color-ink-3); font-size: 11px; line-height: 16px; white-space: nowrap; }
+.act-then { color: var(--color-ink-2); }
+.act-tech { margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
+.act-tech > summary { display: flex; align-items: center; gap: 6px; list-style: none; }
+.act-tech > summary::-webkit-details-marker { display: none; }
+.act-tech > summary::after { content: '›'; font-size: 14px; line-height: 1; transition: rotate var(--t-quick) var(--ease-out); }
+.act-tech[open] > summary::after { rotate: 90deg; }
+.act-tech-body { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
+.act-call { margin: 0; color: var(--color-ink-3); overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) {
+  /* Each face plays its one move as the call opens (team-chat.css draws the moves). */
+  .act-face .face-off { animation: tc-face-shake 520ms ease-in-out 160ms 1; }
+  .act-face .face-hmm .tc-face-tilt { animation: tc-face-tilt 900ms var(--ease-out) 160ms 1; }
+  .act-face .face-seen .tc-face-pupils { animation: tc-face-glance 980ms var(--ease-out) 1; }
+  .act-face :is(.face-done, .face-met) .tc-face-mouth { animation: tc-face-draw 520ms var(--ease-out) 160ms both; }
+}
 
 /* ---------------------------------------------------------------------------
    RUN HISTORY — reopening prior runs. Bounded list; long goals ellipsize.
