@@ -144,6 +144,55 @@ describe('Team chat', () => {
     expect(screen.getByRole('note')).toHaveTextContent('Not delivered: cycle detected')
   })
 
+  it('shows each round of a clarification, in order, with who asked whom', () => {
+    const round = (id: string, seq: number, text: string, reply: MessageReply, clarifies = false) => message({ id, kind: 'ask', from: 'writer', to: 'researcher', text, seq, offsetMs: seq * 1000, ts: at(seq), state: 'answered', reply, ...(clarifies ? { clarifies: true as const } : {}) })
+    setup([
+      round('q1', 50, 'How many did it sell?', answer('researcher', 'It depends.\n\n## Question back\nWhich year?', 55, { seq: 55, asksBack: true })),
+      round('q2', 60, '2025.', answer('researcher', '42 in 2025.', 65, { seq: 65 }), true),
+    ])
+    expect(said().map((item) => item.getAttribute('aria-label')?.replace(/^[^,]+, /, ''))).toEqual([
+      'Writer to Researcher: question',
+      'Researcher to Writer: asks back',
+      'Writer to Researcher: clarifies',
+      'Researcher to Writer: answer',
+    ])
+    // Each round says what it is under it, and the question back is shown as the agent wrote it.
+    expect(within(msg(/asks back/)).getByText('asks back')).toBeInTheDocument()
+    expect(within(msg(/asks back/)).getByText('Which year?')).toBeInTheDocument()
+    expect(within(msg(/clarifies/)).getByText('clarifies')).toBeInTheDocument()
+    expect(within(msg(/clarifies/)).getByText('@Researcher')).toBeInTheDocument()
+    // The answer quotes the clarification it answers.
+    expect(within(msg(/Researcher to Writer: answer/)).getByRole('blockquote')).toHaveTextContent('Writer2025.')
+  })
+
+  // A team-mode helper is brought in fresh for each round; the chat reads the same.
+  it('reads a clarification with a helper brought in for it the same way', () => {
+    const helperOrder = [{ id: 'lead', name: 'Research lead', operator: false }, { id: 'writer', name: 'Writer', operator: false }]
+    render(<AgentMessages messages={[
+      message({ id: 'q1', kind: 'ask', from: 'lead', to: 'writer', text: 'Write the note.', seq: 1, state: 'answered', reply: answer('writer', '## Question back\nFor whom?', 5, { seq: 5, source: 'fresh', asksBack: true }) }),
+      message({ id: 'q2', kind: 'ask', from: 'lead', to: 'writer', text: 'First-time users.', seq: 6, state: 'answered', clarifies: true, reply: answer('writer', 'The note.', 9, { seq: 9, source: 'fresh' }) }),
+    ]} order={helperOrder} evidence={[]} live={false} onInspectEvidence={vi.fn()} />)
+    expect(said().map((item) => item.getAttribute('aria-label')?.replace(/^[^,]+, /, ''))).toEqual([
+      'Research lead to Writer: question',
+      'Writer to Research lead: asks back',
+      'Research lead to Writer: clarifies',
+      'Writer to Research lead: answer',
+    ])
+  })
+
+  it('says in one line why a question was not asked, with the Team Bus’s words a hover away', () => {
+    const refusal = (reason: TeamMessage['refused']) => ({ ...askBack, id: `writer:${reason}`, state: 'failed' as const, reply: null, error: 'The Team Bus’s own words.', refused: reason })
+    setup([refusal('finished'), refusal('limit')])
+    const lines = said()
+    expect(lines.map((item) => item.textContent?.replace(/\d+:\d+.*$/, ''))).toEqual([
+      'Writer asked Researcher, but Researcher had already finished its part of this run',
+      'Writer had already asked Researcher as many questions as this team allows, so this one wasn’t sent',
+    ])
+    expect(lines[0]).toHaveClass('chat-notice')
+    expect(lines[0]).toHaveAttribute('title', 'Which spec version did you read?\n\nThe Team Bus’s own words.')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
   it('cuts a long message to its first lines, with the rest a click away', () => {
     setup([{ ...handover, text: Array.from({ length: 12 }, (_, index) => `Line ${index + 1}`).join('\n\n') }])
     const more = screen.getByRole('button', { name: 'Read more' })
@@ -249,3 +298,43 @@ describe('Team chat', () => {
     expect(screen.getByText(/Nothing has passed between the agents yet/)).toBeInTheDocument()
   })
 })
+
+// ADR 0062: each round of a check step is an exchange: what it sent back, the revised work as the
+// reply, and the next round's verdict; a round with nothing missing is one quiet line.
+describe('a check step in the chat', () => {
+  const items = (verdicts: ('met' | 'not_met')[]) => verdicts.map((verdict, index) => ({ verdict, item: `Item ${index + 1}`, evidence: verdict === 'met' ? 'seen' : 'not seen' }))
+  const sentBack = message({
+    id: 'check:e10', kind: 'check', from: 'editor', to: 'writer', seq: 10, offsetMs: 60_000, ts: at(60), state: 'answered',
+    text: 'The piece runs long.\n\n**Not met**\n- Item 2 — not seen',
+    check: { round: 1, items: items(['met', 'not_met']), readable: true, sentBack: true, problems: 'The piece runs long.' },
+    reply: answer('writer', 'Shorter draft.', 90, { seq: 14, source: 'open' }),
+  })
+  const allMetAgain = message({
+    id: 'check:e20', kind: 'check', from: 'editor', to: 'writer', seq: 20, offsetMs: 120_000, ts: at(120), text: 'All 2 met.',
+    check: { round: 2, items: items(['met', 'met']), readable: true, sentBack: false, problems: null },
+  })
+
+  it('shows what was sent back, the revised work as the reply, and the round that found it all met', () => {
+    setup([sentBack, allMetAgain])
+    const back = msg(/Editor to Writer: sent back/)
+    expect(within(back).getByText('The piece runs long.')).toBeInTheDocument()
+    expect(within(back).getByText(/Item 2/)).toBeInTheDocument()
+    expect(within(back).getByText('sent back')).toBeInTheDocument()
+    const revised = msg(/Writer to Editor: revised/)
+    expect(within(revised).getByText('Shorter draft.')).toBeInTheDocument()
+    fireEvent.click(within(revised).getByRole('button', { name: 'Info' }))
+    expect(within(revised).getByText(/Revised 30 seconds after it was sent back/)).toBeInTheDocument()
+    // Nothing missing: a line, not a message.
+    expect(screen.getByText('Editor checked Writer’s revised work: all 2 met').closest('li')).toHaveClass('chat-notice')
+  })
+
+  it('says the agent is revising while it does, and that it never did once the run is over', () => {
+    const pending = { ...sentBack, state: 'pending' as const, reply: null }
+    setup([pending], { live: true })
+    expect(screen.getByText('Writer is revising its work')).toBeInTheDocument()
+    cleanup()
+    setup([pending])
+    expect(screen.getByText('Not revised')).toBeInTheDocument()
+  })
+})
+

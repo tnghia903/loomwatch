@@ -1,9 +1,10 @@
 import { stringify } from 'yaml'
 
-import { DEFAULT_MODEL } from '../ai/modelIds'
+import { modelForJob, NEW_AGENT } from '../ai/modelIds'
 import { buildAgentFromSource } from '../library/createAgent'
 import { savedJobPreset, type SavedJob } from '../library/jobs'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../library/roles'
+import { checkStepFields } from './checkStep'
 import type { AgentConfig, EdgeConfig } from './types'
 import { slugifyTeamName } from './useTeamDocument'
 import { NEW_TEAM_PER_RUN_USD } from '../runs/spend'
@@ -57,8 +58,9 @@ export const TEAM_TEMPLATES: readonly TeamTemplate[] = [
     title: 'Research, write and check',
     description: 'A third agent checks the finished piece against what it must have, and says what it missed.',
     steps: ['Researcher', 'Writer', 'Checker'],
-    // Measured on a real run (ADR 0062): the checker re-opened every source, 188k of 393k tokens.
-    perRun: 'Three agents work on each run. The checker re-opens the writer’s sources, so it can cost as much as the research.',
+    // Measured on a real run (ADR 0062), the checker re-opened every source: 188k of 393k tokens.
+    // It is now handed what the writer was given, and opens at most five sources itself.
+    perRun: 'Three agents work on each run. The checker reads what the writer was given and opens only the sources the piece rests on. When a check is not met, the writer fixes it once before you see the answer.',
     example: { title: 'Market brief: AI note-taking', lines: ['Three tools lead; two launched this year', 'Prices cluster around $10–20 a month', 'Checks: every claim linked, 120 words'], note: 'Checked by the Checker before you read it' },
   },
   {
@@ -115,7 +117,7 @@ function agent(id: string, name: string, role: string): AgentConfig {
   // The Researcher job's own switches (ADR 0037), so a template's researcher can search the web
   // like one hired from the palette; each job's model tier (ADR 0057) and effort (ADR 0062).
   const preset = ROLE_PRESETS.find((candidate) => candidate.id === id)
-  const choice = preset ? modelForPreset(preset) : { model: DEFAULT_MODEL }
+  const choice = preset ? modelForPreset(preset) : modelForJob(NEW_AGENT)
   return {
     id,
     name,
@@ -147,12 +149,11 @@ export function templateTeamYaml(template: TeamTemplateId, name: string, now = n
     agents = [agent('researcher', 'Researcher', jobRole('researcher')), agent('writer', 'Writer', jobRole('writer'))]
     edges = [sequence('researcher', 'writer', ts)]
   } else if (template === 'research-write-check') {
-    agents = [
-      agent('researcher', 'Researcher', jobRole('researcher')),
-      agent('writer', 'Writer', jobRole('writer')),
-      // The check step's answer is the writer's piece; its checks show beside it (ADR 0062).
-      { ...agent('checker', 'Checker', jobRole('checker')), checks: 'writer' },
-    ]
+    const writer = agent('writer', 'Writer', jobRole('writer'))
+    const checker = agent('checker', 'Checker', jobRole('checker'))
+    // The check step's answer is the writer's piece; its checks show beside it, and a missed one
+    // goes back to the writer once before the answer is shown (ADR 0062).
+    agents = [agent('researcher', 'Researcher', jobRole('researcher')), writer, { ...checker, ...checkStepFields(checker, writer) }]
     edges = [sequence('researcher', 'writer', ts), sequence('writer', 'checker', ts)]
   } else if (template === 'research') {
     // No edges, so the lead is the entrypoint and its reply is the answer; it reaches the others
@@ -177,13 +178,17 @@ export function templateTeamYaml(template: TeamTemplateId, name: string, now = n
 
 /**
  * A team of some of Your agents, as YAML text ready to save. Each joins as the canvas places one:
- * a copy of its current version, linked to it, so the team keeps that version until Update. The
- * first is where a request starts; connecting the rest is the Workflow's job, as it is for agents
- * added later. `agents` must not be empty: a team always starts with agents.
+ * a copy of its current version, linked to it, so the team keeps that version until Update. They
+ * are connected in the order they are placed, each handing its work to the next, so a request
+ * starts with the first and the last one answers. Unconnected, the first would lead the others
+ * without being told it leads, and they would never see the request. The Workflow rewires them
+ * like any other team. `agents` must not be empty: a team always starts with agents.
  */
-export function agentsTeamYaml(agents: readonly SavedJob[], name: string, id = slugifyTeamName(name)): string {
+export function agentsTeamYaml(agents: readonly SavedJob[], name: string, id = slugifyTeamName(name), now = new Date()): string {
   if (agents.length === 0) throw new Error('a team starts with at least one agent')
   const placed: AgentConfig[] = []
   for (const job of agents) placed.push(buildAgentFromSource(roleSource(savedJobPreset(job)), placed))
-  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: placed[0].id, agents: placed, edges: [] }, { lineWidth: 0 })
+  const ts = now.toISOString()
+  const edges = placed.slice(1).map((agent, index) => sequence(placed[index].id, agent.id, ts))
+  return stringify({ schemaVersion: 1, id, name: name.trim(), spend: { perRun: NEW_TEAM_PER_RUN_USD }, entrypoint: placed[0].id, agents: placed, edges }, { lineWidth: 0 })
 }

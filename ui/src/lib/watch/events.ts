@@ -822,6 +822,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           // ADR 0040: LoomWatch put the app's request to you; in the team's chat it is a message.
           if (p.phase === 'awaiting_permission') letters.permissionAsked(event, evidence.findLast((item) => item.kind === 'permission' && item.agentId === agent.id)?.id ?? null)
           if (p.phase === 'permission_answered') letters.permissionAnswered(event)
+          // ADR 0062: each round of a check step is an exchange in the team's chat.
+          if (p.phase === 'check_result') letters.checkResult(event)
+          if (p.phase === 'check_sent_back') letters.checkSentBack(event)
+          if (p.phase === 'check_send_back_skipped') letters.checkSendBackSkipped(event)
           if (p.phase === 'permission_answered' && p.outcome === 'auto_approved') {
             autoRan.push({ agentId: agent.id, title: typeof p.title === 'string' ? p.title : 'A command', detail: typeof p.detail === 'string' ? p.detail : null, ts: event.ts })
           }

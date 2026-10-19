@@ -108,7 +108,10 @@ depend on the document as a whole:
   mode it may name any agent in the configured pipeline; later stages still run, but their replies
   do not replace the selected output. In team mode it must equal `entrypoint`, because the entrypoint
   owns the self-organizing root turn. When omitted, compatibility inference applies: `entrypoint`
-  responds in team mode and the last topological pipeline stage responds in pipeline mode.
+  responds in team mode and the last topological pipeline stage responds in pipeline mode. A
+  pipeline that ends on a review stop answers with the work approved there, not with what you typed
+  to approve it: the stage feeding the stop responds (through stops in a row, and then the
+  check-step rule below). A final stop fed by more than one stage responds itself.
 - An optional `schedule` block (`$defs.Schedule`) turns the team into a routine: `cron`
   must parse (standard 5-field form with `0`/`7` = Sunday, or the 6/7-field seconds form),
   `timezone` must be an IANA zone when present, and `prompt` must not be blank. Loaders
@@ -156,17 +159,60 @@ depend on the document as a whole:
   `## Not changed` (below). It records them as a `session_meta` `answer_notes` event, which the
   verdict beside the answer shows, so what is delivered is the work alone. No second turn
   is taken on the agent's own say-so: a check step with `sendBackOnce` is what sends work back.
-- Optional `Agent.checks` makes a pipeline agent a check step: it names the agent whose work it
-  checks, which must hand its work straight to it. That agent writes no summary for it; the check
-  step is handed the work as written and its `doneWhen`, and ends its reply with a `## Check` block
-  (`- Met | Not met | Not sure — item — evidence`). When the pipeline ends on a check step and no
-  `responder` is set, the checked agent's reply is the team's answer, and the checks show beside it.
-  With `sendBackOnce: true`, missed checks go back to the checked agent's open session once and the
-  checks run once more on the revised work. The findings go back as findings that can be wrong: the
-  agent changes a fact only when a finding's evidence is stronger than its own source, and lists
-  what it kept under `## Not changed`, which is set aside from the answer like `## Not met`. A verdict
-  word in the `## Check` block is read as a whole word, so "Metrics …" is not "Met". Operator nodes
-  may not set either field.
+- Optional `Agent.checks` makes a pipeline agent a check step. It names the agent whose work it
+  checks, which must hand its work straight to it. That agent writes no summary for it.
+  - **What it is handed.**
+    - The work as written.
+    - What that agent was given: each stage result that fed it (one part per stage at a join), the
+      operator's direction from a review stop, and what the team knows. These share
+      `conversation.check.givenChars` fairly (8,000 by default; 0 shows none). A part longer than
+      its share keeps its head and tail.
+    - The numbered items the work must satisfy: the agent's `doneWhen` (or "Does what the request
+      asked" when it has none), then always "No claim contradicts its source or the request".
+  - **How it checks.** It traces each claim to what the agent was given first. Then it checks for
+    itself every claim it cannot trace and every claim the work rests on: it opens the source,
+    reads the file or runs the check. Nothing caps how many.
+  - **How it answers.** It ends its reply with a `## Check` block, one numbered line per item
+    (`1. Met | Not met | Not sure — item — evidence`), and every problem it found must be a Not
+    met line there.
+  - **Reading the block.**
+    - Each line is matched to its item by its words, or else by its number.
+    - Lines may put the verdict first or the item first, be numbered or not, use bold or a mark
+      such as ✅, or be table rows.
+    - An item it leaves out is Not sure ("Not checked"). Met with no evidence is Not sure, and
+      "partly met" is Not met.
+    - A line naming none of the items is kept as a problem of its own.
+    - A reply with no readable block is recorded as unreadable (`readable: false` on the
+      `check_result` event), and the answer then says the check could not be read.
+  - **The answer.** When the pipeline ends on a check step and no `responder` is set, the checked
+    agent's reply is the team's answer, and the checks show beside it.
+  - **A check step mid-pipeline.** It hands the stages after it the work it checked (as revised),
+    followed by what it could not confirm. Its own reply is not handed on, and it writes no handover.
+  - **`sendBackOnce: true`.**
+    - Missed checks go back to the checked agent's open session once, with what the check step
+      wrote about the problems.
+    - They go as findings that can be wrong: the agent changes a fact only when a finding's
+      evidence is stronger than its own source. It lists what it kept under `## Not changed`,
+      which is set aside from the answer like `## Not met`.
+    - The recheck covers only the items that were Not met or Not sure, plus what the revision
+      changed. It is told that a reason under `## Not changed` is not evidence. An item it leaves
+      out keeps a Met it had.
+  - **What is recorded.** Every round is recorded as a `check_result` event. A send-back is
+    recorded as `check_sent_back` (with its round, findings and problem text) before the turn it
+    starts, or as `check_send_back_skipped` when the checked agent had already finished. The team
+    chat shows each round as an exchange: what was sent back, the revised work as the reply, and
+    the next verdict. A round with nothing missing is one line.
+  - **Defaults.**
+    - The daemon treats a missing `sendBackOnce` as off, so existing files behave as before.
+    - LoomWatch's editor turns it on whenever it makes a check step: the "Research, write and
+      check" template, and connecting work into a Checker.
+    - So does Ask's `propose_team`, for a proposed check step that does not set it.
+    - The checkup suggests it for any other check step. Without it, the check costs about half a
+      run and changes nothing in the answer.
+    - The editor sets the check step's effort from one table keyed by the checked agent's job:
+      high for every job, for now.
+  - **Verdict words.** A verdict word is read as a whole word, so "Metrics …" is not "Met".
+  - Operator nodes may not set either field.
 - `spend.perRun` (team level) is what one run may spend on model calls, in US dollars. Absent
   means no limit; new teams and the starter teams are written with `1.00`. Every agent of the run draws on it: stages, the lead, Team Bus helpers,
   summaries, checkpoints and handovers. The daemon adds up the exact cost OpenRouter reports for
@@ -182,6 +228,22 @@ depend on the document as a whole:
   while the rest of the team carries on. Operator nodes spend nothing and may not set it. The
   monthly cap, which also covers Ask LoomWatch and every schedule, is a limit on the OpenRouter
   key itself, set at openrouter.ai.
+- `spend.web` (team or agent level) is how much web reading one model call may do, for an agent
+  allowed the web. A page read stays in the conversation and is read again on every later call.
+  - `maxPageTokens` (default 16000, about 12,000 words): how much of one page is read. A longer page
+    is cut.
+  - `maxPages`: pages one call may read.
+  - `maxSearches`: searches one call may run.
+  - `maxSteps`: searches and page reads together in one call.
+
+  The last three have no default: absent leaves them to OpenRouter (30 steps a call). Quality
+  comes first, so a lower figure waits for a quality benchmark to show the work stays as good. On
+  an agent, each figure it leaves out is the team's, and one left out everywhere is the default,
+  so a file without the block behaves as described. A figure outside the schema's range refuses
+  the file. The daemon sends them as OpenRouter's server-tool `parameters` (`max_content_tokens`,
+  `max_uses`) and `max_tool_calls`. A model whose provider refuses them is asked again without
+  them, and reads the web without them for as long as the daemon runs, so a run never fails over a
+  limit.
 - `budget` (team or agent level) is retired.
   Readers accept it in any shape and ignore it, so older team files still load; writers must not
   add it. `spend` replaced it.
@@ -453,26 +515,51 @@ The decision is made on this computer from the command line alone; `permission_a
 ```yaml
 conversation:
   brief:
-    summaryChars: 1200   # character budget for the handover summary
-    maxFindings: 8       # standalone findings carried forward
+    asWrittenUpTo: 24000 # longest reply handed on as written (at most 24000)
+    summaryChars: 1200   # character budget for a handover's summary
+    maxFindings: 8       # standalone findings a handover carries forward
   ask:
-    maxPerStage: 3       # questions a stage may put to the stage before it
+    maxPerStage: 3       # questions one agent may put to another in a run
+    roundsPerQuestion: 3 # times the asked agent may ask back about one question
+    replyChars: 20000    # most of one answer handed back to the asker
+  check:
+    givenChars: 8000     # how much of what the checked agent was given a check step is shown
 ```
 
-A stage does not receive its predecessor's transcript. When its own work is done, each non-final
-stage is asked — in the session it already built — to write a handover under fixed headings, and
-that is what the next stage reads. A reply no longer than a handover (`summaryChars` plus about
-250 characters per finding, 3,200 by default) is handed to the agents after it as written, with no
-handover turn: it cannot be made shorter, and its role already shaped it for the next stage. A
-review stop always gets the handover, because you decide from its summary and open questions. A
-step that checks its predecessor is handed the work as written either way. The predecessor's
-session then stays open while its successor
-runs, so anything the brief left out can be pulled with the Team Bus `ask` tool and answered from
-the context that produced it. `allowRecruiting: false` does not block such a question: that flag
-governs recruiting a helper, not talking to the stage before you.
+A stage does not receive its predecessor's transcript. It receives its reply, as written, when the
+reply fits: up to `asWrittenUpTo` characters, shared equally where several stages feed one stage, so
+a join is never cut. A review stop passes its share on to the stage after it, so you read the work
+itself, and the stage after the stop works from the same text you approved. Only a longer reply is
+summarised: the stage is asked, in the session it already built, to write a handover under fixed
+headings, keeping with each finding the evidence it rests on (a link, a file path, a figure, a date)
+and saying what it could not confirm. Any link in the full reply that the handover leaves out is
+listed under it. A step that checks its predecessor is handed the work as written either way, with
+what that predecessor was given; the stage after a check step receives the work it checked.
 
-Every field is optional and the defaults above apply. Raise them for a stage whose output genuinely
-cannot be summarised; the cost of raising them is paid by every stage downstream.
+A finished stage's session stays open while the stages it feeds take their turn, so anything its
+work left out can be pulled with the Team Bus `ask` tool and answered from the context that
+produced it. This follows the edges, not the run order: the source of a fan-out stays open for
+every branch, and every input of a join for the join. A stage followed by a review stop is put away
+for you instead, and a stage that finished in an earlier run you continue from has no session at
+all. Each stage is told which of the stages feeding it are open; asking one that has finished is
+refused with where its work is, rather than starting a fresh copy that knows nothing.
+`allowRecruiting: false` does not block a question to an open stage: that flag governs recruiting a
+helper, not talking to the stage before you.
+
+Every `ask`, in a pipeline or a team, follows the same rules. One agent may put `maxPerStage`
+questions to another in a run. The question reaches an open stage saying who asks and asking for a
+brief answer from the work it already did. An agent that needs something from the asker first ends
+its answer with a `## Question back` section, never by asking the asker, which is waiting on it.
+The asker's next question to it answers that and continues the same question, so it is not
+counted. One question may go back and forth `roundsPerQuestion` times; on the last round the asked
+agent is told it can't ask back again, and answers with its best assumption, saying which. A fresh
+helper asked to clarify is handed the question so far, so this works the same in team mode. The
+answer comes back as written, cut in the middle past `replyChars` so its conclusion is kept. Every
+round, and every question that was refused and why, shows in the team's chat.
+
+Every field is optional and the defaults above apply. Lower `asWrittenUpTo` for a long pipeline on
+a model without prompt caching; the cost of raising the other bounds is paid by every stage
+downstream.
 
 ## Memory
 

@@ -1,7 +1,7 @@
 //! The Team Bus: the tools a team's agents delegate, ask and remember with. Each agent's calls
 //! arrive directly through its [`TeamBusConnection`], under a token that says which agent it is.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -69,9 +69,19 @@ struct TeamBusState {
     /// collects one after the stage's turn returns and waits on it there — the bus records the
     /// question, the session's owner does the waiting.
     pending_questions: Mutex<BTreeMap<String, crate::operator::OperatorWait>>,
-    /// Kept-alive agents answering an `ask` right now, with how many. An agent answering a
-    /// question may not start another agent to help it (see [`TeamBus::refuse_new_agent`]).
-    answering: std::sync::Mutex<BTreeMap<String, usize>>,
+    /// Kept-alive agents answering an `ask` right now, each with the agents whose questions it is
+    /// answering. An agent answering a question may not start another agent to help it (see
+    /// [`TeamBus::refuse_new_agent`]), nor ask back the agent waiting on it.
+    answering: std::sync::Mutex<BTreeMap<String, Vec<String>>>,
+    /// Pipeline stages whose work is done in this run, or was replayed into it. One that is not
+    /// kept open has no session to ask, and a fresh copy started for the question would know only
+    /// its role: `ask` says where its work is instead.
+    finished: std::sync::Mutex<BTreeSet<String>>,
+    /// How many questions each agent has put to each other agent in this run, by (asker, asked).
+    asked: std::sync::Mutex<BTreeMap<(String, String), u32>>,
+    /// Questions whose asked agent asked back and is waiting for the asker to clarify, by (asker,
+    /// asked). The asker's next `ask` to that agent continues the question.
+    threads: std::sync::Mutex<BTreeMap<(String, String), Thread>>,
     /// Every `ask` still in flight, by the bearer token of the agent that asked, each with the
     /// switch that withdraws it. The asker's turn ending flips them (see
     /// [`TeamBusConnection::turn_ended`]).
@@ -85,6 +95,54 @@ struct TeamBusState {
 
 /// Each caller's `ask` calls in flight, by bearer token: an id, and the switch that withdraws it.
 type OpenAsks = BTreeMap<String, Vec<(u64, oneshot::Sender<()>)>>;
+
+/// A question the asked agent asked back about, waiting for the asker to clarify it.
+#[derive(Debug, Clone)]
+struct Thread {
+    /// The question as first asked.
+    question: String,
+    /// Each earlier round: what the asked agent asked back, and how the asker clarified it.
+    rounds: Vec<(String, String)>,
+    /// What it asked back last, which the asker's next `ask` to it answers.
+    waiting: String,
+}
+
+/// Where one `ask` stands in its question: the first time it is asked, or a clarification of what
+/// the asked agent asked back, and whether the asked agent may still ask back.
+struct Round {
+    /// The question it continues, when this `ask` clarifies a question back.
+    thread: Option<Thread>,
+    /// This `ask`'s place in its question: 1 the first time.
+    number: u32,
+    /// How many more times the asked agent may ask back about this question after this `ask`.
+    backs_left: u32,
+}
+
+impl Round {
+    fn may_ask_back(&self) -> bool {
+        self.backs_left > 0
+    }
+}
+
+/// A Team Bus refusal, with a reason the run's record keeps beside its words (`refused`), so the
+/// team chat can say in a line why a question was not put, whatever words it was refused with.
+#[derive(Debug)]
+struct Refused {
+    reason: &'static str,
+    message: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+fn refused(reason: &'static str, message: String) -> anyhow::Error {
+    Refused { reason, message }.into()
+}
 
 /// One caller's `dispatch`/`handoff` work. See [`TeamBusConnection::collect_delegated`].
 #[derive(Default)]
@@ -150,6 +208,19 @@ impl Drop for TeamBusTeardown {
 pub(crate) struct TeamBusConnection {
     bus: TeamBus,
     token: String,
+    /// Who is behind this connection, for what it is offered.
+    holder: Holder,
+}
+
+/// The agent behind a connection: what the tools it is offered, and what its turns are recorded
+/// as, depend on.
+#[derive(Debug, Clone)]
+struct Holder {
+    agent_id: String,
+    /// Started by another agent, with `dispatch`, `handoff` or `ask`.
+    helper: bool,
+    /// Started by `ask`, to answer one question.
+    answering: bool,
 }
 
 impl TeamBus {
@@ -191,6 +262,9 @@ impl TeamBus {
             operator,
             pending_questions: Mutex::new(BTreeMap::new()),
             answering: std::sync::Mutex::new(BTreeMap::new()),
+            finished: std::sync::Mutex::new(BTreeSet::new()),
+            asked: std::sync::Mutex::new(BTreeMap::new()),
+            threads: std::sync::Mutex::new(BTreeMap::new()),
             asks: Mutex::new(BTreeMap::new()),
             next_ask: AtomicU64::new(0),
             delegated: std::sync::Mutex::new(BTreeMap::new()),
@@ -215,6 +289,11 @@ impl TeamBus {
         Ok(TeamBusConnection {
             bus: self.clone(),
             token,
+            holder: Holder {
+                agent_id: agent_id.to_owned(),
+                helper: false,
+                answering: false,
+            },
         })
     }
 
@@ -249,6 +328,8 @@ impl TeamBus {
                 } else {
                     request.prompt
                 };
+                // Each turn names what it is for, so nothing carries over from the one before.
+                process.turn_for(request.turn);
                 let answer = if request.from_operator {
                     process.prompt_turn(&mut recorder, &prompt).await
                 } else {
@@ -325,15 +406,43 @@ impl TeamBus {
         self.state.live.lock().await.contains_key(agent_id)
     }
 
+    /// The agents kept open right now: the only ones an `ask` reaches in the session that did the
+    /// work. What a stage is offered to ask is read from this (`crate::ask_offer`).
+    pub(crate) async fn open_agents(&self) -> BTreeSet<String> {
+        self.state.live.lock().await.keys().cloned().collect()
+    }
+
+    /// Record that a pipeline stage's work is done in this run, or was replayed into it.
+    pub(crate) fn finished(&self, agent_id: &str) {
+        self.state
+            .finished
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(agent_id.to_owned());
+    }
+
+    fn is_finished(&self, agent_id: &str) -> bool {
+        self.state
+            .finished
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(agent_id)
+    }
+
     /// One more turn for a kept-alive agent, from the pipeline itself: a check step sending its
     /// work back (ADR 0062). `None` when it is no longer live.
     pub(crate) async fn turn_live(&self, agent_id: &str, prompt: &str) -> Result<Option<String>> {
-        self.ask_live(agent_id, prompt).await
+        self.ask_live(agent_id, prompt, "").await
     }
 
-    /// Put a question to a kept-alive agent. `None` means it is not live, so the caller falls back
-    /// to spawning one.
-    async fn ask_live(&self, agent_id: &str, question: &str) -> Result<Option<String>> {
+    /// Put a question to a kept-alive agent on behalf of `asker`. `None` means it is not live, so
+    /// the caller falls back to spawning one.
+    async fn ask_live(
+        &self,
+        agent_id: &str,
+        question: &str,
+        asker: &str,
+    ) -> Result<Option<String>> {
         let sender = self.state.live.lock().await.get(agent_id).cloned();
         let Some(sender) = sender else {
             return Ok(None);
@@ -341,11 +450,18 @@ impl TeamBus {
         let (answer, answered) = oneshot::channel();
         // Marked before the question goes in, so the agent is already answering when its turn
         // can first reach the bus; unmarked when this returns or is dropped by a withdrawal.
-        let _answering = Answering::begin(self, agent_id);
+        let _answering = Answering::begin(self, agent_id, asker);
         sender
             .send(LiveTurn {
                 prompt: question.to_owned(),
                 from_operator: false,
+                // An asker's question is answered; the pipeline's own turn is a check step's
+                // send-back, which the agent revises its work for.
+                turn: if asker.is_empty() {
+                    "revision"
+                } else {
+                    "ask_answer"
+                },
                 answer,
             })
             .await
@@ -371,14 +487,167 @@ impl TeamBus {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains_key(&session.agent_id);
         if answering {
-            bail!(
-                "{} is answering another agent's question, so it may not start {target} with \
-                 `{tool}`. Answer from what you already have, and say plainly what you could not \
-                 confirm.",
-                session.agent_id
-            );
+            return Err(refused(
+                "cannot_start",
+                format!(
+                    "{} is answering another agent's question, so it may not start {target} \
+                     with `{tool}`. Answer from what you already have, and say plainly what you \
+                     could not confirm.",
+                    session.agent_id
+                ),
+            ));
         }
         Ok(())
+    }
+
+    /// Refuse a question to the agent the caller is itself answering.
+    ///
+    /// That agent is waiting on this turn, so its answer would wait on the question and the
+    /// question on the answer. What the caller needs from it goes in its answer instead, as a
+    /// question back, which the asker reads and can ask again with (`ask_result`).
+    fn refuse_asking_back(&self, session: &AgentSession, target: &str) -> Result<()> {
+        let live = self
+            .state
+            .answering
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&session.agent_id)
+            .is_some_and(|askers| askers.iter().any(|asker| asker == target));
+        // A helper started by `ask` was started by the agent before it on its path.
+        let helper = session.answering
+            && session
+                .delegation_path
+                .iter()
+                .rev()
+                .nth(1)
+                .map(String::as_str)
+                == Some(target);
+        if live || helper {
+            let name = self
+                .agent(target)
+                .map_or_else(|_| target.to_owned(), |agent| shown_name(&agent).to_owned());
+            return Err(refused(
+                "asking_back",
+                format!(
+                    "{name} asked you this and is waiting for your answer, so you can't ask \
+                     {name} anything now. If you need a detail from {name} first, end your \
+                     answer with a `{QUESTION_BACK}` section saying exactly what you need."
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Refuse a question to a pipeline stage that has finished and is no longer kept open.
+    ///
+    /// A fresh copy started for it would know only its role and the question, and do its work
+    /// again to answer. Its work is already handed on: the refusal says where, so the asker works
+    /// from it instead of trying another way.
+    fn refuse_finished(&self, session: &AgentSession, target: &str) -> Result<()> {
+        if !self.is_finished(target) {
+            return Ok(());
+        }
+        let name = self
+            .agent(target)
+            .map_or_else(|_| target.to_owned(), |agent| shown_name(&agent).to_owned());
+        let handed_on = crate::configured_ancestors(&self.state.team, &session.agent_id)
+            .iter()
+            .any(|ancestor| ancestor == target);
+        let place = if handed_on {
+            " Its work reached you in your prompt, under \"Results from preceding stages\": work \
+             from that,"
+        } else {
+            " Work from what you have,"
+        };
+        Err(refused(
+            "finished",
+            format!(
+                "{name} has finished its part of this run and is no longer open, so it can't be \
+                 asked.{place} and say plainly what it does not cover."
+            ),
+        ))
+    }
+
+    /// Count one more question from `asker` to `target`, or refuse it past the team's limit
+    /// (`conversation.ask.maxPerStage`). A clarification of what `target` asked back continues a
+    /// question already counted, so it is not charged (`charge` false). Returns how many more
+    /// questions `asker` may put to `target`.
+    fn count_ask(&self, asker: &str, target: &str, charge: bool) -> Result<u32> {
+        let max = self.state.team.conversation.ask.max_per_stage;
+        let mut counts = self
+            .state
+            .asked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = counts
+            .entry((asker.to_owned(), target.to_owned()))
+            .or_default();
+        if !charge {
+            return Ok(max.saturating_sub(*count));
+        }
+        if *count >= max {
+            let name = self
+                .agent(target)
+                .map_or_else(|_| target.to_owned(), |agent| shown_name(&agent).to_owned());
+            return Err(refused(
+                "limit",
+                format!(
+                    "You have asked {name} {count} question{} in this run, the most this team \
+                     allows. Work from what you have, and say plainly what you could not confirm.",
+                    if *count == 1 { "" } else { "s" }
+                ),
+            ));
+        }
+        *count += 1;
+        Ok(max - *count)
+    }
+
+    /// Where an `ask` from `asker` to `target` stands: a clarification of the question `target`
+    /// asked back about, when one waits, else a new question. Taken out of the waiting threads:
+    /// [`TeamBus::settle_round`] puts it back if `target` asks back again.
+    fn round_for(&self, asker: &str, target: &str) -> Round {
+        let allowed = self.state.team.conversation.ask.rounds_per_question;
+        let thread = self
+            .state
+            .threads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&(asker.to_owned(), target.to_owned()));
+        // How many times `target` has asked back about this question so far.
+        let backs = thread.as_ref().map_or(0, |thread| {
+            u32::try_from(thread.rounds.len() + 1).unwrap_or(u32::MAX)
+        });
+        Round {
+            thread,
+            number: backs + 1,
+            backs_left: allowed.saturating_sub(backs),
+        }
+    }
+
+    /// After an answer: keep the question waiting when `target` asked back, with this `ask`'s
+    /// words as the clarification of what it asked back last.
+    fn settle_round(&self, asker: &str, target: &str, round: &Round, question: &str, back: &str) {
+        let thread = match &round.thread {
+            Some(thread) => {
+                let mut rounds = thread.rounds.clone();
+                rounds.push((thread.waiting.clone(), question.to_owned()));
+                Thread {
+                    question: thread.question.clone(),
+                    rounds,
+                    waiting: back.to_owned(),
+                }
+            }
+            None => Thread {
+                question: question.to_owned(),
+                rounds: Vec::new(),
+                waiting: back.to_owned(),
+            },
+        };
+        self.state
+            .threads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert((asker.to_owned(), target.to_owned()), thread);
     }
 
     /// Record an `ask` in flight for the caller behind `token`, and the switch that withdraws it.
@@ -517,10 +786,15 @@ impl TeamBus {
             .execute_tool(&session, token, &event_log, name, &arguments)
             .await;
         let (status, raw_output, result) = match execution {
+            Ok(output) if name == "ask" => ("completed", output.clone(), ask_success(&output)),
             Ok(output) => ("completed", output.clone(), tool_success(&output)),
             Err(error) => {
                 let message = format!("{error:#}");
-                ("failed", json!({"error": message}), tool_error(&message))
+                let mut raw = json!({"error": message});
+                if let Some(refusal) = error.downcast_ref::<Refused>() {
+                    raw["refused"] = json!(refusal.reason);
+                }
+                ("failed", raw, tool_error(&message))
             }
         };
         event_log
@@ -571,7 +845,8 @@ impl TeamBus {
             ),
             // `allowRecruiting` governs spawning a *helper*. Asking a predecessor that is still
             // alive is conversation along an edge the operator already drew, so it is allowed
-            // regardless — the live registry only ever holds configured predecessors.
+            // regardless — the live registry only ever holds configured predecessors. A stage
+            // that has finished is no helper either: `ask` refuses it with where its work is.
             // The target is resolved leniently here: one that names nobody is not live, and the
             // refusal below is the right answer for it, as it was before names resolved.
             "ask"
@@ -581,13 +856,16 @@ impl TeamBus {
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     let target = self.resolve(target).unwrap_or_else(|_| target.to_owned());
-                    !self.is_live(&target).await
+                    !self.is_live(&target).await && !self.is_finished(&target)
                 } =>
             {
-                bail!(
-                    "agent {:?} may not recruit helpers within its own pipeline step (allowRecruiting: false)",
-                    session.agent_id
-                )
+                Err(refused(
+                    "not_recruiting",
+                    format!(
+                        "agent {:?} may not recruit helpers within its own pipeline step (allowRecruiting: false)",
+                        session.agent_id
+                    ),
+                ))
             }
             _ => Ok(()),
         }
@@ -646,10 +924,34 @@ impl TeamBus {
             "ask" => {
                 let target = self.resolve(&required_string(arguments, "agent")?)?;
                 let question = required_string(arguments, "question")?;
+                // One way through for every `ask`, in either mode: who may not be asked, then the
+                // count, then the question, framed by what the asked agent already holds.
+                self.refuse_asking_back(session, &target)?;
                 // Refused before the live path as well as in `guard_delegation`: a kept-alive agent
                 // asking itself, or a helper asking back the live agent waiting on it, would queue
                 // a turn behind the very turn that is waiting for the answer.
                 refuse_cycle(session, &target)?;
+                // Everything that would refuse a helper is settled before the question counts.
+                let helper_context = if self.is_live(&target).await {
+                    None
+                } else {
+                    self.refuse_finished(session, &target)?;
+                    self.refuse_new_agent(session, &target, "ask")?;
+                    let mut context = self.guard_delegation(session, &target)?;
+                    context.answering = true;
+                    Some(context)
+                };
+                let from_agent = self.agent(&session.agent_id)?;
+                let to_agent = self.agent(&target)?;
+                // A clarification of what the asked agent asked back continues its question.
+                let waiting = self
+                    .state
+                    .threads
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .contains_key(&(from_agent.id.clone(), target.clone()));
+                let left = self.count_ask(&session.agent_id, &target, !waiting)?;
+                let round = self.round_for(&session.agent_id, &target);
                 let (ask, withdrawn) = self.track_ask(token).await;
                 let started = AtomicBool::new(false);
                 let answer = async {
@@ -657,21 +959,42 @@ impl TeamBus {
                     // built. Spawning a fresh process for it would produce an agent that knows
                     // only its role and the question, which is what made pipeline `ask` useless
                     // before.
-                    if let Some(reply) = self.ask_live(&target, &question).await? {
-                        return Ok(json!({ "agent": target, "reply": reply, "live": true }));
+                    if let Some(reply) = self
+                        .ask_live(
+                            &target,
+                            &live_question(&from_agent, &question, &round),
+                            &from_agent.id,
+                        )
+                        .await?
+                    {
+                        let mut answer =
+                            self.answer(&from_agent, &to_agent, &question, &round, &reply, left);
+                        answer["live"] = json!(true);
+                        return Ok(answer);
                     }
-                    self.refuse_new_agent(session, &target, "ask")?;
-                    let mut context = self.guard_delegation(session, &target)?;
-                    context.answering = true;
+                    // Released while the question was on its way.
+                    self.refuse_finished(session, &target)?;
+                    let context = helper_context.with_context(|| {
+                        format!("{target} stopped answering questions before this one reached it")
+                    })?;
                     started.store(true, Ordering::SeqCst);
                     let helped = self
-                        .run_agent(&target, &question, event_log.clone(), context)
+                        .run_agent(
+                            &target,
+                            &helper_question(&from_agent, &question, &round),
+                            event_log.clone(),
+                            context,
+                        )
                         .await?;
-                    let mut answer = json!({
-                        "agent": target,
-                        "reply": helped.outcome.reply,
-                        "sessionId": helped.outcome.session_id
-                    });
+                    let mut answer = self.answer(
+                        &from_agent,
+                        &to_agent,
+                        &question,
+                        &round,
+                        &helped.outcome.reply,
+                        left,
+                    );
+                    answer["sessionId"] = json!(helped.outcome.session_id);
                     // Its reply says why it stopped; it is not an answer to the question.
                     if helped.stopped {
                         answer["stopped"] = json!("spend_limit");
@@ -1342,6 +1665,11 @@ impl TeamBus {
         Ok(TeamBusConnection {
             bus: self.clone(),
             token,
+            holder: Holder {
+                agent_id: agent_id.to_owned(),
+                helper: true,
+                answering: context.answering,
+            },
         })
     }
 
@@ -1434,19 +1762,22 @@ impl Drop for Delegating {
 struct Answering {
     bus: TeamBus,
     agent: String,
+    asker: String,
 }
 
 impl Answering {
-    fn begin(bus: &TeamBus, agent: &str) -> Self {
-        *bus.state
+    fn begin(bus: &TeamBus, agent: &str, asker: &str) -> Self {
+        bus.state
             .answering
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(agent.to_owned())
-            .or_default() += 1;
+            .or_default()
+            .push(asker.to_owned());
         Self {
             bus: bus.clone(),
             agent: agent.to_owned(),
+            asker: asker.to_owned(),
         }
     }
 }
@@ -1459,9 +1790,11 @@ impl Drop for Answering {
             .answering
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(count) = answering.get_mut(&self.agent) {
-            *count -= 1;
-            if *count == 0 {
+        if let Some(askers) = answering.get_mut(&self.agent) {
+            if let Some(at) = askers.iter().position(|asker| *asker == self.asker) {
+                askers.remove(at);
+            }
+            if askers.is_empty() {
                 answering.remove(&self.agent);
             }
         }
@@ -1510,13 +1843,40 @@ impl TeamBusConnection {
     }
 
     /// The bus's tools, as the agent behind this connection is offered them: `{name, description,
-    /// inputSchema}` each.
-    pub(crate) fn tool_definitions(&self) -> Vec<Value> {
-        tool_definitions(
-            self.bus.state.mode,
-            self.bus.state.memory.notebook_enabled,
-            self.bus.state.operator.is_some(),
-        )
+    /// inputSchema}` each. `conversation` says its opening message holds `## Conversation so far`.
+    pub(crate) fn tool_definitions(&self, conversation: bool) -> Vec<Value> {
+        offered_tools(&self.bus.seat(&self.holder, conversation))
+    }
+
+    /// What this agent's turns are for, for the usage record: `check` for a check step,
+    /// `ask_answer` for a helper answering a question, `helper` for one handed work, else `work`.
+    pub(crate) fn purpose(&self) -> &'static str {
+        let checks = self
+            .bus
+            .state
+            .team
+            .agents
+            .iter()
+            .any(|agent| agent.id == self.holder.agent_id && agent.checks.is_some());
+        if self.holder.answering {
+            "ask_answer"
+        } else if self.holder.helper {
+            "helper"
+        } else if checks {
+            "check"
+        } else {
+            crate::agent::WORK
+        }
+    }
+
+    /// The time zone the team works in: its schedule's, when it has one.
+    pub(crate) fn time_zone(&self) -> Option<String> {
+        self.bus
+            .state
+            .team
+            .schedule
+            .as_ref()
+            .and_then(|schedule| schedule.timezone.clone())
     }
 
     /// One tool call from the agent behind this connection, made directly rather than over the
@@ -1677,6 +2037,179 @@ fn scope_sentence(scope: &NoteScope) -> String {
     )
 }
 
+/// The heading an asked agent ends its answer with when it needs something from the asker first.
+const QUESTION_BACK: &str = "## Question back";
+
+/// What an asked agent is told to do when something is unclear, on this round of its question.
+///
+/// While it may still ask back, a question back; once it may not, its best assumption, named, so a
+/// clarification loop always ends in an answer the asker can check.
+fn when_unclear(asker: &str, round: &Round) -> String {
+    if round.may_ask_back() {
+        format!(
+            "If you can't answer without a detail only {asker} has, end your answer with a \
+             `{QUESTION_BACK}` section saying exactly what you need, instead of guessing."
+        )
+    } else if round.thread.is_some() {
+        "This is the last round on this question, so don't ask back again: answer with your best \
+         assumption for anything still unclear, and say which assumption you made."
+            .to_owned()
+    } else {
+        "If something is unclear, answer with your best assumption and say which assumption you \
+         made."
+            .to_owned()
+    }
+}
+
+/// A question as a kept-open agent receives it: who asks, and how to answer.
+///
+/// It already did the work, so it is asked to answer from that rather than do it again, briefly,
+/// with what each fact rests on, and to say what it cannot confirm. Needing something from the
+/// asker is a question back in the answer, never a call to the asker, which is waiting on it. A
+/// clarification arrives in the same session as the question it clarifies, so it carries only the
+/// asker's words.
+fn live_question(asker: &AgentConfig, question: &str, round: &Round) -> String {
+    let name = shown_name(asker);
+    let unclear = when_unclear(name, round);
+    if round.thread.is_some() {
+        return format!(
+            "## {name} answers your question back\n{question}\n\nNow answer {name}'s question, \
+             from the work you already did; don't do it again. Be brief, with the link, file path \
+             or figure each fact rests on. {unclear} Don't contact {name} yourself: it is waiting \
+             for your answer."
+        );
+    }
+    format!(
+        "## A question from {name}\n{name} is working on this task with what you handed on, and \
+         asks:\n\n{question}\n\nAnswer from the work you already did in this conversation; don't \
+         do it again. Be brief: the answer, with the link, file path or figure it rests on, and \
+         say plainly what you could not confirm. {unclear} Don't contact {name} yourself: it is \
+         waiting for your answer."
+    )
+}
+
+/// A question as a helper started for it receives it. It holds nothing yet, so it is not told to
+/// be brief — in team mode `ask` is how a lead has a whole piece written — only what to do when
+/// something is unclear. A fresh helper remembers nothing of a question it asked back about, so a
+/// clarification brings the whole question with it: as asked, each question back and each answer.
+fn helper_question(asker: &AgentConfig, question: &str, round: &Round) -> String {
+    use std::fmt::Write as _;
+    let name = shown_name(asker);
+    let unclear = when_unclear(name, round);
+    let Some(thread) = &round.thread else {
+        return format!("{question}\n\n{name} is waiting for your reply. {unclear}");
+    };
+    let mut text = format!("{}\n\n## Clarified so far\n", thread.question);
+    for (back, clarified) in thread
+        .rounds
+        .iter()
+        .map(|(back, clarified)| (back.as_str(), clarified.as_str()))
+        .chain([(thread.waiting.as_str(), question)])
+    {
+        let _ = write!(
+            text,
+            "You asked back:\n{back}\n\n{name} answered:\n{clarified}\n\n"
+        );
+    }
+    let _ = write!(text, "{name} is waiting for your reply. {unclear}");
+    text
+}
+
+impl TeamBus {
+    /// What an `ask` hands back, and where its question goes next: kept waiting for a
+    /// clarification when the asked agent asked back on a round that allowed it, finished
+    /// otherwise.
+    ///
+    /// The reply is cut in the middle past `conversation.ask.replyChars`. The record says which
+    /// round of its question this was, whether it clarified a question back, and how many more
+    /// times the asked agent may ask back, which is what the team chat reads.
+    fn answer(
+        &self,
+        from: &AgentConfig,
+        to: &AgentConfig,
+        question: &str,
+        round: &Round,
+        reply: &str,
+        left: u32,
+    ) -> Value {
+        let team = &self.state.team;
+        let cap = usize::try_from(team.conversation.ask.reply_chars).unwrap_or(usize::MAX);
+        let mut answer = json!({
+            "agent": to.id,
+            "name": shown_name(to),
+            "reply": crate::cap_middle_text(reply, cap),
+            "asksLeft": left,
+            "round": round.number,
+            "clarifies": round.thread.is_some(),
+            "lastRound": !round.may_ask_back(),
+        });
+        // A question back on a round that allowed none is the answer it was told to give.
+        if round.may_ask_back()
+            && let Some(needs) = question_back(reply)
+        {
+            self.settle_round(&from.id, &to.id, round, question, needs);
+            answer["questionBack"] = json!(needs);
+            answer["backsLeft"] = json!(round.backs_left - 1);
+        }
+        answer
+    }
+}
+
+/// The question back an answer ends with: the text under a line that reads "Question back" as a
+/// Markdown heading or a label, whatever its level, case or trailing colon.
+fn question_back(reply: &str) -> Option<&str> {
+    let mut offset = 0;
+    for line in reply.split_inclusive('\n') {
+        let label = line
+            .trim()
+            .trim_start_matches('#')
+            .trim_matches(|c: char| c == '*' || c == ':' || c.is_whitespace());
+        offset += line.len();
+        if label.eq_ignore_ascii_case("question back") {
+            let needs = reply[offset..].trim();
+            return (!needs.is_empty()).then_some(needs);
+        }
+    }
+    None
+}
+
+/// An `ask`'s tool answer: the reply as plain text, as the asker reads it.
+///
+/// Every other tool answers with its JSON as text. A reply serialised that way arrives as one
+/// string with every line break escaped, longer and harder to read than what was written. The
+/// JSON stays in `structuredContent` for whatever reads it. A question back says what to do next:
+/// ask again with what is needed, which continues the same question rather than starting another.
+fn ask_success(answer: &Value) -> Value {
+    let name = answer["name"].as_str().unwrap_or_default();
+    let reply = answer["reply"].as_str().unwrap_or_default();
+    let text = if answer.get("questionBack").is_some() {
+        let backs = answer["backsLeft"].as_u64().unwrap_or(0);
+        let next = if backs == 0 {
+            format!(
+                "That will be the last round on this question: {name} answers it with its best \
+                 assumption."
+            )
+        } else {
+            format!(
+                "{name} can ask back {backs} more time{} on this question.",
+                if backs == 1 { "" } else { "s" }
+            )
+        };
+        format!(
+            "{name} needs something from you before it can answer:\n\n{reply}\n\nAsk {name} \
+             again with what it needs: your next question to {name} continues this one, and does \
+             not count against your questions. {next}"
+        )
+    } else {
+        format!("{name} answered:\n\n{reply}")
+    };
+    json!({
+        "content": [{"type": "text", "text": text}],
+        "structuredContent": answer,
+        "isError": false
+    })
+}
+
 fn rpc_result(id: &Value, result: &Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
@@ -1700,16 +2233,90 @@ fn tool_error(message: &str) -> Value {
 /// The four memory tools, named once so the gate and the definitions cannot disagree.
 const MEMORY_TOOLS: [&str; 4] = ["memory_search", "memory_read", "memory_write", "checkpoint"];
 
-fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value> {
-    let mut tools = vec![tool(
-        "roster",
-        "List the team, capabilities, and live status",
-        &json!({"type": "object", "additionalProperties": false}),
-    )];
+/// What an agent can use the Team Bus for, from where it sits: the facts [`offered_tools`] decides
+/// every tool from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct BusSeat {
+    pub(crate) mode: TeamBusMode,
+    /// Agents on the team besides this one that run on a model. A review stop is the person,
+    /// reached with `ask_user`.
+    pub(crate) teammates: usize,
+    /// In a pipeline, a stage that runs on a model is connected straight into this one: the one
+    /// kept open for it to ask.
+    pub(crate) has_stage_before: bool,
+    /// Started by `ask` to answer one question, so it may not start other agents.
+    pub(crate) answering: bool,
+    pub(crate) notebook: bool,
+    /// A person at the keyboard: a run started from the app, not the command line.
+    pub(crate) operator: bool,
+    /// Its opening message holds `## Conversation so far`, whose work ids `earlier_work` reads.
+    pub(crate) conversation: bool,
+}
+
+impl TeamBus {
+    /// Where the agent behind `holder` sits on this team.
+    fn seat(&self, holder: &Holder, conversation: bool) -> BusSeat {
+        let team = &self.state.team;
+        let runs_on_a_model = |id: &str| {
+            team.agents
+                .iter()
+                .any(|agent| agent.id == id && !agent.is_operator())
+        };
+        BusSeat {
+            mode: self.state.mode,
+            teammates: team
+                .agents
+                .iter()
+                .filter(|agent| !agent.is_operator() && agent.id != holder.agent_id)
+                .count(),
+            has_stage_before: team
+                .edges
+                .iter()
+                .any(|edge| edge.to == holder.agent_id && runs_on_a_model(&edge.from)),
+            answering: holder.answering,
+            notebook: self.state.memory.notebook_enabled,
+            operator: self.state.operator.is_some(),
+            conversation,
+        }
+    }
+}
+
+/// The Team Bus tools an agent is offered: only the ones it can use from its seat. Every tool is
+/// decided here, from [`BusSeat`] alone, so a new kind of seat needs no new special case.
+///
+/// - `dispatch` and `handoff` start a teammate, so they need team mode, a teammate, and an agent
+///   that is not answering a question (the bus refuses it).
+/// - `ask` needs someone to ask: in team mode, a teammate it may start; in a pipeline, the stage
+///   before, kept open for it. A pipeline stage with none would only start a cold copy of another
+///   agent, which knows nothing of the work.
+/// - `roster` comes with any of those, to find the teammate.
+/// - `report` is never offered: only `roster` reads it, and the bus records each agent's status
+///   itself. A call still works, for a model that remembers it.
+/// - `ask_user` needs a person to ask; the Notebook's tools a notebook; `earlier_work` a
+///   conversation to read from.
+pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
+    let team = seat.mode == TeamBusMode::Team;
+    let together = seat.teammates > 0;
+    let hands_out = team && together && !seat.answering;
+    let asks = together
+        && if team {
+            !seat.answering
+        } else {
+            seat.has_stage_before
+        };
+    let mut tools = Vec::new();
+    if hands_out || asks {
+        tools.push(tool(
+            "roster",
+            "List the team, capabilities, and live status",
+            &json!({"type": "object", "additionalProperties": false}),
+        ));
+    }
     // The descriptions carry the delegation brief because the agent reads them at the moment it
     // writes one. The agent it starts sees nothing but that text (orientation.rs `for_helper`),
     // and a vague brief is how two helpers end up doing the same search, or the wrong one.
-    if mode == TeamBusMode::Team {
+    if hands_out {
         tools.push(tool(
             "dispatch",
             "Hand part of the work to a teammate without waiting for it. Hand out parts that do \
@@ -1724,18 +2331,20 @@ fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value>
             ),
         ));
     }
-    tools.push(tool(
-        "ask",
-        "Ask another agent and wait for its reply. Use it when you need the answer before you \
-         can go on.",
-        &two_strings(
-            "agent",
-            "Target agent ID",
-            "question",
-            "A question it can answer from this text alone: it does not see your conversation.",
-        ),
-    ));
-    if mode == TeamBusMode::Team {
+    if asks {
+        tools.push(tool(
+            "ask",
+            "Ask another agent and wait for its reply. Use it when you need the answer before you \
+             can go on.",
+            &two_strings(
+                "agent",
+                "Target agent ID",
+                "question",
+                "A question it can answer from this text alone: it does not see your conversation.",
+            ),
+        ));
+    }
+    if hands_out {
         tools.push(tool(
             "handoff",
             "Pass the rest of the task to a teammate and stop: it carries on, and you end this \
@@ -1749,37 +2358,34 @@ fn tool_definitions(mode: TeamBusMode, notebook: bool, chat: bool) -> Vec<Value>
             ),
         ));
     }
-    tools.push(tool(
-        "report",
-        "Publish this agent's current status",
-        &one_string("status", "Progress status"),
-    ));
-    tools.push(tool(
-        "ask_user",
-        "Put a question to the person running this team. Returns immediately: end your turn after \
-         calling it, and their answer arrives as your next turn. Ask only for a decision you \
-         cannot reasonably make yourself and that would change the result; otherwise make the \
-         most reasonable assumption, say which one you made, and carry on.",
-        &object(
-            &[
-                (
-                    "question",
-                    string_property("What you need the person to decide", 1),
-                ),
-                (
-                    "context",
-                    string_property("What they need to know to decide it", 0),
-                ),
-            ],
-            &["question"],
-        ),
-    ));
-    if notebook {
+    if seat.operator {
+        tools.push(tool(
+            "ask_user",
+            "Put a question to the person running this team. Returns immediately: end your turn \
+             after calling it, and their answer arrives as your next turn. Ask only for a decision \
+             you cannot reasonably make yourself and that would change the result; otherwise make \
+             the most reasonable assumption, say which one you made, and carry on.",
+            &object(
+                &[
+                    (
+                        "question",
+                        string_property("What you need the person to decide", 1),
+                    ),
+                    (
+                        "context",
+                        string_property("What they need to know to decide it", 0),
+                    ),
+                ],
+                &["question"],
+            ),
+        ));
+    }
+    if seat.notebook {
         tools.extend(memory_tool_definitions());
     }
     // ADR 0051: the conversation shows older work one line each; this reads one piece in full.
-    // Offered only where there is a team chat to read — a run started from the app.
-    if chat {
+    // Offered only where there is one: a run started from the team's chat.
+    if seat.operator && seat.conversation {
         tools.push(tool(
             "earlier_work",
             "Read one earlier piece of this team's work in full: what the operator asked and the \
@@ -2059,11 +2665,18 @@ mod tests {
     /// MCP: `tools/list`, or `tools/call` with the result or the error as a tool error.
     async fn post_json(bus: &TeamBus, token: &str, request: &Value) -> Result<Value> {
         let result = match request.get("method").and_then(Value::as_str) {
-            Some("tools/list") => json!({"tools": tool_definitions(
-                bus.state.mode,
-                bus.state.memory.notebook_enabled,
-                bus.state.operator.is_some(),
-            )}),
+            Some("tools/list") => {
+                let holder = {
+                    let tokens = bus.state.tokens.read().await;
+                    let session = tokens.get(token).context("unknown token")?;
+                    Holder {
+                        agent_id: session.agent_id.clone(),
+                        helper: session.delegation_path.len() > 1,
+                        answering: session.answering,
+                    }
+                };
+                json!({"tools": offered_tools(&bus.seat(&holder, true))})
+            }
             Some("tools/call") => match bus.call_tool(token, request).await {
                 Ok(result) => result,
                 Err(error) => tool_error(&format!("{error:#}")),
@@ -2080,7 +2693,16 @@ mod tests {
     #[test]
     fn no_tool_description_carries_a_run_of_spaces() {
         for mode in [TeamBusMode::Team, TeamBusMode::Pipeline] {
-            for tool in tool_definitions(mode, true, true) {
+            let seat = BusSeat {
+                mode,
+                teammates: 2,
+                has_stage_before: true,
+                answering: false,
+                notebook: true,
+                operator: true,
+                conversation: true,
+            };
+            for tool in offered_tools(&seat) {
                 let text = tool.to_string();
                 assert!(!text.contains("  "), "{text}");
             }
@@ -2431,10 +3053,12 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().expect("tool name"))
             .collect();
-        assert_eq!(
-            names,
-            ["roster", "ask", "report", "ask_user"],
-            "dispatch and handoff must be withdrawn in pipeline mode"
+        // A first stage on the command line has no stage before it to ask, nobody at the keyboard
+        // and no notebook: it is offered none of the bus. Pipeline mode never offers `dispatch` or
+        // `handoff`, and the bus still refuses them below for a model that calls them anyway.
+        assert!(
+            names.is_empty(),
+            "dispatch and handoff must be withdrawn in pipeline mode: {names:?}"
         );
 
         open.register(event_log.clone()).await;
@@ -3043,10 +3667,15 @@ mod tests {
             }),
         )
         .await?;
+        // The asker reads the reply as written, not as an escaped JSON string.
         let text = answered["result"]["content"][0]["text"]
             .as_str()
             .context("ask returned no content")?;
-        let payload: Value = serde_json::from_str(text)?;
+        assert_eq!(
+            text,
+            "a name answered:\n\nanswered from the context I already had"
+        );
+        let payload = &answered["result"]["structuredContent"];
         assert_eq!(
             payload["live"], true,
             "the answer must come from the live session, not a fresh one: {payload}"
@@ -3216,6 +3845,7 @@ mod tests {
             .send(LiveTurn {
                 prompt: "Also check the footnotes.".into(),
                 from_operator: true,
+                turn: crate::agent::WORK,
                 answer,
             })
             .await
@@ -3464,7 +4094,10 @@ mod tests {
                     return Some(says("done"));
                 }
                 let answers = answers(&request.messages);
-                if let Some(wrong) = answers.iter().find(|answer| !answer.contains(REFUSED)) {
+                // Refused by the bus, or not offered at all to an agent that may not start one.
+                if let Some(wrong) = answers.iter().find(|answer| {
+                    !answer.contains(REFUSED) && !answer.contains("There's no tool called")
+                }) {
                     return Some(says(&format!("started another agent: {wrong}")));
                 }
                 Some(match tries.get(answers.len()) {
@@ -3794,6 +4427,610 @@ mod tests {
         );
     }
 
+    /// One `ask` from the agent behind `token` to `agent`, as its tools make it.
+    async fn ask(bus: &TeamBus, token: &str, agent: &str, question: &str) -> Result<Value> {
+        post_json(
+            bus,
+            token,
+            &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                "params": {"name": "ask", "arguments": {"agent": agent, "question": question}}}),
+        )
+        .await
+    }
+
+    /// What the asker reads of an `ask`'s answer.
+    fn answer_text(response: &Value) -> &str {
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+    }
+
+    /// Stage `a`'s session: its own turn, then handed to `bus` to answer questions.
+    async fn keep_a_open(
+        bus: &TeamBus,
+        archive: &EventArchive,
+        model: &str,
+        event_log: &EventLog,
+        connection: Option<&TeamBusConnection>,
+    ) -> Result<LiveAgent> {
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let mut process = AgentRun::spawn(&spec_in(&team_path))?;
+        let mut context = TeamSessionContext {
+            archive,
+            bus: connection,
+            event_log: Some(event_log.clone()),
+            packet: None,
+            composed: None,
+            boundary: None,
+        };
+        let mut recorder = process.open_live("a", model, &mut context).await?;
+        let first = process.prompt_turn(&mut recorder, "do your work").await?;
+        Ok(bus.keep_alive("a", process, recorder, first).await)
+    }
+
+    /// **An answer comes back as the asked agent wrote it, framed going in, capped coming back,
+    /// and counted.**
+    ///
+    /// The kept-open stage answers "framed" only when the question reached it saying who asks and
+    /// how to answer. The team file sets the cap and the count: a 30,000-character answer comes
+    /// back as its start and its end within 2,000, and the fourth question is refused, with the
+    /// reason recorded for the team chat.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_answer_comes_back_as_plain_text_capped_and_counted() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let predecessor = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            let framed = prompt.contains("## A question from b name")
+                && prompt.contains("Answer from the work you already did")
+                && prompt.contains("`## Question back` section");
+            Some(says(&if !framed {
+                "main turn done".to_owned()
+            } else if prompt.contains("everything") {
+                format!("START {} END", "x".repeat(30_000))
+            } else {
+                "framed".to_owned()
+            }))
+        }));
+        let mut team = TeamConfig {
+            agents: vec![test_agent("a", &predecessor), test_agent("b", OFFLINE)],
+            edges: vec![edge("a", "b")],
+            ..team_of("plain-answer-team", "a")
+        };
+        team.conversation.ask.reply_chars = 2_000;
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let event_log = EventLog::new(archive.clone(), "plain-answer-run".into());
+        let live = keep_a_open(&bus, &archive, &predecessor, &event_log, None).await?;
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+
+        let first = ask(&bus, &b.token, "a", "what did you find?").await?;
+        assert_eq!(answer_text(&first), "a name answered:\n\nframed", "{first}");
+        let record = &first["result"]["structuredContent"];
+        assert_eq!(record["asksLeft"], 2);
+        assert_eq!(record["live"], true);
+        assert_eq!(record["round"], 1);
+        assert_eq!(record["clarifies"], false);
+
+        let long = ask(&bus, &b.token, "a", "tell me everything").await?;
+        let text = answer_text(&long);
+        assert!(text.starts_with("a name answered:\n\nSTART x"), "{text}");
+        assert!(text.ends_with("x END"), "the conclusion is kept: {text}");
+        assert!(text.contains("characters cut here"), "{text}");
+        assert!(
+            text.chars().count() < 2_000 + 200,
+            "{}",
+            text.chars().count()
+        );
+
+        let third = ask(&bus, &b.token, "a", "one more?").await?;
+        assert_eq!(third["result"]["structuredContent"]["asksLeft"], 0);
+        let refused = ask(&bus, &b.token, "a", "and another?").await?;
+        assert_tool_error_contains(
+            &refused,
+            "You have asked a name 3 questions in this run, the most this team allows. Work \
+             from what you have",
+        );
+        let events = archive.load_session("plain-answer-run").await?;
+        let last = events
+            .iter()
+            .rev()
+            .find(|event| event.kind == EventKind::ToolUpdate)
+            .context("the refused ask was recorded")?;
+        assert_eq!(last.payload["status"], "failed");
+        assert_eq!(last.payload["rawOutput"]["refused"], "limit");
+        bus.release("a", live).await?;
+        Ok(())
+    }
+
+    /// **A kept-open stage's turns are recorded as what they are for.** Its own work, its answer
+    /// to the stage after it, its revision of work a check step sent back and the operator's
+    /// follow-up are four turns in one session; each call's usage record names which, so what the
+    /// clarification and check rounds cost can be told from what the work cost.
+    #[tokio::test]
+    async fn a_kept_open_stage_s_turns_are_recorded_as_what_they_are_for() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let model = demo_model(Demo::responder(|_| {
+            Some(Completion {
+                usage: crate::agent::Usage {
+                    input_tokens: 100,
+                    output_tokens: 10,
+                    ..Default::default()
+                },
+                ..says("said")
+            })
+        }));
+        let team = TeamConfig {
+            agents: vec![test_agent("a", &model), test_agent("b", OFFLINE)],
+            edges: vec![edge("a", "b")],
+            ..team_of("turns-team", "a")
+        };
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let event_log = EventLog::new(archive.clone(), "turns-run".into());
+        let live = keep_a_open(&bus, &archive, &model, &event_log, None).await?;
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+        ask(&bus, &b.token, "a", "what did you find?").await?;
+        bus.turn_live("a", "## Sent back by Checker\nClaim 2 has no link.")
+            .await?
+            .context("a is kept open")?;
+        let sender = bus
+            .state
+            .live
+            .lock()
+            .await
+            .get("a")
+            .cloned()
+            .context("a is kept alive")?;
+        let (answer, answered) = oneshot::channel();
+        sender
+            .send(LiveTurn {
+                prompt: "Also check the footnotes.".into(),
+                from_operator: true,
+                turn: crate::agent::WORK,
+                answer,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("the kept-alive session stopped taking turns"))?;
+        answered.await??;
+
+        let turns: Vec<Value> = archive
+            .load_session("turns-run")
+            .await?
+            .into_iter()
+            .filter(|event| event.agent_id == "a" && event.kind == EventKind::Usage)
+            .map(|event| event.payload["_meta"]["loomwatch"]["call"]["turn"].clone())
+            .collect();
+        assert_eq!(turns, ["work", "ask_answer", "revision", "work"]);
+        drop(sender);
+        bus.release("a", live).await?;
+        Ok(())
+    }
+
+    /// **A question the asked agent asks back about goes back and forth, uncounted, until it is
+    /// answered — and the last round is an answer with its assumption named.**
+    ///
+    /// Two rounds per question, one question allowed. The kept-open stage asks back on the
+    /// question and on the first clarification; on the second it is told it may not ask back
+    /// again, and answers with an assumption. All three asks are one question: the next new one
+    /// is refused. Each round reaches the stage in the session that asked back, framed for what
+    /// it is, and comes back saying what to do next.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_question_back_is_clarified_round_by_round_until_it_is_answered() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let predecessor = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            Some(says(if prompt.contains("## A question from b name") {
+                "It depends on the year.\n\n## Question back\nWhich year do you mean?"
+            } else if prompt.contains("## b name answers your question back")
+                && prompt.contains("This is the last round on this question")
+            {
+                "42, assuming the fourth quarter. Assumption: Q4."
+            } else if prompt.contains("## b name answers your question back")
+                && prompt.contains("2025")
+                && prompt.contains("`## Question back` section")
+            {
+                "**Question back:**\nWhich quarter of 2025?"
+            } else {
+                "main turn done"
+            }))
+        }));
+        let mut team = TeamConfig {
+            agents: vec![test_agent("a", &predecessor), test_agent("b", OFFLINE)],
+            edges: vec![edge("a", "b")],
+            ..team_of("clarifying-team", "a")
+        };
+        team.conversation.ask.max_per_stage = 1;
+        team.conversation.ask.rounds_per_question = 2;
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let event_log = EventLog::new(archive.clone(), "clarifying-run".into());
+        let live = keep_a_open(&bus, &archive, &predecessor, &event_log, None).await?;
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+
+        let asked = ask(&bus, &b.token, "a", "how many did it sell?").await?;
+        assert_eq!(
+            answer_text(&asked),
+            "a name needs something from you before it can answer:\n\nIt depends on the \
+             year.\n\n## Question back\nWhich year do you mean?\n\nAsk a name again with what it \
+             needs: your next question to a name continues this one, and does not count against \
+             your questions. a name can ask back 1 more time on this question."
+        );
+        let record = &asked["result"]["structuredContent"];
+        assert_eq!(record["questionBack"], "Which year do you mean?");
+        assert_eq!(record["asksLeft"], 0);
+        assert_eq!(record["round"], 1);
+
+        let clarified = ask(&bus, &b.token, "a", "2025").await?;
+        let text = answer_text(&clarified);
+        assert!(
+            text.starts_with("a name needs something from you before it can answer:"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with(
+                "That will be the last round on this question: a name answers it with its best \
+                 assumption."
+            ),
+            "{text}"
+        );
+        let record = &clarified["result"]["structuredContent"];
+        assert_eq!(record["clarifies"], true);
+        assert_eq!(record["round"], 2);
+        assert_eq!(record["questionBack"], "Which quarter of 2025?");
+
+        let last = ask(&bus, &b.token, "a", "any quarter will do").await?;
+        assert_eq!(
+            answer_text(&last),
+            "a name answered:\n\n42, assuming the fourth quarter. Assumption: Q4."
+        );
+        let record = &last["result"]["structuredContent"];
+        assert_eq!(record["round"], 3);
+        assert_eq!(record["lastRound"], true);
+        assert!(record.get("questionBack").is_none(), "{record}");
+
+        // All three were one question, and one is all this team allows.
+        assert_tool_error_contains(
+            &ask(&bus, &b.token, "a", "something else?").await?,
+            "You have asked a name 1 question in this run",
+        );
+        bus.release("a", live).await?;
+        Ok(())
+    }
+
+    /// **A question back works the same in team mode**, where every `ask` starts a fresh helper:
+    /// the helper asked to clarify is handed the question as asked, what it asked back, and the
+    /// lead's answer, so it can answer without having been there. With no rounds allowed, a helper
+    /// is told to answer with its assumption instead, and a question back is taken as its answer.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_question_back_reaches_a_fresh_helper_with_the_question_so_far() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let helper = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            Some(says(if prompt.contains("## Clarified so far") {
+                if prompt.contains("Write the launch note.")
+                    && prompt.contains("You asked back:\nFor which audience?")
+                    && prompt.contains("lead name answered:\nFor first-time users.")
+                {
+                    "A launch note for first-time users."
+                } else {
+                    "the helper was not handed the question so far"
+                }
+            } else if prompt.contains("answer with your best assumption and say which") {
+                "A note for everyone. Assumption: a general audience.\n\n## Question back\nWho?"
+            } else {
+                "Before I write it:\n\n## Question back\nFor which audience?"
+            }))
+        }));
+        let team = |rounds: u32| {
+            let mut team = TeamConfig {
+                agents: vec![test_agent("lead", OFFLINE), test_agent("h", &helper)],
+                ..team_of("helper-clarifying-team", "lead")
+            };
+            team.conversation.ask.rounds_per_question = rounds;
+            Arc::new(team)
+        };
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let event_log = EventLog::new(archive.clone(), "helper-clarifying-run".into());
+
+        let bus = TeamBus::start(
+            team(3),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = bus.connection("lead").await?;
+        lead.register(event_log.clone()).await;
+        let asked = ask(&bus, &lead.token, "h", "Write the launch note.").await?;
+        assert_eq!(
+            asked["result"]["structuredContent"]["questionBack"],
+            "For which audience?"
+        );
+        let answered = ask(&bus, &lead.token, "h", "For first-time users.").await?;
+        assert_eq!(
+            answer_text(&answered),
+            "h name answered:\n\nA launch note for first-time users."
+        );
+        assert_eq!(answered["result"]["structuredContent"]["clarifies"], true);
+        assert_eq!(answered["result"]["structuredContent"]["asksLeft"], 2);
+        bus.wait_for_tasks().await?;
+
+        // No rounds: the helper is told to assume, and what it asks back anyway is its answer.
+        let bus = TeamBus::start(
+            team(0),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = bus.connection("lead").await?;
+        lead.register(event_log.clone()).await;
+        let assumed = ask(&bus, &lead.token, "h", "Write the launch note.").await?;
+        assert!(
+            answer_text(&assumed).starts_with("h name answered:\n\nA note for everyone."),
+            "{assumed}"
+        );
+        assert!(
+            assumed["result"]["structuredContent"]
+                .get("questionBack")
+                .is_none()
+        );
+        bus.wait_for_tasks().await?;
+        Ok(())
+    }
+
+    /// **A stage that has finished is refused with where its work is, not cold-started.**
+    ///
+    /// Whether or not the asker may recruit, and whether or not the stage fed it: one it fed is
+    /// told its work is in its prompt, another to work from what it has. An agent nobody has run
+    /// is still a helper, and `allowRecruiting: false` still refuses it. The finished stage's
+    /// model panics if it is ever prompted.
+    #[tokio::test]
+    async fn a_finished_stage_is_refused_with_where_its_work_is_never_started_again() -> Result<()>
+    {
+        let pool = crate::db::Db::temp().await;
+        let never = Demo::scripted(Vec::new());
+        let never_model = demo_model(never.clone());
+        let mut locked = test_agent("b", OFFLINE);
+        locked.allow_recruiting = false;
+        let mut team = TeamConfig {
+            agents: vec![
+                test_agent("a", &never_model),
+                locked,
+                test_agent("c", OFFLINE),
+                test_agent("z", &never_model),
+            ],
+            edges: vec![edge("a", "b"), edge("b", "z")],
+            ..team_of("finished-team", "a")
+        };
+        team.conversation.ask.max_per_stage = 1;
+        let team = Arc::new(team);
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let event_log = EventLog::new(archive.clone(), "finished-run".into());
+        bus.finished("a");
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+        let c = bus.connection("c").await?;
+        c.register(event_log.clone()).await;
+
+        assert_tool_error_contains(
+            &ask(&bus, &b.token, "a name", "which source?").await?,
+            "a name has finished its part of this run and is no longer open, so it can't be \
+             asked. Its work reached you in your prompt, under \"Results from preceding \
+             stages\": work from that, and say plainly what it does not cover.",
+        );
+        let unfed = ask(&bus, &c.token, "a", "which source?").await?;
+        assert_tool_error_contains(
+            &unfed,
+            "so it can't be asked. Work from what you have, and say plainly what it does not \
+             cover.",
+        );
+        assert_tool_error_contains(
+            &ask(&bus, &b.token, "z", "can you help?").await?,
+            "may not recruit helpers within its own pipeline step",
+        );
+        // A refused question is not counted: with one question allowed, an agent answering
+        // another's question is refused the helper twice for the same reason, never for the count.
+        let answering = bus
+            .connection_with_context(
+                "c",
+                DelegationContext {
+                    path: vec!["b".into(), "c".into()],
+                    depth: 1,
+                    answering: true,
+                },
+            )
+            .await?;
+        answering.register(event_log.clone()).await;
+        for _ in 0..2 {
+            assert_tool_error_contains(
+                &ask(&bus, &answering.token, "z", "can you help?").await?,
+                "is answering another agent's question, so it may not start",
+            );
+        }
+        assert!(never.requests().is_empty(), "a finished stage was started");
+        // Each refusal's reason is recorded beside its words, for the team chat to say in a line.
+        let reasons: Vec<Value> = archive
+            .load_session("finished-run")
+            .await?
+            .iter()
+            .filter(|event| event.kind == EventKind::ToolUpdate)
+            .map(|event| event.payload["rawOutput"]["refused"].clone())
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                json!("finished"),
+                json!("finished"),
+                json!("not_recruiting"),
+                json!("cannot_start"),
+                json!("cannot_start")
+            ]
+        );
+        Ok(())
+    }
+
+    /// **An agent answering a question may not ask back the agent waiting on it** — a kept-open
+    /// stage or a helper started for the question, in either mode. Each tries, and answers with
+    /// what the bus told it, which must say how to ask back instead. The helper is told that
+    /// before it starts, and a lead asking one helper is held to the same count as a stage.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_agent_answering_a_question_may_not_ask_back_the_agent_waiting_on_it() -> Result<()>
+    {
+        const BACK: &str = "asked you this and is waiting for your answer, so you can't ask";
+        let pool = crate::db::Db::temp().await;
+        // Asks `back` whatever it is asked, then answers with what the bus said.
+        let asking_back = |back: &'static str, framing: &'static str| {
+            move |request: &crate::agent::SeenRequest| {
+                if request.after_tool() {
+                    return Some(says(match request.messages.last() {
+                        Some(Message::Tool { content, .. }) => content,
+                        _ => "no answer",
+                    }));
+                }
+                let prompt = request.prompt();
+                if prompt.contains("again, please") {
+                    return Some(says("helped"));
+                }
+                if !prompt.contains(framing) {
+                    return Some(says("main turn done"));
+                }
+                Some(calls(
+                    "ask",
+                    &json!({"agent": back, "question": "which year do you mean?"}),
+                ))
+            }
+        };
+        let live_model = demo_model(Demo::responder(asking_back(
+            "b",
+            "## A question from b name",
+        )));
+        let helper_model = demo_model(Demo::responder(asking_back(
+            "lead",
+            "lead name is waiting for your reply. If you can't answer without a detail only \
+             lead name has, end your answer with a `## Question back` section",
+        )));
+        let team = |edges: Vec<crate::config::EdgeConfig>| {
+            Arc::new(TeamConfig {
+                agents: vec![
+                    test_agent("a", &live_model),
+                    test_agent("b", OFFLINE),
+                    test_agent("lead", OFFLINE),
+                    test_agent("h", &helper_model),
+                ],
+                edges,
+                ..team_of("asking-back-team", "a")
+            })
+        };
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let event_log = EventLog::new(archive.clone(), "asking-back-run".into());
+
+        // A kept-open stage, asked by the stage after it. It has a stage before it, so it is
+        // offered `ask` at all: a first stage is not (`offered_tools`).
+        let bus = TeamBus::start(
+            team(vec![edge("lead", "a"), edge("a", "b")]),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let a = bus.connection("a").await?;
+        let live = keep_a_open(&bus, &archive, &live_model, &event_log, Some(&a)).await?;
+        let b = bus.connection("b").await?;
+        b.register(event_log.clone()).await;
+        let answered = ask(&bus, &b.token, "a", "what did you find?").await?;
+        let text = answer_text(&answered);
+        assert!(text.contains(&format!("b name {BACK} b name")), "{text}");
+        assert!(text.contains("`## Question back` section"), "{text}");
+        bus.release("a", live).await?;
+
+        // A helper started for a lead's question, in a team-mode run.
+        let bus = TeamBus::start(
+            team(Vec::new()),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = bus.connection("lead").await?;
+        lead.register(event_log.clone()).await;
+        let answered = ask(&bus, &lead.token, "h", "draft the summary").await?;
+        let text = answer_text(&answered);
+        assert!(text.starts_with("h name answered:"), "{text}");
+        // It tried, so its question reached it framed with how to ask back. A helper answering a
+        // question is not offered `ask` at all (`offered_tools`); were it offered, the bus would
+        // refuse it with how to ask back instead.
+        assert!(
+            text.contains(&format!("lead name {BACK} lead name"))
+                || text.contains("There's no tool called ask"),
+            "{text}"
+        );
+        for _ in 0..2 {
+            let again = ask(&bus, &lead.token, "h", "again, please").await?;
+            assert_eq!(answer_text(&again), "h name answered:\n\nhelped");
+        }
+        assert_tool_error_contains(
+            &ask(&bus, &lead.token, "h", "again, once more").await?,
+            "You have asked h name 3 questions in this run",
+        );
+        bus.wait_for_tasks().await?;
+        Ok(())
+    }
+
     fn assert_events_match_schema(events: &[crate::RunEvent]) {
         let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let source = std::fs::read_to_string(workspace.join("schemas/team.schema.yaml"))
@@ -3813,5 +5050,183 @@ mod tests {
                 .collect();
             assert!(errors.is_empty(), "invalid event: {errors:?}\n{value}");
         }
+    }
+
+    fn tool_names(seat: &BusSeat) -> Vec<String> {
+        offered_tools(seat)
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    }
+
+    /// One rule decides every tool from where the agent sits, for every kind of seat: a team of
+    /// one, a pipeline's first and later stages, a stage after a review stop, a lead and its
+    /// helpers, with and without a notebook, a person to ask and a conversation.
+    #[test]
+    fn the_tools_offered_follow_where_the_agent_sits() {
+        let seat = |mode, teammates, has_stage_before| BusSeat {
+            mode,
+            teammates,
+            has_stage_before,
+            answering: false,
+            notebook: false,
+            operator: true,
+            conversation: false,
+        };
+        let cases: [(&str, BusSeat, &[&str]); 9] = [
+            (
+                "one agent, team mode",
+                seat(TeamBusMode::Team, 0, false),
+                &["ask_user"],
+            ),
+            (
+                "one agent, pipeline",
+                seat(TeamBusMode::Pipeline, 0, false),
+                &["ask_user"],
+            ),
+            (
+                "a pipeline's first stage",
+                seat(TeamBusMode::Pipeline, 2, false),
+                &["ask_user"],
+            ),
+            (
+                "a later stage",
+                seat(TeamBusMode::Pipeline, 2, true),
+                &["roster", "ask", "ask_user"],
+            ),
+            (
+                "a lead",
+                seat(TeamBusMode::Team, 2, false),
+                &["roster", "dispatch", "ask", "handoff", "ask_user"],
+            ),
+            (
+                "a helper answering a question",
+                BusSeat {
+                    answering: true,
+                    ..seat(TeamBusMode::Team, 2, false)
+                },
+                &["ask_user"],
+            ),
+            (
+                "the command line, nobody to ask",
+                BusSeat {
+                    operator: false,
+                    ..seat(TeamBusMode::Pipeline, 2, true)
+                },
+                &["roster", "ask"],
+            ),
+            (
+                "with a notebook and a conversation",
+                BusSeat {
+                    notebook: true,
+                    conversation: true,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &[
+                    "ask_user",
+                    "memory_search",
+                    "memory_read",
+                    "memory_write",
+                    "checkpoint",
+                    "earlier_work",
+                ],
+            ),
+            (
+                "a conversation, but nobody to ask",
+                BusSeat {
+                    conversation: true,
+                    operator: false,
+                    ..seat(TeamBusMode::Team, 0, false)
+                },
+                &[],
+            ),
+        ];
+        for (what, seat, expected) in cases {
+            assert_eq!(tool_names(&seat), expected, "{what}");
+            assert!(!tool_names(&seat).contains(&"report".to_owned()), "{what}");
+        }
+    }
+
+    /// The seat is read from the team: review stops are not teammates, a stage straight after one
+    /// has no stage before it to ask, and what a session is for comes from who opened it.
+    #[tokio::test]
+    async fn a_seat_is_read_from_the_team_file() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let mut stop = test_agent("stop", OFFLINE);
+        stop.kind = crate::config::AgentKind::Operator;
+        let mut checker = test_agent("checker", OFFLINE);
+        checker.checks = Some("writer".to_owned());
+        let team = Arc::new(TeamConfig {
+            agents: vec![
+                test_agent("researcher", OFFLINE),
+                stop,
+                test_agent("writer", OFFLINE),
+                checker,
+            ],
+            edges: vec![
+                edge("researcher", "stop"),
+                edge("stop", "writer"),
+                edge("writer", "checker"),
+            ],
+            ..team_of("seat-team", "researcher")
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            team,
+            &team_path,
+            archive,
+            Duration::from_secs(1),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let names = |connection: &TeamBusConnection| -> Vec<String> {
+            connection
+                .tool_definitions(false)
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap_or_default().to_owned())
+                .collect()
+        };
+        let researcher = bus.connection("researcher").await?;
+        let writer = bus.connection("writer").await?;
+        let checker = bus.connection("checker").await?;
+        let seat = bus.seat(&writer.holder, false);
+        assert_eq!(
+            seat.teammates, 2,
+            "the review stop is the person, not a teammate"
+        );
+        assert!(
+            !seat.has_stage_before,
+            "the stage before the writer is a review stop"
+        );
+        assert!(names(&researcher).is_empty() && names(&writer).is_empty());
+        assert_eq!(names(&checker), ["roster", "ask"]);
+        assert_eq!(researcher.purpose(), crate::agent::WORK);
+        assert_eq!(checker.purpose(), "check");
+        let helper = bus
+            .connection_with_context(
+                "writer",
+                DelegationContext {
+                    path: vec!["checker".into(), "writer".into()],
+                    depth: 1,
+                    answering: false,
+                },
+            )
+            .await?;
+        assert_eq!(helper.purpose(), "helper");
+        let answering = bus
+            .connection_with_context(
+                "researcher",
+                DelegationContext {
+                    path: vec!["checker".into(), "researcher".into()],
+                    depth: 1,
+                    answering: true,
+                },
+            )
+            .await?;
+        assert_eq!(answering.purpose(), "ask_answer");
+        assert_eq!(researcher.time_zone(), None);
+        Ok(())
     }
 }

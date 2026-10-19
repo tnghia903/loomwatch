@@ -346,12 +346,19 @@ async fn a_parked_session_resumes_with_its_whole_history() {
         .iter()
         .filter_map(|message| match message {
             Message::User { content } | Message::Assistant { content, .. } => {
-                Some(content.as_str())
+                Some(session::without_date(content))
             }
             _ => None,
         })
         .collect();
     assert_eq!(said, ["One", "First answer.", "Two"]);
+    // Each turn was dated when it started, the resumed one too.
+    let dated = second
+        .messages
+        .iter()
+        .filter(|message| matches!(message, Message::User { content } if content.contains("\n\nToday is ")))
+        .count();
+    assert_eq!(dated, 2);
 }
 
 #[tokio::test]
@@ -1036,4 +1043,561 @@ async fn a_connected_tools_call_asks_first_and_runs_only_when_allowed() {
         "The person answered instead of letting this run: It's ENG-9 already."
     );
     assert_eq!(replies[2], "Created ENG-1");
+}
+
+// ---------------------------------------------------------------------------------------------
+// What each call costs and is told
+// ---------------------------------------------------------------------------------------------
+
+fn at(time: &str) -> chrono::DateTime<chrono::Utc> {
+    time.parse().unwrap()
+}
+
+/// The date is worked out where the team works, on both sides of midnight, and falls back to this
+/// computer's own zone for a name that isn't one.
+#[test]
+fn the_date_line_is_in_the_teams_time_zone() {
+    let late = at("2026-10-18T23:30:00Z");
+    assert_eq!(
+        session::today_line(Some("Asia/Singapore"), late),
+        "Today is Monday 19 October 2026 (Asia/Singapore)."
+    );
+    assert_eq!(
+        session::today_line(Some("America/Los_Angeles"), late),
+        "Today is Sunday 18 October 2026 (America/Los_Angeles)."
+    );
+    let local = session::today_line(None, late);
+    assert!(
+        local.starts_with("Today is ") && local.contains(" 2026 (UTC"),
+        "{local}"
+    );
+    assert_eq!(session::today_line(Some("Nowhere/Land"), late), local);
+    assert_eq!(session::today_line(Some("  "), late), local);
+    assert_eq!(
+        session::without_date(&format!("Do it.\n\n{local}")),
+        "Do it."
+    );
+    assert_eq!(
+        session::without_date("Today is a word here."),
+        "Today is a word here."
+    );
+}
+
+/// Every turn's message ends with the date as it is when the turn starts; the instructions, which
+/// lead the cached prompt, never carry it. A session parked overnight is a day on when resumed.
+#[tokio::test]
+async fn each_turn_is_dated_when_it_starts() {
+    let folder = Folder::new();
+    let demo = Demo::scripted(vec![Completion::text("One."), Completion::text("Two.")]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.time_zone = Some("Asia/Ho_Chi_Minh".to_owned());
+    config.now = Some(at("2026-10-18T10:00:00Z"));
+    let mut first = Session::open(
+        config.clone(),
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    first.prompt("Find this week's news.").await.unwrap();
+    let parked = first.snapshot();
+    config.now = Some(at("2026-10-19T10:00:00Z"));
+    let mut resumed = Session::resume(
+        parked,
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    resumed.prompt("And today's?").await.unwrap();
+    let requests = demo.requests();
+    let Message::System { content: system } = &requests[1].messages[0] else {
+        panic!("instructions first");
+    };
+    assert!(!system.contains("Today is"));
+    let users: Vec<&str> = requests[1]
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::User { content } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        users,
+        [
+            "Find this week's news.\n\nToday is Sunday 18 October 2026 (Asia/Ho_Chi_Minh).",
+            "And today's?\n\nToday is Monday 19 October 2026 (Asia/Ho_Chi_Minh).",
+        ]
+    );
+    // The model sees the prompt the operator gave, with the date after it.
+    assert_eq!(requests[1].prompt(), "And today's?");
+}
+
+fn busy_call() -> Completion {
+    let mut busy = Completion::calls("", vec![call("l", "list_files", &json!({}))]);
+    busy.usage = Usage {
+        input_tokens: 900,
+        ..Usage::default()
+    };
+    busy
+}
+
+fn cut_summary(text: &str) -> Completion {
+    Completion {
+        finish: Finish::Length,
+        ..Completion::text(text)
+    }
+}
+
+/// A summary keeps the sources, figures and set-aside ids the work goes on from; one the length
+/// limit cut off is asked for once more, shorter, never used half-written; and the Brief that came
+/// in an earlier turn's opening message is put back.
+#[tokio::test]
+async fn a_cut_summary_is_asked_for_again_and_the_brief_is_kept() {
+    let folder = Folder::new();
+    std::fs::write(
+        folder.0.join("AGENTS.md"),
+        format!(
+            "{}team t, agent writer. Rebuilt on every run. -->\n\n# What the team knows\n\nWrite in French.\n",
+            crate::memory::NATIVE_FILE_MARKER
+        ),
+    )
+    .unwrap();
+    let demo = Demo::scripted(vec![
+        busy_call(),
+        cut_summary("Summary: found https://example.com/a and"),
+        Completion::text("Summary: https://example.com/a (2026-10-01) says 42%."),
+        Completion::text("Finished."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.context_window = Some(1000);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    let end = session.prompt("Carry on with the brief.").await.unwrap();
+    assert_eq!(end.reply, "Finished.");
+    let requests = demo.requests();
+    let Message::System { content: system } = &requests[0].messages[0] else {
+        panic!("instructions first");
+    };
+    assert!(
+        !system.contains("Write in French"),
+        "the Brief isn't read twice"
+    );
+    let asked = |index: usize| requests[index].prompt().to_owned();
+    assert!(asked(1).contains("address (URL)") && asked(1).contains("set-aside output"));
+    assert!(!asked(1).contains("shorter"));
+    assert!(asked(2).contains("make this one shorter"), "{}", asked(2));
+    let after = &requests[3].messages;
+    assert_eq!(after.len(), 2);
+    let Message::User { content } = &after[1] else {
+        panic!("the summary should stand in for the conversation");
+    };
+    assert!(content.contains("says 42%") && !content.contains("found https://example.com/a and"));
+    assert!(content.contains(
+        "## Standing notes from the operator\n# What the team knows\n\nWrite in French."
+    ));
+    assert!(content.contains("Carry on with the brief.") && content.contains("\n\nToday is "));
+
+    // Cut twice: the conversation stays as it was rather than carry on from half a summary.
+    let demo = Demo::scripted(vec![
+        busy_call(),
+        cut_summary("Summary: half"),
+        cut_summary("Summary: half again"),
+        Completion::text("Finished."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.context_window = Some(1000);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    session.prompt("The task.").await.unwrap();
+    let requests = demo.requests();
+    assert_eq!(requests[3].messages.len(), requests[0].messages.len() + 2);
+}
+
+fn calls_recorded(sink: &Recorded) -> Vec<Value> {
+    sink.all()
+        .into_iter()
+        .filter(|update| update["sessionUpdate"] == "usage_update")
+        .map(|update| update["_meta"]["loomwatch"]["call"].clone())
+        .collect()
+}
+
+/// One record per model call, saying what it was for (the work, the rest of a cut-off reply, a
+/// summary; a handover turn), with its tokens by kind, its cost and its web use. A provider that
+/// leaves a figure out gets a zero.
+#[tokio::test]
+async fn every_call_is_recorded_with_what_it_was_for_and_used() {
+    let folder = Folder::new();
+    let (_, base) = stand(vec![
+        ok(&[
+            json!({"choices": [{"index": 0, "delta": {"content": "Part one, "}, "finish_reason": "length"}],
+                   "usage": {"prompt_tokens": 1000, "completion_tokens": 200,
+                             "prompt_tokens_details": {"cached_tokens": 600, "cache_write_tokens": 300},
+                             "completion_tokens_details": {"reasoning_tokens": 50},
+                             "cost": 0.01, "server_tool_use": {"web_search_requests": 1}}}),
+        ]),
+        ok(&[
+            json!({"choices": [{"index": 0, "delta": {"content": "part two."}, "finish_reason": "stop"}],
+                   "usage": {"prompt_tokens": 1300, "completion_tokens": 10, "cost": 0.002}}),
+        ]),
+        ok(&[
+            json!({"choices": [{"index": 0, "delta": {"content": "Handed over."}, "finish_reason": "stop"}],
+                   "usage": {"prompt_tokens": 1400, "completion_tokens": 5}}),
+        ]),
+    ])
+    .await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session(&folder, openrouter(&base), sink.clone(), Arc::new(AllowAll));
+    assert_eq!(
+        session.prompt("Write it.").await.unwrap().reply,
+        "Part one, part two."
+    );
+    session.set_purpose("handover");
+    session.prompt("Hand over.").await.unwrap();
+    session.end_purpose();
+    let calls = calls_recorded(&sink);
+    assert_eq!(
+        calls[0],
+        json!({"kind": "work", "turn": "work", "model": "anthropic/claude-haiku-5.5",
+               "inputTokens": 100, "cachedReadTokens": 600, "cachedWriteTokens": 300,
+               "outputTokens": 200, "reasoningTokens": 50, "costUsd": 0.01,
+               "webSearches": 1, "webFetches": 0})
+    );
+    assert_eq!(calls[1]["kind"], "carry_on");
+    assert_eq!(
+        (
+            calls[1]["cachedReadTokens"].as_u64(),
+            calls[1]["reasoningTokens"].as_u64()
+        ),
+        (Some(0), Some(0))
+    );
+    assert_eq!(
+        (calls[2]["kind"].as_str(), calls[2]["turn"].as_str()),
+        (Some("work"), Some("handover"))
+    );
+    assert_eq!(calls[2]["costUsd"], 0.0);
+
+    // A session opened for a check step says so on every call; a summary is its own kind.
+    let mut summary = Completion::text("Summary.");
+    summary.usage.output_tokens = 20;
+    let demo = Demo::scripted(vec![busy_call(), summary, Completion::text("Checked.")]);
+    let sink = Arc::new(Recorded::default());
+    let mut config = SessionConfig::new("s", "checker", folder.0.clone(), "m");
+    config.context_window = Some(1000);
+    "check".clone_into(&mut config.purpose);
+    let mut checking = Session::open(
+        config,
+        Provider::Demo(demo),
+        sink.clone(),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    checking.prompt("Check it.").await.unwrap();
+    let calls = calls_recorded(&sink);
+    assert_eq!(
+        calls.len(),
+        2,
+        "the demo's free calls aren't recorded: {calls:?}"
+    );
+    assert_eq!(
+        (calls[0]["kind"].as_str(), calls[0]["turn"].as_str()),
+        (Some("work"), Some("check"))
+    );
+    assert_eq!(
+        (calls[1]["kind"].as_str(), calls[1]["turn"].as_str()),
+        (Some("summary"), Some("check"))
+    );
+}
+
+/// A Chat Completions stream from `OpenRouter` for a researcher on Claude that searched with
+/// Anthropic's own engine. Its shape is the one `OpenRouter` sends: keep-alive comments, reasoning
+/// in pieces closed by a signature, the reply, its sources as `url_citation` annotations (one per
+/// cited passage, not per search), the finish, and a last chunk that repeats it with the usage.
+/// The searches are counted only in `server_tool_use_details`; no tool call or reasoning entry
+/// names them.
+const CLAUDE_SEARCHED: &str = r#": OPENROUTER PROCESSING
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":"Search for this week's releases.","reasoning_details":[{"type":"reasoning.text","text":"Search for this week's releases.","format":"anthropic-claude-v1","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_details":[{"type":"reasoning.text","signature":"EqQBCkYIBxgCKkA","format":"anthropic-claude-v1","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"Two releases landed this week"},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":" (page ages shown in search results)."},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":"","annotations":[{"type":"url_citation","url_citation":{"url":"https://example.com/releases","title":"Releases","content":"Version 4.2 shipped on Tuesday.","start_index":0,"end_index":29}},{"type":"url_citation","url_citation":{"url":"https://example.org/changelog","title":"Changelog","start_index":0,"end_index":29}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"end_turn"}]}
+
+data: {"id":"gen-1792335100-r","object":"chat.completion.chunk","created":1792335100,"model":"anthropic/claude-haiku-5.5","provider":"Anthropic","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"end_turn"}],"usage":{"prompt_tokens":24310,"completion_tokens":412,"total_tokens":24722,"cost":0.0291,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":22258,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0291,"upstream_inference_prompt_cost":0.0255,"upstream_inference_completions_cost":0.0036},"completion_tokens_details":{"reasoning_tokens":31,"image_tokens":0,"audio_tokens":0},"server_tool_use_details":{"web_search_requests":3}}}
+
+data: [DONE]
+
+"#;
+
+/// The same for a model without a search or fetch engine of its own, so `OpenRouter` ran both.
+/// Only its searches have a count; the pages it read are the rest of the calls it ran.
+const OPENROUTER_FETCHED: &str = r#": OPENROUTER PROCESSING
+
+data: {"id":"gen-1792335200-g","object":"chat.completion.chunk","created":1792335200,"model":"z-ai/glm-5.3","provider":"Z.AI","choices":[{"index":0,"delta":{"role":"assistant","content":"The changelog lists three fixes."},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335200-g","object":"chat.completion.chunk","created":1792335200,"model":"z-ai/glm-5.3","provider":"Z.AI","choices":[{"index":0,"delta":{"role":"assistant","content":"","annotations":[{"type":"url_citation","url_citation":{"url":"https://example.org/changelog","title":"Changelog","content":"Fixed: three crashes. [...] Released Tuesday.","start_index":0,"end_index":32}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792335200-g","object":"chat.completion.chunk","created":1792335200,"model":"z-ai/glm-5.3","provider":"Z.AI","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop"}],"usage":{"prompt_tokens":9120,"completion_tokens":96,"total_tokens":9216,"cost":0.0071,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"completion_tokens_details":{"reasoning_tokens":0},"server_tool_use_details":{"tool_calls_requested":3,"tool_calls_executed":3,"web_search_requests":1}}}
+
+data: [DONE]
+
+"#;
+
+/// What a researcher's call searched and read reaches its usage record, as `OpenRouter` streams
+/// it: from the model's own engine (Claude's) or from `OpenRouter`'s.
+#[tokio::test]
+async fn a_researchers_web_use_reaches_its_usage_record() {
+    let folder = Folder::new();
+    let streamed = |body: &str| Reply {
+        status: StatusCode::OK,
+        body: body.to_owned(),
+        delay: Duration::ZERO,
+    };
+    let (_, base) = stand(vec![
+        streamed(CLAUDE_SEARCHED),
+        streamed(OPENROUTER_FETCHED),
+    ])
+    .await;
+    let mut calls = Vec::new();
+    for (model, reply) in [
+        (
+            "anthropic/claude-haiku-5.5",
+            "Two releases landed this week (page ages shown in search results).",
+        ),
+        ("z-ai/glm-5.3", "The changelog lists three fixes."),
+    ] {
+        let sink = Arc::new(Recorded::default());
+        let mut config = SessionConfig::new("s", "researcher", folder.0.clone(), model);
+        config.tools = ToolSet::all(true);
+        let mut session = Session::open(
+            config,
+            openrouter(&base),
+            sink.clone(),
+            Arc::new(AllowAll),
+            Arc::new(NoHostTools),
+        );
+        assert_eq!(session.prompt("What's new?").await.unwrap().reply, reply);
+        calls.extend(calls_recorded(&sink));
+    }
+    assert_eq!(
+        calls[0],
+        json!({"kind": "work", "turn": "work", "model": "anthropic/claude-haiku-5.5",
+               "inputTokens": 2052, "cachedReadTokens": 0, "cachedWriteTokens": 22258,
+               "outputTokens": 412, "reasoningTokens": 31, "costUsd": 0.0291,
+               "webSearches": 3, "webFetches": 0})
+    );
+    assert_eq!(
+        (
+            calls[1]["webSearches"].as_u64(),
+            calls[1]["webFetches"].as_u64()
+        ),
+        (Some(1), Some(2))
+    );
+}
+
+/// The team file's web limits reach `OpenRouter` for an agent allowed the web. A provider that
+/// refuses them is asked again without them, and the model isn't sent them again.
+#[tokio::test]
+async fn web_limits_reach_openrouter_and_a_refusal_falls_back_without_them() {
+    let folder = Folder::new();
+    let refused = Reply {
+        status: StatusCode::BAD_REQUEST,
+        body: json!({"error": {"code": 400, "message": "max_tool_calls is not supported by this provider"}}).to_string(),
+        delay: Duration::ZERO,
+    };
+    let answer = |text: &str| {
+        ok(&[
+            json!({"choices": [{"index": 0, "delta": {"content": text}, "finish_reason": "stop"}]}),
+        ])
+    };
+    let (stand, base) = stand(vec![refused, answer("Found it."), answer("Again.")]).await;
+    let provider = openrouter(&base);
+    let open = |provider: Provider| {
+        let mut config = SessionConfig::new("s", "researcher", folder.0.clone(), "z-ai/glm-5.3");
+        config.tools = ToolSet::all(true);
+        config.web = WebLimits {
+            page_tokens: 4_000,
+            pages: Some(3),
+            searches: Some(2),
+            steps: Some(4),
+        };
+        Session::open(
+            config,
+            provider,
+            Arc::new(Recorded::default()),
+            Arc::new(AllowAll),
+            Arc::new(NoHostTools),
+        )
+    };
+    assert_eq!(
+        open(provider.clone())
+            .prompt("Look it up.")
+            .await
+            .unwrap()
+            .reply,
+        "Found it."
+    );
+    assert_eq!(
+        open(provider).prompt("Again.").await.unwrap().reply,
+        "Again."
+    );
+    let bodies = stand.bodies.lock().unwrap().clone();
+    let server = |body: &Value| -> Vec<Value> {
+        body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| {
+                tool["type"]
+                    .as_str()
+                    .is_some_and(|kind| kind.starts_with("openrouter:"))
+            })
+            .cloned()
+            .collect()
+    };
+    assert_eq!(bodies[0]["max_tool_calls"], 4);
+    assert_eq!(
+        server(&bodies[0])[1],
+        json!({"type": "openrouter:web_fetch", "parameters": {"max_uses": 3, "max_content_tokens": 4_000}})
+    );
+    for later in &bodies[1..] {
+        assert!(later.get("max_tool_calls").is_none());
+        assert_eq!(
+            server(later),
+            [
+                json!({"type": "openrouter:web_search"}),
+                json!({"type": "openrouter:web_fetch"})
+            ]
+        );
+    }
+    let system = bodies[0]["messages"][0]["content"].as_str().unwrap();
+    assert!(
+        system.contains("A page is read up to about 3,000 words."),
+        "{system}"
+    );
+}
+
+/// With a library too large to list, the instructions list the agent's own skills and the
+/// library's that its first message calls for, and keep them for the session, resumed too.
+#[tokio::test]
+async fn the_skills_listed_are_the_ones_its_first_message_calls_for() {
+    let folder = Folder::new();
+    let library = folder.0.join("library");
+    let own = folder.0.join(".agents").join("skills");
+    let mut skills: Vec<(PathBuf, String, String)> = (0..24)
+        .map(|index| {
+            (
+                library.clone(),
+                format!("skill-{index:02}"),
+                "Tidies a folder of notes into an outline.".to_owned(),
+            )
+        })
+        .collect();
+    skills.push((
+        library.clone(),
+        "slides".to_owned(),
+        "Builds a presentation deck as HTML slides.".to_owned(),
+    ));
+    skills.push((
+        own.clone(),
+        "house-style".to_owned(),
+        "How this team writes.".to_owned(),
+    ));
+    for (root, name, description) in &skills {
+        std::fs::create_dir_all(root.join(name)).unwrap();
+        std::fs::write(
+            root.join(name).join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {description}\n---\nBody"),
+        )
+        .unwrap();
+    }
+    let demo = Demo::scripted(vec![Completion::text("One."), Completion::text("Two.")]);
+    let mut config = SessionConfig::new("s", "designer", folder.0.clone(), "m");
+    config.skill_roots = vec![own];
+    config.skill_library = vec![library.clone()];
+    let mut session = Session::open(
+        config.clone(),
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    session
+        .prompt("## Task\nPrepare the slides for Monday.")
+        .await
+        .unwrap();
+    let mut resumed = Session::resume(
+        session.snapshot(),
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    resumed.prompt("Now the speaker notes.").await.unwrap();
+    let requests = demo.requests();
+    let Message::System { content: system } = &requests[0].messages[0] else {
+        panic!("instructions first");
+    };
+    assert!(
+        system.contains("- slides: Builds a presentation deck"),
+        "{system}"
+    );
+    assert!(
+        system.contains("- house-style: How this team writes."),
+        "{system}"
+    );
+    assert!(!system.contains("- skill-00"), "{system}");
+    assert!(system.contains(&format!("…and 24 more skills in {}.", library.display())));
+    assert_eq!(
+        requests[1].messages[0], requests[0].messages[0],
+        "kept for the session"
+    );
+
+    // The engine says what the agent is for and was asked, and that picks them, not the rest of
+    // its first message.
+    let demo = Demo::scripted(vec![Completion::text("One.")]);
+    let mut config = SessionConfig::new("s", "designer", folder.0.clone(), "m");
+    config.skill_library = vec![library.clone()];
+    config.skill_focus = Some("You make decks.\nPrepare the slides for Monday.".to_owned());
+    let mut focused = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    focused
+        .prompt("## Task\nDo the work you were handed.")
+        .await
+        .unwrap();
+    let Message::System { content: system } = &demo.requests()[0].messages[0] else {
+        panic!("instructions first");
+    };
+    assert!(
+        system.contains("- slides: Builds a presentation deck"),
+        "{system}"
+    );
 }

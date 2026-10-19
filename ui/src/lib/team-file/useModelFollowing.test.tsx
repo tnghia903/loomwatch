@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
 import { forgetReadings } from '../ai/reading'
 import { forgetKeyStatus } from '../ai/useKeyStatus'
+import { onTheFastTier } from '../library/onTheFastTier'
 import { ROLE_PRESETS } from '../library/roles'
 import type { AgentConfig } from './types'
 import { MOVE_SHOWN_MS, SETTLE_MS, useModelFollowing } from './useModelFollowing'
@@ -47,7 +48,7 @@ function follow(agents: readonly AgentConfig[]) {
 const settle = () => act(() => vi.advanceTimersByTimeAsync(SETTLE_MS + 10))
 
 describe('useModelFollowing', () => {
-  it('takes the team as it opened, and moves a following agent once its configuration settles', async () => {
+  it('takes the team as it opened, and moves a following agent once its configuration settles', onTheFastTier(async () => {
     // Opened gathering, yet on the strongest model: nothing changed, so nothing moves.
     const { rerender, result, move } = follow([writer, { ...gathering }])
     await settle()
@@ -67,11 +68,11 @@ describe('useModelFollowing', () => {
     // The note goes after a while.
     await act(() => vi.advanceTimersByTimeAsync(MOVE_SHOWN_MS))
     expect(result.current.moves.size).toBe(0)
-  })
+  }))
 
   // The workbench renders often (its figure moves): a render with nothing changed isn't a change, so
   // it never puts the move off.
-  it('moves even while the page keeps rendering', async () => {
+  it('moves even while the page keeps rendering', onTheFastTier(async () => {
     const { rerender, move } = follow([writer, helper])
     await settle()
     const changed = [writer, gathering]
@@ -80,9 +81,9 @@ describe('useModelFollowing', () => {
       await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS / 4))
     }
     expect(move).toHaveBeenCalledWith('helper', FAST_MODEL)
-  })
+  }))
 
-  it('leaves a pinned agent’s model alone, and moves a new following agent without a note', async () => {
+  it('leaves a pinned agent’s model alone, and moves a new following agent without a note', onTheFastTier(async () => {
     const pinned = { ...helper, followsSuggestion: undefined }
     const { rerender, result, move } = follow([writer, pinned])
     await settle()
@@ -95,11 +96,11 @@ describe('useModelFollowing', () => {
     await settle()
     expect(move).toHaveBeenCalledWith('scout', FAST_MODEL)
     expect(result.current.moves.size).toBe(0)
-  })
+  }))
 
   // Picked to follow, then changed before the pick had settled: it had a model of its own, so the
   // move is noted, as for any agent that was there when the team opened.
-  it('notes a move right after an agent starts following', async () => {
+  it('notes a move right after an agent starts following', onTheFastTier(async () => {
     const pinned = { ...helper, followsSuggestion: undefined }
     const { rerender, result, move } = follow([writer, pinned])
     await settle()
@@ -109,9 +110,9 @@ describe('useModelFollowing', () => {
     await settle()
     expect(move).toHaveBeenCalledWith('helper', FAST_MODEL)
     expect(result.current.moves.get('helper')).toEqual({ from: DEFAULT_MODEL, to: FAST_MODEL })
-  })
+  }))
 
-  it('puts the model back and stops following on Undo', async () => {
+  it('puts the model back and stops following on Undo', onTheFastTier(async () => {
     const { rerender, result, pin } = follow([writer, helper])
     await settle()
     rerender({ agents: [writer, gathering] })
@@ -119,7 +120,7 @@ describe('useModelFollowing', () => {
     act(() => result.current.undo('helper'))
     expect(pin).toHaveBeenCalledWith('helper', DEFAULT_MODEL)
     expect(result.current.moves.size).toBe(0)
-  })
+  }))
 
   it('with Let AI choose on, moves an unclear agent by AI’s reading, and stays put when AI can’t read it', async () => {
     readingOn = true

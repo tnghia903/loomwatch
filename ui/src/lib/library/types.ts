@@ -16,7 +16,7 @@ export interface LibrarySource {
   label: string
   /** Only presets pre-fill the role — §4.5: "From a preset, both are already filled". */
   role?: string
-  /** The OpenRouter model it runs on; absent is the default model. */
+  /** The OpenRouter model it runs on; absent starts it as the model table's new agent. */
   model?: string
   /** How hard that model thinks; it goes with the model. */
   thinkingEffort?: string

@@ -296,6 +296,7 @@ impl Default for AgentMemoryConfig {
 pub struct ConversationConfig {
     pub brief: BriefConfig,
     pub ask: AskConfig,
+    pub check: CheckConfig,
     /// Bounds on a review stop or a parked `ask_user`, kept so older team files still load.
     pub stop: StopConfig,
 }
@@ -327,31 +328,70 @@ pub struct BriefConfig {
     pub summary_chars: u32,
     /// How many standalone findings a stage may carry forward.
     pub max_findings: u32,
+    /// The longest reply, in characters, handed to the stages after it as written. A longer one is
+    /// summarised in a handover turn first. Shared between the stages that feed one stage, and
+    /// never more than the prompt's section cap (`SECTION_CAP_CHARS`), which would cut it anyway.
+    pub as_written_up_to: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AskConfig {
-    /// How many questions one stage may put to the stage before it.
+    /// How many questions one agent may put to another in a run. Clarifying what the other asked
+    /// back continues a question, so it is not counted (`rounds_per_question` bounds that).
     pub max_per_stage: u32,
+    /// The most of one answer, in characters, the asker is handed. A longer one is cut in the
+    /// middle, keeping its start and its conclusion.
+    pub reply_chars: u32,
+    /// How many times an asked agent may ask back about one question before it must answer with
+    /// its best assumption. The asker's clarifications continue the question, so they are not
+    /// counted against `max_per_stage`.
+    pub rounds_per_question: u32,
 }
 
 impl Default for BriefConfig {
     fn default() -> Self {
         // Roughly 300 tokens of summary plus eight findings: enough for a stage to start work
         // without the transcript, small enough that a long pipeline does not accumulate one.
+        // Replies up to the prompt's section cap go on as written: a handover re-reads the
+        // stage's whole conversation to save the next stage a few thousand tokens, and loses the
+        // links and dates the next stage needs.
         Self {
             summary_chars: 1200,
             max_findings: 8,
+            as_written_up_to: 24_000,
         }
+    }
+}
+
+/// What a check step is shown besides the work it checks (ADR 0062).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CheckConfig {
+    /// The most of what the checked agent was given that its check step is shown, in characters:
+    /// what lets it trace a claim without opening the claim's source. 0 shows none of it.
+    pub given_chars: u32,
+}
+
+impl Default for CheckConfig {
+    fn default() -> Self {
+        // About 2,000 tokens: a research handover's findings and its sources, whole, in most runs.
+        Self { given_chars: 8_000 }
     }
 }
 
 impl Default for AskConfig {
     fn default() -> Self {
         // Three is enough to recover what a brief cut, and few enough that a stage cannot turn the
-        // predecessor into a search engine.
-        Self { max_per_stage: 3 }
+        // predecessor into a search engine. An answer stays under the 24,000 characters at which
+        // LoomWatch's own engine sets a tool result aside and shows only its start.
+        // Three rounds: enough to settle what was unclear about one question, and an end the
+        // asked agent knows about, so the last round is an answer with its assumption named.
+        Self {
+            max_per_stage: 3,
+            reply_chars: 20_000,
+            rounds_per_question: 3,
+        }
     }
 }
 
@@ -1258,9 +1298,24 @@ impl TeamConfig {
     /// Returns an error when the document cannot be parsed, uses an unknown version, or
     /// fails the runtime's semantic checks.
     pub fn parse(source: &str) -> Result<Self> {
-        let team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
+        let mut team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
+        }
+        // `spend.web` on an agent is the team's with the agent's own figures over it, settled here
+        // once so every place that runs the agent holds it to the same limits.
+        team.spend
+            .web
+            .validate("the team's")
+            .map_err(anyhow::Error::msg)?;
+        let team_web = team.spend.web;
+        for agent in &mut team.agents {
+            agent
+                .spend
+                .web
+                .validate(&format!("agent {:?}'s", agent.id))
+                .map_err(anyhow::Error::msg)?;
+            agent.spend.web = agent.spend.web.over(team_web);
         }
         // The schema's `Identifier`, enforced here too and not only in the editor: ids name the
         // agents' folders under `.loomwatch/`, and a team file can come from anyone. An agent id of
@@ -1475,11 +1530,22 @@ impl TeamConfig {
         if self.edges.is_empty() {
             return Ok(self.entrypoint.clone());
         }
-        let last = self
+        let mut last = self
             .pipeline_order()?
             .last()
             .cloned()
             .unwrap_or_else(|| self.entrypoint.clone());
+        // A pipeline that ends on a review stop answers with the work the person approved, not
+        // with what they typed to approve it ("Approved"): the stage that feeds the stop, through
+        // any stops before it. A stop fed by several stages has no one such stage, and keeps
+        // answering itself.
+        while self.is_operator_node(&last) {
+            let mut feeding = self.edges.iter().filter(|edge| edge.to == last);
+            match (feeding.next(), feeding.next()) {
+                (Some(only), None) => last.clone_from(&only.from),
+                _ => break,
+            }
+        }
         // A pipeline that ends on a check step answers with the work it checked, not with the
         // check (ADR 0062): the checks are shown beside the answer.
         Ok(self
@@ -1488,6 +1554,12 @@ impl TeamConfig {
             .find(|agent| agent.id == last)
             .and_then(|agent| agent.checks.clone())
             .unwrap_or(last))
+    }
+
+    fn is_operator_node(&self, id: &str) -> bool {
+        self.agents
+            .iter()
+            .any(|agent| agent.id == id && agent.is_operator())
     }
 
     /// Topological run order for pipeline mode (non-empty `edges`).
@@ -1728,6 +1800,87 @@ mod tests {
         assert_eq!(team.responder_id().expect("responder"), "a");
     }
 
+    /// A pipeline that ends on a review stop answers with the work approved there: the stage
+    /// feeding the stop, through stops in a row, then by the check-step rule. A final stop fed by
+    /// several stages has no one such stage and keeps answering itself; a file's own `responder`
+    /// always wins. Older files that ended on a stop load as they did.
+    #[test]
+    fn a_pipeline_ending_on_a_review_stop_answers_with_the_work_it_approved() {
+        const AGENT: &str = "spawn: {cmd: acp, cwd: .}\n    model: test/model";
+        let team = |agents: &[(&str, &str)], edges: &[(&str, &str)], responder: &str| {
+            let agents: String = agents
+                .iter()
+                .map(|(id, extra)| format!("\n  - id: {id}\n    {extra}"))
+                .collect::<Vec<_>>()
+                .concat();
+            let edges: String = edges
+                .iter()
+                .map(|(from, to)| {
+                    format!(
+                        "\n  - {{from: {from}, to: {to}, layer: configured, kind: sequence, ts: \"2026-10-18T00:00:00Z\"}}"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .concat();
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\n{responder}agents:{agents}\nedges:{edges}\n"
+            ))
+            .expect("a valid pipeline")
+        };
+        let stop = "kind: operator\n    role: Approve it.";
+        let answers = |team: TeamConfig| team.responder_id().expect("a responder");
+        assert_eq!(
+            answers(team(
+                &[("a", AGENT), ("review", stop)],
+                &[("a", "review")],
+                ""
+            )),
+            "a"
+        );
+        assert_eq!(
+            answers(team(
+                &[("a", AGENT), ("s1", stop), ("s2", stop)],
+                &[("a", "s1"), ("s1", "s2")],
+                ""
+            )),
+            "a"
+        );
+        let checked = format!("{AGENT}\n    checks: a");
+        assert_eq!(
+            answers(team(
+                &[("a", AGENT), ("checker", &checked), ("review", stop)],
+                &[("a", "checker"), ("checker", "review")],
+                ""
+            )),
+            "a"
+        );
+        assert_eq!(
+            answers(team(
+                &[("a", AGENT), ("b", AGENT), ("c", AGENT), ("review", stop)],
+                &[("a", "b"), ("a", "c"), ("b", "review"), ("c", "review")],
+                ""
+            )),
+            "review"
+        );
+        assert_eq!(
+            answers(team(
+                &[("a", AGENT), ("review", stop)],
+                &[("a", "review")],
+                "responder: review\n"
+            )),
+            "review"
+        );
+        // A stop in the middle changes nothing: the last stage answers.
+        assert_eq!(
+            answers(team(
+                &[("a", AGENT), ("review", stop), ("b", AGENT)],
+                &[("a", "review"), ("review", "b")],
+                ""
+            )),
+            "b"
+        );
+    }
+
     #[test]
     fn rejects_an_unknown_or_non_entrypoint_team_responder() {
         let unknown = TeamConfig::parse(
@@ -1874,6 +2027,64 @@ mod tests {
         )
         .expect_err("an operator node spends nothing");
         assert!(format!("{error:#}").contains("no spend"), "{error:#}");
+    }
+
+    /// `spend.web` on the team, and on an agent figure by figure over it; a team that says nothing
+    /// reads the web within the built-in limits, as every team file written before them does.
+    #[test]
+    fn web_limits_load_at_team_and_agent_level() {
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  perRun: 1\n  web:\n    maxPageTokens: 12000\n    maxSteps: 6\nagents:\n  - id: a\n    model: m\n    spend:\n      web:\n        maxPages: 2\n  - id: b\n    model: m\n",
+        )
+        .expect("valid config");
+        let a = team.agents[0].spend.web.limits();
+        assert_eq!(
+            (a.page_tokens, a.pages, a.searches, a.steps),
+            (12_000, Some(2), None, Some(6))
+        );
+        let b = team.agents[1].spend.web.limits();
+        assert_eq!((b.page_tokens, b.pages, b.steps), (12_000, None, Some(6)));
+        assert_eq!(
+            team.agents[0].spend.per_run, None,
+            "only the web figures are the team's"
+        );
+
+        let silent = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n",
+        )
+        .expect("valid config");
+        assert_eq!(
+            silent.agents[0].spend.web.limits(),
+            crate::agent::WebLimits::default()
+        );
+
+        for (block, said) in [
+            (
+                "spend:\n  web:\n    maxPages: 0\n",
+                "the team's spend.web.maxPages is 0",
+            ),
+            ("spend:\n  web:\n    maxSteps: 31\n", "between 1 and 30"),
+            (
+                "spend:\n  web:\n    maxPageTokens: 100\n",
+                "maxPageTokens is 100",
+            ),
+        ] {
+            let error = TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: a\n{block}agents:\n  - id: a\n    model: m\n"
+            ))
+            .expect_err(said);
+            assert!(format!("{error:#}").contains(said), "{error:#}");
+        }
+        let error = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: m\n    spend:\n      web:\n        maxSearches: 99\n",
+        )
+        .expect_err("out of range on an agent");
+        assert!(format!("{error:#}").contains("agent \"a\"'s spend.web.maxSearches is 99"));
+        let error = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nspend:\n  web:\n    pages: 3\nagents:\n  - id: a\n    model: m\n",
+        )
+        .expect_err("an unknown figure is a mistake, not a default");
+        assert!(format!("{error:#}").contains("pages"), "{error:#}");
     }
 
     /// Budgets were retired by ADR 0027. A team file written before then still says `budget:` at

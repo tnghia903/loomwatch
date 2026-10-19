@@ -88,6 +88,28 @@ describe('bubbles', () => {
     ])
   })
 
+  it('reads every round of a question in order: asked, asked back, clarified, answered', () => {
+    const reply = (text: string, seq: number, asksBack = false) => ({ from: 'editor', text, eventId: `r${seq}`, seq, ts: '', offsetMs: 0, source: 'open' as const, sentBackTo: null, ...(asksBack ? { asksBack: true as const } : {}) })
+    const rounds = [
+      message({ id: 'q1', kind: 'ask', from: 'writer', to: 'editor', text: 'Which source?', seq: 1, state: 'answered', reply: reply('## Question back\nFor which claim?', 2, true) }),
+      message({ id: 'q2', kind: 'ask', from: 'writer', to: 'editor', text: 'The sales figure.', seq: 3, state: 'answered', clarifies: true, reply: reply('**Question back:** which year?', 4, true) }),
+      message({ id: 'q3', kind: 'ask', from: 'writer', to: 'editor', text: '2025.', seq: 5, state: 'answered', clarifies: true, reply: reply('Reuters, 2025.', 6) }),
+    ]
+    expect(lay(rounds).map(({ from, to, word }) => `${from[0]} -> ${to[0]}: ${word}`)).toEqual([
+      'writer -> editor: question',
+      'editor -> writer: asks back',
+      'writer -> editor: clarifies',
+      'editor -> writer: asks back',
+      'writer -> editor: clarifies',
+      'editor -> writer: answer',
+    ])
+  })
+
+  it('says a refused question was not asked, and owes no answer for it', () => {
+    const refused = message({ id: 'q', kind: 'ask', from: 'writer', to: 'editor', text: 'Which source?', state: 'failed', error: 'finished', refused: 'finished' })
+    expect(lay([refused])).toEqual([{ part: 'said', from: ['writer'], to: ['editor'], word: 'not asked', text: 'Which source?' }])
+  })
+
   it('shows an answer still owed as one on its way from whoever owes it, and as none once the run is over', () => {
     const owed = { ...asked, state: 'pending' as const, reply: null }
     expect(lay([owed], true)[1]).toEqual({ part: 'waiting', from: ['editor'], to: ['writer'], word: 'thinking…', text: '' })

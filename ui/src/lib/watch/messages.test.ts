@@ -95,6 +95,43 @@ describe('messages between agents', () => {
     expect(messages[1]).toMatchObject({ state: 'failed', error: 'cycle detected: lead -> lead', reply: null })
   })
 
+  // The daemon records a question back on the answer and a clarification on the ask that answers
+  // it; every round is its own call, so the record reads in order however many rounds there were.
+  it('reads a question back and the clarifications answering it, round by round, from the record', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'writer', 'q1', 'ask', { agent: 'researcher', question: 'How many did it sell?' }),
+      settled(5, 'writer', 'q1', { agent: 'researcher', reply: 'It depends.\n\n## Question back\nWhich year?', live: true, round: 1, clarifies: false, questionBack: 'Which year?', backsLeft: 2 }),
+      bus(6, 'writer', 'q2', 'ask', { agent: 'researcher', question: '2025.' }),
+      settled(9, 'writer', 'q2', { agent: 'researcher', reply: '**Question back:**\nWhich quarter?', live: true, round: 2, clarifies: true, questionBack: 'Which quarter?', backsLeft: 1 }),
+      bus(10, 'writer', 'q3', 'ask', { agent: 'researcher', question: 'Any quarter.' }),
+      settled(14, 'writer', 'q3', { agent: 'researcher', reply: '42, assuming Q4.', live: true, round: 3, clarifies: true }),
+    ])
+    expect(messages.map(({ text, clarifies, reply }) => ({ text, clarifies: clarifies ?? false, asksBack: reply?.asksBack ?? false, answer: reply?.text }))).toEqual([
+      { text: 'How many did it sell?', clarifies: false, asksBack: true, answer: 'It depends.\n\n## Question back\nWhich year?' },
+      { text: '2025.', clarifies: true, asksBack: true, answer: '**Question back:**\nWhich quarter?' },
+      { text: 'Any quarter.', clarifies: true, asksBack: false, answer: '42, assuming Q4.' },
+    ])
+  })
+
+  it('keeps why the Team Bus would not put a question, when it recorded a reason, and only then', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'writer', 'q1', 'ask', { agent: 'researcher', question: 'Which source?' }),
+      settled(1, 'writer', 'q1', { error: 'Researcher has finished its part of this run…', refused: 'finished' }, 'failed'),
+      bus(2, 'writer', 'q2', 'ask', { agent: 'editor', question: 'And you?' }),
+      settled(2, 'writer', 'q2', { error: 'You have asked Editor 3 questions…', refused: 'limit' }, 'failed'),
+      bus(3, 'writer', 'q3', 'ask', { agent: 'editor', question: 'Older?' }),
+      settled(3, 'writer', 'q3', { error: 'cycle detected', refused: 'something new' }, 'failed'),
+    ])
+    expect(messages.map(({ state, refused, error }) => ({ state, refused, error }))).toEqual([
+      { state: 'failed', refused: 'finished', error: 'Researcher has finished its part of this run…' },
+      { state: 'failed', refused: 'limit', error: 'You have asked Editor 3 questions…' },
+      // A reason this version does not know reads as a failure in the Team Bus's own words.
+      { state: 'failed', refused: undefined, error: 'cycle detected' },
+    ])
+  })
+
   it('marks an answer cut short at a spending limit as stopped, keeping why (ADR 0068)', () => {
     seq = 0
     const { messages } = projectRun([
@@ -325,3 +362,69 @@ describe('messages between agents', () => {
     })])
   })
 })
+
+// ADR 0062: a check step's rounds are exchanges in the team's chat, built from what it recorded,
+// so a replayed run reads the same as a live one, and a loop of any length is one exchange a round.
+describe('a check step in the chat', () => {
+  const checked = (seconds: number, round: number, items: { verdict: string; item: string; evidence: string }[], recorded: Record<string, unknown> = {}) =>
+    event(seconds, 'checker', 'session_meta', { phase: 'check_result', checked: 'writer', round, items, readable: true, ...recorded }, loomwatch('check_result'))
+  const sentBack = (seconds: number, payload: Record<string, unknown>) =>
+    event(seconds, 'checker', 'session_meta', { phase: 'check_sent_back', to: 'writer', missed: 1, ...payload }, loomwatch('check_sent_back'))
+  const linked = { verdict: 'met', item: 'Every claim has a link', evidence: 'all four' }
+  const short = (verdict: string, evidence: string) => ({ verdict, item: 'Under 300 words', evidence })
+
+  function checkedRun(order: 'recorded before' | 'recorded after'): RunEvent[] {
+    seq = 0
+    const back = () => sentBack(52, order === 'recorded before'
+      ? { round: 1, findings: [short('not_met', '412 words')], problems: 'The piece runs long.' }
+      : {})
+    const revision = () => [prompt(52, 'writer', 'Sent back by Checker'), say(70, 'writer', 'Shorter draft.\n\n## Not changed\n- Kept the 2023 figure: the report says so'), event(71, 'writer', 'turn_end', { stopReason: 'end_turn' })]
+    const events = [
+      say(10, 'writer', 'Draft.'),
+      event(11, 'writer', 'turn_end', { stopReason: 'end_turn' }),
+      say(40, 'checker', 'The piece runs long.\n\n## Check\n1. Met — …'),
+      event(41, 'checker', 'turn_end', { stopReason: 'end_turn' }),
+      checked(42, 1, [linked, short('not_met', '412 words')]),
+    ]
+    // Numbered in the order they were recorded.
+    if (order === 'recorded before') events.push(back(), ...revision())
+    else events.push(...revision(), back())
+    events.push(
+      say(90, 'checker', '## Check\n2. Met — Under 300 words — 280 words'),
+      event(91, 'checker', 'turn_end', { stopReason: 'end_turn' }),
+      checked(92, 2, [linked, short('met', '280 words')]),
+    )
+    return events
+  }
+
+  it('shows each round, what was sent back, and the revised work as the reply', () => {
+    const checks = projectRun(checkedRun('recorded before')).messages.filter((message) => message.kind === 'check')
+    expect(checks.map(({ from, to, state, check }) => ({ from, to, state, round: check?.round, sentBack: check?.sentBack }))).toEqual([
+      { from: 'checker', to: 'writer', state: 'answered', round: 1, sentBack: true },
+      { from: 'checker', to: 'writer', state: 'delivered', round: 2, sentBack: false },
+    ])
+    expect(checks[0].text).toBe('The piece runs long.\n\n**Not met**\n- Under 300 words — 412 words')
+    expect(checks[0].reply).toMatchObject({ from: 'writer', text: 'Shorter draft.\n\n## Not changed\n- Kept the 2023 figure: the report says so', offsetMs: 61_000, source: 'open' })
+    expect(checks[1].text).toBe('All 2 met.')
+  })
+
+  it('reads a run recorded before the send-back came first the same way', () => {
+    const checks = projectRun(checkedRun('recorded after')).messages.filter((message) => message.kind === 'check')
+    expect(checks.map((message) => message.state)).toEqual(['answered', 'delivered'])
+    expect(checks[0].reply?.text).toContain('Shorter draft.')
+  })
+
+  it('says a check it could not read, and a send-back that found the agent finished', () => {
+    seq = 0
+    const messages = projectRun([
+      checked(1, 1, [short('not_sure', 'no block')], { readable: false }),
+      checked(2, 1, [short('not_met', '412 words')]),
+      sentBack(3, { round: 1, problems: '' }),
+      event(4, 'checker', 'session_meta', { phase: 'check_send_back_skipped', to: 'writer', round: 1 }, loomwatch('check_send_back_skipped')),
+    ]).messages
+    expect(messages[0]).toMatchObject({ kind: 'check', state: 'delivered', text: 'Its reply had no Check block LoomWatch could read, so nothing it checked is confirmed.' })
+    expect(messages[1]).toMatchObject({ kind: 'check', state: 'failed', text: '**Not met**\n- Under 300 words — 412 words' })
+    expect(messages[1].error).toContain('not revised')
+  })
+})
+

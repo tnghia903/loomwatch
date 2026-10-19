@@ -32,6 +32,9 @@ use crate::db::Db;
 /// The heading the packet is rendered under. One constant, referenced by the renderer, the
 /// section record, and the tests, so the daemon and the UI cannot disagree about it.
 pub const TEAM_KNOWLEDGE_HEADING: &str = "## What the team knows";
+/// How the Brief `LoomWatch` writes as a work folder's `AGENTS.md` begins. The built-in agent knows
+/// its own file by it: the opening message already carries the Brief, so it isn't read twice.
+pub const NATIVE_FILE_MARKER: &str = "<!-- Written by LoomWatch for team ";
 
 /// Why memory could not be assembled. Every variant is the operator's file to fix, so each one
 /// names the entry and says what is wrong with it — never just "memory failed".
@@ -260,7 +263,7 @@ impl TeamMemory {
             return None;
         }
         let mut body = format!(
-            "<!-- Written by LoomWatch for team {team_id}, agent {}. Rebuilt on every run; edit \
+            "{NATIVE_FILE_MARKER}{team_id}, agent {}. Rebuilt on every run; edit \
              the Brief files beside the team file instead. -->\n\n\
              # What the team knows\n\n\
              Standing notes from the operator. Treat them as constraints on how you work, not as \
@@ -566,6 +569,7 @@ impl ComposedPrompt {
                 !matches!(
                     section.kind,
                     PromptSectionKind::Role
+                        | PromptSectionKind::DoneWhen
                         | PromptSectionKind::Team
                         | PromptSectionKind::Capabilities
                         | PromptSectionKind::RequiredSkill
@@ -625,7 +629,9 @@ impl ComposedPrompt {
                         .take_while(|section| {
                             matches!(
                                 section.kind,
-                                PromptSectionKind::Role | PromptSectionKind::Team
+                                PromptSectionKind::Role
+                                    | PromptSectionKind::DoneWhen
+                                    | PromptSectionKind::Team
                             )
                         })
                         .count()
@@ -3614,6 +3620,65 @@ mod tests {
     impl Drop for TempDirectory {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Knowledge and required skills are what this run hands the agent, so they go below the
+    /// standing configuration: the role, then Done when (ADR 0062), then its place in the team.
+    /// Done when used to be split from its role by them.
+    #[test]
+    fn knowledge_and_required_skills_go_below_done_when() {
+        let mut agent = agent("a");
+        agent.done_when = vec!["Every claim links to its source".to_owned()];
+        let mut task = crate::NodeTask::goal("Write the brief");
+        task.place = Some("Before you: Researcher.".to_owned());
+        for place in [None, task.place.clone()] {
+            let task = crate::NodeTask {
+                place,
+                ..task.clone()
+            };
+            let composed = crate::compose_prompt(&agent, &ContextPacket::default(), &task);
+            let delivery = crate::delivery::Delivery {
+                knowledge: vec![crate::delivery::DeliveredKnowledge {
+                    name: "Style guide".to_owned(),
+                    source: "LoomWatch".to_owned(),
+                    folders: Vec::new(),
+                    files: Vec::new(),
+                    read_access: None,
+                    chars: 0,
+                    sha256: String::new(),
+                    contents: Vec::new(),
+                    text_copy: None,
+                }],
+                ..crate::delivery::Delivery::default()
+            };
+            let skill = crate::workspace::PreparedSkill::fixture(
+                "brief-writer",
+                "/work/.agents/skills/brief-writer/SKILL.md",
+                "---\nname: brief-writer\ndescription: d\n---\nWrite briefs.",
+                crate::skill_routing::SkillRoute::Native,
+            );
+            let loaded = composed
+                .with_required_skills(std::slice::from_ref(&skill))
+                .with_delivery(&delivery);
+            let kinds: Vec<PromptSectionKind> =
+                loaded.sections.iter().map(|section| section.kind).collect();
+            let at = |kind| kinds.iter().position(|found| *found == kind).unwrap();
+            assert!(
+                at(PromptSectionKind::DoneWhen) < at(PromptSectionKind::RequiredSkill)
+                    && at(PromptSectionKind::DoneWhen) < at(PromptSectionKind::Knowledge),
+                "{kinds:?}"
+            );
+            assert_eq!(at(PromptSectionKind::DoneWhen), 1, "{kinds:?}");
+            // The text follows the record, section for section.
+            let done = loaded.text.find("## Done when").unwrap();
+            assert!(done < loaded.text.find("## Required skill").unwrap());
+            assert!(done < loaded.text.find("## Knowledge: Style guide").unwrap());
+            assert!(
+                loaded
+                    .text
+                    .starts_with("## Your assigned role\nworks\n\n## Done when\n")
+            );
         }
     }
 

@@ -33,22 +33,37 @@ describe('team templates', () => {
     }
   })
 
-  // A team made from Your agents is what the canvas would make placing each one: linked copies.
+  // A team made from Your agents is what the canvas would make placing each one: linked copies,
+  // each handing its work to the next in the order they were placed.
   it('writes a schema-valid team of My agents, each a linked copy of its saved version', () => {
     const jobs = [
       { id: 'reader', file: 'reader.yaml', name: 'Reader', instructions: 'Read every source you are given and list what each one says.', model: FAST_MODEL, skills: ['notebooklm'], allow: { web: true }, version: 3 },
       { id: 'reader-2', file: 'reader-2.yaml', name: 'Reader', instructions: 'Read the second half of the sources and list what each one says.' },
     ]
-    const doc = parse(agentsTeamYaml(jobs, ' Digest ', 'digest')) as TeamDocument
+    const doc = parse(agentsTeamYaml(jobs, ' Digest ', 'digest', new Date('2026-10-18T00:00:00Z'))) as TeamDocument
     const result = validate(doc)
     expect(result.documentProblems).toEqual([])
     expect(result.valid).toBe(true)
-    expect(doc).toMatchObject({ id: 'digest', name: 'Digest', entrypoint: 'reader', edges: [], spend: { perRun: 1 } })
+    expect(doc).toMatchObject({ id: 'digest', name: 'Digest', entrypoint: 'reader', spend: { perRun: 1 } })
     expect(doc.agents[0]).toMatchObject({ id: 'reader', model: FAST_MODEL, capabilities: [{ kind: 'skill', name: 'notebooklm' }], allow: { web: true }, from: { agent: 'reader', version: 3 } })
     // Two agents with one name still get their own ids.
     expect(doc.agents[1]).toMatchObject({ name: 'Reader', from: { agent: 'reader-2', version: 1 } })
     expect(doc.agents[1].id).not.toBe('reader')
+    expect(doc.edges).toEqual([{ from: 'reader', to: doc.agents[1].id, layer: 'configured', kind: 'sequence', ts: '2026-10-18T00:00:00.000Z' }])
     expect(() => agentsTeamYaml([], 'Nobody')).toThrow()
+  })
+
+  // Unconnected, the first agent would lead the rest without knowing it, and they would never see
+  // the request: a pipeline in the order placed, first to last, whatever the number.
+  it('connects My agents first to last in the order they are placed', () => {
+    const job = (id: string, name: string) => ({ id, file: `${id}.yaml`, name, instructions: `Do the ${name.toLowerCase()} part of the request and hand it on.` })
+    const one = parse(agentsTeamYaml([job('solo', 'Solo')], 'One')) as TeamDocument
+    expect(one.edges).toEqual([])
+    const doc = parse(agentsTeamYaml([job('gather', 'Gather'), job('draft', 'Draft'), job('polish', 'Polish'), job('send', 'Send')], 'Four')) as TeamDocument
+    expect(validate(doc).valid).toBe(true)
+    expect(doc.entrypoint).toBe('gather')
+    expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['gather->draft', 'draft->polish', 'polish->send'])
+    expect(doc.edges.every((edge) => edge.layer === 'configured' && edge.kind === 'sequence')).toBe(true)
   })
 
   // ADR 0037: a researcher that cannot search the web can only guess, so it starts allowed to;
@@ -60,20 +75,21 @@ describe('team templates', () => {
     expect(single.agents[0].allow).toBeUndefined()
   })
 
-  // ADR 0057 and 0062: the researcher gathers on the faster model, the writer writes on the strong
+  // The model table (ADR 0057 and 0062), quality first: the researcher and the writer on the strong
   // one, the check step reads on another maker's, and each thinks as hard as its job needs.
   it('puts each job on its tier’s model at its job’s effort', () => {
     const tiers = (template: 'single' | 'research-write' | 'research-write-check' | 'research-review-write' | 'research') => {
       const doc = parse(templateTeamYaml(template, 'Report')) as TeamDocument
       return Object.fromEntries(doc.agents.filter((agent) => agent.kind !== 'operator').map((agent) => [agent.id, `${agent.model}${agent.thinkingEffort ? `[${agent.thinkingEffort}]` : ''}`]))
     }
-    expect(tiers('research-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
-    expect(tiers('research-review-write')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
-    expect(tiers('research-write-check')).toEqual({ researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]`, checker: `${CHECK_MODEL}[high]` })
-    // The lead plans and judges on the strong model; its researchers gather on the faster one.
-    expect(tiers('research')).toEqual({ lead: `${DEFAULT_MODEL}[medium]`, researcher: `${FAST_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
-    // One assistant writes the answer itself: the strong model, at its own default.
-    expect(tiers('single')).toEqual({ assistant: DEFAULT_MODEL })
+    expect(tiers('research-write')).toEqual({ researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    expect(tiers('research-review-write')).toEqual({ researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    expect(tiers('research-write-check')).toEqual({ researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]`, checker: `${CHECK_MODEL}[high]` })
+    // The lead plans and judges on the strong model, and its researchers gather on it too.
+    expect(tiers('research')).toEqual({ lead: `${DEFAULT_MODEL}[medium]`, researcher: `${DEFAULT_MODEL}[medium]`, writer: `${DEFAULT_MODEL}[medium]` })
+    // One assistant, with no job of its own, starts as the model table's new agent: the strong
+    // model at the standard effort.
+    expect(tiers('single')).toEqual({ assistant: `${DEFAULT_MODEL}[medium]` })
   })
 
   // Open Deep Research's shape: no edges, so the lead answers, and reaches the Researcher (many
@@ -93,12 +109,12 @@ describe('team templates', () => {
   })
 
   // ADR 0062: the checked starter team ends on a check step that checks the writer, so the writer's
-  // piece stays the answer and the daemon accepts the file as it stands.
-  it('ends the checked team on a Checker that checks the writer', () => {
+  // piece stays the answer and the daemon accepts the file as it stands. A missed check goes back
+  // to the writer once: without that, the check costs about half a run and changes nothing.
+  it('ends the checked team on a Checker that checks the writer and sends a miss back', () => {
     const doc = parse(templateTeamYaml('research-write-check', 'Brief')) as TeamDocument
     expect(doc.agents.map((agent) => agent.id)).toEqual(['researcher', 'writer', 'checker'])
-    expect(doc.agents[2]).toMatchObject({ checks: 'writer', allow: { web: true } })
-    expect(doc.agents[2].sendBackOnce).toBeUndefined()
+    expect(doc.agents[2]).toMatchObject({ checks: 'writer', sendBackOnce: true, allow: { web: true } })
     expect(doc.edges.map((edge) => `${edge.from}->${edge.to}`)).toEqual(['researcher->writer', 'writer->checker'])
   })
 

@@ -44,6 +44,10 @@ const COST_CHOICES = new Set([
   'daily-tech-digest: Writer',
   // A researcher left on the default model; its job says gatherer.
   'capability-delivery: Market Researcher',
+  // Researchers their examples put on the faster model, while quality comes first and the table
+  // (schemas/model-tiers.json) keeps researchers on the strongest one.
+  'research-team: Researcher',
+  'team-memory: Researcher',
 ])
 
 const KIND_FOR: Record<Tier, JobKind> = { strong: 'produce', fast: 'gather', check: 'check' }

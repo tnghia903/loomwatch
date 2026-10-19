@@ -113,8 +113,27 @@ $defs:
         $ref: "#/$defs/Brief"
       ask:
         $ref: "#/$defs/Ask"
+      check:
+        $ref: "#/$defs/Check"
       stop:
         $ref: "#/$defs/Stop"
+
+  Check:
+    description: >-
+      What a check step (`checks:`) is shown besides the work it checks.
+    type: object
+    additionalProperties: false
+    properties:
+      givenChars:
+        description: >-
+          The most of what the checked agent was given (the results of the stages before it, the
+          operator's direction, what the team knows) that its check step is shown, in characters.
+          It lets the check trace a claim to what the work was written from instead of opening the
+          claim's source. Shared fairly when several stages fed the checked agent. 0 shows none.
+        type: integer
+        minimum: 0
+        maximum: 24000
+        default: 8000
 
   Stop:
     description: >-
@@ -135,22 +154,31 @@ $defs:
 
   Brief:
     description: >-
-      Bounds on the handover a stage writes for the stage after it. The successor reads this
-      instead of the transcript, so these bounds are what keep a long pipeline from carrying
-      every earlier stage's narration in its prompt.
+      What a stage hands the stages after it. A reply that fits is handed on as written; a longer
+      one is summarised first, in a handover the stage writes in the session it already built,
+      and these bounds shape that handover.
     type: object
     additionalProperties: false
     properties:
       summaryChars:
-        description: Character budget for the summary section.
+        description: Character budget for a handover's summary section.
         type: integer
         minimum: 1
         default: 1200
       maxFindings:
-        description: How many standalone findings a stage may carry forward.
+        description: How many standalone findings a handover may carry forward.
         type: integer
         minimum: 0
         default: 8
+      asWrittenUpTo:
+        description: >-
+          The longest reply, in characters, handed on as written. Where several stages feed one,
+          they share it. Longer replies get a handover. At most 24000, the most of a handed
+          section one prompt carries; 0 asks every stage for a handover.
+        type: integer
+        minimum: 0
+        maximum: 24000
+        default: 24000
 
   Memory:
     description: >-
@@ -336,8 +364,25 @@ $defs:
     properties:
       maxPerStage:
         description: >-
-          How many questions a stage may put to the stage before it, which stays alive and
-          answerable while this one runs.
+          How many questions one agent may put to another in a run. Clarifying what the other
+          asked back continues a question and is not counted. A stage before this one stays
+          answerable while the stages it feeds run.
+        type: integer
+        minimum: 0
+        default: 3
+      replyChars:
+        description: >-
+          The most of one answer, in characters, handed back to the agent that asked. A longer
+          answer is cut in the middle, keeping its start and its conclusion.
+        type: integer
+        minimum: 1000
+        default: 20000
+      roundsPerQuestion:
+        description: >-
+          How many times an asked agent may ask back about one question (a `## Question back`
+          section) before it must answer with its best assumption, saying which. The asker's
+          clarifications continue the same question and are not counted against maxPerStage.
+          0 lets no agent ask back.
         type: integer
         minimum: 0
         default: 3
@@ -444,6 +489,40 @@ $defs:
         description: The most one run may spend, in US dollars.
         type: number
         exclusiveMinimum: 0
+      web:
+        $ref: "#/$defs/WebLimits"
+
+  WebLimits:
+    description: >-
+      How much web reading one model call may do, for an agent allowed the web. A page read stays in
+      the conversation and is read again on every later call. By default only the page length is
+      held; how many pages, searches and steps a call takes is left to OpenRouter (30 steps) unless
+      set here. On an agent, each figure it leaves out is the team's. A model whose provider refuses
+      the limits reads the web without them rather than failing.
+    type: object
+    additionalProperties: false
+    properties:
+      maxPageTokens:
+        description: How much of one page is read, in tokens (about three quarters of a word each). A longer page is cut.
+        type: integer
+        minimum: 500
+        maximum: 100000
+        default: 16000
+      maxPages:
+        description: Pages one model call may read. Absent leaves it to OpenRouter.
+        type: integer
+        minimum: 1
+        maximum: 50
+      maxSearches:
+        description: Searches one model call may run. Absent leaves it to OpenRouter.
+        type: integer
+        minimum: 1
+        maximum: 25
+      maxSteps:
+        description: Searches and page reads together in one model call. Absent leaves it to OpenRouter's 30.
+        type: integer
+        minimum: 1
+        maximum: 30
 
   RetiredBudget:
     description: >-

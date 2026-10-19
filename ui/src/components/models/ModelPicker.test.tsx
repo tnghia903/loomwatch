@@ -10,6 +10,7 @@ import { forgetReadings } from '../../lib/ai/reading'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetModels } from '../../lib/ai/useModels'
 import { CHECKER_ROLE } from '../../lib/library/checker'
+import { onTheFastTier } from '../../lib/library/onTheFastTier'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import { ModelPicker } from './ModelPicker'
 
@@ -69,7 +70,7 @@ describe('ModelPicker', () => {
     expect(screen.queryByRole('listbox')).toBeNull()
   })
 
-  it('lists the model suggested for the agent first, with why, and not again below', async () => {
+  it('lists the model suggested for the agent first, with why, and not again below', onTheFastTier(async () => {
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: researcher, team }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
     const suggested = screen.getByRole('group', { name: 'Suggested for this agent' })
@@ -79,7 +80,7 @@ describe('ModelPicker', () => {
     const others = screen.getByRole('group', { name: 'Other good models' })
     expect(others).toHaveTextContent('Claude Opus 5.5')
     expect(others).not.toHaveTextContent('Sonnet')
-  })
+  }))
 
   it('leaves the suggestion out when the model list doesn’t have it', async () => {
     // A check step's model, which this list doesn't have.

@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL } from '../ai/modelIds'
+import { modelForJob, NEW_AGENT } from '../ai/modelIds'
 import { safeFileStem } from '../files/paths'
 import type { AgentConfig } from '../team-file/types'
 import type { LibrarySource } from './types'
@@ -34,7 +34,7 @@ export const DEFAULT_AGENT_ROLE = 'Complete the request you are given. Work care
 /**
  * Builds the agent a drop creates (docs/CANVAS_SPEC.md §4.5 step 4).
  *
- * A blank agent starts on the default model with [`DEFAULT_AGENT_ROLE`]; a preset source pre-fills
+ * A blank agent starts on the model table's new agent (`NEW_AGENT`) with [`DEFAULT_AGENT_ROLE`]; a preset source pre-fills
  * both, "the entire argument for presets." It works in the team file's own folder, so it has no
  * `spawn` until a work folder is chosen.
  */
@@ -45,15 +45,18 @@ export function buildAgentFromSource(
   const existingIds = new Set(existingAgents.map((agent) => agent.id))
   const id = uniqueId(slugify(source.label), existingIds)
   if (source.kind === 'operator') return { id, kind: 'operator', name: source.label, role: source.role ?? 'Review the work and say what should happen next.' }
+  // A source that names no model is an agent made from nothing: the model table's new agent.
+  const choice = source.model ? { model: source.model } : modelForJob(NEW_AGENT)
+  const thinkingEffort = source.thinkingEffort || (source.model ? undefined : choice.thinkingEffort)
   return {
     id,
     name: source.label,
     role: source.role ?? DEFAULT_AGENT_ROLE,
-    model: source.model || DEFAULT_MODEL,
+    model: choice.model,
+    ...(thinkingEffort ? { thinkingEffort } : {}),
     // A team's own new agent follows the model suggested for it (ADR 0072); one placed from Your
     // agents keeps the model its builder chose.
     ...(source.from ? {} : { followsSuggestion: true }),
-    ...(source.thinkingEffort ? { thinkingEffort: source.thinkingEffort } : {}),
     allowRecruiting: true,
     ...(source.capabilities?.length ? { capabilities: source.capabilities.map((capability) => ({ ...capability })) } : {}),
     ...(source.doneWhen?.length ? { doneWhen: [...source.doneWhen] } : {}),

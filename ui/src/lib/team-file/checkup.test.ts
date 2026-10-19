@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, type ModelTier } from '../ai/modelIds'
+import { CHECKER_ROLE } from '../library/checker'
 import { modelForPreset, ROLE_PRESETS } from '../library/roles'
-import { appendToRole, checkup, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
+import { appendToRole, checkup, fixFields, jobFor, LONG_WORDS, type CheckupFinding, type CheckupInput } from './checkup'
 import { templateTeamYaml } from './templates'
 import type { AgentConfig, TeamDocument } from './types'
 
@@ -39,7 +40,26 @@ describe('checkup', () => {
     }
   })
 
-  it('suggests the faster model for a gatherer on the strong one, with its share of the team’s tokens', () => {
+  // No built-in job is on the fast tier while quality comes first (schemas/model-tiers.json). The
+  // rule is for when the table moves one there, so these move the Researcher there meanwhile.
+  const onTheFastTier = (check: () => void) => () => {
+    const job = ROLE_PRESETS.find((candidate) => candidate.id === 'researcher') as { tier?: ModelTier }
+    const tier = job.tier
+    job.tier = 'fast'
+    try {
+      check()
+    } finally {
+      job.tier = tier
+    }
+  }
+
+  it('leaves a gatherer on the strong model alone while its job is on the strong tier', () => {
+    const edges = [{ from: 'researcher', to: 'writer' }]
+    const agents = [agent('researcher', preset('researcher'), { model: DEFAULT_MODEL }), agent('writer', preset('writer'))]
+    expect(rules(run({ agents, edges }))).toEqual([])
+  })
+
+  it('suggests the faster model for a gatherer on the strong one, with its share of the team’s tokens', onTheFastTier(() => {
     const team = (model: string, extra: Partial<AgentConfig> = {}) => [agent('researcher', preset('researcher'), { model, ...extra }), agent('writer', preset('writer'), { model: DEFAULT_MODEL })]
     const edges = [{ from: 'researcher', to: 'writer' }]
     const usage = { runs: 3, perRun: 90_000, agents: [{ id: 'writer', name: 'Writer', perRun: 53_000, share: 0.59, opening: null }, { id: 'researcher', name: 'Researcher', perRun: 37_000, share: 0.41, opening: null }] }
@@ -56,9 +76,9 @@ describe('checkup', () => {
     expect(run({ agents: team('opus'), edges })[0]).toMatchObject({ rule: 'strong-gatherer' })
     // The model list's own names, once it has arrived.
     expect(run({ agents: team(DEFAULT_MODEL), edges, modelNames: new Map([[FAST_MODEL, 'Sonnet 5.5']]) })[0].title).toBe('Researcher could gather on Sonnet 5.5')
-  })
+  }))
 
-  it('leaves alone a gatherer whose reply is the answer, one already faster, and one on a model chosen on purpose', () => {
+  it('leaves alone a gatherer whose reply is the answer, one already faster, and one on a model chosen on purpose', onTheFastTier(() => {
     const researcher = agent('researcher', preset('researcher'))
     expect(run({ agents: [researcher] })).toEqual([])
     const writer = agent('writer', preset('writer'))
@@ -66,7 +86,7 @@ describe('checkup', () => {
     expect(run({ agents: [{ ...researcher, model: FAST_MODEL }, writer], edges })).toEqual([])
     expect(run({ agents: [{ ...researcher, model: 'anthropic/claude-haiku-5.5' }, writer], edges })).toEqual([])
     expect(run({ agents: [{ ...researcher, model: 'openai/gpt-6.1-sol' }, writer], edges })).toEqual([])
-  })
+  }))
 
   it('stays silent on every built-in job as the canvas places it', () => {
     const placed = ROLE_PRESETS.map((job) => agent(job.id, job.role, { ...modelForPreset(job) }))
@@ -206,8 +226,11 @@ function applyFix(agents: readonly AgentConfig[], finding: CheckupFinding): Agen
     if (change.kind === 'allow') return { ...one, allow: { ...one.allow, [change.key]: true } }
     if (change.kind === 'append-role') return { ...one, role: appendToRole(one.role, change.text) }
     if (change.kind === 'effort') return { ...one, thinkingEffort: change.value }
-    if (change.kind === 'model') return { ...one, model: change.model, thinkingEffort: change.thinkingEffort }
-    return { ...one, role: change.text, ...(change.allow ? { allow: { ...one.allow, ...change.allow } } : {}) }
+    // The fixes that are field edits go through the same mapping the canvas applies them with.
+    const fields = fixFields(change)
+    if (fields) return { ...one, ...fields }
+    if (change.kind === 'replace-role') return { ...one, role: change.text, ...(change.allow ? { allow: { ...one.allow, ...change.allow } } : {}) }
+    return one
   })
 }
 
@@ -229,6 +252,8 @@ describe('checkup fixes', () => {
       { agents: [agent('writer', `${preset('writer')}\nIMPORTANT: NEVER skip a source.`, { thinkingEffort: 'max' })] },
       // A gatherer on the strong model, thinking at the top setting.
       { agents: [agent('researcher', preset('researcher'), { model: DEFAULT_MODEL, thinkingEffort: 'max' }), agent('writer', preset('writer'))], edges: [{ from: 'researcher', to: 'writer' }] },
+      // A check step on the writer's model, on a writer with no Done when, that sends nothing back.
+      { agents: [agent('writer', preset('writer')), agent('checker', CHECKER_ROLE, { model: DEFAULT_MODEL, checks: 'writer' })], edges: [{ from: 'writer', to: 'checker' }], responder: 'writer' },
     ]
     let fixed = 0
     for (const scenario of scenarios) {
@@ -243,6 +268,40 @@ describe('checkup fixes', () => {
       }
     }
     expect(fixed).toBeGreaterThanOrEqual(8)
+  })
+})
+
+// ADR 0062: a check step pays for a whole extra session, so it should be one that can find a
+// problem and get it fixed.
+describe('check steps', () => {
+  const edges = [{ from: 'writer', to: 'checker' }]
+  const team = (writer: Partial<AgentConfig>, checker: Partial<AgentConfig>) => [
+    agent('writer', preset('writer'), { doneWhen: ['Every claim has a link'], ...writer }),
+    agent('checker', CHECKER_ROLE, { checks: 'writer', sendBackOnce: true, model: CHECK_MODEL, ...checker }),
+  ]
+  const checks = (agents: AgentConfig[]) => run({ agents, edges, responder: 'writer' }).filter((finding) => finding.rule.startsWith('check-'))
+
+  it('finds nothing to say about a check step set up as the template sets one up', () => {
+    expect(checks(team({}, {}))).toEqual([])
+  })
+
+  it('suggests another maker’s model for a check on the model that wrote the work', () => {
+    const [finding] = checks(team({ model: DEFAULT_MODEL }, { model: DEFAULT_MODEL, thinkingEffort: 'medium' }))
+    expect(finding).toMatchObject({ rule: 'check-same-model', agentId: 'checker', agentIds: ['checker', 'writer'], fix: { change: { kind: 'model', agentId: 'checker', model: CHECK_MODEL, thinkingEffort: 'medium' } } })
+    // Work written on the check model is checked on the default one.
+    expect(checks(team({ model: CHECK_MODEL }, { model: CHECK_MODEL }))[0]).toMatchObject({ fix: { change: { model: DEFAULT_MODEL } } })
+  })
+
+  it('offers the job’s Done when to a checked agent that has none, and Ask for one that is no job', () => {
+    expect(checks(team({ doneWhen: undefined }, {}))).toEqual([expect.objectContaining({ rule: 'check-no-done-when', agentId: 'writer', fix: { label: 'Use the Writer job’s Done when', change: { kind: 'done-when', agentId: 'writer', items: ROLE_PRESETS.find((job) => job.id === 'writer')?.doneWhen } } })])
+    const [custom] = checks(team({ name: 'Summary', role: 'Sum up the emails in three lines.', doneWhen: undefined }, {}))
+    expect(custom).toMatchObject({ rule: 'check-no-done-when', title: 'Checker has nothing to check Summary’s work against' })
+    expect(custom.fix).toBeUndefined()
+    expect(custom.askPrompt).toContain('as its Done when')
+  })
+
+  it('says a check that sends nothing back changes nothing, and turns it on', () => {
+    expect(checks(team({}, { sendBackOnce: undefined }))).toEqual([expect.objectContaining({ rule: 'check-no-send-back', agentId: 'checker', title: 'What Checker finds is never fixed', fix: { label: 'Send a missed check back once', change: { kind: 'send-back', agentId: 'checker' } } })])
   })
 })
 

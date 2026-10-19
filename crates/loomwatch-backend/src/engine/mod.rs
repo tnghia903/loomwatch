@@ -360,11 +360,18 @@ impl AgentRun {
                 return Err(error.into());
             }
         };
-        let config = self
-            .session_config(&session_id, agent_id, &model, effort)
+        let mut config = self
+            .session_config(&session_id, agent_id, &model, effort, context.bus)
             .await;
+        config.skill_focus = context.composed.map(skill_focus);
         let (sender, receiver) = unbounded_channel();
-        let host = self.host_tools(context.bus);
+        let conversation = context.composed.is_some_and(|composed| {
+            composed
+                .sections
+                .iter()
+                .any(|section| section.kind == crate::memory::PromptSectionKind::Conversation)
+        });
+        let host = self.host_tools(context.bus, conversation);
         let session = Session::open(
             config,
             provider,
@@ -425,10 +432,16 @@ impl AgentRun {
                 agent_id,
                 &snapshot.model,
                 snapshot.effort.as_deref(),
+                context.bus,
             )
             .await;
         let (sender, receiver) = unbounded_channel();
-        let host = self.host_tools(context.bus);
+        // The same tools it was opened with, or the provider's cache of the conversation is lost:
+        // its opening message says whether it was handed a conversation.
+        let conversation = snapshot.history.iter().any(|message| {
+            matches!(message, crate::agent::Message::User { content } if crate::has_conversation(content))
+        });
+        let host = self.host_tools(context.bus, conversation);
         let session = Session::resume(
             snapshot,
             config,
@@ -538,6 +551,22 @@ impl AgentRun {
         self.records = None;
     }
 
+    /// What the next turns are for, in their usage records, until [`Self::end_turn_for`]: a
+    /// handover or checkpoint the engine asks for, or a kept-open agent's answer to a question or
+    /// revision of work sent back to it.
+    pub(crate) fn turn_for(&mut self, purpose: &str) {
+        if let Some(session) = self.session.as_mut() {
+            session.set_purpose(purpose);
+        }
+    }
+
+    /// Back to what the session is for.
+    pub(crate) fn end_turn_for(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            session.end_purpose();
+        }
+    }
+
     /// Record why a coordinator-requested turn exists. Its text and cost remain evidence, but a
     /// checkpoint or handover must never replace the agent's answer in the Output card.
     pub(crate) async fn bookkeeping_turn(
@@ -554,7 +583,9 @@ impl AgentRun {
             )
             .await?;
         let listening = recorder.interrupt.take();
+        self.turn_for(purpose);
         let answer = self.prompt_turn(recorder, prompt).await;
+        self.end_turn_for();
         recorder.interrupt = listening;
         recorder
             .append(
@@ -815,6 +846,7 @@ impl AgentRun {
         agent_id: &str,
         model: &str,
         effort: Option<&str>,
+        bus: Option<&TeamBusConnection>,
     ) -> SessionConfig {
         let mut config = SessionConfig::new(session_id, agent_id, self.spec.cwd.clone(), model);
         config.effort = effort.map(str::to_owned);
@@ -833,6 +865,11 @@ impl AgentRun {
         config.instructions.clone_from(&self.instructions);
         if let Some(policy) = &self.spec.permissions {
             config.turned_off = policy.turned_off_skills();
+            config.web = policy.web_limits();
+        }
+        if let Some(bus) = bus {
+            config.time_zone = bus.time_zone();
+            bus.purpose().clone_into(&mut config.purpose);
         }
         // Joined part by part, so Windows names them with `\` throughout, as the agent reads them.
         config.skill_roots = vec![
@@ -840,19 +877,23 @@ impl AgentRun {
             self.spec.cwd.join(".claude").join("skills"),
         ];
         if let Some(ai) = crate::ai::installed() {
-            config.skill_roots.push(ai.skills_folder());
+            config.skill_library.push(ai.skills_folder());
             config.context_window = ai.models().context_length(model).await;
         }
         config
     }
 
-    fn host_tools(&self, bus: Option<&TeamBusConnection>) -> Arc<dyn HostTools> {
+    fn host_tools(
+        &self,
+        bus: Option<&TeamBusConnection>,
+        conversation: bool,
+    ) -> Arc<dyn HostTools> {
         if let Some(host) = &self.host {
             return host.clone();
         }
         let mut hosts: Vec<Arc<dyn HostTools>> = Vec::new();
         if let Some(connection) = bus {
-            hosts.push(Arc::new(BusTools::new(connection.clone())));
+            hosts.push(Arc::new(BusTools::new(connection.clone(), conversation)));
         }
         // The tools the operator connected and gave this agent (ADR 0069). Only a run agent, with
         // a policy to ask through, is ever offered them.
@@ -879,6 +920,22 @@ impl AgentRun {
             _ => Arc::new(CombinedTools(hosts)),
         }
     }
+}
+
+/// What picks the skills a large library lists for an agent: what it is for (its role's first line)
+/// and what it was asked (its task), not everything it was handed with them.
+fn skill_focus(composed: &crate::memory::ComposedPrompt) -> String {
+    use crate::memory::PromptSectionKind;
+    composed
+        .sections
+        .iter()
+        .filter_map(|section| match section.kind {
+            PromptSectionKind::Role => Some(crate::orientation::role_summary(&section.text)),
+            PromptSectionKind::Task => Some(section.text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 async fn write(recorder: &mut Recorder, record: Record) -> Result<()> {
@@ -913,6 +970,25 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    /// The skills a large library lists follow the agent's role and task, not the material it was
+    /// handed: a long handover or Brief would match skills the work isn't about.
+    #[test]
+    fn the_skill_focus_is_the_roles_first_line_and_the_task() {
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: m\n    role: |\n      You write the brief.\n      How to work:\n      - Note every meeting.\n",
+        )
+        .expect("team");
+        let agent = &team.agents[0];
+        let mut task = crate::NodeTask::goal("Prepare the slides.");
+        task.stage_results = Some("Minutes of the budget meeting and its action items.".to_owned());
+        let composed =
+            crate::compose_prompt(agent, &crate::memory::ContextPacket::default(), &task);
+        assert_eq!(
+            skill_focus(&composed),
+            "You write the brief.\nPrepare the slides."
+        );
+    }
     use crate::test_support::{stand_in, turn};
 
     /// A folder for one test's database, removed when the test ends.

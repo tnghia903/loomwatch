@@ -288,12 +288,13 @@ impl Demo {
     }
 }
 
+/// The newest prompt, as it was given: without the date line the session adds to each turn.
 fn last_user_message(messages: &[Message]) -> &str {
     messages
         .iter()
         .rev()
         .find_map(|message| match message {
-            Message::User { content } => Some(content.as_str()),
+            Message::User { content } => Some(super::session::without_date(content)),
             _ => None,
         })
         .unwrap_or_default()

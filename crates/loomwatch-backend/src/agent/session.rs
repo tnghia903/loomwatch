@@ -13,6 +13,10 @@
 //! provider's prompt cache holds for the whole session. A long output is set aside rather than put
 //! in it whole, and a conversation that nears the model's context limit, or 160k tokens, is
 //! replaced by a summary.
+//!
+//! Each turn's message ends with today's date, worked out when the turn starts, so a session
+//! parked overnight or a scheduled run is never a day out. Each model call is recorded with what
+//! it was for and what it used (`usage_update`'s `_meta.loomwatch.call`).
 //! [`Session::snapshot`] and [`Session::resume`] keep a parked agent as data: nothing runs while
 //! it waits.
 
@@ -28,12 +32,12 @@ use super::BoxFuture;
 use super::error::{AgentError, CallError};
 use super::events::{self, EventSink, ToolKind, ToolStatus};
 use super::permission::{Decision, PermissionRequest, Permissions};
-use super::prompt::{Abilities, project_notes, system_prompt};
+use super::prompt::{Abilities, loomwatch_brief, project_notes, system_prompt};
 use super::provider::{
     Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Provider, ServerTools, ToolCall,
-    ToolSpec, Usage,
+    ToolSpec, Usage, WebLimits,
 };
-use super::skills::index_skills;
+use super::skills::{SkillIndex, prompt_section};
 use super::spend::{Go, Spend, Unmetered};
 use super::tools::{Builtin, CommandSettings, Context, Output};
 
@@ -149,8 +153,13 @@ pub struct SessionConfig {
     /// The team file's effort, if any: `low`, `medium`, `high`, `xhigh`, `max`, …
     pub effort: Option<String>,
     pub tools: ToolSet,
-    /// Folders of skills to list, the agent's own first.
+    /// Folders of the agent's own skills, which are always listed.
     pub skill_roots: Vec<PathBuf>,
+    /// `LoomWatch`'s library of skills: listed whole while small, else by what the work calls for.
+    pub skill_library: Vec<PathBuf>,
+    /// What the agent is for and was asked, which picks the skills a large library lists: its
+    /// role's first line and its task. `None`: its first message, whole.
+    pub skill_focus: Option<String>,
     pub turned_off: Vec<String>,
     /// More instructions after the built-in ones, such as Ask `LoomWatch`'s.
     pub instructions: Option<String>,
@@ -162,6 +171,16 @@ pub struct SessionConfig {
     pub max_tool_calls: usize,
     /// Folders besides the work folder a command may write to.
     pub writable: Vec<PathBuf>,
+    /// How much web reading one model call may do.
+    pub web: WebLimits,
+    /// The IANA time zone the date is given in, such as the team's schedule's. `None`, or a name
+    /// that isn't one: this computer's own.
+    pub time_zone: Option<String>,
+    /// What the turns are for, for the usage record: `work`, or what the engine opened the
+    /// session for (`check`, `ask_answer`, `helper`).
+    pub purpose: String,
+    /// A fixed time for the date line, for tests. `None`: the clock.
+    pub now: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl SessionConfig {
@@ -175,12 +194,18 @@ impl SessionConfig {
             effort: None,
             tools: ToolSet::all(false),
             skill_roots: Vec::new(),
+            skill_library: Vec::new(),
+            skill_focus: None,
             turned_off: Vec::new(),
             instructions: None,
             max_tokens: 16_000,
             context_window: None,
             max_tool_calls: 200,
             writable: Vec::new(),
+            web: WebLimits::default(),
+            time_zone: None,
+            purpose: WORK.to_owned(),
+            now: None,
         }
     }
 }
@@ -239,7 +264,12 @@ impl TurnEnd {
                 "outputTokens": self.usage.output_tokens,
                 "totalTokens": self.usage.total_tokens(),
             },
-            "_meta": {"loomwatch": {"costUsd": self.usage.cost_usd, "reasoningTokens": self.usage.reasoning_tokens}},
+            "_meta": {"loomwatch": {
+                "costUsd": self.usage.cost_usd,
+                "reasoningTokens": self.usage.reasoning_tokens,
+                "webSearches": self.usage.web_searches,
+                "webFetches": self.usage.web_fetches,
+            }},
         })
     }
 }
@@ -286,6 +316,10 @@ pub struct Session {
     messages_written: u64,
     /// The prompt of the turn under way, which a summary keeps word for word.
     task: String,
+    /// What the turn under way is for, for the usage record.
+    turn: String,
+    /// The skills the instructions list, kept until the first turn says what the work is.
+    skills: SkillIndex,
     cancel: Arc<watch::Sender<bool>>,
 }
 
@@ -300,29 +334,16 @@ impl Session {
         host: Arc<dyn HostTools>,
     ) -> Self {
         let skills = if config.tools.files {
-            index_skills(&config.skill_roots, &config.turned_off)
+            SkillIndex::read(
+                &config.skill_roots,
+                &config.skill_library,
+                &config.turned_off,
+            )
         } else {
-            Vec::new()
+            SkillIndex::default()
         };
-        let abilities = Abilities {
-            files: config.tools.files,
-            commands: config.tools.commands,
-            web: config.tools.web,
-            plan: config.tools.plan,
-            ask_user: host.specs().iter().any(|tool| tool.name == "ask_user"),
-        };
-        let notes = if config.tools.files {
-            project_notes(&config.cwd)
-        } else {
-            None
-        };
-        let system = system_prompt(
-            &config.cwd,
-            abilities,
-            &skills,
-            notes.as_deref(),
-            config.instructions.as_deref(),
-        );
+        let focus = config.skill_focus.clone().unwrap_or_default();
+        let system = instructions(&config, host.as_ref(), &skills, &focus);
         Self {
             history: vec![Message::System { content: system }],
             outputs: BTreeMap::new(),
@@ -330,6 +351,8 @@ impl Session {
             last_prompt_tokens: 0,
             messages_written: 0,
             task: String::new(),
+            turn: config.purpose.clone(),
+            skills,
             cancel: Arc::new(watch::Sender::new(false)),
             config,
             provider,
@@ -360,6 +383,8 @@ impl Session {
             last_prompt_tokens: 0,
             messages_written: snapshot.messages_written,
             task: String::new(),
+            turn: config.purpose.clone(),
+            skills: SkillIndex::default(),
             cancel: Arc::new(watch::Sender::new(false)),
             config,
             provider,
@@ -407,6 +432,17 @@ impl Session {
         &self.config
     }
 
+    /// What the next turns are for, for the usage record: a handover or a checkpoint the engine
+    /// asks for, or a kept-open agent's `ask_answer` or `revision`. [`Self::end_purpose`] goes back
+    /// to what the session is for.
+    pub fn set_purpose(&mut self, purpose: &str) {
+        purpose.clone_into(&mut self.turn);
+    }
+
+    pub fn end_purpose(&mut self) {
+        self.config.purpose.clone_into(&mut self.turn);
+    }
+
     /// Runs one turn.
     ///
     /// # Errors
@@ -416,10 +452,7 @@ impl Session {
     pub async fn prompt(&mut self, text: &str) -> Result<TurnEnd, AgentError> {
         self.cancel.send_replace(false);
         let cancel = Cancel::new(self.cancel.subscribe());
-        text.clone_into(&mut self.task);
-        self.history.push(Message::User {
-            content: text.to_owned(),
-        });
+        self.begin_turn(text);
         let mut turn = Usage::default();
         let mut reply: Vec<String> = Vec::new();
         let mut calls_made = 0usize;
@@ -446,14 +479,19 @@ impl Session {
                     return Ok(ended(stopped(&cancel), turn, &reply));
                 }
             }
-            let completion = match self.call_model(&cancel, Call::Work).await {
+            let call = if cut_offs > 0 {
+                Call::CarryOn
+            } else {
+                Call::Work
+            };
+            let completion = match self.call_model(&cancel, call).await {
                 Ok(completion) => completion,
                 Err(CallError::Cancelled) => {
                     return Ok(ended(StopReason::Cancelled, turn, &reply));
                 }
                 Err(CallError::Failed(error)) => return Err(error),
             };
-            self.count(&completion.usage, &mut turn).await?;
+            self.count(&completion.usage, &mut turn, call).await?;
             self.record_server_tools(&completion.server_tool_calls)
                 .await?;
             let cut = completion.finish == Finish::Length;
@@ -504,6 +542,23 @@ impl Session {
                 return Ok(ended(StopReason::MaxTurnRequests, turn, &reply));
             }
         }
+    }
+
+    /// The turn's prompt joins the conversation, dated.
+    fn begin_turn(&mut self, text: &str) {
+        text.clone_into(&mut self.task);
+        // Nothing has been sent yet, so the instructions can still list the skills this work
+        // calls for: the first message says what it is.
+        if self.history.len() == 1
+            && self.skills.picks_by_work()
+            && self.config.skill_focus.is_none()
+        {
+            let system = instructions(&self.config, self.host.as_ref(), &self.skills, text);
+            self.history[0] = Message::System { content: system };
+        }
+        self.history.push(Message::User {
+            content: format!("{text}\n\n{}", self.today()),
+        });
     }
 
     /// The tools offered to the model. The same list on every call of the session: it leads the
@@ -560,6 +615,7 @@ impl Session {
                 ServerTools {
                     web_search: true,
                     web_fetch: true,
+                    limits: self.config.web,
                 }
             } else {
                 ServerTools::default()
@@ -571,7 +627,7 @@ impl Session {
         let deltas = Streaming {
             sink: self.sink.as_ref(),
             message_id: &message_id,
-            quiet: call != Call::Work,
+            quiet: matches!(call, Call::Summary | Call::BareSummary),
         };
         self.provider.complete(&request, &deltas, cancel).await
     }
@@ -585,7 +641,12 @@ impl Session {
         }
     }
 
-    async fn count(&mut self, usage: &Usage, turn: &mut Usage) -> Result<(), AgentError> {
+    async fn count(
+        &mut self,
+        usage: &Usage,
+        turn: &mut Usage,
+        call: Call,
+    ) -> Result<(), AgentError> {
         turn.add(usage);
         self.usage.add(usage);
         self.spend.spent(usage);
@@ -593,12 +654,27 @@ impl Session {
         if self.provider.is_demo() && usage.total_tokens() == 0 {
             return Ok(());
         }
+        let record = events::CallRecord {
+            call: call.as_str(),
+            turn: &self.turn,
+            model: &self.config.model,
+            usage,
+        };
         self.emit(events::usage_update(
             self.last_prompt_tokens,
             self.config.context_window,
             self.usage.cost_usd,
+            &record,
         ))
         .await
+    }
+
+    /// The line each turn's message ends with: today's date where the team works.
+    fn today(&self) -> String {
+        today_line(
+            self.config.time_zone.as_deref(),
+            self.config.now.unwrap_or_else(chrono::Utc::now),
+        )
     }
 
     async fn emit(&self, update: Value) -> Result<(), AgentError> {
@@ -963,25 +1039,22 @@ impl Session {
         used >= COMPACT_AT && self.history.len() > 3
     }
 
-    /// One request for a summary, which is not part of the work whatever happens.
+    /// One request for a summary, which is not part of the work whatever happens. `shorter` asks
+    /// again after one the length limit cut off.
     async fn summarise(
         &mut self,
         cancel: &Cancel,
         call: Call,
         turn: &mut Usage,
+        shorter: bool,
     ) -> Result<Completion, CallError> {
         self.history.push(Message::User {
-            content: "Your conversation is getting too long to work with. Write a summary of it \
-                      for yourself to carry on from: what the task is, what you have done and \
-                      found (with file names and sources), what you decided and why, and what is \
-                      left to do. Be complete but brief. Don't call any tools: reply with the \
-                      summary only."
-                .to_owned(),
+            content: summary_request(shorter),
         });
         let completion = self.call_model(cancel, call).await;
         self.history.pop();
         let completion = completion?;
-        self.count(&completion.usage, turn)
+        self.count(&completion.usage, turn, call)
             .await
             .map_err(CallError::Failed)?;
         Ok(completion)
@@ -992,24 +1065,37 @@ impl Session {
     async fn compact(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<(), CallError> {
         let task = self.task.clone();
         // The conversation plus one more message: everything before it is read from the cache.
-        let mut completion = self.summarise(cancel, Call::Summary, turn).await?;
+        let mut completion = self.summarise(cancel, Call::Summary, turn, false).await?;
         if completion.content.trim().is_empty() && self.may_call(cancel).await {
-            completion = self.summarise(cancel, Call::BareSummary, turn).await?;
+            completion = self
+                .summarise(cancel, Call::BareSummary, turn, false)
+                .await?;
         }
-        if completion.content.trim().is_empty() {
+        // A summary the length limit cut off has lost its end, which is what is left to do: it is
+        // asked for once more, shorter, and a second cut one is not used.
+        if completion.finish == Finish::Length && self.may_call(cancel).await {
+            completion = self.summarise(cancel, Call::Summary, turn, true).await?;
+        }
+        if completion.content.trim().is_empty() || completion.finish == Finish::Length {
             // No summary to carry on from: the conversation stays as it was.
             return Ok(());
         }
         let Some(Message::System { content: system }) = self.history.first().cloned() else {
             return Ok(());
         };
+        // The Brief came in the opening message; a summary of a later turn would drop it.
+        let brief = loomwatch_brief(&self.config.cwd)
+            .filter(|_| !task.contains(crate::memory::TEAM_KNOWLEDGE_HEADING))
+            .map(|brief| format!("## Standing notes from the operator\n{brief}\n\n"))
+            .unwrap_or_default();
         self.history = vec![
             Message::System { content: system },
             Message::User {
                 content: format!(
-                    "## Where the work stands\n{}\n\n## Your current task, as you were given it\n\
-                     {task}\n\nCarry on from where the summary leaves off.",
-                    completion.content.trim()
+                    "## Where the work stands\n{}\n\n{brief}## Your current task, as you were given \
+                     it\n{task}\n\nCarry on from where the summary leaves off.\n\n{}",
+                    completion.content.trim(),
+                    self.today()
                 ),
             },
         ];
@@ -1075,11 +1161,107 @@ fn carry_on(wrote_nothing: bool) -> &'static str {
 enum Call {
     /// The agent's work, streamed to the operator as it is written.
     Work,
+    /// The work again after the length limit cut a reply off: the rest of the reply, or a tool
+    /// call made smaller.
+    CarryOn,
     /// A summary the agent writes for itself, with the same tools offered as for the work, so the
     /// provider reads the whole conversation from its cache.
     Summary,
     /// The same summary with no tools, for a model that called one instead of writing it.
     BareSummary,
+}
+
+impl Call {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Work => WORK,
+            Self::CarryOn => "carry_on",
+            Self::Summary => "summary",
+            Self::BareSummary => "bare_summary",
+        }
+    }
+}
+
+/// What a turn is for when nothing says otherwise.
+pub const WORK: &str = "work";
+
+/// The instructions a session starts with, listing the skills `work` calls for.
+fn instructions(
+    config: &SessionConfig,
+    host: &dyn HostTools,
+    skills: &SkillIndex,
+    work: &str,
+) -> String {
+    let abilities = Abilities {
+        files: config.tools.files,
+        commands: config.tools.commands,
+        web: config.tools.web.then(|| config.web.page_words()),
+        plan: config.tools.plan,
+        ask_user: host.specs().iter().any(|tool| tool.name == "ask_user"),
+    };
+    let notes = if config.tools.files {
+        project_notes(&config.cwd)
+    } else {
+        None
+    };
+    system_prompt(
+        &config.cwd,
+        abilities,
+        &prompt_section(skills, work),
+        notes.as_deref(),
+        config.instructions.as_deref(),
+    )
+}
+
+/// What the agent is asked for a summary of its conversation.
+fn summary_request(shorter: bool) -> String {
+    let mut request = String::from(
+        "Your conversation is getting too long to work with. Write a summary of it for yourself to \
+         carry on from: what the task is, what you have done and found, what you decided and why, \
+         and what is left to do. Keep, exactly as they are: the address (URL) and date of every \
+         source you have used or will cite, every figure, name and quote you will need, the file \
+         names you worked on, and the id of any set-aside output you may read again. Be complete \
+         but brief. Don't call any tools: reply with the summary only.",
+    );
+    if shorter {
+        request.push_str(
+            " Your last summary was cut off by the length limit of one reply: make this one \
+             shorter, and think less before you write it.",
+        );
+    }
+    request
+}
+
+/// `text` without the date line a turn's message ends with: the prompt as it was given.
+pub(crate) fn without_date(text: &str) -> &str {
+    match text.rsplit_once(DATE_LINE) {
+        Some((prompt, line)) if !line.contains('\n') => prompt,
+        _ => text,
+    }
+}
+
+/// How the date line starts, a paragraph of its own at the end of a turn's message.
+const DATE_LINE: &str = "\n\nToday is ";
+
+/// "Today is Sunday 18 October 2026 (Asia/Singapore)." in `time_zone`, or in this computer's own
+/// zone, named by its offset from UTC, when there is none or it isn't one.
+pub(super) fn today_line(time_zone: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> String {
+    const DATE: &str = "%A %-d %B %Y";
+    if let Some((zone, name)) = time_zone
+        .map(str::trim)
+        .and_then(|name| Some((name.parse::<chrono_tz::Tz>().ok()?, name)))
+    {
+        return format!(
+            "Today is {} ({name}).",
+            now.with_timezone(&zone).format(DATE)
+        );
+    }
+    let local = now.with_timezone(&chrono::Local);
+    format!(
+        "Today is {} (UTC{}).",
+        local.format(DATE),
+        local.format("%:z")
+    )
 }
 
 /// The provider's name for a team file's effort. `default` leaves it to the model, and the

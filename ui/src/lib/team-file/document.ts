@@ -130,8 +130,26 @@ export class TeamFileModel {
    * with no `spend` block has no limit.
    */
   setSpend(perRun: number | null): void {
-    if (perRun !== null && perRun > 0) this.doc.setIn(['spend', 'perRun'], perRun)
-    else this.doc.delete('spend')
+    this.setPerRun(['spend'], perRun)
+  }
+
+  /** An agent's own guard on what one run may spend on it, or none with `null` (ADR 0068). */
+  setAgentSpend(agentId: string, perRun: number | null): void {
+    this.setPerRun(['agents', this.requireAgentIndex(agentId), 'spend'], perRun)
+  }
+
+  /**
+   * Set or remove `perRun` in the `spend` block at `path`. The rest of the block, such as its
+   * `web` limits, stays; a block left empty goes.
+   */
+  private setPerRun(path: (string | number)[], perRun: number | null): void {
+    if (perRun !== null && perRun > 0) {
+      this.doc.setIn([...path, 'perRun'], perRun)
+      return
+    }
+    const block = this.doc.getIn(path)
+    if (isMap(block)) block.delete('perRun')
+    if (!isMap(block) || block.items.length === 0) this.doc.deleteIn(path)
   }
 
   /** Set the team-wide `deliver` block, or remove it with `null` (ADR 0038). */

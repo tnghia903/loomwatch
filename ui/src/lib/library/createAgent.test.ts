@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
+import { DEFAULT_MODEL, jobNeeds, modelForJob } from '../ai/modelIds'
 import type { AgentConfig } from '../team-file/types'
 import { buildAgentFromSource, DEFAULT_AGENT_ROLE } from './createAgent'
 import { ROLE_PRESETS, roleSource } from './roles'
@@ -53,12 +53,13 @@ describe('buildAgentFromSource', () => {
     expect(result.model).toBe('anthropic/claude-haiku-5.5')
   })
 
-  // ADR 0037: the Researcher job brings its web switch; a blank agent brings none. ADR 0057: it
-  // gathers on the faster model.
-  it('places the Researcher job allowed to search the web, on the faster model, and a blank agent allowed nothing', () => {
+  // ADR 0037: the Researcher job brings its web switch; a blank agent brings none. It gathers on
+  // its job's model from the model table: the strong one, while quality comes first.
+  it('places the Researcher job allowed to search the web, on its job’s model, and a blank agent allowed nothing', () => {
     const researcher = ROLE_PRESETS.find((preset) => preset.id === 'researcher')!
     const placed = buildAgentFromSource(roleSource(researcher), [])
-    expect(placed).toMatchObject({ allow: { web: true }, model: FAST_MODEL, thinkingEffort: 'medium' })
+    expect(placed).toMatchObject({ allow: { web: true }, model: modelForJob(jobNeeds('researcher')).model, thinkingEffort: 'medium' })
+    expect(placed.model).toBe(DEFAULT_MODEL)
     expect(buildAgentFromSource(blankSource, []).allow).toBeUndefined()
     // The Checker opens the sources the work cites (ADR 0062); no other job starts with a switch on.
     expect(ROLE_PRESETS.filter((preset) => preset.allow).map((preset) => preset.id)).toEqual(['researcher', 'checker'])

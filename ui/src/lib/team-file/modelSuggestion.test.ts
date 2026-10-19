@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL } from '../ai/modelIds'
 import { CHECKER_ROLE } from '../library/checker'
+import { onTheFastTier } from '../library/onTheFastTier'
 import { ROLE_PRESETS } from '../library/roles'
 import type { SetupReading } from './agentSetup'
 import { suggestModel } from './modelSuggestion'
@@ -10,21 +11,26 @@ const researcher = { id: 'researcher', name: 'Researcher', role: 'Find sources o
 const writer = { id: 'writer', name: 'Writer', role: 'Write the article from what you are handed.', model: DEFAULT_MODEL }
 
 describe('suggestModel', () => {
-  it('puts a gatherer on the faster model when another agent writes the answer', () => {
+  it('keeps a researcher on the strongest model while its job is on the strong tier', () => {
+    const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher, writer], responder: 'writer' } })
+    expect(suggestion).toEqual({ model: DEFAULT_MODEL, why: 'A researcher finds and checks sources. That work decides the result, so it gets the strongest model.' })
+  })
+
+  it('puts a gatherer on the faster model when another agent writes the answer', onTheFastTier(() => {
     const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher, writer], responder: 'writer' } })
     expect(suggestion.model).toBe(FAST_MODEL)
     expect(suggestion.why).toBe('It gathers facts for Writer to write up. A faster model does that well, for less, and leaves the strongest one for the step that writes.')
-  })
+  }))
 
-  it('keeps a gatherer on the strongest model when its reply is the team’s answer', () => {
+  it('keeps a gatherer on the strongest model when its reply is the team’s answer', onTheFastTier(() => {
     const suggestion = suggestModel({ agent: researcher, team: { agents: [researcher], responder: 'researcher' } })
     expect(suggestion.model).toBe(DEFAULT_MODEL)
     expect(suggestion.why).toContain('Its reply is the team’s answer')
-  })
+  }))
 
-  it('follows the job alone while the agent is built on its own', () => {
+  it('follows the job alone while the agent is built on its own', onTheFastTier(() => {
     expect(suggestModel({ agent: researcher })).toEqual({ model: FAST_MODEL, why: expect.stringContaining('for another agent to write up') })
-  })
+  }))
 
   it('reads a check on another maker’s model than the work it checks', () => {
     const checker = { id: 'checker', name: 'Checker', role: CHECKER_ROLE, checks: 'writer' }
@@ -80,11 +86,11 @@ describe('suggestModel with a reading of the whole setup', () => {
     expect(suggestModel({ agent: checker, team: { agents: [writer, checker], responder: 'writer' }, reading: sure('produce') }).model).toBe(CHECK_MODEL)
   })
 
-  it('keeps work the reading says decides the result on the strongest model, even where keywords said gatherer', () => {
+  it('keeps work the reading says decides the result on the strongest model, even where keywords said gatherer', onTheFastTier(() => {
     const lead = { id: 'lead', name: 'Step 1', role: 'Plan the research, hand each question out to a teammate, and judge when the answers are enough.' }
     expect(suggestModel({ agent: lead }).model).toBe(FAST_MODEL)
     expect(suggestModel({ agent: lead, reading: sure('produce') })).toMatchObject({ model: DEFAULT_MODEL, read: true })
-  })
+  }))
 
   it('ignores a reading that isn’t sure, and falls back to the keywords', () => {
     expect(suggestModel({ agent: gatherer, team, reading: sure('gather', 0.7) })).toEqual(suggestModel({ agent: gatherer, team }))

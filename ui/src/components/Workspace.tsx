@@ -422,9 +422,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const history = useRunHistory(false)
   const schedules = useSchedules()
   const [routineBusy, setRoutineBusy] = useState(false)
-  // A pipeline that ends on a check step answers with the work it checked (ADR 0062).
+  // A pipeline that ends on a check step answers with the work it checked (ADR 0062), and one that
+  // ends on a review stop with the work you approved there.
+  const configuredEdges = doc.edges.map((edge) => ({ from: edge.source, to: edge.target }))
   const inferredResponder = doc.mode === 'pipeline'
-    ? answeringAgent(pipelineTerminal(doc.nodes.map((node) => node.id), doc.edges.map((edge) => ({ from: edge.source, to: edge.target })), doc.entrypoint), doc.nodes.map((node) => node.data.agent))
+    ? answeringAgent(pipelineTerminal(doc.nodes.map((node) => node.id), configuredEdges, doc.entrypoint), doc.nodes.map((node) => node.data.agent), configuredEdges)
     : doc.entrypoint
   const responderFromDoc = doc.responder ?? inferredResponder
   // ADR 0072: an agent whose model follows its suggestion moves with its configuration.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Evidence, RunProjection } from '../watch/events'
+import type { CheckItemResult } from './checks'
 import { buildReceipt, type Receipt, type ReceiptLine } from './receipt'
 import { answerVerdict, findingsOf, type VerdictInput } from './verdict'
 
@@ -41,6 +42,31 @@ describe('answerVerdict', () => {
     })
     expect(verdict.findings.map((line) => line.tone)).toEqual(['bad', 'warn'])
     expect(verdict.detail).toBe('Researcher wasn’t allowed to search the web, and carried on without it.')
+  })
+
+  // ADR 0062: only the last round decides the badge, so what a send-back fixed is said beside it.
+  it('says what the check found and how much of it was fixed before you saw the answer', () => {
+    const met = (item: string): CheckItemResult => ({ verdict: 'met', item, evidence: 'seen' })
+    const missed = (item: string): CheckItemResult => ({ verdict: 'not_met', item, evidence: 'not seen' })
+    const round = (first: CheckItemResult[], items: CheckItemResult[]) => [{ checker: 'checker', checked: 'writer', round: 2, first, items }]
+    expect(answerVerdict({ ...finished, checks: round([missed('Linked'), missed('Short')], [met('Linked'), met('Short')]) })).toMatchObject({
+      tone: 'ok',
+      detail: 'Every step finished and nothing in the record was flagged. Every check was met. The check found 2 problems, and both were fixed before you saw this answer.',
+    })
+    expect(answerVerdict({ ...finished, checks: round([missed('Linked'), missed('Short')], [met('Linked'), missed('Short')]) })).toMatchObject({
+      tone: 'look',
+      detail: 'Check not met: Short (not seen). The check found 2 problems, and 1 of them was fixed before you saw this answer.',
+    })
+    expect(answerVerdict({ ...finished, checks: round([missed('Linked')], [missed('Linked')]) }).detail).toBe('Check not met: Linked (not seen). The check found 1 problem, and none was fixed when the work was sent back.')
+    // Nothing sent back, nothing said.
+    expect(answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [met('Linked')] }] }).detail).toBe('Every step finished and nothing in the record was flagged. Every check was met.')
+  })
+
+  // A reply the daemon could not read checked nothing: one finding says so, not a Not sure per item.
+  it('says a check that could not be read confirmed nothing', () => {
+    const verdict = answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 1, readable: false, items: [{ verdict: 'not_sure', item: 'Linked', evidence: 'no block' }, { verdict: 'not_sure', item: 'Short', evidence: 'no block' }] }] })
+    expect(verdict).toMatchObject({ tone: 'look', label: '1 thing to check' })
+    expect(verdict.findings).toEqual([{ tone: 'warn', text: 'The check could not be read, so nothing it checked is confirmed', agentId: 'checker' }])
   })
 
   it('calls an answer from a run that did not finish partial, whatever else it holds', () => {
