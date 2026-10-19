@@ -358,3 +358,54 @@ describe('a check step in the chat', () => {
   })
 })
 
+
+// ADR 0051: anything an agent said can be replied to from the team's chat — a handover, a question
+// or a question back, an answer — and a clarification is drawn as the reply it is.
+describe('Replying to what the agents said', () => {
+  it('offers Reply under each agent’s message, saying what it replies to, and none under yours', () => {
+    const onReply = vi.fn()
+    const question = message({ id: 'question:e40', kind: 'question', from: 'editor', to: 'operator', text: 'Which market?', seq: 40, state: 'answered', reply: answer('operator', 'Asia.', 45, { seq: 45 }) })
+    setup([handover, askBack, question], { bare: true, onReply })
+    const replies = screen.getAllByRole('button', { name: /^Reply to/ })
+    expect(replies.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Reply to Researcher: handover',
+      'Reply to Writer: question',
+      'Reply to Researcher: answer',
+      'Reply to Editor: question',
+    ])
+    fireEvent.click(replies[0])
+    expect(onReply).toHaveBeenLastCalledWith({ messageId: 'handover:e5:said', from: 'researcher', to: 'writer', kind: 'handover', text: 'ACP is JSON-RPC.' })
+    fireEvent.click(replies[2])
+    expect(onReply).toHaveBeenLastCalledWith({ messageId: 'writer:q1:reply', from: 'researcher', to: 'writer', kind: 'answer', text: '**Version 0.4**, the one on the site.' })
+    // A question to you is addressed to nobody else.
+    fireEvent.click(replies[3])
+    expect(onReply).toHaveBeenLastCalledWith(expect.objectContaining({ from: 'editor', to: null, kind: 'question' }))
+    // Your answer is yours: nothing to reply to.
+    expect(within(msg(/You to Editor/)).queryByRole('button', { name: /^Reply/ })).toBeNull()
+  })
+
+  it('names a question back as one, and quotes it above the clarification that answers it', () => {
+    const onReply = vi.fn()
+    const round = (id: string, seq: number, text: string, reply: MessageReply, clarifies = false) => message({ id, kind: 'ask', from: 'writer', to: 'researcher', text, seq, offsetMs: seq * 1000, ts: at(seq), state: 'answered', reply, ...(clarifies ? { clarifies: true as const } : {}) })
+    setup([
+      round('q1', 50, 'How many did it sell?', answer('researcher', 'It depends.\n\n## Question back\nWhich year?', 55, { seq: 55, asksBack: true })),
+      round('q2', 60, '2025.', answer('researcher', '42 in 2025.', 65, { seq: 65 }), true),
+    ], { bare: true, onReply })
+    expect(within(msg(/clarifies/)).getByRole('blockquote')).toHaveTextContent('ResearcherWhich year?')
+    fireEvent.click(within(msg(/asks back/)).getByRole('button', { name: /^Reply/ }))
+    expect(onReply).toHaveBeenLastCalledWith(expect.objectContaining({ messageId: 'q1:reply', kind: 'question_back', from: 'researcher', to: 'writer' }))
+    fireEvent.click(within(msg(/clarifies/)).getByRole('button', { name: /^Reply/ }))
+    expect(onReply).toHaveBeenLastCalledWith(expect.objectContaining({ messageId: 'q2:said', kind: 'answer', from: 'writer', to: 'researcher' }))
+  })
+
+  it('shows the very bubble a reply’s quote points at', () => {
+    setup([askBack], { bare: true, onReply: vi.fn(), reveal: { id: 'writer:q1:reply', at: 1 } })
+    expect(msg(/Researcher to Writer: answer/)).toHaveClass('flash')
+    expect(msg(/Writer to Researcher: question/)).not.toHaveClass('flash')
+  })
+
+  it('offers no Reply outside the team’s chat', () => {
+    setup([handover, askBack])
+    expect(screen.queryByRole('button', { name: /^Reply/ })).toBeNull()
+  })
+})
