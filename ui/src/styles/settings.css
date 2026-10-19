@@ -109,6 +109,8 @@
 .lw-you-form > p { margin: 0; }
 .lw-you-hint { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3); }
 .lw-you-count { flex: none; font-variant-numeric: tabular-nums; color: var(--color-ink-3); }
+/* The message to paste into ChatGPT or Claude, folded under the box: wrapped, never scrolled sideways. */
+.lw-you-prompt { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Buttons that act on what a section shows, side by side. */
 .lw-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 

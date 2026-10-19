@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { announceAiStatus, forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetYou } from '../../lib/you/client'
 import { AboutYou } from './AboutYou'
+import { ASK_ANOTHER_AI } from './AskAnotherAI'
 import AboutYouPage from './AboutYouPage'
 
 // The privacy note names the AI the agents run on; known up front, so no test's fetch answers it.
@@ -79,6 +80,37 @@ describe('About you', () => {
     expect(sent(fetch, 1).body).toEqual({ skipped: true })
     expect(screen.getByLabelText('What should your agents call you?')).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull()
+  })
+
+  it('gives a message to copy into ChatGPT or Claude, which writes the note from what it remembers', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ skipped: false }))))
+    const writeText = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    render(<AboutYou />)
+    expect(await screen.findByText('Already use ChatGPT or Claude? Have it write this for you')).toBeInTheDocument()
+    const message = screen.getByLabelText('The message to copy')
+    expect(message).toHaveTextContent(/write a short note about me that I can paste into the app’s “About you” box/)
+    // The same limit as the box, and nothing that should stay private.
+    expect(ASK_ANOTHER_AI).toContain('It must fit in 1,000 characters.')
+    expect(ASK_ANOTHER_AI).toContain('Leave out my name and anything private: passwords')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy message' }))
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
+    expect(writeText).toHaveBeenCalledWith(ASK_ANOTHER_AI)
+  })
+
+  it('selects the message when it can’t copy, and Home’s short card leaves it out', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ skipped: false }))))
+    vi.stubGlobal('navigator', { ...navigator, platform: 'MacIntel', clipboard: { writeText: () => Promise.reject(new Error('denied')) } })
+    const { unmount } = render(<AboutYou />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy message' }))
+    expect(await screen.findByText('Couldn’t copy here. The message is selected: press ⌘C.')).toBeInTheDocument()
+    expect(window.getSelection()?.toString()).toBe(ASK_ANOTHER_AI)
+    unmount()
+
+    render(<AboutYou variant="card" />)
+    expect(await screen.findByRole('heading', { name: 'Tell your agents about you' })).toBeInTheDocument()
+    expect(screen.queryByText(/Already use ChatGPT or Claude/)).toBeNull()
   })
 
   it('on Home, Not now puts the card away for good, and a refusal is said', async () => {
