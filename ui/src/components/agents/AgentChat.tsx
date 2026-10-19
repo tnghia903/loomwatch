@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
+import { filesTouched } from '../../lib/files/fileRefs'
 import { joinUnderRoot } from '../../lib/files/paths'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
@@ -187,10 +188,11 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
   const record = session.record
   const responder = session.projection.agents.find((agent) => agent.id === record?.responder)
   const text = record && isTerminalRun(record.status) ? record.reply ?? '' : responder?.reply ?? ''
+  const touched = useMemo(() => filesTouched(session.projection.evidence), [session.projection.evidence])
   return (
     <div className="agent-answer" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <button type="button" className="link agent-answer-back" onClick={onClose}><ArrowLeft size={14} aria-hidden="true" />Back to {name} at the bench</button>
-      <AnswerDocument text={text} by={name} streaming={!session.terminal} />
+      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} />
     </div>
   )
 }

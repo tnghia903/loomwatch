@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fileLabel, fileNoun, filePathFrom, fileRefsIn, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
+import { fileLabel, fileNoun, filePathFrom, filePathFromLink, fileRefsIn, filesTouched, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
 
 const REPORT = '/Users/me/loomwatch/teams/.loomwatch/launch-plan/writer/market-research-report.docx'
 
@@ -54,6 +54,35 @@ describe('fileRefsIn', () => {
     expect(fileRefsIn('In `/a/out` run `python build.py`, see `example.com`, `v0.1.0`, `window.claude`, `.env`, `../x.pdf`, `~/x.pdf`.')).toEqual([])
     expect(fileRefsIn('In `/a/out`:\n\n```\nplan.pdf\n`inside.pdf`\n```')).toEqual([])
     expect(fileRefsIn('The route `/api/runs` is a folder, not a file.')).toEqual([])
+  })
+
+  it('resolves a name given from the agent’s own folder to the one file the run read or wrote', () => {
+    const folder = '/Users/me/LoomWatch/teams/.loomwatch/bench-coby/coby'
+    const guide = `${folder}/LLM Prefill Guide.html`
+    const touched = [guide, `${folder}/research/notes.md`, '/a/one/README.md', '/a/two/README.md']
+    // The shape of a real reply (run aace60a2): a relative link with %20s, then the bare name.
+    const reply = '### [Open the guide](./LLM%20Prefill%20Guide.html)\n\nSee `research/notes.md` and `./notes.md`.\n\n**File:** `LLM Prefill Guide.html`'
+    expect(fileRefsIn(reply, touched)).toEqual([`${folder}/research/notes.md`, guide])
+    expect(withFolderPaths(reply, touched).split('\n')[0]).toBe(`### [Open the guide](${folder}/LLM%20Prefill%20Guide.html)`)
+    // Two files end in the name, the agent never touched it, or it is not a file: left as written.
+    expect(fileRefsIn('`README.md`, `report.pdf`, `tokenizer.decode()`, `../notes.md`, [site](https://x.com/notes.md)', touched)).toEqual([])
+    // A folder named in the passage still comes first.
+    expect(fileRefsIn('In `/b/out`: `notes.md`.', touched)).toEqual(['/b/out/notes.md'])
+  })
+
+  it('reads a link’s %20s as the spaces in a file’s name', () => {
+    expect(filePathFromLink('/Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')
+    expect(filePathFromLink('file:///Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')
+    expect(filePathFromLink('/Users/me/100%.pdf')).toBe('/Users/me/100%.pdf')
+    expect(filePathFromLink('./guide.html')).toBeNull()
+  })
+
+  it('collects the files a run read or wrote, once each', () => {
+    expect(filesTouched([
+      { locations: [{ path: '/a/guide.html' }, { path: '/a/research' }] },
+      { locations: [{ path: '/a/guide.html' }, { path: 'relative.md' }] },
+      {},
+    ])).toEqual(['/a/guide.html'])
   })
 
   it('writes resolved names out as paths only where it resolved them', () => {

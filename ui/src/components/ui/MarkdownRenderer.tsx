@@ -1,7 +1,7 @@
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-import { filePathFrom } from '../../lib/files/fileRefs'
+import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
 
 /**
@@ -14,7 +14,9 @@ import { FileChip } from './FileChip'
  *
  * A file the reply names — an absolute path in inline code, a link to one, or a `file://` URL — is
  * shown as a file the operator can open (FileChip, ADR 0026), not as a path to copy by hand. Fenced
- * code is left alone: a path inside a code block is code.
+ * code is left alone: a path inside a code block is code. A link to a file named from somewhere this
+ * page cannot know (`./guide.html`) reads as its words: opened here it would only load LoomWatch
+ * again, in a new tab.
  *
  * Research answers mark each claim and cite it: "[Sourced] … [Paper](https://…)". The mark reads
  * as a small tag and the links after the claim as its sources, not as bracketed text and a run of
@@ -111,8 +113,9 @@ function hostOf(href: string | undefined): string | undefined {
 // and asking the daemon about its file again each time.
 const COMPONENTS: Components = {
   a: ({ children: label, href, className }) => {
-    const path = filePathFrom(href)
+    const path = filePathFromLink(href)
     if (path) return <FileChip path={path} />
+    if (href && !/^([a-z][a-z0-9+.-]*:|#)/i.test(href)) return <span className="md-unlinked">{label}</span>
     if (className === 'md-source') {
       return (
         <a className="md-source" href={href} target="_blank" rel="noreferrer" title={hostOf(href)}>

@@ -1,4 +1,4 @@
-import { baseName, isAbsolutePath, pathFromFileUrl } from './paths'
+import { baseName, isAbsolutePath, pathFromFileUrl, splitPath } from './paths'
 
 export { baseName }
 
@@ -27,6 +27,32 @@ export function filePathFrom(text: string | null | undefined): string | null {
   const name = baseName(value)
   if (!EXTENSION.test(name) || (name.startsWith('.') && name.split('.').length === 2)) return null
   return value
+}
+
+/**
+ * The path a Markdown link points at, if it is a file. A link target cannot hold a space, so a
+ * file with spaces in its name is written with `%20`s, which name the file only once undone.
+ */
+export function filePathFromLink(href: string | null | undefined): string | null {
+  if (!href || href.trim().startsWith('file://')) return filePathFrom(href)
+  try {
+    return filePathFrom(decodeURIComponent(href))
+  } catch {
+    return filePathFrom(href)
+  }
+}
+
+/**
+ * Every file a run's agents read or wrote, by its full path: the paths their tool calls name. An
+ * agent names a file in its reply as it sees it, from its own folder (`./guide.html`); these are
+ * what such a name means.
+ */
+export function filesTouched(evidence: readonly { locations?: readonly { path: string }[] }[]): string[] {
+  const found = new Set<string>()
+  for (const item of evidence) {
+    for (const { path } of item.locations ?? []) if (filePathFrom(path)) found.add(path)
+  }
+  return [...found]
 }
 
 export function extensionOf(path: string): string {
@@ -105,17 +131,19 @@ export function folderWords(folder: string | null | undefined, path: string): st
   return relative.replace(/^\.loomwatch[\\/]/, '').split(/[\\/]/).filter(Boolean).join(' › ')
 }
 
-/** Every distinct file a Markdown reply names, in the order it first names them. */
-export function fileRefsIn(markdown: string): string[] {
-  const text = withFolderPaths(markdown)
+/**
+ * Every distinct file a Markdown reply names, in the order it first names them. `touched` is what
+ * the run's agents read or wrote ([`filesTouched`]), for the names they give from their own folder.
+ */
+export function fileRefsIn(markdown: string, touched: readonly string[] = []): string[] {
+  const text = withFolderPaths(markdown, touched)
   const found: string[] = []
-  const add = (candidate: string) => {
-    const path = filePathFrom(candidate)
+  const add = (path: string | null) => {
     if (path && !found.includes(path)) found.push(path)
   }
-  for (const match of text.matchAll(/`([^`\n]+)`/g)) add(match[1])
-  for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) add(match[1])
-  for (const match of text.matchAll(/(file:\/\/\/[^\s)>\]]+)/g)) add(match[1])
+  for (const match of text.matchAll(/`([^`\n]+)`/g)) add(filePathFrom(match[1]))
+  for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) add(filePathFromLink(match[1]))
+  for (const match of text.matchAll(/(file:\/\/\/[^\s)>\]]+)/g)) add(filePathFrom(match[1]))
   return found
 }
 
@@ -131,8 +159,13 @@ export function fileRefsIn(markdown: string): string[] {
  * passage — one paragraph and the list that carries on after it — and only when its extension is a
  * kind of file this module can name. Commands, domains, versions, names in another paragraph and
  * anything in a fenced block stay text.
+ *
+ * An agent also names files from its own folder without saying where that is: "[Open the
+ * guide](./guide.html)". Such a name, in a link or in code, resolves to the one file in `touched`
+ * — what the run's agents read or wrote — whose path ends with it. A file the agents never touched
+ * is not guessed at.
  */
-export function withFolderPaths(markdown: string): string {
+export function withFolderPaths(markdown: string, touched: readonly string[] = []): string {
   const lines = markdown.split('\n')
   for (const passage of passagesOf(lines)) {
     const folders: Array<{ at: number; path: string }> = []
@@ -142,16 +175,18 @@ export function withFolderPaths(markdown: string): string {
         if (path) folders.push({ at: order * LINE + (match.index ?? 0), path })
       }
     })
-    if (!folders.length) continue
+    if (!folders.length && !touched.length) continue
     // The nearest folder named before the name, else the first one named after it.
     const folderFor = (at: number) => folders.filter((folder) => folder.at < at).at(-1)?.path ?? folders.find((folder) => folder.at > at)?.path
     passage.forEach((index, order) => {
       lines[index] = lines[index].replace(MENTION, (whole: string, span?: string, href?: string, _url?: string, offset = 0) => {
-        const relative = relativeFileFrom(span ?? href)
+        if (span === undefined && href === undefined) return whole
+        const named = span ?? decodedLink(href)
+        const relative = relativeFileFrom(named)
         const folder = relative ? folderFor(order * LINE + offset) : undefined
-        if (!relative || !folder) return whole
-        const path = joinPath(folder, relative)
-        return span !== undefined ? `\`${path}\`` : `](${path})`
+        const path = relative && folder ? joinPath(folder, relative) : touchedFile(named, touched)
+        if (!path) return whole
+        return span !== undefined ? `\`${path}\`` : `](${linkTarget(path)})`
       })
     })
   }
@@ -220,6 +255,32 @@ function relativeFileFrom(text: string | undefined): string | null {
   const segments = value.split('/')
   if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.startsWith('.'))) return null
   return Object.hasOwn(LABELS, extensionOf(value)) ? value : null
+}
+
+/** The one touched file whose path ends with `name` (`guide.html`, `./drafts/plan.md`), if just one. */
+function touchedFile(name: string | undefined, touched: readonly string[]): string | null {
+  const value = name?.trim() ?? ''
+  if (!touched.length || !value || value.length > 255 || isAbsolutePath(value) || value.includes('://') || /[\n\r`]/.test(value)) return null
+  const wanted = splitPath(value).filter((segment) => segment !== '.')
+  if (!wanted.length || wanted.includes('..') || !EXTENSION.test(wanted[wanted.length - 1])) return null
+  const found = touched.filter((path) => {
+    const parts = splitPath(path)
+    return parts.length > wanted.length && wanted.every((segment, index) => parts[parts.length - wanted.length + index] === segment)
+  })
+  return found.length === 1 ? found[0] : null
+}
+
+function decodedLink(href: string | undefined): string | undefined {
+  try {
+    return href === undefined ? href : decodeURIComponent(href)
+  } catch {
+    return href
+  }
+}
+
+/** A path as a Markdown link target, which ends at a space or a bracket: those as `%xx`. */
+function linkTarget(path: string): string {
+  return path.replace(/[\s()<>%]/g, (char) => encodeURIComponent(char))
 }
 
 function joinPath(folder: string, relative: string): string {

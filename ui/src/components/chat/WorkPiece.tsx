@@ -12,7 +12,7 @@ import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/r
 import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
-import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
+import { fileRefsIn, filesTouched, withFolderPaths } from '../../lib/files/fileRefs'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import type { Bubble, Party } from '../../lib/story/conversation'
@@ -173,9 +173,11 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const checked = [...(team.configs?.values() ?? [])].some((config) => config.checks === run.responder)
   const streamed = live && !checked ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
-  // The files the answer names, for its tools: a scan of the whole text, so once per answer.
+  // The files the answer names, for its tools: a scan of the whole text, so once per answer. An
+  // agent names a file from its own folder ("./guide.html"); what it read or wrote says which.
   const finishedAnswer = isTerminalRun(record.status)
-  const answerFiles = useMemo(() => (finishedAnswer ? fileRefsIn(answer) : []), [finishedAnswer, answer])
+  const touched = useMemo(() => filesTouched(session.projection.evidence), [session.projection.evidence])
+  const answerFiles = useMemo(() => (finishedAnswer ? fileRefsIn(answer, touched) : []), [finishedAnswer, answer, touched])
   // Your review lasts while this chat is open, and only for the answer you reviewed.
   const [reviewedText, setReviewedText] = useState<string | null>(null)
   const streaming = live && responder?.taskState === 'STREAMING'
@@ -419,7 +421,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
       {stops.length > 0 && <SpendStopCard inline run={{ runId: run.runId, spendStops: stops }} onDecide={pin} onRun={onRun} />}
 
-      <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
+      <Outcome tour={newest} run={record} answer={answer} touched={touched} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -561,6 +563,8 @@ interface AnswerProps {
   tour: boolean
   run: RunRecord
   answer: string
+  /** Every file the run's agents read or wrote, for names the answer gives from an agent's folder. */
+  touched: readonly string[]
   streaming: boolean
   name: (id: string) => string
   hue: (id: string) => number
@@ -618,10 +622,11 @@ function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (
  * message. A long one, or one with a title, is a document: a card with its title, its opening
  * words and its length, read in full in the pane beside the chat (lib/chat/document.ts).
  */
-function Answer({ tour, run, answer, streaming, name, hue, open, flash = false, onOpen, solo, reactions, children }: AnswerProps) {
+function Answer({ tour, run, answer, touched, streaming, name, hue, open, flash = false, onOpen, solo, reactions, children }: AnswerProps) {
   const appear = useAppear()
-  // Names listed under a folder read as files in the sentence too; copy and save keep the agent's words.
-  const shown = useMemo(() => withFolderPaths(answer), [answer])
+  // Names listed under a folder, or given from the agent's own folder, read as files in the sentence
+  // too; copy and save keep the agent's words.
+  const shown = useMemo(() => withFolderPaths(answer, touched), [answer, touched])
   const facts = useMemo(() => (isDocument(answer) ? describeDocument(answer) : null), [answer])
   const responder = run.responder
   return (
