@@ -570,6 +570,7 @@ mod tests {
             kinds,
             [
                 Kind::Role,
+                Kind::Reading,
                 Kind::Capabilities,
                 Kind::Knowledge,
                 Kind::Tool,
@@ -625,6 +626,7 @@ mod tests {
             [
                 Kind::Role,
                 Kind::Team,
+                Kind::Reading,
                 Kind::Capabilities,
                 Kind::Knowledge,
                 Kind::Tool,

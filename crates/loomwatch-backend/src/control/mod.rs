@@ -411,7 +411,7 @@ async fn start_conversation(
 
 /// How the assistant runs: in the managed folder, with no permissions to ask for anything. Its
 /// only tools are the Control tools ([`mcp::ControlTools`]).
-fn ask_spec(workspace: PathBuf) -> ProcessSpec {
+pub(crate) fn ask_spec(workspace: PathBuf) -> ProcessSpec {
     ProcessSpec {
         cmd: String::new(),
         args: Vec::new(),
@@ -424,7 +424,7 @@ fn ask_spec(workspace: PathBuf) -> ProcessSpec {
 }
 
 /// The assistant's working folder: hidden, managed, and never a team's.
-fn prepare_workspace(teams_root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn prepare_workspace(teams_root: &Path) -> Result<PathBuf, String> {
     let workspace = teams_root.join(ASK_WORKSPACE);
     std::fs::create_dir_all(&workspace)
         .map_err(|error| format!("could not prepare the Ask folder: {error}"))?;

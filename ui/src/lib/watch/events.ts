@@ -553,6 +553,13 @@ export type PromptSectionKind =
    * in the same change, which is the rule.
    */
   | 'team'
+  /**
+   * `## Reading the request` — the role says who the agent is, the task is what you want now, read
+   * for what it means: a question answered, a change made, a greeting greeted, not the role's whole
+   * job done again. Fixed text under the role. Added here and in `memory::PromptSectionKind` in the
+   * same change, which is the rule.
+   */
+  | 'reading'
   | 'capabilities'
   | 'required_skill'
   | 'memory'

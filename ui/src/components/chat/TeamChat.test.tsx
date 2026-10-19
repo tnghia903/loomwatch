@@ -262,6 +262,72 @@ describe('the team’s chat', () => {
     expect(await screen.findByText(/Starting…/)).toBeInTheDocument()
   })
 
+  it('a hello the team answered: each agent answers for itself, no work starts, and the team can still be started', async () => {
+    const hello = message({
+      id: 'hi-1', text: 'hi @team', route: 'team_note', runId: null,
+      answers: {
+        waiting: [],
+        said: [
+          { from: 'researcher', text: 'Hi! I find today’s news. What should we cover?', at: '2026-10-06T02:00:03.000Z' },
+          { from: 'writer', text: 'Hello! I turn it into the digest.', at: '2026-10-06T02:00:04.000Z' },
+        ],
+      },
+    })
+    answer = (url) => url.endsWith('/start')
+      ? new Response(JSON.stringify({ route: 'team', message: { ...hello, route: 'team', runId: 'run-2' }, run: run({ runId: 'run-2', status: 'queued', reply: null, finishedAt: null }) }), { status: 202 })
+      : new Response(JSON.stringify({ route: 'team_note', message: hello }), { status: 200 })
+    const { props } = renderChat()
+    await screen.findByRole('heading', { name: 'Talk to News desk' })
+    fireEvent.change(box(), { target: { value: 'hi @team' } })
+    // Enter would pick from the @ list the message ends on; the button sends.
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    const researcher = (await screen.findByText('Hi! I find today’s news. What should we cover?')).closest('li')!
+    expect(within(researcher).getByText('Researcher')).toBeInTheDocument()
+    const writer = screen.getByText('Hello! I turn it into the digest.').closest('li')!
+    expect(within(writer).getByText('Writer')).toBeInTheDocument()
+    expect(screen.getByText('You → the team')).toBeInTheDocument()
+    expect(screen.getByText('No work started')).toBeInTheDocument()
+    expect(screen.queryByText(/team note/)).not.toBeInTheDocument()
+    // The answers say what happened; no notice about the route on top of them.
+    expect(props.announce).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Start the team on this' }))
+    await waitFor(() => expect(posted.at(-1)?.url).toBe('/api/chat/messages/hi-1/start'))
+  })
+
+  it('an agent still answering is shown writing, and the chat keeps reading until it is done', async () => {
+    page = [{
+      kind: 'note',
+      message: message({
+        id: 'hi-3', text: 'hi @team', route: 'team_note', runId: null, createdAt: new Date().toISOString(),
+        answers: { waiting: ['writer'], said: [{ from: 'researcher', text: 'Hi there!', at: new Date().toISOString() }] },
+      }),
+    }]
+    renderChat()
+    expect(await screen.findByText('Hi there!')).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'Writer is writing' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start the team on this' })).not.toBeInTheDocument()
+  })
+
+  it('an answer that stopped long ago is not shown as still writing', async () => {
+    page = [{
+      kind: 'note',
+      message: message({ id: 'hi-4', text: 'hi @team', route: 'team_note', runId: null, answers: { waiting: ['writer'], said: [] } }),
+    }]
+    renderChat()
+    expect(await screen.findByText('No work started')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Writer is writing' })).not.toBeInTheDocument()
+  })
+
+  it('a hello one agent answered offers to start that agent', async () => {
+    page = [{
+      kind: 'note',
+      message: message({ id: 'hi-2', text: '@Writer thanks!', route: 'team_note', runId: null, agentId: 'writer', answers: { waiting: [], said: [{ from: 'writer', text: 'Any time!', at: '2026-10-06T02:00:02.000Z' }] } }),
+    }]
+    renderChat()
+    expect(await screen.findByText('You → Writer')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start Writer on this' })).toBeInTheDocument()
+  })
+
   it('an empty chat suggests an @team first message, and starts nothing until you send it', async () => {
     renderChat()
     fireEvent.click(await screen.findByRole('button', { name: '@team today’s AI news digest' }))

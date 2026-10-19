@@ -1,7 +1,7 @@
 import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
+import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { replyOf } from '../../lib/chat/reply'
@@ -252,7 +252,8 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       chat.settleSend(localId, result)
       if ((result.route === 'team' || result.route === 'agent') && result.run) onStarted?.(result.run.runId)
       startKeys.current.delete(localId)
-      if (result.route !== where.route) announce(routeChanged(result.route, team.names.get(result.message.agentId ?? '') ?? result.message.agentId ?? '', Boolean(team.solo)))
+      // A message answered instead of started ("hi @team") says so itself, under it in the chat.
+      if (result.route !== where.route && !result.message.answers) announce(routeChanged(result.route, team.names.get(result.message.agentId ?? '') ?? result.message.agentId ?? '', Boolean(team.solo)))
       return true
     } catch (caught) {
       if (caught instanceof RunApiError && caught.code === TEAM_NEEDS_REVIEW && caught.review) {
@@ -560,7 +561,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} />
-                  : <TeamNote message={item.message} name={name} onShowReplied={showReplied} onStart={() => void startNote(item.message)} />}
+                  : <TeamNote message={item.message} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} />}
               </Fragment>
             )
           })}
@@ -702,10 +703,57 @@ function useChatSearch(teamPath: string) {
   return { open, setOpen, text, setText, results, loading, close }
 }
 
-/** A note to the whole team: it starts nothing, and the next work reads it. */
-function TeamNote({ message, name, onShowReplied, onStart }: { message: ChatMessage; name: (id: string) => string; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void }) {
+/**
+ * A note to the whole team: it starts nothing, and the next work reads it. An @ message that needed
+ * no workflow ("hi @team") is drawn as you sent it, with each agent's own answer under it, and the
+ * ones still writing typing, in place of the work it would have started.
+ */
+function TeamNote({ message, name, hue, onShowReplied, onStart }: { message: ChatMessage; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
+  const answers = message.answers
+  if (answers) {
+    const to = message.agentId ? name(message.agentId) : 'the team'
+    const waiting = stillAnswering(message)
+    const face = (id: string) => <span className="chat-gutter"><AgentFace id={id}><AvatarFace id={id} hue={hue(id)} size={28} text={initialsOf(name(id))} /></AgentFace></span>
+    return (
+      <>
+        <li className={`chat-msg mine tc-answered-note${appear ? ' tc-appear' : ''}`}>
+          <div className="chat-stack">
+            <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(message.createdAt)}</time></div>
+            <div className="chat-bubble">
+              {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
+              <div className="chat-text tc-plain">{message.text}</div>
+            </div>
+          </div>
+        </li>
+        {answers.said.map((said) => (
+          <li key={`said-${said.from}`} className="chat-msg tc-answer tc-said-back tc-appear">
+            {face(said.from)}
+            <div className="chat-stack">
+              <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
+              <div className="chat-bubble"><div className="chat-text tc-plain">{said.text}</div></div>
+            </div>
+          </li>
+        ))}
+        {waiting.map((id) => (
+          <li key={`writing-${id}`} className="chat-msg tc-said-back tc-appear">
+            {face(id)}
+            <div className="chat-stack">
+              <div className={`chat-meta hue-${hue(id)}`}><span className="chat-name">{name(id)}</span></div>
+              <div className="chat-bubble typing" role="status" aria-label={`${name(id)} is writing`}><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></div>
+            </div>
+          </li>
+        ))}
+        {waiting.length === 0 && (
+          <li className="tc-said-acts">
+            <span>No work started</span>
+            <button type="button" className="tc-link" disabled={starting} onClick={() => { setStarting(true); onStart() }}><Play size={11} aria-hidden="true" />Start {to} on this</button>
+          </li>
+        )}
+      </>
+    )
+  }
   return (
     <li className={`chat-msg mine tc-team-note${appear ? ' tc-appear' : ''}`}>
       <div className="chat-stack">

@@ -35,6 +35,41 @@ export interface ChatMessage {
   now: boolean
   /** The message it replies to, when it was written as one. Absent from chats before replies. */
   replyTo?: ReplyTo | null
+  /**
+   * The agents' own answers to an @ message that needed no workflow ("hi @team"): the message
+   * stayed a note, nothing ran, and the agents it was for answered it themselves, at the same time.
+   * Absent from chats before these answers.
+   */
+  answers?: NoteAnswers | null
+}
+
+/** The agents answering a message that needed no workflow (`chat::NoteAnswers`). */
+export interface NoteAnswers {
+  /** Agents still writing their answer. */
+  waiting: string[]
+  /** What each said, in the order they finished. An agent with nothing to add says nothing. */
+  said: NoteAnswer[]
+}
+
+/** What one agent said back (`chat::NoteAnswer`). */
+export interface NoteAnswer {
+  from: string
+  text: string
+  at: string
+}
+
+/**
+ * Past this, an agent still "writing" an answer is not: the daemon gives each answer two minutes,
+ * and one that stopped with the daemon never reports back.
+ */
+const ANSWERING_MS = 4 * 60_000
+
+/** The agents still writing their answer to `message`, or none once it is too old for that to be true. */
+export function stillAnswering(message: ChatMessage, now = Date.now()): string[] {
+  const waiting = message.answers?.waiting ?? []
+  if (waiting.length === 0) return waiting
+  const sent = Date.parse(message.createdAt)
+  return Number.isFinite(sent) && now - sent < ANSWERING_MS ? waiting : []
 }
 
 /** What kind of message a reply answers, in the daemon's words (`chat::ReplyKind`). */

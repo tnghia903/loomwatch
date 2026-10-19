@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { keepIfSame } from '../keepIfSame'
 import { isTerminalRun, RunApiError, type RunRecord } from '../runs/client'
-import { fetchChatPage, itemAt, itemKey, reactTo, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo, type SendResult } from './client'
+import { fetchChatPage, itemAt, itemKey, reactTo, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo, type SendResult } from './client'
 import { yoursOn, type Face, type Reaction, type ReactionAbout } from './reactions'
 
 /** Newest items are re-read this often while something is working or waiting, and when idle. */
@@ -80,7 +80,9 @@ export function useTeamChat(teamPath: string | null) {
 
   const items = useMemo(() => [...current.byKey.values()].sort((left, right) => itemAt(left).localeCompare(itemAt(right))), [current.byKey])
   const live = useMemo(() => items.flatMap((item) => (item.kind === 'work' && !isTerminalRun(item.run.status) ? [item.run] : [])), [items])
-  const busy = live.length > 0 || pending.some((message) => message.state === 'sending')
+  // Agents answering a message themselves count as work: their answers arrive with the next read.
+  const answering = items.some((item) => item.kind === 'note' && stillAnswering(item.message).length > 0)
+  const busy = live.length > 0 || answering || pending.some((message) => message.state === 'sending')
 
   const merge = useCallback((path: string, incoming: ChatItem[], patch: Partial<ChatState> = {}) => {
     setState((previous) => {

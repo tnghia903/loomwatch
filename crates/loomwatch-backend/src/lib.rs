@@ -19,6 +19,7 @@ pub mod db;
 pub mod delivery;
 pub mod engine;
 mod files;
+mod intent;
 mod jobs;
 pub mod marketplace;
 pub mod memory;
@@ -2682,6 +2683,17 @@ pub(crate) fn compose_prompt(
             text: place.clone(),
         });
     }
+    // How to read the task at the end: for what it means, not as a cue to do the role's whole job.
+    let reading = orientation::reading(task.place.is_some(), agent.checks.is_some());
+    text.push_str("\n\n");
+    text.push_str(orientation::READING_HEADING);
+    text.push('\n');
+    text.push_str(&reading);
+    sections.push(PromptSection {
+        kind: PromptSectionKind::Reading,
+        heading: orientation::READING_HEADING.to_owned(),
+        text: reading,
+    });
     if let Some(capabilities) = wired_capabilities(agent) {
         text.push_str("\n\n## Capabilities wired for you\n");
         text.push_str(&capabilities);
@@ -7315,13 +7327,20 @@ mod tests {
         // A two-stage pipeline: each stage is told its place in it (ADR 0034).
         assert_eq!(
             kinds("a"),
-            [Kind::Role, Kind::Team, Kind::Memory, Kind::Task]
+            [
+                Kind::Role,
+                Kind::Team,
+                Kind::Reading,
+                Kind::Memory,
+                Kind::Task
+            ]
         );
         assert_eq!(
             kinds("b"),
             [
                 Kind::Role,
                 Kind::Team,
+                Kind::Reading,
                 Kind::Memory,
                 Kind::StageResults,
                 Kind::AskOffer,
@@ -7732,16 +7751,55 @@ mod tests {
     }
 
     /// Byte-compatibility: a team with no `memory:` block must produce the prompt it produced
-    /// before memory existed. `agent_prompt` is the one place that could regress this, so it is
-    /// pinned directly rather than inferred from a run completing.
+    /// before memory existed, with how to read the request under the role. `agent_prompt` is the
+    /// one place that could regress this, so it is pinned directly rather than inferred from a run
+    /// completing.
     #[test]
     fn a_team_without_memory_gets_exactly_the_prompt_it_got_before() {
         let agent = pipeline_agent("a", OFFLINE);
         let empty = memory::ContextPacket::default();
         assert_eq!(
             compose_prompt(&agent, &empty, &NodeTask::goal("do the thing")).text,
-            "## Your assigned role\na role\n\n## Task\ndo the thing"
+            format!(
+                "## Your assigned role\na role\n\n## Reading the request\n{}\n\n## Task\ndo the thing",
+                orientation::reading(false, false)
+            )
         );
+    }
+
+    /// The request is read for what it means: the role is who the agent is, not a job to redo on
+    /// "hi" or "why did you leave X out?". Teammates and checks are spoken of only where they are.
+    #[test]
+    fn every_agent_is_told_to_read_the_request_for_what_it_means() {
+        let alone = orientation::reading(false, false);
+        assert!(alone.contains("It is not a job to do again on every message."));
+        assert!(alone.contains("Asked a question: answer it"));
+        assert!(alone.contains("Greeted, thanked or chatted with: reply in a sentence or two"));
+        assert!(!alone.contains("teammates") && !alone.contains("check block"));
+        let in_team = orientation::reading(true, false);
+        assert!(in_team.contains("pass on what you were handed as it is"));
+        assert!(in_team.contains("give the operator that answer itself"));
+        let checking = orientation::reading(true, true);
+        assert!(checking.contains("always end with your check block"));
+        assert!(checking.contains("mark each item Met with \"Does not apply\" and why"));
+
+        let mut checker = pipeline_agent("b", OFFLINE);
+        checker.checks = Some("a".to_owned());
+        let task = NodeTask {
+            place: Some("You are b, step 2 of 2.".to_owned()),
+            ..NodeTask::goal("hi")
+        };
+        let composed = compose_prompt(&checker, &memory::ContextPacket::default(), &task);
+        let reading = composed
+            .sections
+            .iter()
+            .find(|section| section.kind == memory::PromptSectionKind::Reading)
+            .expect("a Reading section");
+        assert_eq!(reading.text, orientation::reading(true, true));
+        // Under the role and the place in the team, above the task it is about.
+        let at = |heading: &str| composed.text.find(heading).expect(heading);
+        assert!(at("## Your place in the team") < at("## Reading the request"));
+        assert!(at("## Reading the request") < at("## Task"));
     }
 
     /// ADR 0051: what the operator's request replies to sits straight above the task, quoted, as
@@ -7809,11 +7867,15 @@ mod tests {
         );
         assert_eq!(
             composed.text,
-            "## Your assigned role\na role\n\n## Done when\nYour result is finished when:\n\
+            format!(
+                "## Your assigned role\na role\n\n## Done when\nYour result is finished when:\n\
              - Every story has a link\n- Five stories\nBefore you reply, check your result \
              against each of these and fix what you can. If you could not meet one, end your reply \
              with a `## Not met` section that lists only those items, one line each, saying why. \
-             If you met them all, leave that section out.\n\n## Task\ndo the thing"
+             If you met them all, leave that section out.\n\n## Reading the request\n{}\n\n\
+             ## Task\ndo the thing",
+                orientation::reading(false, false)
+            )
         );
         assert_eq!(
             composed
@@ -7824,6 +7886,7 @@ mod tests {
             [
                 memory::PromptSectionKind::Role,
                 memory::PromptSectionKind::DoneWhen,
+                memory::PromptSectionKind::Reading,
                 memory::PromptSectionKind::Task
             ]
         );
