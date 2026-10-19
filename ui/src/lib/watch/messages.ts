@@ -180,6 +180,24 @@ export interface TeamMessage {
   refused?: AskRefusal
   /** For a `check` message: the round and what it found. */
   check?: CheckExchange
+  /**
+   * For a `dispatch`, `handoff` or `ask` in a team with no fixed order: where it went.
+   * `continued` — into the conversation the teammate already had in this run (`continues` in the
+   * record); `busy` — to a separate copy, because the teammate was still working; `limit` — to a
+   * fresh start, because as many teammates as the team allows already held a conversation.
+   */
+  reached?: Reached
+}
+
+export type Reached = 'continued' | 'busy' | 'limit'
+
+/** The word the chat shows beside a message for where it went (see `TeamMessage.reached`). */
+export const REACHED_WORD: Record<Reached, string> = { continued: 'carries on', busy: 'separate copy', limit: 'fresh start' }
+
+/** Where the Team Bus says a call went, from its recorded result. */
+function reachedOf(output: Record<string, unknown>): Reached | null {
+  if (output.continues === true) return 'continued'
+  return output.fresh === 'busy' || output.fresh === 'limit' ? output.fresh : null
 }
 
 /** Whether a check round found nothing missing: every item met, from a reply that could be read. */
@@ -199,6 +217,13 @@ export function checkText(check: CheckExchange): string {
     return items.length ? [`**${heading}**`, ...items.map((item) => `- ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)].join('\n') : ''
   }
   return [check.problems ?? '', list('not_met', 'Not met'), list('not_sure', 'Not sure')].filter(Boolean).join('\n\n')
+}
+
+/** What a `dispatch` or `handoff` message's info says about where the work went, for `name`, its recipient. */
+export function reachedLine(reached: Reached, name: string): string {
+  if (reached === 'continued') return `${name} carried on in the conversation it already had in this run, so it remembered its earlier work.`
+  if (reached === 'busy') return `${name} was still working, so a separate copy started: it saw only this message.`
+  return `${name} started fresh and saw only this message: as many teammates as the team allows already held a conversation for this run.`
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
@@ -308,6 +333,8 @@ export class Correspondence {
     }
     // The bus accepts a name where the id belongs and answers with the id it resolved.
     if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
+    const reached = reachedOf(output)
+    if (reached) message.reached = reached
     if (message.kind !== 'ask') { message.state = 'delivered'; return }
     message.state = 'answered'
     if (output.clarifies === true) message.clarifies = true

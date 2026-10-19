@@ -267,6 +267,20 @@ depend on the document as a whole:
   of its delegated work has finished, that agent gets one more turn with each reply (or why it
   failed), and its reply to that turn is its answer. Each result is also archived as a
   `session_meta` event with `phase: "delegated_result"`.
+- In a team with no fixed order (team mode), each teammate keeps one conversation for the whole
+  run. A `dispatch`, `handoff` or `ask` that reaches a teammate whose last turn has ended
+  continues that conversation, so the teammate builds on what it already did and was told.
+  - A call that reaches a teammate still working starts a separate copy, which is closed after its
+    turn. Nothing ever waits for a busy teammate.
+  - At most `guards.maxConcurrentDispatches` teammates hold a conversation at once. Past that, a
+    teammate starts fresh each time and is closed after its turn.
+  - The call's result says which happened: `continues: true`, or `fresh: "busy"` or
+    `fresh: "limit"`.
+  - Each turn of a kept teammate ends with a `session_meta` event with `phase: "kept_open"`.
+    Every kept conversation closes when the run ends, and records its exit then.
+  - A teammate whose round failed, or that was stopped at its own spending limit, is closed; the
+    next call starts it fresh.
+  - Pipeline stages and the helpers they recruit are unchanged.
 - An agent answering an `ask` answers from what it has: it may not start another agent with `ask`,
   `dispatch` or `handoff`, though it may still `ask` an agent whose session is open. An `ask` is
   withdrawn when the agent that asked ends its turn before the answer comes back; the answering

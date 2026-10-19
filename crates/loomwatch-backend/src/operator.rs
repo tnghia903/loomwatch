@@ -362,6 +362,10 @@ pub(crate) struct LiveTurn {
     /// `ask_answer` for another agent's question, `revision` for work a check step sent back.
     pub(crate) turn: &'static str,
     pub(crate) answer: oneshot::Sender<anyhow::Result<String>>,
+    /// A team-mode teammate's turn, held from the moment a call claims it until this turn's reply
+    /// is sent, so a call that finds it held starts a separate copy instead of waiting
+    /// (`TeamBus::reach`). `None` for every other kept-open session.
+    pub(crate) held: Option<tokio::sync::OwnedMutexGuard<()>>,
 }
 
 /// The narrow handle onto the waiting room that the pipeline and the Team Bus are given.
@@ -528,6 +532,7 @@ impl OperatorDesk {
                 from_operator: true,
                 turn: crate::agent::WORK,
                 answer,
+                held: None,
             })
             .await
             .map_err(|_| {

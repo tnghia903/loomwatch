@@ -53,7 +53,7 @@ use serde_json::{Value, json};
 use crate::archive::EventArchive;
 use crate::config::TeamConfig;
 use crate::engine::{AgentRun, EventLog, ProcessSpec, TeamSessionContext};
-use crate::team_bus::{TeamBus, TeamBusMode};
+use crate::team_bus::{TeamBus, TeamBusConnection, TeamBusMode};
 use crate::workspace::BusMode;
 
 /// One durable event in replay order.
@@ -529,8 +529,12 @@ async fn run_team_mode(
     ))
     .await;
     let delegated = bus.wait_for_tasks().await;
+    // Nothing can reach a teammate any more: each conversation kept open closes, and records it,
+    // before the run's events are counted.
+    let released = bus.release_teammates().await;
     let mut outcome = root?;
     delegated?;
+    released?;
     set_aside_answer_notes(event_log.as_ref(), &agent.id, &mut outcome).await?;
     outcome.event_count = archive.verify_session(&outcome.session_id).await?;
     if let (Some(turn), Some(run_id)) = (checkpoint_turn.as_ref(), run_id.as_deref()) {
@@ -1024,48 +1028,7 @@ pub(crate) async fn run_answerable_session(
             .run_session_with_bus(&asked.agent.id, model, prompt, context)
             .await;
     }
-    let mut recorder = process
-        .open_live(&asked.agent.id, model, &mut context)
-        .await?;
-    let work = Work::begin(
-        asked.lineage,
-        asked.shared_log,
-        &asked.agent.id,
-        &mut recorder,
-    );
-    let mut session = StageSession { process, recorder };
-    let mut reply = session
-        .process
-        .prompt_turn(&mut session.recorder, prompt)
-        .await?;
-    while let Some(wait) = asked.bus.take_pending_question(&asked.agent.id).await {
-        let (resumed, answer) =
-            answer_a_parked_question(AskedQuestion { ..asked }, session, wait).await?;
-        session = resumed;
-        reply = session
-            .process
-            .prompt_turn(&mut session.recorder, &answer_turn(&answer.text))
-            .await?;
-    }
-    reply = work
-        .deliver_notes(&mut session, asked.shared_log, reply)
-        .await?;
-    drop(work);
-    // What this agent handed out with `dispatch` or `handoff` comes back to it as one more turn
-    // once all of it has finished, so the work it paid for reaches its answer instead of ending
-    // with the helper. Bounded, because that turn may hand out more.
-    if let Some(bus) = context.bus {
-        for _ in 0..DELEGATED_ROUNDS {
-            let results = bus.collect_delegated().await;
-            if results.is_empty() {
-                break;
-            }
-            reply = session
-                .process
-                .prompt_turn(&mut session.recorder, &delegated_turn(asked.team, &results))
-                .await?;
-        }
-    }
+    let (mut session, reply) = open_and_work(asked, process, model, prompt, &mut context).await?;
     if let Some(boundary) = context.boundary {
         let answer = session
             .process
@@ -1080,6 +1043,95 @@ pub(crate) async fn run_answerable_session(
         .process
         .finish_live(&mut session.recorder, reply, &context)
         .await
+}
+
+/// Open the agent's session and take its first round of work on `prompt` (see [`work_round`]),
+/// leaving the session open: closed by the caller, or kept for more rounds (a team-mode teammate,
+/// `TeamBus::keep_teammate`).
+pub(crate) async fn open_and_work(
+    asked: AskedQuestion<'_>,
+    mut process: AgentRun,
+    model: &str,
+    prompt: &str,
+    context: &mut TeamSessionContext<'_>,
+) -> Result<(StageSession, String)> {
+    let recorder = process.open_live(&asked.agent.id, model, context).await?;
+    // Boxed: opening and the round together are over Clippy's 16 KB `large_futures` limit on
+    // Windows, where futures come out larger.
+    Box::pin(work_round(
+        asked,
+        StageSession { process, recorder },
+        prompt,
+        context.bus,
+    ))
+    .await
+}
+
+/// One round of an agent's work on an open session: the turn on `prompt`, then everything that
+/// comes back to it before its reply is final. Returns the session and that reply.
+pub(crate) async fn work_round(
+    asked: AskedQuestion<'_>,
+    mut session: StageSession,
+    prompt: &str,
+    bus: Option<&TeamBusConnection>,
+) -> Result<(StageSession, String)> {
+    let work = Work::begin(
+        asked.lineage,
+        asked.shared_log,
+        &asked.agent.id,
+        &mut session.recorder,
+    );
+    let reply = session
+        .process
+        .prompt_turn(&mut session.recorder, prompt)
+        .await?;
+    let (mut session, mut reply) =
+        answer_parked_questions(AskedQuestion { ..asked }, session, reply).await?;
+    reply = work
+        .deliver_notes(&mut session, asked.shared_log, reply)
+        .await?;
+    drop(work);
+    // What this agent handed out with `dispatch` or `handoff` comes back to it as one more turn
+    // once all of it has finished, so the work it paid for reaches its answer instead of ending
+    // with the helper. Bounded, because that turn may hand out more.
+    if let Some(bus) = bus {
+        for _ in 0..DELEGATED_ROUNDS {
+            let results = bus.collect_delegated().await;
+            if results.is_empty() {
+                break;
+            }
+            reply = session
+                .process
+                .prompt_turn(&mut session.recorder, &delegated_turn(asked.team, &results))
+                .await?;
+        }
+    }
+    Ok((session, reply))
+}
+
+/// Your answer to each question the agent's last turn put to you with `ask_user`, as one more turn
+/// each, until it asks nothing more. Returns the session and its reply to the last of them.
+pub(crate) async fn answer_parked_questions(
+    asked: AskedQuestion<'_>,
+    mut session: StageSession,
+    mut reply: String,
+) -> Result<(StageSession, String)> {
+    while let Some(wait) = asked.bus.take_pending_question(&asked.agent.id).await {
+        // Boxed: parking and reopening the session is most of a round's future, and the rounds
+        // that await this would be over Clippy's 16 KB `large_futures` limit with it inline.
+        let (resumed, answer) = Box::pin(answer_a_parked_question(
+            AskedQuestion { ..asked },
+            session,
+            wait,
+        ))
+        .await?;
+        session = resumed;
+        reply = session
+            .process
+            .prompt_turn(&mut session.recorder, &answer_turn(&answer.text))
+            .await?;
+    }
+    Ok((session, reply))
 }
 
 /// Park a stage that called `ask_user`, wait for the answer, and bring its session back.
@@ -1841,9 +1893,9 @@ impl StageBoundary<'_> {
 }
 
 /// One stage's ACP session, held together so a park can hand both halves back.
-struct StageSession {
-    process: AgentRun,
-    recorder: crate::engine::Recorder,
+pub(crate) struct StageSession {
+    pub(crate) process: AgentRun,
+    pub(crate) recorder: crate::engine::Recorder,
 }
 
 /// A stage's session while the person at the keyboard is thinking (decision 7).
@@ -5700,6 +5752,136 @@ mod tests {
         assert_eq!(returned.payload["mode"], "dispatch");
         assert_eq!(returned.payload["status"], "succeeded");
         assert_eq!(returned.payload["reply"], "worker found 42 sources");
+        Ok(())
+    }
+
+    /// **A lead that sends its teammate back for a fix reaches the same conversation, and it closes
+    /// when the run ends.**
+    ///
+    /// The lead hands the worker a draft, then a fix. The worker writes "v2 from v1" only when the
+    /// fix reaches it framed as more work in the conversation that holds the draft's brief; a
+    /// fresh copy would see the fix alone. The worker opens one session, which is kept open after
+    /// each round and closed once, after the lead's last turn, before the run's events are counted.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_teammate_sent_back_for_a_fix_continues_its_conversation_until_the_run_ends()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let dispatch = |task: &str| {
+            crate::agent::Completion::calls(
+                "",
+                vec![crate::agent::ToolCall {
+                    id: format!("dispatch-{}", uuid::Uuid::new_v4().simple()),
+                    name: "dispatch".to_owned(),
+                    arguments: json!({"agent": "worker", "task": task}).to_string(),
+                }],
+            )
+        };
+        let lead = crate::engine::demo_model(crate::agent::Demo::responder(move |request| {
+            let prompt = request.prompt();
+            Some(if request.after_tool() {
+                crate::agent::Completion::text("handed out")
+            } else if prompt.contains("came back with") && prompt.contains("Draft v2 from v1") {
+                crate::agent::Completion::text("final: Draft v2 from v1")
+            } else if prompt.contains("came back with") && prompt.contains("Draft v1") {
+                dispatch("Fix the date.")
+            } else if prompt.contains("came back with") {
+                crate::agent::Completion::text("the fix did not build on the draft")
+            } else {
+                dispatch("Draft the launch note.")
+            })
+        }));
+        let worker = crate::engine::demo_model(crate::agent::Demo::responder(|request| {
+            let prompt = request.prompt();
+            let saw_the_draft = request.messages.iter().any(|message| {
+                matches!(message, crate::agent::Message::User { content } if content.contains("Draft the launch note."))
+            });
+            Some(crate::agent::Completion::text(
+                if prompt.contains("## More work from lead name")
+                    && prompt.contains("Fix the date.")
+                    && saw_the_draft
+                {
+                    "Draft v2 from v1"
+                } else if prompt.contains("Fix the date.") {
+                    "a fresh fix that never saw the draft"
+                } else {
+                    "Draft v1"
+                },
+            ))
+        }));
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "looping-team".into(),
+            name: "Looping team".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![
+                pipeline_agent("lead", &lead),
+                pipeline_agent("worker", &worker),
+            ],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let lineage = RunLineage {
+            operator: Some(desk),
+            ..RunLineage::default()
+        };
+        // A conversation that never closed would hold the run open: fail rather than hang.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(30),
+            run_team_mode(
+                &team,
+                &team_path,
+                archive.clone(),
+                "write the launch note",
+                Duration::from_secs(5),
+                Some(EventLog::new(archive.clone(), run_id.clone())),
+                &Arc::new(memory::TeamMemory::default()),
+                &lineage,
+            ),
+        )
+        .await
+        .context("the run never ended")??;
+        assert_eq!(outcome.reply, "final: Draft v2 from v1");
+        let events = archive.load_verified_session(&run_id).await?;
+        assert_eq!(outcome.event_count, events.len());
+        let worker_events = |phase: &str| {
+            events
+                .iter()
+                .filter(|event| event.agent_id == "worker" && event.payload["phase"] == phase)
+                .map(|event| event.seq)
+                .collect::<Vec<_>>()
+        };
+        // One session: its model is set once, it is kept open after each of its two rounds, and it
+        // exits once, after the second round's result went back to the lead.
+        assert_eq!(worker_events("set_config_option").len(), 1, "{events:#?}");
+        assert_eq!(worker_events("kept_open").len(), 2);
+        let exited = worker_events("exited");
+        assert_eq!(exited.len(), 1);
+        let results = worker_events("delegated_result");
+        assert_eq!(results.len(), 2);
+        assert!(exited[0] > results[1]);
+        let accepted: Vec<Value> = events
+            .iter()
+            .filter(|event| {
+                event.agent_id == "lead"
+                    && event.kind == EventKind::ToolUpdate
+                    && event.payload["status"] == "completed"
+            })
+            .map(|event| event.payload["rawOutput"].clone())
+            .collect();
+        assert_eq!(accepted.len(), 2);
+        assert!(accepted[0].get("continues").is_none(), "{accepted:?}");
+        assert_eq!(accepted[1]["continues"], true);
         Ok(())
     }
 
