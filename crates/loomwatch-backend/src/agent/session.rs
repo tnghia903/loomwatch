@@ -255,7 +255,7 @@ impl TurnEnd {
     /// `_meta`.
     #[must_use]
     pub fn as_result(&self) -> Value {
-        json!({
+        let mut result = json!({
             "stopReason": self.stop_reason.as_str(),
             "usage": {
                 "inputTokens": self.usage.input_tokens,
@@ -270,7 +270,9 @@ impl TurnEnd {
                 "webSearches": self.usage.web_searches,
                 "webFetches": self.usage.web_fetches,
             }},
-        })
+        });
+        super::events::mark_payer(&mut result["_meta"]["loomwatch"], &self.usage);
+        result
     }
 }
 
@@ -503,6 +505,7 @@ impl Session {
                 content: completion.content,
                 reasoning_details: completion.reasoning_details,
                 tool_calls: completion.tool_calls,
+                native: completion.native,
             });
             cut_offs = if cut { cut_offs + 1 } else { 0 };
             carrying_on = false;

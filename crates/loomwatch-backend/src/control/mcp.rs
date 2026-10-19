@@ -303,7 +303,7 @@ fn models_used(team: &TeamConfig) -> Vec<String> {
         .iter()
         .filter(|agent| agent.kind != AgentKind::Operator)
     {
-        let model = crate::ai::openrouter_id(&agent.model);
+        let model = crate::ai::ModelRef::parse(&agent.model).selector();
         if !models.contains(&model) {
             models.push(model);
         }

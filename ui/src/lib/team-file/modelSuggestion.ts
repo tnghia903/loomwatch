@@ -8,7 +8,7 @@
 // a reading of its whole setup (agentSetup.ts) says what kind of work it does instead; the team's
 // shape still applies after it. Pure, so every case is testable without a picker.
 
-import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, modelNameFromId, openRouterId } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, FAST_MODEL, modelNameFromId, canonicalModel } from '../ai/modelIds'
 import { isCheckerRole } from '../library/checker'
 import { type SetupReading, type SuggestedAgent, trustedKind } from './agentSetup'
 import { jobFor } from './checkup'
@@ -46,7 +46,7 @@ export function suggestModel({ agent, team, reading }: ModelSuggestionInput): Mo
   if (agent.checks || isCheckerRole(agent.role) || (read ? read === 'check' : job?.tier === 'check')) {
     const checked = agent.checks ? team?.agents.find((other) => other.id === agent.checks) : undefined
     if (checked) {
-      const theirs = openRouterId(checked.model)
+      const theirs = canonicalModel(checked.model)
       const model = maker(theirs) === maker(CHECK_MODEL) ? DEFAULT_MODEL : CHECK_MODEL
       return { model, why: `It checks ${checked.name}’s work, written on ${named(theirs)}. A model from another maker reads it without sharing its blind spots.` }
     }

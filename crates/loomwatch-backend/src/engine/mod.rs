@@ -25,9 +25,10 @@ pub(crate) use bridge::tool_spec;
 pub(crate) use recorder::{EventLog, Recorder, ReplyText, new_event_id};
 
 use crate::agent::{
-    AgentError, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter, Provider, Session,
-    SessionConfig, ToolSet,
+    AgentError, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter, Problem, ProblemKind,
+    Provider, Session, SessionConfig, ToolSet,
 };
+use crate::ai::{ModelRef, Source};
 use crate::archive::EventArchive;
 use crate::team_bus::TeamBusConnection;
 use crate::{EventKind, SessionOutcome};
@@ -92,10 +93,35 @@ impl<'a> BoundaryTurn<'a> {
 }
 
 /// A turn that could not finish, said in the operator's words: the key was refused, the account
-/// is out of credits, no key is set. The run shows `message` as it is.
+/// is out of credits, no key is set. The run shows `message` as it is, and `problem` says which
+/// source it was and what went wrong, for the app to offer the way out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AppReportedError {
     pub(crate) message: String,
+    pub(crate) problem: Option<Problem>,
+}
+
+impl AppReportedError {
+    pub(crate) fn said(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            problem: None,
+        }
+    }
+
+    /// The `turn_failed` note a run's record keeps for it.
+    fn note(&self) -> Value {
+        turn_failed(&self.message, self.problem.as_ref())
+    }
+}
+
+/// A `turn_failed` note: the words, and the problem when the app can offer a way out of it.
+fn turn_failed(message: &str, problem: Option<&Problem>) -> Value {
+    let mut note = json!({"phase": "turn_failed", "reason": "app_error", "message": message});
+    if let Some(problem) = problem {
+        note["problem"] = json!(problem);
+    }
+    note
 }
 
 impl std::fmt::Display for AppReportedError {
@@ -139,8 +165,13 @@ type KeptConnection = Option<(String, Arc<OpenRouter>)>;
 static OPENROUTER: LazyLock<tokio::sync::Mutex<KeptConnection>> =
     LazyLock::new(tokio::sync::Mutex::default);
 
-/// The provider `model` runs on.
-async fn provider_for(model: &str) -> Result<Provider, AppReportedError> {
+/// The provider `model` runs on: its own source's, never another's.
+async fn provider_for(model: &ModelRef) -> Result<Provider, AppReportedError> {
+    match model.source {
+        Source::OpenRouter => {}
+        source @ (Source::ChatGpt | Source::Anthropic) => return Err(not_connected(source)),
+    }
+    let model = model.id.as_str();
     if model == OFFLINE_MODEL {
         return Ok(Provider::Demo(Demo::offline()));
     }
@@ -151,17 +182,15 @@ async fn provider_for(model: &str) -> Result<Provider, AppReportedError> {
     {
         return Ok(Provider::Demo(demo.clone()));
     }
-    let missing = || AppReportedError {
-        message: "Agents need an OpenRouter key to run. Add one on LoomWatch's Connections page, \
-                  then run the team again."
-            .to_owned(),
-    };
+    let missing = || not_connected(Source::OpenRouter);
     let ai = crate::ai::installed().ok_or_else(missing)?;
     let key = ai
         .openrouter_key()
         .await
-        .map_err(|error| AppReportedError {
-            message: format!("LoomWatch couldn't read your OpenRouter key: {error:#}"),
+        .map_err(|error| {
+            AppReportedError::said(format!(
+                "LoomWatch couldn't read your OpenRouter key: {error:#}"
+            ))
         })?
         .ok_or_else(missing)?;
     let mut held = OPENROUTER.lock().await;
@@ -170,13 +199,35 @@ async fn provider_for(model: &str) -> Result<Provider, AppReportedError> {
     {
         return Ok(Provider::OpenRouter(provider.clone()));
     }
-    let provider = Arc::new(
-        OpenRouter::new(key.clone()).map_err(|error| AppReportedError {
-            message: format!("LoomWatch couldn't set up its connection to OpenRouter: {error:#}"),
-        })?,
-    );
+    let provider = Arc::new(OpenRouter::new(key.clone()).map_err(|error| {
+        AppReportedError::said(format!(
+            "LoomWatch couldn't set up its connection to OpenRouter: {error:#}"
+        ))
+    })?);
     *held = Some((key.expose().to_owned(), provider.clone()));
     Ok(Provider::OpenRouter(provider))
+}
+
+/// An agent whose source has nothing connected on this computer, said with what to connect.
+fn not_connected(source: Source) -> AppReportedError {
+    let message = match source {
+        Source::OpenRouter => {
+            "Agents need an OpenRouter key to run. Add one on LoomWatch's Connections page, then \
+             run the team again."
+        }
+        Source::ChatGpt => {
+            "This agent runs on your ChatGPT plan. Sign in with ChatGPT on LoomWatch's \
+             Connections page, then run the team again."
+        }
+        Source::Anthropic => {
+            "This agent runs on your Claude API credit. Add your Claude API key on LoomWatch's \
+             Connections page, then run the team again."
+        }
+    };
+    AppReportedError {
+        message: message.to_owned(),
+        problem: Some(Problem::new(ProblemKind::NotConnected, source)),
+    }
 }
 
 /// `model[effort]`, as team files write a model with a reasoning effort, split into its parts.
@@ -325,13 +376,13 @@ impl AgentRun {
         }
         self.has_run = true;
         let (model, effort) = split_selector(model);
-        let model = crate::ai::openrouter_id(model);
+        let model = ModelRef::parse(model);
         let session_id = Uuid::new_v4().to_string();
         let mut recorder = self.start_recorder(agent_id, &session_id, context).await?;
         recorder
             .append(
                 EventKind::SessionMeta,
-                json!({"phase": "set_config_option", "configId": "model", "value": model}),
+                json!({"phase": "set_config_option", "configId": "model", "value": model.selector()}),
                 Some(json!({"source": "loomwatch", "phase": "set_config_option"})),
             )
             .await?;
@@ -353,7 +404,7 @@ impl AgentRun {
                 recorder
                     .append(
                         EventKind::SessionMeta,
-                        json!({"phase": "turn_failed", "reason": "app_error", "message": error.message}),
+                        error.note(),
                         Some(json!({"source": "loomwatch", "phase": "turn_failed"})),
                     )
                     .await?;
@@ -361,7 +412,13 @@ impl AgentRun {
             }
         };
         let mut config = self
-            .session_config(&session_id, agent_id, &model, effort, context.bus)
+            .session_config(
+                &session_id,
+                agent_id,
+                &model.selector(),
+                effort,
+                context.bus,
+            )
             .await;
         config.skill_focus = context.composed.map(skill_focus);
         let (sender, receiver) = unbounded_channel();
@@ -425,7 +482,7 @@ impl AgentRun {
                 Some(json!({"source": "loomwatch", "phase": "session_loaded"})),
             )
             .await?;
-        let provider = provider_for(&snapshot.model).await?;
+        let provider = provider_for(&ModelRef::parse(&snapshot.model)).await?;
         let config = self
             .session_config(
                 session_id,
@@ -669,16 +726,19 @@ impl AgentRun {
                 Ok(recorder.reply.take())
             }
             Err(error) => {
-                let message = error.to_string();
+                let failed = AppReportedError {
+                    message: error.to_string(),
+                    problem: error.problem(),
+                };
                 recorder.reply.clear();
                 recorder
                     .append(
                         EventKind::SessionMeta,
-                        json!({"phase": "turn_failed", "reason": "app_error", "message": message}),
+                        failed.note(),
                         Some(json!({"source": "loomwatch", "phase": "turn_failed"})),
                     )
                     .await?;
-                Err(AppReportedError { message }.into())
+                Err(failed.into())
             }
         }
     }
@@ -878,7 +938,10 @@ impl AgentRun {
         ];
         if let Some(ai) = crate::ai::installed() {
             config.skill_library.push(ai.skills_folder());
-            config.context_window = ai.models().context_length(model).await;
+            config.context_window = ai
+                .models()
+                .context_length(&ModelRef::parse(model).openrouter_equivalent())
+                .await;
         }
         config
     }

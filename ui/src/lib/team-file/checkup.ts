@@ -10,7 +10,7 @@
 //
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
-import { CHECK_MODEL, DEFAULT_MODEL, OVERTHINKING_EFFORTS, modelForJob, modelNameFromId, openRouterId } from '../ai/modelIds'
+import { CHECK_MODEL, DEFAULT_MODEL, OVERTHINKING_EFFORTS, modelForJob, modelNameFromId, canonicalModel } from '../ai/modelIds'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
 import type { TeamUsage } from './runLessons'
 import type { AgentAllow, AgentConfig, AllowSwitch } from './types'
@@ -347,7 +347,7 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
     // agent whose reply is the team's answer, and only for one on the default strong model: a model
     // the operator chose on purpose is theirs.
     const job = jobFor(agent)
-    if (job?.tier === 'fast' && !final && openRouterId(agent.model) === DEFAULT_MODEL) {
+    if (job?.tier === 'fast' && !final && canonicalModel(agent.model) === DEFAULT_MODEL) {
       const fast = modelForJob(job)
       const named = (id: string) => modelNames?.get(id) ?? modelNameFromId(id)
       const writer = responder ? name(responder) : 'the next step'
@@ -443,8 +443,8 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
   for (const checker of workers) {
     const checked = checker.checks ? byId.get(checker.checks) : undefined
     if (!checked || checked.kind === 'operator') continue
-    const theirs = openRouterId(checked.model)
-    if (theirs && openRouterId(checker.model) === theirs) {
+    const theirs = canonicalModel(checked.model)
+    if (theirs && canonicalModel(checker.model) === theirs) {
       // The other maker's model, as the model picker suggests it (modelSuggestion.ts).
       const other = theirs.split('/')[0] === CHECK_MODEL.split('/')[0] ? DEFAULT_MODEL : CHECK_MODEL
       add({

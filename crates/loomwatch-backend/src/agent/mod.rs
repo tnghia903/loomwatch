@@ -45,13 +45,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use demo::{Demo, Hold, OFFLINE_MODEL, Respond, SeenRequest};
-pub use error::AgentError;
+pub use error::{AgentError, CHATGPT_USAGE_URL, Problem, ProblemKind};
 pub use events::{EventSink, ToolKind, ToolStatus};
 pub use openrouter::{BASE_URL_ENV, DEFAULT_BASE_URL, OpenRouter, base_url, is_loopback_http};
 pub(crate) use openrouter::{REFERER as OPENROUTER_REFERER, TITLE as OPENROUTER_TITLE};
 pub use permission::{AllowAll, Decision, DenyAll, PermissionRequest, Permissions};
 pub use provider::{
-    Completion, Finish, Message, Provider, ServerTools, ToolCall, ToolSpec, Usage, WebLimits,
+    Completion, Finish, Message, Native, Provider, ServerTools, ToolCall, ToolSpec, Usage,
+    WebLimits,
 };
 pub use session::{
     CancelHandle, HostAsk, HostTools, NoHostTools, Session, SessionConfig, Snapshot, StopReason,

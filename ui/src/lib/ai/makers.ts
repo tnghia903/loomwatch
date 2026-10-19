@@ -4,6 +4,8 @@
 // third-party-notices.txt). Each mark is its company's trademark and is shown only to say who
 // made the model; LoomWatch is not affiliated with any of them.
 
+import { openRouterEquivalent, parseModelRef } from './modelIds'
+
 export interface Maker {
   /** The name people know the company by, or OpenRouter's own word for it when this list has none. */
   name: string
@@ -87,11 +89,13 @@ const MAKERS: Record<string, { name: string; mark?: string }> = {
 }
 
 /**
- * Who made a model, from its OpenRouter id ("anthropic/claude-opus-5.5"). A "~" in front is
- * OpenRouter's always-the-latest alias ("~anthropic/claude-opus-latest"), the same maker.
+ * Who made a model, from its id: an OpenRouter id ("anthropic/claude-opus-5.5") or one a plan pays
+ * for ("chatgpt:gpt-6.1-sol" is OpenAI's). A "~" in front is OpenRouter's always-the-latest alias
+ * ("~anthropic/claude-opus-latest"), the same maker.
  */
 export function makerOf(id: string): Maker {
-  const slug = (id.split('/')[0] ?? '').replace(/^~/, '')
+  const openrouter = openRouterEquivalent(parseModelRef(id))
+  const slug = (openrouter.split('/')[0] ?? '').replace(/^~/, '')
   const known = Object.hasOwn(MAKERS, slug) ? MAKERS[slug] : undefined
   if (!known) return { name: slug }
   return known.mark ? { name: known.name, mark: MARKS[known.mark] } : { name: known.name }

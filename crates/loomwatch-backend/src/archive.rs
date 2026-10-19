@@ -13,6 +13,9 @@ use crate::db::{self, Db};
 use crate::{EventKind, RunEvent};
 
 pub(crate) mod codec;
+mod usage;
+
+pub use usage::{AgentUsage, DayUsage, LastProblem, SourceUsage, Tally, UsageReport};
 
 /// The ordered event archive, in the SQLite database.
 #[derive(Clone, Debug)]

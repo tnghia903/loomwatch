@@ -5535,9 +5535,9 @@ pub(crate) mod tests {
 
         // An app that reported its turn failed is neither: the process was fine, and so was the
         // protocol. The crash marker a one-shot session writes for it changes nothing.
-        let refused = anyhow::Error::new(crate::engine::AppReportedError {
-            message: "The model is not supported.".to_owned(),
-        })
+        let refused = anyhow::Error::new(crate::engine::AppReportedError::said(
+            "The model is not supported.",
+        ))
         .context("pipeline node gatherer failed");
         assert_eq!(classify_failure_code(&refused, false, None), APP_ERROR);
         assert_eq!(

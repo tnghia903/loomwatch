@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { type Model, contextSize, price, shortName } from '../../lib/ai/client'
 import { makerOf } from '../../lib/ai/makers'
-import { OFFLINE_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
+import { OFFLINE_MODEL, modelNameFromId, parseModelRef } from '../../lib/ai/modelIds'
 import { useSetupReading } from '../../lib/ai/reading'
 import { useModels } from '../../lib/ai/useModels'
 import { type ModelSuggestionInput, suggestModel } from '../../lib/team-file/modelSuggestion'
@@ -201,11 +201,11 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
     <div ref={root} className="model-picker field" onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close() } }}>
       <span className="t-meta" id={labelId}>{label}</span>
       <button ref={toggle} type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}${follows ? ` ${suggestedId}` : ''}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
-        {value.includes('/') && value !== OFFLINE_MODEL && <MakerMark maker={makerOf(value)} />}
+        {value && value !== OFFLINE_MODEL && (value.includes('/') || parseModelRef(value).source !== 'openrouter') && <MakerMark maker={makerOf(value)} />}
         <span className="model-picker-text">
           <span className="t-body" id={nameId}>{current ? shortName(current) : value ? modelNameFromId(value) : 'Choose a model'}</span>
           {current && <span className="t-meta lw-settings-quiet">{current.free ? 'Free' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}</span>}
-          {!current && value && value !== OFFLINE_MODEL && catalog && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
+          {!current && value && value !== OFFLINE_MODEL && catalog && parseModelRef(value).source === 'openrouter' && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
         </span>
         {follows && <span className="model-picker-suggested t-meta" id={suggestedId}><Sparkles size={11} aria-hidden="true" />Suggested</span>}
         <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />

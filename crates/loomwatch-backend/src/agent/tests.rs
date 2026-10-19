@@ -14,6 +14,7 @@ use axum::routing::post;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::ai::Source;
 
 /// Keeps every update, for a test to read.
 #[derive(Default)]
@@ -820,7 +821,11 @@ async fn openrouter_refusals_read_plainly_and_busy_answers_are_retried() {
         Arc::new(AllowAll),
     );
     let said = refused.prompt("Hi").await.unwrap_err();
-    assert!(matches!(said, AgentError::KeyRefused));
+    assert!(matches!(said, AgentError::KeyRefused(Source::OpenRouter)));
+    assert_eq!(
+        said.problem().map(|problem| problem.kind),
+        Some(super::error::ProblemKind::KeyRefused)
+    );
     assert!(said.to_string().contains("Connections page"));
 
     let (_, base) = stand(vec![error(
@@ -836,7 +841,7 @@ async fn openrouter_refusals_read_plainly_and_busy_answers_are_retried() {
     );
     assert!(matches!(
         broke.prompt("Hi").await.unwrap_err(),
-        AgentError::OutOfCredits
+        AgentError::OutOfCredits(Source::OpenRouter)
     ));
 
     let (stand, base) = stand(vec![

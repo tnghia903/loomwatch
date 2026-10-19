@@ -289,9 +289,16 @@ pub fn review(team: &TeamConfig) -> Vec<ReviewLine> {
 /// The lines about one agent, added to `lines`.
 fn review_agent(agent: &AgentConfig, lines: &mut Vec<ReviewLine>) {
     let who = agent_name(agent);
+    // Which source pays is said too: a team file dropped in can spend the person's plan.
+    let model = crate::ai::ModelRef::parse(&agent.model);
+    let paid = match model.source {
+        crate::ai::Source::OpenRouter => "through OpenRouter",
+        crate::ai::Source::ChatGpt => "on your ChatGPT plan",
+        crate::ai::Source::Anthropic => "on your Claude API credit",
+    };
     lines.push(ReviewLine::info(format!(
-        "{who} runs on LoomWatch with {}.",
-        crate::ai::openrouter_id(&agent.model)
+        "{who} runs on LoomWatch with {}, {paid}.",
+        model.id
     )));
     let cwd = agent.spawn.cwd.to_string_lossy();
     if outside_team_folder(&agent.spawn.cwd) {
@@ -464,12 +471,31 @@ mod tests {
         TeamConfig::parse(yaml).expect("team parses")
     }
 
+    /// A team file dropped in can spend the person's plan, so the review says which source pays.
+    #[test]
+    fn the_review_says_which_source_each_agent_is_paid_from() {
+        let lines = review(&team(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    name: Writer\n    model: chatgpt:gpt-6.1-sol\n  - id: b\n    name: Checker\n    model: anthropic:claude-opus-5-5[high]\n",
+        ));
+        assert!(lines.contains(&ReviewLine::info(
+            "Writer runs on LoomWatch with gpt-6.1-sol, on your ChatGPT plan.".to_owned()
+        )));
+        assert!(
+            lines.iter().any(|line| line
+                .text
+                .starts_with("Checker runs on LoomWatch with claude-opus-5-5")
+                && line.text.ends_with("on your Claude API credit.")),
+            "{lines:?}"
+        );
+    }
+
     #[test]
     fn the_review_names_each_agents_model_and_flags_what_deserves_a_second_look() {
         assert_eq!(
             review(&team(TEAM)),
             vec![ReviewLine::info(
-                "Researcher runs on LoomWatch with anthropic/claude-opus-5.5.".to_owned()
+                "Researcher runs on LoomWatch with anthropic/claude-opus-5.5, through OpenRouter."
+                    .to_owned()
             )]
         );
         let custom = review(&team(
@@ -477,7 +503,9 @@ mod tests {
         ));
         assert_eq!(
             custom[0],
-            ReviewLine::info("Fetcher runs on LoomWatch with openai/gpt-5.5.".to_owned()),
+            ReviewLine::info(
+                "Fetcher runs on LoomWatch with openai/gpt-5.5, through OpenRouter.".to_owned()
+            ),
             "the program an old file named is not run, so it is not shown"
         );
         assert!(custom.contains(&ReviewLine::warn("Fetcher works in /tmp.".to_owned())));

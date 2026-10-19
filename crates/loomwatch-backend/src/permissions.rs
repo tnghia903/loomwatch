@@ -211,9 +211,10 @@ impl PermissionPolicy {
         let Some(state) = &self.state_dir else {
             return false;
         };
-        // The key, and the connected tools' secrets and list (ADR 0069).
+        // The keys and sign-ins (ADR 0073), and the connected tools' secrets and list (ADR 0069).
         let secrets = [
             state.join(crate::ai::KEY_FILE),
+            state.join(crate::ai::PLANS_FILE),
             state.join(crate::connected_tools::CREDENTIALS_FILE),
             state.join(crate::connected_tools::TOOLS_FILE),
         ];

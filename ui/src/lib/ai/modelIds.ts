@@ -1,9 +1,11 @@
-// Which model an agent runs on, and how hard it thinks.
+// Which model an agent runs on, who pays for it, and how hard it thinks.
 //
-// Every agent runs on LoomWatch's own engine through OpenRouter, so a `model` is an OpenRouter id
-// (`anthropic/claude-opus-5.5`). Team files written for an AI app hold that app's names (`sonnet`,
-// `gpt-5.5`); `openRouterId` reads them the way the daemon does (`crates/loomwatch-backend/src/ai/
-// models.rs`, `openrouter_id`), with the same test cases, because the app reads team files itself.
+// Every agent runs on LoomWatch's own engine. A `model` also says who pays (ADR 0073): the
+// person's ChatGPT plan (`chatgpt:gpt-6.1-sol`), their Claude API credit
+// (`anthropic:claude-opus-5-5`), or OpenRouter (`anthropic/claude-opus-5.5`). Team files written for
+// an AI app hold that app's names (`sonnet`, `gpt-5.5`), read as OpenRouter's. `parseModelRef` reads
+// them the way the daemon does (`crates/loomwatch-backend/src/ai/models.rs`, `ModelRef::parse`),
+// with the same test cases, because the app reads team files itself.
 
 import tiers from '../../../../schemas/model-tiers.json'
 
@@ -30,7 +32,84 @@ export type Effort = (typeof EFFORTS)[number]
 /** Efforts so high they mostly buy overthinking: Anthropic's guidance says max often overthinks. */
 export const OVERTHINKING_EFFORTS: ReadonlySet<string> = new Set(['xhigh', 'max', 'ultra'])
 
-/** The OpenRouter id for a team file's `model`. */
+/** Who pays for a model call: each costs differently, so a model never moves between them by itself. */
+export type ModelSource = 'openrouter' | 'chatgpt' | 'anthropic'
+
+/** Every source, in the order the model picker shows them: the plans a person already pays for first. */
+export const SOURCES: readonly ModelSource[] = ['chatgpt', 'anthropic', 'openrouter']
+
+/** A team file's `model`, read for who pays and what that source calls it. */
+export interface ModelRef {
+  source: ModelSource
+  /** As its source names it: `gpt-6.1-sol`, `claude-opus-5-5`, or an OpenRouter id. */
+  id: string
+}
+
+const KNOWN_EFFORTS = new Set(['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+
+/** `model` without a known `[effort]` at its end, and the effort. */
+function withoutEffort(model: string): { base: string; effort?: string } {
+  const text = model.trim()
+  const open = text.lastIndexOf('[')
+  if (open >= 0 && text.endsWith(']')) {
+    const effort = text.slice(open + 1, -1)
+    if (KNOWN_EFFORTS.has(effort)) return { base: text.slice(0, open).trimEnd(), effort }
+  }
+  return { base: text }
+}
+
+/**
+ * Reads a team file's `model`. `chatgpt:` and `anthropic:` name their source; anything else is read
+ * as OpenRouter's, the way it always was. A prefix with nothing after it keeps its source, so the run
+ * fails plainly instead of quietly running on OpenRouter.
+ */
+export function parseModelRef(model: string | undefined): ModelRef {
+  const { base } = withoutEffort(model ?? '')
+  const colon = base.indexOf(':')
+  if (colon >= 0) {
+    const prefix = base.slice(0, colon).toLowerCase()
+    if (prefix === 'chatgpt' || prefix === 'anthropic') return { source: prefix, id: base.slice(colon + 1).trim() }
+  }
+  return { source: 'openrouter', id: openRouterId(base) }
+}
+
+/** A model as a team file writes it, without its effort. */
+export function modelSelector(model: ModelRef): string {
+  return model.source === 'openrouter' ? model.id : `${model.source}:${model.id}`
+}
+
+/** A team file's `model` as the app and the daemon name it, without its effort: `sonnet` is `anthropic/claude-sonnet-5.5`. */
+export function canonicalModel(model: string | undefined): string {
+  return modelSelector(parseModelRef(model))
+}
+
+/** `model` as a team file should write it, its `[effort]` kept. */
+export function normalizeModel(model: string): string {
+  const { effort } = withoutEffort(model)
+  const selector = canonicalModel(model)
+  return effort ? `${selector}[${effort}]` : selector
+}
+
+/** The same model in OpenRouter's catalog, where its context size and prices are listed. */
+export function openRouterEquivalent(model: ModelRef): string {
+  if (model.source === 'chatgpt') return `openai/${model.id}`
+  if (model.source === 'anthropic') return openRouterId(model.id)
+  return model.id
+}
+
+/** The same model through `source`, when it can be named there. Whether that source offers it is the caller's to check. */
+export function modelOn(model: ModelRef, source: ModelSource): ModelRef | undefined {
+  if (model.source === source) return model
+  const openrouter = openRouterEquivalent(model)
+  if (source === 'openrouter') return { source, id: openrouter }
+  if (source === 'chatgpt') return openrouter.startsWith('openai/') ? { source, id: openrouter.slice('openai/'.length) } : undefined
+  const name = openrouter.startsWith('anthropic/') ? openrouter.slice('anthropic/'.length) : undefined
+  // A variant (`:thinking`) or an alias (`~anthropic/…`) has no Anthropic id.
+  if (!name || name.includes(':') || !name.startsWith('claude-')) return undefined
+  return { source, id: name.replaceAll('.', '-') }
+}
+
+/** The OpenRouter id for a team file's `model` written for OpenRouter or an AI app. Read a model with `parseModelRef`. */
 export function openRouterId(model: string | undefined): string {
   let id = (model ?? '').trim()
   if (!id) return DEFAULT_MODEL
@@ -61,7 +140,8 @@ export function openRouterId(model: string | undefined): string {
 /** A model's short name from its id, for when the model list hasn't arrived: `Claude Opus 5.5`. */
 export function modelNameFromId(id: string): string {
   if (id === OFFLINE_MODEL) return 'Offline demo (no AI)'
-  const name = (id.split('/').pop() ?? id).replace(/:free$/, ' (free)')
+  const named = openRouterEquivalent(parseModelRef(id))
+  const name = (named.split('/').pop() ?? named).replace(/:free$/, ' (free)')
   return name
     .split('-')
     .map((word) => (/^\d/.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)))

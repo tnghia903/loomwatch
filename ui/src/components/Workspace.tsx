@@ -3,7 +3,7 @@ import '@xyflow/react/dist/style.css'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import { shortName } from '../lib/ai/client'
-import { OFFLINE_MODEL, openRouterId } from '../lib/ai/modelIds'
+import { OFFLINE_MODEL, parseModelRef } from '../lib/ai/modelIds'
 import { useKeyStatus } from '../lib/ai/useKeyStatus'
 import { useModels } from '../lib/ai/useModels'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
@@ -536,7 +536,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Every agent thinks on the person's OpenRouter key, so a team can't run without one. The offline
   // demo calls no model and runs without it.
   const key = useKeyStatus()
-  const needsKey = key !== null && !key.connected && docAgents.some((agent) => agent.kind !== 'operator' && openRouterId(agent.model) !== OFFLINE_MODEL)
+  const needsKey = key !== null && !key.connected && docAgents.some((agent) => {
+    if (agent.kind === 'operator') return false
+    const model = parseModelRef(agent.model)
+    return model.source === 'openrouter' && model.id !== OFFLINE_MODEL
+  })
   const keyProblem = needsKey ? `Add your OpenRouter key so these agents can think. LoomWatch keeps it in ${keyStore()}.` : null
   const { catalog: modelCatalog } = useModels()
   const modelNames = useMemo(() => new Map((modelCatalog?.models ?? []).map((model) => [model.id, shortName(model)])), [modelCatalog])

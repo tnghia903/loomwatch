@@ -1,4 +1,4 @@
-import { OFFLINE_MODEL, modelNameFromId, openRouterId } from './ai/modelIds'
+import { OFFLINE_MODEL, canonicalModel, modelNameFromId } from './ai/modelIds'
 import type { AgentConfig } from './team-file/types'
 
 /**
@@ -7,7 +7,7 @@ import type { AgentConfig } from './team-file/types'
  */
 export function modelLabelForAgent(agent: AgentConfig, names?: ReadonlyMap<string, string>): string {
   if (agent.kind === 'operator') return 'You (review step)'
-  const id = openRouterId(agent.model)
+  const id = canonicalModel(agent.model)
   if (id === OFFLINE_MODEL) return 'Offline demo (no AI)'
   return names?.get(id) ?? modelNameFromId(id)
 }

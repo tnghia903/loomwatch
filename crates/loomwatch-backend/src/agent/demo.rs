@@ -273,7 +273,11 @@ impl Demo {
                     if !partial.is_empty() {
                         deltas.text(partial).await?;
                     }
-                    return Err(AgentError::Provider(message.clone()).into());
+                    return Err(AgentError::Provider(
+                        crate::ai::Source::OpenRouter,
+                        message.clone(),
+                    )
+                    .into());
                 }
                 scripted
                     .or_else(|| script.respond.as_ref().and_then(|respond| respond(&seen)))

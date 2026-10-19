@@ -25,7 +25,7 @@ mod client;
 mod host;
 mod icons;
 mod sign_in;
-mod vault;
+pub(crate) mod vault;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};

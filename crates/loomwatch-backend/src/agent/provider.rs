@@ -11,6 +11,7 @@ use super::BoxFuture;
 use super::demo::Demo;
 use super::error::CallError;
 use super::openrouter::OpenRouter;
+use crate::ai::Source;
 
 /// One message of the conversation, in the agent's own order. It is append-only: a model that
 /// signs its reasoning (Claude's "preserved thinking") refuses a history whose earlier turns were
@@ -31,11 +32,23 @@ pub enum Message {
         reasoning_details: Vec<Value>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
+        /// The message as a provider other than `OpenRouter` wrote it, sent back to that provider
+        /// unchanged: Claude refuses a history whose signed thinking was rewritten.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native: Option<Native>,
     },
     Tool {
         tool_call_id: String,
         content: String,
     },
+}
+
+/// A message in the shape one provider writes it: Anthropic's content blocks or the Responses API's
+/// output items. Only that provider reads it back; any other ignores it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Native {
+    pub source: Source,
+    pub items: Vec<Value>,
 }
 
 /// A tool the model asked to call. `arguments` is the JSON text the model wrote, kept as text so
@@ -165,6 +178,13 @@ pub struct Usage {
     pub web_searches: u64,
     #[serde(default)]
     pub web_fetches: u64,
+    /// Who paid, when it was not `OpenRouter`. A `ChatGPT` plan's calls cost the plan's allowance,
+    /// not dollars, so their `cost_usd` is zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_by: Option<Source>,
+    /// `cost_usd` was worked out from list prices rather than reported by the provider.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cost_estimated: bool,
 }
 
 impl Usage {
@@ -177,6 +197,8 @@ impl Usage {
         self.cost_usd += other.cost_usd;
         self.web_searches += other.web_searches;
         self.web_fetches += other.web_fetches;
+        self.paid_by = self.paid_by.or(other.paid_by);
+        self.cost_estimated |= other.cost_estimated;
     }
 
     /// Every prompt token, cached or not: how full the model's context was for this call.
@@ -201,6 +223,8 @@ pub struct Completion {
     pub usage: Usage,
     /// Searches and fetches the provider ran on the model's behalf, for the record.
     pub server_tool_calls: Vec<Value>,
+    /// The message as the provider wrote it, when it is not `OpenRouter`: see [`Native`].
+    pub native: Option<Native>,
 }
 
 impl Completion {
@@ -214,6 +238,7 @@ impl Completion {
             finish: Finish::Stop,
             usage: Usage::default(),
             server_tool_calls: Vec::new(),
+            native: None,
         }
     }
 
