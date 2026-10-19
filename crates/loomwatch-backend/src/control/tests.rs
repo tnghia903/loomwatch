@@ -630,7 +630,7 @@ async fn the_person_chooses_the_model_a_conversation_uses() {
     }
 }
 
-/// ADR 0074: Ask LoomWatch knows who it is talking to, as every agent does. The rewrite of an
+/// ADR 0074: Ask `LoomWatch` knows who it is talking to, as every agent does. The rewrite of an
 /// agent's instructions is not told: it writes `LoomWatch`'s text, which "answer in Vietnamese"
 /// must not translate.
 #[tokio::test]
