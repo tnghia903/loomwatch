@@ -219,7 +219,6 @@ span.story-schedule { cursor: default; }
 .chat-mention { font-weight: 600; color: var(--hue); }
 .chat-file { padding: 8px 10px 9px; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-ground); }
 .chat-file-head { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: var(--color-ink-2); }
-.chat-file-head .chat-mentions { display: inline-flex; margin: 0; }
 .chat-text { overflow-wrap: anywhere; }
 .chat-text.cut { max-height: 10.5em; overflow: hidden; -webkit-mask: linear-gradient(#000 62%, transparent); mask: linear-gradient(#000 62%, transparent); }
 /* The agents write Markdown; a chat shows it formatted, at the chat's size. */

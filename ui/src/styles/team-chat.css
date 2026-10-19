@@ -319,7 +319,9 @@
 .tc-link:hover, .tc-link:focus-visible, .tc-link[aria-pressed='true'], .tc-link[aria-expanded='true'] { color: var(--color-accent); }
 .tc-link.danger:hover, .tc-link.danger:focus-visible { color: var(--color-alert); }
 .tc-link:disabled { opacity: .5; cursor: default; }
-.tc-said { margin: 4px 0 0 42px; }
+/* The agents' talk lines up with the answer and your request: a reply says what it answers by its
+   quote (components/chat/ReplyQuote.tsx), not by an indent. */
+.tc-said { margin: 4px 0 0; }
 .tc-said .chat { margin: 6px 0 4px; }
 
 /* What the team waits on you for: a message with its buttons. */
@@ -500,7 +502,7 @@
 }
 
 @container (max-width: 560px) {
-  .tc-talk, .tc-decision, .tc-said, .tc-stopped, .tc-continue, .tc-piece .permission-prompt.inline { margin-left: 0; }
+  .tc-talk, .tc-decision, .tc-stopped, .tc-continue, .tc-piece .permission-prompt.inline { margin-left: 0; }
   .tc-talk-acts { margin-left: 0; }
 }
 @container (max-width: 400px) {

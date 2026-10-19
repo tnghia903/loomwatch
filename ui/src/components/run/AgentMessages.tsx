@@ -5,13 +5,14 @@ import { bubbles as layOut, callsWhileWaiting, converse, fold, waited, type Bubb
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { clockTime } from '../../lib/chat/format'
 import type { ReplyKind, ReplyTo } from '../../lib/chat/client'
-import { questionBackOf } from '../../lib/chat/reply'
+import { questionBackOf, SAID } from '../../lib/chat/reply'
 import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
 import { REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
 import { useAgentFaces } from '../../lib/chat/faces'
 import { AgentFace } from '../chat/AgentFace'
+import { Quote } from '../chat/ReplyQuote'
 import { AvatarFace } from '../agents/AvatarFace'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
@@ -75,9 +76,9 @@ const LONG = { lines: 7, chars: 520 }
 
 /**
  * What the agents said to each other, as a group chat: each agent a member with its own avatar and
- * name colour, your words on the right, an answer quoting the question it answers, a handover as a
- * document someone shared, and "… is typing" while an answer is on its way. Read only: this is the
- * record of the run, and reopening it never runs the agents again.
+ * name colour, your words on the right, a handover said like any message, every reply quoting what
+ * it answers, and "… is typing" while an answer is on its way. Read only: this is the record of the
+ * run, and reopening it never runs the agents again.
  */
 export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, bare = false, yourTurn, permissionTurn, onReply, reactions }: AgentMessagesProps) {
   // What an agent was handed again from the work this follows is said once, as picked up, rather
@@ -88,8 +89,8 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
     const conversation = converse(fresh, order, predecessors)
     return { lanes: conversation.lanes, said: layOut(fold(conversation.lines, conversation.lanes), conversation.lanes, live, APPROVAL_TEXT) }
   }, [fresh, order, predecessors, live])
-  // A clarification answers the question back before it, so it quotes it, as any reply does.
-  const backs = useMemo(() => questionsBack(said), [said])
+  // Whatever answers an earlier message quotes it, as a reply of yours does.
+  const quotes = useMemo(() => repliesTo(said), [said])
   const figures = useContext(TeamFiguresContext)
   const members = useMemo(() => membersOf(lanes, order, figures), [lanes, order, figures])
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
@@ -149,6 +150,7 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
           const previous = said[index - 1]
           // Consecutive messages from one member share its avatar and name, as in any chat.
           const continued = previous !== undefined && !isNotice(previous) && previous.from[0] === bubble.from[0]
+          const quote = quotes.get(bubble.key) ?? null
           return (
             <ChatMessage
               key={bubble.key}
@@ -168,7 +170,9 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
               onInspectHandover={onInspectHandover}
               yourTurn={bubble.item.line.message.kind === 'permission' ? permissionTurn?.(bubble.item.line.message) : yourTurn}
               when={when}
-              answers={backs.get(bubble.key) ?? null}
+              quote={quote}
+              onShowQuote={quote ? () => setFlash(quote.key) : undefined}
+              bare={bare}
               onReply={onReply}
               reactions={reactions}
             />
@@ -322,22 +326,27 @@ interface ChatMessageProps {
   onInspectHandover?: (agentId: string) => void
   yourTurn?: ReactNode
   when: (bubble: Bubble) => string
-  /** For a clarification: the question back it answers, which it quotes. */
-  answers: Bubble | null
+  /** The earlier message this one answers, which it quotes (`repliesTo`). */
+  quote: Bubble | null
+  /** Shows the quoted message where it was said. */
+  onShowQuote?: () => void
+  /** Inside the team's chat, whose own messages wear a smaller face. */
+  bare: boolean
   onReply?: (reply: Omit<ReplyTo, 'runId'>) => void
   reactions?: (bubble: Bubble, said: ReactNode) => ReactNode
 }
 
-function ChatMessage({ bubble, member, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when, answers, onReply, reactions }: ChatMessageProps) {
+function ChatMessage({ bubble, member, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when, quote, onShowQuote, bare, onReply, reactions }: ChatMessageProps) {
   const { item, part, text } = bubble
   const { message } = item.line
   const speaker = bubble.from[0] ? member(bubble.from[0]) : null
   const mentions = bubble.to.map(member)
   const mine = speaker?.you ?? false
   const failed = part === 'said' && message.state === 'failed'
-  const handover = part === 'said' && (message.kind === 'handover' || message.kind === 'handoff')
+  const handover = isHandover(bubble)
   const asking = part === 'said' && message.kind === 'permission'
-  const long = text.length > LONG.chars || text.split('\n').length > LONG.lines
+  const words = spoken(bubble, member)
+  const long = words.length > LONG.chars || words.split('\n').length > LONG.lines
   const [more, setMore] = useState(false)
   const reply = message.reply
   const name = (person: Member) => (person.you ? 'You' : person.name)
@@ -346,21 +355,20 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
   // What the message's info holds: the record behind it, what a stage was given in full.
   const handedTo = handover ? mentions.filter((person) => !person.you) : part === 'reply' ? item.passedOn.map((passed) => member(passed.to)) : []
   const info = part !== 'waiting' && (part === 'reply' ? Boolean(reply) : Boolean(message.evidenceId || message.context || handedTo.length > 0 || item.line.derived))
-  // An answer quotes what it answers: the question, or for your review, the handover you read; a
-  // clarification, the question back it answers.
-  const quoted = part === 'reply' ? { who: speakerOf(item.line.senders[0], member), text: message.kind === 'handover' ? `Handover: ${oneLine(message.text)}` : oneLine(message.text) }
-    : answers ? { who: speakerOf(answers.from[0], member), text: oneLine(questionBackOf(answers.text)) } : null
+  // A reply quotes what it answers, as yours do: a question back by what it asks, anything else by
+  // its first words.
+  const quoted = quote ? { what: quoteWhat(quote, member), text: quote.part === 'reply' && quote.item.line.message.reply?.asksBack ? questionBackOf(quote.text) : spoken(quote, member) } : null
   // What you can reply to: anything an agent said, other than a permission request (answered with
   // its own buttons) and a message that never arrived.
   const toReply = onReply && speaker && !mine && part !== 'waiting' && !asking && !failed && text.trim() ? replyFor(bubble, speaker.id, mentions) : null
   // A reply's quote already says whom it answers; it names someone only when it goes elsewhere, as
   // your approval does when it passes the work on.
-  const addressed = part === 'reply' ? mentions.filter((person) => !item.line.senders.includes(person.id)) : mentions
+  const addressed = quote ? mentions.filter((person) => !quote.from.includes(person.id)) : mentions
   const kindWord = part === 'reply' && message.kind === 'handover'
     ? bubble.word === 'sent back' ? 'sent back' : `approved${item.passedOn.length ? ` · passed on to ${nameList(item.passedOn.map((passed) => member(passed.to).name))}` : ''}`
     : message.kind === 'check' && part !== 'waiting'
       ? `${bubble.word}${message.check && message.check.round > 1 ? ` · round ${message.check.round}` : ''}`
-      : bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' ? bubble.word : null
+      : handover || bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' ? bubble.word : null
   // In a team with no fixed order: whether the teammate carried on in its conversation or a fresh
   // copy took it, said under the work handed out, and under a teammate's answer.
   const reach = message.reached && (message.kind === 'ask' ? part === 'reply' : part === 'said') ? REACHED_WORD[message.reached] : null
@@ -373,7 +381,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
       tabIndex={-1}
       aria-label={label}
     >
-      {!mine && <span className="chat-gutter">{!continued && speaker && <Avatar member={speaker} size={32} />}</span>}
+      {!mine && <span className="chat-gutter">{!continued && speaker && <Avatar member={speaker} size={bare ? 28 : 32} />}</span>}
       <div className="chat-stack">
         {!continued && (
           <p className="chat-meta">
@@ -390,27 +398,18 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
           </div>
         ) : withReactions(
           <div className="chat-bubble">
-            {quoted && (
-              <blockquote className="chat-quote">
-                <b>{quoted.who}</b>
-                <span>{quoted.text}</span>
-              </blockquote>
-            )}
+            {quoted && <Quote what={quoted.what} text={quoted.text} onShow={onShowQuote} />}
             {asking ? (
               <div className="chat-file chat-permission">
                 <p className="chat-file-head"><ShieldQuestionMark size={15} aria-hidden="true" /><span>{permissionAsks(message.permission?.switch, message.permission?.tool)}</span></p>
                 <p className="permission-what" title={permissionWhat({ title: text, detail: message.permission?.detail })}>{permissionWhat({ title: text, detail: message.permission?.detail })}</p>
                 {message.permission?.auto && <p className="permission-auto">{autoNote(message.permission.auto)}</p>}
               </div>
-            ) : handover ? (
-              <div className="chat-file">
-                <p className="chat-file-head"><FileText size={15} aria-hidden="true" /><span>Handover{mentions.length > 0 && <> to <Mentions people={mentions} /></>}</span></p>
-                <Body text={text} long={long} more={more} />
-              </div>
             ) : (
+              // A handover is said as any message is: to whom, then the work, with "handover" under it.
               <>
                 {addressed.length > 0 && <Mentions people={addressed} />}
-                {text && <Body text={text} long={long} more={more} />}
+                {words && <Body text={words} long={long} more={more} />}
               </>
             )}
             {failed && <p className="chat-failed" role="note">Not delivered{message.error ? `: ${message.error}` : ''}</p>}
@@ -482,22 +481,58 @@ function replyFor(bubble: Bubble, from: string, mentions: readonly Member[]): Om
 }
 
 /**
- * The question back each clarification answers: the latest answer before it that asked back, from
- * the agent the clarification goes to, to the agent that sends it.
+ * What each reply answers, by the bubble it quotes. An answer quotes its question, or for your
+ * review the handover you read. A clarification quotes the latest question back to it, and a check
+ * the work it checked: the latest handover to it, or revision after its last round, from the agent
+ * it checks.
  */
-function questionsBack(said: readonly Bubble[]): Map<string, Bubble> {
-  const backs = new Map<string, Bubble>()
+function repliesTo(said: readonly Bubble[]): Map<string, Bubble> {
+  const quotes = new Map<string, Bubble>()
   said.forEach((bubble, index) => {
-    if (bubble.part !== 'said' || !bubble.item.line.message.clarifies) return
+    if (bubble.part === 'reply') {
+      const asked = said.find((earlier) => earlier.item === bubble.item && earlier.part === 'said')
+      if (asked) quotes.set(bubble.key, asked)
+      return
+    }
+    const { message } = bubble.item.line
+    const answers = bubble.part !== 'said' ? null
+      : message.clarifies ? (earlier: Bubble) => earlier.part === 'reply' && Boolean(earlier.item.line.message.reply?.asksBack)
+      : message.kind === 'check' ? (earlier: Bubble) => (earlier.part === 'said' ? isHandover(earlier) : earlier.part === 'reply' && earlier.item.line.message.kind === 'check')
+      : null
+    const [speaker, heard] = [bubble.from[0], bubble.to[0]]
+    if (!answers || !speaker || !heard) return
     for (let at = index - 1; at >= 0; at--) {
       const earlier = said[at]
-      if (earlier.part === 'reply' && earlier.item.line.message.reply?.asksBack && earlier.from[0] === bubble.to[0] && earlier.to[0] === bubble.from[0]) {
-        backs.set(bubble.key, earlier)
+      if (earlier.from.includes(heard) && earlier.to.includes(speaker) && answers(earlier)) {
+        quotes.set(bubble.key, earlier)
         return
       }
     }
   })
-  return backs
+  return quotes
+}
+
+function isHandover(bubble: Bubble): boolean {
+  const { kind } = bubble.item.line.message
+  return bubble.part === 'said' && (kind === 'handover' || kind === 'handoff')
+}
+
+/** What a reply's quote names: "Writer’s question", "your note", "Editor’s check". */
+function quoteWhat(quoted: Bubble, member: (id: string) => Member): string {
+  const who = quoted.from[0] ? member(quoted.from[0]) : null
+  const { message } = quoted.item.line
+  const thing = quoted.part === 'reply' && message.kind === 'check' ? 'revised work' : message.kind === 'note' ? 'note' : SAID[replyKind(quoted)]
+  return `${who ? (who.you ? 'your' : `${who.name}’s`) : 'the'} ${thing}`
+}
+
+/**
+ * A message's words as its speaker says them. A handover a check step is given opens on "Work from"
+ * its writer, which the name above it already says.
+ */
+function spoken(bubble: Bubble, member: (id: string) => Member): string {
+  if (!isHandover(bubble) || bubble.from.length !== 1) return bubble.text
+  const [first, ...rest] = bubble.text.trimStart().split('\n')
+  return first.replace(/^#+\s*/, '').trim() === `Work from ${member(bubble.from[0]).name}` ? rest.join('\n').trimStart() : bubble.text
 }
 
 /** What a message still owed says: who is writing it, or that it waits on you; or that none came. */
@@ -548,15 +583,6 @@ function membersOf(lanes: readonly Party[], order: readonly Party[], figures: Re
 function initialsOf(name: string): string {
   const words = name.split(/[\s_-]+/).filter(Boolean)
   return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : name.slice(0, 2).replace(/^./, (first) => first.toUpperCase())
-}
-
-function speakerOf(id: string | undefined, member: (id: string) => Member): string {
-  return id ? (member(id).you ? 'You' : member(id).name) : 'Earlier'
-}
-
-/** The quoted message in one line: Markdown marks off, whitespace run together. CSS cuts it to fit. */
-function oneLine(text: string): string {
-  return text.replace(/^#+\s*/gm, '').replace(/[*_`>]/g, '').replace(/\s+/g, ' ').trim()
 }
 
 /** Names joined as a person would say them: "A", "A and B", "A, B and C". */

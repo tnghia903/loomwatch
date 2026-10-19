@@ -81,23 +81,31 @@ describe('Team chat', () => {
     const question = msg(/Writer to Researcher: question/)
     expect(within(question).getByText('@Researcher')).toBeInTheDocument()
     const reply = msg(/Researcher to Writer: answer/)
-    expect(within(reply).getByRole('blockquote')).toHaveTextContent('WriterWhich spec version did you read?')
+    // Quoted as a reply of yours is: what it answers, then its first words.
+    expect(within(reply).getByRole('button', { name: 'Replying to Writer’s question. Show it' })).toHaveTextContent('Writer’s questionWhich spec version did you read?')
     // The quote says whom it answers, so the reply does not name them again.
     expect(within(reply).queryByText('@Writer')).not.toBeInTheDocument()
     // What the agent wrote is formatted, as a chat shows it.
     expect(within(reply).getByText('Version 0.4').tagName).toBe('STRONG')
+    // The quote shows the question where it was asked.
+    fireEvent.click(within(reply).getByRole('button', { name: /^Replying to/ }))
+    expect(question).toHaveClass('flash')
   })
 
-  it('shows a handover as a document shared with the stage it was for', () => {
+  it('says a handover as any message: to whom, the work, and “handover” under it', () => {
     setup([handover])
-    expect(within(msg(/handover/)).getByText(/Handover/)).toHaveTextContent('Handover to @Writer')
+    const handedOver = msg(/Researcher to Writer: handover/)
+    expect(within(handedOver).getByText('@Writer')).toBeInTheDocument()
+    expect(within(handedOver).getByText('ACP is JSON-RPC.')).toBeInTheDocument()
+    expect(within(handedOver).getByText('handover')).toBeInTheDocument()
+    expect(within(handedOver).queryByText(/Handover to/)).toBeNull()
   })
 
   it('puts your words on your side, quoting the handover you answered and saying where it went', () => {
     setup([reviewed(answer('review', 'Shorter, please.', 30, { sentBackTo: 'writer' }))])
     const back = msg(/You to Writer: sent back/)
     expect(back).toHaveClass('mine')
-    expect(within(back).getByRole('blockquote')).toHaveTextContent('Handover: Draft Lead with the rule.')
+    expect(within(back).getByRole('button', { name: /^Replying to Writer’s handover/ })).toHaveTextContent('Writer’s handoverDraft Lead with the rule.')
     expect(within(back).getByText('sent back')).toBeInTheDocument()
   })
 
@@ -115,7 +123,7 @@ describe('Team chat', () => {
     const stop = message({ id: 'check-stop:e40', kind: 'question', from: 'editor', to: 'operator', text: 'Writer’s work still misses 2 checks.', seq: 40, state: 'answered', checkStop: { checked: 'writer', open: 2 }, reply: answer('operator', APPROVAL_TEXT, 41) })
     setup([handover, stop])
     expect(msg(/You: approved$/)).toHaveTextContent('You approved Writer’s work as it was, with 2 checks not met')
-    expect(screen.queryByText(/handover/)).not.toBeInTheDocument()
+    expect(msg(/You: approved$/)).not.toHaveTextContent(/handover/)
   })
 
   it('tells a plain approval as a note in the chat, not as words you typed', () => {
@@ -168,9 +176,11 @@ describe('Team chat', () => {
     expect(within(msg(/asks back/)).getByText('asks back')).toBeInTheDocument()
     expect(within(msg(/asks back/)).getByText('Which year?')).toBeInTheDocument()
     expect(within(msg(/clarifies/)).getByText('clarifies')).toBeInTheDocument()
-    expect(within(msg(/clarifies/)).getByText('@Researcher')).toBeInTheDocument()
+    // The clarification quotes the question back, which names whom it answers.
+    expect(within(msg(/clarifies/)).getByRole('button', { name: /^Replying to Researcher’s question back/ })).toBeInTheDocument()
+    expect(within(msg(/clarifies/)).queryByText('@Researcher')).toBeNull()
     // The answer quotes the clarification it answers.
-    expect(within(msg(/Researcher to Writer: answer/)).getByRole('blockquote')).toHaveTextContent('Writer2025.')
+    expect(within(msg(/Researcher to Writer: answer/)).getByRole('button', { name: /^Replying to/ })).toHaveTextContent('Writer’s answer2025.')
   })
 
   // A team-mode helper is brought in fresh for each round; the chat reads the same.
@@ -348,6 +358,24 @@ describe('a check step in the chat', () => {
     expect(screen.getByText('Editor checked Writer’s revised work: all 2 met').closest('li')).toHaveClass('chat-notice')
   })
 
+  it('quotes the work each round checked: the handover first, then the revision', () => {
+    const work = message({ id: 'handover:e5', kind: 'handover', to: 'editor', text: '### Work from Writer\n\nFirst draft.', handedBy: { from: ['writer'], via: [] }, seq: 5, offsetMs: 30_000, ts: at(30) })
+    const stillLong = message({ ...allMetAgain, text: 'Still long.', check: { round: 2, items: items(['met', 'not_met']), readable: true, sentBack: false, problems: 'Still long.' } })
+    setup([work, sentBack, stillLong])
+    // The writer's name is already above its work, so the heading saying so is not repeated.
+    const handedOver = msg(/Writer to Editor: handover/)
+    expect(within(handedOver).getByText('First draft.')).toBeInTheDocument()
+    expect(within(handedOver).queryByText(/Work from Writer/)).toBeNull()
+    const back = msg(/Editor to Writer: sent back/)
+    expect(within(back).getByRole('button', { name: /^Replying to Writer’s handover/ })).toHaveTextContent('Writer’s handoverFirst draft.')
+    expect(within(back).queryByText('@Writer')).toBeNull()
+    expect(within(msg(/Writer to Editor: revised/)).getByRole('button', { name: /^Replying to Editor’s check/ })).toBeInTheDocument()
+    const again = msg(/Editor to Writer: checked$/)
+    expect(within(again).getByRole('button', { name: /^Replying to Writer’s revised work/ })).toHaveTextContent('Shorter draft.')
+    fireEvent.click(within(again).getByRole('button', { name: /^Replying to/ }))
+    expect(msg(/Writer to Editor: revised/)).toHaveClass('flash')
+  })
+
   it('says the agent is revising while it does, and that it never did once the run is over', () => {
     const pending = { ...sentBack, state: 'pending' as const, reply: null }
     setup([pending], { live: true })
@@ -381,7 +409,7 @@ describe('Replying to what the agents said', () => {
     fireEvent.click(replies[3])
     expect(onReply).toHaveBeenLastCalledWith(expect.objectContaining({ from: 'editor', to: null, kind: 'question' }))
     // Your answer is yours: nothing to reply to.
-    expect(within(msg(/You to Editor/)).queryByRole('button', { name: /^Reply/ })).toBeNull()
+    expect(within(msg(/You to Editor/)).queryByRole('button', { name: /^Reply to/ })).toBeNull()
   })
 
   it('names a question back as one, and quotes it above the clarification that answers it', () => {
@@ -391,10 +419,10 @@ describe('Replying to what the agents said', () => {
       round('q1', 50, 'How many did it sell?', answer('researcher', 'It depends.\n\n## Question back\nWhich year?', 55, { seq: 55, asksBack: true })),
       round('q2', 60, '2025.', answer('researcher', '42 in 2025.', 65, { seq: 65 }), true),
     ], { bare: true, onReply })
-    expect(within(msg(/clarifies/)).getByRole('blockquote')).toHaveTextContent('ResearcherWhich year?')
-    fireEvent.click(within(msg(/asks back/)).getByRole('button', { name: /^Reply/ }))
+    expect(within(msg(/clarifies/)).getByRole('button', { name: /^Replying to/ })).toHaveTextContent('Researcher’s question backWhich year?')
+    fireEvent.click(within(msg(/asks back/)).getByRole('button', { name: /^Reply to/ }))
     expect(onReply).toHaveBeenLastCalledWith(expect.objectContaining({ messageId: 'q1:reply', kind: 'question_back', from: 'researcher', to: 'writer' }))
-    fireEvent.click(within(msg(/clarifies/)).getByRole('button', { name: /^Reply/ }))
+    fireEvent.click(within(msg(/clarifies/)).getByRole('button', { name: /^Reply to/ }))
     expect(onReply).toHaveBeenLastCalledWith(expect.objectContaining({ messageId: 'q2:said', kind: 'answer', from: 'writer', to: 'researcher' }))
   })
 
@@ -406,6 +434,6 @@ describe('Replying to what the agents said', () => {
 
   it('offers no Reply outside the team’s chat', () => {
     setup([handover, askBack])
-    expect(screen.queryByRole('button', { name: /^Reply/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Reply to/ })).toBeNull()
   })
 })

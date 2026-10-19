@@ -8,11 +8,18 @@ import { quoteLine, replyWhat } from '../../lib/chat/reply'
  * its first words. A click shows the message itself where it was said, when the chat has it.
  */
 export function ReplyQuote({ reply, name, onShow }: { reply: ReplyTo; name: (id: string) => string; onShow?: () => void }) {
-  const what = replyWhat(reply, name)
+  return <Quote what={replyWhat(reply, name)} text={reply.text} onShow={onShow} />
+}
+
+/**
+ * A reply's quote, yours or an agent's: `what` names the message it answers ("Writer’s question"),
+ * and its first words follow, so every reply in the chat reads the same way.
+ */
+export function Quote({ what, text, onShow }: { what: string; text: string; onShow?: () => void }) {
   const words = (
     <>
       <b><CornerUpLeft size={11} aria-hidden="true" />{what.charAt(0).toUpperCase() + what.slice(1)}</b>
-      <span>{quoteLine(reply.text)}</span>
+      <span>{quoteLine(text)}</span>
     </>
   )
   return onShow
