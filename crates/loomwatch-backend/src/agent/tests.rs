@@ -1245,6 +1245,262 @@ async fn a_cut_summary_is_asked_for_again_and_the_brief_is_kept() {
     assert_eq!(requests[3].messages.len(), requests[0].messages.len() + 2);
 }
 
+/// How many bytes of text a request sends besides the instructions: what a stand-in for a model
+/// with a small context counts.
+fn sent(request: &SeenRequest) -> usize {
+    request
+        .messages
+        .iter()
+        .map(|message| match message {
+            Message::System { .. } => 0,
+            Message::User { content } | Message::Tool { content, .. } => content.len(),
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => content.len() + tool_calls.iter().map(|c| c.arguments.len()).sum::<usize>(),
+        })
+        .sum()
+}
+
+/// Writes a 500-line file whose every line names it, about 20,000 characters as `read_file` gives
+/// it: under the length that is set aside, so its result goes into the conversation whole.
+fn twenty_k_file(folder: &Folder, name: &str) {
+    let text = (0..500).fold(String::new(), |mut text, line| {
+        let _ = writeln!(text, "{name} line {line:03}: the quick brown fox");
+        text
+    });
+    std::fs::write(folder.0.join(name), text).unwrap();
+}
+
+/// A model reply reading each of `names` at once, one call apiece, each call's id the file's name.
+fn reads(names: &[&str]) -> Completion {
+    Completion::calls(
+        "",
+        names
+            .iter()
+            .map(|name| call(name, "read_file", &json!({"path": name})))
+            .collect(),
+    )
+}
+
+/// The result of the tool call `id` in a request.
+fn result_of<'a>(request: &'a SeenRequest, id: &str) -> &'a str {
+    request
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::Tool {
+                tool_call_id,
+                content,
+            } if tool_call_id == id => Some(content.as_str()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no result for {id}"))
+}
+
+fn is_whole_read(result: &str, name: &str) -> bool {
+    result.contains(&format!("{name} line 499:")) && !result.contains("set aside")
+}
+
+/// Field audit (2026-10-19): one step that read several long files at once carried the next call
+/// past the model's limit, and the provider's refusal ended the run, while its words claimed a
+/// summary had been tried. Now the newest results are set aside, the older ones cut down oldest
+/// first until the summary request fits, the conversation is summarised, and the turn carries on;
+/// every cut result can still be read whole.
+#[tokio::test]
+async fn a_conversation_refused_as_too_long_is_cut_down_summarised_and_carried_on() {
+    // What the model takes besides its instructions, in bytes.
+    const LIMIT: usize = 100_000;
+    let folder = Folder::new();
+    let older = ["old1", "old2", "old3", "old4"];
+    let newest = ["a", "b", "c", "d"];
+    for name in older.iter().chain(&newest) {
+        twenty_k_file(&folder, name);
+    }
+    let demo = Demo::limited(
+        vec![
+            reads(&older),
+            reads(&newest),
+            Completion::text("Summary: read eight files; a is under id a, old1 under id old1."),
+            Completion::calls(
+                "",
+                vec![
+                    call(
+                        "again-a",
+                        "read_tool_output",
+                        &json!({"id": "a", "limit": 30_000}),
+                    ),
+                    call(
+                        "again-old1",
+                        "read_tool_output",
+                        &json!({"id": "old1", "limit": 30_000}),
+                    ),
+                ],
+            ),
+            Completion::text("Finished."),
+        ],
+        |request| sent(request) > LIMIT,
+    );
+    let sink = Arc::new(Recorded::default());
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        sink.clone(),
+        Arc::new(AllowAll),
+    );
+    let end = session.prompt("Read all eight files.").await.unwrap();
+    assert_eq!(end.stop_reason, StopReason::EndTurn);
+    assert_eq!(end.reply, "Finished.");
+
+    let requests = demo.requests();
+    assert_eq!(
+        requests.len(),
+        6,
+        "work, work, refused, summary, work, work"
+    );
+    // The call after the second step was refused, with every result whole.
+    let refused = &requests[2];
+    assert!(sent(refused) > LIMIT && requests[..2].iter().all(|r| sent(r) <= LIMIT));
+    assert!(is_whole_read(result_of(refused, "a"), "a"));
+    // The summary was asked for in a conversation cut down to fit: the newest results set aside
+    // to the preview a long output gets, the oldest read cut shorter, the latest older one whole.
+    let summary = &requests[3];
+    assert!(summary.prompt().contains("Write a summary"));
+    assert!(sent(summary) <= LIMIT, "{}", sent(summary));
+    for name in newest {
+        let result = result_of(summary, name);
+        assert!(
+            result.contains(&format!(
+                "read_tool_output, id {name}, starting at offset 6000"
+            )),
+            "{result}"
+        );
+    }
+    assert!(result_of(summary, "old1").contains("id old1, starting at offset 1500"));
+    assert!(is_whole_read(result_of(summary, "old4"), "old4"));
+    // The work carried on from the summary, and read both cut results whole.
+    assert_eq!(requests[4].messages.len(), 2);
+    let read_back = &requests[5];
+    assert!(is_whole_read(result_of(read_back, "again-a"), "a"));
+    assert!(is_whole_read(result_of(read_back, "again-old1"), "old1"));
+    assert!(sink.all().iter().any(|update| {
+        update["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("conversation was summarised"))
+    }));
+}
+
+/// Room is made once a turn. When the conversation still doesn't fit, after the summary or in it,
+/// the turn ends with the error, whose words are then true, and makes no more calls.
+#[tokio::test]
+async fn a_second_refusal_in_a_turn_ends_it_with_the_error() {
+    // The summary fits, but what it says is too long for the model by itself.
+    const LIMIT: usize = 50_000;
+    let folder = Folder::new();
+    let newest = ["a", "b", "c", "d"];
+    for name in newest {
+        twenty_k_file(&folder, name);
+    }
+    let demo = Demo::limited(
+        vec![
+            reads(&newest),
+            Completion::text(&"Summary: everything, word for word. ".repeat(2_000)),
+            Completion::text("Never reached."),
+        ],
+        |request| sent(request) > LIMIT,
+    );
+    let mut agent = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    let error = agent.prompt("Read all four.").await.unwrap_err();
+    assert!(matches!(error, AgentError::ContextTooLong), "{error}");
+    assert!(error.to_string().contains("even after summarising it"));
+    let requests = demo.requests();
+    assert_eq!(requests.len(), 4, "work, refused, summary, refused");
+    assert!(requests[2].prompt().contains("Write a summary") && sent(&requests[2]) <= LIMIT);
+    assert_eq!(requests[3].messages.len(), 2);
+    assert!(sent(&requests[3]) > LIMIT);
+
+    // The summary itself is refused: no second try.
+    let demo = Demo::limited(vec![reads(&newest)], |request| request.messages.len() > 2);
+    let mut agent = session(
+        &folder,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+    );
+    let error = agent.prompt("Read all four.").await.unwrap_err();
+    assert!(matches!(error, AgentError::ContextTooLong), "{error}");
+    let requests = demo.requests();
+    assert_eq!(requests.len(), 3, "work, refused, refused summary");
+    assert!(requests[2].prompt().contains("Write a summary"));
+}
+
+/// The size of the next call is estimated before it is sent: what the provider counted for the
+/// last call, plus the results added since. A step that adds more than the model has room for is
+/// summarised first, with its newest results cut down so the summary fits, and nothing is refused.
+#[tokio::test]
+async fn a_step_that_adds_too_much_is_summarised_before_the_call_is_refused() {
+    let folder = Folder::new();
+    let names = ["a", "b", "c", "d", "e", "f"];
+    for name in names {
+        twenty_k_file(&folder, name);
+    }
+    // A model of 30,000 tokens, 1,000 kept for the reply, that refuses more than `limit` bytes
+    // besides its instructions.
+    let read_six = async |limit: usize| {
+        let mut first = reads(&names);
+        // The instructions and the prompt, as the provider counted them.
+        first.usage.input_tokens = 3_000;
+        let demo = Demo::limited(
+            vec![
+                first,
+                Completion::text("Summary: read six files."),
+                Completion::text("Finished."),
+            ],
+            move |request| sent(request) > limit,
+        );
+        let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+        config.context_window = Some(30_000);
+        config.max_tokens = 1_000;
+        let mut session = Session::open(
+            config,
+            Provider::Demo(demo.clone()),
+            Arc::new(Recorded::default()),
+            Arc::new(AllowAll),
+            Arc::new(NoHostTools),
+        );
+        let end = session.prompt("Read all six.").await.unwrap();
+        assert_eq!(end.reply, "Finished.");
+        demo.requests()
+    };
+
+    // 29,000 tokens less the 3,000 counted: about 104,000 bytes.
+    let limit = 104_000;
+    let requests = read_six(limit).await;
+    assert_eq!(requests.len(), 3, "work, summary, work");
+    assert!(requests.iter().all(|request| sent(request) <= limit));
+    let summary = &requests[1];
+    assert!(summary.prompt().contains("Write a summary"));
+    assert!(result_of(summary, "a").contains("id a, starting at offset 6000"));
+    assert!(is_whole_read(result_of(summary, "f"), "f"));
+    assert_eq!(requests[2].messages.len(), 2);
+
+    // The estimate came out low and the summary is refused all the same: room is made, as for
+    // the work's own call, and the summary asked for again.
+    let limit = 80_000;
+    let requests = read_six(limit).await;
+    assert_eq!(requests.len(), 4, "work, refused summary, summary, work");
+    assert!(requests[1].prompt().contains("Write a summary") && sent(&requests[1]) > limit);
+    assert!(requests[2].prompt().contains("Write a summary") && sent(&requests[2]) <= limit);
+    assert!(result_of(&requests[2], "f").contains("id f, starting at offset"));
+    assert_eq!(requests[3].messages.len(), 2);
+}
+
 fn calls_recorded(sink: &Recorded) -> Vec<Value> {
     sink.all()
         .into_iter()
