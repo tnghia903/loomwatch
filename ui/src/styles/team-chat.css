@@ -376,6 +376,10 @@
 .tc-note .chat-bubble, .tc-team-note .chat-bubble { border-style: dashed; background: transparent; }
 .tc-team-note { margin: 12px 0 6px; }
 .tc-team-note .chat-under, .tc-note .chat-under { justify-content: flex-end; }
+/* "hi @team", answered by the agents themselves instead of started: your message, then each one's reply. */
+.tc-answered-note { margin-top: 12px; }
+.tc-said-back { margin-top: 8px; }
+.tc-said-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 10px; margin: 4px 4px 6px 46px; font-size: 11.5px; color: var(--color-ink-3); }
 .tc-pending { margin-top: 12px; opacity: .8; }
 .tc-pending.failed { opacity: 1; }
 .tc-pending.failed .chat-bubble { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }

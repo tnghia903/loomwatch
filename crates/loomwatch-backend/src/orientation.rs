@@ -176,6 +176,52 @@ const CHECK_BLOCK: &str = "Do not rewrite the work. End your reply with this blo
      found must be one of these lines, marked Not met:\n## Check\n1. Met | Not met | Not sure — \
      the item — your evidence";
 
+/// The heading of the section that says how to read the request.
+pub const READING_HEADING: &str = "## Reading the request";
+
+/// `## Reading the request`: the role says who the agent is, and the task is what the operator
+/// wants now, read for what it means.
+///
+/// Without it, an agent handed "hi", "why did you leave X out?" or "make it shorter" read its role
+/// as the job and did that job again in full: the role is the most specific instruction it has,
+/// and a short task looked like nothing to go on. A colleague would answer the greeting, answer
+/// the question, or make the change. Fixed text, so it sits in the cached part of the prompt; the
+/// lines about teammates and checks only for an agent that has them.
+#[must_use]
+pub fn reading(in_team: bool, checks: bool) -> String {
+    let mut text = String::from(
+        "Your role above says who you are and how you work. It is not a job to do again on every \
+         message. The task at the end is what the operator wants now: read it as a thoughtful \
+         colleague would, with the conversation so far, and give them what they meant.\n\
+         - Asked for work your role covers: do it fully.\n\
+         - Asked a question: answer it, from the conversation, earlier work and what you were \
+         handed, instead of producing your usual result. Look things up only when the answer \
+         needs it.\n\
+         - Asked to change something already made: change that, and keep the rest.\n\
+         - Greeted, thanked or chatted with: reply in a sentence or two, as a person would, and \
+         start no work.\n\
+         - Hold \"Done when\" to what was asked: an item about something the request doesn't call \
+         for does not apply.\n\
+         - When you can't tell what they want and a wrong guess would waste real work, ask. \
+         Otherwise take the likeliest reading and say which one you took.",
+    );
+    if in_team {
+        text.push_str(
+            "\n- Your teammates read the same request. When it needs nothing from your part, say \
+             so in a line and pass on what you were handed as it is, rather than redoing your \
+             job. If your reply is the team's answer, give the operator that answer itself.",
+        );
+    }
+    if checks {
+        text.push_str(
+            "\n- When you check a teammate's work, check it against what the operator asked, and \
+             always end with your check block. When the request asked for no work, such as a \
+             greeting, mark each item Met with \"Does not apply\" and why.",
+        );
+    }
+    text
+}
+
 /// An agent the operator wrote to directly with an @mention (ADR 0051).
 ///
 /// It works alone this time, and it has to be told so: its usual orientation names a successor
@@ -187,8 +233,9 @@ pub fn for_one_agent(team: &TeamConfig, agent: &AgentConfig) -> String {
     format!(
         "You are {}, on {}. The operator wrote to you directly, so this time you work alone: \
          nobody else on the team runs, and your reply goes straight back to the operator.\n\
-         Reply with the complete new version of your work, not a description of what changed, \
-         and keep everything the task does not ask you to change.",
+         When the task asks you to change your work, reply with the complete new version of it, \
+         not a description of what changed, and keep everything the task does not ask you to \
+         change. When it asks something else, such as a question about your work, answer that.",
         agent.name,
         team_label(team)
     )

@@ -6236,7 +6236,14 @@ pub(crate) mod tests {
         assert_eq!(session.first_agent_id.as_deref(), Some("solo"));
         assert_eq!(
             session.prompt.as_deref(),
-            Some("## Your assigned role\nanswer directly\n\n## Task\nsay done")
+            Some(
+                format!(
+                    "## Your assigned role\nanswer directly\n\n## Reading the request\n{}\n\n\
+                     ## Task\nsay done",
+                    crate::orientation::reading(false, false)
+                )
+                .as_str()
+            )
         );
     }
 

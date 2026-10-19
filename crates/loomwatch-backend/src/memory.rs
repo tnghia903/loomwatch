@@ -417,6 +417,11 @@ pub enum PromptSectionKind {
     /// whether its reply is the team's answer (ADR 0034). Absent for a team of one. Added here and
     /// in `ui/src/lib/watch/events.ts` in one change.
     Team,
+    /// `## Reading the request` — the role says who the agent is, the task is what the operator
+    /// wants now, read for what it means: a question answered, a change made, a greeting greeted,
+    /// not the role's whole job done again ([`crate::orientation::reading`]). Fixed text under the
+    /// role, so it stays cached. Added here and in `ui/src/lib/watch/events.ts` in one change.
+    Reading,
     /// `## Capabilities wired for you`.
     Capabilities,
     /// One required skill, loaded before the task starts.
@@ -576,6 +581,7 @@ impl ComposedPrompt {
                     PromptSectionKind::Role
                         | PromptSectionKind::DoneWhen
                         | PromptSectionKind::Team
+                        | PromptSectionKind::Reading
                         | PromptSectionKind::Capabilities
                         | PromptSectionKind::RequiredSkill
                         | PromptSectionKind::SkillTranslation
@@ -637,6 +643,7 @@ impl ComposedPrompt {
                                 PromptSectionKind::Role
                                     | PromptSectionKind::DoneWhen
                                     | PromptSectionKind::Team
+                                    | PromptSectionKind::Reading
                             )
                         })
                         .count()

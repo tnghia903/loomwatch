@@ -19,7 +19,9 @@
 //! is the quote, kept with the message and handed to the agent with it ([`ReplyTo`]).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path as RoutePath, Query, State};
@@ -57,6 +59,9 @@ const QUOTE_KEPT_CHARS: usize = 24_000;
 /// The most of it an agent is handed with the reply: the size of the newest answer in the
 /// conversation, so a quoted handover or answer reaches the agent whole in every ordinary case.
 const QUOTE_HANDED_CHARS: usize = 8_000;
+/// How much of what an agent said last in the newest work it is reminded of when it answers in
+/// the chat: a check step's whole verdict, or a long answer's middle cut.
+const LAST_WORDS_CHARS: usize = 4_000;
 /// The ids a reply names are the chat's own, and short.
 const MAX_REPLY_ID_CHARS: usize = 200;
 
@@ -130,6 +135,29 @@ pub struct ChatMessage {
     /// The message it replies to, when it was written as one.
     #[serde(default)]
     pub reply_to: Option<ReplyTo>,
+    /// The agents' own answers to an `@` message that needed no workflow ([`crate::intent`]):
+    /// the message stayed a note, and the agents it was for answered it themselves instead.
+    #[serde(default)]
+    pub answers: Option<NoteAnswers>,
+}
+
+/// The agents answering a message that needed no workflow, each for itself, at the same time.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteAnswers {
+    /// Agents still writing their answer.
+    pub waiting: Vec<String>,
+    /// What each said, in the order they finished. An agent with nothing to add says nothing.
+    pub said: Vec<NoteAnswer>,
+}
+
+/// What one agent said back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteAnswer {
+    pub from: String,
+    pub text: String,
+    pub at: String,
 }
 
 /// What kind of message a reply answers, as the chat named it when the operator pressed Reply.
@@ -256,8 +284,8 @@ impl ChatStore {
         sqlx::query(
             "INSERT INTO chat_messages
              (id, team_key, team_path, text, created_at, route, run_id, agent_id, delivered_at, now,
-              reply_to)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              reply_to, answers)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
              ON CONFLICT (id) DO NOTHING",
         )
         .bind(&message.id)
@@ -275,6 +303,12 @@ impl ChatStore {
                 .reply_to
                 .as_ref()
                 .and_then(|reply| serde_json::to_value(reply).ok()),
+        )
+        .bind(
+            message
+                .answers
+                .as_ref()
+                .and_then(|answers| serde_json::to_value(answers).ok()),
         )
         .execute(self.db.writer())
         .await?;
@@ -324,9 +358,15 @@ impl ChatStore {
         Ok(claimed.rows_affected() == 1)
     }
 
-    async fn set_run(&self, id: &str, run_id: Option<&str>) -> Result<(), sqlx::Error> {
+    /// The run a team note started, routed as `started`; or, with no run, a team note again.
+    async fn set_run(
+        &self,
+        id: &str,
+        run_id: Option<&str>,
+        started: Route,
+    ) -> Result<(), sqlx::Error> {
         let route = if run_id.is_some() {
-            "team"
+            started.as_str()
         } else {
             "team_note"
         };
@@ -334,6 +374,16 @@ impl ChatStore {
             .bind(id)
             .bind(route)
             .bind(run_id)
+            .execute(self.db.writer())
+            .await?;
+        Ok(())
+    }
+
+    /// What the agents have answered a note so far, and who is still answering.
+    async fn set_answers(&self, id: &str, answers: &NoteAnswers) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE chat_messages SET answers = $2 WHERE id = $1")
+            .bind(id)
+            .bind(serde_json::to_value(answers).ok())
             .execute(self.db.writer())
             .await?;
         Ok(())
@@ -655,6 +705,9 @@ fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessage, sqlx::Er
         reply_to: row
             .try_get::<Option<Value>, _>("reply_to")?
             .and_then(|reply| serde_json::from_value(reply).ok()),
+        answers: row
+            .try_get::<Option<Value>, _>("answers")?
+            .and_then(|answers| serde_json::from_value(answers).ok()),
     })
 }
 
@@ -831,6 +884,9 @@ enum EntryKind {
         to: Option<String>,
         text: String,
         reply: Option<String>,
+        /// For a message the agents answered themselves instead of starting the workflow
+        /// ([`crate::intent`]): who said what.
+        answers: Option<Vec<(String, String)>>,
     },
     Decision {
         line: String,
@@ -915,17 +971,7 @@ fn entries(team: &TeamConfig, history: &History, before: &str, person: &Person) 
             RunStatus::Queued | RunStatus::Starting | RunStatus::Running => {}
         }
     }
-    for note in &history.notes {
-        entries.push(Entry {
-            at: note.created_at.clone(),
-            run_id: None,
-            kind: EntryKind::Note {
-                to: note.agent_id.as_deref().map(name),
-                text: note.text.clone(),
-                reply: note.reply_to.as_ref().map(|reply| reply.mentioned(team)),
-            },
-        });
-    }
+    entries.extend(history.notes.iter().map(|note| note_entry(team, note)));
     entries.extend(
         history
             .decisions
@@ -942,6 +988,27 @@ fn entries(team: &TeamConfig, history: &History, before: &str, person: &Person) 
     // Newest first, with a stable order for entries stamped the same millisecond.
     entries.sort_by(|left, right| right.at.cmp(&left.at));
     entries
+}
+
+/// A note, as the conversation carries it: to the team or to an agent, and the answer it got when
+/// an agent answered it instead of starting work.
+fn note_entry(team: &TeamConfig, note: &ChatMessage) -> Entry {
+    Entry {
+        at: note.created_at.clone(),
+        run_id: None,
+        kind: EntryKind::Note {
+            to: note.agent_id.as_deref().map(|id| agent_name(team, id)),
+            text: note.text.clone(),
+            reply: note.reply_to.as_ref().map(|reply| reply.mentioned(team)),
+            answers: note.answers.as_ref().map(|answers| {
+                answers
+                    .said
+                    .iter()
+                    .map(|answer| (agent_name(team, &answer.from), answer.text.clone()))
+                    .collect()
+            }),
+        },
+    }
 }
 
 /// A face the operator put on something an agent said, said as what it tells the team, with what
@@ -1117,9 +1184,29 @@ fn detail(entries: &[Entry], followed: Option<&str>, person: &Person) -> (Vec<St
                 short_id(entry.run_id.as_deref().unwrap_or_default())
             ),
             EntryKind::Note {
+                to,
+                text,
+                reply,
+                answers: Some(answers),
+            } => {
+                let mut block = format!(
+                    "{} to {}{}: {}",
+                    person.subject,
+                    to.as_deref().unwrap_or("the team"),
+                    replying(reply.as_deref()),
+                    text.trim()
+                );
+                for (by, said) in answers {
+                    let _ = write!(block, "\n{by} answered in the chat: {}", said.trim());
+                }
+                block.push_str("\nNo work was started.");
+                block
+            }
+            EntryKind::Note {
                 to: Some(to),
                 text,
                 reply,
+                answers: None,
             } => format!(
                 "{}, in a note to {to} while it worked{}: {}",
                 person.subject,
@@ -1130,6 +1217,7 @@ fn detail(entries: &[Entry], followed: Option<&str>, person: &Person) -> (Vec<St
                 to: None,
                 text,
                 reply,
+                answers: None,
             } => format!(
                 "{}, in a note to the team{}: {}",
                 person.subject,
@@ -1631,6 +1719,7 @@ async fn send_message(
         delivered_at: None,
         now: false,
         reply_to,
+        answers: None,
     };
     let mut decided = decide(request.to.as_ref(), &live);
     if let Decided::Note { run_id, agent } = &decided {
@@ -1669,6 +1758,9 @@ async fn send_message(
             }
         }
     }
+    // "hi @team" asks for no work: the agent it would have started says hello back, and the
+    // message stays a note rather than sending the team off to do its standing job.
+    answer_instead(&state, &team, &mut decided, text, &mut message).await;
     match decided {
         Decided::TeamNote | Decided::Note { .. } => {
             store
@@ -1702,6 +1794,235 @@ async fn send_message(
             started(&state.registry, &store, message, outcome).await
         }
     }
+}
+
+/// A message that was going to start the workflow but needs none is answered by the agents
+/// themselves instead ([`crate::intent`]): it is stored as a team note saying who is answering, and
+/// they answer in the background, at the same time. Stored here so their answers have a row to
+/// land on; the route's own insert after this is then a no-op.
+async fn answer_instead(
+    state: &ChatState,
+    team: &TeamConfig,
+    decided: &mut Decided,
+    text: &str,
+    message: &mut ChatMessage,
+) {
+    let (speaker, whole_team) = match &*decided {
+        Decided::Team => (team.entrypoint_agent().ok(), true),
+        Decided::Agent(agent) => (team.agents.iter().find(|found| &found.id == agent), false),
+        Decided::Note { .. } | Decided::TeamNote => return,
+    };
+    // No model settings at all (tests, a daemon started without them): nothing to read with.
+    let (Some(speaker), Some(_), Some(store)) =
+        (speaker, crate::ai::installed(), state.registry.chat_store())
+    else {
+        return;
+    };
+    let addressed = crate::intent::Addressed {
+        team,
+        speaker,
+        whole_team,
+    };
+    let (conversation, newest_work) = conversation_now(state, team, &message.team_path).await;
+    let context = crate::intent::Context {
+        conversation,
+        replying: message.reply_to.as_ref().map(|reply| reply.mentioned(team)),
+    };
+    let task = task_text(text, team);
+    let model = crate::control::tier_model("fast");
+    let Some(who) = crate::intent::read(
+        state.archive.as_ref(),
+        &state.teams_root,
+        &addressed,
+        task,
+        &context,
+        &model,
+    )
+    .await
+    else {
+        return;
+    };
+    if let Decided::Agent(agent) = &*decided {
+        message.agent_id = Some(agent.clone());
+    }
+    message.answers = Some(NoteAnswers {
+        waiting: who,
+        said: Vec::new(),
+    });
+    if let Err(error) = store.insert(message).await {
+        eprintln!("loomwatchd: could not keep a message the agents were to answer: {error}");
+        message.answers = None;
+        message.agent_id = None;
+        return;
+    }
+    *decided = Decided::TeamNote;
+    tokio::spawn(answer_together(
+        store,
+        Answering {
+            archive: state.archive.clone(),
+            teams_root: state.teams_root.clone(),
+            team: team.clone(),
+            whole_team,
+            task: task.to_owned(),
+            context,
+            newest_work,
+        },
+        message.clone(),
+    ));
+}
+
+/// What the agents answering a message need, owned, for the background.
+struct Answering {
+    archive: Option<EventArchive>,
+    teams_root: PathBuf,
+    team: TeamConfig,
+    whole_team: bool,
+    task: String,
+    context: crate::intent::Context,
+    /// The newest finished work in the conversation, whose agents remember what they said there.
+    newest_work: Option<String>,
+}
+
+/// Every agent `message` is waiting on answers it, each on its own model, all at the same time;
+/// each answer is stored as it comes, so the chat shows it while the others are still writing.
+async fn answer_together(store: ChatStore, answering: Answering, message: ChatMessage) {
+    let remembered = match (&answering.archive, &answering.newest_work) {
+        (Some(archive), Some(run_id)) => last_words(archive, run_id).await,
+        _ => BTreeMap::new(),
+    };
+    let newest_work = answering
+        .newest_work
+        .as_deref()
+        .map(short_id)
+        .map(str::to_owned);
+    let answering = Arc::new(answering);
+    let mut answers = message.answers.clone().unwrap_or_default();
+    let mut replies = tokio::task::JoinSet::new();
+    for id in answers.waiting.clone() {
+        let answering = answering.clone();
+        let own = remembered
+            .get(&id)
+            .zip(newest_work.as_ref())
+            .map(|(words, work)| crate::intent::OwnWords {
+                work: work.clone(),
+                text: words.clone(),
+            });
+        replies.spawn(async move {
+            let Some(speaker) = answering.team.agents.iter().find(|agent| agent.id == id) else {
+                return (id, None);
+            };
+            let addressed = crate::intent::Addressed {
+                team: &answering.team,
+                speaker,
+                whole_team: answering.whole_team,
+            };
+            let said = crate::intent::reply(
+                answering.archive.as_ref(),
+                &answering.teams_root,
+                &addressed,
+                &answering.task,
+                &answering.context,
+                own.as_ref(),
+            )
+            .await;
+            (id, said)
+        });
+    }
+    while let Some(done) = replies.join_next().await {
+        let Ok((id, said)) = done else { continue };
+        answers.waiting.retain(|waiting| waiting != &id);
+        if let Some(text) = said {
+            answers.said.push(NoteAnswer {
+                from: id,
+                text,
+                at: now(),
+            });
+        }
+        if let Err(error) = store.set_answers(&message.id, &answers).await {
+            eprintln!("loomwatchd: could not keep an agent's answer in the chat: {error}");
+        }
+    }
+    // An answer whose task panicked never reported its agent: nobody is still writing.
+    if !answers.waiting.is_empty() {
+        answers.waiting.clear();
+        if let Err(error) = store.set_answers(&message.id, &answers).await {
+            eprintln!("loomwatchd: could not keep an agent's answer in the chat: {error}");
+        }
+    }
+}
+
+/// `## Conversation so far` as a run the team started now would be handed it, which the read of a
+/// message and the agents' answers go on; and the newest finished work in it, whose agents
+/// remember what they said there.
+async fn conversation_now(
+    state: &ChatState,
+    team: &TeamConfig,
+    relative: &str,
+) -> (Option<String>, Option<String>) {
+    let Some(store) = state.registry.chat_store() else {
+        return (None, None);
+    };
+    let Ok(record) =
+        RunRecord::queued(relative.to_owned(), String::new(), team, RunTrigger::Manual)
+    else {
+        return (None, None);
+    };
+    let team_ref = TeamRef {
+        key: record.team_key.clone(),
+        path: record.team_path.clone(),
+    };
+    let history = match gather(&store, &state.registry, &team_ref, &record).await {
+        Ok(history) => history,
+        Err(error) => {
+            eprintln!("loomwatchd: could not read the team's chat to read a message: {error}");
+            return (None, None);
+        }
+    };
+    let newest = history
+        .runs
+        .iter()
+        .find(|run| {
+            matches!(
+                run.status,
+                RunStatus::Succeeded | RunStatus::Failed | RunStatus::Cancelled
+            )
+        })
+        .map(|run| run.run_id.clone());
+    let told = crate::you::told_in(&state.teams_root.join(relative));
+    let person = Person::named(told.as_ref().and_then(|you| you.name.as_deref()));
+    (render(team, &history, &record, &person), newest)
+}
+
+/// What each agent said last in a piece of work: the final message of its last turn there, cut to
+/// a chat's length. An agent remembers its own words, as the team's answer alone would not tell
+/// it: a check step's verdict is not in the answer.
+async fn last_words(archive: &EventArchive, run_id: &str) -> BTreeMap<String, String> {
+    let Ok(events) = archive.load_verified_session(run_id).await else {
+        return BTreeMap::new();
+    };
+    let mut last: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for event in events {
+        if event.kind != crate::EventKind::Message || event.payload["role"] != "agent" {
+            continue;
+        }
+        let (Some(id), Some(text)) = (
+            event.payload["messageId"].as_str(),
+            event.payload["content"]["text"].as_str(),
+        ) else {
+            continue;
+        };
+        let words = last
+            .entry(event.agent_id.clone())
+            .or_insert_with(|| (id.to_owned(), String::new()));
+        if words.0 != id {
+            *words = (id.to_owned(), String::new());
+        }
+        words.1.push_str(text);
+    }
+    last.into_iter()
+        .filter(|(_, (_, text))| !text.trim().is_empty())
+        .map(|(agent, (_, text))| (agent, crate::cap_middle_text(text.trim(), LAST_WORDS_CHARS)))
+        .collect()
 }
 
 /// The request or note a message hands the agents: without the @mention that addressed it, when
@@ -1810,14 +2131,30 @@ async fn start_from_note(
         ));
     }
     let expected = body.and_then(|Json(body)| body.expected_revision);
+    let team = open_team(&state.teams_root, &message.team_path)
+        .ok()
+        .map(|(_, team)| team);
     // A note written as a reply stays one when it starts the team: the agents are handed the quote.
-    let replied = message.reply_to.as_ref().and_then(|reply| {
-        open_team(&state.teams_root, &message.team_path)
-            .ok()
-            .map(|(_, team)| reply.for_agents(&team))
+    let replied = message
+        .reply_to
+        .as_ref()
+        .and_then(|reply| team.as_ref().map(|team| reply.for_agents(team)));
+    // A note said to one agent, which that agent answered ([`crate::intent`]), starts it alone.
+    let only = message.agent_id.clone().filter(|agent| {
+        team.as_ref()
+            .is_some_and(|team| team.agents.iter().any(|found| &found.id == agent))
     });
-    let start = StartRunRequest::from_chat(&message.team_path, &message.text, expected, None)
-        .replying(replied);
+    let task = team
+        .as_ref()
+        .map_or(message.text.as_str(), |team| task_text(&message.text, team));
+    let mut start =
+        StartRunRequest::from_chat(&message.team_path, task, expected, None).replying(replied);
+    let route = if let Some(agent) = &only {
+        start = start.only(agent);
+        Route::Agent
+    } else {
+        Route::Team
+    };
     let outcome = runs::launch_manual(
         &state.registry,
         state.archive.clone(),
@@ -1832,7 +2169,7 @@ async fn start_from_note(
         _ => None,
     };
     store
-        .set_run(&id, run_id.as_deref())
+        .set_run(&id, run_id.as_deref(), route)
         .await
         .map_err(|error| database(&error))?;
     let Some(run_id) = run_id else {
@@ -1843,8 +2180,8 @@ async fn start_from_note(
     Ok((
         StatusCode::ACCEPTED,
         Json(json!({
-            "route": "team",
-            "message": ChatMessage { route: Route::Team, run_id: Some(run_id), ..message },
+            "route": route.as_str(),
+            "message": ChatMessage { route, run_id: Some(run_id), ..message },
             "run": record,
         })),
     )
@@ -2142,6 +2479,7 @@ mod tests {
             delivered_at: None,
             now: false,
             reply_to: None,
+            answers: None,
         }
     }
 
@@ -2335,6 +2673,168 @@ mod tests {
         assert!(section.contains("Mai, in a note to the team: shorter, please"));
         assert!(!section.contains("You"), "{section}");
         assert!(!section.contains(" you"), "{section}");
+    }
+
+    /// A hello the agents answered themselves instead of starting the workflow
+    /// ([`crate::intent`]) is carried as what it was: said to the team or to one agent, what each
+    /// agent answered, and that no work was started.
+    #[test]
+    fn an_answered_hello_is_carried_with_every_answer() {
+        let now = finished("ffffffff-now", "2026-10-06T03:00:00.000Z", "today", "");
+        let said = |from: &str, text: &str| NoteAnswer {
+            from: from.to_owned(),
+            text: text.to_owned(),
+            at: "2026-10-05T02:10:05.000Z".to_owned(),
+        };
+        let answered =
+            |at: &str, text: &str, to: Option<&str>, said: Vec<NoteAnswer>| ChatMessage {
+                route: Route::TeamNote,
+                answers: Some(NoteAnswers {
+                    waiting: Vec::new(),
+                    said,
+                }),
+                ..note(at, text, to)
+            };
+        let history = History {
+            replies: BTreeMap::new(),
+            reactions: Vec::new(),
+            runs: Vec::new(),
+            notes: vec![
+                answered(
+                    "2026-10-05T02:10:00.000Z",
+                    "hi @team",
+                    None,
+                    vec![
+                        said("researcher", "Hi! What should we look into?"),
+                        said("writer", "Hello, ready when you are."),
+                    ],
+                ),
+                answered(
+                    "2026-10-05T02:12:00.000Z",
+                    "@Writer thanks!",
+                    Some("writer"),
+                    vec![said("writer", "Any time!")],
+                ),
+            ],
+            decisions: Vec::new(),
+        };
+        let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
+        assert!(
+            section.contains(
+                "You to the team: hi @team\nResearcher answered in the chat: Hi! What should we \
+                 look into?\nWriter answered in the chat: Hello, ready when you are.\nNo work was \
+                 started."
+            ),
+            "{section}"
+        );
+        assert!(
+            section.contains(
+                "You to Writer: @Writer thanks!\nWriter answered in the chat: Any time!\nNo work \
+                 was started."
+            ),
+            "{section}"
+        );
+        assert!(!section.contains("while it worked"), "{section}");
+    }
+
+    /// An agent remembers the last thing it said in a piece of work: its final message there,
+    /// not the message before it, and nothing another agent said.
+    #[tokio::test]
+    async fn an_agent_remembers_its_own_last_words_in_the_newest_work() {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let said = [
+            ("researcher", "m1", "Three stories, "),
+            ("researcher", "m1", "all sourced."),
+            ("checker", "m2", "Checking now."),
+            ("checker", "m3", "## Check\n1. Met"),
+            ("checker", "m3", " \u{2014} every claim has its link"),
+        ];
+        for (seq, (agent, id, text)) in said.iter().enumerate() {
+            archive
+                .append(&crate::RunEvent {
+                    id: format!("e{seq}"),
+                    session_id: "run-1".to_owned(),
+                    agent_id: (*agent).to_owned(),
+                    seq: seq as u64,
+                    ts: "2026-10-06T02:00:00.000Z".to_owned(),
+                    kind: crate::EventKind::Message,
+                    payload: json!({"role": "agent", "messageId": id, "content": {"type": "text", "text": text}}),
+                    raw: None,
+                })
+                .await
+                .expect("append");
+        }
+        let words = last_words(&archive, "run-1").await;
+        assert_eq!(words["researcher"], "Three stories, all sourced.");
+        assert_eq!(
+            words["checker"],
+            "## Check\n1. Met \u{2014} every claim has its link"
+        );
+        assert!(last_words(&archive, "no-such-run").await.is_empty());
+    }
+
+    /// **"hi @team": everyone answers at once, for themselves, and nothing runs.** Each agent the
+    /// read named answers on its own model; each answer lands on the note as it comes, an agent
+    /// with nothing to add says nothing, and nobody is left "writing".
+    #[tokio::test]
+    async fn the_agents_answer_a_hello_together_each_on_its_own_model() {
+        use crate::agent::{Completion, Demo};
+        let pool = crate::db::Db::temp().await;
+        let store = ChatStore::new(pool.clone());
+        let scripted = |reply: &str| {
+            let demo = Demo::scripted(vec![Completion::text(reply)]);
+            (crate::engine::demo_model(demo.clone()), demo)
+        };
+        let mut team = team();
+        let (researcher_model, researcher) = scripted("Hi! I find the stories.");
+        let (writer_model, writer) = scripted("PASS");
+        team.agents[0].model = researcher_model;
+        team.agents[1].model = writer_model;
+        let mut message = note("2026-10-06T02:00:00.000Z", "hi @team", None);
+        message.answers = Some(NoteAnswers {
+            waiting: vec!["researcher".to_owned(), "writer".to_owned()],
+            said: Vec::new(),
+        });
+        store.insert(&message).await.expect("insert");
+        let folder = std::env::temp_dir().join(format!("loomwatch-together-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        answer_together(
+            store.clone(),
+            Answering {
+                archive: Some(EventArchive::new(pool)),
+                teams_root: folder.clone(),
+                team,
+                whole_team: true,
+                task: "hi @team".to_owned(),
+                context: crate::intent::Context::default(),
+                newest_work: None,
+            },
+            message.clone(),
+        )
+        .await;
+        let kept = store.get(&message.id).await.expect("read").expect("kept");
+        let answers = kept.answers.expect("answers");
+        assert!(answers.waiting.is_empty(), "{answers:?}");
+        assert_eq!(
+            answers.said.len(),
+            1,
+            "the writer had nothing to add: {answers:?}"
+        );
+        assert_eq!(answers.said[0].from, "researcher");
+        assert_eq!(answers.said[0].text, "Hi! I find the stories.");
+        assert_eq!(kept.route, Route::TeamNote, "nothing ran");
+        // Each answered for itself, told the other was reading too.
+        assert!(
+            researcher.requests()[0]
+                .prompt()
+                .contains("Writer is reading it too")
+        );
+        assert!(
+            writer.requests()[0]
+                .prompt()
+                .contains("Researcher is reading it too")
+        );
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     // -----------------------------------------------------------------------------------------
