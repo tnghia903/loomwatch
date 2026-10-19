@@ -27,7 +27,8 @@ export const PAGE_POLICY = [
 export const PAGE_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox'
 
 /**
- * The script added to the page. It reports the marked words and where they are, opens web links
+ * The script added to the page. It reports the marked words and where they are, lets go of them on
+ * Escape (the key reaches the page, not the reader, once words in it are marked), opens web links
  * outside the reader, and lights the parts asked about (found as the reader finds them: whitespace
  * aside). Written as plain script, not compiled: it runs inside the page.
  */
@@ -45,6 +46,12 @@ export const PAGE_BRIDGE = `(function () {
   document.addEventListener('pointerdown', function () { down = true; if (shown) { shown = false; send({ type: 'selection', text: '' }); } }, true);
   document.addEventListener('pointerup', function () { down = false; setTimeout(report, 0); }, true);
   document.addEventListener('selectionchange', function () { if (down) return; clearTimeout(timer); timer = setTimeout(report, 120); });
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape' || !shown) return;
+    var selection = document.getSelection();
+    if (selection) selection.removeAllRanges();
+    shown = false; send({ type: 'selection', text: '' });
+  }, true);
   addEventListener('scroll', function () { if (shown) report(); }, true);
   addEventListener('resize', function () { if (shown) report(); });
   document.addEventListener('click', function (event) {
