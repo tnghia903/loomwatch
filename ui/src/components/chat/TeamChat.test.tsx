@@ -158,7 +158,9 @@ describe('the team’s chat', () => {
     expect(text.indexOf('we only cover listed companies')).toBeLessThan(text.indexOf('The chip story.'))
     expect(within(log).getByText('The schedule')).toBeInTheDocument()
     expect(within(log).getByText('Writer took it in its next turn')).toBeInTheDocument()
-    expect(within(log).getAllByText(/Researcher and Writer worked on this · \d+ min/)).toHaveLength(2)
+    // Who worked on each finished piece, and how long it took: their faces on its request, not a line.
+    expect(within(log).getAllByRole('button', { name: /^Researcher and Writer worked on this · \d+ min$/ })).toHaveLength(2)
+    expect(within(log).queryByText(/worked on this/)).not.toBeInTheDocument()
     // The newest piece shows what they said; the one before folds it to one line.
     expect(within(log).getAllByRole('button', { name: 'What they said' })).toHaveLength(1)
     expect(within(log).getByRole('button', { name: 'Hide what they said' })).toHaveAttribute('aria-expanded', 'true')
@@ -730,6 +732,105 @@ describe('a piece of work', () => {
     renderChat()
     const stopped = (await screen.findByText('The work stopped.')).closest('p')
     expect(stopped).toHaveTextContent('The work stopped. Researcher stopped. Codex reported an error instead of an answer: The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.')
+  })
+})
+
+describe('reactions', () => {
+  const handover: TeamMessage = {
+    id: 'h-1', kind: 'handover', from: null, handedBy: { from: ['researcher'], via: [] }, to: 'writer', text: 'Three stories, sourced.', context: null,
+    eventId: 'e0', evidenceId: null, seq: 0, ts: '2026-10-06T02:01:00.000Z', offsetMs: 60_000, state: 'delivered', error: null, reply: null, carried: false,
+  }
+  const stores = () => {
+    answer = (_url, body) => {
+      const { target, face } = body as { target: string; face: string | null }
+      return new Response(JSON.stringify({ anchor: 'run-1', reactions: face ? [{ target, face, at: '2026-10-06T02:06:00.000Z' }] : [] }), { status: 200 })
+    }
+  }
+
+  it('shows the agents looking up at what they were handed, and yours with what it tells the team', async () => {
+    said.messages = [handover]
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [], reactions: [{ target: 'answer', face: 'hmm', at: '2026-10-06T02:05:00.000Z' }] }]
+    renderChat()
+    // Both worked on the request, and Writer was handed Researcher's work.
+    expect(await screen.findByRole('button', { name: 'Researcher and Writer worked on this · 4 min' })).toBeDisabled()
+    const talk = await screen.findByRole('region', { name: 'What the agents said' })
+    expect(within(talk).getByRole('button', { name: 'Writer picked this up. Add yours' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Not sure: you. The team looks at it again. Take yours off' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('reacts only to what the agents said: your own words carry only their faces', async () => {
+    page = [
+      { kind: 'note', message: message({ id: 'n-1', route: 'team_note', runId: null, text: 'we only cover listed companies', createdAt: '2026-10-06T01:00:00.000Z' }) },
+      { kind: 'work', run: run({}), request: message({}), notes: [message({ id: 'n-2', route: 'note', agentId: 'writer', text: 'keep it short', deliveredAt: '2026-10-06T02:02:00.000Z' })] },
+    ]
+    renderChat()
+    expect(await screen.findByRole('button', { name: "React to Writer's answer" })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Writer picked this up' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /React to your/ })).not.toBeInTheDocument()
+  })
+
+  it('puts no React button on your own answer in the agents\u2019 talk, only the face of the agent it reached', async () => {
+    said.messages = [{
+      id: 'q-1', kind: 'question', from: 'writer', handedBy: null, to: 'operator', text: 'Which region?', context: null,
+      eventId: 'e1', evidenceId: null, seq: 1, ts: '2026-10-06T02:02:00.000Z', offsetMs: 120_000, state: 'answered', error: null, carried: false,
+      reply: { from: 'operator', text: 'Europe only', eventId: 'e2', seq: 2, ts: '2026-10-06T02:03:00.000Z', offsetMs: 180_000, source: null, sentBackTo: null },
+    }]
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    renderChat()
+    const talk = await screen.findByRole('region', { name: 'What the agents said' })
+    expect(within(talk).getByRole('button', { name: "React to Writer's question" })).toBeInTheDocument()
+    expect(within(talk).getByRole('button', { name: 'Writer picked this up' })).toBeDisabled()
+    expect(within(talk).queryByRole('button', { name: /React to your/ })).not.toBeInTheDocument()
+  })
+
+  it('opens a tray that says what each reaction tells the team, keeps the one you pick, and takes it off again', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    stores()
+    renderChat()
+    fireEvent.click(await screen.findByRole('button', { name: "React to Writer's answer" }))
+    const tray = screen.getByRole('toolbar', { name: 'Pick a reaction' })
+    expect(within(tray).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Good', 'Love it', 'Not sure', 'Wrong', 'Seen'])
+    expect(tray).toHaveTextContent('The team reads your reaction next time')
+    // The tray is the keyboard's while it is open: arrows move along it, and say each face.
+    expect(within(tray).getByRole('button', { name: 'Good' })).toHaveFocus()
+    fireEvent.keyDown(tray, { key: 'ArrowRight' })
+    expect(within(tray).getByRole('button', { name: 'Love it' })).toHaveFocus()
+    fireEvent.keyDown(tray, { key: 'ArrowRight' })
+    expect(tray).toHaveTextContent('Not sure · The team looks at it again')
+    fireEvent.click(within(tray).getByRole('button', { name: 'Wrong' }))
+    expect(screen.queryByRole('toolbar', { name: 'Pick a reaction' })).not.toBeInTheDocument()
+    const off = screen.getByRole('button', { name: /^Wrong: you\./ })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/reactions', body: { teamPath: 'news.yaml', anchor: 'run-1', target: 'answer', face: 'off' } }))
+    fireEvent.click(off)
+    await waitFor(() => expect(posted[1]).toMatchObject({ url: '/api/chat/reactions', body: { target: 'answer', face: null } }))
+    expect(screen.queryByRole('button', { name: /^Wrong: you/ })).not.toBeInTheDocument()
+  })
+
+  it('sends what a line of talk was with your reaction on it, for the next work to read', async () => {
+    said.messages = [handover]
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    stores()
+    renderChat()
+    const talk = await screen.findByRole('region', { name: 'What the agents said' })
+    fireEvent.click(within(talk).getByRole('button', { name: "React to Researcher's handover" }))
+    fireEvent.click(screen.getByRole('button', { name: 'Not sure' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({
+      url: '/api/chat/reactions',
+      body: { anchor: 'run-1', target: 'talk:h-1:said', face: 'hmm', about: { agent: 'researcher', what: 'handover', quote: 'Three stories, sourced.' } },
+    }))
+  })
+
+  it('closes the tray on Escape without the workspace hearing it', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    renderChat()
+    const heard = vi.fn()
+    document.addEventListener('keydown', heard)
+    fireEvent.click(await screen.findByRole('button', { name: "React to Writer's answer" }))
+    fireEvent.keyDown(screen.getByRole('toolbar', { name: 'Pick a reaction' }), { key: 'Escape' })
+    document.removeEventListener('keydown', heard)
+    expect(screen.queryByRole('toolbar', { name: 'Pick a reaction' })).not.toBeInTheDocument()
+    expect(heard).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: "React to Writer's answer" })).toHaveFocus()
   })
 })
 

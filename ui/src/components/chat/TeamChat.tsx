@@ -559,7 +559,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
-                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} />
+                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} />
                   : <TeamNote message={item.message} name={name} onShowReplied={showReplied} onStart={() => void startNote(item.message)} />}
               </Fragment>
             )

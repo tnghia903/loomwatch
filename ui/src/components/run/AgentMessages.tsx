@@ -51,6 +51,11 @@ interface AgentMessagesProps {
    * which hands it to the message box as the message being answered. Absent, there is none.
    */
   onReply?: (reply: Omit<ReplyTo, 'runId'>) => void
+  /**
+   * Inside the team's chat: each thing said with its reactions under it (components/chat/Reactions.tsx).
+   * Given the bubble and the message as drawn, it returns what to draw in its place.
+   */
+  reactions?: (bubble: Bubble, said: ReactNode) => ReactNode
 }
 
 /** A member of the chat, as its messages show it. */
@@ -74,7 +79,7 @@ const LONG = { lines: 7, chars: 520 }
  * document someone shared, and "… is typing" while an answer is on its way. Read only: this is the
  * record of the run, and reopening it never runs the agents again.
  */
-export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, bare = false, yourTurn, permissionTurn, onReply }: AgentMessagesProps) {
+export function AgentMessages({ messages, order, predecessors, evidence, live, onInspectEvidence, onInspectHandover, reveal = null, bare = false, yourTurn, permissionTurn, onReply, reactions }: AgentMessagesProps) {
   // What an agent was handed again from the work this follows is said once, as picked up, rather
   // than drawn as a handover and a review sent just now (ADR 0051).
   const { carried, fresh } = useMemo(() => ({ carried: messages.filter((message) => message.carried), fresh: messages.filter((message) => !message.carried) }), [messages])
@@ -165,6 +170,7 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
               when={when}
               answers={backs.get(bubble.key) ?? null}
               onReply={onReply}
+              reactions={reactions}
             />
           )
         })}
@@ -319,9 +325,10 @@ interface ChatMessageProps {
   /** For a clarification: the question back it answers, which it quotes. */
   answers: Bubble | null
   onReply?: (reply: Omit<ReplyTo, 'runId'>) => void
+  reactions?: (bubble: Bubble, said: ReactNode) => ReactNode
 }
 
-function ChatMessage({ bubble, member, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when, answers, onReply }: ChatMessageProps) {
+function ChatMessage({ bubble, member, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when, answers, onReply, reactions }: ChatMessageProps) {
   const { item, part, text } = bubble
   const { message } = item.line
   const speaker = bubble.from[0] ? member(bubble.from[0]) : null
@@ -334,6 +341,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
   const [more, setMore] = useState(false)
   const reply = message.reply
   const name = (person: Member) => (person.you ? 'You' : person.name)
+  const withReactions = (said: ReactNode) => (reactions ? reactions(bubble, said) : said)
   const label = `${when(bubble)}, ${speaker ? name(speaker) : 'Someone'}${mentions.length ? ` to ${mentions.map((person) => (person.you ? 'you' : person.name)).join(' and ')}` : ''}: ${bubble.word}`
   // What the message's info holds: the record behind it, what a stage was given in full.
   const handedTo = handover ? mentions.filter((person) => !person.you) : part === 'reply' ? item.passedOn.map((passed) => member(passed.to)) : []
@@ -380,7 +388,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
             {live && <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>}
             <span className="chat-typing-word">{typing(bubble.word, speaker, live)}</span>
           </div>
-        ) : (
+        ) : withReactions(
           <div className="chat-bubble">
             {quoted && (
               <blockquote className="chat-quote">
@@ -407,7 +415,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
             )}
             {failed && <p className="chat-failed" role="note">Not delivered{message.error ? `: ${message.error}` : ''}</p>}
             {long && <button type="button" className="chat-more" aria-expanded={more} onClick={() => setMore((value) => !value)}>{more ? 'Show less' : 'Read more'}</button>}
-          </div>
+          </div>,
         )}
         {(caption || info || continued || toReply) && (
           <p className="chat-under">
