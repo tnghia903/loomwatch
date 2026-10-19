@@ -19,7 +19,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-56524A" alt="Platform: macOS and Windows">
-  <img src="https://img.shields.io/badge/first%20run-offline%20demo%2C%20no%20key-17724A" alt="First run: offline demo, no key">
+  <img src="https://img.shields.io/badge/demo-offline%2C%20no%20key-17724A" alt="Demo: offline, no key">
   <img src="https://img.shields.io/badge/models%20via-ChatGPT%20plan%20%7C%20Claude%20credit%20%7C%20OpenRouter-56524A" alt="Models via your ChatGPT plan, your Claude credit or OpenRouter">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
 </p>
@@ -220,7 +220,8 @@ with a lead that hands out work and asks its teammates questions as it goes.
 
 Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
 **Chat** tab, then add it to any team. A new job makes a new version, and teams keep theirs until
-you choose **Update**.
+you choose **Update**. Tell them about you once, in **About you**, and every agent fits its answers
+to you.
 
 </td>
 <td width="33%" valign="top">
@@ -273,9 +274,10 @@ replay what happened, and when.
 
 ### ✋ You stay in the loop
 
-Add a **You** step to approve the work or send it back with changes. Agents can also stop and ask you
-a question mid-run, and when one asks to run a command you can change it first, or answer in its
-place. In **Auto** mode, commands that only read or download run without asking.
+Add a **You** step to approve the work or send it back with changes. A check step can send the work
+back to be fixed, up to three rounds, and then ask you. Agents can also stop and ask you a question
+mid-run, and when one asks to run a command you can change it first, or answer in its place. In
+**Auto** mode, commands that only read or download run without asking.
 
 </td>
 <td valign="top">
@@ -311,6 +313,8 @@ that carry from one run to the next.
 
 Write **@team** to start everyone, **@Writer** to ask one agent, or a note the team reads next time.
 A note to an agent at work goes into its next turn, so it revises with everything it already has.
+**Reply** under anything an agent said tells it exactly what you mean, and a face you put on its
+work is read by the team's next run.
 
 </td>
 <td valign="top">
@@ -334,7 +338,8 @@ connected, and nothing is saved until you click **Apply**.
 
 ### 🎓 Guided first run
 
-An offline demo team and a three-minute guide. You can learn the whole app before you add a key.
+Your first agent asks what to make first, and asks which AI should answer only when you send. An
+offline demo team and a three-minute guide are there to look around before you connect anything.
 
 </td>
 <td valign="top">
@@ -732,10 +737,16 @@ saves a copy of the run history, safely while it runs.
 
 ## Try your first run
 
-The first time you open LoomWatch, a short guide offers to walk you through building your first
-agent, trying it on its own, putting it in a team and running it on the models you've connected.
-Reopen it any time with **New here? Take the 3-minute guide** on Home, from the menu in a team, or
-by pressing <kbd>⌘</kbd><kbd>K</kbd> and choosing **Getting started guide**.
+The first time you open LoomWatch, your first agent asks **What shall we make first?** Write
+anything, or pick one of the examples, and send it. If no AI is connected yet, it asks which one
+should answer: your ChatGPT plan, your Claude API credit or an OpenRouter key, each with what it
+costs. After its first answer it offers **Tell my agents about me**: your name, what you do, and the
+language and length you want. Then it answers again, made for you. **Keep this agent** adds it to My
+agents, and **Just look around** goes to Home instead.
+
+For a tour of the rest, open **New here? Take the 3-minute guide** on Home or in a team's menu, or
+press <kbd>⌘</kbd><kbd>K</kbd> and choose **Getting started guide**. It walks you through building
+an agent, trying it on its own, putting it in a team and running it.
 
 To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The
 demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so
@@ -790,6 +801,13 @@ with what should change; under its new version, **Continue with the team** runs 
    add **You (review step)** wherever you want to approve work before the team continues.
 5. Click **Run team**, or open **Chat**, describe what you want in plain words, and press
    <kbd>Enter</kbd>.
+
+In the chat, **Reply** under anything an agent said, such as a handover, a question or the answer:
+the agent is told which message you mean, and a reply to an agent at work joins its next turn. Put
+a face on what an agent said, such as **Good**, **Not sure** or **Wrong**, and the team's next run
+reads what it meant. Tell your agents about you once, with **About you…** in the ☰ menu: every agent
+reads your name and what you wrote before it works, including the language, length and tone you ask
+for.
 
 Each agent's model says how it is paid: `chatgpt:gpt-6.1-sol` on your ChatGPT plan,
 `anthropic:claude-opus-5-5` on your Claude API credit, or an OpenRouter model id such as
