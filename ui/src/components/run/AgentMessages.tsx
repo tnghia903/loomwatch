@@ -7,7 +7,7 @@ import { clockTime } from '../../lib/chat/format'
 import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
-import { reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
+import { REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
 import { useAgentFaces } from '../../lib/chat/faces'
 import { AgentFace } from '../chat/AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
@@ -318,11 +318,15 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
   // A reply's quote already says whom it answers; it names someone only when it goes elsewhere, as
   // your approval does when it passes the work on.
   const addressed = part === 'reply' ? mentions.filter((person) => !item.line.senders.includes(person.id)) : mentions
-  const caption = part === 'reply' && message.kind === 'handover'
+  const kindWord = part === 'reply' && message.kind === 'handover'
     ? bubble.word === 'sent back' ? 'sent back' : `approved${item.passedOn.length ? ` · passed on to ${nameList(item.passedOn.map((passed) => member(passed.to).name))}` : ''}`
     : message.kind === 'check' && part !== 'waiting'
       ? `${bubble.word}${message.check && message.check.round > 1 ? ` · round ${message.check.round}` : ''}`
       : bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' ? bubble.word : null
+  // In a team with no fixed order: whether the teammate carried on in its conversation or a fresh
+  // copy took it, said under the work handed out, and under a teammate's answer.
+  const reach = message.reached && (message.kind === 'ask' ? part === 'reply' : part === 'said') ? REACHED_WORD[message.reached] : null
+  const caption = reach ? `${kindWord ?? bubble.word} · ${reach}` : kindWord
 
   return (
     <li

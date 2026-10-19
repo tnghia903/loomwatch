@@ -168,6 +168,12 @@ describe('messages between agents', () => {
       settled(8, 'lead', 'd', { accepted: true, agent: 'checker', mode: 'handoff', fresh: 'limit' }),
     ])
     expect(messages.map((message) => message.reached)).toEqual([undefined, 'continued', 'busy', 'limit'])
+    seq = 0
+    const asked = projectRun([
+      bus(1, 'lead', 'q', 'ask', { agent: 'writer', question: 'Which line?' }),
+      settled(2, 'lead', 'q', { agent: 'writer', reply: 'Line 12.', live: true, continues: true }),
+    ])
+    expect(asked.messages[0]).toMatchObject({ state: 'answered', reached: 'continued', reply: { source: 'open' } })
     expect(reachedLine('continued', 'Writer')).toBe('Writer carried on in the conversation it already had in this run, so it remembered its earlier work.')
     expect(reachedLine('busy', 'Writer')).toBe('Writer was still working, so a separate copy started: it saw only this message.')
     expect(reachedLine('limit', 'Checker')).toContain('as many teammates as the team allows already held a conversation')

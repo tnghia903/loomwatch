@@ -181,7 +181,7 @@ export interface TeamMessage {
   /** For a `check` message: the round and what it found. */
   check?: CheckExchange
   /**
-   * For a `dispatch` or `handoff` in a team with no fixed order: where the work went.
+   * For a `dispatch`, `handoff` or `ask` in a team with no fixed order: where it went.
    * `continued` — into the conversation the teammate already had in this run (`continues` in the
    * record); `busy` — to a separate copy, because the teammate was still working; `limit` — to a
    * fresh start, because as many teammates as the team allows already held a conversation.
@@ -190,6 +190,15 @@ export interface TeamMessage {
 }
 
 export type Reached = 'continued' | 'busy' | 'limit'
+
+/** The word the chat shows beside a message for where it went (see `TeamMessage.reached`). */
+export const REACHED_WORD: Record<Reached, string> = { continued: 'carries on', busy: 'separate copy', limit: 'fresh start' }
+
+/** Where the Team Bus says a call went, from its recorded result. */
+function reachedOf(output: Record<string, unknown>): Reached | null {
+  if (output.continues === true) return 'continued'
+  return output.fresh === 'busy' || output.fresh === 'limit' ? output.fresh : null
+}
 
 /** Whether a check round found nothing missing: every item met, from a reply that could be read. */
 export function allMet(check: CheckExchange): boolean {
@@ -324,12 +333,9 @@ export class Correspondence {
     }
     // The bus accepts a name where the id belongs and answers with the id it resolved.
     if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
-    if (message.kind !== 'ask') {
-      message.state = 'delivered'
-      const reached = output.continues === true ? 'continued' : output.fresh === 'busy' || output.fresh === 'limit' ? output.fresh : null
-      if (reached) message.reached = reached
-      return
-    }
+    const reached = reachedOf(output)
+    if (reached) message.reached = reached
+    if (message.kind !== 'ask') { message.state = 'delivered'; return }
     message.state = 'answered'
     if (output.clarifies === true) message.clarifies = true
     message.reply = {
