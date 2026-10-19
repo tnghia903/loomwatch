@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 
 import { shortName } from '../lib/ai/client'
 import { useAiStatus } from '../lib/ai/useKeyStatus'
-import { SOURCE_INFO, missingSourceSaid, missingSources } from '../lib/ai/sources'
+import { SOURCE_INFO, missingSourceSaid, missingSources, sourceOf } from '../lib/ai/sources'
 import { useModels } from '../lib/ai/useModels'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import { nodeFromDrop, type AgentNode } from '../lib/library/nodeFromDrop'
@@ -1705,7 +1705,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     const said = perRun === null ? 'Runs of this team have no limit on what they spend.' : `Each run of this team may spend up to ${dollars(perRun)}. Past it, the agents wait for you.`
     setStatusAnnouncement(saved ? said : `${said} It applies once the team is saved.`)
   }, [doc])
-  const spendLimit = useMemo(() => ({ perRun: doc.teamSpendPerRun, onChange: editable ? (perRun: number | null) => void chooseSpend(perRun) : undefined }), [doc.teamSpendPerRun, editable, chooseSpend])
+  // Which plans pay for some of the team's agents, so the spend menu says how their calls count.
+  const plansPaying = useMemo(() => {
+    const paid = new Set(docAgents.filter((agent) => agent.kind !== 'operator').map((agent) => sourceOf(agent.model)))
+    return { chatgpt: paid.has('chatgpt'), anthropic: paid.has('anthropic') }
+  }, [docAgents])
+  const spendLimit = useMemo(() => ({ perRun: doc.teamSpendPerRun, onChange: editable ? (perRun: number | null) => void chooseSpend(perRun) : undefined, plans: plansPaying }), [doc.teamSpendPerRun, editable, chooseSpend, plansPaying])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
