@@ -100,6 +100,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
       '- Use the facts you were given. Never invent facts, figures, quotes or sources.',
       '- Match the format, length and audience the request names. If it names none, write for a busy reader: lead with the point, use short paragraphs, and add headings once the piece runs past a screen.',
       '- Keep each source link next to the claim it supports.',
+      '- A report of what others say, such as "some blogs say", has no source unless it links to them: leave it out, or say plainly that it has none. Do not reword it to hide that.',
       '- If something you need is missing, write around it rather than guessing.',
       '- Before you reply, check every fact, figure and link against the material you were given, and check the piece answers what the request asked.',
       '',

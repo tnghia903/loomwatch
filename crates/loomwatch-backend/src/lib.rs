@@ -2963,6 +2963,15 @@ fn check_material(
          \"{DOES_NOT_APPLY}\" and why as its evidence. Once any of them has what an item is about, \
          it applies to all of the work.\n"
     );
+    // Read by paragraph, a link anywhere in a paragraph met "each claim has its link": "Some blogs
+    // say the RFC 'recommends' it", ending in a link that backs only the RFC's side, passed in 8 of
+    // 8 runs on the bench's L1 probe and in R1's rerun (pilot-1 had caught it once).
+    let _ = write!(
+        text,
+        "\nWhere an item asks for a link beside each claim, the link must back that claim itself, \
+         not only a sentence near it: a claim with no link of its own, such as what unnamed blogs \
+         say, is Not met unless the work says plainly that it has no source.\n"
+    );
     text
 }
 
@@ -4721,6 +4730,97 @@ mod tests {
             .iter()
             .find(|event| event.payload["phase"] == "check_sent_back")
             .expect("the unlinked claim is sent back");
+        assert_eq!(
+            sent.payload["findings"],
+            json!([{"verdict": "not_met", "item": LINK_ITEM, "evidence": unlinked}])
+        );
+        let verdicts = |list: [&str; 3]| list.map(str::to_owned).to_vec();
+        assert_eq!(
+            check_results(&events),
+            [
+                (1, verdicts(["met", "not_met", "met"]), true),
+                (2, verdicts(["met"; 3]), true),
+            ]
+        );
+        Ok(())
+    }
+
+    /// A claim that came with no link is not met by a link beside it that backs only the rest of
+    /// its sentence. Every check step is told the link must back the claim itself, so findings that
+    /// came in the request, linked but for one "some blogs say", send that one back (quality bench
+    /// L1: Met in 8 of 8 live runs before, "each paragraph has its link").
+    #[tokio::test]
+    async fn a_claim_with_no_link_of_its_own_is_sent_back_beside_linked_ones() -> Result<()> {
+        const LINK_ITEM: &str = "Uses only facts you were given; if they came with source links, \
+                                 each claim has its link beside it";
+        const RFC: &str = "https://www.rfc-editor.org/rfc/rfc6585#section-4";
+        let unlinked = "\"Some blogs say RFC 6585 recommends it\" has no link of its own: the RFC \
+                        6585 link backs only MAY";
+        let revised = format!("A 429 response MAY include Retry-After ([RFC 6585]({RFC})).");
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(
+                &["Some secondary blogs say"],
+                &format!(
+                    "A 429 response MAY include Retry-After. Some blogs say RFC 6585 recommends \
+                     it, but that's wrong ([RFC 6585]({RFC}))."
+                ),
+            ),
+            crate::test_support::turn(&["Sent back by Checker", unlinked], &revised),
+        ]);
+        let (checker, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(
+                &[
+                    "Only the request: nothing was handed to Writer.",
+                    &format!("2. {LINK_ITEM}"),
+                    "the link must back that claim itself, not only a sentence near it",
+                    "a claim with no link of its own, such as what unnamed blogs say, is Not met",
+                ],
+                &format!(
+                    "One claim has no link of its own.\n\n## Check\n\
+                     1. Met — Answers what the request asked — one short paragraph on 429\n\
+                     2. Not met — {LINK_ITEM} — {unlinked}\n\
+                     3. Met — {CONTRADICTION_ITEM} — the request's findings say MAY"
+                ),
+            ),
+            crate::test_support::turn(
+                &["The revised work", &format!("2. {LINK_ITEM} (Not met)")],
+                "## Check\n2. Met — the blogs' claim is gone, and the rest links RFC 6585",
+            ),
+        ]);
+        let mut writer_agent = named("writer", "Writer", &writer);
+        writer_agent.done_when = vec!["Answers what the request asked".into(), LINK_ITEM.into()];
+        let mut checker_agent = named("checker", "Checker", &checker);
+        checker_agent.checks = Some("writer".into());
+        checker_agent.send_back_once = true;
+        let team = check_team(
+            "unlinked-beside-linked",
+            vec![writer_agent, checker_agent],
+            &[("writer", "checker")],
+        );
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            &format!(
+                "Turn these findings into a short brief.\n\n## Findings\n\
+                 - A 429 response MAY include Retry-After. ({RFC})\n\n## Conflicts and gaps\n\
+                 - Some secondary blogs say RFC 6585 \"recommends\" Retry-After on 429."
+            ),
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, revised);
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        let sent = events
+            .iter()
+            .find(|event| event.payload["phase"] == "check_sent_back")
+            .expect("the claim with no link of its own is sent back");
         assert_eq!(
             sent.payload["findings"],
             json!([{"verdict": "not_met", "item": LINK_ITEM, "evidence": unlinked}])
@@ -7172,6 +7272,11 @@ mod tests {
             .collect()
     }
 
+    /// What a check step's material may hold beyond what its agent was given: the headings, how to
+    /// trace a claim, and how to read an item that does not apply or asks for a link beside each
+    /// claim (about 1,230 characters).
+    const CHECK_MATERIAL_FIXED_CHARS: usize = 1_300;
+
     /// The checker is shown what the checked agent was given, held to a size that keeps both its
     /// findings and its sources, and the items it answers, numbered, with the contradiction item.
     /// Nothing limits what it checks for itself.
@@ -7210,13 +7315,20 @@ mod tests {
             )),
             "{text}"
         );
-        // Then how to read an item that cannot apply to this work.
+        // Then how to read an item that cannot apply to this work, and a link beside each claim.
         assert!(
             at(&format!("2. {CONTRADICTION_ITEM}")) < at("An item, or part of one"),
             "{text}"
         );
-        assert!(text.ends_with("it applies to all of the work.\n"), "{text}");
-        assert!(text.chars().count() < 8_000 + 1_000);
+        assert!(
+            at("it applies to all of the work.\n") < at("Where an item asks for a link"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("unless the work says plainly that it has no source.\n"),
+            "{text}"
+        );
+        assert!(text.chars().count() < 8_000 + CHECK_MATERIAL_FIXED_CHARS);
         // A first stage was handed only the request, and an agent with no Done when is checked
         // against the request.
         let mut bare = team.clone();
@@ -7257,7 +7369,7 @@ mod tests {
             assert!(text.contains(kept), "{kept:?} in {text}");
         }
         assert!(
-            text.chars().count() < 3_000 + 1_000,
+            text.chars().count() < 3_000 + CHECK_MATERIAL_FIXED_CHARS,
             "{}",
             text.chars().count()
         );
