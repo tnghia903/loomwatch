@@ -4,7 +4,8 @@
 //! 1. The prompt joins the conversation.
 //! 2. The model's reply streams to the [`EventSink`] as it is written.
 //! 3. Every tool call it asks for is worked out, allowed or declined by [`Permissions`], run, and
-//!    its result goes back to the model.
+//!    its result goes back to the model. The calls are asked about one at a time, in order. The
+//!    reads among them run at the same time, and every other call runs on its own in its place.
 //! 4. That repeats until the model replies without a tool call, the turn hits its tool-call cap,
 //!    the run's spool says no more ([`Spend`]), or someone cancels it. A reply the length limit cut
 //!    off is carried on instead of ending the turn.
@@ -12,7 +13,9 @@
 //! The conversation is append-only (see [`Message`]), and the tools offered never change, so the
 //! provider's prompt cache holds for the whole session. A long output is set aside rather than put
 //! in it whole, and a conversation that nears the model's context limit, or 160k tokens, is
-//! replaced by a summary.
+//! replaced by a summary. One the provider refuses as too long all the same has its tool results
+//! cut down to their start, their whole text set aside, and is summarised, once a turn, before
+//! that ends the run.
 //!
 //! Each turn's message ends with today's date, worked out when the turn starts, so a session
 //! parked overnight or a scheduled run is never a day out. Each model call is recorded with what
@@ -34,12 +37,13 @@ use super::events::{self, EventSink, ToolKind, ToolStatus};
 use super::permission::{Decision, PermissionRequest, Permissions};
 use super::prompt::{Abilities, loomwatch_brief, project_notes, system_prompt};
 use super::provider::{
-    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Provider, ServerTools, ToolCall,
-    ToolSpec, Usage, WebLimits,
+    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Picture, Provider, ServerTools,
+    ToolCall, ToolSpec, Usage, WebLimits,
 };
 use super::skills::{SkillIndex, prompt_section};
 use super::spend::{Go, Spend, Unmetered};
-use super::tools::{Builtin, CommandSettings, Context, Output};
+use super::tools::{self, Builtin, CommandSettings, Context, Output, Pictures};
+use crate::documents::Kind;
 use crate::you::AboutYou;
 
 /// The context size assumed for a model whose size isn't known.
@@ -57,9 +61,29 @@ const MAX_CUT_OFFS: usize = 2;
 /// A tool result longer than this is set aside, and the model sees its start.
 const SET_ASIDE_CHARS: usize = 24_000;
 const SET_ASIDE_PREVIEW_CHARS: usize = 6_000;
+/// How much of its start a tool result the model has read keeps when it is cut down to make room.
+const TRIMMED_PREVIEW_CHARS: usize = 1_500;
+/// What a set-aside output's note starts with, after its start.
+const SET_ASIDE_MARK: &str = "\n… this output is ";
+/// About how many bytes of text make a token, for the part of a request no provider has counted
+/// yet (see [`Session::estimate`]). Bytes rather than characters, so accented letters and other
+/// scripts, which take more tokens to a character than English, count for more.
+const BYTES_PER_TOKEN: u64 = 4;
+/// What one picture counts as in the estimate, in bytes of text: about 3,000 tokens. What it
+/// really takes depends on its size and the model: Claude counts a token for every 750 pixels, so a
+/// screenshot takes 1,000 to 3,000 and a picture at the largest size sent up to about 6,600. The
+/// estimate only says when to make room, and one that comes out low is caught when the provider
+/// refuses the call.
+const PICTURE_SIZE: usize = 12_000;
 /// How much of a tool's result the run record keeps. The model still gets all of it.
 const RECORDED_OUTPUT_CHARS: usize = 4_000;
 const READ_OUTPUT_DEFAULT_CHARS: usize = 20_000;
+/// The most pictures one conversation holds. Past 20 in one request, Claude's API wants each
+/// picture at most 2000 pixels on a side, smaller than the pictures are sent.
+pub const MAX_PICTURES: usize = 20;
+/// The most picture data one conversation holds, in base64. Every call sends the whole
+/// conversation again, and Anthropic refuses a request over 32 MB.
+pub const MAX_PICTURE_BYTES: usize = 20 * 1024 * 1024;
 
 /// Which of the built-in tools an agent gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,6 +196,13 @@ pub struct SessionConfig {
     pub context_window: Option<u64>,
     /// The most tool calls one turn may make before it stops.
     pub max_tool_calls: usize,
+    /// The model can see pictures, so a picture `read_file` opens is shown to it. From the model
+    /// list.
+    pub sees_pictures: bool,
+    /// The most pictures the conversation may hold.
+    pub max_pictures: usize,
+    /// The most picture data the conversation may hold, in base64 bytes.
+    pub max_picture_bytes: usize,
     /// Folders besides the work folder a command may write to.
     pub writable: Vec<PathBuf>,
     /// How much web reading one model call may do.
@@ -205,6 +236,9 @@ impl SessionConfig {
             max_tokens: 16_000,
             context_window: None,
             max_tool_calls: 200,
+            sees_pictures: false,
+            max_pictures: MAX_PICTURES,
+            max_picture_bytes: MAX_PICTURE_BYTES,
             writable: Vec::new(),
             web: WebLimits::default(),
             time_zone: None,
@@ -327,6 +361,9 @@ pub struct Session {
     /// The skills the instructions list, kept until the first turn says what the work is.
     skills: SkillIndex,
     cancel: Arc<watch::Sender<bool>>,
+    /// The pictures opened by the message whose calls are running, and their base64 bytes: they
+    /// join the conversation only once all its calls are done, and count against its room before.
+    unsent_pictures: (usize, usize),
 }
 
 impl Session {
@@ -366,6 +403,7 @@ impl Session {
             permissions,
             host,
             spend: Arc::new(Unmetered),
+            unsent_pictures: (0, 0),
         }
     }
 
@@ -398,6 +436,7 @@ impl Session {
             permissions,
             host,
             spend: Arc::new(Unmetered),
+            unsent_pictures: (0, 0),
         }
     }
 
@@ -454,7 +493,10 @@ impl Session {
     /// # Errors
     ///
     /// When the provider refuses or fails ([`AgentError`]), or the run can't be recorded. A
-    /// cancelled turn is not an error: it ends with [`StopReason::Cancelled`].
+    /// cancelled turn is not an error: it ends with [`StopReason::Cancelled`]. A conversation the
+    /// provider refuses as too long is only an error the second time in a turn: the first time,
+    /// room is made and it is summarised ([`Self::make_room`]).
+    #[allow(clippy::too_many_lines)] // Every way a turn goes on or ends, in one loop.
     pub async fn prompt(&mut self, text: &str) -> Result<TurnEnd, AgentError> {
         self.cancel.send_replace(false);
         let cancel = Cancel::new(self.cancel.subscribe());
@@ -465,6 +507,10 @@ impl Session {
         // Replies the length limit cut off in a row, and whether the last one was text to carry on.
         let mut cut_offs = 0usize;
         let mut carrying_on = false;
+        // Whether the provider just refused a call as too long for the model, the work's or a
+        // summary's, and whether this turn has made room once already.
+        let mut overflowed = false;
+        let mut made_room = false;
         loop {
             if cancel.is_cancelled() {
                 return Ok(ended(StopReason::Cancelled, turn, &reply));
@@ -472,9 +518,27 @@ impl Session {
             if !self.may_call(&cancel).await {
                 return Ok(ended(stopped(&cancel), turn, &reply));
             }
-            if self.needs_compacting() {
-                match self.compact(&cancel, &mut turn).await {
-                    Ok(()) => {}
+            if overflowed || self.needs_compacting() {
+                let summarised = if overflowed {
+                    self.make_room(&cancel, &mut turn).await
+                } else {
+                    self.compact(&cancel, &mut turn).await
+                };
+                overflowed = false;
+                match summarised {
+                    // A reply cut off before the summary isn't carried on: the summary says where
+                    // the work stands, and what the model writes next is a reply of its own.
+                    Ok(true) => {
+                        cut_offs = 0;
+                        carrying_on = false;
+                    }
+                    Ok(false) => {}
+                    // The summary was refused too: the newest step added more than estimated.
+                    Err(CallError::Failed(AgentError::ContextTooLong)) if !made_room => {
+                        made_room = true;
+                        overflowed = true;
+                        continue;
+                    }
                     Err(CallError::Cancelled) => {
                         return Ok(ended(StopReason::Cancelled, turn, &reply));
                     }
@@ -494,6 +558,13 @@ impl Session {
                 Ok(completion) => completion,
                 Err(CallError::Cancelled) => {
                     return Ok(ended(StopReason::Cancelled, turn, &reply));
+                }
+                // Once a turn, room is made and the call made again; a second refusal is the
+                // error, whose words are then true.
+                Err(CallError::Failed(AgentError::ContextTooLong)) if !made_room => {
+                    made_room = true;
+                    overflowed = true;
+                    continue;
                 }
                 Err(CallError::Failed(error)) => return Err(error),
             };
@@ -531,24 +602,84 @@ impl Session {
                 };
                 return Ok(ended(reason, turn, &reply));
             }
-            for call in &calls {
-                let content = if calls_made >= self.config.max_tool_calls {
-                    "Not run: this turn reached its limit of tool calls.".to_owned()
-                } else if cancel.is_cancelled() {
-                    "Not run: the turn was cancelled.".to_owned()
-                } else {
-                    calls_made += 1;
-                    self.run_tool(call, cut, &cancel).await?
-                };
-                self.history.push(Message::Tool {
-                    tool_call_id: call.id.clone(),
-                    content,
-                });
-            }
+            self.run_calls(&calls, cut, &cancel, &mut calls_made)
+                .await?;
             if calls_made >= self.config.max_tool_calls {
                 return Ok(ended(StopReason::MaxTurnRequests, turn, &reply));
             }
         }
+    }
+
+    /// Runs the tool calls of one model message, and adds their results to the conversation in
+    /// the order the model asked for them. `calls_made` counts the calls the turn has run.
+    async fn run_calls(
+        &mut self,
+        calls: &[ToolCall],
+        cut: bool,
+        cancel: &Cancel,
+        calls_made: &mut usize,
+    ) -> Result<(), AgentError> {
+        // Reads are asked about one by one and then run at the same time. Any other call waits for
+        // the reads before it and runs on its own, so the calls take effect in the model's order,
+        // and their answers go back in that order whichever finished first.
+        let mut answers: Vec<Option<Answer>> =
+            std::iter::repeat_with(|| None).take(calls.len()).collect();
+        let mut reads: Vec<Read> = Vec::new();
+        self.unsent_pictures = (0, 0);
+        for (place, call) in calls.iter().enumerate() {
+            let read = self.read_tool(call, &reads);
+            if read.is_none() {
+                self.run_reads(&mut reads, &mut answers, cancel).await?;
+            }
+            let answer = if *calls_made >= self.config.max_tool_calls {
+                (
+                    "Not run: this turn reached its limit of tool calls.".to_owned(),
+                    Vec::new(),
+                )
+            } else if cancel.is_cancelled() {
+                ("Not run: the turn was cancelled.".to_owned(), Vec::new())
+            } else {
+                *calls_made += 1;
+                match read {
+                    Some(tool) => match self.begin_read(tool, call, cut).await? {
+                        Begun::Allowed(input) => {
+                            reads.push(Read {
+                                place,
+                                call,
+                                tool,
+                                input,
+                            });
+                            continue;
+                        }
+                        Begun::Answered(answer) => (answer, Vec::new()),
+                    },
+                    None => self.run_tool(call, cut, cancel).await?,
+                }
+            };
+            self.hold_unsent(&answer.1);
+            answers[place] = Some(answer);
+        }
+        self.run_reads(&mut reads, &mut answers, cancel).await?;
+        self.unsent_pictures = (0, 0);
+        for (call, answer) in calls.iter().zip(answers) {
+            let (content, pictures) = answer.unwrap_or_default();
+            self.history.push(Message::Tool {
+                tool_call_id: call.id.clone(),
+                content,
+                pictures,
+            });
+        }
+        Ok(())
+    }
+
+    /// Counts `pictures` among the ones the running message's calls opened.
+    fn hold_unsent(&mut self, pictures: &[Picture]) {
+        let (count, bytes) = &mut self.unsent_pictures;
+        *count += pictures.len();
+        *bytes += pictures
+            .iter()
+            .map(|picture| picture.data.len())
+            .sum::<usize>();
     }
 
     /// The turn's prompt joins the conversation, dated.
@@ -742,35 +873,10 @@ impl Session {
         call: &ToolCall,
         cut: bool,
         cancel: &Cancel,
-    ) -> Result<String, AgentError> {
+    ) -> Result<(String, Vec<Picture>), AgentError> {
         let Ok(input @ Value::Object(_)) = serde_json::from_str::<Value>(&call.arguments) else {
-            // Told why, or the model makes the same call again and is cut off at the same place.
-            let said = if cut {
-                format!(
-                    "Not run: your message reached the length limit of one reply before this call \
-                     to {} was complete. Make it smaller: split the work into several calls (write \
-                     a long file in parts, the first with write_file and the rest with edit_file), \
-                     and keep your thinking short.",
-                    call.name
-                )
-            } else {
-                format!(
-                    "The arguments for {} weren't a JSON object. Call it again with valid \
-                     arguments.",
-                    call.name
-                )
-            };
-            self.emit(events::tool_call(
-                &call.id,
-                &call.name,
-                ToolKind::Other,
-                &json!({}),
-                &[],
-            ))
-            .await?;
-            self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
-                .await?;
-            return Ok(said);
+            let said = self.broken_arguments(call, cut).await?;
+            return Ok((said, Vec::new()));
         };
         let output = match Builtin::named(&call.name).filter(|tool| self.offers(*tool)) {
             Some(tool) => self.run_builtin(tool, call, input, cancel).await?,
@@ -796,7 +902,127 @@ impl Session {
                 said
             }
         };
-        Ok(self.for_conversation(&call.id, output.text))
+        Ok((
+            self.for_conversation(&call.id, output.text),
+            output.pictures,
+        ))
+    }
+
+    /// How many pictures the conversation holds now, and how much data they are in base64, with
+    /// the ones the running message's calls opened.
+    fn pictures_held(&self) -> (usize, usize) {
+        self.history
+            .iter()
+            .flat_map(|message| match message {
+                Message::Tool { pictures, .. } => pictures.as_slice(),
+                _ => &[],
+            })
+            .fold(self.unsent_pictures, |(count, bytes), picture| {
+                (count + 1, bytes + picture.data.len())
+            })
+    }
+
+    /// What the model is told about a call whose arguments aren't a JSON object, recorded as a
+    /// failed call. `cut` says the length limit cut its message off before the call was finished.
+    async fn broken_arguments(&self, call: &ToolCall, cut: bool) -> Result<String, AgentError> {
+        // Told why, or the model makes the same call again and is cut off at the same place.
+        let said = if cut {
+            format!(
+                "Not run: your message reached the length limit of one reply before this call to \
+                 {} was complete. Make it smaller: split the work into several calls (write a long \
+                 file in parts, the first with write_file and the rest with edit_file), and keep \
+                 your thinking short.",
+                call.name
+            )
+        } else {
+            format!(
+                "The arguments for {} weren't a JSON object. Call it again with valid arguments.",
+                call.name
+            )
+        };
+        self.emit(events::tool_call(
+            &call.id,
+            &call.name,
+            ToolKind::Other,
+            &json!({}),
+            &[],
+        ))
+        .await?;
+        self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
+            .await?;
+        Ok(said)
+    }
+
+    /// The read-only built-in `call` is for, when it can run at the same time as `reads`: any
+    /// read but one of a set-aside output that a read among them has still to set aside, or one
+    /// that opens a picture. A picture takes room the conversation has only so much of, so it is
+    /// opened on its own, knowing what the calls before it opened.
+    fn read_tool(&self, call: &ToolCall, reads: &[Read<'_>]) -> Option<Builtin> {
+        let tool = Builtin::named(&call.name).filter(|tool| tool.only_reads())?;
+        let input = serde_json::from_str::<Value>(&call.arguments).ok();
+        let text = |key: &str| input.as_ref().and_then(|input| input.get(key)?.as_str());
+        match tool {
+            Builtin::ReadToolOutput => {
+                let id = text("id");
+                if reads.iter().any(|read| Some(read.call.id.as_str()) == id) {
+                    return None;
+                }
+            }
+            Builtin::ReadFile => {
+                // Only a plain file is looked into: opening a pipe to read its start would wait
+                // for whatever writes to it.
+                let file = text("path").map(|path| tools::resolve(&self.config.cwd, path));
+                if file.is_some_and(|file| {
+                    std::fs::metadata(&file).is_ok_and(|meta| meta.is_file())
+                        && Kind::of(&file) == Some(Kind::Picture)
+                }) {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        self.offers(tool).then_some(tool)
+    }
+
+    /// A read worked out, recorded and asked about, as [`Self::run_tool`] would, but not run yet.
+    async fn begin_read(
+        &mut self,
+        tool: Builtin,
+        call: &ToolCall,
+        cut: bool,
+    ) -> Result<Begun, AgentError> {
+        let Ok(input @ Value::Object(_)) = serde_json::from_str::<Value>(&call.arguments) else {
+            return self.broken_arguments(call, cut).await.map(Begun::Answered);
+        };
+        Ok(match self.allow_builtin(tool, call, input).await? {
+            Ok(input) => Begun::Allowed(input),
+            Err(output) => Begun::Answered(self.for_conversation(&call.id, output.text)),
+        })
+    }
+
+    /// Runs the allowed `reads` all at once, and puts each one's answer in its place.
+    async fn run_reads(
+        &mut self,
+        reads: &mut Vec<Read<'_>>,
+        answers: &mut [Option<Answer>],
+        cancel: &Cancel,
+    ) -> Result<(), AgentError> {
+        if reads.is_empty() {
+            return Ok(());
+        }
+        let outputs = futures_util::future::join_all(
+            reads
+                .iter()
+                .map(|read| self.finish_builtin(read.tool, read.call, &read.input, cancel)),
+        )
+        .await;
+        for (read, output) in reads.drain(..).zip(outputs) {
+            let output = output?;
+            let text = self.for_conversation(&read.call.id, output.text);
+            self.hold_unsent(&output.pictures);
+            answers[read.place] = Some((text, output.pictures));
+        }
+        Ok(())
     }
 
     fn offers(&self, tool: Builtin) -> bool {
@@ -868,16 +1094,34 @@ impl Session {
             ))
             .await?;
         }
-        Ok(Output { text, failed })
+        Ok(Output {
+            text,
+            failed,
+            pictures: Vec::new(),
+        })
     }
 
     async fn run_builtin(
-        &mut self,
+        &self,
+        tool: Builtin,
+        call: &ToolCall,
+        input: Value,
+        cancel: &Cancel,
+    ) -> Result<Output, AgentError> {
+        match self.allow_builtin(tool, call, input).await? {
+            Ok(input) => self.finish_builtin(tool, call, &input, cancel).await,
+            Err(answered) => Ok(answered),
+        }
+    }
+
+    /// Works the call out, records it and asks [`Permissions`]: the arguments to run it with,
+    /// which the person may have changed, or what it is answered with instead of running.
+    async fn allow_builtin(
+        &self,
         tool: Builtin,
         call: &ToolCall,
         mut input: Value,
-        cancel: &Cancel,
-    ) -> Result<Output, AgentError> {
+    ) -> Result<Result<Value, Output>, AgentError> {
         let prepared = match tool.prepare(&input, &self.config.cwd) {
             Ok(prepared) => prepared,
             Err(said) => {
@@ -891,7 +1135,7 @@ impl Session {
                 .await?;
                 self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                     .await?;
-                return Ok(Output::failed(said));
+                return Ok(Err(Output::failed(said)));
             }
         };
         self.emit(events::tool_call(
@@ -918,7 +1162,7 @@ impl Session {
                         let said = format!("The person's change didn't work: {said}");
                         self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                             .await?;
-                        return Ok(Output::failed(said));
+                        return Ok(Err(Output::failed(said)));
                     }
                     input = edited;
                 }
@@ -928,19 +1172,30 @@ impl Session {
                         .to_owned();
                     self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                         .await?;
-                    return Ok(Output::failed(said));
+                    return Ok(Err(Output::failed(said)));
                 }
                 Decision::Answer(answer) => {
                     let said = format!("The person answered instead of letting this run: {answer}");
                     self.emit(events::tool_update(&call.id, ToolStatus::Completed, &said))
                         .await?;
-                    return Ok(Output::ok(said));
+                    return Ok(Err(Output::ok(said)));
                 }
             }
         }
+        Ok(Ok(input))
+    }
+
+    /// Runs an allowed call and records how it ended.
+    async fn finish_builtin(
+        &self,
+        tool: Builtin,
+        call: &ToolCall,
+        input: &Value,
+        cancel: &Cancel,
+    ) -> Result<Output, AgentError> {
         let output = match tool {
-            Builtin::UpdatePlan => self.update_plan(&input).await?,
-            Builtin::ReadToolOutput => self.read_output(&input),
+            Builtin::UpdatePlan => self.update_plan(input).await?,
+            Builtin::ReadToolOutput => self.read_output(input),
             _ => {
                 let settings = CommandSettings {
                     network: self.config.tools.web,
@@ -950,8 +1205,16 @@ impl Session {
                     cwd: &self.config.cwd,
                     cancel,
                     command: &settings,
+                    pictures: {
+                        let (held, bytes) = self.pictures_held();
+                        Pictures {
+                            seen: self.config.sees_pictures,
+                            room: self.config.max_pictures.saturating_sub(held),
+                            bytes: self.config.max_picture_bytes.saturating_sub(bytes),
+                        }
+                    },
                 };
-                tool.run(&input, &context).await
+                tool.run(input, &context).await
             }
         };
         let status = if output.failed {
@@ -1025,16 +1288,12 @@ impl Session {
     /// What goes into the conversation for a tool's result: all of it, or its start and an id to
     /// read the rest by.
     fn for_conversation(&mut self, id: &str, text: String) -> String {
-        let total = text.chars().count();
-        if total <= SET_ASIDE_CHARS {
+        if text.chars().count() <= SET_ASIDE_CHARS {
             return text;
         }
-        let preview: String = text.chars().take(SET_ASIDE_PREVIEW_CHARS).collect();
+        let note = set_aside_note(&text, id, SET_ASIDE_PREVIEW_CHARS);
         self.outputs.insert(id.to_owned(), text);
-        format!(
-            "{preview}\n… this output is {total} characters long; the rest was set aside. Read it \
-             with read_tool_output, id {id}, starting at offset {SET_ASIDE_PREVIEW_CHARS}."
-        )
+        note
     }
 
     fn needs_compacting(&self) -> bool {
@@ -1044,8 +1303,161 @@ impl Session {
             .unwrap_or(DEFAULT_CONTEXT)
             .min(COMPACT_WINDOW_CAP);
         #[allow(clippy::cast_precision_loss)]
-        let used = self.last_prompt_tokens as f64 / window as f64;
+        let used = self.estimate() as f64 / window as f64;
         used >= COMPACT_AT && self.history.len() > 3
+    }
+
+    /// About how many tokens the next request will take: what the provider counted for the last
+    /// call, and the messages added since at [`BYTES_PER_TOKEN`]. With nothing counted yet (a
+    /// resumed session, one just summarised, a provider that doesn't say), the whole conversation
+    /// is estimated that way.
+    ///
+    /// Going by the last call alone, one step that read several long files or pages could carry the
+    /// next call past the model's limit before anything was summarised. Counting bytes is rough,
+    /// but it guesses only what was added since the last count, and a guess that comes out low is
+    /// caught when the provider refuses the call ([`Self::make_room`]). The models' own tokenizers
+    /// aren't all published, and asking the provider to count would be a call of its own.
+    fn estimate(&self) -> u64 {
+        let counted = if self.last_prompt_tokens == 0 {
+            0
+        } else {
+            self.unread_from()
+        };
+        self.last_prompt_tokens + tokens(self.history[counted..].iter().map(size).sum())
+    }
+
+    /// Where the messages the model hasn't read yet start: after its newest message.
+    fn unread_from(&self) -> usize {
+        self.history
+            .iter()
+            .rposition(|message| matches!(message, Message::Assistant { .. }))
+            .map_or(0, |index| index + 1)
+    }
+
+    /// How many tokens a request may take and leave the model room for its longest reply.
+    fn request_room(&self) -> u64 {
+        self.config
+            .context_window
+            .unwrap_or(DEFAULT_CONTEXT)
+            .saturating_sub(u64::from(self.config.max_tokens))
+    }
+
+    /// Cuts tool results down, each to its start with its whole text set aside for
+    /// `read_tool_output`, until the conversation is estimated to take no more than `room` tokens.
+    /// The newest go first, to the preview a long output gets: the model hasn't read them yet, so
+    /// they were never sent. Then the ones it has read, oldest first and shorter, and last the
+    /// newest as short. Nothing is cut while the conversation fits.
+    ///
+    /// A tool result is the one part of the conversation cut once sent: the providers send it as
+    /// plain text, never signed, so the model's reasoning stays valid.
+    fn make_fit(&mut self, room: u64) {
+        let unread = self.unread_from();
+        let results = |range: std::ops::Range<usize>| -> Vec<usize> {
+            range
+                .filter(|&index| matches!(self.history[index], Message::Tool { .. }))
+                .collect()
+        };
+        let newest = results(unread..self.history.len());
+        let older = results(0..unread);
+        let cuts = newest
+            .iter()
+            .map(|&index| (index, SET_ASIDE_PREVIEW_CHARS))
+            .chain(older.iter().map(|&index| (index, TRIMMED_PREVIEW_CHARS)))
+            .chain(newest.iter().map(|&index| (index, TRIMMED_PREVIEW_CHARS)));
+        for (index, keep) in cuts {
+            if self.estimate() <= room {
+                return;
+            }
+            let removed = self.cut_result(index, keep);
+            if index < unread {
+                // Part of what the last call counted.
+                self.last_prompt_tokens = self.last_prompt_tokens.saturating_sub(tokens(removed));
+            }
+        }
+    }
+
+    /// Cuts the tool result at `index` down to its first `keep` characters and sets its whole text
+    /// aside, and takes out the pictures it opened, which can be opened again. Gives back how many
+    /// bytes the conversation lost, a picture counted as [`PICTURE_SIZE`].
+    fn cut_result(&mut self, index: usize, keep: usize) -> usize {
+        let Some(Message::Tool {
+            tool_call_id,
+            content,
+            pictures,
+        }) = self.history.get(index)
+        else {
+            return 0;
+        };
+        let names: Vec<&str> = pictures
+            .iter()
+            .map(|picture| picture.name.as_str())
+            .collect();
+        // One set aside before is cut from its whole text, which stays under its id.
+        let (id, whole) = match self.set_aside_whole(tool_call_id, content) {
+            Some(whole) => (tool_call_id.clone(), whole.clone()),
+            None => (self.free_id(tool_call_id), content.clone()),
+        };
+        let cut = set_aside_note(&whole, &id, keep);
+        let mut text = content.clone();
+        let mut removed = 0;
+        if cut.len() < content.len() {
+            removed = content.len() - cut.len();
+            self.outputs.insert(id, whole);
+            text = cut;
+        }
+        if !names.is_empty() {
+            let note = format!(
+                "\n(Taken out to make room in the model's memory: {}. Open it again with \
+                 read_file if you still need to see it.)",
+                names.join(", ")
+            );
+            removed = (removed + names.len() * PICTURE_SIZE).saturating_sub(note.len());
+            text.push_str(&note);
+        }
+        if removed == 0 {
+            return 0;
+        }
+        if let Some(Message::Tool {
+            content, pictures, ..
+        }) = self.history.get_mut(index)
+        {
+            *content = text;
+            pictures.clear();
+        }
+        removed
+    }
+
+    /// The whole text of a tool result set aside before, when `content` is what the conversation
+    /// kept of it.
+    fn set_aside_whole(&self, id: &str, content: &str) -> Option<&String> {
+        let whole = self.outputs.get(id)?;
+        let (kept, note) = content.rsplit_once(SET_ASIDE_MARK)?;
+        (whole.starts_with(kept) && note.contains(&format!("read_tool_output, id {id},")))
+            .then_some(whole)
+    }
+
+    /// `id`, or `id-2`, `id-3`… when another output was set aside under it already.
+    fn free_id(&self, id: &str) -> String {
+        let mut key = id.to_owned();
+        let mut copy = 1;
+        while self.outputs.contains_key(&key) {
+            copy += 1;
+            key = format!("{id}-{copy}");
+        }
+        key
+    }
+
+    /// Makes room after the provider refused a call because the conversation no longer fits the
+    /// model, and summarises it. Gives back whether it was summarised.
+    ///
+    /// The tool results are cut down until the conversation is estimated at half of what the model
+    /// has room for, or of the request just refused if that is less. The estimate didn't see this
+    /// coming, so it, or the context size the catalog gave, is out by an amount nobody knows: half
+    /// leaves room for both, and every cut result can still be read whole.
+    async fn make_room(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<bool, CallError> {
+        let room = self.request_room().min(self.estimate()) / 2;
+        self.make_fit(room);
+        self.compact(cancel, turn).await
     }
 
     /// One request for a summary, which is not part of the work whatever happens. `shorter` asks
@@ -1070,8 +1482,14 @@ impl Session {
     }
 
     /// Replaces the conversation with a summary of it, keeping the instructions and the current
-    /// task. The model writes the summary, so it keeps what matters for the work.
-    async fn compact(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<(), CallError> {
+    /// task. The model writes the summary, so it keeps what matters for the work. Gives back whether
+    /// the conversation was replaced.
+    async fn compact(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<bool, CallError> {
+        // The summary reads the whole conversation and the request for it. Most of the time they
+        // fit beside the summary's reply and nothing is cut; when the newest step added more than
+        // that, its results are cut down first rather than have the summary refused.
+        let request = tokens(summary_request(true).len());
+        self.make_fit(self.request_room().saturating_sub(request));
         let task = self.task.clone();
         // The conversation plus one more message: everything before it is read from the cache.
         let mut completion = self.summarise(cancel, Call::Summary, turn, false).await?;
@@ -1087,10 +1505,10 @@ impl Session {
         }
         if completion.content.trim().is_empty() || completion.finish == Finish::Length {
             // No summary to carry on from: the conversation stays as it was.
-            return Ok(());
+            return Ok(false);
         }
         let Some(Message::System { content: system }) = self.history.first().cloned() else {
-            return Ok(());
+            return Ok(false);
         };
         // The Brief came in the opening message; a summary of a later turn would drop it.
         let brief = loomwatch_brief(&self.config.cwd)
@@ -1113,8 +1531,47 @@ impl Session {
             "(The conversation was summarised to make room in the model's memory.)",
         ))
         .await
-        .map_err(CallError::Failed)
+        .map_err(CallError::Failed)?;
+        Ok(true)
     }
+}
+
+/// About how many tokens `bytes` of text make.
+fn tokens(bytes: usize) -> u64 {
+    u64::try_from(bytes).unwrap_or(u64::MAX) / BYTES_PER_TOKEN
+}
+
+/// How many bytes of text a message sends: its words, and the names and arguments of the tools it
+/// calls. The reasoning a provider hands back is left out: some send it again, some don't.
+fn size(message: &Message) -> usize {
+    match message {
+        Message::System { content } | Message::User { content } => content.len(),
+        Message::Tool {
+            content, pictures, ..
+        } => content.len() + pictures.len() * PICTURE_SIZE,
+        Message::Assistant {
+            content,
+            tool_calls,
+            ..
+        } => {
+            content.len()
+                + tool_calls
+                    .iter()
+                    .map(|call| call.name.len() + call.arguments.len())
+                    .sum::<usize>()
+        }
+    }
+}
+
+/// What the conversation keeps of an output set aside under `id`: its first `keep` characters,
+/// and how to read the rest.
+fn set_aside_note(text: &str, id: &str, keep: usize) -> String {
+    let total = text.chars().count();
+    let preview: String = text.chars().take(keep).collect();
+    format!(
+        "{preview}{SET_ASIDE_MARK}{total} characters long; the rest was set aside. Read it with \
+         read_tool_output, id {id}, starting at offset {keep}."
+    )
 }
 
 /// Why a turn that may not make its next call ends: it was cancelled, or the spool is used up.
@@ -1163,6 +1620,27 @@ fn carry_on(wrote_nothing: bool) -> &'static str {
         "Your reply was cut off: it reached the length limit of one message. Carry on from exactly \
          where it stopped, without repeating anything or saying that you are carrying on."
     }
+}
+
+/// A read the model asked for, allowed and waiting to run with the reads beside it.
+struct Read<'c> {
+    /// Where its answer goes among its message's calls.
+    place: usize,
+    call: &'c ToolCall,
+    tool: Builtin,
+    /// The arguments it runs with, which the person may have changed.
+    input: Value,
+}
+
+/// What a call puts in the conversation: its text, and the pictures it opened.
+type Answer = (String, Vec<Picture>);
+
+/// Where a read stands once it was asked about.
+enum Begun {
+    /// Allowed, with the arguments to run it with.
+    Allowed(Value),
+    /// Answered without running: declined, answered by the person, or not a call it could make.
+    Answered(String),
 }
 
 /// What a model call is for.

@@ -8,26 +8,22 @@
 //!   gets — its listing and README — and a read grant for the folder, so a later run sees its
 //!   current contents.
 //! * **A file** is added to the team: the panel copies it beside the team file under
-//!   `<team>.files/`, so the team stays self-contained. The agent is handed its text — extracted
-//!   with `pdftotext` for a PDF, so an app that cannot open PDFs still reads it — and a read grant
-//!   for the file. A long file's prompt section is its opening. Its full text is written into the
-//!   agent's working folder for the agent to read when it needs more. That is the "preview, then
-//!   retrieve" shape that keeps a prompt small without hiding anything.
+//!   `<team>.files/`, so the team stays self-contained. The agent is handed its text — read from a
+//!   PDF, Word, Excel or `PowerPoint` file by [`crate::documents`] — and a read grant for the file.
+//!   A long file's prompt section is its opening. Its full text is written into the agent's working
+//!   folder for the agent to read when it needs more. That is the "preview, then retrieve" shape
+//!   that keeps a prompt small without hiding anything. A picture is described, and the agent looks
+//!   at it with `read_file`.
 //!
 //! Every reader goes through [`snapshot`], so what the panel previews is what the agent gets.
 
-use std::ffi::OsString;
 use std::fs;
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use crate::capabilities::{CapabilityDefinition, KnowledgeSnapshot, TextCopy, folder_contents};
+use crate::documents::{self, Kind};
 
 /// Characters of an added file's text carried in the prompt. Past this, the prompt carries the
 /// opening and says where the rest is. About 3,000 tokens: enough to judge whether the document
@@ -40,7 +36,7 @@ pub const MAX_FILE_BYTES: usize = 25 * 1024 * 1024;
 /// Where an excerpted file's full text is put, relative to the agent's working folder.
 pub const TEXT_COPY_DIR: &str = "knowledge";
 
-/// The largest file read as text. A bigger non-PDF is described, not read.
+/// The largest file read as text. A bigger one that isn't a document is described, not read.
 const MAX_TEXT_READ_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Files listed by the folder picker before it says how many more there are.
@@ -113,27 +109,32 @@ fn file_contents(file: &Path) -> Result<(String, String, Option<TextCopy>), Stri
     let size = fs::metadata(file)
         .map_err(|error| format!("{location} could not be read ({error})"))?
         .len();
-    if is_pdf(file) {
-        return Ok(match pdf_text(file) {
-            Some(text) if !text.trim().is_empty() => {
-                let (content, copy) = excerpt(&text, &format!("{name}.txt"));
-                (format!("PDF · {name}, text extracted"), content, copy)
-            }
-            Some(_) => (
-                format!("PDF · {name}"),
+    match Kind::of(file) {
+        Some(kind) if kind.has_text() => {
+            let label = kind.label();
+            return Ok(match documents::text(file) {
+                Ok(text) => {
+                    let (content, copy) = excerpt(&text, &format!("{name}.txt"));
+                    (format!("{label} · {name}, text extracted"), content, copy)
+                }
+                Err(reason) => (
+                    format!("{label} · {name}"),
+                    format!("{reason} The file is at {location}."),
+                    None,
+                ),
+            });
+        }
+        Some(Kind::Picture) => {
+            return Ok((
+                format!("Picture · {name}"),
                 format!(
-                    "No text could be extracted from this PDF; it may be scanned pages. The file is at {location}; open it directly if your app can read PDFs."
+                    "A picture of {}. To see it, read it with read_file: {location}",
+                    human_size(size)
                 ),
                 None,
-            ),
-            None => (
-                format!("PDF · {name}"),
-                format!(
-                    "This PDF's text could not be extracted on this computer: pdftotext is not installed, or it could not read this file in time. The file is at {location}; open it directly if your app can read PDFs."
-                ),
-                None,
-            ),
-        });
+            ));
+        }
+        _ => {}
     }
     let text = (size <= MAX_TEXT_READ_BYTES)
         .then(|| fs::read(file).ok())
@@ -201,126 +202,6 @@ pub(crate) fn excerpt(text: &str, copy_name: &str) -> (String, Option<TextCopy>)
             text,
         }),
     )
-}
-
-fn is_pdf(file: &Path) -> bool {
-    file.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
-        || fs::File::open(file).is_ok_and(|mut handle| {
-            use std::io::Read as _;
-            let mut magic = [0u8; 5];
-            handle.read_exact(&mut magic).is_ok() && &magic == b"%PDF-"
-        })
-}
-
-/// How long `pdftotext` may take over one file, and how much text is kept from it. A PDF someone
-/// shared could otherwise hold a worker or fill memory (ADR 0048); the prompt carries an excerpt
-/// of far less anyway.
-const PDF_DEADLINE: Duration = Duration::from_secs(15);
-const PDF_TEXT_MAX: usize = 8 * 1024 * 1024;
-
-/// A PDF's text, from `pdftotext`, at most [`PDF_TEXT_MAX`] bytes of it. `None` when `pdftotext`
-/// is not installed, fails, or takes longer than [`PDF_DEADLINE`].
-#[must_use]
-pub fn pdf_text(file: &Path) -> Option<String> {
-    extract_text(&pdftotext()?, file, PDF_DEADLINE, PDF_TEXT_MAX)
-}
-
-/// Run `program` as `pdftotext` over `file` for at most `deadline`, keeping at most `limit` bytes
-/// of what it writes. A program that writes more is stopped once the limit is read, and what was
-/// read is kept.
-/// Starts `command`, trying again for a moment while its program file is busy. Linux refuses to run a
-/// file that some process still holds open for writing ("text file busy"), and a process forked
-/// while the file was being written holds it until it execs. CI met this when a test wrote its
-/// stand-in `pdftotext` while other tests started processes, and the PDF read as having no text.
-fn spawn_when_not_busy(command: &mut Command) -> Option<std::process::Child> {
-    for _ in 0..20 {
-        match command.spawn() {
-            Ok(child) => return Some(child),
-            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(_) => return None,
-        }
-    }
-    None
-}
-
-fn extract_text(program: &Path, file: &Path, deadline: Duration, limit: usize) -> Option<String> {
-    let mut command = Command::new(program);
-    command
-        .args(["-enc", "UTF-8", "-q"])
-        .arg(file)
-        .arg("-")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = spawn_when_not_busy(&mut command)?;
-    // Whatever it starts goes with it: on Windows a `pdftotext.cmd` is cmd.exe running the real
-    // program, which would otherwise keep writing into the pipe after cmd.exe is stopped.
-    let mut tree = Some(crate::platform::ProcessTree::adopt_std(&child));
-    let stdout = child.stdout.take()?;
-    let full = Arc::new(AtomicBool::new(false));
-    let reader = {
-        let full = Arc::clone(&full);
-        std::thread::spawn(move || {
-            let mut text = Vec::new();
-            // The pipe stays open until the limit is recorded: closing it stops the program, and
-            // its exit must not be seen before we know it was stopped for having said enough.
-            let mut pipe = stdout.take(u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1));
-            let _ = pipe.read_to_end(&mut text);
-            if text.len() > limit {
-                text.truncate(limit);
-                full.store(true, Ordering::Release);
-            }
-            drop(pipe);
-            text
-        })
-    };
-    let stop_by = Instant::now() + deadline;
-    let exited_well = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status.success()),
-            // Enough text: the rest is never read, so the program is stopped rather than left
-            // blocked on a full pipe.
-            Ok(None) if full.load(Ordering::Acquire) => {
-                if let Some(tree) = tree.take() {
-                    tree.end();
-                }
-                let _ = child.kill();
-                let _ = child.wait();
-                break Some(true);
-            }
-            Ok(None) if Instant::now() < stop_by => {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            _ => {
-                if let Some(tree) = tree.take() {
-                    tree.end();
-                }
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-        }
-    };
-    let text = reader.join().ok()?;
-    // Asked once the reader is done: a program stopped by the pipe closing behind the text limit
-    // still gave enough text, though it may exit before the reader has said so.
-    let finished = exited_well.is_some_and(|well| well || full.load(Ordering::Acquire));
-    finished.then(|| String::from_utf8_lossy(&text).into_owned())
-}
-
-/// Where `pdftotext` is. A daemon started outside a login shell sees a short `PATH`, and Homebrew
-/// — where poppler's `pdftotext` usually comes from — is not on it, so its directories are tried
-/// too.
-fn pdftotext() -> Option<PathBuf> {
-    let mut directories = std::env::var_os("PATH")
-        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-        .unwrap_or_default();
-    directories.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
-    let search: OsString = std::env::join_paths(directories).ok()?;
-    crate::api::find_executable(&search, "pdftotext")
 }
 
 fn human_size(bytes: u64) -> String {
@@ -461,7 +342,7 @@ pub struct StoredFile {
     pub chars: usize,
     /// The prompt carries only the opening; the full text goes into the agent's working folder.
     pub excerpted: bool,
-    /// Something the operator should know, such as a PDF whose text could not be extracted.
+    /// Something the operator should know, such as a PDF whose text couldn't be read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -551,10 +432,15 @@ pub fn store_file_in(
         .first()
         .map(|part| part.content.as_str())
         .unwrap_or_default();
-    let note = (is_pdf(&resolved.join(&stored)) && snapshot.text_copy.is_none() && content.contains("pdftotext is not installed"))
-        .then(|| {
-            "Its text could not be extracted on this computer, so agents are told where the PDF is but not given its text. Install pdftotext (brew install poppler) to fix that.".to_owned()
-        });
+    let unread = Kind::of(&resolved.join(&stored)).is_some_and(Kind::has_text)
+        && !snapshot
+            .contents
+            .first()
+            .is_some_and(|part| part.source.ends_with("text extracted"));
+    let note = unread.then(|| {
+        let reason = content.split(" The file is at ").next().unwrap_or_default();
+        format!("Agents are told where it is but not given its text. {reason}")
+    });
     Ok(StoredFile {
         name: stored,
         path: relative,
@@ -590,6 +476,7 @@ fn numbered(name: &str, counter: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{docx, minimal_pdf, png};
 
     fn scratch() -> tempfile_lite::Dir {
         tempfile_lite::Dir::new()
@@ -680,16 +567,16 @@ mod tests {
     fn a_binary_file_is_described_not_pasted() {
         let dir = scratch();
         fs::write(
-            dir.path().join("photo.png"),
+            dir.path().join("data.bin"),
             [0x89, b'P', b'N', b'G', 0, 1, 2],
         )
         .unwrap();
-        let snapshot = snapshot(dir.path(), Path::new("photo.png")).unwrap();
-        assert!(snapshot.contents[0].content.starts_with("A PNG file of"));
+        let snapshot = snapshot(dir.path(), Path::new("data.bin")).unwrap();
+        assert!(snapshot.contents[0].content.starts_with("A BIN file of"));
         assert_eq!(
             snapshot.files.len(),
             1,
-            "it can still be opened by an app that reads images"
+            "it can still be opened by an app that reads it"
         );
     }
 
@@ -700,75 +587,75 @@ mod tests {
         assert!(error.contains("does not exist on this computer"), "{error}");
     }
 
-    // Exercised only where poppler is installed; the no-pdftotext branch is the same code path
-    // with `pdf_text` returning `None`.
     #[test]
-    fn a_pdf_is_supplied_as_its_extracted_text_when_pdftotext_is_installed() {
-        if pdftotext().is_none() {
-            return;
-        }
+    fn a_pdf_or_an_office_file_is_supplied_as_its_text() {
         let dir = scratch();
         let pdf = dir.path().join("memo.pdf");
-        fs::write(&pdf, minimal_pdf("Quarterly revenue rose")).unwrap();
+        fs::write(&pdf, minimal_pdf(&["Quarterly revenue rose"])).unwrap();
         let snapshot = snapshot(dir.path(), &pdf).unwrap();
         assert_eq!(
             snapshot.contents[0].source,
             "PDF · memo.pdf, text extracted"
         );
+        assert_eq!(snapshot.contents[0].content, "Quarterly revenue rose");
+        assert_eq!(snapshot.files, [pdf]);
+
+        let word = dir.path().join("plan.docx");
+        fs::write(&word, docx("<w:p><w:r><w:t>Leave Friday</w:t></w:r></w:p>")).unwrap();
+        let read = super::snapshot(dir.path(), &word).unwrap();
+        assert_eq!(read.contents[0].source, "Word · plan.docx, text extracted");
+        assert_eq!(read.contents[0].content, "Leave Friday");
+    }
+
+    #[test]
+    fn a_long_document_keeps_its_full_text_for_the_workspace() {
+        let dir = scratch();
+        let line = "Quarterly revenue rose again".repeat(3);
+        let pages: Vec<&str> = (0..200).map(|_| line.as_str()).collect();
+        fs::write(dir.path().join("report.pdf"), minimal_pdf(&pages)).unwrap();
+        let snapshot = snapshot(dir.path(), Path::new("report.pdf")).unwrap();
         assert!(
             snapshot.contents[0]
                 .content
-                .contains("Quarterly revenue rose"),
-            "{:?}",
-            snapshot.contents
+                .contains("knowledge/report.pdf.txt in your working folder")
         );
+        let copy = snapshot.text_copy.expect("the full text");
+        assert_eq!(copy.file_name, "report.pdf.txt");
+        assert!(copy.text.contains("— Page 200 of 200 —"));
     }
 
-    fn fake_pdftotext(dir: &Path, body: &str) -> PathBuf {
-        crate::test_support::fake_program(
-            &dir.join("fake-pdftotext"),
-            &format!("#!/bin/sh\n{body}\n"),
-        )
-    }
-
-    /// ADR 0048: a PDF that keeps `pdftotext` busy, or makes it write without end, costs a bounded
-    /// time and a bounded amount of memory.
     #[test]
-    fn pdf_extraction_is_bounded_in_time_and_size() {
+    fn a_scanned_pdf_says_why_it_brings_no_text() {
         let dir = scratch();
-        let file = dir.path().join("shared.pdf");
-        fs::write(&file, b"%PDF-").unwrap();
-
-        let slow = fake_pdftotext(dir.path(), "exec sleep 30");
-        let started = Instant::now();
-        assert_eq!(
-            extract_text(&slow, &file, Duration::from_millis(300), 1024),
-            None
-        );
+        let team = dir.path().join("desk.yaml");
+        fs::write(&team, "schemaVersion: 1").unwrap();
+        let added = store_file(&team, "scan.pdf", &minimal_pdf(&[""])).unwrap();
+        let note = added.note.expect("a note for the panel");
         assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "{:?}",
-            started.elapsed()
+            note.starts_with("Agents are told where it is but not given its text."),
+            "{note}"
         );
+        assert!(note.contains("probably scanned pages"), "{note}");
+        let read = snapshot(dir.path(), Path::new(&added.path)).unwrap();
+        assert_eq!(read.contents[0].source, "PDF · scan.pdf");
+        assert!(read.contents[0].content.contains("The file is at "));
+        let read = store_file(&team, "memo.pdf", &minimal_pdf(&["Revenue rose"])).unwrap();
+        assert_eq!(read.note, None);
+    }
 
-        let endless = fake_pdftotext(dir.path(), "exec yes loomwatch");
-        let text = extract_text(&endless, &file, Duration::from_secs(10), 1000).expect("text");
-        assert_eq!(text.len(), 1000);
-        assert!(text.starts_with("loomwatch\nloomwatch\n"));
-
-        // More text than the limit, then a failing exit: the text read is still kept, however the
-        // exit and the reader's "enough" are ordered.
-        let then_fails = fake_pdftotext(dir.path(), "head -c 4000 /dev/zero | tr '\\0' x; exit 1");
-        for _ in 0..20 {
-            let text = extract_text(&then_fails, &file, Duration::from_secs(10), 1000);
-            assert_eq!(text.map(|text| text.len()), Some(1000));
-        }
-
-        let quick = fake_pdftotext(dir.path(), "printf 'Quarterly revenue rose'");
-        assert_eq!(
-            extract_text(&quick, &file, Duration::from_secs(10), 1000).as_deref(),
-            Some("Quarterly revenue rose")
+    #[test]
+    fn a_picture_is_described_and_left_for_read_file() {
+        let dir = scratch();
+        fs::write(dir.path().join("shot.png"), png(40, 20, false)).unwrap();
+        let snapshot = snapshot(dir.path(), Path::new("shot.png")).unwrap();
+        assert_eq!(snapshot.contents[0].source, "Picture · shot.png");
+        assert!(snapshot.contents[0].content.starts_with("A picture of "));
+        assert!(
+            snapshot.contents[0]
+                .content
+                .contains("read it with read_file")
         );
+        assert_eq!(snapshot.files.len(), 1, "the agent may read it");
     }
 
     #[test]
@@ -822,36 +709,5 @@ mod tests {
             cfg!(windows)
         );
         assert!(list_folder(Some(Path::new("relative")), None).is_err());
-    }
-
-    /// The smallest PDF `pdftotext` reads: one page, one line of Helvetica text.
-    fn minimal_pdf(text: &str) -> Vec<u8> {
-        let stream = format!("BT /F1 18 Tf 50 700 Td ({text}) Tj ET");
-        let objects = [
-            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
-            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_owned(),
-            format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()),
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
-        ];
-        let mut pdf = b"%PDF-1.4\n".to_vec();
-        let mut offsets = Vec::new();
-        for (index, object) in objects.iter().enumerate() {
-            offsets.push(pdf.len());
-            pdf.extend(format!("{} 0 obj\n{object}\nendobj\n", index + 1).bytes());
-        }
-        let xref = pdf.len();
-        pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).bytes());
-        for offset in offsets {
-            pdf.extend(format!("{offset:010} 00000 n \n").bytes());
-        }
-        pdf.extend(
-            format!(
-                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-                objects.len() + 1
-            )
-            .bytes(),
-        );
-        pdf
     }
 }

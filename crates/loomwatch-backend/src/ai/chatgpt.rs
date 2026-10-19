@@ -138,6 +138,10 @@ pub struct ChatGptModel {
     /// `OpenAI`'s order: lower first.
     #[serde(default)]
     pub priority: i64,
+    /// It takes pictures. The plan lists a model that takes only text as such, and Codex reads a
+    /// model listed without saying as taking both.
+    #[serde(default = "crate::ai::anthropic::yes")]
+    pub sees_pictures: bool,
 }
 
 /// A sign-in the person started and `OpenAI` hasn't sent back yet.
@@ -746,6 +750,10 @@ pub(crate) fn models_from(body: &Value) -> Vec<ChatGptModel> {
                     .get("priority")
                     .and_then(Value::as_i64)
                     .unwrap_or(i64::MAX),
+                sees_pictures: model
+                    .get("input_modalities")
+                    .and_then(Value::as_array)
+                    .is_none_or(|kinds| kinds.iter().any(|kind| kind == "image")),
                 slug,
             })
         })
@@ -902,11 +910,15 @@ mod tests {
              "context_window": 272_000, "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}]},
             {"slug": "gpt-reserve", "visibility": "hide", "priority": 0},
             {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol", "visibility": "list", "priority": 1,
-             "context_window": 500_000, "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}]},
+             "context_window": 500_000, "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}],
+             "input_modalities": ["text"]},
         ]}));
         let slugs: Vec<&str> = models.iter().map(|model| model.slug.as_str()).collect();
         assert_eq!(slugs, ["gpt-6.1-sol", "gpt-6-luna"]);
         assert_eq!(models[0].context_length, 500_000);
         assert_eq!(models[1].efforts, ["low", "high"]);
+        // A model that says it takes text only sees no pictures; one that doesn't say sees them.
+        assert!(!models[0].sees_pictures);
+        assert!(models[1].sees_pictures);
     }
 }

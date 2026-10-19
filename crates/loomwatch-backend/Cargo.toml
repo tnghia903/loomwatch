@@ -66,6 +66,13 @@ futures-util = "0.3"
 rmcp = { version = "3.5", default-features = false, features = ["auth", "client", "transport-streamable-http-client-reqwest"] }
 # rmcp's credential store is an async_trait trait.
 async-trait = "0.1"
+# Agents read the files people have (documents.rs): a PDF's text, Excel workbooks, and Word and
+# PowerPoint files, which are ZIPs of XML read with the zip above. Pictures are shrunk only when
+# larger than a model takes them, in the four formats every provider accepts.
+pdf-extract = "0.12.1"
+calamine = { version = "0.37", default-features = false }
+quick-xml = "0.42"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"

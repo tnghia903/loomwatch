@@ -1048,6 +1048,9 @@ impl AgentRun {
                     .context_length(&model.openrouter_equivalent())
                     .await;
             }
+            // A picture the agent opens is shown to the model only when its model list says the
+            // model takes pictures.
+            config.sees_pictures = ai.sees_pictures(&model).await;
         }
         config
     }

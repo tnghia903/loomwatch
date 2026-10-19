@@ -33,6 +33,13 @@ instructions and tools.
   `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. An agent
   allowed the web also gets OpenRouter's web search and fetch. Tools the daemon serves itself,
   such as the Team Bus and Ask's tools, come in through the `HostTools` trait.
+- **Documents and pictures** (`documents.rs`): `read_file` reads a PDF, Word, Excel or
+  PowerPoint file as numbered text, and hands a PNG, JPEG, GIF or WebP picture to a model whose
+  model list says it takes pictures, shrunk only past 2576 pixels on its long side. Each provider
+  gets the picture its own way: inside Claude's `tool_result`, inside the plan's
+  `function_call_output`, and on OpenRouter in a user message after the tool results. Every file
+  is read in a short-lived `loomwatchd read-document` process with a time limit, so a damaged file
+  costs nothing else. The same reader gives knowledge files their text.
 - **Commands** run in the agent's work folder, through `/bin/sh -c` on macOS and Linux and
   `cmd.exe /d /s /c` on Windows (`agent/tools/command.rs`). Every provider key and LoomWatch
   setting is removed from their environment. A command stops at its time limit or when its turn
