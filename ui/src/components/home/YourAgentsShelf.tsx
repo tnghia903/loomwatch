@@ -4,6 +4,7 @@ import { figureFor } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
+import { KnowYou } from '../you/KnowYou'
 
 /** How many agents the row shows before "All agents" takes over. */
 const SHOWN = 6
@@ -25,6 +26,8 @@ export function YourAgentsShelf() {
         <h2 id="home-agents-title">My agents<span className="home-section-says">Build and try each one</span></h2>
         <a className="link home-agents-all" href="/agents">{any ? 'All agents' : 'Open My agents'}<ArrowRight size={14} aria-hidden="true" /></a>
       </div>
+      {/* Home has no About you card since the first run (ADR 0075), so this line is its way there. */}
+      <KnowYou />
       {loaded && own !== null && !any && (
         <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>Start here: build an agent once, chat with it on its own, then use it in any team. <a href="/agents/new">Build your first agent</a></span></div>
       )}

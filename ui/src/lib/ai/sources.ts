@@ -14,6 +14,8 @@ export interface SourceInfo {
   cost: string
   /** How a sentence names it: "on your ChatGPT plan". */
   on: string
+  /** The service an agent's work is sent to: "ChatGPT". */
+  service: string
   /** It is a plan the person already pays for, not pay per use. */
   subscription: boolean
 }
@@ -24,6 +26,7 @@ export const SOURCE_INFO: Record<ModelSource, SourceInfo> = {
     chip: 'ChatGPT plan',
     cost: 'Uses your Plus or Pro allowance. No extra charge; it stops at your plan’s limit.',
     on: 'on your ChatGPT plan',
+    service: 'ChatGPT',
     subscription: true,
   },
   anthropic: {
@@ -31,6 +34,7 @@ export const SOURCE_INFO: Record<ModelSource, SourceInfo> = {
     chip: 'Claude credit',
     cost: 'Paid from your Max or Team plan’s monthly API credit. Each call has a price.',
     on: 'on your Claude API credit',
+    service: 'Claude',
     subscription: true,
   },
   openrouter: {
@@ -38,6 +42,7 @@ export const SOURCE_INFO: Record<ModelSource, SourceInfo> = {
     chip: 'OpenRouter',
     cost: 'Paid from your OpenRouter credit. Each call has a price.',
     on: 'through OpenRouter',
+    service: 'OpenRouter',
     subscription: false,
   },
 }

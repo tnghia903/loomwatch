@@ -66,6 +66,27 @@ describe('Home', () => {
     expect(chip).toHaveAttribute('href', '/agents/reply-helper?view=chat')
   })
 
+  // Home's About you card went with the first run (ADR 0075), which left Home no way to About you.
+  it('says beside your agents what they know about you, and links to About you', async () => {
+    let you: Record<string, unknown> = { skipped: false }
+    fetchMock.mockImplementation((url: string) => respond(
+      url === '/api/you' ? you
+        : url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: [], problems: [] }
+          : { root: '/teams', files: [], teams: [] }))
+    renderHome()
+    const shelf = () => screen.getByRole('heading', { name: /My agents/ }).closest('section')!
+    expect(await screen.findByText(/Your agents don’t know you yet\./)).toBeInTheDocument()
+    expect(within(shelf()).getByRole('link', { name: 'Tell them about you' })).toHaveAttribute('href', '/you')
+
+    cleanup()
+    forgetYou()
+    you = { name: 'Mai', about: 'I teach English.', skipped: false }
+    renderHome()
+    expect(await screen.findByText('Mai')).toBeInTheDocument()
+    expect(shelf().querySelector('.agents-know-you')).toHaveTextContent('Your agents know you as Mai. Edit')
+    expect(within(shelf()).getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/you')
+  })
+
   // A newcomer whose teams were made first saw "Build your first agent" over teams full of agents.
   it('lists the agents written into a team with their team, and opens each one there', async () => {
     const yaml = [
