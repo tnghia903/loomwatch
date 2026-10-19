@@ -137,6 +137,10 @@ export interface CheckExchange {
   sentBack: boolean
   /** What the check step wrote about the problems, sent back with the findings. */
   problems: string | null
+  /** Your words, when it was you who sent the work back from the check step's stop. */
+  direction?: string | null
+  /** Set on the round the check step stopped sending the work back at (`check_stopped`). */
+  stopped?: { reason: string; exit: string; sent: number } | null
 }
 
 export interface TeamMessage {
@@ -180,6 +184,30 @@ export interface TeamMessage {
   refused?: AskRefusal
   /** For a `check` message: the round and what it found. */
   check?: CheckExchange
+  /**
+   * For a `dispatch`, `handoff` or `ask` in a team with no fixed order: where it went.
+   * `continued` — into the conversation the teammate already had in this run (`continues` in the
+   * record); `busy` — to a separate copy, because the teammate was still working; `limit` — to a
+   * fresh start, because as many teammates as the team allows already held a conversation.
+   */
+  reached?: Reached
+  /**
+   * For a `question`: it is a check step that stopped to ask about checks still not met (ADR 0062,
+   * `whenStillNotMet: ask`), so your answer approves the work or sends it back. Whose work, and how
+   * many checks were open.
+   */
+  checkStop?: { checked: string; open: number }
+}
+
+export type Reached = 'continued' | 'busy' | 'limit'
+
+/** The word the chat shows beside a message for where it went (see `TeamMessage.reached`). */
+export const REACHED_WORD: Record<Reached, string> = { continued: 'carries on', busy: 'separate copy', limit: 'fresh start' }
+
+/** Where the Team Bus says a call went, from its recorded result. */
+function reachedOf(output: Record<string, unknown>): Reached | null {
+  if (output.continues === true) return 'continued'
+  return output.fresh === 'busy' || output.fresh === 'limit' ? output.fresh : null
 }
 
 /** Whether a check round found nothing missing: every item met, from a reply that could be read. */
@@ -192,13 +220,33 @@ export function allMet(check: CheckExchange): boolean {
  * it sent the work back, then the items it did not find met, each with its evidence.
  */
 export function checkText(check: CheckExchange): string {
-  if (!check.readable) return 'Its reply had no Check block LoomWatch could read, so nothing it checked is confirmed.'
+  if (!check.readable) return ['Its reply had no Check block LoomWatch could read, so nothing it checked is confirmed.', stopText(check)].filter(Boolean).join('\n\n')
   if (allMet(check)) return `All ${check.items.length} met.`
   const list = (verdict: CheckItemResult['verdict'], heading: string) => {
     const items = check.items.filter((item) => item.verdict === verdict)
     return items.length ? [`**${heading}**`, ...items.map((item) => `- ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)].join('\n') : ''
   }
-  return [check.problems ?? '', list('not_met', 'Not met'), list('not_sure', 'Not sure')].filter(Boolean).join('\n\n')
+  const direction = check.direction ? `**You sent it back:** ${check.direction}` : ''
+  // What you said, when it was you who sent it back, then what is open, then why it stopped there.
+  return [direction, check.problems ?? '', list('not_met', 'Not met'), list('not_sure', 'Not sure'), stopText(check)].filter(Boolean).join('\n\n')
+}
+
+/** Why the check step stopped sending the work back at this round, when checks were still open. */
+function stopText(check: CheckExchange): string {
+  const stopped = check.stopped
+  if (!stopped || allMet(check)) return ''
+  const after = stopped.exit === 'ask' ? ' It asks you what to do.' : ' The answer shows with this marked.'
+  if (stopped.reason === 'no_progress') return `_It stopped sending the work back: this round fixed none of what went back.${after}_`
+  if (stopped.reason === 'unchecked') return `_It stopped: what is still open is what it could not check, which a revision can’t fix.${after}_`
+  if (stopped.reason === 'rounds') return `_It stopped after sending the work back ${stopped.sent === 1 ? 'once' : `${stopped.sent} times`}, as often as it may.${after}_`
+  return ''
+}
+
+/** What a `dispatch` or `handoff` message's info says about where the work went, for `name`, its recipient. */
+export function reachedLine(reached: Reached, name: string): string {
+  if (reached === 'continued') return `${name} carried on in the conversation it already had in this run, so it remembered its earlier work.`
+  if (reached === 'busy') return `${name} was still working, so a separate copy started: it saw only this message.`
+  return `${name} started fresh and saw only this message: as many teammates as the team allows already held a conversation for this run.`
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
@@ -308,6 +356,8 @@ export class Correspondence {
     }
     // The bus accepts a name where the id belongs and answers with the id it resolved.
     if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
+    const reached = reachedOf(output)
+    if (reached) message.reached = reached
     if (message.kind !== 'ask') { message.state = 'delivered'; return }
     message.state = 'answered'
     if (output.clarifies === true) message.clarifies = true
@@ -364,6 +414,15 @@ export class Correspondence {
         context: words(p.context), evidenceId: this.askedUser.get(event.agentId) ?? null, state: 'pending',
       })
       this.askedUser.delete(event.agentId)
+    } else if (p.kind === 'review_stop' && object(p.check)) {
+      // A check step that stopped to ask: it asks you about the checks still not met, and your
+      // answer approves the work or sends it back (ADR 0062).
+      const items = Array.isArray(p.check.items) ? checkItemsOf(p.check.items) : []
+      const lines = items.map((item) => `- ${item.verdict === 'not_met' ? 'Not met' : 'Not sure'}: ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)
+      this.add(event, {
+        id: `check-stop:${event.id}`, kind: 'question', from: event.agentId, to: OPERATOR_ID, text: words(p.question) ?? '',
+        context: lines.length ? lines.join('\n') : null, state: 'pending', checkStop: { checked: words(p.check.checked) ?? '', open: items.length },
+      })
     } else if (p.kind === 'review_stop') {
       this.reviewSteps.add(event.agentId)
       const handover = this.messages.findLast((message) => message.kind === 'handover' && message.to === event.agentId)
@@ -418,6 +477,14 @@ export class Correspondence {
     const to = words(p.to)
     const message = this.messages.findLast((candidate) => candidate.kind === 'check' && candidate.from === event.agentId && candidate.to === to && !candidate.check?.sentBack)
     if (!to || !message?.check) return
+    const direction = words(p.direction)
+    if (direction) {
+      // You sent it back from the check step's stop: an exchange of its own, after your answer, so
+      // the revision answers what you sent rather than the round before the stop.
+      const check: CheckExchange = { round: message.check.round, items: message.check.items.filter((item) => item.verdict !== 'met'), readable: true, sentBack: true, problems: null, direction }
+      this.add(event, { id: `check-back:${event.id}`, kind: 'check', from: event.agentId, to, text: checkText(check), state: 'pending', check })
+      return
+    }
     message.check.sentBack = true
     message.check.problems = words(p.problems)
     message.text = checkText(message.check)
@@ -426,6 +493,16 @@ export class Correspondence {
     if (!last || last.event.seq < message.seq) return
     message.state = 'answered'
     message.reply = { from: to, text: last.reply, ...this.at(last.event), source: 'open', sentBackTo: null }
+  }
+
+  /** `check_stopped`: how a check step's rounds ended, on the round they ended at. */
+  checkStopped(event: RunEvent) {
+    const p = event.payload
+    const to = words(p.checked)
+    const message = this.messages.findLast((candidate) => candidate.kind === 'check' && candidate.from === event.agentId && candidate.to === to)
+    if (!message?.check) return
+    message.check.stopped = { reason: words(p.reason) ?? '', exit: words(p.exit) ?? 'answer', sent: typeof p.sent === 'number' ? p.sent : 0 }
+    message.text = checkText(message.check)
   }
 
   /** `check_send_back_skipped`: the checked agent was no longer open, so nothing went back. */

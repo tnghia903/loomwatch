@@ -67,3 +67,16 @@
 /* Beats the panels' stacked label/input styling: the box sits beside its words. */
 .node-inspector .check-step-switch, .inspector .check-step-switch, .check-step-switch { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); cursor: pointer; }
 .check-step-switch input[type='checkbox'] { flex: none; width: auto; height: auto; margin: 2px 0 0; }
+.check-step-loop { display: flex; flex-direction: column; gap: 6px; margin-left: 21px; color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); }
+.check-step-rounds { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.check-step-exit { display: flex; flex-direction: column; gap: 4px; }
+/* Inspector labels stack their control under the text; a choice reads on one line. */
+.inspector-fields .check-step-choice, .inspector .check-step-choice, .check-step-choice { display: inline-flex; flex-direction: row; align-items: flex-start; gap: 6px; color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); cursor: pointer; }
+.check-step-choice input[type='radio'] { flex: none; width: auto; height: auto; margin: 2px 0 0; }
+.check-step-tip { margin: 0; }
+
+/* A check step that stopped to ask (ADR 0062): what is still not met, above the work. */
+.tc-check-misses { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font: 400 13px/1.45 var(--font-sans); color: var(--color-ink-1); }
+.tc-check-verdict { display: inline-block; margin-right: 4px; font-weight: 600; }
+.tc-check-verdict.not_met { color: var(--color-alert); }
+.tc-check-verdict.not_sure { color: var(--color-ink-2); }

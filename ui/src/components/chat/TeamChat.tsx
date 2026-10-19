@@ -1,9 +1,10 @@
 import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, type ChatItem, type ChatMessage, type ChatTarget } from '../../lib/chat/client'
+import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
+import { replyOf } from '../../lib/chat/reply'
 import { markSeen } from '../../lib/chat/seen'
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
@@ -24,6 +25,7 @@ import { Swap } from './Appearing'
 import type { AutoModeControl } from './AutoModeSwitch'
 import type { SpendLimitControl } from './SpendLimitChip'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
+import { ReplyQuote } from './ReplyQuote'
 import { WorkPiece, type TeamView } from './WorkPiece'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
@@ -75,6 +77,9 @@ interface TeamChatProps {
   onStartTeamTaken?: () => void
 }
 
+/** Sending one message: as a retry of a pending one, and as a reply to something said. */
+type Send = (text: string, to: ChatTarget, now: boolean, retryOf?: string, replyTo?: ReplyTo | null) => Promise<boolean>
+
 /** Within this of the bottom, the chat follows new messages. */
 const FOLLOW_PX = 120
 /** Room left under something revealed, so it does not sit against the message box. */
@@ -99,7 +104,17 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // One agent's own chat needs no @, and a box that cannot send yet (`blocked`) is not written in.
   const startsWithTeam = startTeam && !team.solo && !blocked
   const [draft, setDraft] = useState(() => (startsWithTeam ? '@team ' : ''))
-  // Once the first page has painted, what arrives is news and moves in (lib/chat/appear.ts).
+  // What the message being written replies to, when Reply was pressed under something said.
+  const [replyTo, setReplyTo] = useState<ReplyTo | null>(null)
+  // Reply on what the team waits on you for takes the box back to answering it.
+  const [answerAsked, setAnswerAsked] = useState(0)
+  // What the chat shows when asked: a message Details asked for, or what a reply's quote points at.
+  const [shown, setShown] = useState(reveal)
+  const [seenReveal, setSeenReveal] = useState(reveal)
+  if (reveal !== seenReveal) {
+    setSeenReveal(reveal)
+    setShown(reveal)
+  }  // Once the first page has painted, what arrives is news and moves in (lib/chat/appear.ts).
   const [settled, setSettled] = useState(false)
   useEffect(() => {
     if (!chat.loaded || settled || chat.loadingOlder) return
@@ -216,9 +231,9 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const live = chat.live
   // "Trust and run" sends again what the review held back; through a ref, so a callback can
   // name itself.
-  const resend = useRef<(text: string, to: ChatTarget, now: boolean) => Promise<boolean>>(async () => false)
+  const resend = useRef<Send>(async () => false)
   const restart = useRef<(message: ChatMessage) => Promise<void>>(async () => {})
-  const send = useCallback(async (text: string, to: ChatTarget, now: boolean, retryOf?: string): Promise<boolean> => {
+  const send = useCallback<Send>(async (text, to, now, retryOf, replyTo = null) => {
     const where = destination(to, live, team.names, steps, now)
     const startsWork = where.route === 'team' || where.route === 'agent'
     let revision: string | null = null
@@ -228,12 +243,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       revision = prepared.revision
     }
     if (retryOf) chat.dismissPending(retryOf)
-    const localId = chat.beginSend(text, to, now)
+    const localId = chat.beginSend(text, to, now, replyTo)
     const key = (retryOf && startKeys.current.get(retryOf)) || newStartKey()
     startKeys.current.set(localId, key)
     atBottom.current = true
     try {
-      const result = await sendChatMessage({ teamPath, text, to, now, expectedRevision: revision, startKey: startsWork ? key : undefined })
+      const result = await sendChatMessage({ teamPath, text, to, now, expectedRevision: revision, startKey: startsWork ? key : undefined, replyTo })
       chat.settleSend(localId, result)
       if ((result.route === 'team' || result.route === 'agent') && result.run) onStarted?.(result.run.runId)
       startKeys.current.delete(localId)
@@ -244,7 +259,11 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         chat.dismissPending(localId)
         // Held in the box meanwhile; once "Trust and run" sends it, the box lets it go.
         onTeamReview(caught.review, () => {
-          void resend.current(text, to, now).then((sent) => { if (sent) setDraft((current) => (current.trim() === text ? '' : current)) })
+          void resend.current(text, to, now, undefined, replyTo).then((sent) => {
+            if (!sent) return
+            setDraft((current) => (current.trim() === text ? '' : current))
+            setReplyTo((current) => (current?.messageId === replyTo?.messageId ? null : current))
+          })
         })
         return false
       }
@@ -268,7 +287,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
 
   const tryAgain = useCallback((item: Extract<ChatItem, { kind: 'work' }>) => {
     const text = item.request?.text ?? item.run.prompt
-    void send(text, item.run.onlyAgent ? { kind: 'agent', agent: item.run.onlyAgent } : { kind: 'team' }, false)
+    void send(text, item.run.onlyAgent ? { kind: 'agent', agent: item.run.onlyAgent } : { kind: 'team' }, false, undefined, item.request?.replyTo ?? null)
   }, [send])
 
   const keepGoing = useCallback(async (runId: string) => {
@@ -372,6 +391,33 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       setMentioned((count) => count + 1)
     },
   }
+  // Reply under something said: the box takes it as the message being answered, addressed with
+  // the @ of whoever said it, so it goes to that agent as any @ does (ADR 0051).
+  const startReply = (reply: ReplyTo) => {
+    const answers = decision !== null && reply.runId === decision.runId && reply.from === decision.from
+      && (decision.kind === 'question' ? reply.kind === 'question' && reply.to === null : reply.kind === 'handover')
+    if (answers) {
+      // What the team waits on you for is answered in the box already: Reply goes back to it.
+      setReplyTo(null)
+      setAnswerAsked((count) => count + 1)
+      return
+    }
+    setReplyTo(replyOf(reply))
+    const author = members.find((agent) => agent.id === reply.from)
+    if (author && !soloAgent) setDraft((text) => withMention(text, author, agents))
+    setMentioned((count) => count + 1)
+  }
+  const address = (id: string) => {
+    const agent = members.find((member) => member.id === id)
+    if (!agent) return
+    setDraft((text) => withMention(text, agent, agents))
+    setMentioned((count) => count + 1)
+  }
+  // A reply's quote shows what it replied to, when that piece is in the chat.
+  const showReplied = (reply: ReplyTo) => (reply.runId && runs.has(reply.runId)
+    ? () => setShown({ runId: reply.runId as string, id: reply.messageId, at: Date.now() })
+    : undefined)
+  const name = (id: string) => team.names.get(id) ?? id
   const [rosterOpen, setRosterOpen] = useState(readRosterOpen)
   const rosterId = useId()
   const toggleRoster = () => {
@@ -511,15 +557,15 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
               <Fragment key={item.kind === 'work' ? item.run.runId : item.message.id}>
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
-                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={reveal?.runId === item.run.runId ? reveal : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
+                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
-                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReact={search.results === null ? chat.react : undefined} />
-                  : <TeamNote message={item.message} onStart={() => void startNote(item.message)} />}
+                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} />
+                  : <TeamNote message={item.message} name={name} onShowReplied={showReplied} onStart={() => void startNote(item.message)} />}
               </Fragment>
             )
           })}
           {search.results === null && chat.pending.map((message) => (
-            <Pending key={message.localId} message={message} onRetry={() => void send(message.text, message.to, message.now, message.localId)} onEdit={() => { chat.dismissPending(message.localId); setDraft(message.text) }} onDismiss={() => chat.dismissPending(message.localId)} />
+            <Pending key={message.localId} message={message} name={name} onRetry={() => void send(message.text, message.to, message.now, message.localId, message.replyTo)} onEdit={() => { chat.dismissPending(message.localId); setDraft(message.text); setReplyTo(message.replyTo) }} onDismiss={() => chat.dismissPending(message.localId)} />
           ))}
         </ol>
         {chat.error && chat.loaded && (
@@ -542,10 +588,21 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         spendLimit={spendLimit}
         value={draft}
         onChange={setDraft}
-        onSend={(text, to, now) => send(text, to, now)}
+        onSend={async (text, to, now) => {
+          // Out of the box with the words, and back with them if the message was held.
+          const reply = replyTo
+          setReplyTo(null)
+          const ok = await send(text, to, now, undefined, reply)
+          if (!ok && reply) setReplyTo((current) => current ?? reply)
+          return ok
+        }}
         onAnswer={answer}
         mentioned={mentioned}
         solo={soloAgent}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+        onAddress={address}
+        answerAsked={answerAsked}
       />
       {line.flight && <BatonFlight key={line.flight.id} flight={line.flight} holding={holding} onDone={line.done} />}
     </section>
@@ -646,14 +703,17 @@ function useChatSearch(teamPath: string) {
 }
 
 /** A note to the whole team: it starts nothing, and the next work reads it. */
-function TeamNote({ message, onStart }: { message: ChatMessage; onStart: () => void }) {
+function TeamNote({ message, name, onShowReplied, onStart }: { message: ChatMessage; name: (id: string) => string; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
   return (
     <li className={`chat-msg mine tc-team-note${appear ? ' tc-appear' : ''}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">You → the team · note</span><time>{clockTime(message.createdAt)}</time></div>
-        <div className="chat-bubble"><div className="chat-text tc-plain">{message.text}</div></div>
+        <div className="chat-bubble">
+          {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
+          <div className="chat-text tc-plain">{message.text}</div>
+        </div>
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>
           <button type="button" className="tc-link" disabled={starting} onClick={() => { setStarting(true); onStart() }}><Play size={11} aria-hidden="true" />Start the team on this</button>
@@ -664,12 +724,15 @@ function TeamNote({ message, onStart }: { message: ChatMessage; onStart: () => v
 }
 
 /** A message on its way, or one the daemon did not take. */
-function Pending({ message, onRetry, onEdit, onDismiss }: { message: PendingMessage; onRetry: () => void; onEdit: () => void; onDismiss: () => void }) {
+function Pending({ message, name, onRetry, onEdit, onDismiss }: { message: PendingMessage; name: (id: string) => string; onRetry: () => void; onEdit: () => void; onDismiss: () => void }) {
   return (
     <li className={`chat-msg mine tc-pending tc-appear${message.state === 'failed' ? ' failed' : ''}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">{message.state === 'sending' ? 'Sending…' : 'Not sent'}</span></div>
-        <div className="chat-bubble"><div className="chat-text tc-plain">{message.text}</div></div>
+        <div className="chat-bubble">
+          {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} />}
+          <div className="chat-text tc-plain">{message.text}</div>
+        </div>
         {message.state === 'failed' && (
           <div className="chat-under tc-pending-acts">
             <span className="chat-failed">{message.error}</span>

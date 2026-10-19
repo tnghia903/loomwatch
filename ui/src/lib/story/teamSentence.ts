@@ -1,5 +1,6 @@
 import { summarizeSchedule } from '../team-file/schedule'
-import type { DeliverConfig, ScheduleConfig } from '../team-file/types'
+import { sendBackOf } from '../team-file/sendBack'
+import type { DeliverConfig, ScheduleConfig, SendBack } from '../team-file/types'
 
 /**
  * The team, said as one sentence.
@@ -27,6 +28,10 @@ export interface SentenceAgent {
   role: string
   kind?: 'harness' | 'operator'
   model?: string
+  /** A check step's (ADR 0062): whose work it checks, and how that work goes back. */
+  checks?: string
+  sendBack?: SendBack
+  sendBackOnce?: boolean
 }
 
 export interface SentenceInput {
@@ -113,6 +118,20 @@ export function teamSentence(input: SentenceInput): SentencePart[] {
     const title = operator ? `${agent.id} · review step` : [agent.id, agent.model].filter(Boolean).join(' · ')
     return { kind: 'agent', id, name: operator ? 'you' : agent.name, operator, title }
   }
+  // A check step says whose work it checks and what happens when a check isn't met: that is the
+  // loop a newcomer would otherwise have to find in its panel.
+  const checking = (agent: SentenceAgent): SentencePart[] | null => {
+    const checked = agent.checks ? byId.get(agent.checks) : undefined
+    if (!checked || checked.kind === 'operator') return null
+    const setting = sendBackOf(agent)
+    const times = setting?.rounds === 1 ? 'once' : `up to ${setting?.rounds} times`
+    const tail = !setting
+      ? ''
+      : setting.whenStillNotMet === 'ask'
+        ? `, sends it back ${times}, and asks you if a check still isn’t met`
+        : ` and sends it back ${times} if a check isn’t met`
+    return [{ kind: 'text', text: ' checks ' }, { ...ref(checked.id), name: `${checked.name}’s` } as SentencePart, { kind: 'text', text: ` work${tail}` }]
+  }
   const parts: SentencePart[] = []
   const scheduled = input.schedule && input.schedule.cron && input.schedule.enabled !== false
   if (scheduled) {
@@ -149,10 +168,14 @@ export function teamSentence(input: SentenceInput): SentencePart[] {
         return
       }
       parts.push(ref(step.id))
+      const check = checking(agent)
       if (step.joinFrom.length > 1) {
         parts.push({ kind: 'text', text: ' brings together ' })
         parts.push(...list(step.joinFrom.map((id) => ({ ...ref(id), name: byId.get(id)?.kind === 'operator' ? 'your' : `${byId.get(id)?.name}’s` }) as SentencePart)))
-        parts.push({ kind: 'text', text: ` work and ${verbFor(agent, isFinal && index > 0)}` })
+        if (check) parts.push({ kind: 'text', text: ' work and' }, ...check)
+        else parts.push({ kind: 'text', text: ` work and ${verbFor(agent, isFinal && index > 0)}` })
+      } else if (check) {
+        parts.push(...check)
       } else {
         parts.push({ kind: 'text', text: ` ${verbFor(agent, isFinal && index > 0)}` })
       }

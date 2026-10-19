@@ -59,6 +59,13 @@ describe('ticketsFrom', () => {
     })
   })
 
+  // ADR 0062: a check step that stopped to ask leads with what is still not met, then the work.
+  it('leads a check step’s stop with the checks still not met', () => {
+    const check = { checked: 'writer', rounds: 2, reason: 'rounds' as const, met: 2, items: [{ verdict: 'not_met' as const, item: 'Cites the 2025 report', evidence: 'cites 2023' }] }
+    const [ticket] = ticketsFrom([run('r1', { status: 'running', waitingOn: { ...waiting('review_stop', '2026-10-01T03:40:00Z'), node: 'checker', name: 'Checker', handoverFrom: 'writer', question: 'Writer’s work still misses 1 check after going back 2 times.', context: 'Draft three.', check } })], names, new Set(), NOW)
+    expect(ticket).toMatchObject({ kind: 'review', node: 'checker', sendBackTo: 'writer', asker: 'Checker', text: 'Writer’s work still misses 1 check after going back 2 times.', context: 'Not met: Cites the 2025 report — cites 2023\nDraft three.' })
+  })
+
   it('offers no send-back when the daemon does not allow it', () => {
     const [ticket] = ticketsFrom([run('r1', { status: 'running', waitingOn: { ...waiting('review_stop', '2026-10-01T03:40:00Z'), sendBackAvailable: false } })], names, new Set(), NOW)
     expect(ticket.sendBackTo).toBeNull()

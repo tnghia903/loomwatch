@@ -12,11 +12,11 @@ import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
 // saying what the agents said when a test gives it messages.
-const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false }))
+const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[] }))
 vi.mock('../../lib/runs/useRunSession', () => ({
   useRunSession: (runId: string | null) => ({
     record: null, applyRecord: vi.fn(), missing: false, events: runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
-    projection: { agents: [], evidence: [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
+    projection: { agents: runId ? said.agents : [], evidence: [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
     latest: null, cursor: null, setCursor: vi.fn(), lastSeq: -1, mode: 'replay', terminal: true, evidenceComplete: true,
   }),
 }))
@@ -56,6 +56,7 @@ beforeEach(() => {
   page = []
   posted = []
   said.messages = []
+  said.agents = []
   said.read = false
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -638,6 +639,54 @@ describe('a piece of work', () => {
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'review', text: 'Approved. Continue as planned.' } }))
   })
 
+  // ADR 0062, `whenStillNotMet: ask`: the check step's stop leads with what is still not met, and
+  // decides like a review: Approve as it is needs no words, Send back needs them.
+  // ADR 0062: work a check step checks may yet go back, or wait for you to approve it, so while
+  // the run is live it is not shown as the team's answer.
+  it('holds back work a check step checks until the run is done, and shows other work as it comes', async () => {
+    said.agents = [{ id: 'writer', reply: 'Draft three: three times as often.', taskState: 'COMPLETED' }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
+    renderChat()
+    expect(await screen.findByText(/Draft three: three times as often/)).toBeInTheDocument()
+    cleanup()
+    renderChat({ team: { ...team, configs: new Map([['checker', { id: 'checker', name: 'Checker', role: 'Check it.', checks: 'writer' }]]) } })
+    expect((await screen.findAllByText(/today’s digest/)).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Draft three/)).not.toBeInTheDocument()
+  })
+
+  const checkStop = async () => {
+    const check = { checked: 'researcher', rounds: 2, reason: 'rounds' as const, met: 2, problems: 'Two figures are from 2023.', items: [{ verdict: 'not_met' as const, item: 'Cites the 2025 report', evidence: 'cites the 2023 one' }, { verdict: 'not_sure' as const, item: 'Under 200 words', evidence: '' }] }
+    const waitingOn = { node: 'writer', name: 'Writer', kind: 'review_stop' as const, since: '2026-10-06T02:01:00.000Z', question: 'Researcher’s work still misses 2 checks after going back 2 times.', context: 'Draft three.', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true, check }
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn }), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
+    renderChat()
+    return screen.findByRole('group', { name: "Decide on Researcher's work" })
+  }
+
+  it('shows a check step’s stop with what is still not met, and approves the work as it is', async () => {
+    const card = await checkStop()
+    expect(card).toHaveTextContent('Researcher’s work still misses 2 checks after going back 2 times.')
+    expect(screen.getByText('Waiting for you').parentElement).toHaveTextContent('Waiting for you · Researcher’s work still misses 2 checks after going back 2 times')
+    expect(within(card).getByRole('list', { name: 'Checks still not met' })).toHaveTextContent('Not met Cites the 2025 report — cites the 2023 one')
+    expect(within(card).getByRole('list', { name: 'Checks still not met' })).toHaveTextContent('Not sure Under 200 words')
+    expect(within(card).getByText('What Writer wrote about it')).toBeInTheDocument()
+    expect(within(card).getByText('Read Researcher’s work')).toBeInTheDocument()
+    // Not the plain review's card.
+    expect(screen.queryByText(/handed over its work for your review/)).not.toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Send back to Researcher' })).toBeDisabled()
+    expect(card).toHaveTextContent('Researcher revises, and Writer checks it again.')
+    fireEvent.click(within(card).getByRole('button', { name: 'Approve as it is' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: 'Approved. Continue as planned.' } }))
+  })
+
+  it('sends the work back from a check step’s stop with what you wrote', async () => {
+    const card = await checkStop()
+    fireEvent.change(box(), { target: { value: 'Use the 2025 report.' } })
+    expect(within(card).getByRole('button', { name: 'Approve with your note' })).toBeEnabled()
+    fireEvent.click(within(card).getByRole('button', { name: 'Send back to Researcher' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: 'Use the 2025 report.', sendBack: 'researcher' } }))
+  })
+
   it('puts the review on the handover it decides, in what the agents said', async () => {
     said.messages = [{
       id: 'h-1', kind: 'handover', from: null, handedBy: { from: ['researcher'], via: [] }, to: 'review', text: 'Three stories, sourced.', context: null,
@@ -827,5 +876,99 @@ describe('one agent’s own chat', () => {
     const onNewestRun = vi.fn()
     renderSolo({ onNewestRun })
     await waitFor(() => expect(onNewestRun).toHaveBeenLastCalledWith(expect.objectContaining({ runId: 'run-1', status: 'running' })))
+  })
+})
+
+// ADR 0051: Reply under something said — a handover, a question, an answer — writes to whoever said
+// it, by the same rule as an @, with the quote kept on the message and handed to the agent.
+describe('replying to something said', () => {
+  const talk = (extra: Partial<TeamMessage> & Pick<TeamMessage, 'id' | 'kind'>): TeamMessage => ({
+    from: null, handedBy: null, to: null, text: 'x', context: null, eventId: extra.id, evidenceId: null, seq: 1, ts: '2026-10-06T02:01:00.000Z',
+    offsetMs: 60_000, state: 'delivered', error: null, reply: null, carried: false, ...extra,
+  })
+  const replied = { runId: 'run-1', messageId: 'answer:run-1', from: 'writer', to: null, kind: 'answer' as const, text: 'Done — I tightened the lead.' }
+
+  it('a reply to the answer starts the agent that gave it, with the answer quoted, and the quote shows it again', async () => {
+    said.read = true
+    page = [{ kind: 'work', run: run({ reply: 'Done — I tightened the lead.' }), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify({
+      route: 'agent',
+      message: message({ id: 'm-2', text: '@Writer shorter', route: 'agent', agentId: 'writer', runId: 'run-2', createdAt: '2026-10-06T03:00:00.000Z', replyTo: replied }),
+      run: run({ runId: 'run-2', status: 'queued', onlyAgent: 'writer', reply: null, finishedAt: null, createdAt: '2026-10-06T03:00:00.000Z' }),
+    }), { status: 202 })
+    const { props } = renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    fireEvent.click(await within(log).findByRole('button', { name: "Reply to Writer's answer" }))
+    expect(box()).toHaveValue('@Writer ')
+    await waitFor(() => expect(box()).toHaveFocus())
+    expect(screen.getByRole('group', { name: "Replying to Writer's answer" })).toHaveTextContent('Done — I tightened the lead.')
+    expect(screen.getByText('Starts Writer only')).toBeInTheDocument()
+    expect(box()).toHaveAttribute('placeholder', 'Reply to Writer…')
+
+    fireEvent.change(box(), { target: { value: '@Writer shorter' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Writer shorter', to: { kind: 'agent', agent: 'writer' }, replyTo: replied } }))
+    expect(props.prepare).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('group', { name: /^Replying to/ })).toBeNull()
+
+    // The new piece says what it replied to; a click shows that answer where it was given.
+    const quote = await within(log).findByRole('button', { name: "Replying to Writer's answer. Show it" })
+    fireEvent.click(quote)
+    await waitFor(() => expect(document.querySelector('[data-run="run-1"] .tc-answer')).toHaveClass('flash'))
+  })
+
+  it('a reply to an agent at work is a note for its turn, and a handover’s reply can go to either agent', async () => {
+    said.messages = [talk({ id: 'h1', kind: 'handover', to: 'writer', handedBy: { from: ['researcher'], via: [] }, text: 'Three stories, sourced.' })]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['writer'] }), request: message({}), notes: [] }]
+    renderChat()
+    const said_ = await screen.findByRole('region', { name: 'What the agents said' })
+    fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: handover' }))
+    expect(box()).toHaveValue('@Researcher ')
+    expect(screen.getByText('Starts Researcher only')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'To Writer instead' }))
+    expect(box()).toHaveValue('@Writer ')
+    expect(screen.getByText('Note for Writer · after its current step')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'To Researcher instead' })).toBeInTheDocument()
+
+    // Esc lets go of the reply and keeps the words.
+    fireEvent.keyDown(box(), { key: 'Escape' })
+    expect(screen.queryByRole('group', { name: /^Replying to/ })).toBeNull()
+    expect(box()).toHaveValue('@Writer ')
+  })
+
+  it('Reply on the question the team waits on you for goes back to answering it', async () => {
+    said.messages = [
+      talk({ id: 'h1', kind: 'handover', to: 'review', handedBy: { from: ['researcher'], via: [] }, text: 'Three stories, sourced.', seq: 0 }),
+      talk({ id: 'question:e1', kind: 'question', from: 'researcher', to: 'operator', text: 'Which market?', state: 'pending', seq: 2 }),
+    ]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], waitingOn: { node: 'researcher', name: 'Researcher', kind: 'question', since: '2026-10-06T02:01:00.000Z', question: 'Which market?', park: 'reloadable', parkNote: '', sendBackAvailable: false } }), request: message({}), notes: [] }]
+    renderChat()
+    expect(await screen.findByPlaceholderText('Answer Researcher…')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Write to the team instead' }))
+    expect(screen.queryByPlaceholderText('Answer Researcher…')).toBeNull()
+    const said_ = await screen.findByRole('region', { name: 'What the agents said' })
+    fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: question' }))
+    expect(screen.getByPlaceholderText('Answer Researcher…')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: /^Replying to/ })).toBeNull()
+    // A reply to anything else is a message of its own, not your answer to the question.
+    fireEvent.click(within(said_).getByRole('button', { name: 'Reply to Researcher: handover' }))
+    expect(screen.getByRole('group', { name: "Replying to Researcher's handover" })).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Answer Researcher…')).toBeNull()
+    expect(screen.getByPlaceholderText('Reply to Researcher…')).toBeInTheDocument()
+  })
+
+  it('shows a note and a team note with what they replied to, and Try again sends the same reply', async () => {
+    const quoted = { runId: 'run-1', messageId: 'h1:said', from: 'researcher', to: 'writer', kind: 'handover' as const, text: 'Three stories, sourced.' }
+    page = [
+      { kind: 'work', run: run({ status: 'failed', reply: null, error: 'it broke' }), request: message({ replyTo: quoted }), notes: [message({ id: 'n-1', text: 'only Asia', route: 'note', agentId: 'writer', replyTo: quoted })] },
+      { kind: 'note', message: message({ id: 'n-2', text: 'and Europe', route: 'team_note', runId: null, createdAt: '2026-10-06T03:00:00.000Z', replyTo: quoted }) },
+    ]
+    answer = () => new Response(JSON.stringify({ error: 'no' }), { status: 500 })
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    await within(log).findByText('only Asia')
+    expect(within(log).getAllByRole('button', { name: "Replying to Researcher's handover to Writer. Show it" })).toHaveLength(3)
+    fireEvent.click(within(log).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { replyTo: quoted } }))
   })
 })
