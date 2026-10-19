@@ -1,4 +1,5 @@
-import { OFFLINE_MODEL, canonicalModel, modelNameFromId } from './ai/modelIds'
+import { OFFLINE_MODEL, canonicalModel, modelNameFromId, parseModelRef } from './ai/modelIds'
+import { SOURCE_INFO } from './ai/sources'
 import type { AgentConfig } from './team-file/types'
 
 /**
@@ -9,7 +10,10 @@ export function modelLabelForAgent(agent: AgentConfig, names?: ReadonlyMap<strin
   if (agent.kind === 'operator') return 'You (review step)'
   const id = canonicalModel(agent.model)
   if (id === OFFLINE_MODEL) return 'Offline demo (no AI)'
-  return names?.get(id) ?? modelNameFromId(id)
+  const name = names?.get(id) ?? modelNameFromId(id)
+  // A model a plan pays for says so on the card, so how an agent is paid shows at a glance (ADR 0073).
+  const source = parseModelRef(id).source
+  return source === 'openrouter' ? name : `${name} · ${SOURCE_INFO[source].chip}`
 }
 
 const THINKING_EFFORTS = new Set(['default', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])

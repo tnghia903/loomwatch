@@ -5,7 +5,8 @@ import { Feedback } from './components/feedback/Feedback'
 import { Updates } from './components/updates/Updates'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
-import { useKeyStatus } from './lib/ai/useKeyStatus'
+import { useAiStatus } from './lib/ai/useKeyStatus'
+import { connectedSources } from './lib/ai/sources'
 import { fetchCapabilities, SKILLS_CHANGED_EVENT, type CapabilityInventory } from './lib/library/client'
 import { useNeedsYou } from './lib/story/useNeedsYou'
 import { useTheme } from './lib/theme'
@@ -14,6 +15,7 @@ const Connections = lazy(() => import('./components/Connections'))
 const AgentsPage = lazy(() => import('./components/agents/AgentsPage').then((module) => ({ default: module.AgentsPage })))
 const QuestsPage = lazy(() => import('./components/quests/QuestsPage').then((module) => ({ default: module.QuestsPage })))
 const SkillsPage = lazy(() => import('./components/skills/SkillsPage').then((module) => ({ default: module.SkillsPage })))
+const UsagePage = lazy(() => import('./components/usage/UsagePage').then((module) => ({ default: module.UsagePage })))
 
 function useCapabilities() {
   const [inventory, setInventory] = useState<CapabilityInventory>({ skills: [], sources: [] })
@@ -45,10 +47,10 @@ function useCapabilities() {
   return { inventory, loading, error, scannedAt, retry }
 }
 
-/** The guide waits for an OpenRouter key before it asks for an agent. */
+/** The guide waits for a way to pay for models before it asks for an agent. */
 function Guide() {
-  const key = useKeyStatus()
-  return <GettingStarted keyReady={key?.connected === true} keyLoading={key === null} />
+  const ai = useAiStatus()
+  return <GettingStarted keyReady={ai !== null && connectedSources(ai).length > 0} keyLoading={ai === null} />
 }
 
 function Editor({ initialRunId }: { initialRunId: string | null }) {
@@ -106,6 +108,9 @@ export default function App() {
   if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
   if (pathname === '/quests') return <Quests />
   if (pathname === '/skills') return <Skills />
+  if (pathname === '/usage') {
+    return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading usage…</p>}><UsagePage /></Suspense>
+  }
   if (pathname === '/connections') {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
   }

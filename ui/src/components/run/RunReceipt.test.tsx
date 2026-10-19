@@ -83,7 +83,7 @@ describe('RunReceipt', () => {
     const line = screen.getByRole('button', { name: '~2.63M · 89% cached' })
     expect(line).toHaveAttribute('aria-expanded', 'false')
     expect(line).toHaveAttribute('title', '2,628,961 tokens')
-    expect(screen.getByText('$0.42')).toHaveAttribute('title', 'What OpenRouter charged for this run’s model calls')
+    expect(screen.getByText('$0.42')).toHaveAttribute('title', 'What this run’s model calls cost: OpenRouter’s charge, your Claude credit at list prices (≈), or your ChatGPT plan')
     expect(screen.queryByRole('group', { name: 'Tokens by agent and by kind of turn' })).toBeNull()
 
     fireEvent.click(line)

@@ -173,9 +173,96 @@ export function effortFor(tier: EffortTier | undefined): Effort | undefined {
   return tier ? (tiers.efforts[tier] as Effort) : undefined
 }
 
-/** The model a tier runs on. */
-export function modelForTier(tier: ModelTier | undefined): string {
-  return tiers.models[tier ?? 'strong']
+// The sources connected now, as the daemon last said (useKeyStatus.ts sets them), and the models
+// each plan offers. A new agent, a template and a suggestion place each tier's model on them.
+let connectedNow: readonly ModelSource[] = []
+let offeredNow: Offers = {}
+
+/** The models each plan offers, as selectors (`anthropic:claude-opus-5-5`); a plan not named offers whatever its maker makes. */
+export type Offers = Partial<Record<ModelSource, readonly string[]>>
+
+/** What `modelForTier` reads: the sources an agent can run on now, and what each plan offers. */
+export function setConnectedSources(sources: readonly ModelSource[], offers: Offers = {}) {
+  connectedNow = sources
+  offeredNow = offers
+}
+
+/** The sources an agent can run on now, as last known. */
+export function currentSources(): readonly ModelSource[] {
+  return connectedNow
+}
+
+/** What each connected plan offers, as last known. */
+export function currentOffers(): Offers {
+  return offeredNow
+}
+
+const BY_SOURCE = tiers.bySource as Record<'chatgpt' | 'anthropic', Record<ModelTier, string>>
+const PREFERENCE = tiers.preference as Record<ModelTier, ModelSource[]>
+
+/** The plans that can pay for a model of their own maker's: the Claude credit, the ChatGPT plan. */
+const PLANS = ['anthropic', 'chatgpt'] as const
+
+/** The connected plan that offers `model` (an OpenRouter id), as that plan's selector. */
+export function planFor(model: string, sources: readonly ModelSource[] = connectedNow, offers: Offers = offeredNow): string | undefined {
+  const reference: ModelRef = { source: 'openrouter', id: model }
+  for (const plan of PLANS) {
+    if (!sources.includes(plan)) continue
+    const on = modelOn(reference, plan)
+    if (!on) continue
+    const selector = modelSelector(on)
+    if (!offers[plan] || offers[plan].includes(selector)) return selector
+  }
+  return undefined
+}
+
+/** The model a tier names first, as an OpenRouter id, before who pays for it is settled. */
+export function tierModel(tier: ModelTier): string {
+  return tiers.models[tier]
+}
+
+/** The plan that could pay for `model` (an OpenRouter id) if it were connected: its maker's. */
+export function coveringPlan(model: string): 'anthropic' | 'chatgpt' | undefined {
+  return PLANS.find((plan) => modelOn({ source: 'openrouter', id: model }, plan) !== undefined)
+}
+
+/**
+ * Who pays for `model`, an OpenRouter id (ADR 0073, ruled 2026-10-19): a connected plan that offers
+ * it (the Claude credit for Anthropic's models, the ChatGPT plan for OpenAI's), else OpenRouter when
+ * its key is in. Undefined when neither can run it.
+ */
+export function placeModel(model: string, sources: readonly ModelSource[] = connectedNow, offers: Offers = offeredNow): string | undefined {
+  return planFor(model, sources, offers) ?? (sources.includes('openrouter') ? model : undefined)
+}
+
+/**
+ * The model a tier runs on. The tier names the model first (the table's `models`), and then who
+ * pays: a connected plan that offers it, else OpenRouter. Only when neither can run it does the tier
+ * take a connected plan's own model for it (`bySource`), so an agent made with just a ChatGPT plan
+ * still runs. With nothing connected it is the OpenRouter model, as it always was.
+ */
+export function modelForTier(tier: ModelTier | undefined, sources: readonly ModelSource[] = connectedNow, offers: Offers = offeredNow): string {
+  const wanted = tier ?? 'strong'
+  const model = tiers.models[wanted]
+  const placed = placeModel(model, sources, offers)
+  if (placed) return placed
+  const plan = PREFERENCE[wanted].find((source): source is 'anthropic' | 'chatgpt' => source !== 'openrouter' && sources.includes(source))
+  return plan ? BY_SOURCE[plan][wanted] : model
+}
+
+/** The tier whose model `model` is on any source, if it is one of the table's. */
+export function tierOfModel(model: string): ModelTier | null {
+  const selector = canonicalModel(model)
+  for (const tier of ['strong', 'fast', 'check'] as const) {
+    if (tiers.models[tier] === selector) return tier
+    if (BY_SOURCE.chatgpt[tier] === selector || BY_SOURCE.anthropic[tier] === selector) return tier
+  }
+  return null
+}
+
+/** Who made `model`, as OpenRouter names the maker: `anthropic`, `openai`. */
+export function makerSlug(model: string): string {
+  return (openRouterEquivalent(parseModelRef(model)).split('/')[0] ?? '').replace(/^~/, '')
 }
 
 /** What an agent made from nothing needs: the strong tier, at the standard effort. */

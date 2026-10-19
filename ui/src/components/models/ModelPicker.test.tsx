@@ -60,11 +60,11 @@ describe('ModelPicker', () => {
     const current = await screen.findByRole('button', { name: /Claude Opus 5\.5/ })
     expect(current).toHaveTextContent('$4 / $20 per million tokens')
     fireEvent.click(current)
-    const recommended = screen.getByRole('listbox', { name: 'Recommended models' })
+    const recommended = screen.getByRole('listbox', { name: 'Models by how they are paid' })
     expect(recommended).toHaveTextContent('Best for hard work')
     expect(recommended).not.toHaveTextContent('Gemma')
 
-    fireEvent.change(screen.getByLabelText('Search all 4 models'), { target: { value: 'free' } })
+    fireEvent.change(screen.getByLabelText('Search every model'), { target: { value: 'free' } })
     fireEvent.click(screen.getByRole('option', { name: /Gemma 4 31B/ }))
     expect(onChange).toHaveBeenCalledWith('google/gemma-4-31b-it:free', false)
     expect(screen.queryByRole('listbox')).toBeNull()
@@ -77,7 +77,7 @@ describe('ModelPicker', () => {
     expect(suggested).toHaveTextContent('Claude Sonnet 5.5')
     expect(suggested).toHaveTextContent('It gathers facts for Writer to write up.')
     expect(suggested).not.toHaveTextContent('Strong and quicker')
-    const others = screen.getByRole('group', { name: 'Other good models' })
+    const others = screen.getByRole('group', { name: 'OpenRouter (pay per use)' })
     expect(others).toHaveTextContent('Claude Opus 5.5')
     expect(others).not.toHaveTextContent('Sonnet')
   }))
@@ -86,7 +86,7 @@ describe('ModelPicker', () => {
     // A check step's model, which this list doesn't have.
     render(<ModelPicker value={opus.id} onChange={() => {}} suggestFor={{ agent: { id: 'c', name: 'Checker', role: CHECKER_ROLE } }} />)
     fireEvent.click(await screen.findByRole('button', { name: /Claude Opus 5\.5/ }))
-    expect(screen.queryByRole('group')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Suggested for this agent' })).toBeNull()
     expect(screen.getAllByRole('option')).toHaveLength(2)
   })
 
@@ -97,7 +97,7 @@ describe('ModelPicker', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    const search = screen.getByRole('combobox', { name: 'Search all 4 models' })
+    const search = screen.getByRole('combobox', { name: 'Search every model' })
     const [first, second] = screen.getAllByRole('option')
     expect(second).toHaveAttribute('aria-selected', 'true')
     expect(second).toHaveClass('active')
@@ -109,6 +109,71 @@ describe('ModelPicker', () => {
     fireEvent.keyDown(search, { key: 'Enter' })
     expect(onChange).toHaveBeenCalledWith(opus.id, false)
     expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('keeps the three ways of paying apart, suggests a plan first, and says what each costs', async () => {
+    const plan = { id: 'chatgpt:gpt-6.1-sol', name: 'GPT-6.1-Sol', contextLength: 500_000, inputPrice: 0, outputPrice: 0, free: false, reasoning: true }
+    const credit = { id: 'anthropic:claude-opus-5-5', name: 'Claude Opus 5.5', contextLength: 1_000_000, inputPrice: 4, outputPrice: 20, free: false, reasoning: true }
+    // A Claude model no price list knows yet: the credit still pays for it.
+    const unpriced = { id: 'anthropic:claude-next-9', name: 'Claude Next 9', contextLength: 1_000_000, inputPrice: 0, outputPrice: 0, free: false, reasoning: true }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (path === '/api/models') return json({ ...catalog, chatgpt: [plan], anthropic: [credit, unpriced] })
+      if (path === '/api/ai') return json({ openrouter: { connected: false }, anthropic: { connected: true }, chatgpt: { available: true, connected: true, planUse: true } })
+      if (path === '/api/models/reading') return json(reading)
+      return json({})
+    }))
+    const onChange = vi.fn()
+    render(<ModelPicker value={plan.id} onChange={onChange} suggestFor={{ agent: writer, team }} />)
+    const current = await screen.findByRole('button', { name: /GPT-6\.1-Sol/ })
+    expect(current).toHaveTextContent('Using ChatGPT plan')
+    expect(current).toHaveTextContent('ChatGPT plan')
+    fireEvent.click(current)
+    // The writer's suggestion is the strongest model, on the Claude credit before OpenRouter.
+    const suggested = screen.getByRole('group', { name: 'Suggested for this agent' })
+    await waitFor(() => expect(suggested).toHaveTextContent('It runs on your Claude API credit.'))
+    expect(suggested).toHaveTextContent('Claude Opus 5.5')
+    expect(screen.getByText(/Also good:/)).toHaveTextContent('GPT-6.1-Sol on your ChatGPT plan (included in your plan)')
+    const ofPlan = screen.getByRole('group', { name: 'Your ChatGPT plan' })
+    expect(ofPlan).toHaveTextContent('No extra charge')
+    expect(within(ofPlan).getByRole('option', { name: /GPT-6\.1-Sol/ })).toHaveTextContent('Included in your plan')
+    const ofCredit = within(screen.getByRole('group', { name: 'Your Claude API credit' })).getByRole('option', { name: /Claude Next 9/ })
+    expect(ofCredit).toHaveTextContent('Price not listed')
+    expect(ofCredit).not.toHaveTextContent('Free')
+    // OpenRouter isn't connected: one row to connect it, never its models.
+    const ofOpenRouter = screen.getByRole('group', { name: 'OpenRouter (pay per use)' })
+    expect(within(ofOpenRouter).queryByRole('option')).toBeNull()
+    expect(within(ofOpenRouter).getByRole('link', { name: /Connect an OpenRouter key/ })).toHaveAttribute('href', '/connections')
+    fireEvent.click(within(suggested).getByRole('option', { name: /Claude Opus 5\.5/ }))
+    expect(onChange).toHaveBeenCalledWith(credit.id, true)
+  })
+
+  it('suggests the model first and who pays second, and says what connecting would change', async () => {
+    const plan = { id: 'chatgpt:gpt-6.1-sol', name: 'GPT-6.1-Sol', contextLength: 500_000, inputPrice: 0, outputPrice: 0, free: false, reasoning: true }
+    let ai: unknown = { openrouter: { connected: true }, chatgpt: { available: true, connected: true, planUse: true } }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (path === '/api/models') return json({ ...catalog, chatgpt: [plan] })
+      if (path === '/api/ai') return json(ai)
+      if (path === '/api/models/reading') return json(reading)
+      return json({})
+    }))
+    // The ChatGPT plan doesn't offer Claude Opus, so OpenRouter pays for it, and the Claude plan is offered.
+    const { unmount } = render(<ModelPicker value={plan.id} onChange={() => {}} suggestFor={{ agent: writer, team }} />)
+    fireEvent.click(await screen.findByRole('button', { name: /GPT-6\.1-Sol/ }))
+    const suggested = screen.getByRole('group', { name: 'Suggested for this agent' })
+    await waitFor(() => expect(suggested).toHaveTextContent('It runs through OpenRouter.'))
+    expect(suggested).toHaveTextContent('Claude Opus 5.5')
+    expect(screen.getByText(/Have Claude Max or Team\?/)).toHaveTextContent('its monthly API credit can pay for Claude Opus 5.5 instead of OpenRouter')
+    unmount(); forgetModels(); forgetKeyStatus()
+
+    // Only the ChatGPT plan: its strongest stands in, and the first choice is named.
+    ai = { openrouter: { connected: false }, chatgpt: { available: true, connected: true, planUse: true } }
+    render(<ModelPicker value={plan.id} onChange={() => {}} suggestFor={{ agent: writer, team }} />)
+    fireEvent.click(await screen.findByRole('button', { name: /GPT-6\.1-Sol/ }))
+    const standIn = screen.getByRole('group', { name: 'Suggested for this agent' })
+    await waitFor(() => expect(standIn).toHaveTextContent('It runs on your ChatGPT plan.'))
+    expect(screen.getByText(/is the first choice for this work/)).toHaveTextContent('Claude Opus 5.5 is the first choice for this work. Connect your Claude API credit or an OpenRouter key to use it.')
   })
 
   it('closes on Escape without choosing', async () => {
@@ -125,12 +190,12 @@ describe('ModelPicker', () => {
     const current = await screen.findByRole('button', { name: /Claude Opus 5\.5/ })
     expect(current.querySelector('.maker-mark svg')).not.toBeNull()
     fireEvent.click(current)
-    fireEvent.change(screen.getByLabelText('Search all 4 models'), { target: { value: 'gemma' } })
+    fireEvent.change(screen.getByLabelText('Search every model'), { target: { value: 'gemma' } })
     const gemmaRow = screen.getByRole('option', { name: /Gemma 4 31B/ })
     expect(gemmaRow.querySelector('.maker-mark svg')).not.toBeNull()
     expect(gemmaRow).toHaveTextContent('Google · 262K context')
     expect(gemmaRow.querySelector('.model-row-tick')).toBeNull()
-    fireEvent.change(screen.getByLabelText('Search all 4 models'), { target: { value: 'opus' } })
+    fireEvent.change(screen.getByLabelText('Search every model'), { target: { value: 'opus' } })
     expect(screen.getByRole('option', { name: /Claude Opus 5\.5/ }).querySelector('.model-row-tick')).not.toBeNull()
   })
 

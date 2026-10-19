@@ -694,13 +694,32 @@ fn plan_listing(model: &ChatGptModel) -> Model {
 }
 
 /// A Claude key's model as the picker lists it, with the prices `OpenRouter` lists for the same
-/// model: Anthropic's own list prices, which the API doesn't report.
+/// model: Anthropic's own list prices, which the API doesn't report. A model the catalog doesn't
+/// list takes the bundled list price, and one neither knows is listed at 0, which the app says it
+/// can't price.
 fn claude_listing(model: &ClaudeModel, catalog: &Catalog) -> Model {
     let reference = ModelRef {
         source: Source::Anthropic,
         id: model.id.clone(),
     };
     let listed = catalog.find(&reference.openrouter_equivalent());
+    let bundled = crate::agent::list_price(&model.id);
+    let (input_price, output_price, cached_input_price, cache_write_price) = match (listed, bundled)
+    {
+        (Some(listed), _) => (
+            listed.input_price,
+            listed.output_price,
+            listed.cached_input_price,
+            listed.cache_write_price,
+        ),
+        (None, Some(price)) => (
+            price.input,
+            price.output,
+            Some(price.cache_read),
+            Some(price.cache_write),
+        ),
+        (None, None) => (0.0, 0.0, None, None),
+    };
     Model {
         id: reference.selector(),
         name: model.name.clone(),
@@ -708,10 +727,10 @@ fn claude_listing(model: &ClaudeModel, catalog: &Catalog) -> Model {
             .map(|listed| listed.description.clone())
             .unwrap_or_default(),
         context_length: model.context_length,
-        input_price: listed.map_or(0.0, |listed| listed.input_price),
-        output_price: listed.map_or(0.0, |listed| listed.output_price),
-        cached_input_price: listed.and_then(|listed| listed.cached_input_price),
-        cache_write_price: listed.and_then(|listed| listed.cache_write_price),
+        input_price,
+        output_price,
+        cached_input_price,
+        cache_write_price,
         free: false,
         reasoning: model.adaptive_thinking || !model.efforts.is_empty(),
         note: None,
@@ -725,6 +744,36 @@ mod tests {
     use axum::http::Request as HttpRequest;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    #[test]
+    fn a_claude_model_is_priced_from_the_catalog_else_the_bundled_list_else_not_at_all() {
+        let catalog = crate::ai::models::catalog_from(&json!({"data": [{
+            "id": "anthropic/claude-opus-5.5", "name": "Anthropic: Claude Opus 5.5",
+            "pricing": {"prompt": "0.000004", "completion": "0.00002"},
+            "supported_parameters": ["tools"],
+        }]}));
+        let claude = |id: &str| ClaudeModel {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            context_length: 200_000,
+            max_output: 64_000,
+            adaptive_thinking: true,
+            efforts: Vec::new(),
+        };
+        let listed = claude_listing(&claude("claude-opus-5-5"), &catalog);
+        assert_eq!(listed.id, "anthropic:claude-opus-5-5");
+        assert!(
+            (listed.input_price - 4.0).abs() < 1e-9 && (listed.output_price - 20.0).abs() < 1e-9
+        );
+        // Not in the catalog: Anthropic's list price, not "free".
+        let bundled = claude_listing(&claude("claude-haiku-5-5"), &catalog);
+        assert!(
+            (bundled.input_price - 0.10).abs() < 1e-9 && (bundled.output_price - 0.50).abs() < 1e-9
+        );
+        assert_eq!(bundled.cached_input_price, Some(0.01));
+        let unknown = claude_listing(&claude("claude-next-9"), &catalog);
+        assert!(unknown.input_price == 0.0 && unknown.output_price == 0.0 && !unknown.free);
+    }
 
     async fn fake_openrouter() -> String {
         async fn key(headers: axum::http::HeaderMap) -> Response {

@@ -1582,7 +1582,7 @@ describe('Connections entry point', () => {
 
 // Every agent thinks on the person's OpenRouter key: a team can't run until one is added, and Build
 // says so before the run rather than letting the first model call fail.
-describe('a team with no OpenRouter key added', () => {
+describe('a team whose way of paying isn’t connected', () => {
   function withKey(connected: boolean) {
     const fallback = globalThis.fetch
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1595,9 +1595,11 @@ describe('a team with no OpenRouter key added', () => {
     withKey(false)
     renderWorkspace()
     expect(await screen.findByRole('heading', { name: 'Finish setting up' })).toBeInTheDocument()
-    expect(screen.getByText('Add your OpenRouter key so these agents can think. LoomWatch keeps it in this Mac’s Keychain.')).toBeInTheDocument()
+    // Which agents need which way of paying, and what to do about it (ADR 0073).
+    const said = /through OpenRouter, which isn’t connected\. Add an OpenRouter key on the Connections page/
+    expect(screen.getAllByText(said).length).toBeGreaterThanOrEqual(1)
     fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-    expect(screen.getByText('Add your OpenRouter key to run this team.')).toBeInTheDocument()
+    expect(screen.getAllByText(said).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('textbox', { name: 'Message the team' })).toBeDisabled()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })

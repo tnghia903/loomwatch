@@ -1,16 +1,48 @@
-import { Check, ChevronDown, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, Plug, Sparkles } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
-import { type Model, contextSize, price, shortName } from '../../lib/ai/client'
+import { type Catalog, type Model, contextSize, price, shortName } from '../../lib/ai/client'
 import { makerOf } from '../../lib/ai/makers'
-import { OFFLINE_MODEL, modelNameFromId, parseModelRef } from '../../lib/ai/modelIds'
+import { type ModelSource, type ModelTier, OFFLINE_MODEL, SOURCES, coveringPlan, modelForTier, modelNameFromId, openRouterEquivalent, parseModelRef, tierModel } from '../../lib/ai/modelIds'
 import { useSetupReading } from '../../lib/ai/reading'
+import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
+import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { useModels } from '../../lib/ai/useModels'
 import { type ModelSuggestionInput, suggestModel } from '../../lib/team-file/modelSuggestion'
 import { MakerMark } from './MakerMark'
 import { AiChoice } from './AiChoice'
 
 const MAX_RESULTS = 40
+
+/** The models listed for `source`: the plan's and the Claude key's whole lists, OpenRouter's recommended few. */
+function listed(catalog: Catalog, source: ModelSource): Model[] {
+  if (source === 'chatgpt') return catalog.chatgpt ?? []
+  if (source === 'anthropic') return catalog.anthropic ?? []
+  return catalog.recommended
+}
+
+/** Every model any source lists, to search and to find a model by its id. */
+function everyModel(catalog: Catalog): Model[] {
+  return [...(catalog.chatgpt ?? []), ...(catalog.anthropic ?? []), ...catalog.models]
+}
+
+/** What a row says a model costs: the plan's own words, or its price per million tokens. */
+function costOf(model: Model, source: ModelSource): string {
+  if (source === 'chatgpt') return 'Included in your plan'
+  if (model.free) return 'Free'
+  if (unpriced(model, source)) return 'Price not listed'
+  return `${price(model.inputPrice)} in · ${price(model.outputPrice)} out`
+}
+
+/** A Claude model neither OpenRouter's list nor LoomWatch's own knows the price of: never "Free", since the credit pays for it. */
+function unpriced(model: Model, source: ModelSource): boolean {
+  return source === 'anthropic' && model.inputPrice === 0 && model.outputPrice === 0
+}
+
+/** The source tag on a row and on the picker's button, so how a model is paid is never a guess. */
+export function SourceChip({ source }: { source: ModelSource }) {
+  return <span className={`model-source-chip ${source}`}>{SOURCE_INFO[source].chip}</span>
+}
 
 function Row({ id, model, selected, active, why, plain = false, follow, onPoint, onPick }: {
   id: string
@@ -27,6 +59,7 @@ function Row({ id, model, selected, active, why, plain = false, follow, onPoint,
   onPick: (id: string) => void
 }) {
   const maker = makerOf(model.id)
+  const source = parseModelRef(model.id).source
   return (
     <button id={id} type="button" {...(plain ? {} : { role: 'option', 'aria-selected': selected })} title={follow} aria-description={follow} className={`pop-row model-row ${selected ? 'current' : ''} ${active ? 'active' : ''}`} onMouseMove={onPoint} onClick={() => onPick(model.id)}>
       <span className="model-row-mark">
@@ -35,20 +68,56 @@ function Row({ id, model, selected, active, why, plain = false, follow, onPoint,
       </span>
       <span className="name t-body">{shortName(model)}</span>
       <span className="aside t-meta">
-        {model.free ? <span className="badge">Free</span> : `${price(model.inputPrice)} in · ${price(model.outputPrice)} out`}
+        {model.free && source === 'openrouter' ? <span className="badge">Free</span> : costOf(model, source)}
       </span>
       <span className={`t-meta model-row-detail ${why ? 'model-row-why' : ''}`}>
-        {why ?? <>{model.note ? `${model.note} · ` : ''}{maker.name} · {contextSize(model.contextLength)} context</>}
+        <SourceChip source={source} />
+        {why ?? <>{model.note ? `${model.note} · ` : ''}{maker.name}{model.contextLength ? ` · ${contextSize(model.contextLength)} context` : ''}{source === 'anthropic' ? ' · from your monthly credit' : ''}</>}
       </span>
     </button>
   )
 }
 
+/** A source with nothing connected: one row that says what it costs and where to connect it. */
+function ConnectRow({ source }: { source: ModelSource }) {
+  return (
+    <a className="pop-row model-row model-connect-row" href="/connections">
+      <span className="model-row-mark"><Plug size={14} aria-hidden="true" /></span>
+      <span className="name t-body">Connect {source === 'openrouter' ? 'an OpenRouter key' : source === 'chatgpt' ? 'your ChatGPT plan' : 'your Claude API credit'}</span>
+      <span className="t-meta model-row-detail">{SOURCE_INFO[source].cost}</span>
+    </a>
+  )
+}
+
 /**
- * The models to choose from: the one suggested for this agent first, with why, then the
- * recommended few, and everything OpenRouter lists that can use tools a search away. The arrow keys
- * move through them and Enter picks, as in the command palette. Prices are per million tokens, the
- * way OpenRouter shows them.
+ * What connecting would change about a suggestion (ruled 2026-10-19): the tier names its model first
+ * and a connected plan that offers it pays, else OpenRouter, else a plan's own model stands in.
+ * Said when the first choice runs through OpenRouter though its maker's plan could pay for it, or
+ * when a plan's own model stands in for a first choice nothing connected can run.
+ */
+function connectNudge(model: string, tier: ModelTier, source: ModelSource, connected: readonly ModelSource[], offered: (source: ModelSource) => boolean): string | undefined {
+  const first = tierModel(tier)
+  const plan = coveringPlan(first)
+  const missing = plan && offered(plan) && !connected.includes(plan) ? plan : undefined
+  const name = modelNameFromId(first)
+  const pays = missing === 'anthropic'
+    ? { who: 'Claude Max or Team', how: `its monthly API credit can pay for ${name} instead of OpenRouter` }
+    : { who: 'ChatGPT Plus or Pro', how: `your plan can run ${name} at no extra charge instead of OpenRouter` }
+  if (openRouterEquivalent(parseModelRef(model)) === first) {
+    return source === 'openrouter' && missing ? `Have ${pays.who}? Connect it and ${pays.how}.` : undefined
+  }
+  const ways = missing ? `${missing === 'anthropic' ? 'your Claude API credit' : 'your ChatGPT plan'} or an OpenRouter key` : 'an OpenRouter key'
+  return `${name} is the first choice for this work. Connect ${ways} to use it.`
+}
+
+/**
+ * The models to choose from, in three clearly separate sections, one per way of paying (ADR 0073):
+ * the person's ChatGPT plan, their Claude API credit, and OpenRouter, each headed by what it costs.
+ * A source with nothing connected shows one row to connect it instead of its models. Every row says
+ * which source it is on. The one suggested for this agent comes first, with why, from all three
+ * sources, the plans the person pays for first; "Also good" names the best pick on each other
+ * connected source. Search reaches every model of every source. The arrow keys move through the
+ * rows and Enter picks, as in the command palette.
  *
  * `suggestFor` is the agent and its team (modelSuggestion.ts). Its suggestion is a card of its own
  * at the top, above the search, so it stands apart whether or not it is the model in use and stays
@@ -63,21 +132,39 @@ function Row({ id, model, selected, active, why, plain = false, follow, onPoint,
  */
 export function ModelChoices({ value, suggestFor, follows, onPick }: { value: string; suggestFor?: ModelSuggestionInput; follows?: boolean; onPick: (id: string, follow: boolean) => void }) {
   const { catalog, error } = useModels()
+  const ai = useAiStatus()
+  // Until the daemon says what is connected, OpenRouter's list shows as it always did.
+  const connected: readonly ModelSource[] | null = useMemo(() => (ai ? connectedSources(ai) : null), [ai])
+  const offered = (source: ModelSource) => source !== 'chatgpt' || ai?.chatgpt.available === true
   const read = useSetupReading(suggestFor?.agent, Boolean(suggestFor))
-  const suggestion = suggestFor ? suggestModel({ ...suggestFor, reading: read.reading }) : undefined
+  const suggestion = suggestFor ? suggestModel({ ...suggestFor, reading: read.reading, ...(connected ? { sources: connected } : {}) }) : undefined
   const [query, setQuery] = useState('')
   const listId = useId()
+  const all = useMemo(() => (catalog ? everyModel(catalog) : []), [catalog])
   const found = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    if (!catalog || words.length === 0) return []
-    return catalog.models
-      .filter((model) => words.every((word) => `${model.id} ${model.name}`.toLowerCase().includes(word)))
+    if (words.length === 0) return []
+    return all
+      .filter((model) => !connected || connected.includes(parseModelRef(model.id).source))
+      .filter((model) => words.every((word) => `${model.id} ${model.name} ${SOURCE_INFO[parseModelRef(model.id).source].chip}`.toLowerCase().includes(word)))
       .slice(0, MAX_RESULTS)
-  }, [catalog, query])
-  // Shown only when the list has it: a suggestion is a price and a pick, never a dead row.
-  const suggested = suggestion && catalog?.models.find((model) => model.id === suggestion.model)
-  const others = catalog ? catalog.recommended.filter((model) => model.id !== suggested?.id) : []
-  const rows = query ? found : [...(suggested ? [suggested] : []), ...others]
+  }, [all, connected, query])
+  // Shown only when a list has it: a suggestion is a price and a pick, never a dead row.
+  const suggested = suggestion ? all.find((model) => model.id === suggestion.model) : undefined
+  const suggestedSource = suggested ? parseModelRef(suggested.id).source : undefined
+  // The same kind of model on each other connected source, so the person compares what it costs.
+  const alsoGood = suggested && suggestion && connected
+    ? connected.filter((source) => source !== suggestedSource).map((source) => all.find((model) => model.id === modelForTier(suggestion.tier, [source]))).filter((model): model is Model => Boolean(model))
+    : []
+  const nudge = suggestion && suggestedSource && connected ? connectNudge(suggestion.model, suggestion.tier, suggestedSource, connected, offered) : undefined
+  const sections = catalog
+    ? SOURCES.filter(offered).map((source) => {
+        const live = !connected || connected.includes(source)
+        const models = live ? listed(catalog, source).filter((model) => model.id !== suggested?.id) : []
+        return { source, live: live && (source !== 'chatgpt' || connected !== null), models }
+      })
+    : []
+  const rows = query ? found : [...(suggested ? [suggested] : []), ...sections.flatMap((section) => section.models)]
   const startAt = (list: readonly Model[]) => Math.max(0, list.findIndex((model) => model.id === value))
   const [activeIndex, setActiveIndex] = useState(() => startAt(rows))
   // The list arrives after the picker opens the first time, so the chosen model is found then; a
@@ -111,6 +198,8 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
   const row = (model: Model, index: number, why?: string) => (
     <Row key={model.id} id={optionId(index)} model={model} selected={model.id === value} active={index === activeIndex} why={why} follow={why ? followNote : undefined} onPoint={() => setActiveIndex(index)} onPick={(id) => pick(id, Boolean(why))} />
   )
+  const why = suggestion && suggestedSource ? `${suggestion.why} It runs ${SOURCE_INFO[suggestedSource].on}.` : suggestion?.why
+  let index = suggested ? 1 : 0
 
   return (
     <>
@@ -124,35 +213,47 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
           </div>
           <div className="model-group" role="group" id={`${listId}-suggested-group`} aria-labelledby={`${listId}-suggested`}>
             {query
-              ? <Row id={`${listId}-suggested-row`} model={suggested} selected={suggested.id === value} active={false} why={suggestion?.why} plain follow={followNote} onPoint={() => {}} onPick={(id) => pick(id, true)} />
-              : row(suggested, 0, suggestion?.why)}
+              ? <Row id={`${listId}-suggested-row`} model={suggested} selected={suggested.id === value} active={false} why={why} plain follow={followNote} onPoint={() => {}} onPick={(id) => pick(id, true)} />
+              : row(suggested, 0, why)}
           </div>
+          {nudge && <p className="t-meta model-connect-nudge">{nudge} <a className="link" href="/connections">Open Connections</a></p>}
+          {alsoGood.length > 0 && <p className="t-meta model-also-good">
+            Also good: {alsoGood.map((model, place) => {
+              const source = parseModelRef(model.id).source
+              return <span key={model.id}>{place > 0 && ' · '}<button type="button" className="link" onClick={() => pick(model.id)}>{shortName(model)}</button> {SOURCE_INFO[source].on} ({costOf(model, source).toLowerCase()})</span>
+            })}
+          </p>}
           {suggestFor && <AiChoice agent={suggestFor.agent} read={read} />}
         </div>}
         <label className="field">
-          <span className="t-meta">Search all {catalog.models.length} models</span>
+          <span className="t-meta">Search every model</span>
           <input
-            className="input" value={query} placeholder="claude, gpt, gemini, free…" autoFocus
+            className="input" value={query} placeholder="claude, gpt, gemini, plan, free…" autoFocus
             role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list"
             aria-activedescendant={rows[activeIndex] ? optionId(activeIndex) : undefined}
             onChange={(event) => {
               const next = event.target.value
               setQuery(next)
-              setActiveIndex(next.trim() ? 0 : startAt([...(suggested ? [suggested] : []), ...others]))
+              setActiveIndex(next.trim() ? 0 : startAt([...(suggested ? [suggested] : []), ...sections.flatMap((section) => section.models)]))
             }}
             onKeyDown={onKeyDown}
           />
         </label>
-        <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Recommended models'} aria-owns={!query && suggested ? `${listId}-suggested-group ${listId}-others` : undefined}>
-          {query ? found.map((model, index) => row(model, index)) : suggested ? (
-            <div className="model-group" role="group" id={`${listId}-others`} aria-labelledby={`${listId}-others-head`}>
-              <p className="model-group-head t-micro" id={`${listId}-others-head`}>Other good models</p>
-              {others.map((model, index) => row(model, index + 1))}
+        <div className="pop-list model-list" role="listbox" id={listId} aria-label={query ? 'Models found' : 'Models by how they are paid'} aria-owns={!query && suggested ? [`${listId}-suggested-group`, ...sections.map((section) => `${listId}-${section.source}`)].join(' ') : undefined}>
+          {query ? found.map((model, place) => row(model, place)) : sections.map((section) => (
+            <div key={section.source} className={`model-group model-source-group ${section.source}`} role="group" id={`${listId}-${section.source}`} aria-labelledby={`${listId}-${section.source}-head`}>
+              <div className="model-source-head">
+                <p className="model-group-head t-micro" id={`${listId}-${section.source}-head`}>{SOURCE_INFO[section.source].heading}</p>
+                <p className="t-meta model-source-cost">{SOURCE_INFO[section.source].cost}</p>
+              </div>
+              {section.live
+                ? section.models.map((model) => row(model, index++))
+                : <ConnectRow source={section.source} />}
             </div>
-          ) : others.map((model, index) => row(model, index))}
+          ))}
         </div>
         {query && found.length === 0 && <p className="t-meta lw-settings-quiet">No model matches. Try another word.</p>}
-        {!query && <p className="t-meta lw-settings-quiet">Free models are limited per day, and their makers may learn from what you send. Keep private work on a paid model.</p>}
+        {!query && <p className="t-meta lw-settings-quiet">Search to reach every OpenRouter model. Free models are limited per day, and their makers may learn from what you send. Keep private work on a paid model.</p>}
       </>}
     </>
   )
@@ -177,14 +278,17 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
   moved?: { from: string; onUndo: () => void }
 }) {
   const { catalog } = useModels()
+  // Asked for now, so the list's sources and suggestion are known before it opens.
+  useAiStatus()
   const [open, setOpen] = useState(false)
+  const source = value && value !== OFFLINE_MODEL ? parseModelRef(value).source : null
   const root = useRef<HTMLDivElement>(null)
   const toggle = useRef<HTMLButtonElement>(null)
   const listId = useId()
   const labelId = useId()
   const nameId = useId()
   const suggestedId = useId()
-  const current = catalog?.models.find((model) => model.id === value)
+  const current = catalog ? everyModel(catalog).find((model) => model.id === value) : undefined
 
   useEffect(() => {
     if (!open) return
@@ -204,9 +308,12 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
         {value && value !== OFFLINE_MODEL && (value.includes('/') || parseModelRef(value).source !== 'openrouter') && <MakerMark maker={makerOf(value)} />}
         <span className="model-picker-text">
           <span className="t-body" id={nameId}>{current ? shortName(current) : value ? modelNameFromId(value) : 'Choose a model'}</span>
-          {current && <span className="t-meta lw-settings-quiet">{current.free ? 'Free' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}</span>}
-          {!current && value && value !== OFFLINE_MODEL && catalog && parseModelRef(value).source === 'openrouter' && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
+          {source === 'chatgpt' && <span className="t-meta lw-settings-quiet">Using ChatGPT plan · included in your plan</span>}
+          {current && source === 'anthropic' && <span className="t-meta lw-settings-quiet">{unpriced(current, source) ? 'Price not listed' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}, from your monthly credit</span>}
+          {current && source === 'openrouter' && <span className="t-meta lw-settings-quiet">{current.free ? 'Free' : `${price(current.inputPrice)} / ${price(current.outputPrice)} per million tokens`}</span>}
+          {!current && value && value !== OFFLINE_MODEL && catalog && source === 'openrouter' && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
         </span>
+        {source && <SourceChip source={source} />}
         {follows && <span className="model-picker-suggested t-meta" id={suggestedId}><Sparkles size={11} aria-hidden="true" />Suggested</span>}
         <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />
       </button>

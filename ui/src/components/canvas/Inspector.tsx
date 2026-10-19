@@ -160,7 +160,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}
         <div className={`field ${zoneClass('model')}`}>
           <ModelPicker field="model" value={canonicalModel(agent.model)} disabled={locked} suggestFor={suggestFor} follows={linked ? undefined : agent.followsSuggestion === true} moved={modelMove} onChange={(id, follow) => { onModelChange(id, follow); onFieldBlur('model') }} />
-          <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with. Its price is per million tokens, the way OpenRouter shows it.')}</span>
+          <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with, and which of your connections pays for it. Prices are per million tokens.')}</span>
         </div>
         <EffortSlider model={canonicalModel(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={locked} onChange={onThinkingEffortChange} />
         {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}

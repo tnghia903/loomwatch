@@ -279,6 +279,31 @@ mod tests {
         );
     }
 
+    /// The app offers a button for these stops by their words (`ui/src/lib/runs/errors.ts`,
+    /// `problemAction`), so the words it looks for stay.
+    #[test]
+    fn the_stops_the_app_offers_a_way_out_of_keep_their_words() {
+        for (error, words) in [
+            (AgentError::PlanLimit, "usage limit on your ChatGPT plan"),
+            (
+                AgentError::OutOfCredits(Source::Anthropic),
+                "Claude API credit is used up",
+            ),
+            (
+                AgentError::OutOfCredits(Source::OpenRouter),
+                "OpenRouter account is out of credits",
+            ),
+            (AgentError::SignInAgain, "Connections page"),
+            (AgentError::PlanUseOff, "Connections page"),
+            (
+                AgentError::KeyRefused(Source::Anthropic),
+                "Connections page",
+            ),
+        ] {
+            assert!(error.to_string().contains(words), "{error}");
+        }
+    }
+
     #[test]
     fn plain_words_are_left_alone() {
         assert_eq!(redact("model not found"), "model not found");

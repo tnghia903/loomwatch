@@ -39,3 +39,26 @@ export function plainRunError(message: string, agents: ReadonlyMap<string, Error
   const [, id, cause] = spawn
   return `${agents.get(id)?.name || id} couldn’t start: ${cause.trim()}`
 }
+
+/** The way out of a stop LoomWatch named (ADR 0073): where to fix it, in one button. */
+export interface ProblemAction {
+  label: string
+  href: string
+  /** Opens outside LoomWatch, in a new tab. */
+  external: boolean
+}
+
+// The daemon's own words for each stop (`crates/loomwatch-backend/src/agent/error.rs` and
+// `engine/mod.rs`), first match wins. Their tests pin the same sentences.
+const ACTIONS: readonly [RegExp, ProblemAction][] = [
+  [/usage limit on your ChatGPT plan/, { label: 'Manage usage', href: 'https://chatgpt.com/settings/usage', external: true }],
+  [/Claude API credit is used up/, { label: 'See your Claude balance', href: 'https://platform.claude.com/settings/billing', external: true }],
+  [/OpenRouter account is out of credits/, { label: 'Add OpenRouter credits', href: 'https://openrouter.ai/settings/credits', external: true }],
+  [/Connections page/, { label: 'Open Connections', href: '/connections', external: false }],
+]
+
+/** The button that fixes a stop, when LoomWatch's words for it say where. */
+export function problemAction(message: string | null | undefined): ProblemAction | null {
+  if (!message) return null
+  return ACTIONS.find(([pattern]) => pattern.test(message))?.[1] ?? null
+}

@@ -32,11 +32,23 @@ export interface TurnUsage extends TokenCounts {
   stopReason: string | null
   /** Counted from the turn's readings, because it never reported itself whole. */
   estimated: boolean
-  /** What OpenRouter charged for the turn, in dollars, when that is known. */
+  /** What the turn cost in dollars, when that is known. Zero for a turn the ChatGPT plan paid. */
   costUsd?: number
+  /** Who paid, when it wasn't OpenRouter (ADR 0073): a ChatGPT plan, or a Claude API credit. */
+  paidBy?: 'chatgpt' | 'anthropic'
+  /** `costUsd` was worked out from list prices, not reported by the provider. */
+  costEstimated?: boolean
 }
 
-export interface AgentTokens extends TokenCounts {
+/** How a group of turns was paid, beside its dollars. */
+export interface Payment {
+  /** Some of it ran on the person's ChatGPT plan, which costs the plan's allowance, not dollars. */
+  onPlan?: boolean
+  /** Some of its dollars were worked out from list prices. */
+  costEstimated?: boolean
+}
+
+export interface AgentTokens extends TokenCounts, Payment {
   agentId: string
   turns: number
   estimated: boolean
@@ -49,7 +61,7 @@ export interface PurposeTokens extends TokenCounts {
   estimated: boolean
 }
 
-export interface TokenSummary extends TokenCounts {
+export interface TokenSummary extends TokenCounts, Payment {
   turns: number
   estimated: boolean
   /** Share of prompt tokens read back from a cache: `cacheRead / (input + cacheRead + cacheWrite)`. */
@@ -99,6 +111,13 @@ function reportedCost(result: Record<string, unknown>): number | undefined {
   const meta = object(result._meta) && object(result._meta.loomwatch) ? result._meta.loomwatch : null
   const cost = meta?.costUsd
   return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : undefined
+}
+
+/** Who paid for a turn, and whether its cost is worked out, from its `turn_end` result. */
+function reportedPayer(result: Record<string, unknown>): Pick<TurnUsage, 'paidBy' | 'costEstimated'> {
+  const meta = object(result._meta) && object(result._meta.loomwatch) ? result._meta.loomwatch : null
+  const paidBy = meta?.paidBy === 'chatgpt' || meta?.paidBy === 'anthropic' ? meta.paidBy : undefined
+  return { ...(paidBy ? { paidBy } : {}), ...(meta?.costEstimated === true ? { costEstimated: true } : {}) }
 }
 
 interface Ask { asker: string; from: number; to: number; target: string | null; question: string | null }
@@ -185,6 +204,7 @@ export function turnUsage(events: readonly RunEvent[], throughSeq = Infinity): T
     }
     open.turn.stopReason = stopReason
     const cost = result ? reportedCost(result) : undefined
+    if (result) Object.assign(open.turn, reportedPayer(result))
     if (cost !== undefined) open.turn.costUsd = cost
     else if (open.costTo !== null && open.costFrom !== undefined) {
       // A running total that fell back restarted under the turn, so the reading is all of it.
@@ -272,14 +292,30 @@ export function turnUsage(events: readonly RunEvent[], throughSeq = Infinity): T
   return turns.sort((a, b) => a.startSeq - b.startSeq)
 }
 
-/** What the turns in `group` whose cost is known came to, and whether that is all of them. */
-function priced(group: readonly TurnUsage[]): { costUsd?: number; costComplete: boolean } {
+/** What the turns in `group` whose cost is known came to, whether that is all of them, and how they were paid. */
+function priced(group: readonly TurnUsage[]): { costUsd?: number; costComplete: boolean } & Payment {
   const spent = group.filter((turn) => turn.total > 0)
-  const known = spent.filter((turn) => turn.costUsd !== undefined)
+  // A turn the plan paid is known: it cost no dollars.
+  const known = spent.filter((turn) => turn.costUsd !== undefined || turn.paidBy === 'chatgpt')
   return {
     ...(known.length > 0 ? { costUsd: known.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) } : {}),
     costComplete: known.length === spent.length,
+    ...(spent.some((turn) => turn.paidBy === 'chatgpt') ? { onPlan: true } : {}),
+    ...(spent.some((turn) => turn.costEstimated) ? { costEstimated: true } : {}),
   }
+}
+
+/**
+ * What a group of turns cost, in words: "$0.0123", "≈ $0.12" when worked out from list prices,
+ * "ChatGPT plan" when the plan paid it all, "$0.12 + ChatGPT plan" when both did, and "at least"
+ * before a sum some turn never reported. `null` when nothing is known.
+ */
+export function costWords(cost: { costUsd?: number; costComplete?: boolean } & Payment): string | null {
+  if (cost.costUsd === undefined && !cost.onPlan) return null
+  const dollars = cost.costUsd !== undefined && (cost.costUsd > 0 || !cost.onPlan)
+    ? `${cost.costComplete === false ? 'at least ' : ''}${cost.costEstimated ? '≈ ' : ''}${formatCost(cost.costUsd)}`
+    : null
+  return [dollars, cost.onPlan ? 'ChatGPT plan' : null].filter(Boolean).join(' + ')
 }
 
 function tally(group: readonly TurnUsage[]): TokenCounts & { turns: number; estimated: boolean } {
@@ -299,8 +335,8 @@ export function summarizeUsage(turns: readonly TurnUsage[]): TokenSummary {
     // A stopped turn's tokens are counted without their split, so they read as fresh input.
     cacheShare: prompt > 0 ? all.cacheRead / prompt : null,
     agents: [...byAgent].map(([agentId, group]) => {
-      const { costUsd } = priced(group)
-      return { agentId, ...tally(group), ...(costUsd === undefined ? {} : { costUsd }) }
+      const { costUsd, onPlan, costEstimated } = priced(group)
+      return { agentId, ...tally(group), ...(costUsd === undefined ? {} : { costUsd }), ...(onPlan ? { onPlan } : {}), ...(costEstimated ? { costEstimated } : {}) }
     }),
     purposes: PURPOSES.flatMap((purpose) => {
       const group = turns.filter((turn) => turn.purpose === purpose)

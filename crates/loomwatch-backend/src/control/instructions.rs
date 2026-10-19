@@ -82,7 +82,7 @@ pub(super) async fn rewrite(
         );
     };
     let model = match chosen_model(request.model.as_deref()) {
-        Ok(model) => model.unwrap_or_else(|| crate::ai::FAST_MODEL.to_owned()),
+        Ok(model) => model.unwrap_or_else(|| super::tier_model("fast")),
         Err(message) => return error(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let model = control.model_for(Some(model));

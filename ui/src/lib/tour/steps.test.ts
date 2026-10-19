@@ -19,10 +19,10 @@ describe('getting-started guide steps', () => {
     expect(order('workflow')).toBeLessThan(order('ask'))
   })
 
-  it('asks for an OpenRouter key before the first agent', () => {
+  it('asks how models are paid before the first agent', () => {
     expect(step('build-agent').view(ready)).toMatchObject({ title: 'Build your first agent', target: ['[data-tour="build-agent"]'] })
     expect(step('build-agent').view({ keyReady: false, keyLoading: true }).title).toBe('Build your first agent')
-    expect(step('build-agent').view({ keyReady: false, keyLoading: false })).toMatchObject({ title: 'Add your OpenRouter key first', target: ['[data-tour="key"]'] })
+    expect(step('build-agent').view({ keyReady: false, keyLoading: false })).toMatchObject({ title: 'Choose how your models are paid first', target: ['[data-tour="key"]'] })
   })
 
   it('says what is on screen: a builder or the list, a dialog or its button', () => {

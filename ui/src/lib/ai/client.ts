@@ -1,7 +1,9 @@
-// The OpenRouter key and the model list, as the daemon serves them (`crates/loomwatch-backend/src/ai`).
+// How agents' models are paid, and the model list, as the daemon serves them
+// (`crates/loomwatch-backend/src/ai`): an OpenRouter key, a Claude API key (a Claude Max or Team
+// plan's monthly API credit), and the sign-in with ChatGPT (a Plus or Pro plan) (ADR 0073).
 //
-// The key itself never comes back from the daemon: the app sends it once, and afterwards only
-// sees what OpenRouter said about it (its short label, what it has spent, a limit if it has one).
+// No key or token ever comes back from the daemon: the app sends a key once, and afterwards only
+// sees what its source said about it.
 
 /** What the app knows about the OpenRouter connection. */
 export interface KeyStatus {
@@ -19,6 +21,55 @@ export interface KeyStatus {
   checkedAt?: string
   /** Why the last check failed, in plain words. */
   problem?: string
+}
+
+/** One model a Claude key can use, as the key's check listed it. */
+export interface ClaudeModel {
+  id: string
+  name: string
+  contextLength: number
+  maxOutput: number
+  adaptiveThinking: boolean
+  efforts?: string[]
+}
+
+/** What the app knows about the Claude API key. */
+export interface ClaudeStatus {
+  connected: boolean
+  /** The key's start and end, such as `sk-ant-api03-…x7Qa`. */
+  label?: string
+  models?: ClaudeModel[]
+  checkedAt?: string
+  problem?: string
+}
+
+/** One model the ChatGPT plan offers. */
+export interface ChatGptModel {
+  slug: string
+  name: string
+  contextLength: number
+  efforts?: string[]
+  priority?: number
+}
+
+/** What the app knows about the sign-in with ChatGPT. */
+export interface ChatGptStatus {
+  /** This copy of LoomWatch offers the ChatGPT plan. */
+  available: boolean
+  connected: boolean
+  email?: string
+  /** The person allowed LoomWatch to use their plan, not only to know who they are. */
+  planUse: boolean
+  models?: ChatGptModel[]
+  signedInAt?: string
+  problem?: string
+}
+
+/** Every way agents' models can be paid, and what the app knows of each. */
+export interface AiStatus {
+  openrouter: KeyStatus
+  anthropic: ClaudeStatus
+  chatgpt: ChatGptStatus
 }
 
 /** One model an agent can run on. Prices are dollars per million tokens. */
@@ -40,7 +91,12 @@ export interface Catalog {
   fetchedAt: string
   defaultModel: string
   recommended: Model[]
+  /** OpenRouter's models. */
   models: Model[]
+  /** The Claude key's models, ids `anthropic:…`, priced as OpenRouter lists them. */
+  anthropic?: Model[]
+  /** The ChatGPT plan's models, ids `chatgpt:…`, with no price: the plan pays. */
+  chatgpt?: Model[]
 }
 
 async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -57,12 +113,53 @@ async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T>
   return result as T
 }
 
-export async function fetchKeyStatus(): Promise<KeyStatus> {
-  const status = (await call<{ openrouter?: KeyStatus }>('/api/ai')).openrouter
+export async function fetchAiStatus(): Promise<AiStatus> {
+  const answer = await call<Partial<AiStatus>>('/api/ai')
   // An answer that doesn't say is no answer: what everything waiting on a key shows stays unknown.
-  if (!status || typeof status !== 'object') throw new Error('LoomWatch didn’t say whether an OpenRouter key is set. Restart LoomWatch and try again.')
-  return status
+  if (!answer.openrouter || typeof answer.openrouter !== 'object') throw new Error('LoomWatch didn’t say whether an OpenRouter key is set. Restart LoomWatch and try again.')
+  return {
+    openrouter: answer.openrouter,
+    // A daemon from before other sources says nothing of them: nothing is connected there.
+    anthropic: answer.anthropic ?? { connected: false },
+    chatgpt: answer.chatgpt ?? { available: false, connected: false, planUse: false },
+  }
 }
+
+export async function fetchKeyStatus(): Promise<KeyStatus> {
+  return (await fetchAiStatus()).openrouter
+}
+
+/** Checks a Claude API key with Anthropic, then keeps it. A key Anthropic refuses is never kept. */
+export async function saveClaudeKey(key: string): Promise<ClaudeStatus> {
+  return (await call<{ anthropic: ClaudeStatus }>('/api/ai/anthropic', 'PUT', { key })).anthropic
+}
+
+export async function recheckClaudeKey(): Promise<ClaudeStatus> {
+  return (await call<{ anthropic: ClaudeStatus }>('/api/ai/anthropic/check', 'POST', {})).anthropic
+}
+
+export async function removeClaudeKey(): Promise<ClaudeStatus> {
+  return (await call<{ anthropic: ClaudeStatus }>('/api/ai/anthropic', 'DELETE')).anthropic
+}
+
+/** Starts a sign-in with ChatGPT: the address of OpenAI's page, to open in a new tab. */
+export async function startChatGptSignIn(): Promise<string> {
+  return (await call<{ url: string }>('/api/ai/chatgpt/sign-in', 'POST', {})).url
+}
+
+/** Lists the plan's models again, which also proves the sign-in still works. */
+export async function checkChatGpt(): Promise<ChatGptStatus> {
+  return (await call<{ chatgpt: ChatGptStatus }>('/api/ai/chatgpt/check', 'POST', {})).chatgpt
+}
+
+/** Signs out, revoking the sign-in with OpenAI. `revoked` says whether OpenAI confirmed it. */
+export async function signOutChatGpt(): Promise<{ chatgpt: ChatGptStatus; revoked: boolean }> {
+  return call<{ chatgpt: ChatGptStatus; revoked: boolean }>('/api/ai/chatgpt', 'DELETE')
+}
+
+/** Where the page OpenAI sends the browser back to tells the app how the sign-in went. */
+export const AI_CHANNEL = 'loomwatch-ai'
+export type SignInOutcome = 'connected' | 'plan_use_off' | 'denied' | 'expired' | 'failed' | 'storage'
 
 /** Checks the key with OpenRouter, then keeps it. A key OpenRouter refuses is never kept. */
 export async function saveOpenRouterKey(key: string): Promise<KeyStatus> {

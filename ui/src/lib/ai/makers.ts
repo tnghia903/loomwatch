@@ -4,7 +4,7 @@
 // third-party-notices.txt). Each mark is its company's trademark and is shown only to say who
 // made the model; LoomWatch is not affiliated with any of them.
 
-import { openRouterEquivalent, parseModelRef } from './modelIds'
+import { type ModelSource, openRouterEquivalent, parseModelRef } from './modelIds'
 
 export interface Maker {
   /** The name people know the company by, or OpenRouter's own word for it when this list has none. */
@@ -98,5 +98,12 @@ export function makerOf(id: string): Maker {
   const slug = (openrouter.split('/')[0] ?? '').replace(/^~/, '')
   const known = Object.hasOwn(MAKERS, slug) ? MAKERS[slug] : undefined
   if (!known) return { name: slug }
+  return known.mark ? { name: known.name, mark: MARKS[known.mark] } : { name: known.name }
+}
+
+/** The company behind a way of paying: OpenAI for the ChatGPT plan, Anthropic for the Claude credit, OpenRouter for itself. */
+export function sourceMaker(source: ModelSource): Maker {
+  const slug = source === 'chatgpt' ? 'openai' : source
+  const known = MAKERS[slug]
   return known.mark ? { name: known.name, mark: MARKS[known.mark] } : { name: known.name }
 }

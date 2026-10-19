@@ -83,25 +83,47 @@ impl ModelTiers {
         )
     }
 
-    /// The model `tier` runs on, taken from the first of its preferred sources that is connected.
-    /// With none connected it is the `OpenRouter` model, as before there were other sources.
+    /// The model `tier` runs on (ADR 0073, ruled 2026-10-19). The tier names its model first
+    /// (`models`), and then who pays: a connected plan that offers it (the Claude credit for
+    /// Anthropic's models, the `ChatGPT` plan for `OpenAI`'s), else `OpenRouter` when its key is in.
+    /// Only when neither can run it does a connected plan's own model for the tier stand in
+    /// (`bySource`, in `preference` order), so an agent made with just a `ChatGPT` plan still runs.
+    /// With nothing connected it is the `OpenRouter` model. `offers` says whether a connected plan
+    /// lists a model. The same rules live in `ui/src/lib/ai/modelIds.ts` (`modelForTier`).
     #[must_use]
-    pub fn model_on(&self, tier: &str, connected: &[Source]) -> String {
-        let openrouter = || {
-            self.models
-                .get(tier)
-                .map_or(DEFAULT_MODEL, String::as_str)
-                .to_owned()
+    pub fn model_on(
+        &self,
+        tier: &str,
+        connected: &[Source],
+        offers: &dyn Fn(&ModelRef) -> bool,
+    ) -> String {
+        let first = self
+            .models
+            .get(tier)
+            .map_or(DEFAULT_MODEL, String::as_str)
+            .to_owned();
+        let named = ModelRef {
+            source: Source::OpenRouter,
+            id: first.clone(),
         };
-        let preferred = self.preference.get(tier).map_or(&[][..], Vec::as_slice);
-        preferred
+        let paid_by_plan = [Source::Anthropic, Source::ChatGpt]
+            .into_iter()
+            .filter(|plan| connected.contains(plan))
+            .filter_map(|plan| named.on(plan))
+            .find(|on| offers(on));
+        if let Some(on) = paid_by_plan {
+            return on.selector();
+        }
+        if connected.contains(&Source::OpenRouter) {
+            return first;
+        }
+        self.preference
+            .get(tier)
+            .map_or(&[][..], Vec::as_slice)
             .iter()
-            .filter(|source| connected.contains(source))
-            .find_map(|source| match source {
-                Source::OpenRouter => Some(openrouter()),
-                other => self.by_source.get(other)?.get(tier).cloned(),
-            })
-            .unwrap_or_else(openrouter)
+            .filter(|source| **source != Source::OpenRouter && connected.contains(source))
+            .find_map(|source| self.by_source.get(source)?.get(tier).cloned())
+            .unwrap_or(first)
     }
 }
 
@@ -835,35 +857,55 @@ mod tests {
         );
     }
 
-    /// Plans the person already pays for come first; with nothing connected the tiers are
-    /// `OpenRouter`'s, as before.
+    /// The tier names the model, a connected plan that offers it pays, else `OpenRouter`, else a
+    /// connected plan's own model stands in; with nothing connected the tiers are `OpenRouter`'s.
     #[test]
-    fn a_tier_takes_its_model_from_the_first_preferred_connected_source() {
+    fn a_tier_names_its_model_then_a_plan_that_offers_it_pays_else_openrouter() {
         let tiers = &*MODEL_TIERS;
-        assert_eq!(tiers.model_on("strong", &[]), DEFAULT_MODEL);
+        let all = |_: &ModelRef| true;
+        assert_eq!(tiers.model_on("strong", &[], &all), DEFAULT_MODEL);
         assert_eq!(
-            tiers.model_on("strong", &[Source::OpenRouter]),
+            tiers.model_on("strong", &[Source::OpenRouter], &all),
             DEFAULT_MODEL
         );
         let everything = [Source::OpenRouter, Source::ChatGpt, Source::Anthropic];
         assert_eq!(
-            tiers.model_on("strong", &everything),
+            tiers.model_on("strong", &everything, &all),
             "anthropic:claude-opus-5-5"
         );
-        assert_eq!(tiers.model_on("check", &everything), "chatgpt:gpt-6.1-sol");
         assert_eq!(
-            tiers.model_on("strong", &[Source::OpenRouter, Source::ChatGpt]),
+            tiers.model_on("check", &everything, &all),
+            "chatgpt:gpt-6.1-sol"
+        );
+        // The ChatGPT plan doesn't offer Claude Opus: OpenRouter pays for it, not the plan's own model.
+        assert_eq!(
+            tiers.model_on("strong", &[Source::OpenRouter, Source::ChatGpt], &all),
+            "anthropic/claude-opus-5.5"
+        );
+        assert_eq!(
+            tiers.model_on("check", &[Source::OpenRouter, Source::Anthropic], &all),
+            "openai/gpt-6.1-sol"
+        );
+        // Nothing connected can run the first choice: the plan's own model for the tier stands in.
+        assert_eq!(
+            tiers.model_on("strong", &[Source::ChatGpt], &all),
             "chatgpt:gpt-6.1-sol"
         );
         assert_eq!(
-            tiers.model_on("check", &[Source::OpenRouter, Source::Anthropic]),
+            tiers.model_on("check", &[Source::Anthropic], &all),
             "anthropic:claude-opus-5-5"
         );
-        // Every tier has a model on every source, and every source in the preferences.
+        // A plan that doesn't list the model doesn't pay for it.
+        let no_opus = |model: &ModelRef| model.id != "claude-opus-5-5";
+        assert_eq!(
+            tiers.model_on("strong", &[Source::OpenRouter, Source::Anthropic], &no_opus),
+            DEFAULT_MODEL
+        );
+        // Every tier has a model on every source alone, and every source is in the preferences.
         for tier in tiers.models.keys() {
             for source in Source::ALL {
                 assert!(tiers.preference[tier].contains(&source), "{tier} {source}");
-                let model = ModelRef::parse(&tiers.model_on(tier, &[source]));
+                let model = ModelRef::parse(&tiers.model_on(tier, &[source], &all));
                 assert_eq!(model.source, source, "{tier}");
             }
         }

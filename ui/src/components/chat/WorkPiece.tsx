@@ -8,7 +8,7 @@ import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { clockTime, listNames, took } from '../../lib/chat/format'
 import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/runs/client'
-import { failedAgent, plainRunError } from '../../lib/runs/errors'
+import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
@@ -485,6 +485,15 @@ function Outcome({ onTryAgain, onDetails, ...answer }: AnswerProps & { onTryAgai
   return <Answer {...answer} />
 }
 
+/** Where to fix a stop LoomWatch named: a plan's limit, used-up credit, a source not connected. */
+function FixIt({ message }: { message: string | null }) {
+  const action = problemAction(message)
+  if (!action) return null
+  return action.external
+    ? <a className="btn btn-primary" href={action.href} target="_blank" rel="noreferrer">{action.label}</a>
+    : <a className="btn btn-primary" href={action.href}>{action.label}</a>
+}
+
 /** The work stopped: in plain words, with the way to try again. */
 function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (id: string) => string; onTryAgain: () => void; onDetails: () => void }) {
   if (run.status === 'failed') {
@@ -492,6 +501,7 @@ function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (
       <Appearing className="tc-stopped bad" role="status">
         <p><b>The work stopped.</b> {run.error ? plainRunError(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : run.errorCode === 'missing_canonical_response' ? `${name(run.responder)} finished without an answer.` : 'Its record says why.'}</p>
         <div className="tc-acts">
+          <FixIt message={run.error} />
           <button type="button" className="btn" onClick={onTryAgain}><RotateCcw size={13} aria-hidden="true" />Try again</button>
           <button type="button" className="btn" onClick={onDetails}>See what happened</button>
         </div>
