@@ -256,6 +256,44 @@ it('ignores replayed session frames per agent while preserving concurrent eviden
   expect(result.evidence).toHaveLength(0)
   expect(projectRun(rows, 4).agents[0].text).toBe('Original')
 })
+it('shows a teammate kept open between rounds as done for now, and ends its time at its last turn', () => {
+  const at = (seq: number, seconds: number, kind: RunEvent['kind'], payload: RunEvent['payload']): RunEvent =>
+    ({ ...event(seq, kind, payload, 'worker'), ts: new Date(Date.parse('2026-10-19T09:00:00Z') + seconds * 1000).toISOString() })
+  const say = (text: string) => ({ role: 'agent', content: { type: 'text', text } })
+  const ask = (text: string) => ({ role: 'user', content: { type: 'text', text } })
+  const rows = [
+    at(0, 0, 'message', ask('Draft it.')),
+    at(1, 5, 'message', say('v1')),
+    at(2, 6, 'turn_end', { stopReason: 'end_turn' }),
+    at(3, 6, 'session_meta', { phase: 'kept_open' }),
+    at(4, 7, 'session_meta', { phase: 'delegated_result', status: 'succeeded', reply: 'v1' }),
+  ]
+  const worker = (through = rows) => projectRun(through).agents.find((agent) => agent.id === 'worker')
+  expect(worker()).toMatchObject({ status: 'succeeded', task: 'Done for now, open for more work in this run' })
+  rows.push(at(5, 60, 'message', ask('## More work from Lead\nFix the date.')), at(6, 70, 'message', say('v2')))
+  expect(worker()?.status).toBe('running')
+  rows.push(
+    at(7, 71, 'turn_end', { stopReason: 'end_turn' }),
+    at(8, 71, 'session_meta', { phase: 'kept_open' }),
+    // Closed when the run ended, ten minutes on: its time ends with its last turn.
+    at(9, 600, 'process', { phase: 'exited', exitCode: 0, signal: null, message: '' }),
+  )
+  expect(worker()).toMatchObject({ status: 'succeeded', lastTs: '2026-10-19T09:01:11.000Z', reply: 'v2' })
+  // A session that worked up to its exit keeps the exit as its end.
+  const unkept = rows.filter((row) => row.payload.phase !== 'kept_open')
+  expect(worker(unkept)?.lastTs).toBe('2026-10-19T09:10:00.000Z')
+  // So does one that worked again after it was kept open and closed straight after, as one
+  // stopped at its spending guard does.
+  const stopped = [
+    ...rows.slice(0, 9),
+    at(9, 120, 'message', ask('## More work from Lead\nAnd the title.')),
+    at(10, 130, 'message', say('v3')),
+    at(11, 131, 'turn_end', { stopReason: 'end_turn' }),
+    at(12, 131, 'process', { phase: 'exited', exitCode: 0, signal: null, message: '' }),
+  ]
+  expect(worker(stopped)?.lastTs).toBe('2026-10-19T09:02:11.000Z')
+})
+
 it('keeps the operator answer as exact evidence, without replacing the original prompt', () => {
   const answer = { ...event(2, 'message', { role: 'user', content: { type: 'text', text: 'Drop the pricing claim.' } }, 'review'), raw: { phase: 'operator_answer', source: 'loomwatch' } }
   const result = projectRun([event(0, 'message', { role: 'user', content: { type: 'text', text: 'Research this' } }), event(1, 'session_meta', { phase: 'awaiting_operator', question: 'Approve?' }, 'review'), answer])

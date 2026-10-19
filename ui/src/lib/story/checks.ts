@@ -19,6 +19,9 @@ export interface CheckRound {
   /** The first round's items, when a send-back made this a later one: what it found before the
       work was sent back. */
   first?: CheckItemResult[]
+  /** You approved the work as it was at the check step's stop, with checks still not met
+      (`check_approved`, ADR 0062). */
+  approved?: true
 }
 
 const VERDICTS = new Set(['met', 'not_met', 'not_sure'])
@@ -42,6 +45,11 @@ export function checkRounds(events: readonly Pick<RunEvent, 'agentId' | 'kind' |
   for (const event of events) {
     if (event.seq > throughSeq) break
     const payload = event.payload
+    if (event.kind === 'session_meta' && payload.phase === 'check_approved' && typeof payload.checked === 'string') {
+      const approved = rounds.get(`${event.agentId}>${payload.checked}`)
+      if (approved) approved.approved = true
+      continue
+    }
     if (event.kind !== 'session_meta' || payload.phase !== 'check_result' || typeof payload.checked !== 'string' || !Array.isArray(payload.items)) continue
     const key = `${event.agentId}>${payload.checked}`
     const round = typeof payload.round === 'number' ? payload.round : 1
@@ -69,9 +77,9 @@ export function checkProgress(round: CheckRound): { found: number; fixed: number
 
 /**
  * What the answer's author set aside for you rather than for its reader (ADR 0062): the Done when
- * items it could not meet, what it needed and was not given, and after a send-back, the findings it
- * kept its work against. The daemon takes them off the end of the answer, so what is delivered and
- * copied is the work alone.
+ * items it could not meet, what it needed and was not given, after a send-back the findings it
+ * kept its work against, and what it changed in the work it was handed. The daemon takes them off
+ * the end of the answer, so what is delivered and copied is the work alone.
  */
 export interface AnswerNotes {
   agentId: string
@@ -79,6 +87,8 @@ export interface AnswerNotes {
   /** What it needed and was not given: the Writer job's "Missing" list. */
   missing: string[]
   notChanged: string[]
+  /** The edits it made to the work it was handed: the Editor job's "Changes" list. */
+  changes: string[]
 }
 
 const strings = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : [])
@@ -89,7 +99,7 @@ export function answerNotes(events: readonly Pick<RunEvent, 'agentId' | 'kind' |
   for (const event of events) {
     if (event.seq > throughSeq) break
     if (event.kind !== 'session_meta' || event.payload.phase !== 'answer_notes') continue
-    notes = { agentId: event.agentId, notMet: strings(event.payload.not_met), missing: strings(event.payload.missing), notChanged: strings(event.payload.not_changed) }
+    notes = { agentId: event.agentId, notMet: strings(event.payload.not_met), missing: strings(event.payload.missing), notChanged: strings(event.payload.not_changed), changes: strings(event.payload.changes) }
   }
   return notes
 }

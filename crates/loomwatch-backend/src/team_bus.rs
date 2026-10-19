@@ -62,6 +62,12 @@ struct TeamBusState {
     /// them. `ask` prefers these: a live session answers from the context it already built, where
     /// a freshly spawned one knows only its role and the question.
     live: Mutex<BTreeMap<String, mpsc::Sender<LiveTurn>>>,
+    /// Team mode: the teammates that hold one conversation for the whole run, each with the lock
+    /// on its turn. One is here from the start of the turn that will keep it, and its channel joins
+    /// `live` when that turn ends. See [`TeamBus::reach`].
+    teammates: std::sync::Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
+    /// The kept teammates' sessions, closed when the run ends ([`TeamBus::release_teammates`]).
+    kept: Mutex<Vec<(String, JoinHandle<Result<()>>)>>,
     /// Where a run parks on the operator, when this bus belongs to a run that has one. `None` on
     /// the CLI path, where there is nobody to ask and `ask_user` says so.
     operator: Option<crate::operator::OperatorDesk>,
@@ -95,6 +101,102 @@ struct TeamBusState {
 
 /// Each caller's `ask` calls in flight, by bearer token: an id, and the switch that withdraws it.
 type OpenAsks = BTreeMap<String, Vec<(u64, oneshot::Sender<()>)>>;
+
+/// One turn of a kept-open session for an agent waiting on its reply through `answer`.
+///
+/// The question is withdrawn when the agent that asked ends its turn
+/// (`TeamBusConnection::turn_ended`), which drops the receiver. Nobody can take the answer after
+/// that, so this turn is stopped rather than finished: the session stays usable, and stops spending
+/// on a reply nobody reads.
+async fn withdrawable_turn(
+    process: &mut AgentRun,
+    recorder: &mut crate::engine::Recorder,
+    prompt: &str,
+    answer: &mut oneshot::Sender<Result<String>>,
+) -> Result<String> {
+    let withdrawn = Arc::new(crate::runs::Interrupt::because(ASK_WITHDRAWN));
+    let listening = recorder.interrupt.replace(Arc::clone(&withdrawn));
+    let reply = {
+        let turn = process.prompt_turn(recorder, prompt);
+        tokio::pin!(turn);
+        tokio::select! {
+            reply = &mut turn => reply,
+            () = answer.closed() => {
+                withdrawn.request();
+                turn.await
+            }
+        }
+    };
+    recorder.interrupt = listening;
+    reply
+}
+
+/// Where a `dispatch`, `handoff` or `ask` goes. See [`TeamBus::reach`].
+enum Reach {
+    /// Pipeline mode: a kept-open stage when the target is one, else a helper, as always.
+    Pipeline,
+    /// A team-mode teammate whose conversation is open and idle: the call is its next turn.
+    Open {
+        channel: mpsc::Sender<LiveTurn>,
+        held: tokio::sync::OwnedMutexGuard<()>,
+    },
+    /// A fresh start: kept for the rest of the run when `keep` holds its place, or closed after
+    /// its turn, for the reason `fresh` gives (`busy` or `limit`).
+    Start {
+        keep: Option<Designation>,
+        fresh: Option<&'static str>,
+    },
+}
+
+/// A teammate's place as the one conversation it holds for the run, from the start of the turn
+/// that will keep it. Its turn is held until [`TeamBus::keep_teammate`] has its channel in `live`;
+/// dropped before that (the turn failed, or its question was withdrawn), the place is given up, so
+/// a later call starts it again.
+struct Designation {
+    bus: TeamBus,
+    agent: String,
+    _held: Option<tokio::sync::OwnedMutexGuard<()>>,
+    kept: bool,
+}
+
+impl Drop for Designation {
+    fn drop(&mut self) {
+        if !self.kept {
+            self.bus
+                .state
+                .teammates
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&self.agent);
+        }
+    }
+}
+
+/// What a kept teammate's later rounds need from the run, owned, since its session outlives the
+/// call that started it.
+struct KeptSeat {
+    agent: AgentConfig,
+    lineage: crate::RunLineage,
+    log: EventLog,
+    spec: ProcessSpec,
+    connection: TeamBusConnection,
+}
+
+impl KeptSeat {
+    fn asked<'a>(&'a self, bus: &'a TeamBus) -> crate::AskedQuestion<'a> {
+        crate::AskedQuestion {
+            team: &bus.state.team,
+            agent: &self.agent,
+            archive: &bus.state.archive,
+            bus,
+            shared_log: Some(&self.log),
+            lineage: &self.lineage,
+            team_path: &bus.state.team_path,
+            exit_timeout: bus.state.exit_timeout,
+            spec: &self.spec,
+        }
+    }
+}
 
 /// A question the asked agent asked back about, waiting for the asker to clarify it.
 #[derive(Debug, Clone)]
@@ -259,6 +361,8 @@ impl TeamBus {
             dispatch_slots: Arc::new(Semaphore::new(dispatch_limit)),
             tasks: Mutex::new(Vec::new()),
             live: Mutex::new(BTreeMap::new()),
+            teammates: std::sync::Mutex::new(BTreeMap::new()),
+            kept: Mutex::new(Vec::new()),
             operator,
             pending_questions: Mutex::new(BTreeMap::new()),
             answering: std::sync::Mutex::new(BTreeMap::new()),
@@ -333,25 +437,8 @@ impl TeamBus {
                 let answer = if request.from_operator {
                     process.prompt_turn(&mut recorder, &prompt).await
                 } else {
-                    // An agent's question is withdrawn when the agent that asked ends its turn
-                    // (`TeamBusConnection::turn_ended`), which drops the receiver. Nobody can take
-                    // the answer after that, so this turn is stopped rather than finished: the
-                    // session stays usable, and stops spending on a reply nobody reads.
-                    let withdrawn = Arc::new(crate::runs::Interrupt::because(ASK_WITHDRAWN));
-                    let listening = recorder.interrupt.replace(Arc::clone(&withdrawn));
-                    let answer = {
-                        let turn = process.prompt_turn(&mut recorder, &prompt);
-                        tokio::pin!(turn);
-                        tokio::select! {
-                            answer = &mut turn => answer,
-                            () = request.answer.closed() => {
-                                withdrawn.request();
-                                turn.await
-                            }
-                        }
-                    };
-                    recorder.interrupt = listening;
-                    answer
+                    withdrawable_turn(&mut process, &mut recorder, &prompt, &mut request.answer)
+                        .await
                 };
                 // A dropped receiver means the asker gave up; the session stays usable.
                 let _ = request.answer.send(answer);
@@ -402,8 +489,320 @@ impl TeamBus {
             .with_context(|| format!("kept-alive agent {agent_id} failed to close"))
     }
 
-    async fn is_live(&self, agent_id: &str) -> bool {
+    pub(crate) async fn is_live(&self, agent_id: &str) -> bool {
         self.state.live.lock().await.contains_key(agent_id)
+    }
+
+    /// Where a call to `target` goes. In team mode a teammate holds one conversation for the run:
+    /// a call that finds it open and free is its next turn there. Otherwise it starts fresh, and is
+    /// kept for the rest of the run while fewer than `guards.maxConcurrentDispatches` teammates
+    /// hold one.
+    ///
+    /// A teammate busy with a turn is never waited for: a call that finds it working starts a
+    /// separate copy, as before, which is closed after its turn. Waiting could deadlock, since the
+    /// busy turn may itself be waiting on the caller, and it would make parts handed out together
+    /// run one after another.
+    async fn reach(&self, target: &str) -> Reach {
+        if self.state.mode != TeamBusMode::Team {
+            return Reach::Pipeline;
+        }
+        let turn = {
+            let mut teammates = self
+                .state
+                .teammates
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(turn) = teammates.get(target) {
+                Arc::clone(turn)
+            } else {
+                let cap = usize::try_from(self.state.team.guards.max_concurrent_dispatches)
+                    .unwrap_or(usize::MAX);
+                if teammates.len() >= cap {
+                    return Reach::Start {
+                        keep: None,
+                        fresh: Some("limit"),
+                    };
+                }
+                let turn = Arc::new(Mutex::new(()));
+                teammates.insert(target.to_owned(), Arc::clone(&turn));
+                return Reach::Start {
+                    keep: Some(Designation {
+                        bus: self.clone(),
+                        agent: target.to_owned(),
+                        // Nobody else can have it yet: it was made just now.
+                        _held: turn.try_lock_owned().ok(),
+                        kept: false,
+                    }),
+                    fresh: None,
+                };
+            }
+        };
+        let Ok(held) = turn.try_lock_owned() else {
+            return Reach::Start {
+                keep: None,
+                fresh: Some("busy"),
+            };
+        };
+        match self.state.live.lock().await.get(target).cloned() {
+            Some(channel) => Reach::Open { channel, held },
+            // Its place was given up between the two looks: its turn failed.
+            None => Reach::Start {
+                keep: None,
+                fresh: Some("busy"),
+            },
+        }
+    }
+
+    /// Keep a teammate's session open after its first round, for the rest of the run. Each later
+    /// call that reaches it ([`Self::reach`]) is one more round in the same conversation, so it
+    /// builds on what it did and was told instead of starting from its role and one brief.
+    ///
+    /// The session closes when the run ends ([`Self::release_teammates`]). A round that fails, or
+    /// that ends with the agent stopped at its own spending guard, closes it sooner and gives up its
+    /// place, so a later call starts it fresh.
+    async fn keep_teammate(
+        &self,
+        mut session: crate::StageSession,
+        last_reply: String,
+        seat: KeptSeat,
+        mut place: Designation,
+    ) -> Result<()> {
+        note_kept_open(&mut session).await?;
+        let agent_id = seat.agent.id.clone();
+        let (channel, mut requests) = mpsc::channel::<LiveTurn>(4);
+        let bus = self.clone();
+        let task = tokio::spawn(async move {
+            let mut session = session;
+            let mut last_reply = last_reply;
+            let run_id = seat.log.session_id().to_owned();
+            while let Some(LiveTurn {
+                prompt,
+                turn,
+                mut answer,
+                held,
+                ..
+            }) = requests.recv().await
+            {
+                session.process.turn_for(turn);
+                let asked = seat.asked(&bus);
+                // An answer is one turn on what it already has, stopped when its asker moves on.
+                // Work is a whole round, as its first one was.
+                let round = if turn == "ask_answer" {
+                    match withdrawable_turn(
+                        &mut session.process,
+                        &mut session.recorder,
+                        &prompt,
+                        &mut answer,
+                    )
+                    .await
+                    {
+                        Ok(reply) => crate::answer_parked_questions(asked, session, reply).await,
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    crate::work_round(asked, session, &prompt, Some(&seat.connection)).await
+                };
+                // Its place is given up before its turn is let go, so no call can reach a
+                // conversation that is closing.
+                let (open, reply) = match round {
+                    Ok(round) => round,
+                    Err(error) => {
+                        bus.forget_teammate(&seat.agent.id).await;
+                        let _ = answer.send(Err(error));
+                        drop(held);
+                        return Ok(());
+                    }
+                };
+                session = open;
+                let stopped = bus.guard_stopped(&run_id, &seat.agent.id);
+                let noted = if stopped {
+                    Ok(())
+                } else {
+                    note_kept_open(&mut session).await
+                };
+                if stopped || noted.is_err() {
+                    bus.forget_teammate(&seat.agent.id).await;
+                }
+                if let Err(error) = noted {
+                    let _ = answer.send(Err(error));
+                    drop(held);
+                    return Ok(());
+                }
+                last_reply.clone_from(&reply);
+                // A dropped receiver means the asker gave up; the session stays usable.
+                let _ = answer.send(Ok(reply));
+                drop(held);
+                if stopped {
+                    break;
+                }
+            }
+            let context = TeamSessionContext {
+                archive: &bus.state.archive,
+                bus: None,
+                event_log: None,
+                // Archived when the session opened; a later turn adds nothing to supply.
+                packet: None,
+                composed: None,
+                boundary: None,
+            };
+            session
+                .process
+                .finish_live(&mut session.recorder, last_reply, &context)
+                .await
+                .map(|_| ())
+        });
+        // In `live` before its turn is let go, so the next call finds it open.
+        self.state
+            .live
+            .lock()
+            .await
+            .insert(agent_id.clone(), channel);
+        self.state.kept.lock().await.push((agent_id, task));
+        place.kept = true;
+        Ok(())
+    }
+
+    /// One more round for a teammate whose conversation is open: `prompt` as its `turn` (`helper`
+    /// for a `dispatch` or `handoff`, `ask_answer` for an `ask`). Comes back as a fresh start's
+    /// round would ([`Self::run_agent`]).
+    async fn continue_teammate(
+        &self,
+        agent_id: &str,
+        (channel, held): (mpsc::Sender<LiveTurn>, tokio::sync::OwnedMutexGuard<()>),
+        prompt: String,
+        turn: &'static str,
+        run_id: &str,
+    ) -> Result<Helped> {
+        let agent = self.agent(agent_id)?;
+        self.state
+            .statuses
+            .write()
+            .await
+            .insert(agent.id.clone(), "running".to_owned());
+        let (answer, answered) = oneshot::channel();
+        let reply = async {
+            channel
+                .send(LiveTurn {
+                    prompt,
+                    from_operator: false,
+                    turn,
+                    answer,
+                    held: Some(held),
+                })
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("{agent_id}'s conversation closed before this reached it")
+                })?;
+            answered
+                .await
+                .with_context(|| format!("{agent_id} dropped the turn it was handed"))?
+        }
+        .await;
+        let result = self.settle_helper(
+            run_id,
+            &agent,
+            reply.map(|reply| crate::SessionOutcome {
+                session_id: run_id.to_owned(),
+                event_count: 0,
+                exit_code: 0,
+                reply,
+            }),
+        );
+        self.state.statuses.write().await.insert(
+            agent.id,
+            if result.is_ok() {
+                "succeeded"
+            } else {
+                "failed"
+            }
+            .to_owned(),
+        );
+        result
+    }
+
+    /// Give up `agent_id`'s place as a kept teammate, so a later call starts it fresh.
+    async fn forget_teammate(&self, agent_id: &str) {
+        self.state
+            .teammates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(agent_id);
+        self.state.live.lock().await.remove(agent_id);
+    }
+
+    /// Close every kept teammate's session and wait for each to record its exit. Called when
+    /// nothing in the run can reach them any more: the lead's session and all the work handed out
+    /// have ended.
+    pub(crate) async fn release_teammates(&self) -> Result<()> {
+        let kept = std::mem::take(&mut *self.state.kept.lock().await);
+        self.state
+            .teammates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        {
+            let mut live = self.state.live.lock().await;
+            for (agent, _) in &kept {
+                live.remove(agent);
+            }
+        }
+        let mut first_error = None;
+        for (agent, task) in kept {
+            let closed = task
+                .await
+                .context("kept teammate task panicked")
+                .and_then(|closed| closed)
+                .with_context(|| format!("kept teammate {agent} failed to close"));
+            if first_error.is_none() {
+                first_error = closed.err();
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    /// The person running the team stopped `agent_id` at its own spending guard (ADR 0068).
+    fn guard_stopped(&self, run_id: &str, agent_id: &str) -> bool {
+        self.state
+            .operator
+            .as_ref()
+            .is_some_and(|desk| desk.registry().guard_stopped(run_id, agent_id).is_some())
+    }
+
+    /// What a `dispatch` or `handoff` result says about where the work went: the field the run view
+    /// reads, and a line for the agent that handed it out, so it knows whether to repeat itself.
+    fn say_reach(&self, result: &mut Value, reach: &Reach, target: &str) {
+        let name = self
+            .agent(target)
+            .map_or_else(|_| target.to_owned(), |agent| shown_name(&agent).to_owned());
+        let note = match reach {
+            Reach::Open { .. } => {
+                result["continues"] = json!(true);
+                format!(
+                    "{name} carries on in its conversation from earlier in this run: it remembers \
+                     its earlier work and what it was told."
+                )
+            }
+            Reach::Start {
+                fresh: Some(why), ..
+            } => {
+                result["fresh"] = json!(why);
+                if *why == "busy" {
+                    format!(
+                        "{name} was still working, so a separate copy started: it sees only this \
+                         brief, and closes when it is done."
+                    )
+                } else {
+                    format!(
+                        "{name} started fresh: it sees only this brief, and closes when it is \
+                         done. As many teammates as guards.maxConcurrentDispatches allows ({}) \
+                         already hold a conversation for this run.",
+                        self.state.team.guards.max_concurrent_dispatches
+                    )
+                }
+            }
+            Reach::Start { fresh: None, .. } | Reach::Pipeline => return,
+        };
+        result["note"] = json!(note);
     }
 
     /// The agents kept open right now: the only ones an `ask` reaches in the session that did the
@@ -463,6 +862,7 @@ impl TeamBus {
                     "ask_answer"
                 },
                 answer,
+                held: None,
             })
             .await
             .map_err(|_| anyhow::anyhow!("agent {agent_id} is no longer answering questions"))?;
@@ -722,9 +1122,13 @@ impl TeamBus {
         TeamBusTeardown { bus: self.clone() }
     }
 
-    /// Abort every delegated agent task without waiting for them.
+    /// Abort every delegated agent task, and every kept teammate's session, without waiting for
+    /// them.
     async fn abort_background(&self) {
         for task in self.state.tasks.lock().await.drain(..) {
+            task.abort();
+        }
+        for (_, task) in self.state.kept.lock().await.drain(..) {
             task.abort();
         }
     }
@@ -883,6 +1287,7 @@ impl TeamBus {
         self.refuse_by_mode(session, name, arguments).await?;
         match name {
             "roster" => {
+                let open = self.open_agents().await;
                 let statuses = self.state.statuses.read().await;
                 Ok(Value::Array(
                     self.state
@@ -890,7 +1295,7 @@ impl TeamBus {
                         .agents
                         .iter()
                         .map(|agent| {
-                            json!({
+                            let mut entry = json!({
                                 "id": agent.id,
                                 "name": agent.name,
                                 // A line, as the opening prompt shows teammates: each agent is
@@ -900,7 +1305,13 @@ impl TeamBus {
                                 "allowRecruiting": agent.allow_recruiting,
                                 "capabilities": {"canRecruit": agent.allow_recruiting},
                                 "status": statuses.get(&agent.id).map_or("idle", String::as_str)
-                            })
+                            });
+                            // Holding its conversation for this run: what it is handed next builds
+                            // on what it already did.
+                            if open.contains(&agent.id) {
+                                entry["open"] = json!(true);
+                            }
+                            entry
                         })
                         .collect(),
                 ))
@@ -910,16 +1321,19 @@ impl TeamBus {
                 let task = required_string(arguments, "task")?;
                 self.refuse_new_agent(session, &target, "dispatch")?;
                 let context = self.guard_delegation(session, &target)?;
+                let reach = self.reach(&target).await;
+                let mut accepted = json!({"accepted": true, "agent": target, "mode": "dispatch"});
+                self.say_reach(&mut accepted, &reach, &target);
                 self.spawn_background(
                     &target,
                     &task,
                     event_log.clone(),
-                    context,
+                    (context, reach),
                     (session, token),
                     "dispatch",
                 )
                 .await?;
-                Ok(json!({"accepted": true, "agent": target, "mode": "dispatch"}))
+                Ok(accepted)
             }
             "ask" => {
                 let target = self.resolve(&required_string(arguments, "agent")?)?;
@@ -931,8 +1345,11 @@ impl TeamBus {
                 // asking itself, or a helper asking back the live agent waiting on it, would queue
                 // a turn behind the very turn that is waiting for the answer.
                 refuse_cycle(session, &target)?;
-                // Everything that would refuse a helper is settled before the question counts.
-                let helper_context = if self.is_live(&target).await {
+                // Everything that would refuse a helper is settled before the question counts. In
+                // team mode that is every question, even one a teammate's open conversation will
+                // take, so a conversation kept open lets through nothing that was refused before.
+                let pipeline = self.state.mode == TeamBusMode::Pipeline;
+                let helper_context = if pipeline && self.is_live(&target).await {
                     None
                 } else {
                     self.refuse_finished(session, &target)?;
@@ -952,26 +1369,68 @@ impl TeamBus {
                     .contains_key(&(from_agent.id.clone(), target.clone()));
                 let left = self.count_ask(&session.agent_id, &target, !waiting)?;
                 let round = self.round_for(&session.agent_id, &target);
+                let reach = self.reach(&target).await;
                 let (ask, withdrawn) = self.track_ask(token).await;
                 let started = AtomicBool::new(false);
                 let answer = async {
-                    // A predecessor that is still alive answers from the context it already
-                    // built. Spawning a fresh process for it would produce an agent that knows
-                    // only its role and the question, which is what made pipeline `ask` useless
-                    // before.
-                    if let Some(reply) = self
-                        .ask_live(
-                            &target,
-                            &live_question(&from_agent, &question, &round),
-                            &from_agent.id,
-                        )
-                        .await?
-                    {
-                        let mut answer =
-                            self.answer(&from_agent, &to_agent, &question, &round, &reply, left);
-                        answer["live"] = json!(true);
-                        return Ok(answer);
-                    }
+                    let (keep, fresh) = match reach {
+                        // A teammate whose conversation is open answers from everything it did in
+                        // this run, as a kept-open stage does.
+                        Reach::Open { channel, held } => {
+                            started.store(true, Ordering::SeqCst);
+                            let _answering = Answering::begin(self, &target, &from_agent.id);
+                            let helped = self
+                                .continue_teammate(
+                                    &target,
+                                    (channel, held),
+                                    kept_question(&from_agent, &question, &round),
+                                    "ask_answer",
+                                    event_log.session_id(),
+                                )
+                                .await?;
+                            let mut answer = self.answer(
+                                &from_agent,
+                                &to_agent,
+                                &question,
+                                &round,
+                                &helped.outcome.reply,
+                                left,
+                            );
+                            answer["live"] = json!(true);
+                            answer["continues"] = json!(true);
+                            if helped.stopped {
+                                answer["stopped"] = json!("spend_limit");
+                            }
+                            return Ok(answer);
+                        }
+                        // A predecessor that is still alive answers from the context it already
+                        // built. Spawning a fresh process for it would produce an agent that knows
+                        // only its role and the question, which is what made pipeline `ask`
+                        // useless before.
+                        Reach::Pipeline => {
+                            if let Some(reply) = self
+                                .ask_live(
+                                    &target,
+                                    &live_question(&from_agent, &question, &round),
+                                    &from_agent.id,
+                                )
+                                .await?
+                            {
+                                let mut answer = self.answer(
+                                    &from_agent,
+                                    &to_agent,
+                                    &question,
+                                    &round,
+                                    &reply,
+                                    left,
+                                );
+                                answer["live"] = json!(true);
+                                return Ok(answer);
+                            }
+                            (None, None)
+                        }
+                        Reach::Start { keep, fresh } => (keep, fresh),
+                    };
                     // Released while the question was on its way.
                     self.refuse_finished(session, &target)?;
                     let context = helper_context.with_context(|| {
@@ -984,6 +1443,7 @@ impl TeamBus {
                             &helper_question(&from_agent, &question, &round),
                             event_log.clone(),
                             context,
+                            keep,
                         )
                         .await?;
                     let mut answer = self.answer(
@@ -995,6 +1455,9 @@ impl TeamBus {
                         left,
                     );
                     answer["sessionId"] = json!(helped.outcome.session_id);
+                    if let Some(why) = fresh {
+                        answer["fresh"] = json!(why);
+                    }
                     // Its reply says why it stopped; it is not an answer to the question.
                     if helped.stopped {
                         answer["stopped"] = json!("spend_limit");
@@ -1028,11 +1491,19 @@ impl TeamBus {
                 let task = required_string(arguments, "task")?;
                 self.refuse_new_agent(session, &target, "handoff")?;
                 let context = self.guard_delegation(session, &target)?;
+                let reach = self.reach(&target).await;
+                let mut accepted = json!({
+                    "accepted": true,
+                    "agent": target,
+                    "mode": "handoff",
+                    "callerStatus": "stopped"
+                });
+                self.say_reach(&mut accepted, &reach, &target);
                 self.spawn_background(
                     &target,
                     &task,
                     event_log.clone(),
-                    context,
+                    (context, reach),
                     (session, token),
                     "handoff",
                 )
@@ -1042,12 +1513,7 @@ impl TeamBus {
                     .write()
                     .await
                     .insert(session.agent_id.clone(), "stopped".to_owned());
-                Ok(json!({
-                    "accepted": true,
-                    "agent": target,
-                    "mode": "handoff",
-                    "callerStatus": "stopped"
-                }))
+                Ok(accepted)
             }
             "report" => {
                 let status = required_string(arguments, "status")?;
@@ -1120,6 +1586,7 @@ impl TeamBus {
                 .to_owned(),
             send_back_available: false,
             question_id: None,
+            check: None,
         };
         let wait = desk
             .park(&run_id, waiting)
@@ -1355,16 +1822,20 @@ impl TeamBus {
     /// The task still returns its own result, so a failed helper fails the run in
     /// [`Self::wait_for_tasks`] exactly as before; the copy kept here is what lets the caller
     /// read the work it started, which used to be dropped with the `SessionOutcome`.
+    ///
+    /// `reach` says where it goes ([`Self::reach`]): a teammate's open conversation takes it as
+    /// one more round, framed as more work from the caller; anything else starts it fresh.
     async fn spawn_background(
         &self,
         agent_id: &str,
         prompt: &str,
         event_log: EventLog,
-        context: DelegationContext,
+        (context, reach): (DelegationContext, Reach),
         (caller, token): (&AgentSession, &str),
         mode: &'static str,
     ) -> Result<()> {
         self.agent(agent_id)?;
+        let from = self.agent(&caller.agent_id)?;
         let Ok(permit) = Arc::clone(&self.state.dispatch_slots).try_acquire_owned() else {
             bail!(
                 "concurrent dispatch limit reached: guards.maxConcurrentDispatches {}",
@@ -1378,9 +1849,26 @@ impl TeamBus {
         let caller = caller.agent_id.clone();
         let task = tokio::spawn(async move {
             let _permit = permit;
-            let outcome = bus
-                .run_agent(&agent_id, &prompt, event_log.clone(), context)
-                .await;
+            let outcome = match reach {
+                Reach::Open { channel, held } => {
+                    bus.continue_teammate(
+                        &agent_id,
+                        (channel, held),
+                        more_work(&from, &prompt),
+                        "helper",
+                        event_log.session_id(),
+                    )
+                    .await
+                }
+                Reach::Start { keep, .. } => {
+                    bus.run_agent(&agent_id, &prompt, event_log.clone(), context, keep)
+                        .await
+                }
+                Reach::Pipeline => {
+                    bus.run_agent(&agent_id, &prompt, event_log.clone(), context, None)
+                        .await
+                }
+            };
             let returned = match &outcome {
                 Ok(helped) => Ok(helped.outcome.reply.clone()),
                 Err(error) => Err(format!("{error:#}")),
@@ -1435,12 +1923,15 @@ impl TeamBus {
         }
     }
 
+    /// Start `agent_id` fresh on `prompt` and take its round of work. With `keep`, its session
+    /// stays open afterwards as the teammate's conversation for the run ([`Self::keep_teammate`]).
     async fn run_agent(
         &self,
         agent_id: &str,
         prompt: &str,
         event_log: EventLog,
         context: DelegationContext,
+        keep: Option<Designation>,
     ) -> Result<Helped> {
         let agent = self.agent(agent_id)?;
         self.state
@@ -1449,29 +1940,10 @@ impl TeamBus {
             .await
             .insert(agent.id.clone(), "starting".to_owned());
         let run_id = event_log.session_id().to_owned();
-        let result = match self
-            .run_agent_inner(&agent, prompt, event_log, context)
-            .await
-        {
-            Ok(outcome) => Ok(self.say_if_stopped_at_its_guard(&run_id, &agent, outcome)),
-            // The run stopped at its spool while this helper waited there (ADR 0068): the
-            // operator finished it, or a scheduled run had nobody to ask. The helper did not fail,
-            // so what it comes back with says why it stopped instead of reading as a failure.
-            Err(error) => match crate::spend::SpendStopped::of(&error) {
-                Some(stopped) => Ok(Helped {
-                    outcome: crate::SessionOutcome {
-                        session_id: run_id,
-                        event_count: 0,
-                        exit_code: 0,
-                        reply: format!("({} stopped here. {stopped})", shown_name(&agent)),
-                    },
-                    stopped: true,
-                }),
-                None => {
-                    Err(error).with_context(|| format!("delegated agent {:?} failed", agent.id))
-                }
-            },
-        };
+        let outcome = self
+            .run_agent_inner(&agent, prompt, event_log, context, keep)
+            .await;
+        let result = self.settle_helper(&run_id, &agent, outcome);
         self.state.statuses.write().await.insert(
             agent.id,
             if result.is_ok() {
@@ -1482,6 +1954,35 @@ impl TeamBus {
             .to_owned(),
         );
         result
+    }
+
+    /// What a helper's round came back with, as its caller reads it.
+    fn settle_helper(
+        &self,
+        run_id: &str,
+        agent: &AgentConfig,
+        outcome: Result<crate::SessionOutcome>,
+    ) -> Result<Helped> {
+        match outcome {
+            Ok(outcome) => Ok(self.say_if_stopped_at_its_guard(run_id, agent, outcome)),
+            // The run stopped at its spool while this helper waited there (ADR 0068): the
+            // operator finished it, or a scheduled run had nobody to ask. The helper did not fail,
+            // so what it comes back with says why it stopped instead of reading as a failure.
+            Err(error) => match crate::spend::SpendStopped::of(&error) {
+                Some(stopped) => Ok(Helped {
+                    outcome: crate::SessionOutcome {
+                        session_id: run_id.to_owned(),
+                        event_count: 0,
+                        exit_code: 0,
+                        reply: format!("({} stopped here. {stopped})", shown_name(agent)),
+                    },
+                    stopped: true,
+                }),
+                None => {
+                    Err(error).with_context(|| format!("delegated agent {:?} failed", agent.id))
+                }
+            },
+        }
     }
 
     /// A helper the operator stopped at its own spending guard (ADR 0068) ends its turn with what it
@@ -1523,12 +2024,14 @@ impl TeamBus {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn run_agent_inner(
         &self,
         agent: &AgentConfig,
         prompt: &str,
         event_log: EventLog,
         context: DelegationContext,
+        keep: Option<Designation>,
     ) -> Result<crate::SessionOutcome> {
         let declared_cwd = resolve_cwd(&self.state.team_path, &agent.spawn.cwd)?;
         // A delegated helper used to skip `materialise` entirely, so it received neither the
@@ -1614,35 +2117,73 @@ impl TeamBus {
             operator: self.state.operator.clone(),
             ..crate::RunLineage::default()
         };
-        // Boxed: on Windows, where a child process takes more room, the session's future is over
-        // Clippy's 16 KB `large_futures` limit, and everything that awaits it would be too.
-        Box::pin(crate::run_answerable_session(
-            crate::AskedQuestion {
-                team: &self.state.team,
-                agent,
-                archive: &self.state.archive,
-                bus: self,
-                shared_log: Some(&event_log),
-                lineage: &lineage,
-                team_path: &self.state.team_path,
-                exit_timeout: self.state.exit_timeout,
-                spec: &spec,
-            },
+        let asked = crate::AskedQuestion {
+            team: &self.state.team,
+            agent,
+            archive: &self.state.archive,
+            bus: self,
+            shared_log: Some(&event_log),
+            lineage: &lineage,
+            team_path: &self.state.team_path,
+            exit_timeout: self.state.exit_timeout,
+            spec: &spec,
+        };
+        // The selector, not the bare model: a helper is held to its `thinkingEffort` like the stage
+        // or lead that runs the same agent.
+        let model = agent.model_selector();
+        let mut context = TeamSessionContext {
+            archive: &self.state.archive,
+            bus: Some(&connection),
+            event_log: Some(event_log.clone()),
+            packet: Some(&packet),
+            composed: Some(&composed),
+            boundary: None,
+        };
+        let Some(place) = keep else {
+            // Boxed: on Windows, where a child process takes more room, the session's future is
+            // over Clippy's 16 KB `large_futures` limit, and everything that awaits it would be too.
+            return Box::pin(crate::run_answerable_session(
+                asked,
+                process,
+                &model,
+                &composed.text,
+                context,
+            ))
+            .await;
+        };
+        let (mut session, reply) = Box::pin(crate::open_and_work(
+            asked,
             process,
-            // The selector, not the bare model: a helper is held to its `thinkingEffort` like
-            // the stage or lead that runs the same agent.
-            &agent.model_selector(),
+            &model,
             &composed.text,
-            TeamSessionContext {
-                archive: &self.state.archive,
-                bus: Some(&connection),
-                event_log: Some(event_log.clone()),
-                packet: Some(&packet),
-                composed: Some(&composed),
-                boundary: None,
-            },
+            &mut context,
         ))
-        .await
+        .await?;
+        // Stopped at its own spending guard, it does no more work in this run: nothing to keep.
+        if self.guard_stopped(event_log.session_id(), &agent.id) {
+            return session
+                .process
+                .finish_live(&mut session.recorder, reply, &context)
+                .await;
+        }
+        let outcome = crate::SessionOutcome {
+            session_id: event_log.session_id().to_owned(),
+            event_count: usize::try_from(event_log.events_appended().await).unwrap_or(usize::MAX),
+            exit_code: 0,
+            reply: reply.clone(),
+        };
+        let seat = KeptSeat {
+            agent: agent.clone(),
+            lineage: crate::RunLineage {
+                operator: self.state.operator.clone(),
+                ..crate::RunLineage::default()
+            },
+            log: event_log,
+            spec,
+            connection: connection.clone(),
+        };
+        self.keep_teammate(session, reply, seat, place).await?;
+        Ok(outcome)
     }
 
     async fn connection_with_context(
@@ -2115,6 +2656,52 @@ fn helper_question(asker: &AgentConfig, question: &str, round: &Round) -> String
     text
 }
 
+/// A question as a team-mode teammate whose conversation is open receives it.
+///
+/// Like [`live_question`], it is asked to use the work already in its conversation, but not to be
+/// brief: in team mode `ask` is also how a lead has a piece written, and the teammate may not have
+/// done this piece yet.
+fn kept_question(asker: &AgentConfig, question: &str, round: &Round) -> String {
+    let name = shown_name(asker);
+    let unclear = when_unclear(name, round);
+    if round.thread.is_some() {
+        return format!(
+            "## {name} answers your question back\n{question}\n\nNow answer {name}'s question. \
+             {unclear} Don't contact {name} yourself: it is waiting for your answer."
+        );
+    }
+    format!(
+        "## A question from {name}\n{question}\n\nThis conversation already holds your earlier \
+         work in this run: use it, and don't redo what is already done. {unclear} Don't contact \
+         {name} yourself: it is waiting for your answer."
+    )
+}
+
+/// More work for a team-mode teammate whose conversation is open, from the agent that handed it
+/// out. It asks for the complete result because its reply goes back as it stands, like a fresh
+/// helper's.
+fn more_work(caller: &AgentConfig, task: &str) -> String {
+    let name = shown_name(caller);
+    format!(
+        "## More work from {name}\n{task}\n\nThis conversation already holds your earlier work in \
+         this run: build on it, and don't redo what is already done. Reply with the complete \
+         result, because {name} uses your reply as it stands."
+    )
+}
+
+/// Record that a team-mode teammate's turn has ended and its conversation stays open for the run:
+/// the run view shows it as done for now, not as working.
+async fn note_kept_open(session: &mut crate::StageSession) -> Result<()> {
+    session
+        .recorder
+        .append(
+            EventKind::SessionMeta,
+            json!({"phase": "kept_open"}),
+            Some(json!({"source": "loomwatch", "phase": "kept_open"})),
+        )
+        .await
+}
+
 impl TeamBus {
     /// What an `ask` hands back, and where its question goes next: kept waiting for a
     /// clarification when the asked agent asked back on a round that allowed it, finished
@@ -2321,7 +2908,9 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
             "dispatch",
             "Hand part of the work to a teammate without waiting for it. Hand out parts that do \
              not depend on each other together. What each one sends back reaches you in one more \
-             turn after this one ends.",
+             turn after this one ends. A teammate that already finished work in this run carries \
+             on in the same conversation and remembers it; one still working starts as a separate \
+             copy that does not.",
             &two_strings(
                 "agent",
                 "Target agent ID",
@@ -2334,8 +2923,7 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     if asks {
         tools.push(tool(
             "ask",
-            "Ask another agent and wait for its reply. Use it when you need the answer before you \
-             can go on.",
+            ask_description(team),
             &two_strings(
                 "agent",
                 "Target agent ID",
@@ -2394,6 +2982,19 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
         ));
     }
     tools
+}
+
+/// What `ask` is for. In team mode it also says who answers from the conversation it already has
+/// (`TeamBus::reach`), so a lead knows whether to repeat itself.
+fn ask_description(team: bool) -> &'static str {
+    if team {
+        "Ask another agent and wait for its reply. Use it when you need the answer before you can \
+         go on. A teammate that already finished work in this run answers in the same conversation \
+         and remembers it; one still working answers as a separate copy that does not."
+    } else {
+        "Ask another agent and wait for its reply. Use it when you need the answer before you can \
+         go on."
+    }
 }
 
 /// The Notebook's tool surface. These are the first Team Bus tools with structured arguments —
@@ -2656,7 +3257,7 @@ mod tests {
             turned_off: Vec::new(),
             done_when: Vec::new(),
             checks: None,
-            send_back_once: false,
+            send_back: None,
             spend: crate::spend::SpendConfig::default(),
         }
     }
@@ -3544,11 +4145,14 @@ mod tests {
                     "b",
                     "help",
                     event_log,
-                    DelegationContext {
-                        path: vec!["a".into()],
-                        depth: 1,
-                        answering: false,
-                    },
+                    (
+                        DelegationContext {
+                            path: vec!["a".into()],
+                            depth: 1,
+                            answering: false,
+                        },
+                        Reach::Pipeline,
+                    ),
                     (
                         &AgentSession {
                             agent_id: "a".into(),
@@ -3847,6 +4451,7 @@ mod tests {
                 from_operator: true,
                 turn: crate::agent::WORK,
                 answer,
+                held: None,
             })
             .await
             .map_err(|_| anyhow::anyhow!("the kept-alive session stopped taking turns"))?;
@@ -4609,6 +5214,7 @@ mod tests {
                 from_operator: true,
                 turn: crate::agent::WORK,
                 answer,
+                held: None,
             })
             .await
             .map_err(|_| anyhow::anyhow!("the kept-alive session stopped taking turns"))?;
@@ -4729,10 +5335,13 @@ mod tests {
         Ok(())
     }
 
-    /// **A question back works the same in team mode**, where every `ask` starts a fresh helper:
-    /// the helper asked to clarify is handed the question as asked, what it asked back, and the
-    /// lead's answer, so it can answer without having been there. With no rounds allowed, a helper
-    /// is told to answer with its assumption instead, and a question back is taken as its answer.
+    /// **A question back works the same for a fresh helper in team mode**: the helper asked to
+    /// clarify is handed the question as asked, what it asked back, and the lead's answer, so it
+    /// can answer without having been there. With no rounds allowed, a helper is told to answer
+    /// with its assumption instead, and a question back is taken as its answer.
+    ///
+    /// Every `ask` here starts a fresh helper because the team's one open conversation
+    /// (`maxConcurrentDispatches: 1`) is already held by another teammate.
     #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_question_back_reaches_a_fresh_helper_with_the_question_so_far() -> Result<()> {
@@ -4754,12 +5363,18 @@ mod tests {
                 "Before I write it:\n\n## Question back\nFor which audience?"
             }))
         }));
+        let other = demo_model(Demo::responder(|_| Some(says("holding the open place"))));
         let team = |rounds: u32| {
             let mut team = TeamConfig {
-                agents: vec![test_agent("lead", OFFLINE), test_agent("h", &helper)],
+                agents: vec![
+                    test_agent("lead", OFFLINE),
+                    test_agent("h", &helper),
+                    test_agent("other", &other),
+                ],
                 ..team_of("helper-clarifying-team", "lead")
             };
             team.conversation.ask.rounds_per_question = rounds;
+            team.guards.max_concurrent_dispatches = 1;
             Arc::new(team)
         };
         let archive = EventArchive::new(pool);
@@ -4777,7 +5392,10 @@ mod tests {
         )?;
         let lead = bus.connection("lead").await?;
         lead.register(event_log.clone()).await;
+        hand(&bus, &lead.token, "other", "Hold the one open place.").await?;
+        came_back(&lead).await;
         let asked = ask(&bus, &lead.token, "h", "Write the launch note.").await?;
+        assert_eq!(asked["result"]["structuredContent"]["fresh"], "limit");
         assert_eq!(
             asked["result"]["structuredContent"]["questionBack"],
             "For which audience?"
@@ -4803,6 +5421,8 @@ mod tests {
         )?;
         let lead = bus.connection("lead").await?;
         lead.register(event_log.clone()).await;
+        hand(&bus, &lead.token, "other", "Hold the one open place.").await?;
+        came_back(&lead).await;
         let assumed = ask(&bus, &lead.token, "h", "Write the launch note.").await?;
         assert!(
             answer_text(&assumed).starts_with("h name answered:\n\nA note for everyone."),
@@ -5028,6 +5648,646 @@ mod tests {
             "You have asked h name 3 questions in this run",
         );
         bus.wait_for_tasks().await?;
+        Ok(())
+    }
+
+    /// A team-mode bus for `team`, with the lead's connection registered on run `run`.
+    async fn team_mode_bus(
+        team: TeamConfig,
+        archive: &EventArchive,
+        run: &str,
+    ) -> Result<(TeamBus, TeamBusConnection, EventLog)> {
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = bus.connection("lead").await?;
+        let log = EventLog::new(archive.clone(), run.into());
+        lead.register(log.clone()).await;
+        Ok((bus, lead, log))
+    }
+
+    /// One `dispatch` from the agent behind `token`, as its tools make it.
+    async fn hand(bus: &TeamBus, token: &str, agent: &str, task: &str) -> Result<Value> {
+        post_json(
+            bus,
+            token,
+            &json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                "params": {"name": "dispatch", "arguments": {"agent": agent, "task": task}}}),
+        )
+        .await
+    }
+
+    /// What everything `connection` handed out came back with, once all of it has.
+    async fn came_back(connection: &TeamBusConnection) -> Vec<std::result::Result<String, String>> {
+        connection
+            .collect_delegated()
+            .await
+            .into_iter()
+            .map(|result| result.outcome)
+            .collect()
+    }
+
+    /// Whether any message the agent was given holds `words`: what is in its conversation.
+    fn was_told(request: &crate::agent::SeenRequest, words: &str) -> bool {
+        request
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::User { content } if content.contains(words)))
+    }
+
+    /// The sequence numbers of `agent`'s events in `run` with this `phase`.
+    async fn phases(
+        archive: &EventArchive,
+        run: &str,
+        agent: &str,
+        phase: &str,
+    ) -> Result<Vec<u64>> {
+        Ok(archive
+            .load_session(run)
+            .await?
+            .into_iter()
+            .filter(|event| event.agent_id == agent && event.payload["phase"] == phase)
+            .map(|event| event.seq)
+            .collect())
+    }
+
+    /// Close the run's kept conversations, failing rather than hanging if one never closes.
+    async fn released(bus: &TeamBus) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), bus.release_teammates())
+            .await
+            .context("a kept conversation never closed")?
+    }
+
+    /// Wait until `agent`'s kept conversation is free for its next turn.
+    async fn until_free(bus: &TeamBus, agent: &str) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let turn = bus
+                    .state
+                    .teammates
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(agent)
+                    .cloned();
+                if turn.is_some_and(|turn| turn.try_lock().is_ok())
+                    && bus.state.live.lock().await.contains_key(agent)
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .with_context(|| format!("{agent}'s conversation was never free"))
+    }
+
+    /// **A teammate handed more work, or asked, carries on in the conversation it already has.**
+    ///
+    /// The worker answers "v2 from v1" only when the fix reaches it framed as more work in the
+    /// conversation that holds the draft's brief, and answers the question from both rounds only
+    /// when it reaches the same conversation framed as a question. Each round is recorded as what
+    /// it is for; the worker opens one session, which the roster shows as open, and which closes
+    /// once, when the run releases it.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_teammate_handed_more_work_or_asked_carries_on_in_the_same_conversation() -> Result<()>
+    {
+        let pool = crate::db::Db::temp().await;
+        let worker = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            // Framed for a teammate, which may not have done this piece yet: never told to be
+            // brief, as a kept-open stage answering from its finished work is.
+            let text = if prompt.contains("## A question from lead name")
+                && !prompt.contains("Be brief")
+                && was_told(request, "Draft the note.")
+                && was_told(request, "Fix the date.")
+            {
+                "The date came from the brief."
+            } else if prompt.contains("## More work from lead name")
+                && prompt.contains("Fix the date.")
+                && was_told(request, "Draft the note.")
+            {
+                "v2 from v1"
+            } else if prompt.contains("Draft the note.") {
+                "v1"
+            } else {
+                "never saw the earlier rounds"
+            };
+            Some(Completion {
+                usage: crate::agent::Usage {
+                    input_tokens: 100,
+                    output_tokens: 10,
+                    ..Default::default()
+                },
+                ..says(text)
+            })
+        }));
+        let team = TeamConfig {
+            agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &worker)],
+            ..team_of("kept-teammate-team", "lead")
+        };
+        let archive = EventArchive::new(pool);
+        let (bus, lead, _) = team_mode_bus(team, &archive, "kept-teammate-run").await?;
+
+        let first = hand(&bus, &lead.token, "worker", "Draft the note.").await?;
+        assert!(
+            first["result"]["structuredContent"]
+                .get("continues")
+                .is_none(),
+            "{first}"
+        );
+        assert_eq!(came_back(&lead).await, [Ok("v1".to_owned())]);
+
+        let fix = hand(&bus, &lead.token, "worker", "Fix the date.").await?;
+        assert_eq!(
+            fix["result"]["structuredContent"]["continues"], true,
+            "{fix}"
+        );
+        assert!(
+            fix["result"]["structuredContent"]["note"]
+                .as_str()
+                .is_some_and(|note| note.starts_with("worker name carries on")),
+            "{fix}"
+        );
+        assert_eq!(came_back(&lead).await, [Ok("v2 from v1".to_owned())]);
+
+        let asked = ask(&bus, &lead.token, "worker", "Where did the date come from?").await?;
+        assert_eq!(
+            answer_text(&asked),
+            "worker name answered:\n\nThe date came from the brief."
+        );
+        assert_eq!(asked["result"]["structuredContent"]["live"], true);
+        assert_eq!(asked["result"]["structuredContent"]["continues"], true);
+
+        let roster = post_json(
+            &bus,
+            &lead.token,
+            &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": "roster", "arguments": {}}}),
+        )
+        .await?;
+        assert_eq!(roster["result"]["structuredContent"][1]["open"], true);
+        assert!(
+            roster["result"]["structuredContent"][0]
+                .get("open")
+                .is_none()
+        );
+
+        let turns: Vec<Value> = archive
+            .load_session("kept-teammate-run")
+            .await?
+            .into_iter()
+            .filter(|event| event.agent_id == "worker" && event.kind == EventKind::Usage)
+            .map(|event| event.payload["_meta"]["loomwatch"]["call"]["turn"].clone())
+            .collect();
+        assert_eq!(turns, ["helper", "helper", "ask_answer"]);
+
+        let run = "kept-teammate-run";
+        assert_eq!(
+            phases(&archive, run, "worker", "set_config_option")
+                .await?
+                .len(),
+            1
+        );
+        assert_eq!(phases(&archive, run, "worker", "kept_open").await?.len(), 3);
+        assert!(phases(&archive, run, "worker", "exited").await?.is_empty());
+        bus.wait_for_tasks().await?;
+        released(&bus).await?;
+        assert_eq!(phases(&archive, run, "worker", "exited").await?.len(), 1);
+        assert!(bus.state.live.lock().await.is_empty());
+        assert!(bus.state.kept.lock().await.is_empty());
+        assert_events_match_schema(&archive.load_verified_session(run).await?);
+        Ok(())
+    }
+
+    /// **A teammate still working is not waited for: a separate copy takes the work, and the
+    /// conversation stays its own.**
+    ///
+    /// The first part is held mid-turn. The second, handed out meanwhile, starts a separate copy
+    /// that says so, and is closed after its turn. The third, once the first is done, continues the
+    /// first part's conversation, which holds the first part and not the second.
+    #[tokio::test]
+    async fn a_busy_teammate_gets_a_separate_copy_and_keeps_its_own_conversation() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let (worker, hold) = Demo::responder_holding(
+            |request| {
+                let prompt = request.prompt();
+                Some(says(if prompt.contains("## More work from") {
+                    if was_told(request, "slow part") && !was_told(request, "quick part") {
+                        "continued the slow part"
+                    } else {
+                        "continued the wrong conversation"
+                    }
+                } else if prompt.contains("quick part") {
+                    "quick done"
+                } else {
+                    "slow done"
+                }))
+            },
+            |request| request.prompt().contains("slow part"),
+            "",
+        );
+        let team = TeamConfig {
+            agents: vec![
+                test_agent("lead", OFFLINE),
+                test_agent("worker", &demo_model(worker)),
+            ],
+            ..team_of("busy-teammate-team", "lead")
+        };
+        let archive = EventArchive::new(pool);
+        let run = "busy-teammate-run";
+        let (bus, lead, _) = team_mode_bus(team, &archive, run).await?;
+
+        hand(&bus, &lead.token, "worker", "the slow part").await?;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .context("the first part never started")?;
+        let second = hand(&bus, &lead.token, "worker", "the quick part").await?;
+        assert_eq!(
+            second["result"]["structuredContent"]["fresh"], "busy",
+            "{second}"
+        );
+        assert!(
+            second["result"]["structuredContent"]["note"]
+                .as_str()
+                .is_some_and(|note| note.contains("still working, so a separate copy started")),
+            "{second}"
+        );
+        hold.release(1);
+        let mut both = came_back(&lead).await;
+        both.sort();
+        assert_eq!(
+            both,
+            [Ok("quick done".to_owned()), Ok("slow done".to_owned())]
+        );
+        // The copy closed after its turn; the first part's conversation is still open.
+        assert_eq!(phases(&archive, run, "worker", "exited").await?.len(), 1);
+
+        until_free(&bus, "worker").await?;
+        let third = hand(&bus, &lead.token, "worker", "the third part").await?;
+        assert_eq!(
+            third["result"]["structuredContent"]["continues"], true,
+            "{third}"
+        );
+        assert_eq!(
+            came_back(&lead).await,
+            [Ok("continued the slow part".to_owned())]
+        );
+        bus.wait_for_tasks().await?;
+        released(&bus).await?;
+        assert_eq!(
+            phases(&archive, run, "worker", "set_config_option")
+                .await?
+                .len(),
+            2
+        );
+        assert_eq!(phases(&archive, run, "worker", "exited").await?.len(), 2);
+        Ok(())
+    }
+
+    /// **Past `guards.maxConcurrentDispatches` open conversations, a teammate starts fresh every
+    /// time, as before, and says why.**
+    ///
+    /// With a cap of one, the first teammate keeps its conversation and the second does not: each
+    /// of its rounds starts fresh and closes, while the first one's next round continues.
+    #[tokio::test]
+    async fn past_the_cap_a_teammate_starts_fresh_each_time_and_says_why() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let answers = || {
+            demo_model(Demo::responder(|request| {
+                Some(says(if request.prompt().contains("## More work from") {
+                    "continued"
+                } else {
+                    "fresh"
+                }))
+            }))
+        };
+        let mut team = TeamConfig {
+            agents: vec![
+                test_agent("lead", OFFLINE),
+                test_agent("a", &answers()),
+                test_agent("b", &answers()),
+            ],
+            ..team_of("capped-teammates-team", "lead")
+        };
+        team.guards.max_concurrent_dispatches = 1;
+        let archive = EventArchive::new(pool);
+        let run = "capped-teammates-run";
+        let (bus, lead, _) = team_mode_bus(team, &archive, run).await?;
+
+        hand(&bus, &lead.token, "a", "one").await?;
+        assert_eq!(came_back(&lead).await, [Ok("fresh".to_owned())]);
+        for task in ["two", "three"] {
+            let capped = hand(&bus, &lead.token, "b", task).await?;
+            assert_eq!(
+                capped["result"]["structuredContent"]["fresh"], "limit",
+                "{capped}"
+            );
+            assert!(
+                capped["result"]["structuredContent"]["note"]
+                    .as_str()
+                    .is_some_and(|note| note.contains("guards.maxConcurrentDispatches allows (1)")),
+                "{capped}"
+            );
+            assert_eq!(came_back(&lead).await, [Ok("fresh".to_owned())]);
+        }
+        assert_eq!(phases(&archive, run, "b", "exited").await?.len(), 2);
+        assert!(phases(&archive, run, "b", "kept_open").await?.is_empty());
+
+        until_free(&bus, "a").await?;
+        hand(&bus, &lead.token, "a", "four").await?;
+        assert_eq!(came_back(&lead).await, [Ok("continued".to_owned())]);
+        bus.wait_for_tasks().await?;
+        released(&bus).await?;
+        Ok(())
+    }
+
+    /// **Nothing is kept for a teammate whose round failed, nor for a pipeline's helpers.**
+    #[tokio::test]
+    async fn a_failed_round_and_a_pipeline_helper_keep_nothing_open() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let failing = demo_model(Demo::failing_after(Vec::new(), "the model is down"));
+        let team = TeamConfig {
+            agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &failing)],
+            ..team_of("failing-teammate-team", "lead")
+        };
+        let (bus, lead, _) = team_mode_bus(team, &archive, "failing-teammate-run").await?;
+        hand(&bus, &lead.token, "worker", "draft it").await?;
+        let returned = came_back(&lead).await;
+        assert!(returned[0].is_err(), "{returned:?}");
+        assert!(bus.wait_for_tasks().await.is_err());
+        assert!(bus.state.teammates.lock().unwrap().is_empty());
+        assert!(bus.state.live.lock().await.is_empty());
+        assert!(bus.state.kept.lock().await.is_empty());
+
+        let helper = demo_model(Demo::responder(|_| Some(says("helped"))));
+        let team = TeamConfig {
+            agents: vec![
+                test_agent("a", OFFLINE),
+                test_agent("b", OFFLINE),
+                test_agent("h", &helper),
+            ],
+            edges: vec![edge("a", "b")],
+            ..team_of("pipeline-helper-team", "a")
+        };
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let b = bus.connection("b").await?;
+        b.register(EventLog::new(archive.clone(), "pipeline-helper-run".into()))
+            .await;
+        for _ in 0..2 {
+            let answered = ask(&bus, &b.token, "h", "what is it?").await?;
+            assert!(
+                answered["result"]["structuredContent"]
+                    .get("live")
+                    .is_none(),
+                "{answered}"
+            );
+        }
+        assert!(bus.state.teammates.lock().unwrap().is_empty());
+        assert_eq!(
+            phases(&archive, "pipeline-helper-run", "h", "exited")
+                .await?
+                .len(),
+            2
+        );
+        Ok(())
+    }
+
+    /// **A question withdrawn from a teammate's open conversation stops its answer and leaves the
+    /// conversation open,** for the next round to continue.
+    #[tokio::test]
+    async fn a_withdrawn_question_leaves_the_teammate_s_conversation_open() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let (worker, hold) = Demo::responder_holding(
+            |request| {
+                Some(says(if request.prompt().contains("## More work from") {
+                    if was_told(request, "first work") {
+                        "continued after the withdrawn question"
+                    } else {
+                        "lost its conversation"
+                    }
+                } else {
+                    "first done"
+                }))
+            },
+            |request| request.prompt().contains("## A question from"),
+            "half an answer",
+        );
+        let team = TeamConfig {
+            agents: vec![
+                test_agent("lead", OFFLINE),
+                test_agent("worker", &demo_model(worker)),
+            ],
+            ..team_of("withdrawn-teammate-team", "lead")
+        };
+        let archive = EventArchive::new(pool);
+        let run = "withdrawn-teammate-run";
+        let (bus, lead, _) = team_mode_bus(team, &archive, run).await?;
+        hand(&bus, &lead.token, "worker", "the first work").await?;
+        assert_eq!(came_back(&lead).await, [Ok("first done".to_owned())]);
+        until_free(&bus, "worker").await?;
+
+        let asking = tokio::spawn({
+            let bus = bus.clone();
+            let token = lead.token.clone();
+            async move { ask(&bus, &token, "worker", "what did you find?").await }
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .context("the question never reached the worker")?;
+        lead.turn_ended().await;
+        let withdrawn = tokio::time::timeout(Duration::from_secs(10), asking)
+            .await
+            .context("the withdrawn question never came back")???;
+        assert_eq!(withdrawn["result"]["isError"], true, "{withdrawn}");
+        let events = archive.load_session(run).await?;
+        assert!(
+            events.iter().any(|event| event.agent_id == "worker"
+                && event.payload["phase"] == "turn_interrupted"
+                && event.payload["reason"] == ASK_WITHDRAWN),
+            "the open conversation's answer was not stopped: {events:#?}"
+        );
+
+        until_free(&bus, "worker").await?;
+        let next = hand(&bus, &lead.token, "worker", "more work").await?;
+        assert_eq!(
+            next["result"]["structuredContent"]["continues"], true,
+            "{next}"
+        );
+        assert_eq!(
+            came_back(&lead).await,
+            [Ok("continued after the withdrawn question".to_owned())]
+        );
+        bus.wait_for_tasks().await?;
+        released(&bus).await?;
+        Ok(())
+    }
+
+    /// **A question back is clarified in the teammate's open conversation**, which already holds
+    /// the question: the clarification reaches it as the lead's words alone, framed as an answer
+    /// to what it asked back, and the answer comes back from the same conversation.
+    #[tokio::test]
+    async fn a_question_back_is_clarified_in_the_teammate_s_open_conversation() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let worker = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            Some(says(
+                if prompt
+                    .starts_with("## lead name answers your question back\nFor first-time users.")
+                    && !prompt.contains("## Clarified so far")
+                    && was_told(request, "Write the launch note.")
+                {
+                    "A launch note for first-time users."
+                } else if prompt.contains("## A question from lead name") {
+                    "Before I write it:\n\n## Question back\nFor which audience?"
+                } else if prompt.contains("## Clarified so far") {
+                    "a fresh copy was handed the thread"
+                } else {
+                    "done"
+                },
+            ))
+        }));
+        let team = TeamConfig {
+            agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &worker)],
+            ..team_of("open-clarifying-team", "lead")
+        };
+        let archive = EventArchive::new(pool);
+        let (bus, lead, _) = team_mode_bus(team, &archive, "open-clarifying-run").await?;
+        hand(&bus, &lead.token, "worker", "Read the brief.").await?;
+        came_back(&lead).await;
+        until_free(&bus, "worker").await?;
+        let asked = ask(&bus, &lead.token, "worker", "Write the launch note.").await?;
+        assert_eq!(
+            asked["result"]["structuredContent"]["continues"], true,
+            "{asked}"
+        );
+        assert_eq!(
+            asked["result"]["structuredContent"]["questionBack"],
+            "For which audience?"
+        );
+        until_free(&bus, "worker").await?;
+        let answered = ask(&bus, &lead.token, "worker", "For first-time users.").await?;
+        assert_eq!(
+            answer_text(&answered),
+            "worker name answered:\n\nA launch note for first-time users."
+        );
+        assert_eq!(answered["result"]["structuredContent"]["clarifies"], true);
+        assert_eq!(answered["result"]["structuredContent"]["continues"], true);
+        bus.wait_for_tasks().await?;
+        released(&bus).await?;
+        Ok(())
+    }
+
+    /// **A teammate answering in its open conversation still may not start another agent.** Its
+    /// seat offers `dispatch` (it was first handed work, not a question), so the refusal is the
+    /// bus's, as it is for a kept-open stage answering a question.
+    #[tokio::test]
+    async fn a_teammate_answering_in_its_open_conversation_may_not_start_another_agent()
+    -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let worker = demo_model(Demo::responder(|request| {
+            Some(if request.after_tool() {
+                let refused = matches!(
+                    request.messages.last(),
+                    Some(Message::Tool { content, .. })
+                        if content.contains("is answering another agent's question")
+                );
+                says(if refused {
+                    "refused"
+                } else {
+                    "started another agent"
+                })
+            } else if request.prompt().contains("## A question from") {
+                calls(
+                    "dispatch",
+                    &json!({"agent": "other", "task": "find it for me"}),
+                )
+            } else {
+                says("done")
+            })
+        }));
+        let team = TeamConfig {
+            agents: vec![
+                test_agent("lead", OFFLINE),
+                test_agent("worker", &worker),
+                test_agent("other", &demo_model(Demo::scripted(Vec::new()))),
+            ],
+            ..team_of("answering-teammate-team", "lead")
+        };
+        let archive = EventArchive::new(pool);
+        let (bus, lead, _) = team_mode_bus(team, &archive, "answering-teammate-run").await?;
+        hand(&bus, &lead.token, "worker", "the work").await?;
+        came_back(&lead).await;
+        until_free(&bus, "worker").await?;
+        let asked = ask(&bus, &lead.token, "worker", "what did you find?").await?;
+        assert_eq!(answer_text(&asked), "worker name answered:\n\nrefused");
+        assert!(
+            phases(
+                &archive,
+                "answering-teammate-run",
+                "other",
+                "set_config_option"
+            )
+            .await?
+            .is_empty()
+        );
+        bus.wait_for_tasks().await?;
+        released(&bus).await?;
+        Ok(())
+    }
+
+    /// **A cancelled run's teardown ends the teammates' open conversations too.**
+    #[tokio::test]
+    async fn teardown_ends_kept_teammates() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let worker = demo_model(Demo::responder(|_| Some(says("done"))));
+        let team = TeamConfig {
+            agents: vec![test_agent("lead", OFFLINE), test_agent("worker", &worker)],
+            ..team_of("teardown-teammate-team", "lead")
+        };
+        let archive = EventArchive::new(pool);
+        let (bus, lead, _) = team_mode_bus(team, &archive, "teardown-teammate-run").await?;
+        hand(&bus, &lead.token, "worker", "work").await?;
+        came_back(&lead).await;
+        until_free(&bus, "worker").await?;
+        let channel = bus
+            .state
+            .live
+            .lock()
+            .await
+            .get("worker")
+            .cloned()
+            .context("the worker is kept")?;
+        drop(bus.abort_on_drop());
+        tokio::time::timeout(Duration::from_secs(5), channel.closed())
+            .await
+            .context("the kept conversation outlived its run's teardown")?;
+        assert!(bus.state.kept.lock().await.is_empty());
         Ok(())
     }
 

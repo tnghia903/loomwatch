@@ -814,3 +814,133 @@
 @media (prefers-reduced-motion: no-preference) {
   .tc-mode-menu { animation: tc-pop var(--t-quick) var(--ease-out) both; transform-origin: bottom right; }
 }
+
+/*
+ * Replying (ADR 0051): Reply under what an agent said, the message being answered above the box
+ * while you write, and its quote kept on top of what you sent. The quote is the talk's own
+ * (`.chat-quote`), so a reply reads like the agents' answers that quote a question.
+ */
+.chat-reply { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: inherit; color: var(--color-ink-3); cursor: pointer; }
+.chat-reply:hover, .chat-reply:focus-visible { color: var(--color-accent); }
+/* There when you reach for it, as Info is, and always on a touch screen, which has no hover. */
+@media (hover: hover) {
+  .chat-reply { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .chat-msg:hover .chat-reply, .chat-msg:focus-within .chat-reply { opacity: 1; }
+}
+.tc-replying {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 6px 10px;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-panel-solid));
+  font-size: 12px;
+}
+.tc-replying > svg { flex: none; color: var(--color-accent); }
+.tc-replying-body { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.tc-replying-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--color-ink-2); }
+.tc-replying-quote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-3); }
+.tc-replying .tc-link { flex: none; }
+.tc-reply-quote { box-sizing: border-box; width: 100%; min-width: 0; margin: 0 0 6px; text-align: left; font: inherit; font-size: 12px; color: inherit; }
+.tc-reply-quote b { display: inline-flex; align-items: center; gap: 4px; }
+button.tc-reply-quote { border-top: 0; border-right: 0; border-bottom: 0; cursor: pointer; }
+button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-color: var(--color-accent); }
+
+/* ---------- Reactions (lib/chat/reactions.ts, components/chat/Reactions.tsx) ----------
+   Under what was said, a quiet pill per reaction: the crew's face, the mark's own, pulling a face
+   big enough to read without a word. Yours wears the gold ring and a gold face, because gold is
+   you. A check step's "All met" is green, because it finished well. An agent that reacted is there
+   as its figure's head, peeking up from the chip. */
+.tc-reactable { position: relative; display: grid; justify-items: start; width: fit-content; min-width: 0; max-width: 100%; }
+.tc-reactable.mine { justify-items: end; justify-self: end; }
+.tc-reactable > .tc-doc { width: 460px; max-width: 100%; }
+.tc-reacts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 5px 2px 0; }
+.tc-reactable.mine .tc-reacts { justify-content: flex-end; }
+/* Nothing on it yet: the button rests on the message's lower corner and takes no room. */
+.tc-reacts.empty { position: absolute; right: -11px; bottom: -10px; z-index: 2; margin: 0; }
+.tc-reactable.mine .tc-reacts.empty { right: auto; left: -11px; }
+
+.tc-react,
+.tc-react-add { display: inline-flex; align-items: center; justify-content: center; height: 24px; border: 1px solid var(--color-hairline); border-radius: 999px; background: var(--color-panel-solid); color: var(--color-ink-2); font: inherit; cursor: pointer; }
+.tc-react { position: relative; gap: 4px; min-width: 34px; height: 26px; padding: 0 8px; }
+.tc-react:not(:disabled):hover { border-color: var(--color-accent-dim); color: var(--color-ink); }
+.tc-react:disabled { cursor: default; }
+.tc-react.you { border-color: var(--color-accent); background: var(--color-accent-tint); color: var(--color-accent); }
+.tc-react.met { color: var(--color-ok); }
+.tc-react:focus-visible,
+.tc-react-add:focus-visible,
+.tc-react-pick:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.tc-crew-face { flex: none; overflow: visible; }
+.tc-crew-face :is(.tc-face-eyes, .tc-face-mouth, .tc-face-pupils, .tc-face-tilt) { transform-box: fill-box; transform-origin: center; }
+/* The check is stitched: drawn along its own length when it comes. */
+.tc-crew-face:is(.face-done, .face-met) .tc-face-mouth { stroke-dasharray: 1; }
+.tc-react-heads { display: inline-flex; align-items: center; margin-left: 1px; }
+/* The head is clipped at its slot's foot only, so it can rise from behind the chip. */
+.tc-react-head { display: inline-grid; width: 16px; height: 16px; clip-path: inset(-60% -60% 0 -60%); }
+.tc-react-head + .tc-react-head { margin-left: -3px; }
+.tc-react-head .chat-avatar { width: 16px; height: 16px; border-width: 1px; }
+.tc-react-detail { font: 500 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-ink-3); }
+
+.tc-react-add-wrap { position: relative; display: inline-flex; }
+.tc-react-add { width: 26px; padding: 0; color: var(--color-ink-3); }
+.tc-react-add:hover,
+.tc-react-add[aria-expanded='true'] { border-color: var(--color-accent-dim); color: var(--color-ink); }
+/* Under a pointer the button shows when you are on the message, or while its tray is open. */
+@media (hover: hover) {
+  .tc-reacts:not(.open) .tc-react-add { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .chat-msg:is(:hover, :focus-within) .tc-reacts .tc-react-add { opacity: 1; }
+}
+@media (hover: none) { .tc-reacts.empty .tc-react-add { opacity: .6; } }
+.tc-react-error { font-size: 11.5px; color: var(--color-alert); }
+
+/* The tray: the five faces, and under them one line: what the one you point at tells the team. */
+.tc-react-tray { position: absolute; bottom: calc(100% + 6px); left: -6px; z-index: 6; display: grid; gap: 2px; width: 248px; padding: 4px 4px 7px; border: 1px solid var(--color-hairline); border-radius: 16px; background: var(--color-panel-solid); box-shadow: var(--e2-shadow); }
+.tc-react-tray.end { left: auto; right: -6px; }
+.tc-react-tray.below { top: calc(100% + 6px); bottom: auto; }
+.tc-react-faces { display: flex; gap: 2px; }
+.tc-react-pick { display: grid; flex: 1; place-items: center; height: 42px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: var(--color-ink-2); cursor: pointer; }
+.tc-react-pick:is(:hover, :focus-visible) { background: var(--color-accent-tint); color: var(--color-ink); }
+.tc-react-pick[aria-pressed='true'] { box-shadow: inset 0 0 0 1px var(--color-accent); color: var(--color-accent); }
+.tc-react-says { margin: 0; padding: 0 8px; overflow: hidden; color: var(--color-ink-3); font-size: 11.5px; line-height: 1.4; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.tc-react-says b { color: var(--color-ink); font-weight: 600; }
+.tc-react-stitch { display: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A reaction you put on is sewn on, the way the mark is: a gold running stitch goes round the
+     chip, then rests as its ring. */
+  .tc-react-stitch { position: absolute; inset: -1px; display: block; width: calc(100% + 2px); height: calc(100% + 2px); overflow: visible; pointer-events: none; animation: tc-thread-rest var(--t-move) var(--ease-out) 760ms both; }
+  .tc-react-stitch rect { x: .75px; y: .75px; width: calc(100% - 1.5px); height: calc(100% - 1.5px); rx: 11.25px; fill: none; }
+  .tc-react-stitch-thread { stroke: var(--color-accent); stroke-width: 1.5px; stroke-dasharray: 3 2.2; stroke-linecap: round; }
+  .tc-react-stitch-run { stroke: #fff; stroke-width: 6px; stroke-dasharray: 1; stroke-dashoffset: 1; animation: tc-sew 680ms var(--ease-out) forwards; }
+  .tc-react.you.fresh { animation: tc-react-ring var(--t-move) var(--ease-out) 640ms both; }
+  /* A chip that comes while you watch pops in, and the agent's head rises up from it. */
+  .tc-react.arrives { animation: tc-pop var(--t-quick) var(--ease-out) both; }
+  .tc-react-head.peeks .chat-avatar { animation: tc-react-peek 520ms var(--ease-out) 120ms both; }
+  /* Opening the tray, its reactions rise one after another; pointing at one plays its little move. */
+  .tc-react-tray { animation: tc-pop var(--t-quick) var(--ease-out) both; transform-origin: bottom left; }
+  .tc-react-tray.end { transform-origin: bottom right; }
+  .tc-react-tray.below { transform-origin: top left; }
+  .tc-react-tray.below.end { transform-origin: top right; }
+  .tc-react-pick { animation: tc-react-rise var(--t-move) var(--ease-out) calc(var(--i) * 28ms) both; }
+  .tc-react, .tc-react-add, .tc-react-pick { transition: border-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out), background-color var(--t-quick) var(--ease-out); }
+  /* Each face's one move, when it lands on a message or while you point at it in the tray. */
+  .tc-react-pick .tc-crew-face { transition: translate var(--t-quick) var(--ease-out); }
+  .tc-react-pick:is(:hover, :focus-visible) .tc-crew-face { translate: 0 -2px; }
+  :is(.tc-react:is(.fresh, .arrives), .tc-react-pick:is(:hover, :focus-visible)) .face-glad .tc-face-eyes { animation: tc-face-squint 560ms var(--ease-out) 1; }
+  :is(.tc-react:is(.fresh, .arrives), .tc-react-pick:is(:hover, :focus-visible)) .face-love { animation: tc-face-beat 760ms var(--ease-out) 1; }
+  :is(.tc-react:is(.fresh, .arrives), .tc-react-pick:is(:hover, :focus-visible)) .face-hmm .tc-face-tilt { animation: tc-face-tilt 900ms var(--ease-out) 1; }
+  :is(.tc-react:is(.fresh, .arrives), .tc-react-pick:is(:hover, :focus-visible)) .face-off { animation: tc-face-shake 520ms ease-in-out 1; }
+  :is(.tc-react:is(.fresh, .arrives), .tc-react-pick:is(:hover, :focus-visible)) .face-seen .tc-face-pupils { animation: tc-face-glance 980ms var(--ease-out) 1; }
+  .tc-react:is(.fresh, .arrives) :is(.face-done, .face-met) .tc-face-mouth { animation: tc-face-draw 520ms var(--ease-out) 300ms both; }
+}
+@keyframes tc-react-ring { from { border-color: transparent; } }
+@keyframes tc-react-peek { from { translate: 0 105%; } 65% { translate: 0 -14%; } }
+@keyframes tc-react-rise { from { opacity: 0; translate: 0 6px; } }
+@keyframes tc-face-squint { 45% { scale: 1 .4; } }
+@keyframes tc-face-beat { 22% { scale: 1.28; } 44% { scale: 1; } 66% { scale: 1.14; } }
+@keyframes tc-face-tilt { 35%, 70% { rotate: -12deg; } }
+@keyframes tc-face-shake { 20%, 60% { translate: -1.4px 0; } 40%, 80% { translate: 1.4px 0; } }
+@keyframes tc-face-glance { 0%, 30% { translate: -2.4px 0; } }
+@keyframes tc-face-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }

@@ -86,6 +86,24 @@ export interface WaitingOn {
   parkNote: string
   sendBackAvailable: boolean
   questionId?: string | null
+  /** Set when a check step stopped to ask (ADR 0062, `whenStillNotMet: ask`): the stop is a review of
+      `handoverFrom`'s work, and this is what is still not met. */
+  check?: CheckWait | null
+}
+
+/** What a check step that stopped to ask shows beside the work it checked. */
+export interface CheckWait {
+  checked: string
+  /** How many times the work has gone back so far. */
+  rounds: number
+  /** Why it stopped sending the work back. */
+  reason: 'rounds' | 'no_progress' | 'unchecked' | 'not_open'
+  /** The checks not met, with what the check step saw. */
+  items: { verdict: 'not_met' | 'not_sure'; item: string; evidence: string }[]
+  /** How many checks are met. */
+  met: number
+  /** The check step's own account of the problems, when it wrote one. */
+  problems?: string
 }
 
 /**

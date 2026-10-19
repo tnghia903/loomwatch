@@ -847,7 +847,9 @@ async fn a_proposed_check_step_is_saved_sending_a_miss_back() {
     let proposals = fixture.control.inner.proposals.read().await;
     let proposed = &proposals.get(id).expect("the proposal is kept").yaml;
     assert!(
-        proposed.contains("    checks: writer\n    sendBackOnce: true\n"),
+        proposed.contains(
+            "    checks: writer\n    sendBack:\n      rounds: 2\n      whenStillNotMet: ask\n"
+        ),
         "{proposed}"
     );
 }

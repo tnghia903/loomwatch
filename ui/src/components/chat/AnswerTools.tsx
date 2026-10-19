@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Share2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Reply, Share2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { answerFileName } from '../../lib/chat/format'
@@ -34,6 +34,10 @@ interface AnswerToolsProps {
   onReviewed: () => void
   /** A finding's record, opened in Details beside the chat. */
   onOpenFinding: (line: ReceiptLine) => void
+  /** Reply to the answer: more to ask of the agent that gave it (ADR 0051). Absent, there is none. */
+  onReply?: () => void
+  /** What Reply says to a screen reader: whose answer it answers. */
+  replyLabel?: string
 }
 
 /** Past this many files, the rest wait behind "N more" so the chat stays a chat. */
@@ -46,7 +50,7 @@ const FILES_SHOWN = 3
  * these lives here, once. Kept to one quiet row: the verdict, Copy, and Share for the rest; where
  * the answer went in Notion is said beside them once it has gone somewhere.
  */
-export function AnswerTools({ run, answer, check, files, makers, finished, reviewed, onReviewed, onOpenFinding }: AnswerToolsProps) {
+export function AnswerTools({ run, answer, check, files, makers, finished, reviewed, onReviewed, onOpenFinding, onReply, replyLabel }: AnswerToolsProps) {
   const [copied, setCopied] = useState(false)
   const [allFiles, setAllFiles] = useState(false)
   const [reviewing, setReviewing] = useState(false)
@@ -72,6 +76,7 @@ export function AnswerTools({ run, answer, check, files, makers, finished, revie
             ? <button type="button" className={`delivery-output-badge tc-verdict tone-${verdict.tone}`} title={verdict.detail} aria-haspopup="dialog" onClick={() => setReviewing(true)}>{VERDICT_ICON[verdict.tone]}{verdict.label}</button>
             : <span className={`delivery-output-badge tc-verdict tone-${verdict.tone}`} title={verdict.detail}>{VERDICT_ICON[verdict.tone]}{verdict.label}</span>)}
           <span className="tc-quiet">
+            {onReply && <button type="button" className="tc-link" aria-label={replyLabel} onClick={onReply}><Reply size={12} aria-hidden="true" />Reply</button>}
             <button type="button" className="tc-link" onClick={copy}><Copy size={12} aria-hidden="true" />{copied ? 'Copied' : 'Copy'}</button>
             <Share onSave={save} notion={notion} />
           </span>
@@ -126,8 +131,11 @@ function Review({ check, reviewed, onClose, onReviewed, onOpenFinding }: { check
       <h2>Review the answer</h2>
       {check.required > 0 && <p>{check.opened}/{check.required} required skills have loading evidence.</p>}
       {verdict.findings.length
-        ? <section className="receipt-checks delivery-review-findings" aria-label="Worth a look"><b>Worth a look</b><ul>{verdict.findings.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this agent’s work'} onClick={() => onOpenFinding(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul></section>
+        ? <section className="receipt-checks delivery-review-findings" aria-label="Worth a look"><b>Worth a look</b><Lines lines={verdict.findings} onOpen={onOpenFinding} /></section>
         : <p>Nothing in this record was flagged.</p>}
+      {verdict.changes?.length
+        ? <section className="receipt-checks delivery-review-findings delivery-review-changes" aria-label="Changes made"><b>Changes made</b><Lines lines={verdict.changes} onOpen={onOpenFinding} /></section>
+        : null}
       <p>Read the answer and its record before marking your review. It lasts while this chat stays open.</p>
       {reviewed ? <p className="delivery-review-success">Reviewed by you.</p> : <label><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} />I have reviewed this answer and the evidence behind it.</label>}
       <div>
@@ -136,6 +144,11 @@ function Review({ check, reviewed, onClose, onReviewed, onOpenFinding }: { check
       </div>
     </dialog>
   )
+}
+
+/** The review's lines, each a click from its record or from the work of the agent it came from. */
+function Lines({ lines, onOpen }: { lines: readonly ReceiptLine[]; onOpen: (line: ReceiptLine) => void }) {
+  return <ul>{lines.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this agent’s work'} onClick={() => onOpen(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul>
 }
 
 /** A dialog shown as a modal from the moment it mounts, so Esc and the backdrop work as expected. */

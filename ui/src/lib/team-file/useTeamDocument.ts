@@ -127,6 +127,7 @@ function edgeId(from: string, to: string): string {
 function withoutChecks(agent: AgentConfig): AgentConfig {
   const next: AgentConfig = { ...agent }
   delete next.checks
+  delete next.sendBack
   delete next.sendBackOnce
   return next
 }
@@ -723,7 +724,7 @@ export function useTeamDocument() {
       droppedEdges.forEach((edge) => modelRef.current?.removeEdge(edge.source, edge.target))
       idSet.forEach((id) => modelRef.current?.removeAgent(id))
       const orphanedChecks = remainingNodes.filter((node) => node.data.agent.checks && idSet.has(node.data.agent.checks)).map((node) => node.id)
-      orphanedChecks.forEach((id) => { modelRef.current?.setAgentField(id, 'checks', undefined); modelRef.current?.setAgentField(id, 'sendBackOnce', undefined) })
+      orphanedChecks.forEach((id) => { modelRef.current?.setAgentField(id, 'checks', undefined); modelRef.current?.setAgentField(id, 'sendBack', undefined); modelRef.current?.setAgentField(id, 'sendBackOnce', undefined) })
 
       let nextEntrypoint = entrypoint
       if (entrypoint !== null && idSet.has(entrypoint)) {
@@ -771,7 +772,7 @@ export function useTeamDocument() {
   /** Stop these agents being check steps: what they checked no longer hands them its work. */
   const clearChecks = useCallback((ids: readonly string[]) => {
     if (ids.length === 0) return
-    ids.forEach((id) => { modelRef.current?.setAgentField(id, 'checks', undefined); modelRef.current?.setAgentField(id, 'sendBackOnce', undefined) })
+    ids.forEach((id) => { modelRef.current?.setAgentField(id, 'checks', undefined); modelRef.current?.setAgentField(id, 'sendBack', undefined); modelRef.current?.setAgentField(id, 'sendBackOnce', undefined) })
     setNodes((current) => current.map((node) => (ids.includes(node.id) ? { ...node, data: { ...node.data, agent: withoutChecks(node.data.agent) } } : node)))
   }, [])
 
@@ -1125,7 +1126,7 @@ export function useTeamDocument() {
    * removed from the file rather than written as null.
    */
   const applyAgentFields = useCallback(
-    (id: string, fields: Partial<Pick<AgentConfig, 'name' | 'role' | 'model' | 'followsSuggestion' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'turnedOff' | 'allow' | 'from' | 'doneWhen' | 'checks' | 'sendBackOnce'>>) => {
+    (id: string, fields: Partial<Pick<AgentConfig, 'name' | 'role' | 'model' | 'followsSuggestion' | 'thinkingEffort' | 'spawn' | 'capabilities' | 'turnedOff' | 'allow' | 'from' | 'doneWhen' | 'checks' | 'sendBack' | 'sendBackOnce'>>) => {
       const target = nodes.find((node) => node.id === id)
       if (!target || target.data.agent.kind === 'operator') return
       captureHistory()
@@ -1367,14 +1368,14 @@ export function useTeamDocument() {
       captureHistory()
       modelRef.current?.addEdge(newEdge)
       setEdges((current) => [...current, edgeFromConfig(newEdge)])
-      // Work connected into a Checker that checks nothing yet is the work it checks, and a
-      // missed check goes back to it once (ADR 0062).
+      // Work connected into a Checker that checks nothing yet is the work it checks, and what it
+      // finds not met goes back to it (ADR 0062).
       const target = nodes.find((node) => node.id === connection.target)?.data.agent
       const source = nodes.find((node) => node.id === connection.source)?.data.agent
       if (target && source && source.kind !== 'operator' && !target.checks && isCheckerRole(target.role)) {
         const fields = checkStepFields(target, source)
         modelRef.current?.setAgentField(target.id, 'checks', fields.checks)
-        modelRef.current?.setAgentField(target.id, 'sendBackOnce', fields.sendBackOnce)
+        modelRef.current?.setAgentField(target.id, 'sendBack', fields.sendBack)
         if (fields.thinkingEffort) modelRef.current?.setAgentField(target.id, 'thinkingEffort', fields.thinkingEffort)
         setNodes((current) => current.map((node) => (node.id === target.id ? { ...node, data: { ...node.data, agent: { ...node.data.agent, ...fields } } } : node)))
       }

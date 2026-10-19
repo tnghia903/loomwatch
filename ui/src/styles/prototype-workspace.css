@@ -92,6 +92,9 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .delivery-review-findings ul { max-height:220px; overflow:auto; }
 .delivery-review-findings li { font-size:13px; line-height:1.5; color:var(--color-ink-2); }
 .delivery-review-findings li.tone-bad::before { content:"✗"; color:var(--color-alert); }
+/* An edit is not a problem: its list wears a plain dash, not the findings' "!". */
+.delivery-review-changes { margin-top:10px; }
+.receipt-checks.delivery-review-changes li::before { content:"–"; color:var(--color-ink-3); font-weight:400; }
 .delivery-response { border:1px solid var(--color-hairline); border-radius:7px; padding:28px; background:var(--color-panel); font-size:15px; line-height:1.65; white-space:normal; }
 .delivery-response h1 { font-family:var(--font-serif); font-size:39px; line-height:1.13; letter-spacing:-1px; font-weight:500; margin-top:0; padding-bottom:23px; border-bottom:1px solid var(--color-hairline); }
 .delivery-response h2,.delivery-response h3 { font-family:var(--font-serif); font-size:20px; font-weight:500; }

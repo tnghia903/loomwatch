@@ -217,12 +217,14 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
       })
     } else if (reply && line.replier !== null) {
       const back = reply.sentBackTo
-      const plain = reviewing && !back && reply.text.trim() === approval
+      // A check step's stop is decided like a review: approved as it is, or sent back.
+      const deciding = reviewing || Boolean(message.checkStop)
+      const plain = deciding && !back && reply.text.trim() === approval
       out.push({
         key: `${key}:reply`, item, part: 'reply', from: [line.replier],
         // An answer goes back to whoever asked; your review goes back where you sent it, or on.
         to: back ? [back] : reviewing ? passedOn.map((passed) => passed.to) : line.senders.slice(0, 1),
-        word: back ? 'sent back' : reviewing ? (plain ? 'approved' : 'approved, with a note') : message.kind === 'check' ? 'revised' : reply.asksBack ? 'asks back' : 'answer',
+        word: back ? 'sent back' : deciding ? (plain ? 'approved' : 'approved, with a note') : message.kind === 'check' ? 'revised' : reply.asksBack ? 'asks back' : 'answer',
         text: plain ? '' : reply.text, offsetMs: reply.offsetMs, ts: reply.ts,
       })
     } else if (message.state === 'pending' && line.receiver !== null && (ANSWERED.has(message.kind) || reviewing || message.kind === 'check')) {

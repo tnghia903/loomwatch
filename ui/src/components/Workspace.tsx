@@ -136,6 +136,7 @@ import { AskButton } from './ask/AskButton'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
+import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-file/sendBack'
 import { baseName } from '../lib/files/paths'
 import { keyStore } from '../lib/platform'
 
@@ -1389,15 +1390,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const inspectedUpdate = inspectedNode && !runView ? instructionUpdates.forAgent(inspectedNode.id) : null
   const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? inLibrary(capabilityInventory) : null, [inspectedNode, capabilityInventory])
   const { applyAgentFields } = doc
-  // A check step's panel says whose work it checks and holds its one switch (ADR 0062).
+  // A check step's panel says whose work it checks and how the work goes back (ADR 0062).
   const checkStepFor = (agent: AgentConfig) => {
     if (!agent.checks && !isCheckerRole(agent.role)) return undefined
     const checked = agent.checks ? doc.nodes.find((node) => node.id === agent.checks)?.data.agent : undefined
     return {
       checkedName: checked?.name,
       checkedHasDoneWhen: Boolean(checked?.doneWhen?.length),
-      sendBackOnce: Boolean(agent.sendBackOnce),
-      onSendBackOnce: (on: boolean) => applyAgentFields(agent.id, { sendBackOnce: on || undefined }),
+      sendBack: sendBackOf(agent),
+      onSendBack: (setting: SendBackSetting | null) => applyAgentFields(agent.id, sendBackFields(setting)),
     }
   }
   const inspectedEvidence: Evidence | null = inspectedEvidenceId ? projection.evidence.find((item) => item.id === inspectedEvidenceId) ?? null : null
