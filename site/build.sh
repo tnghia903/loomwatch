@@ -40,6 +40,9 @@ cp "$root"/site/social-card.jpg "$out/"
 # last changed.
 cp "$root"/site/robots.txt "$out/"
 "$root"/site/sitemap.sh "$out"
+# Google Search Console's proof that the site is ours: the google….html file it asked for, served at
+# the top of the site. Keep it there, or Google stops trusting the site's owner.
+cp "$root"/site/google*.html "$out/"
 cp "$root"/docs/assets/readme/*.png "$out/assets/readme/"
 # The app's own screenshots for the page, the crew in the cold open, and the agent figures, read
 # from the app so the page shows the same faces the app does.
