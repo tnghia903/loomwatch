@@ -7,7 +7,7 @@ import { clockTime } from '../../lib/chat/format'
 import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permissionRequests'
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
-import type { AskRefusal, PermissionOutcome, TeamMessage } from '../../lib/watch/messages'
+import { reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
 import { useAgentFaces } from '../../lib/chat/faces'
 import { AgentFace } from '../chat/AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
@@ -396,6 +396,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
               </p>
             )}
             {part === 'said' && message.context && <p><b>Context:</b> {message.context}</p>}
+            {part === 'said' && message.reached && mentions[0] && <p>{reachedLine(message.reached, name(mentions[0]))}</p>}
             {calls.length > 0 && (
               <details className="chat-calls">
                 <summary>{speaker ? name(speaker) : 'It'} made {calls.length === 1 ? 'one call' : `${calls.length} calls`} before answering</summary>

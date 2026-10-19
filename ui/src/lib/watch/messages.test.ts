@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { projectRun, type RunEvent } from './events'
+import { reachedLine } from './messages'
 import { permissionAsks } from '../runs/permissionRequests'
 
 const T0 = Date.parse('2026-10-05T09:00:00Z')
@@ -152,6 +153,24 @@ describe('messages between agents', () => {
       { kind: 'dispatch', to: 'helper', text: 'Collect three sources.', state: 'delivered' },
       { kind: 'handoff', to: 'writer', text: 'Write it up.', state: 'pending' },
     ])
+  })
+
+  it('says where handed-out work went: the open conversation, a separate copy, or a fresh start', () => {
+    seq = 0
+    const { messages } = projectRun([
+      bus(1, 'lead', 'a', 'dispatch', { agent: 'writer', task: 'Draft it.' }),
+      settled(2, 'lead', 'a', { accepted: true, agent: 'writer', mode: 'dispatch' }),
+      bus(3, 'lead', 'b', 'dispatch', { agent: 'writer', task: 'Fix the date.' }),
+      settled(4, 'lead', 'b', { accepted: true, agent: 'writer', mode: 'dispatch', continues: true }),
+      bus(5, 'lead', 'c', 'dispatch', { agent: 'writer', task: 'And the title.' }),
+      settled(6, 'lead', 'c', { accepted: true, agent: 'writer', mode: 'dispatch', fresh: 'busy' }),
+      bus(7, 'lead', 'd', 'handoff', { agent: 'checker', task: 'Check it.' }),
+      settled(8, 'lead', 'd', { accepted: true, agent: 'checker', mode: 'handoff', fresh: 'limit' }),
+    ])
+    expect(messages.map((message) => message.reached)).toEqual([undefined, 'continued', 'busy', 'limit'])
+    expect(reachedLine('continued', 'Writer')).toBe('Writer carried on in the conversation it already had in this run, so it remembered its earlier work.')
+    expect(reachedLine('busy', 'Writer')).toBe('Writer was still working, so a separate copy started: it saw only this message.')
+    expect(reachedLine('limit', 'Checker')).toContain('as many teammates as the team allows already held a conversation')
   })
 
   it('ignores a harness echo of a bus call and bus tools that carry no message', () => {

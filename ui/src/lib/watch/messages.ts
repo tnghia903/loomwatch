@@ -180,7 +180,16 @@ export interface TeamMessage {
   refused?: AskRefusal
   /** For a `check` message: the round and what it found. */
   check?: CheckExchange
+  /**
+   * For a `dispatch` or `handoff` in a team with no fixed order: where the work went.
+   * `continued` — into the conversation the teammate already had in this run (`continues` in the
+   * record); `busy` — to a separate copy, because the teammate was still working; `limit` — to a
+   * fresh start, because as many teammates as the team allows already held a conversation.
+   */
+  reached?: Reached
 }
+
+export type Reached = 'continued' | 'busy' | 'limit'
 
 /** Whether a check round found nothing missing: every item met, from a reply that could be read. */
 export function allMet(check: CheckExchange): boolean {
@@ -199,6 +208,13 @@ export function checkText(check: CheckExchange): string {
     return items.length ? [`**${heading}**`, ...items.map((item) => `- ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)].join('\n') : ''
   }
   return [check.problems ?? '', list('not_met', 'Not met'), list('not_sure', 'Not sure')].filter(Boolean).join('\n\n')
+}
+
+/** What a `dispatch` or `handoff` message's info says about where the work went, for `name`, its recipient. */
+export function reachedLine(reached: Reached, name: string): string {
+  if (reached === 'continued') return `${name} carried on in the conversation it already had in this run, so it remembered its earlier work.`
+  if (reached === 'busy') return `${name} was still working, so a separate copy started: it saw only this message.`
+  return `${name} started fresh and saw only this message: as many teammates as the team allows already held a conversation for this run.`
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
@@ -308,7 +324,12 @@ export class Correspondence {
     }
     // The bus accepts a name where the id belongs and answers with the id it resolved.
     if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
-    if (message.kind !== 'ask') { message.state = 'delivered'; return }
+    if (message.kind !== 'ask') {
+      message.state = 'delivered'
+      const reached = output.continues === true ? 'continued' : output.fresh === 'busy' || output.fresh === 'limit' ? output.fresh : null
+      if (reached) message.reached = reached
+      return
+    }
     message.state = 'answered'
     if (output.clarifies === true) message.clarifies = true
     message.reply = {
