@@ -334,7 +334,9 @@ fn body(request: &ChatRequest<'_>, limited: bool) -> Value {
     {
         body.insert("max_tool_calls".into(), json!(steps));
     }
+    // `OpenRouter` has no `ultra`, so it goes as its highest, `max`.
     if let Some(effort) = request.effort {
+        let effort = if effort == "ultra" { "max" } else { effort };
         body.insert("reasoning".into(), json!({"effort": effort}));
     }
     // Anthropic's models cache a prompt only when asked; the others cache on their own.
@@ -910,6 +912,20 @@ mod tests {
 
     fn body_for_model(model: &str) -> Value {
         body(&request(&[], &[], model), true)
+    }
+
+    /// `OpenRouter` has no `ultra`, so an agent set to it thinks at `max`; the rest go as set.
+    #[test]
+    fn ultra_goes_to_openrouter_as_max() {
+        let at = |effort| {
+            let request = ChatRequest {
+                effort: Some(effort),
+                ..request(&[], &[], "openai/gpt-6.1-sol")
+            };
+            body(&request, true)["reasoning"].clone()
+        };
+        assert_eq!(at("ultra"), json!({"effort": "max"}));
+        assert_eq!(at("xhigh"), json!({"effort": "xhigh"}));
     }
 
     /// Every model `OpenRouter` routes to gets the same limits, as the team file sets them; a model

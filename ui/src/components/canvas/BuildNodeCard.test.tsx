@@ -235,6 +235,15 @@ describe('BuildAgentCard at each depth', () => {
     expect(document.querySelector('.depth-story-line')).toBeNull()
   })
 
+  it('names an effort in plain words at Trace, and leaves the model’s default out', () => {
+    view.zoom = 1.4
+    renderCard({ ...nodeData, agent: { ...nodeData.agent, model: 'sonnet', thinkingEffort: 'xhigh' } })
+    expect(facts().Model).toBe('sonnet · extra high effort')
+    cleanup()
+    renderCard({ ...nodeData, agent: { ...nodeData.agent, model: 'sonnet[default]', thinkingEffort: undefined } })
+    expect(facts().Model).toBe('sonnet')
+  })
+
   it('says plainly when an agent is allowed and given nothing extra', () => {
     view.zoom = 1.4
     renderCard({ ...nodeData, agent: { ...nodeData.agent, model: undefined } })

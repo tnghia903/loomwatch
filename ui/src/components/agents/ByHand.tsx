@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type React
 import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
+import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
 import { modelNameFromId } from '../../lib/ai/modelIds'
+import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { useModels } from '../../lib/ai/useModels'
 import { uniqueLabel } from '../../lib/composer-layout/types'
 import { listNames, middleTruncate } from '../../lib/format'
@@ -163,9 +165,11 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const { catalog } = useModels()
   const listed = catalog?.models.find((item) => item.id === draft.model)
   const model = listed ? shortName(listed) : modelNameFromId(draft.model)
-  // How hard it thinks, when it is set and the model reasons (EffortSlider says the rest).
-  const reasons = listed ? listed.reasoning : true
-  const effort = draft.effort && reasons ? { name: `${draft.effort.charAt(0).toUpperCase()}${draft.effort.slice(1)}` } : null
+  // How hard it thinks, when it is set and the model reasons: where it runs on the model's own
+  // efforts, as the slider shows it (EffortSlider says the rest).
+  const ai = useAiStatus()
+  const runsAt = placeEffort(draft.effort, modelEfforts(draft.model, ai, catalog)).runs
+  const effort = runsAt ? { name: effortWord(runsAt) } : null
   const thinks = effort ? `${model} · ${effort.name.toLowerCase()} effort` : model
   const asked = askedKey(record)
   // The tools connected in LoomWatch (ADR 0069): the ones it is given, and the ones it could be.

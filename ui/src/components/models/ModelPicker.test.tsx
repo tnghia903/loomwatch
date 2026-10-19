@@ -144,6 +144,12 @@ describe('ModelPicker', () => {
     const ofOpenRouter = screen.getByRole('group', { name: 'OpenRouter (pay per use)' })
     expect(within(ofOpenRouter).queryByRole('option')).toBeNull()
     expect(within(ofOpenRouter).getByRole('link', { name: /Connect an OpenRouter key/ })).toHaveAttribute('href', '/connections')
+    // Each section is headed by its provider's own logo, so the three tell apart at a glance.
+    const headMark = (group: HTMLElement) => group.querySelector('.model-source-head .maker-mark svg')?.innerHTML
+    const marks = [ofPlan, screen.getByRole('group', { name: 'Your Claude API credit' }), ofOpenRouter].map(headMark)
+    expect(marks.every(Boolean)).toBe(true)
+    expect(new Set(marks).size).toBe(3)
+    expect(marks[0]).toBe(ofPlan.querySelector('.model-row .maker-mark svg')?.innerHTML)
     fireEvent.click(within(suggested).getByRole('option', { name: /Claude Opus 5\.5/ }))
     expect(onChange).toHaveBeenCalledWith(credit.id, true)
   })

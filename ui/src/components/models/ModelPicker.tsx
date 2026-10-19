@@ -2,7 +2,7 @@ import { Check, ChevronDown, Plug, Sparkles } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { type Catalog, type Model, contextSize, price, shortName } from '../../lib/ai/client'
-import { makerOf } from '../../lib/ai/makers'
+import { makerOf, sourceMaker } from '../../lib/ai/makers'
 import { type ModelSource, type ModelTier, OFFLINE_MODEL, SOURCES, coveringPlan, modelForTier, modelNameFromId, openRouterEquivalent, parseModelRef, tierModel } from '../../lib/ai/modelIds'
 import { useSetupReading } from '../../lib/ai/reading'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
@@ -184,7 +184,14 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
       if (rows.length === 0) return
       const next = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length
       setActiveIndex(next)
-      document.getElementById(optionId(next))?.scrollIntoView?.({ block: 'nearest' })
+      const row = document.getElementById(optionId(next))
+      row?.scrollIntoView?.({ block: 'nearest' })
+      // A section's heading stays at the top of the list, so a row scrolled to the top would sit
+      // under it: scroll it out from under the heading.
+      const head = row?.closest('.model-source-group')?.querySelector('.model-source-head')
+      const list = row?.closest('.model-list')
+      const covered = head && row ? head.getBoundingClientRect().bottom - row.getBoundingClientRect().top : 0
+      if (list && covered > 0) list.scrollTop -= covered
       return
     }
     if (event.key === 'Enter') {
@@ -243,7 +250,8 @@ export function ModelChoices({ value, suggestFor, follows, onPick }: { value: st
           {query ? found.map((model, place) => row(model, place)) : sections.map((section) => (
             <div key={section.source} className={`model-group model-source-group ${section.source}`} role="group" id={`${listId}-${section.source}`} aria-labelledby={`${listId}-${section.source}-head`}>
               <div className="model-source-head">
-                <p className="model-group-head t-micro" id={`${listId}-${section.source}-head`}>{SOURCE_INFO[section.source].heading}</p>
+                <MakerMark maker={sourceMaker(section.source)} />
+                <p className="model-source-title t-body-m" id={`${listId}-${section.source}-head`}>{SOURCE_INFO[section.source].heading}</p>
                 <p className="t-meta model-source-cost">{SOURCE_INFO[section.source].cost}</p>
               </div>
               {section.live

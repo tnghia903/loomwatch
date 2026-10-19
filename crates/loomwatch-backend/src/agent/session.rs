@@ -1274,8 +1274,9 @@ pub(super) fn today_line(time_zone: Option<&str>, now: chrono::DateTime<chrono::
     )
 }
 
-/// The provider's name for a team file's effort. `default` leaves it to the model, and the
-/// efforts `OpenRouter` doesn't know are mapped to the nearest one it does.
+/// The provider's name for a team file's effort. `default` leaves it to the model. Each provider
+/// moves an effort it doesn't take to the nearest one it does, so `ultra` reaches the `ChatGPT`
+/// plan's models that take it, and `OpenRouter` and Claude get `max`.
 fn provider_effort(effort: Option<&str>) -> Option<&'static str> {
     match effort?.trim().to_ascii_lowercase().as_str() {
         "none" => Some("none"),
@@ -1284,7 +1285,8 @@ fn provider_effort(effort: Option<&str>) -> Option<&'static str> {
         "medium" => Some("medium"),
         "high" => Some("high"),
         "xhigh" => Some("xhigh"),
-        "max" | "ultra" => Some("max"),
+        "max" => Some("max"),
+        "ultra" => Some("ultra"),
         _ => None,
     }
 }
@@ -1330,5 +1332,25 @@ impl DeltaSink for Streaming<'_> {
                 .await
                 .map_err(|error| CallError::Failed(AgentError::Record(error)))
         })
+    }
+}
+
+#[cfg(test)]
+mod effort_tests {
+    use super::provider_effort;
+
+    /// `ultra` goes on to the provider, which knows whether its model takes it: the `ChatGPT` plan's
+    /// biggest models do. `default` and a word no provider knows leave it to the model.
+    #[test]
+    fn every_effort_reaches_the_provider_as_set() {
+        for effort in [
+            "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+        ] {
+            assert_eq!(provider_effort(Some(effort)), Some(effort));
+        }
+        assert_eq!(provider_effort(Some(" Ultra ")), Some("ultra"));
+        assert_eq!(provider_effort(Some("default")), None);
+        assert_eq!(provider_effort(Some("turbo")), None);
+        assert_eq!(provider_effort(None), None);
     }
 }

@@ -10,6 +10,7 @@
 //
 // Pure and framework-free like agentPlace.ts, so every rule is testable without a canvas.
 
+import { type ModelEfforts, effortWord, modelEfforts, placeEffort } from '../ai/efforts'
 import { OVERTHINKING_EFFORTS, canonicalModel, makerSlug, modelForJob, modelForTier, modelNameFromId, parseModelRef, tierOfModel } from '../ai/modelIds'
 import { ROLE_PRESETS, type RolePreset } from '../library/roles'
 import type { TeamUsage } from './runLessons'
@@ -34,6 +35,8 @@ export interface CheckupInput {
   modelNames?: ReadonlyMap<string, string>
   /** Where the team's tokens went in its recent runs (`teamUsage`), quoted beside a tier finding. */
   usage?: TeamUsage | null
+  /** The efforts each model takes (`modelEfforts`), once its source has said; absent, its source's usual ones. */
+  efforts?: (model: string) => ModelEfforts
 }
 
 export type CheckupRule =
@@ -264,7 +267,7 @@ function shareOfTeam(usage: TeamUsage | null | undefined, agentId: string): stri
   return ` In ${usage.runs === 1 ? 'the last run' : `the last ${usage.runs} runs`} it used ${Math.round(mine.share * 100)}% of the team’s tokens.`
 }
 
-export function checkup({ agents, edges, entrypoint, responder, scheduled = false, modelNames, usage }: CheckupInput): CheckupFinding[] {
+export function checkup({ agents, edges, entrypoint, responder, scheduled = false, modelNames, usage, efforts }: CheckupInput): CheckupFinding[] {
   const findings: CheckupFinding[] = []
   const workers = agents.filter((agent) => agent.kind !== 'operator')
   const byId = new Map(agents.map((agent) => [agent.id, agent]))
@@ -333,12 +336,17 @@ export function checkup({ agents, edges, entrypoint, responder, scheduled = fals
       })
     }
 
-    // Before the instructions checks: an empty or short role does not make max effort cheaper.
-    if (agent.thinkingEffort && OVERTHINKING_EFFORTS.has(agent.thinkingEffort)) {
+    // Before the instructions checks: an empty or short role does not make max effort cheaper. The
+    // effort is the one it runs at on its model, as the effort slider says it.
+    const model = canonicalModel(agent.model)
+    const runsAt = placeEffort(agent.thinkingEffort, efforts?.(model) ?? modelEfforts(model, null, null)).runs
+    if (OVERTHINKING_EFFORTS.has(runsAt)) {
       add({
         rule: 'overthinking', severity: 'improve', agentId: agent.id,
-        title: `${agent.name} thinks at the highest effort on every run`,
-        why: 'The highest setting often overthinks, and thinking is paid for like writing. High is enough for almost any job.',
+        title: `${agent.name} thinks at ${effortWord(runsAt).toLowerCase()} effort on every run`,
+        why: parseModelRef(model).source === 'chatgpt'
+          ? 'An effort above high often overthinks, and more thinking uses more of your ChatGPT plan. High is enough for almost any job.'
+          : 'An effort above high often overthinks, and thinking is paid for like writing. High is enough for almost any job.',
         fix: { label: 'Use high effort', change: { kind: 'effort', agentId: agent.id, value: 'high' } },
       })
     }

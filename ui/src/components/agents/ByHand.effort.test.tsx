@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetModels } from '../../lib/ai/useModels'
 import { BLANK_DRAFT, type AgentDraft } from '../../lib/library/draft'
 import { ByHand } from './ByHand'
@@ -59,6 +60,16 @@ describe('By hand: its model and how hard it thinks', () => {
     cleanup()
     renderByHand({ effort: '' })
     expect(screen.getByRole('slider', { name: 'Thinking effort' })).toHaveAccessibleDescription(/Left to the model/)
+  })
+
+  it('says the effort it runs at on its model: Ultra on a model that tops out at Max is Max', async () => {
+    forgetKeyStatus()
+    const ai = { openrouter: { connected: true }, anthropic: { connected: false }, chatgpt: { available: true, connected: true, planUse: true, models: [{ slug: 'gpt-6-luna', name: 'GPT-6-Luna', contextLength: 272_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] }] } }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === '/api/ai' ? ai : catalog), { headers: { 'Content-Type': 'application/json' } })))
+    renderByHand({ model: 'chatgpt:gpt-6-luna', effort: 'ultra' })
+    await waitFor(() => expect(document.body.textContent).toMatch(/Luna · max/))
+    expect(document.body.textContent).not.toMatch(/Luna · ultra/)
+    forgetKeyStatus()
   })
 
   it('offers no effort on a model that doesn’t reason separately', async () => {

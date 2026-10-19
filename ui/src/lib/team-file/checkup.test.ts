@@ -201,6 +201,25 @@ describe('checkup', () => {
     expect(run({ agents: [agent('writer', preset('writer'))] })).toEqual([])
   })
 
+  const overthinking = (findings: CheckupFinding[]) => findings.find((finding) => finding.rule === 'overthinking')
+
+  it('names the effort an agent runs at on its model, in plain words, and in plan words on the plan', () => {
+    const extra = overthinking(run({ agents: [agent('writer', preset('writer'), { thinkingEffort: 'xhigh' })] }))
+    expect(extra?.title).toBe('Writer thinks at extra high effort on every run')
+    expect(extra?.why).toMatch(/thinking is paid for like writing/)
+    const plan = overthinking(run({ agents: [agent('writer', preset('writer'), { model: 'chatgpt:gpt-6-luna', thinkingEffort: 'max' })] }))
+    expect(plan?.why).toBe('An effort above high often overthinks, and more thinking uses more of your ChatGPT plan. High is enough for almost any job.')
+  })
+
+  it('judges the effort a model runs at, not the one saved', () => {
+    const levels = (top: string[]) => () => ({ levels: ['low', 'medium', 'high', ...top], listed: true, reads: { ultra: 'max' }, unlisted: [] })
+    // A model that tops out at high runs a saved max at high: nothing to suggest.
+    expect(overthinking(run({ agents: [agent('writer', preset('writer'), { thinkingEffort: 'max' })], efforts: levels([]) }))).toBeUndefined()
+    // Ultra on a model that tops out at max runs at max, and is named so.
+    const max = overthinking(run({ agents: [agent('writer', preset('writer'), { thinkingEffort: 'ultra' })], efforts: levels(['xhigh', 'max']) }))
+    expect(max?.title).toBe('Writer thinks at max effort on every run')
+  })
+
   it('never calls two different built-in jobs the same job', () => {
     const team = ROLE_PRESETS.map((job) => agent(job.id, job.role))
     expect(run({ agents: team }).filter((finding) => finding.rule === 'same-job')).toEqual([])

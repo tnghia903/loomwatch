@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ExternalLink, History, MessagesSquare, Trash2, Wrench } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
+import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { useModels } from '../../lib/ai/useModels'
@@ -100,7 +101,9 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const { catalog } = useModels()
   const listed = catalog?.models.find((model) => model.id === draft.model)
   const modelName = listed ? shortName(listed) : modelNameFromId(draft.model)
-  const effortName = draft.effort ? `${draft.effort.charAt(0).toUpperCase()}${draft.effort.slice(1)}` : undefined
+  // What it runs at on this model, as the slider and the bench say it.
+  const runsAt = placeEffort(draft.effort, modelEfforts(draft.model, ai, catalog)).runs
+  const effortName = runsAt ? effortWord(runsAt) : undefined
 
   const { uses } = useAgentUses()
   const mine = (uses ?? []).filter((use) => saved && use.agent === saved.id)
