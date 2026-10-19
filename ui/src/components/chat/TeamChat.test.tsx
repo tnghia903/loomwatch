@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PASS_BEAT_MS } from '../../lib/chat/baton'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import type { RunRecord } from '../../lib/runs/client'
+import { FileReaderContext } from '../../lib/files/reader'
 import type { TeamMessage } from '../../lib/watch/messages'
 import { ChatComposer } from './ChatComposer'
 import { TeamChat } from './TeamChat'
@@ -1036,5 +1037,51 @@ describe('replying to something said', () => {
     expect(within(log).getAllByRole('button', { name: "Replying to Researcher's handover to Writer. Show it" })).toHaveLength(3)
     fireEvent.click(within(log).getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { replyTo: quoted } }))
+  })
+})
+
+// ADR 0077: a part of a file marked in the reader beside the chat is asked about here, as a reply.
+describe('asking about a part of a file', () => {
+  const part = { runId: 'run-1', messageId: 'passage:abc', from: 'writer', to: null, kind: 'passage' as const, text: 'Sales grew 12% in Q3.', file: '/w/market.md' }
+
+  it('Ask puts the part in the box as what the message is about, addressed to the agent who made it', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    const onPassages = vi.fn()
+    renderChat({ ask: { reply: part, at: 1 }, onPassages })
+    await waitFor(() => expect(box()).toHaveValue('@Writer '))
+    expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toHaveTextContent('Sales grew 12% in Q3.')
+    expect(box()).toHaveAttribute('placeholder', 'Ask Writer about this part…')
+    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], 'Sales grew 12% in Q3.'))
+    // Letting go of it lets go of the part the reader lights.
+    fireEvent.keyDown(box(), { key: 'Escape' })
+    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], null))
+  })
+
+  it('Explain sends at once, to that agent, with the part and its file', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify({ error: 'later' }), { status: 500 })
+    renderChat({ ask: { reply: part, words: 'Explain this part in plain words.', at: 2 } })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Writer Explain this part in plain words.', to: { kind: 'agent', agent: 'writer' }, replyTo: part } }))
+  })
+
+  it('says which parts were asked about, from what the chat holds', async () => {
+    page = [{ kind: 'work', run: run({ runId: 'run-2' }), request: message({ id: 'm-2', runId: 'run-2', text: '@Writer why?', replyTo: part }), notes: [] }]
+    const onPassages = vi.fn()
+    renderChat({ onPassages })
+    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([{ file: '/w/market.md', text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2' }], null))
+    // The quote under the message says what it asked about.
+    expect(await screen.findByLabelText('Replying to a part of market.md from Writer')).toHaveTextContent('Sales grew 12% in Q3.')
+  })
+
+  it('the quote of a part opens its file in the reader beside the chat', async () => {
+    page = [{ kind: 'work', run: run({ runId: 'run-2' }), request: message({ id: 'm-2', runId: 'run-2', text: '@Writer why?', replyTo: part }), notes: [] }]
+    const open = vi.fn()
+    const props = {
+      teamPath: 'news.yaml', teamName: 'News desk', agents, team, steps: 3, suggestion: null, detailsRunId: null, blocked: null,
+      prepare: vi.fn(async () => ({ ok: true as const, revision: 'sha256:1' })), onDetails: vi.fn(), onTeamReview: vi.fn(), onStale: vi.fn(), announce: vi.fn(), onOpenFinding: vi.fn(), onOpenAnswer: vi.fn(),
+    }
+    render(<FileReaderContext.Provider value={open}><TeamChat {...props} /></FileReaderContext.Provider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Replying to a part of market.md from Writer. Show it' }))
+    expect(open).toHaveBeenCalledWith({ path: '/w/market.md', runId: 'run-1', from: 'writer' })
   })
 })

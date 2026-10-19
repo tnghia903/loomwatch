@@ -1,10 +1,12 @@
 import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { replyOf } from '../../lib/chat/reply'
+import { askedPassages, type AskedPassage } from '../../lib/files/passage'
+import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
@@ -75,6 +77,13 @@ interface TeamChatProps {
   startTeam?: boolean
   /** The box has taken `startTeam`, so coming back to the chat later does not take it again. */
   onStartTeamTaken?: () => void
+  /**
+   * A part of a file marked in the reader beside the chat (ADR 0077): the box takes it as a reply
+   * to write about, or — with `words` — it is sent at once. `at` tells one ask from the next.
+   */
+  ask?: { reply: ReplyTo; words?: string; at: number } | null
+  /** The parts of files asked about in this chat, and the one in the box now, whenever they change. */
+  onPassages?: (asked: AskedPassage[], asking: string | null) => void
 }
 
 /** Sending one message: as a retry of a pending one, and as a reply to something said. */
@@ -96,7 +105,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, spendLimit, onNewestRun, startTeam = false, onStartTeamTaken }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, spendLimit, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Run team means start the team. Without an @, what is written is a note that starts nothing,
   // which is not what someone who pressed Run team expects, so the box it opens starts with @team.
@@ -408,16 +417,45 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     if (author && !soloAgent) setDraft((text) => withMention(text, author, agents))
     setMentioned((count) => count + 1)
   }
+  // A part marked in the reader: written about in the box, as a reply is, or sent at once with
+  // the words its button says ("Explain"), to the agent it is asked of. A box that cannot send
+  // shows why with the part in it.
+  const asked = useRef<number | null>(null)
+  const takeAsk = useRef<(next: NonNullable<typeof ask>) => void>(() => {})
+  useEffect(() => {
+    takeAsk.current = (next) => {
+      const author = members.find((agent) => agent.id === next.reply.from)
+      if (!next.words || blocked || !author) { startReply(next.reply); return }
+      const text = soloAgent ? next.words : withMention(next.words, author, agents)
+      void send(text, { kind: 'agent', agent: author.id }, false, undefined, replyOf(next.reply))
+    }
+  })
+  useEffect(() => {
+    if (!ask || asked.current === ask.at) return
+    asked.current = ask.at
+    takeAsk.current(ask)
+  }, [ask])
+  // The parts of files asked about here, for the reader to light; compared by what they say, so a
+  // page of the chat read again changes nothing.
+  const passagesSaid = useMemo(() => JSON.stringify(askedPassages(chat.items, chat.pending)), [chat.items, chat.pending])
+  const askingNow = replyTo?.kind === 'passage' ? replyTo.text : null
+  useEffect(() => {
+    onPassages?.(JSON.parse(passagesSaid) as AskedPassage[], askingNow)
+  }, [passagesSaid, askingNow, onPassages])
   const address = (id: string) => {
     const agent = members.find((member) => member.id === id)
     if (!agent) return
     setDraft((text) => withMention(text, agent, agents))
     setMentioned((count) => count + 1)
   }
-  // A reply's quote shows what it replied to, when that piece is in the chat.
-  const showReplied = (reply: ReplyTo) => (reply.runId && runs.has(reply.runId)
-    ? () => setShown({ runId: reply.runId as string, id: reply.messageId, at: Date.now() })
-    : undefined)
+  // A reply's quote shows what it replied to, when that piece is in the chat; a part of a file
+  // opens the file in the reader beside the chat, where the screen has one (ADR 0077).
+  const readHere = useContext(FileReaderContext)
+  const showReplied = (reply: ReplyTo) => (reply.kind === 'passage'
+    ? (reply.file && readHere ? () => readHere({ path: reply.file as string, runId: reply.runId, from: reply.from }) : undefined)
+    : reply.runId && runs.has(reply.runId)
+      ? () => setShown({ runId: reply.runId as string, id: reply.messageId, at: Date.now() })
+      : undefined)
   const name = (id: string) => team.names.get(id) ?? id
   const [rosterOpen, setRosterOpen] = useState(readRosterOpen)
   const rosterId = useId()

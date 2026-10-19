@@ -68,7 +68,7 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { MessageSquareText, MessagesSquare, Network, UserRound, X } from 'lucide-react'
+import { BookOpenText, MessageSquareText, MessagesSquare, Network, UserRound, X } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
@@ -82,9 +82,11 @@ import { LifecycleStrip } from './run/LifecycleStrip'
 import { ProvenancePanel } from './run/ProvenancePanel'
 import { DeliveryLane } from './run/DeliveryLane'
 import { AnswerDocument } from './chat/AnswerDocument'
+import { FileReader } from './reader/FileReader'
 import { ChatResizer } from './chat/ChatResizer'
 import { TeamChat, type Prepared } from './chat/TeamChat'
 import type { TeamView } from './chat/WorkPiece'
+import type { ReplyTo } from '../lib/chat/client'
 import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
 import { isDocument } from '../lib/chat/document'
 import type { ReceiptLine } from '../lib/story/receipt'
@@ -137,7 +139,9 @@ import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
 import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-file/sendBack'
+import type { AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
+import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
 const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default: module.AskPanel })))
@@ -1645,9 +1649,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // record. A long answer is the document; a short one is read in the chat and has no Answer tab.
   // `null` is the pane's own choice: following the newest work, a finished document is what you
   // would read next, while work in progress shows its record.
-  const [paneTab, setPaneTab] = useState<'answer' | 'details' | null>(null)
+  const [paneTab, setPaneTab] = useState<'answer' | 'details' | 'file' | null>(null)
   const paneDocument = useMemo(() => detailsOpen && isDocument(responseText), [detailsOpen, responseText])
-  const shownTab = paneDocument && (paneTab ?? (detailsFollow && session.terminal ? 'answer' : 'details')) === 'answer' ? 'answer' : 'details'
+  // ADR 0077: a file an answer names, read in the pane as a tab of its own until it is closed, so
+  // following newer work changes the Answer and Details tabs and leaves the file where it is.
+  const [reading, setReading] = useState<FileToRead | null>(null)
+  const shownTab = paneTab === 'file' && reading ? 'file' : paneDocument && (paneTab ?? (detailsFollow && session.terminal ? 'answer' : 'details')) === 'answer' ? 'answer' : 'details'
   const closeDetails = useCallback(() => { setDetailsFollow(false); closeRun(); setRunSetup(true) }, [closeRun])
   const openDetails = useCallback((runId: string) => {
     if (detailsOpen && activeRunId === runId && shownTab === 'details') { closeDetails(); return }
@@ -1661,15 +1668,41 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     setPaneTab('answer')
     if (activeRunId !== runId || !detailsOpen) showRun(runId)
   }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun])
+  const keepFile = (tab: 'answer' | 'details' | 'file' | null) => (tab === 'file' ? tab : null)
   const followNewest = useCallback((runId: string | null) => {
     setNewestPiece(runId)
-    if (runId && detailsFollow && wide && runId !== activeRunId) { setPaneTab(null); showRun(runId) }
+    if (runId && detailsFollow && wide && runId !== activeRunId) { setPaneTab(keepFile); showRun(runId) }
   }, [detailsFollow, wide, activeRunId, showRun])
   const followStarted = useCallback((runId: string) => {
     setDetailsFollow(true)
-    setPaneTab(null)
+    setPaneTab(keepFile)
     if (wide) showRun(runId)
   }, [wide, showRun])
+  const readHere = useCallback((file: FileToRead) => {
+    setReading(file)
+    setPaneTab('file')
+    const runId = file.runId ?? activeRunId ?? newestPiece
+    if (runId && (runId !== activeRunId || !detailsOpen)) {
+      setDetailsFollow(runId === newestPiece)
+      showRun(runId)
+    }
+  }, [activeRunId, newestPiece, detailsOpen, showRun])
+  const closeFile = useCallback(() => { setReading(null); setPaneTab(null) }, [])
+  // What is marked in the file goes to the chat; on a narrow screen the pane covers the chat, so it
+  // steps aside for the message box and the file waits in its tab.
+  const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; at: number } | null>(null)
+  const askInChat = useCallback((reply: ReplyTo, words?: string) => {
+    setChatAsk({ reply, words, at: Date.now() })
+    if (!wide && !words) closeDetails()
+  }, [wide, closeDetails])
+  const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null }>({ asked: [], asking: null })
+  const takePassages = useCallback((asked: AskedPassage[], asking: string | null) => setPassages({ asked, asking }), [])
+  const showAsked = useCallback((passage: AskedPassage) => {
+    if (passage.runId) setChatReveal({ runId: passage.runId, id: `answer:${passage.runId}`, at: Date.now() })
+  }, [])
+  // Files the answer in the pane names are read and asked about as its responder's work.
+  const answerResponder = record?.responder ?? null
+  const answerOrigin = useMemo(() => (activeRunId && answerResponder ? { runId: activeRunId, from: answerResponder } : null), [activeRunId, answerResponder])
   const allowAlways = useCallback((agentId: string, what: AlwaysAllowed) => {
     const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
     const name = agent?.name ?? agentId
@@ -2517,7 +2550,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {/* ADR 0068: the run, or an agent, used what it may spend, and waits for you. */}
         {runView && !deliveryShown && record && (record.spendStops?.length ?? 0) > 0 && <SpendStopCard run={record} />}
         {deliveryShown ? (
-          <>
+          <FileReaderContext.Provider value={readHere}>
           <TeamChat
             teamPath={doc.path}
             teamName={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')}
@@ -2544,23 +2577,38 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onOpenFinding={openFinding}
             startTeam={startTeam}
             onStartTeamTaken={startTeamTaken}
+            ask={chatAsk}
+            onPassages={takePassages}
           />
           {detailsOpen && wide && <ChatResizer width={chatWidth} onResize={setChatWidth} />}
           {detailsOpen && (
             <aside className="tc-details" aria-label="Details of this piece of work">
               <header className="tc-details-head">
-                {paneDocument ? (
+                {paneDocument || reading ? (
                   <div className="tc-pane-tabs" role="tablist" aria-label="Show">
-                    <button type="button" role="tab" id="tc-pane-answer" aria-selected={shownTab === 'answer'} aria-controls="tc-pane-body" onClick={() => setPaneTab('answer')}>Answer</button>
+                    {paneDocument && <button type="button" role="tab" id="tc-pane-answer" aria-selected={shownTab === 'answer'} aria-controls="tc-pane-body" onClick={() => setPaneTab('answer')}>Answer</button>}
                     <button type="button" role="tab" id="tc-pane-details" aria-selected={shownTab === 'details'} aria-controls="tc-pane-body" onClick={() => setPaneTab('details')}>Details</button>
+                    {reading && (
+                      <span className="tc-pane-file">
+                        <button type="button" role="tab" id="tc-pane-file" aria-selected={shownTab === 'file'} aria-controls="tc-pane-body" onClick={() => setPaneTab('file')} title={reading.path}>
+                          <BookOpenText size={13} aria-hidden="true" /><span>{baseName(reading.path)}</span>
+                        </button>
+                        <button type="button" className="tc-pane-file-close" onClick={closeFile} aria-label={`Close ${baseName(reading.path)}`} title="Close"><X size={11} aria-hidden="true" /></button>
+                      </span>
+                    )}
                   </div>
                 ) : <span className="tc-pane-title">Details</span>}
-                <h2>{record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
-                <button type="button" className="btn btn-icon" onClick={closeDetails} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
+                <h2>{shownTab === 'file' ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
+                <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setReading(null) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>
-              <div className="tc-details-body" id="tc-pane-body" role={paneDocument ? 'tabpanel' : undefined} aria-labelledby={paneDocument ? `tc-pane-${shownTab}` : undefined}>
-                {shownTab === 'answer' ? (
-                  <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} />
+              <div className="tc-details-body" id="tc-pane-body" role={paneDocument || reading ? 'tabpanel' : undefined} aria-labelledby={paneDocument || reading ? `tc-pane-${shownTab}` : undefined}>
+                {shownTab === 'file' && reading ? (
+                  <FileReader key={reading.path} file={reading} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1}
+                    onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} onShowAsked={showAsked} />
+                ) : shownTab === 'answer' ? (
+                  <FileOriginContext.Provider value={answerOrigin}>
+                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} />
+                  </FileOriginContext.Provider>
                 ) : session.loading ? (
                   // The record is shown once it is read whole, so it opens as it ended rather than replaying.
                   <p className="tc-loading" role="status">Reading the run…</p>
@@ -2596,7 +2644,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               </div>
             </aside>
           )}
-          </>
+          </FileReaderContext.Provider>
         ) : (
         <div ref={canvasRef} role="application" aria-label={runView ? 'Run graph' : 'Team canvas'} className="lw-canvas" data-depth={depth}>
           <ReactFlow

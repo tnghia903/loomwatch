@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
 
+import { FileOriginContext, FileReaderContext } from '../../lib/files/reader'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileCard } from './FileCard'
 
@@ -101,5 +103,41 @@ describe('files named in a reply', () => {
     render(<MarkdownRenderer>{'Wrote `/teams/out/build.sh`.'}</MarkdownRenderer>)
     fireEvent.click(await screen.findByRole('button', { name: 'Show build.sh (SH file)' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/files/open', expect.objectContaining({ body: JSON.stringify({ path: '/teams/out/build.sh', reveal: true }) })))
+  })
+})
+
+// ADR 0077: where the screen has a reader beside the chat, a file is read there first.
+describe('with a reader beside the chat', () => {
+  const beside = (children: ReactNode, open = vi.fn()) => ({
+    open,
+    ...render(<FileReaderContext.Provider value={open}><FileOriginContext.Provider value={{ runId: 'run-1', from: 'researcher' }}>{children}</FileOriginContext.Provider></FileReaderContext.Provider>),
+  })
+
+  it('Read opens the card’s file there, to ask the agent whose workspace holds it; its own app is still a click away', async () => {
+    const { open } = beside(<FileCard path={REPORT} compact agents={[{ id: 'writer', name: 'Writer' }]} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Read design-report.docx here' }))
+    expect(open).toHaveBeenCalledWith({ path: REPORT, runId: 'run-1', from: 'writer' })
+    fireEvent.click(screen.getByRole('button', { name: 'Open design-report.docx in its own app' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/files/open', expect.objectContaining({ body: JSON.stringify({ path: REPORT, reveal: false }) })))
+  })
+
+  it('a chip in a sentence reads its file there, to ask the agent whose answer named it', async () => {
+    const { open } = beside(<MarkdownRenderer>{`See \`${REPORT}\`.`}</MarkdownRenderer>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Read design-report.docx (Word document)' }))
+    expect(open).toHaveBeenCalledWith({ path: REPORT, runId: 'run-1', from: 'researcher' })
+  })
+
+  it('a kind of file the reader does not read still opens in its own app', async () => {
+    stat = (path) => respond(200, facts({ path, name: 'bundle.zip', kind: 'archive' }))
+    beside(<FileCard path="/teams/out/bundle.zip" compact />)
+    expect(await screen.findByRole('button', { name: 'Open bundle.zip' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /^Read/ })).toBeNull()
+  })
+
+  it('a missing file is not offered to read', async () => {
+    stat = () => respond(200, facts({ exists: false, sizeBytes: null, modifiedAt: null, folder: null }))
+    beside(<FileCard path={REPORT} compact />)
+    expect(await screen.findByText('Not on this computer any more')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Read/ })).toBeNull()
   })
 })

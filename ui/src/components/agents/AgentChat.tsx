@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
+import { FileReaderContext } from '../../lib/files/reader'
+import type { BenchFile } from '../../lib/files/useBenchFile'
+
 import { joinUnderRoot } from '../../lib/files/paths'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
@@ -14,6 +17,7 @@ import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { AnswerDocument } from '../chat/AnswerDocument'
 import { TeamChat, type Prepared } from '../chat/TeamChat'
 import type { TeamView } from '../chat/WorkPiece'
+import { FileReader } from '../reader/FileReader'
 import { TeamFiguresContext } from './figureContext'
 
 export interface AgentChatProps {
@@ -39,6 +43,8 @@ export interface AgentChatProps {
    * agents, where it reads nothing until a team gives it something (ADR 0042).
    */
   knowledge?: TeamKnowledge
+  /** A file its answers name, read over the bench, and what passes between it and the chat (ADR 0077). */
+  file?: BenchFile['chat']
 }
 
 const message = (failed: unknown) => (failed instanceof Error ? failed.message : String(failed))
@@ -53,7 +59,7 @@ const message = (failed: unknown) => (failed instanceof Error ? failed.message :
  * as it is on screen, saved or not, so a change made in Build is in its next answer. Every message
  * goes to the agent: it starts work when the agent is free and joins its turn while it works.
  */
-export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge }: AgentChatProps) {
+export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, answerRunId, onOpenAnswer, knowledge, file }: AgentChatProps) {
   const agentId = chatAgentId(chatId)
   const name = draft.name.trim() || 'New agent'
   // A new agent's chat is kept under its name, so one with no name yet has nowhere to keep it.
@@ -147,6 +153,7 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
   }
   return (
     <TeamFiguresContext.Provider value={figures}>
+    <FileReaderContext.Provider value={file?.open ?? null}>
       <TeamChat
         key={path}
         teamPath={path}
@@ -172,8 +179,12 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
         announce={announce}
         onOpenFinding={(runId) => details(runId)}
         onNewestRun={follow}
+        reveal={file?.reveal ?? null}
+        ask={file?.ask ?? null}
+        onPassages={file?.onPassages}
       />
       <p className="visually-hidden" role="status">{said}</p>
+    </FileReaderContext.Provider>
     </TeamFiguresContext.Provider>
   )
 }
@@ -192,5 +203,22 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
       <button type="button" className="link agent-answer-back" onClick={onClose}><ArrowLeft size={14} aria-hidden="true" />Back to {name} at the bench</button>
       <AnswerDocument text={text} by={name} streaming={!session.terminal} />
     </div>
+  )
+}
+
+/** The file over the bench: back to the bench, and the reader, asking this agent. */
+export function AgentFile({ bench, chatId, name, figure }: { bench: BenchFile; chatId: string; name: string; figure: FigureChoice }) {
+  const reading = bench.reading
+  const agentId = chatAgentId(chatId)
+  const figures = useMemo(() => new Map([[agentId, figure]]), [agentId, figure])
+  if (!reading) return null
+  return (
+    <TeamFiguresContext.Provider value={figures}>
+      <div className="agent-answer agent-file" onKeyDown={(event) => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); bench.close() } }}>
+        <button type="button" className="link agent-answer-back" onClick={bench.close}><ArrowLeft size={14} aria-hidden="true" />Back to {name} at the bench</button>
+        <FileReader key={reading.path} file={{ ...reading, from: reading.from ?? agentId }} name={(id) => (id === agentId ? name : id)} hue={() => figureHue(figure)}
+          onAsk={bench.askInChat} asked={bench.passages.asked} asking={bench.passages.asking} onShowAsked={bench.showAsked} />
+      </div>
+    </TeamFiguresContext.Provider>
   )
 }

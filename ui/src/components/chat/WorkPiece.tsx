@@ -13,6 +13,7 @@ import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
 import { fileRefsIn, withFolderPaths } from '../../lib/files/fileRefs'
+import { FileOriginContext } from '../../lib/files/reader'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import type { Bubble, Party } from '../../lib/story/conversation'
@@ -112,6 +113,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // A reply's quote can point at the answer itself, which is always in view: it is flashed, and
   // the talk stays as it is.
   const answerKey = `answer:${run.runId}`
+  // The files the answer names are read beside the chat, and asked about, as this agent's work.
+  const fileOrigin = useMemo(() => ({ runId: run.runId, from: run.responder }), [run.runId, run.responder])
   const [answerFlash, setAnswerFlash] = useState<number | null>(null)
   if (reveal !== revealed) {
     setRevealed(reveal)
@@ -419,6 +422,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
       {stops.length > 0 && <SpendStopCard inline run={{ runId: run.runId, spendStops: stops }} onDecide={pin} onRun={onRun} />}
 
+      <FileOriginContext.Provider value={fileOrigin}>
       <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
@@ -434,6 +438,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
           replyLabel={`Reply to ${name(run.responder)}'s answer`}
         />
       </Outcome>
+      </FileOriginContext.Provider>
 
       {canContinue(record, team) && !continuedFrom && (
         <Appearing className="tc-continue">

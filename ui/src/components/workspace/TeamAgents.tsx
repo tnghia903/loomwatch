@@ -11,7 +11,8 @@ import type { ModelMove } from '../../lib/team-file/useModelFollowing'
 import type { AgentConfig } from '../../lib/team-file/types'
 import { agentFigure, figureFor } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
-import { AgentAnswer, AgentChat } from '../agents/AgentChat'
+import { useBenchFile } from '../../lib/files/useBenchFile'
+import { AgentAnswer, AgentChat, AgentFile } from '../agents/AgentChat'
 import { AgentBuilder, AgentViewTabs } from '../agents/AgentBuilder'
 import { ByHand, type ByHandProps } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
@@ -162,6 +163,8 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
   const [view, setView] = useState<AgentView>('build')
   // A long answer from the chat, read in full over the bench.
   const [answerRun, setAnswerRun] = useState<string | null>(null)
+  // A file its answers name, read over the bench too (ADR 0077).
+  const benchFile = useBenchFile()
   const figure = figureFor(agent.id)
   const name = draft.name.trim() || agent.name
   return (
@@ -172,9 +175,9 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
       </div>
       <ByHand
         draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} suggestFor={{ agent, team }} following={following}
-        chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} /> : undefined}
+        chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} file={benchFile.chat} /> : undefined}
         onBuild={() => setView('build')}
-        cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
+        cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
       />
     </div>
   )

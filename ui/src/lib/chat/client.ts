@@ -73,7 +73,7 @@ export function stillAnswering(message: ChatMessage, now = Date.now()): string[]
 }
 
 /** What kind of message a reply answers, in the daemon's words (`chat::ReplyKind`). */
-export type ReplyKind = 'handover' | 'question' | 'question_back' | 'answer' | 'task' | 'check' | 'message'
+export type ReplyKind = 'handover' | 'question' | 'question_back' | 'answer' | 'task' | 'check' | 'passage' | 'message'
 
 /**
  * The message a reply answers, as you saw it when you pressed Reply: kept with your message, so the
@@ -91,6 +91,8 @@ export interface ReplyTo {
   kind: ReplyKind
   /** Its words, verbatim. */
   text: string
+  /** A `passage`'s file, by its full path: the part was marked in it while reading it (ADR 0077). */
+  file?: string
 }
 
 /** One item of the chat, newest first from the daemon. */

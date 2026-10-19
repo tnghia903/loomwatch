@@ -1,8 +1,9 @@
-import { Check, Copy, ExternalLink, FolderOpen } from 'lucide-react'
+import { BookOpenText, Check, Copy, ExternalLink, FolderOpen } from 'lucide-react'
 import { createElement } from 'react'
 
 import { baseName, extensionOf, fileLabel, fileNoun, fileTitle, folderWords, formatBytes, workspaceAgent } from '../../lib/files/fileRefs'
 import { fileIcon } from '../../lib/files/icons'
+import { useReadHere } from '../../lib/files/reader'
 import { useFileActions, useFileLookup } from '../../lib/files/useFile'
 import { relativeTime } from '../../lib/format'
 import { AgentMark } from './AgentMark'
@@ -19,6 +20,8 @@ interface FileCardProps {
  * A file an agent produced, presented as the deliverable it is (ADR 0026): drawn as a sheet with
  * its type, titled in words, with its size, age and maker — and one click to open it in its own
  * app, show it in its folder, or copy the path. The gilt woven edge marks it as finished work.
+ * Where the screen has a reader (ADR 0077), Read opens it there, beside the chat, and opening it in
+ * its own app is the icon beside.
  */
 export function FileCard({ path, compact = false, agents = [] }: FileCardProps) {
   const lookup = useFileLookup(path)
@@ -42,6 +45,8 @@ export function FileCard({ path, compact = false, agents = [] }: FileCardProps) 
   const workspace = facts?.exists ? workspaceAgent(facts.folder) : null
   const maker = workspace ? agents.find((agent) => agent.id === workspace.agent) : undefined
   const icon = createElement(fileIcon(facts?.kind, path), { size: compact ? 13 : 14 })
+  const readHere = useReadHere(path, maker?.id)
+  const canRead = Boolean(readHere && facts?.exists)
 
   return (
     <span className={['file-card', compact ? 'compact' : 'hero', canOpen && 'ready', (missing || outside) && 'muted'].filter(Boolean).join(' ')} title={path}>
@@ -61,9 +66,18 @@ export function FileCard({ path, compact = false, agents = [] }: FileCardProps) 
         {!compact && !maker && facts?.exists && <span className="file-card-where">{folderWords(facts.folder, path)}</span>}
       </span>
       <span className="file-card-acts">
-        <button type="button" className="file-card-open" disabled={!canOpen || busy} onClick={() => void open()} aria-label={`Open ${name}`} title={canOpen ? 'Open in its own app' : facts?.exists ? 'This kind of file opens from its folder' : undefined}>
-          <ExternalLink size={compact ? 13 : 15} aria-hidden="true" />{compact ? 'Open' : `Open ${fileNoun(path)}`}
-        </button>
+        {canRead && readHere ? (
+          <>
+            <button type="button" className="file-card-open file-card-read" onClick={readHere} aria-label={`Read ${name} here`} title="Read it here, and ask about any part">
+              <BookOpenText size={compact ? 13 : 15} aria-hidden="true" />Read
+            </button>
+            {canOpen && <button type="button" className="file-card-icon" disabled={busy} onClick={() => void open()} aria-label={`Open ${name} in its own app`} title="Open in its own app"><ExternalLink size={14} aria-hidden="true" /></button>}
+          </>
+        ) : (
+          <button type="button" className="file-card-open" disabled={!canOpen || busy} onClick={() => void open()} aria-label={`Open ${name}`} title={canOpen ? 'Open in its own app' : facts?.exists ? 'This kind of file opens from its folder' : undefined}>
+            <ExternalLink size={compact ? 13 : 15} aria-hidden="true" />{compact ? 'Open' : `Open ${fileNoun(path)}`}
+          </button>
+        )}
         {!compact && (
           <button type="button" className="file-card-reveal" disabled={!facts?.exists || busy} onClick={() => void open(true)} aria-label={`Show ${name} in its folder`} title="Show in folder">
             <FolderOpen size={14} aria-hidden="true" /><span className="file-card-reveal-label">Show in folder</span>
