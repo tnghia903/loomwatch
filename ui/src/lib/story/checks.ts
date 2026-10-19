@@ -19,6 +19,9 @@ export interface CheckRound {
   /** The first round's items, when a send-back made this a later one: what it found before the
       work was sent back. */
   first?: CheckItemResult[]
+  /** You approved the work as it was at the check step's stop, with checks still not met
+      (`check_approved`, ADR 0062). */
+  approved?: true
 }
 
 const VERDICTS = new Set(['met', 'not_met', 'not_sure'])
@@ -42,6 +45,11 @@ export function checkRounds(events: readonly Pick<RunEvent, 'agentId' | 'kind' |
   for (const event of events) {
     if (event.seq > throughSeq) break
     const payload = event.payload
+    if (event.kind === 'session_meta' && payload.phase === 'check_approved' && typeof payload.checked === 'string') {
+      const approved = rounds.get(`${event.agentId}>${payload.checked}`)
+      if (approved) approved.approved = true
+      continue
+    }
     if (event.kind !== 'session_meta' || payload.phase !== 'check_result' || typeof payload.checked !== 'string' || !Array.isArray(payload.items)) continue
     const key = `${event.agentId}>${payload.checked}`
     const round = typeof payload.round === 'number' ? payload.round : 1

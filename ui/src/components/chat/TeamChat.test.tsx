@@ -636,6 +636,41 @@ describe('a piece of work', () => {
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'review', text: 'Approved. Continue as planned.' } }))
   })
 
+  // ADR 0062, `whenStillNotMet: ask`: the check step's stop leads with what is still not met, and
+  // decides like a review: Approve as it is needs no words, Send back needs them.
+  const checkStop = async () => {
+    const check = { checked: 'researcher', rounds: 2, reason: 'rounds' as const, met: 2, problems: 'Two figures are from 2023.', items: [{ verdict: 'not_met' as const, item: 'Cites the 2025 report', evidence: 'cites the 2023 one' }, { verdict: 'not_sure' as const, item: 'Under 200 words', evidence: '' }] }
+    const waitingOn = { node: 'writer', name: 'Writer', kind: 'review_stop' as const, since: '2026-10-06T02:01:00.000Z', question: 'Researcher’s work still misses 2 checks after going back 2 times.', context: 'Draft three.', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true, check }
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn }), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
+    renderChat()
+    return screen.findByRole('group', { name: "Decide on Researcher's work" })
+  }
+
+  it('shows a check step’s stop with what is still not met, and approves the work as it is', async () => {
+    const card = await checkStop()
+    expect(card).toHaveTextContent('Researcher’s work still misses 2 checks after going back 2 times.')
+    expect(screen.getByText('Waiting for you').parentElement).toHaveTextContent('Waiting for you · Researcher’s work still misses 2 checks after going back 2 times')
+    expect(within(card).getByRole('list', { name: 'Checks still not met' })).toHaveTextContent('Not met Cites the 2025 report — cites the 2023 one')
+    expect(within(card).getByRole('list', { name: 'Checks still not met' })).toHaveTextContent('Not sure Under 200 words')
+    expect(within(card).getByText('What Writer wrote about it')).toBeInTheDocument()
+    expect(within(card).getByText('Read Researcher’s work')).toBeInTheDocument()
+    // Not the plain review's card.
+    expect(screen.queryByText(/handed over its work for your review/)).not.toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Send back to Researcher' })).toBeDisabled()
+    expect(card).toHaveTextContent('Researcher revises, and Writer checks it again.')
+    fireEvent.click(within(card).getByRole('button', { name: 'Approve as it is' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: 'Approved. Continue as planned.' } }))
+  })
+
+  it('sends the work back from a check step’s stop with what you wrote', async () => {
+    const card = await checkStop()
+    fireEvent.change(box(), { target: { value: 'Use the 2025 report.' } })
+    expect(within(card).getByRole('button', { name: 'Approve with your note' })).toBeEnabled()
+    fireEvent.click(within(card).getByRole('button', { name: 'Send back to Researcher' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'writer', text: 'Use the 2025 report.', sendBack: 'researcher' } }))
+  })
+
   it('puts the review on the handover it decides, in what the agents said', async () => {
     said.messages = [{
       id: 'h-1', kind: 'handover', from: null, handedBy: { from: ['researcher'], via: [] }, to: 'review', text: 'Three stories, sourced.', context: null,

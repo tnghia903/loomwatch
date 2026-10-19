@@ -62,6 +62,15 @@ describe('answerVerdict', () => {
     expect(answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [met('Linked')] }] }).detail).toBe('Every step finished and nothing in the record was flagged. Every check was met.')
   })
 
+  // ADR 0062: you saw what was not met at the check step's stop and kept the work as it was.
+  it('says you approved the answer with checks not met', () => {
+    const missed: CheckItemResult = { verdict: 'not_met', item: 'Linked', evidence: 'claim 2' }
+    const unsure: CheckItemResult = { verdict: 'not_sure', item: 'Short', evidence: '' }
+    const approved = (items: CheckItemResult[]) => answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 3, items, approved: true }] })
+    expect(approved([missed, unsure])).toMatchObject({ tone: 'look', label: 'Approved with 2 checks not met', detail: 'You approved it as it was. Check not met: Linked (claim 2).' })
+    expect(approved([missed]).label).toBe('Approved with 1 check not met')
+  })
+
   // A reply the daemon could not read checked nothing: one finding says so, not a Not sure per item.
   it('says a check that could not be read confirmed nothing', () => {
     const verdict = answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 1, readable: false, items: [{ verdict: 'not_sure', item: 'Linked', evidence: 'no block' }, { verdict: 'not_sure', item: 'Short', evidence: 'no block' }] }] })

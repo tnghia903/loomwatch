@@ -531,9 +531,11 @@ pub struct AgentConfig {
     /// predecessor. It is handed that agent's work as written and its Done when, and when it is the
     /// last stage the checked agent's reply stays the team's answer.
     pub checks: Option<String>,
-    /// A check step may send the work back once when a check is not met: the findings go to the
-    /// checked agent's still-open session, and the checks run once more. Off unless set.
-    pub send_back_once: bool,
+    /// What a check step does when a check is not met: send the work back to the checked agent's
+    /// still-open session, up to [`SendBack::rounds`] times, checking again after each, then show
+    /// the answer or ask the operator. `None`: the checks are only recorded. The older
+    /// `sendBackOnce: true` reads as one round that shows the answer.
+    pub send_back: Option<SendBack>,
     /// The agent's own guard on what one run may spend on it (ADR 0068). No guard unless set.
     pub spend: crate::spend::SpendConfig,
 }
@@ -543,6 +545,77 @@ pub struct AgentConfig {
 /// requirements document. Agents follow every requirement they are given, needed or not.
 pub const DONE_WHEN_ITEMS: usize = 5;
 pub const DONE_WHEN_CHARS: usize = 160;
+
+/// A check step's `sendBack` (ADR 0062): how many times the work may go back, and what happens
+/// when its checks are still not met after that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SendBack {
+    /// How many times the work may go back, from 1 to [`SEND_BACK_ROUNDS`]. Each one is a revision
+    /// and a check of it, so extra rounds help less each time and cost the same.
+    #[serde(default = "one_round")]
+    pub rounds: u32,
+    #[serde(default)]
+    pub when_still_not_met: WhenStillNotMet,
+}
+
+/// The most rounds a check step may send the work back for.
+pub const SEND_BACK_ROUNDS: u32 = 3;
+
+const fn one_round() -> u32 {
+    1
+}
+
+impl SendBack {
+    /// What `sendBackOnce: true` always meant: one round, then the answer as it is.
+    pub const ONCE: Self = Self {
+        rounds: 1,
+        when_still_not_met: WhenStillNotMet::Answer,
+    };
+
+    /// What a check step Ask proposes is set to when it does not say (the app's templates and
+    /// canvas set the same, in `ui/src/lib/team-file/checkStep.ts`): two rounds, since each one
+    /// helps less than the one before, then the person decides rather than see work that missed.
+    pub const NEW: Self = Self {
+        rounds: 2,
+        when_still_not_met: WhenStillNotMet::Ask,
+    };
+}
+
+/// What a check step does when its checks are still not met after its last round.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WhenStillNotMet {
+    /// Show the answer anyway, with what was not met marked on it.
+    #[default]
+    Answer,
+    /// Stop the run and ask the operator: approve the work as it is, or send it back.
+    Ask,
+}
+
+/// `sendBack` as the run reads it, with the older `sendBackOnce: true` as one round.
+fn send_back(
+    id: &str,
+    send_back: Option<SendBack>,
+    once: bool,
+) -> Result<Option<SendBack>, String> {
+    match (send_back, once) {
+        (Some(_), true) => Err(format!(
+            "agent {id:?} sets both sendBack and sendBackOnce. Keep sendBack, which says how many \
+             times the work may go back."
+        )),
+        (Some(send_back), false) if !(1..=SEND_BACK_ROUNDS).contains(&send_back.rounds) => {
+            Err(format!(
+                "agent {id:?} sends the work back {} times; sendBack.rounds must be 1 to \
+                 {SEND_BACK_ROUNDS}.",
+                send_back.rounds
+            ))
+        }
+        (Some(send_back), false) => Ok(Some(send_back)),
+        (None, true) => Ok(Some(SendBack::ONCE)),
+        (None, false) => Ok(None),
+    }
+}
 
 /// A skill or tool an agent's app has of its own that the operator turned off for the agent by
 /// taking it off the canvas (ADR 0060). Everything else the app has stays the agent's to choose.
@@ -598,6 +671,8 @@ struct RawAgent {
     #[serde(default)]
     send_back_once: bool,
     #[serde(default)]
+    send_back: Option<SendBack>,
+    #[serde(default)]
     spend: Option<crate::spend::SpendConfig>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
@@ -622,6 +697,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("doneWhen", !raw.done_when.is_empty()),
                     ("checks", raw.checks.is_some()),
                     ("sendBackOnce", raw.send_back_once),
+                    ("sendBack", raw.send_back.is_some()),
                     ("spend", raw.spend.is_some()),
                 ] {
                     if present {
@@ -659,7 +735,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     turned_off: Vec::new(),
                     done_when: Vec::new(),
                     checks: None,
-                    send_back_once: false,
+                    send_back: None,
                     spend: crate::spend::SpendConfig::default(),
                 })
             }
@@ -672,6 +748,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     check_turned_off(&id, entry)?;
                 }
                 let done_when = done_when(&id, raw.done_when)?;
+                let send_back = send_back(&id, raw.send_back, raw.send_back_once)?;
                 Ok(Self {
                     id,
                     name: raw.name.unwrap_or_default(),
@@ -690,7 +767,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                         .checks
                         .map(|checked| checked.trim().to_owned())
                         .filter(|checked| !checked.is_empty()),
-                    send_back_once: raw.send_back_once,
+                    send_back,
                     spend: raw.spend.unwrap_or_default(),
                 })
             }
@@ -1434,14 +1511,14 @@ impl TeamConfig {
     /// # Errors
     ///
     /// When a check step is in team mode, names itself, an unknown agent, a review stop, or an
-    /// agent that does not hand work straight to it; or when `sendBackOnce` is set without `checks`.
+    /// agent that does not hand work straight to it; or when `sendBack` is set without `checks`.
     pub fn validate_check_steps(&self) -> Result<()> {
         for agent in &self.agents {
             let Some(checked) = agent.checks.as_deref() else {
-                if agent.send_back_once {
+                if agent.send_back.is_some() {
                     bail!(
-                        "agent {:?} sets sendBackOnce but checks no agent. Add `checks: <agent \
-                         id>`, or remove sendBackOnce.",
+                        "agent {:?} sends work back but checks no agent. Add `checks: <agent \
+                         id>`, or remove sendBack.",
                         agent.id
                     );
                 }
@@ -1759,6 +1836,58 @@ mod tests {
         );
     }
 
+    /// A check step's `sendBack` says how many times the work may go back (1 to 3) and what happens
+    /// when its checks are still not met; an older file's `sendBackOnce` reads as what it always
+    /// did, one round that shows the answer, and a file without either sends nothing back.
+    #[test]
+    fn send_back_takes_one_to_three_rounds_and_send_back_once_is_one_that_answers() {
+        let team = |fields: &str| {
+            TeamConfig::parse(&format!(
+                "schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    model: test/model\n  - id: checker\n    model: test/model\n    checks: writer\n{fields}edges:\n  - {{from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-19T00:00:00Z\"}}\n"
+            ))
+        };
+        let read = |fields: &str| team(fields).expect("valid").agents[1].send_back;
+        assert_eq!(read(""), None);
+        assert_eq!(read("    sendBackOnce: false\n"), None);
+        assert_eq!(read("    sendBackOnce: true\n"), Some(SendBack::ONCE));
+        assert_eq!(read("    sendBack: {}\n"), Some(SendBack::ONCE));
+        assert_eq!(
+            read("    sendBack:\n      rounds: 3\n      whenStillNotMet: ask\n"),
+            Some(SendBack {
+                rounds: 3,
+                when_still_not_met: WhenStillNotMet::Ask
+            })
+        );
+        assert_eq!(
+            read("    sendBack: {rounds: 2, whenStillNotMet: answer}\n"),
+            Some(SendBack {
+                rounds: 2,
+                when_still_not_met: WhenStillNotMet::Answer
+            })
+        );
+        for (fields, says) in [
+            ("    sendBack: {rounds: 0}\n", "must be 1 to 3"),
+            ("    sendBack: {rounds: 4}\n", "must be 1 to 3"),
+            (
+                "    sendBack: {rounds: 2}\n    sendBackOnce: true\n",
+                "both sendBack and sendBackOnce",
+            ),
+            (
+                "    sendBack: {whenStillNotMet: later}\n",
+                "unknown variant",
+            ),
+            ("    sendBack: {round: 2}\n", "unknown field"),
+        ] {
+            let error = format!("{:#}", team(fields).expect_err(says));
+            assert!(error.contains(says), "{fields}: {error}");
+        }
+        let stop = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    model: test/model\n  - id: you\n    kind: operator\n    role: Check it.\n    sendBack: {rounds: 2}\nedges:\n  - {from: a, to: you, layer: configured, kind: sequence, ts: \"2026-10-19T00:00:00Z\"}\n",
+        )
+        .expect_err("a review stop sends nothing back");
+        assert!(format!("{stop:#}").contains("no sendBack"), "{stop:#}");
+    }
+
     /// ADR 0062: a check step names its direct predecessor, a harness agent, in a pipeline; a
     /// pipeline that ends on one answers with the work it checked.
     #[test]
@@ -1772,13 +1901,14 @@ mod tests {
         let edge = "\n  - {from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-15T00:00:00Z\"}";
         let ok = team("checks: writer\n    sendBackOnce: true", edge).expect("a check step");
         assert_eq!(ok.agents[1].checks.as_deref(), Some("writer"));
-        assert!(ok.agents[1].send_back_once);
+        assert_eq!(ok.agents[1].send_back, Some(SendBack::ONCE));
         assert_eq!(ok.responder_id().expect("responder"), "writer");
         for (checks, edges, says) in [
             ("checks: writer", " []", "team mode"),
             ("checks: checker", edge, "its own work"),
             ("checks: ghost", edge, "not an agent"),
             ("sendBackOnce: true", edge, "checks no agent"),
+            ("sendBack: {rounds: 2}", edge, "checks no agent"),
         ] {
             let error = format!("{:#}", team(checks, edges).expect_err(says));
             assert!(error.contains(says), "{error}");

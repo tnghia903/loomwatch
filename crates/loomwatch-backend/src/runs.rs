@@ -6426,6 +6426,7 @@ pub(crate) mod tests {
             park_note: "The turn is still finishing.".into(),
             send_back_available: false,
             question_id: None,
+            check: None,
         };
         let first = desk.park(&run_id, waiting("solo")).await.unwrap();
         assert!(

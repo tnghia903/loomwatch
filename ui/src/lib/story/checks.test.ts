@@ -20,6 +20,16 @@ describe('checkRounds', () => {
     expect(checkRounds(events, 1)).toEqual([{ checker: 'checker', checked: 'writer', round: 1, items: [{ verdict: 'not_met', item: 'Every claim has a link', evidence: 'claim 2' }] }])
   })
 
+  // ADR 0062: approved at the check step's stop with checks still not met, which the badge says.
+  it('marks the last round you approved as it was, and only that check step’s', () => {
+    const events = [
+      meta(1, 'checker', { checked: 'writer', round: 2, items: [{ verdict: 'not_met', item: 'Linked', evidence: 'claim 2' }] }),
+      meta(2, 'other', { checked: 'coder', round: 1, items: [{ verdict: 'not_met', item: 'Tests pass', evidence: '1 fails' }] }),
+      meta(3, 'checker', { phase: 'check_approved', checked: 'writer', round: 2, open: 1 }),
+    ]
+    expect(checkRounds(events).map((round) => [round.checker, round.approved ?? false])).toEqual([['checker', true], ['other', false]])
+  })
+
   it('says when a check step’s reply could not be read', () => {
     const events = [meta(1, 'checker', { checked: 'writer', round: 1, readable: false, items: [{ verdict: 'not_sure', item: 'Linked', evidence: 'no block' }] })]
     expect(checkRounds(events)[0].readable).toBe(false)

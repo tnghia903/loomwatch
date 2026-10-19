@@ -300,8 +300,12 @@ describe('check steps', () => {
     expect(custom.askPrompt).toContain('as its Done when')
   })
 
-  it('says a check that sends nothing back changes nothing, and turns it on', () => {
-    expect(checks(team({}, { sendBackOnce: undefined }))).toEqual([expect.objectContaining({ rule: 'check-no-send-back', agentId: 'checker', title: 'What Checker finds is never fixed', fix: { label: 'Send a missed check back once', change: { kind: 'send-back', agentId: 'checker' } } })])
+  it('says a check that sends nothing back changes nothing, and turns it on as a new check step has it', () => {
+    expect(checks(team({}, { sendBackOnce: undefined }))).toEqual([expect.objectContaining({ rule: 'check-no-send-back', agentId: 'checker', title: 'What Checker finds is never fixed', fix: { label: 'Send it back up to 2 times', change: { kind: 'send-back', agentId: 'checker' } } })])
+    // Either form of send-back counts: the older `sendBackOnce` and `sendBack`.
+    expect(checks(team({}, { sendBackOnce: undefined, sendBack: { rounds: 1 } }))).toEqual([])
+    // The fix writes `sendBack` and takes the older field out.
+    expect(fixFields({ kind: 'send-back', agentId: 'checker' })).toEqual({ sendBack: { rounds: 2, whenStillNotMet: 'ask' }, sendBackOnce: undefined })
   })
 })
 
