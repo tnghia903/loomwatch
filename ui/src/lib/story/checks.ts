@@ -69,9 +69,9 @@ export function checkProgress(round: CheckRound): { found: number; fixed: number
 
 /**
  * What the answer's author set aside for you rather than for its reader (ADR 0062): the Done when
- * items it could not meet, what it needed and was not given, and after a send-back, the findings it
- * kept its work against. The daemon takes them off the end of the answer, so what is delivered and
- * copied is the work alone.
+ * items it could not meet, what it needed and was not given, after a send-back the findings it
+ * kept its work against, and what it changed in the work it was handed. The daemon takes them off
+ * the end of the answer, so what is delivered and copied is the work alone.
  */
 export interface AnswerNotes {
   agentId: string
@@ -79,6 +79,8 @@ export interface AnswerNotes {
   /** What it needed and was not given: the Writer job's "Missing" list. */
   missing: string[]
   notChanged: string[]
+  /** The edits it made to the work it was handed: the Editor job's "Changes" list. */
+  changes: string[]
 }
 
 const strings = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : [])
@@ -89,7 +91,7 @@ export function answerNotes(events: readonly Pick<RunEvent, 'agentId' | 'kind' |
   for (const event of events) {
     if (event.seq > throughSeq) break
     if (event.kind !== 'session_meta' || event.payload.phase !== 'answer_notes') continue
-    notes = { agentId: event.agentId, notMet: strings(event.payload.not_met), missing: strings(event.payload.missing), notChanged: strings(event.payload.not_changed) }
+    notes = { agentId: event.agentId, notMet: strings(event.payload.not_met), missing: strings(event.payload.missing), notChanged: strings(event.payload.not_changed), changes: strings(event.payload.changes) }
   }
   return notes
 }

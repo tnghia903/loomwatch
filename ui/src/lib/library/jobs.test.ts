@@ -22,6 +22,16 @@ describe('built-in jobs', () => {
     }
     expect(new Set(ROLE_PRESETS.map((preset) => preset.id)).size).toBe(ROLE_PRESETS.length)
   })
+
+  // The daemon takes `## Not met`, `## Missing`, `## Not changed` and `## Changes` off the end of
+  // the team's answer (lib.rs NOTE_HEADINGS). Quality bench pilot 1: the Editor's change list was
+  // delivered as part of the answer, and what it flagged went into the piece.
+  it('asks the Editor for its edits and flags under headings set aside from the answer', () => {
+    const editor = ROLE_PRESETS.find((preset) => preset.id === 'editor')!.role
+    expect(editor).toContain('headed "## Changes"')
+    expect(editor).toContain('headed "## Missing"')
+    expect(editor).toContain('no notes about how you edited it')
+  })
 })
 
 describe('saving an agent as a job', () => {

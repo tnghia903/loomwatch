@@ -3557,6 +3557,17 @@ const NOT_MET_HEADING: &str = "## Not met";
 const NOT_CHANGED_HEADING: &str = "## Not changed";
 /// The heading the Writer job ends with when something it needed was missing.
 const MISSING_HEADING: &str = "## Missing";
+/// The heading the Editor job ends with: the edits it made to the work it was handed.
+const CHANGES_HEADING: &str = "## Changes";
+
+/// Every heading an answer's notes go under, in [`AnswerNotes`]'s order. Any job that ends its
+/// reply with one has that section set aside, whatever team file the job came from.
+const NOTE_HEADINGS: [&str; 4] = [
+    NOT_MET_HEADING,
+    MISSING_HEADING,
+    NOT_CHANGED_HEADING,
+    CHANGES_HEADING,
+];
 
 /// What an answer ends with for the operator rather than for its reader (ADR 0062).
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -3567,6 +3578,9 @@ struct AnswerNotes {
     missing: Vec<String>,
     /// Under [`NOT_CHANGED_HEADING`]: the findings of a send-back it kept its work against.
     not_changed: Vec<String>,
+    /// Under [`CHANGES_HEADING`]: what it changed in the work it was handed. Not a problem, so the
+    /// verdict lists them without counting them.
+    changes: Vec<String>,
 }
 
 /// The title of a line that heads a section: `## Title`, a wholly bold `**Title**`, or, for a
@@ -3583,17 +3597,15 @@ fn section_title(line: &str) -> Option<&str> {
         .or_else(|| note_kind(line).map(|_| line))
 }
 
-/// Which note section `title` heads, if it heads one: an index into the headings below.
+/// Which note section `title` heads, if it heads one: an index into [`NOTE_HEADINGS`].
 fn note_kind(title: &str) -> Option<usize> {
     let title = title.trim().trim_end_matches(':').trim_end();
-    [NOT_MET_HEADING, MISSING_HEADING, NOT_CHANGED_HEADING]
-        .iter()
-        .position(|heading| {
-            heading
-                .trim_start_matches('#')
-                .trim()
-                .eq_ignore_ascii_case(title)
-        })
+    NOTE_HEADINGS.iter().position(|heading| {
+        heading
+            .trim_start_matches('#')
+            .trim()
+            .eq_ignore_ascii_case(title)
+    })
 }
 
 /// `reply` without the note sections it ends with, and those notes. `None` when it ends with
@@ -3614,8 +3626,14 @@ fn split_answer_notes(reply: &str) -> Option<(&str, AnswerNotes)> {
                 sections.clear();
             }
         } else if let Some((_, items)) = sections.last_mut() {
-            let item = text
-                .trim_start_matches(|c: char| matches!(c, '-' | '*' | '•') || c.is_whitespace());
+            // One list mark comes off, so an item that opens in bold (`- **Flag:** …`) keeps it.
+            let item = match text.strip_prefix(['-', '*', '+', '•']) {
+                _ if is_thematic_break(text) => "",
+                Some(rest) if rest.is_empty() || rest.starts_with(char::is_whitespace) => {
+                    rest.trim_start()
+                }
+                _ => text,
+            };
             let item = match item.split_once(['.', ')']) {
                 Some((number, rest))
                     if !number.is_empty()
@@ -3632,7 +3650,15 @@ fn split_answer_notes(reply: &str) -> Option<(&str, AnswerNotes)> {
         }
         offset += line.len();
     }
-    let work = reply[..start?].trim_end();
+    let mut work = reply[..start?].trim_end();
+    // A rule drawn between the work and its notes belongs to the notes.
+    loop {
+        let (before, last) = work.rsplit_once('\n').unwrap_or(("", work));
+        if !is_thematic_break(last) {
+            break;
+        }
+        work = before.trim_end();
+    }
     if work.is_empty() {
         return None;
     }
@@ -3641,11 +3667,20 @@ fn split_answer_notes(reply: &str) -> Option<(&str, AnswerNotes)> {
         match kind {
             0 => &mut notes.not_met,
             1 => &mut notes.missing,
-            _ => &mut notes.not_changed,
+            2 => &mut notes.not_changed,
+            _ => &mut notes.changes,
         }
         .extend(items);
     }
     Some((work, notes))
+}
+
+/// A Markdown rule: three or more of one of `-`, `*` or `_`, spaced or not, alone on the line.
+fn is_thematic_break(line: &str) -> bool {
+    let marks: Vec<char> = line.chars().filter(|c| !c.is_whitespace()).collect();
+    marks.len() >= 3
+        && matches!(marks[0], '-' | '*' | '_')
+        && marks.iter().all(|&mark| mark == marks[0])
 }
 
 /// Move the notes the responder's reply ends with out of the answer and into the run's record,
@@ -3669,6 +3704,7 @@ async fn set_aside_answer_notes(
             "not_met": notes.not_met,
             "missing": notes.missing,
             "not_changed": notes.not_changed,
+            "changes": notes.changes,
         }),
         Some(json!({"source": "loomwatch", "phase": "answer_notes"})),
     )
@@ -4236,6 +4272,57 @@ mod tests {
         assert_eq!(split_answer_notes("All five stories, each linked."), None);
     }
 
+    /// Quality bench pilot 1: every Writer → Editor answer ended with the Editor's change list, so
+    /// a 120-word notice came out at 258 words and an email was not ready to send. Each reply here
+    /// is the shape an Editor wrote there, and older team files still ask for a list headed
+    /// "Changes" with no `##`.
+    #[test]
+    fn an_editors_change_list_is_set_aside_with_the_rule_drawn_above_it() {
+        let notice = "**Water off at night**\n\nFrom 1 March, the water is off from 10 pm.\n\n\
+                      ---\n\n**Changes**\n- \"overnight\" became \"at night\"\n\
+                      - **Flag:** the notice gives no end date\n";
+        let (work, notes) = split_answer_notes(notice).expect("changes");
+        assert_eq!(
+            work,
+            "**Water off at night**\n\nFrom 1 March, the water is off from 10 pm."
+        );
+        assert_eq!(
+            notes.changes,
+            [
+                "\"overnight\" became \"at night\"",
+                "**Flag:** the notice gives no end date"
+            ]
+        );
+        let email = "Hi Jordan,\n\nWe can repair them.\n\nBest wishes,\nMai\n\n## Changes\n\
+                     - Joined the repair and replace options\n\n\
+                     ## Missing\n- The delivery date: check it before sending\n";
+        let (work, notes) = split_answer_notes(email).expect("changes and missing");
+        assert_eq!(
+            work,
+            "Hi Jordan,\n\nWe can repair them.\n\nBest wishes,\nMai"
+        );
+        assert_eq!(notes.changes, ["Joined the repair and replace options"]);
+        assert_eq!(
+            notes.missing,
+            ["The delivery date: check it before sending"]
+        );
+        let (work, notes) = split_answer_notes(
+            "Edited.\n\n* * *\nChanges:\n1. Cut a repeat\n\n---\n## Missing\n* x",
+        )
+        .expect("a rule either side");
+        assert_eq!(work, "Edited.");
+        assert_eq!(notes.changes, ["Cut a repeat"]);
+        assert_eq!(notes.missing, ["x"]);
+        // The Coder's own "Changed" is its report, and a rule with no notes after it is the work's.
+        assert_eq!(split_answer_notes("Done.\n## Changed\n- src/a.rs"), None);
+        assert_eq!(split_answer_notes("Part one.\n\n---\n\nPart two."), None);
+        // A change list the work goes on after is part of the work, such as release notes.
+        assert_eq!(
+            split_answer_notes("v1.2\n## Changes\n- Faster\n## Thanks\n- Ana"),
+            None
+        );
+    }
+
     fn check_team(id: &str, agents: Vec<AgentConfig>, edges: &[(&str, &str)]) -> Arc<TeamConfig> {
         Arc::new(TeamConfig {
             schema_version: 1,
@@ -4268,6 +4355,61 @@ mod tests {
         let mut agent = pipeline_agent(id, model);
         agent.name = name.into();
         agent
+    }
+
+    /// A team that ends on the Editor delivers the edited piece alone: its change list, and the
+    /// Writer's Missing list it carried on, go beside the answer. The Editor is handed the draft
+    /// whole, notes and all, because it is the one that decides what still applies.
+    #[tokio::test]
+    async fn a_team_ending_on_the_editor_delivers_the_edited_piece_alone() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = crate::test_support::stand_in(vec![crate::test_support::turn(
+            &[],
+            "Dear Jordan, we can repair them.\n\n## Missing\n- The delivery date",
+        )]);
+        let (editor, _) = crate::test_support::stand_in(vec![crate::test_support::turn(
+            &[
+                "Dear Jordan, we can repair them.",
+                "## Missing",
+                "The delivery date",
+            ],
+            "Dear Jordan, we will repair them.\n\n---\n\n**Changes**\n\
+             - \"can\" became \"will\"\n\n## Missing\n- The delivery date: check it before sending",
+        )]);
+        let team = check_team(
+            "edit-chain",
+            vec![
+                named("writer", "Writer", &writer),
+                named("editor", "Editor", &editor),
+            ],
+            &[("writer", "editor")],
+        );
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let outcome = run_pipeline_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "write the reply",
+            Duration::from_secs(2),
+            None,
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage::default(),
+        )
+        .await?;
+        assert_eq!(outcome.reply, "Dear Jordan, we will repair them.");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        let notes = events
+            .iter()
+            .find(|event| event.payload["phase"] == "answer_notes")
+            .expect("the notes are recorded");
+        assert_eq!(notes.agent_id, "editor");
+        assert_eq!(notes.payload["changes"], json!(["\"can\" became \"will\""]));
+        assert_eq!(
+            notes.payload["missing"],
+            json!(["The delivery date: check it before sending"])
+        );
+        Ok(())
     }
 
     /// Every `check_result` the run recorded: its round, each item's verdict, and whether the

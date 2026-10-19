@@ -43,10 +43,14 @@ describe('answerNotes', () => {
     const events = [
       { seq: 1, agentId: 'writer', kind: 'session_meta' as const, payload: { phase: 'answer_notes', not_met: ['Story 2 has a link: the page is down', 3, ' '], not_changed: ['2.5 million: the report says so'] } },
       { seq: 2, agentId: 'writer', kind: 'session_meta' as const, payload: { phase: 'answer_notes', not_met: [], missing: ['The March total: no sheet was attached'] } },
+      { seq: 3, agentId: 'editor', kind: 'session_meta' as const, payload: { phase: 'answer_notes', not_met: [], missing: [], not_changed: [], changes: ['"overnight" became "at night"', 4] } },
     ]
-    expect(answerNotes(events, 1)).toEqual({ agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: [], notChanged: ['2.5 million: the report says so'] })
+    // A record from before the daemon set changes aside has none.
+    expect(answerNotes(events, 1)).toEqual({ agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: [], notChanged: ['2.5 million: the report says so'], changes: [] })
     // A later answer in the same record is the one beside it.
-    expect(answerNotes(events)).toEqual({ agentId: 'writer', notMet: [], missing: ['The March total: no sheet was attached'], notChanged: [] })
+    expect(answerNotes(events, 2)).toEqual({ agentId: 'writer', notMet: [], missing: ['The March total: no sheet was attached'], notChanged: [], changes: [] })
+    // The Editor's change list, as the daemon took it off the answer.
+    expect(answerNotes(events)).toEqual({ agentId: 'editor', notMet: [], missing: [], notChanged: [], changes: ['"overnight" became "at night"'] })
     expect(answerNotes(events, 0)).toBeNull()
     expect(answerNotes([meta(1, 'checker', { checked: 'writer', items: [] })])).toBeNull()
   })

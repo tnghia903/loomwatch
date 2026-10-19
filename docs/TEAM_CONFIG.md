@@ -154,11 +154,31 @@ depend on the document as a whole:
 - Optional `Agent.doneWhen` is up to five short statements (each at most 160 characters) that
   the finished result must satisfy. They are stated under the role as `## Done when`; the agent
   checks its result against them before it replies, fixes what it can, and lists any it could not
-  meet under `## Not met`. A later stage and any check step read it with the work. On the team's
-  answer, the daemon takes it off the end, with a `## Missing` list (the Writer job's) and
-  `## Not changed` (below). It records them as a `session_meta` `answer_notes` event, which the
-  verdict beside the answer shows, so what is delivered is the work alone. No second turn
+  meet under `## Not met`. A later stage and any check step read it with the work. No second turn
   is taken on the agent's own say-so: a check step with `sendBackOnce` is what sends work back.
+- **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
+  operator, not the answer's reader:
+  - `## Not met`: the `doneWhen` items it could not meet.
+  - `## Missing`: what it needed and was not given (the Writer job's), and what the Editor job
+    flagged.
+  - `## Not changed`: the findings of a send-back it kept its work against (below).
+  - `## Changes`: the edits it made to the work it was handed (the Editor job's).
+
+  When the team's answer ends with any of these, in any order, the daemon takes them off it. It
+  also drops a `---` rule drawn above them. It records them as a `session_meta` `answer_notes`
+  event (`not_met`, `missing`, `not_changed`, `changes`), so what is delivered and copied is the
+  work alone.
+  - **How they are read.** A heading counts written as `## Changes`, `**Changes**`, or `Changes:`
+    alone on its line, so a role written before these were headings still works.
+  - **When they stay in the answer.** A section with any other section after it is part of the
+    work. So is an answer that is nothing but notes.
+  - **The cost.** A piece whose own last section is headed `Changes`, such as release notes, has it
+    set aside too, and it shows in the review instead of the answer.
+  - **Where they show.** In the review beside the answer. The first three are worth a look and
+    are counted on its badge. Changes are listed apart from them and not counted, because an edit
+    is not a problem.
+  - **Between stages.** A stage's notes are handed on with its work: the Editor carries the Writer's
+    `## Missing` into its own.
 - Optional `Agent.checks` makes a pipeline agent a check step. It names the agent whose work it
   checks, which must hand its work straight to it. That agent writes no summary for it.
   - **What it is handed.**

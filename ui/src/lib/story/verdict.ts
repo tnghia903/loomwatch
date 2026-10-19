@@ -23,6 +23,10 @@ export interface AnswerVerdict {
   detail: string
   /** What the reviewer should look at, worst first. */
   findings: ReceiptLine[]
+  /** What the answer's author changed in the work it was handed (the Editor job's "Changes"),
+      listed beside the findings and never counted as one: an edit is not a problem. Absent when
+      it listed none. */
+  changes?: ReceiptLine[]
   /** The badge opens the review, because there is a finished answer to review. */
   reviewable: boolean
 }
@@ -101,14 +105,26 @@ export function noteFindings(notes?: AnswerNotes | null): ReceiptLine[] {
   ]
 }
 
+/** The edits the daemon took off the end of the answer, each a line the review lists. */
+export function changeLines(notes?: AnswerNotes | null): ReceiptLine[] {
+  return notes ? notes.changes.map((text) => ({ tone: 'ok' as const, text, agentId: notes.agentId })) : []
+}
+
 export function answerVerdict(input: VerdictInput): AnswerVerdict {
+  const changes = changeLines(input.notes)
+  const verdict = verdictOf(input, changes.length)
+  return changes.length ? { ...verdict, changes } : verdict
+}
+
+function verdictOf(input: VerdictInput, changed: number): AnswerVerdict {
   // Worst first: a failure leads, then what the author itself could not meet, then the checks.
   const findings = [...noteFindings(input.notes), ...checkFindings(input.checks), ...findingsOf(input.receipt)]
     .sort((a, b) => Number(b.tone === 'bad') - Number(a.tone === 'bad'))
   const allMet = Boolean(input.checks?.length) && input.checks!.every((round) => round.items.every((item) => item.verdict === 'met'))
   const first = findings[0] ? `${findings[0].text}.` : ''
-  const fixed = checkProgressSentence(input.checks)
-  const withFixed = (detail: string) => (fixed ? `${detail} ${fixed}` : detail)
+  // What the check fixed, then where the edits are: neither is in the answer any more.
+  const after = [checkProgressSentence(input.checks), changed ? `The review lists ${plural(changed, 'change')} made to the draft.` : ''].filter(Boolean).join(' ')
+  const withAfter = (detail: string) => (after ? `${detail} ${after}` : detail)
   if (input.streaming) return { tone: 'live', label: 'Writing', detail: 'The team is still writing this answer.', findings, reviewable: false }
   if (!input.text) {
     return input.terminal
@@ -127,12 +143,12 @@ export function answerVerdict(input: VerdictInput): AnswerVerdict {
       reviewable: true,
     }
   }
-  if (findings.length) return { tone: 'look', label: `${plural(findings.length, 'thing')} to check`, detail: withFixed(first), findings, reviewable: true }
+  if (findings.length) return { tone: 'look', label: `${plural(findings.length, 'thing')} to check`, detail: withAfter(first), findings, reviewable: true }
   const read = readPhrase(input.read)
   return {
     tone: 'ok',
     label: 'Nothing flagged',
-    detail: withFixed((read
+    detail: withAfter((read
       ? `Every step finished, reading ${read}, and nothing in the record was flagged.`
       : 'Every step finished and nothing in the record was flagged.') + (allMet ? ' Every check was met.' : '')),
     findings,

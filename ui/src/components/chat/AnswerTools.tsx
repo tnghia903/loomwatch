@@ -126,8 +126,11 @@ function Review({ check, reviewed, onClose, onReviewed, onOpenFinding }: { check
       <h2>Review the answer</h2>
       {check.required > 0 && <p>{check.opened}/{check.required} required skills have loading evidence.</p>}
       {verdict.findings.length
-        ? <section className="receipt-checks delivery-review-findings" aria-label="Worth a look"><b>Worth a look</b><ul>{verdict.findings.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this agent’s work'} onClick={() => onOpenFinding(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul></section>
+        ? <section className="receipt-checks delivery-review-findings" aria-label="Worth a look"><b>Worth a look</b><Lines lines={verdict.findings} onOpen={onOpenFinding} /></section>
         : <p>Nothing in this record was flagged.</p>}
+      {verdict.changes?.length
+        ? <section className="receipt-checks delivery-review-findings delivery-review-changes" aria-label="Changes made"><b>Changes made</b><Lines lines={verdict.changes} onOpen={onOpenFinding} /></section>
+        : null}
       <p>Read the answer and its record before marking your review. It lasts while this chat stays open.</p>
       {reviewed ? <p className="delivery-review-success">Reviewed by you.</p> : <label><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} />I have reviewed this answer and the evidence behind it.</label>}
       <div>
@@ -136,6 +139,11 @@ function Review({ check, reviewed, onClose, onReviewed, onOpenFinding }: { check
       </div>
     </dialog>
   )
+}
+
+/** The review's lines, each a click from its record or from the work of the agent it came from. */
+function Lines({ lines, onOpen }: { lines: readonly ReceiptLine[]; onOpen: (line: ReceiptLine) => void }) {
+  return <ul>{lines.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this agent’s work'} onClick={() => onOpen(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul>
 }
 
 /** A dialog shown as a modal from the moment it mounts, so Esc and the backdrop work as expected. */

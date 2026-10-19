@@ -119,7 +119,7 @@ export const ROLE_PRESETS: readonly RolePreset[] = [
       '- Add no new claims. If a claim looks wrong and you cannot check it, keep it and flag it.',
       '- Before you reply, compare your version with the draft: every fact and link must still be there and still say the same.',
       '',
-      'Reply with the edited piece in full, then a short list headed "Changes": the edits that matter most, and anything you flagged.',
+      'Reply with the edited piece in full, ready to use, with no preamble and no notes about how you edited it. Then end with a short list headed "## Changes": the edits that matter most. If you flagged anything, or the draft ended with a "## Missing" list, put what still needs checking in a short list headed "## Missing" after it, never in the piece.',
     ),
   },
   {

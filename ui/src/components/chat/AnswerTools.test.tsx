@@ -72,6 +72,20 @@ describe('under a team’s answer in the chat', () => {
     expect(within(screen.getByRole('dialog', { name: 'Review the answer' })).getByText('Nothing in this record was flagged.')).toBeInTheDocument()
   })
 
+  // The Editor's change list is taken off the answer, so the review is where it is read.
+  it('lists the changes made to the draft in the review, apart from what is worth a look', () => {
+    const change: ReceiptLine = { tone: 'ok', text: '"overnight" became "at night"', agentId: 'editor' }
+    const { onOpenFinding } = setup({ check: check({ tone: 'ok', label: 'Nothing flagged', findings: [], changes: [change] }) })
+    fireEvent.click(screen.getByRole('button', { name: 'Nothing flagged' }))
+    const review = within(screen.getByRole('dialog', { name: 'Review the answer' }))
+    expect(review.getByText('Nothing in this record was flagged.')).toBeInTheDocument()
+    expect(review.queryByRole('region', { name: 'Worth a look' })).toBeNull()
+    const changes = within(review.getByRole('region', { name: 'Changes made' }))
+    expect(changes.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['"overnight" became "at night"'])
+    fireEvent.click(changes.getByRole('button', { name: 'Open: "overnight" became "at night"' }))
+    expect(onOpenFinding).toHaveBeenCalledWith(change)
+  })
+
   it('copies the exact Markdown, and saves it under its title and day', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
