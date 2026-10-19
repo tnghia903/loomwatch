@@ -22,6 +22,7 @@
 //! events, not into errors, and not into the environment of a command an agent runs.
 
 mod anthropic;
+mod chatgpt;
 mod demo;
 mod error;
 mod events;
@@ -46,7 +47,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use anthropic::{Anthropic, Price, list_price};
+pub use chatgpt::{ChatGptPlan, PlanAccess};
 pub use demo::{Demo, Hold, OFFLINE_MODEL, Respond, SeenRequest};
+pub(crate) use error::hide_secret;
 pub use error::{AgentError, CHATGPT_USAGE_URL, Problem, ProblemKind};
 pub use events::{EventSink, ToolKind, ToolStatus};
 pub use openrouter::{BASE_URL_ENV, DEFAULT_BASE_URL, OpenRouter, base_url, is_loopback_http};

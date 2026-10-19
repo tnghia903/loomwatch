@@ -9,6 +9,7 @@ use tokio::sync::watch;
 
 use super::BoxFuture;
 use super::anthropic::Anthropic;
+use super::chatgpt::ChatGptPlan;
 use super::demo::Demo;
 use super::error::CallError;
 use super::openrouter::OpenRouter;
@@ -270,6 +271,8 @@ pub enum Provider {
     OpenRouter(Arc<OpenRouter>),
     /// The person's own Claude API key (ADR 0073).
     Anthropic(Arc<Anthropic>),
+    /// The person's `ChatGPT` plan, through the sign-in with `ChatGPT` (ADR 0073).
+    ChatGpt(Arc<ChatGptPlan>),
     Demo(Demo),
 }
 
@@ -285,6 +288,7 @@ impl Provider {
             Self::OpenRouter(provider) => provider.complete(request, deltas, cancel).await,
             // Boxed: a provider's call is a large future, and Windows builds count it larger still.
             Self::Anthropic(provider) => Box::pin(provider.complete(request, deltas, cancel)).await,
+            Self::ChatGpt(provider) => Box::pin(provider.complete(request, deltas, cancel)).await,
             // A stopped turn stops the demo too, as it stops a stream.
             Self::Demo(demo) => tokio::select! {
                 completion = demo.complete(request, deltas) => completion,

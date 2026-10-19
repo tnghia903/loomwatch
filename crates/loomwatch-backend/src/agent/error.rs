@@ -226,10 +226,6 @@ static TOKEN_SHAPE: LazyLock<Regex> = LazyLock::new(|| {
 static LIVE_SECRETS: LazyLock<std::sync::RwLock<Vec<String>>> = LazyLock::new(Default::default);
 
 /// Keeps `secret` out of every error [`redact`] sees from now on.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the sign-in with `ChatGPT` is its first caller")
-)]
 pub(crate) fn hide_secret(secret: &str) {
     if secret.len() < 8 {
         return;

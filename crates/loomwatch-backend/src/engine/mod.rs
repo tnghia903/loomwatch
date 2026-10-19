@@ -25,8 +25,8 @@ pub(crate) use bridge::tool_spec;
 pub(crate) use recorder::{EventLog, Recorder, ReplyText, new_event_id};
 
 use crate::agent::{
-    AgentError, Anthropic, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter, Problem,
-    ProblemKind, Provider, Session, SessionConfig, ToolSet,
+    AgentError, Anthropic, ChatGptPlan, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter,
+    Problem, ProblemKind, Provider, Session, SessionConfig, ToolSet,
 };
 use crate::ai::{ModelRef, Source};
 use crate::archive::EventArchive;
@@ -170,7 +170,7 @@ async fn provider_for(model: &ModelRef) -> Result<Provider, AppReportedError> {
     match model.source {
         Source::OpenRouter => {}
         Source::Anthropic => return claude_provider().await,
-        Source::ChatGpt => return Err(not_connected(Source::ChatGpt)),
+        Source::ChatGpt => return plan_provider(),
     }
     let model = model.id.as_str();
     if model == OFFLINE_MODEL {
@@ -251,6 +251,31 @@ async fn claude_provider() -> Result<Provider, AppReportedError> {
         ))
     })?;
     Ok(Provider::Anthropic(Arc::new(provider)))
+}
+
+/// A connection to the person's `ChatGPT` plan, whose access token the sign-in renews.
+fn plan_provider() -> Result<Provider, AppReportedError> {
+    let missing = || not_connected(Source::ChatGpt);
+    let ai = crate::ai::installed().ok_or_else(missing)?;
+    let status = ai.chatgpt_status();
+    if !status.available || !status.connected {
+        return Err(missing());
+    }
+    if !status.plan_use {
+        let off = AgentError::PlanUseOff;
+        return Err(AppReportedError {
+            message: off.to_string(),
+            problem: off.problem(),
+        });
+    }
+    let provider = ChatGptPlan::new(ai.chatgpt_access(), ai.chatgpt_api(), status.models).map_err(
+        |error| {
+            AppReportedError::said(format!(
+                "LoomWatch couldn't set up its connection to ChatGPT: {error:#}"
+            ))
+        },
+    )?;
+    Ok(Provider::ChatGpt(Arc::new(provider)))
 }
 
 /// An agent whose source has nothing connected on this computer, said with what to connect.
@@ -993,7 +1018,14 @@ impl AgentRun {
                     .find(|listed| listed.id == model.id)
                     .map(|listed| listed.context_length)
                     .filter(|length| *length > 0),
-                _ => None,
+                Source::ChatGpt => ai
+                    .chatgpt_status()
+                    .models
+                    .iter()
+                    .find(|listed| listed.slug == model.id)
+                    .map(|listed| listed.context_length)
+                    .filter(|length| *length > 0),
+                Source::OpenRouter => None,
             };
             if config.context_window.is_none() {
                 config.context_window = ai

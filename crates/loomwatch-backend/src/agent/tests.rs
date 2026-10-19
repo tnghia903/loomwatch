@@ -700,6 +700,7 @@ async fn stand(replies: Vec<Reply>) -> (Stand, String) {
     let app = Router::new()
         .route("/api/v1/chat/completions", post(chat))
         .route("/v1/messages", post(chat))
+        .route("/v1/responses", post(chat))
         .with_state(stand.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -1860,4 +1861,175 @@ async fn claude_retries_when_busy_and_says_when_the_credit_is_used_up() {
     );
     assert!(said.to_string().contains("Claude API credit"));
     assert_eq!(refusing.bodies.lock().unwrap().len(), 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// A stand-in for the Responses API, as a ChatGPT plan answers it (ADR 0073)
+// ---------------------------------------------------------------------------------------------
+
+/// Hands out a fixed token, and counts how often it was asked for a new one.
+#[derive(Debug, Default)]
+struct FixedToken {
+    renewed: std::sync::atomic::AtomicUsize,
+}
+
+impl PlanAccess for FixedToken {
+    fn token(&self, renew: bool) -> BoxFuture<'_, Result<String, AgentError>> {
+        if renew {
+            self.renewed
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        Box::pin(async { Ok("at_plan".to_owned()) })
+    }
+}
+
+fn plan(base: &str, access: Arc<FixedToken>) -> Provider {
+    let openai = base.strip_suffix("/api/v1").unwrap_or(base);
+    Provider::ChatGpt(Arc::new(
+        ChatGptPlan::new(access, openai, Vec::new())
+            .unwrap()
+            .with_backoff(Duration::from_millis(5)),
+    ))
+}
+
+fn item_done(item: &Value) -> Value {
+    json!({"type": "response.output_item.done", "item": item})
+}
+
+fn completed(input: u64, cached: u64, output: u64) -> Value {
+    json!({"type": "response.completed", "response": {"output": [], "usage": {
+        "input_tokens": input, "input_tokens_details": {"cached_tokens": cached, "cache_write_tokens": 0},
+        "output_tokens": output, "output_tokens_details": {"reasoning_tokens": 2}, "total_tokens": input + output}}})
+}
+
+/// A turn on the plan: the items put together from `output_item.done` (the completed event carries
+/// none), the plan's own items sent back as they came with the tool's output, the cost the plan's
+/// and never dollars, and no system message anywhere.
+#[tokio::test]
+async fn a_chatgpt_plan_turn_sends_its_own_items_back_and_costs_no_dollars() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "hello").unwrap();
+    let reasoning =
+        json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "enc-1", "summary": []});
+    let call = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file",
+                      "namespace": "loomwatch", "arguments": "{\"path\":\"notes.md\"}", "status": "completed"});
+    let first = events(&[
+        json!({"type": "response.created", "response": {"id": "resp_1"}}),
+        json!({"type": "response.output_item.added", "item": {"type": "reasoning"}}),
+        item_done(&reasoning),
+        json!({"type": "response.function_call_arguments.delta", "delta": "{\"path\""}),
+        item_done(&call),
+        completed(100, 80, 14),
+    ]);
+    let answer = json!({"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": "It says hello.", "annotations": []}]});
+    let second = events(&[
+        json!({"type": "response.output_item.added", "item": {"type": "message"}}),
+        json!({"type": "response.output_text.delta", "delta": "It says hello."}),
+        item_done(&answer),
+        completed(140, 100, 5),
+    ]);
+    let (stand, base) = stand(vec![first, second]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        plan(&base, Arc::new(FixedToken::default())),
+        sink,
+        Arc::new(AllowAll),
+        "chatgpt:gpt-6.1-sol",
+    );
+    let end = session.prompt("What does notes.md say?").await.unwrap();
+    assert_eq!(end.reply, "It says hello.");
+    assert_eq!(end.usage.paid_by, Some(Source::ChatGpt));
+    assert!(end.usage.cost_usd.abs() < 1e-12);
+    assert_eq!(end.usage.cached_read_tokens, 180);
+    assert_eq!(end.usage.input_tokens, 20 + 40);
+    assert_eq!(end.as_result()["_meta"]["loomwatch"]["paidBy"], "chatgpt");
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    assert_eq!(bodies[0]["model"], "gpt-6.1-sol");
+    assert_eq!(bodies[0]["store"], false);
+    assert!(
+        bodies[0]["instructions"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    );
+    for body in &bodies {
+        assert!(
+            body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["role"] != "system")
+        );
+    }
+    let input = bodies[1]["input"].as_array().unwrap();
+    assert_eq!(input[1], reasoning);
+    assert_eq!(input[2], call);
+    assert_eq!(input[3]["type"], "function_call_output");
+    assert_eq!(input[3]["call_id"], "call_1");
+    assert!(
+        stand
+            .auth
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|auth| auth == "Bearer at_plan")
+    );
+}
+
+/// A plan's limit stops the turn with where to manage it, even after the model began, and is
+/// never tried again; a refused token is renewed once and the call made again.
+#[tokio::test]
+async fn a_plans_limit_stops_the_turn_and_a_refused_token_is_renewed() {
+    let folder = Folder::new();
+    let limit = events(&[
+        json!({"type": "response.output_item.added", "item": {"type": "message"}}),
+        json!({"type": "response.output_text.delta", "delta": "Start"}),
+        json!({"type": "response.failed", "response": {"error": {
+            "code": "subscription_sharing_usage_limit_exceeded", "message": "Usage limit reached"}}}),
+    ]);
+    let (limited, base) = stand(vec![limit]).await;
+    let mut session = session_on(
+        &folder,
+        plan(&base, Arc::new(FixedToken::default())),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "chatgpt:gpt-6.1-sol",
+    );
+    let said = session.prompt("Hi").await.unwrap_err();
+    assert!(matches!(said, AgentError::PlanLimit));
+    assert_eq!(
+        said.problem().unwrap().url,
+        Some(crate::agent::CHATGPT_USAGE_URL)
+    );
+    assert_eq!(limited.bodies.lock().unwrap().len(), 1);
+
+    let fine = events(&[
+        json!({"type": "response.output_text.delta", "delta": "Hi."}),
+        item_done(
+            &json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hi."}]}),
+        ),
+        completed(5, 0, 2),
+    ]);
+    let (renewing, base) = stand(vec![
+        Reply {
+            status: StatusCode::UNAUTHORIZED,
+            body: json!({"error": {"code": "token_expired", "message": "expired"}}).to_string(),
+            delay: Duration::ZERO,
+        },
+        fine,
+    ])
+    .await;
+    let access = Arc::new(FixedToken::default());
+    let mut session = session_on(
+        &folder,
+        plan(&base, access.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "chatgpt:gpt-6.1-sol",
+    );
+    assert_eq!(session.prompt("Hi").await.unwrap().reply, "Hi.");
+    assert_eq!(access.renewed.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert_eq!(renewing.bodies.lock().unwrap().len(), 2);
 }

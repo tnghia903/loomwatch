@@ -8,8 +8,11 @@
 //! - `DELETE /api/ai/openrouter` forgets it.
 //! - `PUT`/`DELETE /api/ai/anthropic` and `POST /api/ai/anthropic/check` do the same for a Claude
 //!   API key (ADR 0073), checked by listing its models; `GET /api/ai` says what was last learned.
-//! - `GET /api/models` lists the models an agent can use: `OpenRouter`'s catalog, and the Claude
-//!   key's models when one is kept.
+//! - `POST /api/ai/chatgpt/sign-in` starts a sign-in with `ChatGPT` and answers the consent page's
+//!   address; `OpenAI` sends the browser back to `GET /api/ai/chatgpt/callback`.
+//!   `POST /api/ai/chatgpt/check` lists the plan's models again; `DELETE /api/ai/chatgpt` signs out.
+//! - `GET /api/models` lists the models an agent can use: `OpenRouter`'s catalog, the Claude key's
+//!   models when one is kept, and the `ChatGPT` plan's when one is signed in.
 //! - `/api/models/reading` reads an agent's whole setup to suggest a model, when the operator turns
 //!   that on (`reading.rs`).
 //!
@@ -17,6 +20,7 @@
 //! `X-LoomWatch-Request: 1` header the app sends, so another site can't set a key.
 
 pub mod anthropic;
+pub mod chatgpt;
 mod keys;
 mod models;
 mod reading;
@@ -25,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::extract::{DefaultBodyLimit, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -36,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub use anthropic::{ClaudeModel, ClaudeStatus};
+pub use chatgpt::{ChatGptModel, ChatGptStatus};
 /// The key file's name in the state folder, where it is kept off a Mac: no agent may touch it.
 pub(crate) use keys::FILE_NAME as KEY_FILE;
 pub(crate) use keys::PLANS_FILE;
@@ -73,6 +78,7 @@ struct Inner {
     claude_status: anthropic::StatusFile,
     /// Where the Claude key is checked and agents' Claude calls go.
     anthropic_base: String,
+    chatgpt: Arc<chatgpt::ChatGpt>,
 }
 
 /// The one [`Ai`] the daemon's runs use, set once at startup.
@@ -165,8 +171,48 @@ impl Ai {
                 ),
                 claude_status: anthropic::StatusFile::new(state_dir),
                 anthropic_base: anthropic::base_url(),
+                chatgpt: Arc::new(chatgpt::ChatGpt::new(
+                    state_dir,
+                    &chatgpt::auth_base(),
+                    &chatgpt::api_base(),
+                )),
             }),
         }
+    }
+
+    /// The same, with the sign-in with `ChatGPT` sent to `auth` and the plan's calls to `api`, for
+    /// tests.
+    ///
+    /// # Panics
+    ///
+    /// When called on an [`Ai`] that was already cloned.
+    #[must_use]
+    pub fn with_openai_at(mut self, auth: &str, api: &str) -> Self {
+        let inner = Arc::get_mut(&mut self.inner)
+            .expect("set where the sign-in with ChatGPT goes before sharing the Ai");
+        inner.chatgpt = Arc::new(chatgpt::ChatGpt::new(&inner.state_dir, auth, api));
+        self
+    }
+
+    /// What was last said about the sign-in with `ChatGPT`. Never reads a token.
+    #[must_use]
+    pub fn chatgpt_status(&self) -> ChatGptStatus {
+        self.inner.chatgpt.status()
+    }
+
+    /// Where the plan's calls go.
+    #[must_use]
+    pub fn chatgpt_api(&self) -> &str {
+        self.inner.chatgpt.api()
+    }
+
+    /// What gives the plan's calls their access token, renewing it from the sign-in.
+    #[must_use]
+    pub fn chatgpt_access(&self) -> Arc<dyn crate::agent::PlanAccess> {
+        Arc::new(ChatGptAccess {
+            chatgpt: self.inner.chatgpt.clone(),
+            keys: self.inner.keys.clone(),
+        })
     }
 
     /// The same, with Claude keys checked and Claude calls sent to `base`, for tests.
@@ -215,6 +261,10 @@ impl Ai {
     #[must_use]
     pub fn connected_sources(&self) -> Vec<Source> {
         let mut sources = Vec::new();
+        let plan = self.chatgpt_status();
+        if plan.available && plan.connected && plan.plan_use {
+            sources.push(Source::ChatGpt);
+        }
         if self.claude_status().connected {
             sources.push(Source::Anthropic);
         }
@@ -330,6 +380,10 @@ pub fn router(ai: Ai) -> Router {
             put(connect_claude).delete(disconnect_claude),
         )
         .route("/api/ai/anthropic/check", post(recheck_claude))
+        .route("/api/ai/chatgpt", axum::routing::delete(sign_out_chatgpt))
+        .route("/api/ai/chatgpt/sign-in", post(sign_in_chatgpt))
+        .route("/api/ai/chatgpt/check", post(check_chatgpt))
+        .route(chatgpt::CALLBACK, get(chatgpt_callback))
         .route("/api/models", get(list_models))
         .layer(DefaultBodyLimit::max(4096))
         // A setup carries an agent's whole instructions.
@@ -361,7 +415,94 @@ async fn protect(request: Request, next: Next) -> Response {
 }
 
 async fn status(State(ai): State<Ai>) -> Json<Value> {
-    Json(json!({"openrouter": ai.status(), "anthropic": ai.claude_status()}))
+    Json(json!({
+        "openrouter": ai.status(),
+        "anthropic": ai.claude_status(),
+        "chatgpt": ai.chatgpt_status(),
+    }))
+}
+
+/// Gives the plan's calls an access token from the sign-in with `ChatGPT`.
+#[derive(Debug)]
+struct ChatGptAccess {
+    chatgpt: Arc<chatgpt::ChatGpt>,
+    keys: Keys,
+}
+
+impl crate::agent::PlanAccess for ChatGptAccess {
+    fn token(
+        &self,
+        renew: bool,
+    ) -> crate::agent::BoxFuture<'_, Result<String, crate::agent::AgentError>> {
+        Box::pin(self.chatgpt.access_token(&self.keys, renew))
+    }
+}
+
+async fn sign_in_chatgpt(
+    State(ai): State<Ai>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let port = headers
+        .get(axum::http::header::HOST)
+        .and_then(|host| host.to_str().ok())
+        .and_then(chatgpt::callback_port)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::FORBIDDEN,
+                "Open LoomWatch at http://127.0.0.1 on this computer to sign in with ChatGPT."
+                    .to_owned(),
+            )
+        })?;
+    let url = ai
+        .inner
+        .chatgpt
+        .start(port)
+        .map_err(|said| ApiError::new(StatusCode::BAD_REQUEST, said))?;
+    Ok(Json(json!({"url": url})))
+}
+
+/// Where `OpenAI` sends the browser back. It carries a code, so the page is never cached and the
+/// address never passed on.
+async fn chatgpt_callback(
+    State(ai): State<Ai>,
+    headers: axum::http::HeaderMap,
+    Query(back): Query<chatgpt::Return>,
+) -> Response {
+    let local = headers
+        .get(axum::http::header::HOST)
+        .and_then(|host| host.to_str().ok())
+        .and_then(chatgpt::callback_port)
+        .is_some();
+    let outcome = if local {
+        ai.inner.chatgpt.finish(&ai.inner.keys, back).await
+    } else {
+        chatgpt::Outcome::Failed
+    };
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+            (axum::http::header::REFERRER_POLICY, "no-referrer"),
+        ],
+        chatgpt::landing_page(outcome),
+    )
+        .into_response()
+}
+
+async fn check_chatgpt(State(ai): State<Ai>) -> Json<Value> {
+    Json(json!({"chatgpt": ai.inner.chatgpt.check(&ai.inner.keys).await}))
+}
+
+async fn sign_out_chatgpt(State(ai): State<Ai>) -> Result<Json<Value>, ApiError> {
+    let revoked = ai
+        .inner
+        .chatgpt
+        .sign_out(&ai.inner.keys)
+        .await
+        .map_err(|said| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, said))?;
+    Ok(Json(
+        json!({"chatgpt": ai.chatgpt_status(), "revoked": revoked}),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -498,6 +639,7 @@ struct ModelList {
     #[serde(flatten)]
     catalog: Arc<Catalog>,
     anthropic: Vec<Model>,
+    chatgpt: Vec<Model>,
 }
 
 async fn list_models(State(ai): State<Ai>) -> Result<Json<Value>, ApiError> {
@@ -517,7 +659,38 @@ async fn list_models(State(ai): State<Ai>) -> Result<Json<Value>, ApiError> {
     } else {
         Vec::new()
     };
-    Ok(Json(json!(ModelList { catalog, anthropic })))
+    let plan = ai.chatgpt_status();
+    let chatgpt = if plan.available && plan.connected && plan.plan_use {
+        plan.models.iter().map(plan_listing).collect()
+    } else {
+        Vec::new()
+    };
+    Ok(Json(json!(ModelList {
+        catalog,
+        anthropic,
+        chatgpt,
+    })))
+}
+
+/// A `ChatGPT` plan's model as the picker lists it: no price, since the plan pays.
+fn plan_listing(model: &ChatGptModel) -> Model {
+    Model {
+        id: ModelRef {
+            source: Source::ChatGpt,
+            id: model.slug.clone(),
+        }
+        .selector(),
+        name: model.name.clone(),
+        description: String::new(),
+        context_length: model.context_length,
+        input_price: 0.0,
+        output_price: 0.0,
+        cached_input_price: None,
+        cache_write_price: None,
+        free: false,
+        reasoning: !model.efforts.is_empty(),
+        note: None,
+    }
 }
 
 /// A Claude key's model as the picker lists it, with the prices `OpenRouter` lists for the same
@@ -719,6 +892,387 @@ mod tests {
             keys.openrouter().await.unwrap().unwrap().expose(),
             "sk-or-v1-kept"
         );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// What a stand-in for `OpenAI` saw and must answer.
+    #[derive(Clone, Default)]
+    struct FakeOpenAi {
+        /// The nonce the next ID token carries, as the authorize address asked.
+        nonce: Arc<std::sync::Mutex<String>>,
+        /// The issuer the ID token names: the stand-in's own address.
+        issuer: Arc<std::sync::Mutex<String>>,
+        forms: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    fn jwt(claims: &Value) -> String {
+        use base64::Engine as _;
+        let encode = |value: &Value| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string())
+        };
+        format!(
+            "{}.{}.c2ln",
+            encode(&json!({"alg": "RS256"})),
+            encode(claims)
+        )
+    }
+
+    async fn fake_openai() -> (FakeOpenAi, String) {
+        async fn token(State(fake): State<FakeOpenAi>, body: String) -> Response {
+            fake.forms.lock().unwrap().push(body.clone());
+            let form: std::collections::HashMap<String, String> =
+                url::form_urlencoded::parse(body.as_bytes())
+                    .into_owned()
+                    .collect();
+            if form.get("refresh_token").map(String::as_str) == Some("rt_dead") {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "invalid_grant"})),
+                )
+                    .into_response();
+            }
+            let client = form.get("client_id").cloned().unwrap_or_default();
+            let rotated = if form["grant_type"] == "refresh_token" {
+                "rt_2"
+            } else {
+                "rt_1"
+            };
+            let issuer = fake.issuer.lock().unwrap().clone();
+            let nonce = fake.nonce.lock().unwrap().clone();
+            let id_token = jwt(&json!({"iss": issuer, "aud": [client], "sub": "user-1",
+                "email": "a@example.com", "nonce": nonce, "exp": Utc::now().timestamp() + 3600}));
+            // A person who declined plan use on the consent page gets the sign-in alone.
+            let scope = if form.get("code").map(String::as_str) == Some("c_noplan") {
+                "openid profile email offline_access"
+            } else {
+                "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
+            };
+            Json(json!({"access_token": format!("at_{rotated}"), "refresh_token": rotated, "id_token": id_token,
+                "expires_in": 3600, "token_type": "Bearer", "scope": scope}))
+            .into_response()
+        }
+        async fn revoke(State(fake): State<FakeOpenAi>, body: String) -> StatusCode {
+            fake.forms.lock().unwrap().push(format!("revoke:{body}"));
+            StatusCode::OK
+        }
+        async fn models(headers: axum::http::HeaderMap) -> Response {
+            let auth = headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            if !auth.starts_with("Bearer at_") {
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+            Json(json!({"models": [{"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol", "visibility": "list",
+                "priority": 1, "context_window": 500_000, "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}]}]}))
+            .into_response()
+        }
+        let fake = FakeOpenAi::default();
+        let app = Router::new()
+            .route("/api/accounts/oauth/token", post(token))
+            .route("/api/accounts/oauth/revoke", post(revoke))
+            .route("/v1/models", get(models))
+            .with_state(fake.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let base = format!("http://{address}");
+        fake.issuer.lock().unwrap().clone_from(&base);
+        (fake, base)
+    }
+
+    async fn sign_in_at(app: &Router, host: &str) -> (StatusCode, Value) {
+        let request = HttpRequest::builder()
+            .method("POST")
+            .uri("/api/ai/chatgpt/sign-in")
+            .header("x-loomwatch-request", "1")
+            .header("host", host)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    async fn come_back(app: &Router, query: &str) -> String {
+        let request = HttpRequest::builder()
+            .uri(format!("{}?{query}", chatgpt::CALLBACK))
+            .header("host", "127.0.0.1:3999")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        String::from_utf8(
+            response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .to_vec(),
+        )
+        .unwrap()
+    }
+
+    fn query_of(url: &str) -> std::collections::HashMap<String, String> {
+        url::Url::parse(url)
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect()
+    }
+
+    /// The first sign-in registers `LoomWatch` and keeps the client `OpenAI` issued; a later one
+    /// names that client and this computer's id; tokens rotate on refresh; a grant `OpenAI` ended
+    /// asks for a new sign-in; and signing out revokes the token but keeps the client.
+    #[tokio::test]
+    async fn signing_in_with_chatgpt_keeps_only_the_refresh_token_and_the_issued_client() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-ai-{}", uuid::Uuid::new_v4()));
+        let keys = Keys::in_memory();
+        let (fake, base) = fake_openai().await;
+        let ai = Ai::with(
+            keys.clone(),
+            Models::with_url("http://127.0.0.1:9/models", None),
+            &folder,
+            &fake_openrouter().await,
+        )
+        .with_openai_at(&base, &base);
+        let app = router(ai.clone());
+
+        let (_, body) = send(&app, "GET", "/api/ai", None, false).await;
+        assert_eq!(body["chatgpt"]["available"], chatgpt::AVAILABLE);
+        assert_eq!(body["chatgpt"]["connected"], false);
+        assert_eq!(
+            sign_in_at(&app, "[::1]:3000").await.0,
+            StatusCode::FORBIDDEN
+        );
+
+        let (status, body) = sign_in_at(&app, "127.0.0.1:3999").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let asked = query_of(body["url"].as_str().unwrap());
+        assert_eq!(asked["client_id"], "dynamic_agent_client");
+        assert_eq!(asked["agent_name_hint"], "LoomWatch");
+        assert_eq!(
+            asked["redirect_uri"],
+            "http://127.0.0.1:3999/api/ai/chatgpt/callback"
+        );
+        assert_eq!(asked["code_challenge_method"], "S256");
+        assert!(asked["scope"].contains("chatgpt.tokens.use.direct"));
+        assert!(asked["ext_agent_host_id"].starts_with("urn:uuid:"));
+        let host_id = asked["ext_agent_host_id"].clone();
+
+        // A state nobody started is an ended sign-in.
+        assert!(
+            come_back(&app, "code=x&state=nobody")
+                .await
+                .contains("This sign-in has ended")
+        );
+
+        fake.nonce.lock().unwrap().clone_from(&asked["nonce"]);
+        let page = come_back(
+            &app,
+            &format!("code=c1&state={}&client_id=oaiapp_1", asked["state"]),
+        )
+        .await;
+        assert!(page.contains("Connected"), "{page}");
+        assert!(page.contains("loomwatch-ai"));
+        let status = ai.chatgpt_status();
+        assert!(status.connected && status.plan_use);
+        assert_eq!(status.email.as_deref(), Some("a@example.com"));
+        assert_eq!(status.client_id.as_deref(), Some("oaiapp_1"));
+        assert_eq!(status.models[0].slug, "gpt-6.1-sol");
+        let secret = keys.plan_secrets().await.unwrap().chatgpt.unwrap();
+        assert_eq!(
+            (secret.client_id.as_str(), secret.refresh_token.as_str()),
+            ("oaiapp_1", "rt_1")
+        );
+        assert!(fake.forms.lock().unwrap()[0].contains("client_id=oaiapp_1"));
+        if chatgpt::AVAILABLE {
+            assert!(ai.connected_sources().contains(&Source::ChatGpt));
+        }
+        let (_, models) = send(&app, "GET", "/api/ai", None, false).await;
+        assert!(!models.to_string().contains("rt_1"));
+
+        // The token from the sign-in is used while fresh; a renewal rotates the refresh token.
+        let access = ai.chatgpt_access();
+        assert_eq!(access.token(false).await.unwrap(), "at_rt_1");
+        assert_eq!(access.token(true).await.unwrap(), "at_rt_2");
+        assert_eq!(
+            keys.plan_secrets()
+                .await
+                .unwrap()
+                .chatgpt
+                .unwrap()
+                .refresh_token,
+            "rt_2"
+        );
+
+        // A later sign-in names the issued client and this computer, and no new name.
+        let (_, body) = sign_in_at(&app, "127.0.0.1:3999").await;
+        let again = query_of(body["url"].as_str().unwrap());
+        assert_eq!(again["client_id"], "oaiapp_1");
+        assert_eq!(again["ext_agent_host_id"], host_id);
+        assert_eq!(again["login_hint"], "a@example.com");
+        assert!(!again.contains_key("agent_name_hint"));
+
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// A stand-in `OpenAI`, an [`Ai`] that signs in with it, and that sign-in done.
+    async fn signed_in() -> (Ai, Router, FakeOpenAi, Keys, std::path::PathBuf) {
+        let folder = std::env::temp_dir().join(format!("loomwatch-ai-{}", uuid::Uuid::new_v4()));
+        let keys = Keys::in_memory();
+        let (fake, base) = fake_openai().await;
+        let ai = Ai::with(
+            keys.clone(),
+            Models::with_url("http://127.0.0.1:9/models", None),
+            &folder,
+            &fake_openrouter().await,
+        )
+        .with_openai_at(&base, &base);
+        let app = router(ai.clone());
+        let (_, body) = sign_in_at(&app, "127.0.0.1:3999").await;
+        let asked = query_of(body["url"].as_str().unwrap());
+        fake.nonce.lock().unwrap().clone_from(&asked["nonce"]);
+        let page = come_back(
+            &app,
+            &format!("code=c1&state={}&client_id=oaiapp_1", asked["state"]),
+        )
+        .await;
+        assert!(page.contains("Connected"), "{page}");
+        (ai, app, fake, keys, folder)
+    }
+
+    /// Signing out revokes the refresh token and forgets it, keeping the client for next time; a
+    /// grant `OpenAI` ended asks for a new sign-in and says so.
+    #[tokio::test]
+    async fn signing_out_revokes_and_an_ended_grant_asks_to_sign_in_again() {
+        let (ai, app, fake, keys, folder) = signed_in().await;
+        let access = ai.chatgpt_access();
+        assert_eq!(access.token(true).await.unwrap(), "at_rt_2");
+        let (status, body) = send(&app, "DELETE", "/api/ai/chatgpt", None, true).await;
+        assert_eq!(
+            (status, body["revoked"].clone()),
+            (StatusCode::OK, json!(true))
+        );
+        assert!(
+            fake.forms
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|form| form.starts_with("revoke:") && form.contains("token=rt_2"))
+        );
+        assert!(keys.plan_secrets().await.unwrap().chatgpt.is_none());
+        let status = ai.chatgpt_status();
+        assert!(!status.connected);
+        assert_eq!(status.client_id.as_deref(), Some("oaiapp_1"));
+        assert!(matches!(
+            access.token(false).await,
+            Err(crate::agent::AgentError::SignInAgain)
+        ));
+
+        // A grant OpenAI ended asks for a new sign-in and says so.
+        keys.change_plan_secrets(|secrets| {
+            secrets.chatgpt = Some(ChatGptSecret {
+                client_id: "oaiapp_1".into(),
+                refresh_token: "rt_dead".into(),
+                subject: "user-1".into(),
+                email: String::new(),
+                scopes: vec!["chatgpt.tokens.use.direct".into()],
+            });
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            access.token(true).await,
+            Err(crate::agent::AgentError::SignInAgain)
+        ));
+        assert!(keys.plan_secrets().await.unwrap().chatgpt.is_none());
+        assert!(
+            ai.chatgpt_status()
+                .problem
+                .unwrap()
+                .contains("Sign in with ChatGPT again")
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// An ID token made for another sign-in (another nonce) is refused, and nothing is kept.
+    #[tokio::test]
+    async fn an_id_token_from_another_sign_in_is_refused() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-ai-{}", uuid::Uuid::new_v4()));
+        let keys = Keys::in_memory();
+        let (fake, base) = fake_openai().await;
+        let ai = Ai::with(
+            keys.clone(),
+            Models::with_url("http://127.0.0.1:9/models", None),
+            &folder,
+            &fake_openrouter().await,
+        )
+        .with_openai_at(&base, &base);
+        let app = router(ai.clone());
+        let (_, body) = sign_in_at(&app, "127.0.0.1:3999").await;
+        let asked = query_of(body["url"].as_str().unwrap());
+        *fake.nonce.lock().unwrap() = "someone-elses".to_owned();
+        let page = come_back(
+            &app,
+            &format!("code=c1&state={}&client_id=oaiapp_1", asked["state"]),
+        )
+        .await;
+        assert!(page.contains("Not connected"), "{page}");
+        assert!(keys.plan_secrets().await.unwrap().chatgpt.is_none());
+        assert!(!ai.chatgpt_status().connected);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// Signing in without allowing plan use keeps the account but no plan: the app says to turn it on.
+    #[tokio::test]
+    async fn a_sign_in_without_plan_use_is_kept_but_off() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-ai-{}", uuid::Uuid::new_v4()));
+        let (fake, base) = fake_openai().await;
+        let ai = Ai::with(
+            Keys::in_memory(),
+            Models::with_url("http://127.0.0.1:9/models", None),
+            &folder,
+            &fake_openrouter().await,
+        )
+        .with_openai_at(&base, &base);
+        let start = ai.inner.chatgpt.start(3999).unwrap();
+        let asked = query_of(&start);
+        fake.nonce.lock().unwrap().clone_from(&asked["nonce"]);
+        let back = chatgpt::back(&[
+            ("code", "c_noplan"),
+            ("state", asked["state"].as_str()),
+            ("client_id", "oaiapp_1"),
+        ]);
+        let outcome = ai.inner.chatgpt.finish(&ai.inner.keys, back).await;
+        assert_eq!(outcome, chatgpt::Outcome::PlanUseOff);
+        let status = ai.chatgpt_status();
+        assert!(status.connected && !status.plan_use);
+        assert!(!ai.connected_sources().contains(&Source::ChatGpt));
+        assert!(matches!(
+            ai.chatgpt_access().token(true).await,
+            Err(crate::agent::AgentError::PlanUseOff)
+        ));
+        // The person declined on the consent page.
+        let start = ai.inner.chatgpt.start(3999).unwrap();
+        let asked = query_of(&start);
+        let declined = ai
+            .inner
+            .chatgpt
+            .finish(
+                &ai.inner.keys,
+                chatgpt::back(&[
+                    ("state", asked["state"].as_str()),
+                    ("error", "access_denied"),
+                ]),
+            )
+            .await;
+        assert_eq!(declined, chatgpt::Outcome::Denied);
         let _ = std::fs::remove_dir_all(&folder);
     }
 
