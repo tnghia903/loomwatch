@@ -46,15 +46,18 @@
 .rd-failed p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--color-ink-2); }
 .rd-more { margin: 12px 0 0; }
 
+/* Every view leaves the left margin for the faces of the parts asked about: FileReader sets them 32px
+   left of the page's own padding, so less than 40px puts a face over the first words or numbers. */
+
 /* Code, data and plain text: by line, the numbers drawn beside and never marked with the words. */
-.tc-document .tc-document-page:is(.rd-as-code, .rd-as-text) { max-width: none; padding: 18px 22px 96px 12px; font-size: 13px; }
+.tc-document .tc-document-page:is(.rd-as-code, .rd-as-text) { max-width: none; padding: 18px 22px 96px 40px; font-size: 13px; }
 .rd-lines { margin: 0; padding: 0; counter-reset: line; background: none; border: 0; font: 12.5px/1.7 var(--font-mono); color: var(--color-ink); white-space: pre; tab-size: 4; }
 .rd-lines .rd-line { position: relative; display: block; padding-left: calc(var(--rd-gutter, 3ch) + 20px); white-space: pre-wrap; overflow-wrap: anywhere; }
 .rd-lines .rd-line::before { counter-increment: line; content: counter(line); position: absolute; left: 0; width: var(--rd-gutter, 3ch); text-align: right; color: var(--color-ink-3); opacity: .55; user-select: none; }
 .rd-lines .rd-line:hover::before { opacity: 1; color: var(--color-accent); }
 
 /* A table as a sheet: its header stays as you scroll, numbers sit right, rows are counted. */
-.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
+.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px 40px; }
 .rd-table-wrap { max-width: 100%; overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel-solid); }
 .rd-as-table .rd-table-wrap { overflow: visible; max-width: none; }
 .rd-table { min-width: 100%; border-collapse: separate; border-spacing: 0; counter-reset: row; font: 13px/1.45 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
@@ -151,8 +154,13 @@
 .agent-file { position: relative; }
 .agent-file .rd { position: relative; inset: auto; flex: 1; min-height: 0; margin-top: var(--sp-3); border-top: 1px solid var(--color-hairline); background: transparent; }
 .agent-file .rd .rd-scroll.tc-document { position: absolute; inset: 0; flex: none; }
-.agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px; }
-.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px; }
+.agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px 40px; }
+.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px 40px; }
+
+/* A narrow pane draws a document 20px in from each side (team-chat.css); the faces still need theirs. */
+@container (max-width: 560px) {
+  .tc-document .tc-document-page:is(.rd-as-markdown, .rd-as-document) { padding-left: 40px; }
+}
 
 @container details (max-width: 560px) {
   .rd-bar { padding-left: 14px; }
