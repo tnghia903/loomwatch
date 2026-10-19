@@ -728,6 +728,30 @@ span.story-schedule { cursor: default; }
 }
 .file-chip:hover:not(:disabled) { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent-fill) 22%, var(--color-accent-tint)); }
 .file-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* A claim the writer marked (MarkdownRenderer): a small tag before it, not "[ Sourced ]". Backed by
+   a source is filled; the writer's own reasoning is only outlined, dashed. */
+.md-claim {
+  display: inline-block; margin-right: 0.2em; padding: 0.22em 0.6em 0.2em; vertical-align: 0.14em;
+  border: 1px solid transparent; border-radius: var(--r-full); cursor: help; white-space: nowrap;
+  font: 600 max(10px, 0.68em)/1.2 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase;
+}
+.md-claim-backed { background: color-mix(in srgb, var(--color-ok) 13%, transparent); color: var(--color-ok); }
+.md-claim-reasoned { border: 1px dashed color-mix(in srgb, var(--color-ink-3) 70%, transparent); color: var(--color-ink-2); }
+
+/* The links that close a claim are its sources: quiet tabs after the sentence, not a run of
+   underlined titles. The site is named when pointed at. */
+.md-source:any-link {
+  display: inline-flex; align-items: center; gap: 0.35em; max-width: 100%; padding: 0 0.6em; vertical-align: 0.06em;
+  border: 1px solid var(--color-hairline); border-radius: var(--r-full); background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  color: var(--color-ink-2); font: 500 0.8em/1.75 var(--font-sans); text-decoration: none; word-break: normal; white-space: nowrap;
+  transition: border-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out), background-color var(--t-quick) var(--ease-out);
+}
+.md-source-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.md-source svg { flex: none; color: var(--color-ink-3); transition: color var(--t-quick) var(--ease-out); }
+.md-source:any-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.md-source:any-link:hover svg { color: var(--color-accent); }
+.md-source:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .file-chip:disabled { cursor: default; }
 .file-chip.muted { border-color: var(--color-hairline); background: transparent; color: var(--color-ink-3); }
 .file-chip.muted svg { color: var(--color-ink-3); }
