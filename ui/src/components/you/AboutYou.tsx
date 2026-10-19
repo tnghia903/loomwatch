@@ -4,6 +4,7 @@ import type { ModelSource } from '../../lib/ai/modelIds'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { type AboutYou as Told, MAX_ABOUT_CHARS, MAX_NAME_CHARS, announceYou, fetchYou, saveYou, toldNothing } from '../../lib/you/client'
+import { AskAnotherAI } from './AskAnotherAI'
 
 const count = (value: number) => value.toLocaleString('en-US')
 
@@ -105,6 +106,7 @@ export function AboutYou({ variant = 'section', onDone }: { variant?: 'section' 
               <span className="lw-you-count" aria-label={`${count(about.length)} of ${count(MAX_ABOUT_CHARS)} characters`}>{count(about.length)} / {count(MAX_ABOUT_CHARS)}</span>
             </span>
           </div>
+          {!card && <AskAnotherAI />}
           <p className="t-meta lw-settings-quiet">Kept on this computer. Your agents read it with every task, {sentTo(ai ? connectedSources(ai) : [])}. Leave out passwords and anything private.</p>
           <div className="lw-settings-actions">
             <button type="submit" className="btn btn-primary" disabled={busy || empty || (!card && !changed)}>{busy ? 'Saving…' : 'Save'}</button>
