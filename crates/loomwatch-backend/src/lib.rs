@@ -576,7 +576,10 @@ async fn run_pipeline_mode(
     )?;
     let _teardown = bus.abort_on_drop();
 
-    let run = run_pipeline_nodes(
+    // Boxed for the same reason `run` boxes this function: the stages' loop holds every stage's
+    // handed material, live sessions and check rounds, and on Windows its future is over Clippy's
+    // 16 KB `large_futures` limit, as is everything that awaits it unboxed.
+    let run = Box::pin(run_pipeline_nodes(
         team,
         team_path,
         &archive,
@@ -587,7 +590,7 @@ async fn run_pipeline_mode(
         event_log,
         memory,
         lineage,
-    )
+    ))
     .await;
     let delegated = bus.wait_for_tasks().await;
     let mut outcome = run?;
