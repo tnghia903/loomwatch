@@ -20,6 +20,16 @@ describe('checkRounds', () => {
     expect(checkRounds(events, 1)).toEqual([{ checker: 'checker', checked: 'writer', round: 1, items: [{ verdict: 'not_met', item: 'Every claim has a link', evidence: 'claim 2' }] }])
   })
 
+  // ADR 0062: approved at the check step's stop with checks still not met, which the badge says.
+  it('marks the last round you approved as it was, and only that check step’s', () => {
+    const events = [
+      meta(1, 'checker', { checked: 'writer', round: 2, items: [{ verdict: 'not_met', item: 'Linked', evidence: 'claim 2' }] }),
+      meta(2, 'other', { checked: 'coder', round: 1, items: [{ verdict: 'not_met', item: 'Tests pass', evidence: '1 fails' }] }),
+      meta(3, 'checker', { phase: 'check_approved', checked: 'writer', round: 2, open: 1 }),
+    ]
+    expect(checkRounds(events).map((round) => [round.checker, round.approved ?? false])).toEqual([['checker', true], ['other', false]])
+  })
+
   it('says when a check step’s reply could not be read', () => {
     const events = [meta(1, 'checker', { checked: 'writer', round: 1, readable: false, items: [{ verdict: 'not_sure', item: 'Linked', evidence: 'no block' }] })]
     expect(checkRounds(events)[0].readable).toBe(false)
@@ -43,10 +53,14 @@ describe('answerNotes', () => {
     const events = [
       { seq: 1, agentId: 'writer', kind: 'session_meta' as const, payload: { phase: 'answer_notes', not_met: ['Story 2 has a link: the page is down', 3, ' '], not_changed: ['2.5 million: the report says so'] } },
       { seq: 2, agentId: 'writer', kind: 'session_meta' as const, payload: { phase: 'answer_notes', not_met: [], missing: ['The March total: no sheet was attached'] } },
+      { seq: 3, agentId: 'editor', kind: 'session_meta' as const, payload: { phase: 'answer_notes', not_met: [], missing: [], not_changed: [], changes: ['"overnight" became "at night"', 4] } },
     ]
-    expect(answerNotes(events, 1)).toEqual({ agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: [], notChanged: ['2.5 million: the report says so'] })
+    // A record from before the daemon set changes aside has none.
+    expect(answerNotes(events, 1)).toEqual({ agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: [], notChanged: ['2.5 million: the report says so'], changes: [] })
     // A later answer in the same record is the one beside it.
-    expect(answerNotes(events)).toEqual({ agentId: 'writer', notMet: [], missing: ['The March total: no sheet was attached'], notChanged: [] })
+    expect(answerNotes(events, 2)).toEqual({ agentId: 'writer', notMet: [], missing: ['The March total: no sheet was attached'], notChanged: [], changes: [] })
+    // The Editor's change list, as the daemon took it off the answer.
+    expect(answerNotes(events)).toEqual({ agentId: 'editor', notMet: [], missing: [], notChanged: [], changes: ['"overnight" became "at night"'] })
     expect(answerNotes(events, 0)).toBeNull()
     expect(answerNotes([meta(1, 'checker', { checked: 'writer', items: [] })])).toBeNull()
   })

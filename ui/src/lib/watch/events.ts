@@ -747,6 +747,8 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   /** Agents whose app reported this turn failed, with what it has said since (the daemon's rule:
       the latest thread status counts, so one that says it is working again recovered). */
   const appErrors = new Map<string, string>()
+  /** Teammates whose conversation is open with nothing happening in it, with when its last turn ended. */
+  const keptSince = new Map<string, string>()
   for (const event of events) {
     if (event.seq > throughSeq) break
     lastSeq = event.seq
@@ -758,6 +760,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     const agent = ensureAgent(event.agentId, event)
     const p = event.payload
     if (ACTIVITY_KINDS.has(event.kind)) { agent.turnText.noteActivity(); agent.allText.noteActivity() }
+    if (event.kind !== 'session_meta' && event.kind !== 'process') keptSince.delete(agent.id)
 
     switch (event.kind) {
       case 'process': {
@@ -767,6 +770,10 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           agent.task = 'Starting the harness'
           agent.pid = typeof p.pid === 'number' ? p.pid : agent.pid
         } else if (p.phase === 'exited') {
+          // A conversation kept open and closed when the run ended did no work at its close: its
+          // time ends with its last turn.
+          const kept = keptSince.get(agent.id)
+          if (kept !== undefined) agent.lastTs = kept
           agent.exitCode = typeof p.exitCode === 'number' ? p.exitCode : null
           // Its app closing cleanly does not undo a turn it reported as failed.
           agent.status = agent.exitCode === 0 ? (agent.error ? 'failed' : agent.handedOff ? 'stopped' : 'succeeded') : 'failed'
@@ -798,6 +805,15 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (p.phase === 'set_config_option_skipped' && typeof p.value === 'string') agent.model = p.value
         if (p.phase === 'awaiting_operator') { agent.status = 'waiting'; agent.task = 'Waiting for you'; letters.awaiting(event) }
         if (p.phase === 'team_bus_unavailable') agent.busUnavailable = true
+        if (p.phase === 'kept_open') {
+          // A teammate's turn ended and its conversation stays open for the run: done for now, not
+          // working, until it is handed more (its next turn's activity says running again).
+          if (agent.status !== 'failed') agent.status = 'succeeded'
+          agent.task = 'Done for now, open for more work in this run'
+          agent.streaming = false
+          agent.thinking = false
+          keptSince.set(agent.id, event.ts)
+        }
         if (p.phase === 'turn_interrupted' && object(event.raw) && event.raw.source === 'loomwatch') {
           const why = p.reason === 'ask_withdrawn' ? 'Stopped: the agent that asked moved on' : 'Stopped for your note'
           interrupted.set(agent.id, why)
@@ -826,6 +842,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           if (p.phase === 'check_result') letters.checkResult(event)
           if (p.phase === 'check_sent_back') letters.checkSentBack(event)
           if (p.phase === 'check_send_back_skipped') letters.checkSendBackSkipped(event)
+          if (p.phase === 'check_stopped') letters.checkStopped(event)
           if (p.phase === 'permission_answered' && p.outcome === 'auto_approved') {
             autoRan.push({ agentId: agent.id, title: typeof p.title === 'string' ? p.title : 'A command', detail: typeof p.detail === 'string' ? p.detail : null, ts: event.ts })
           }

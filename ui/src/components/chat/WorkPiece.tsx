@@ -23,6 +23,7 @@ import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
 import { Markdown } from '../ui/Markdown'
+import { checkStopTip, checkStopTitle } from '../../lib/story/checkStop'
 import { AnswerTools } from './AnswerTools'
 import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
@@ -147,7 +148,10 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const working = (record.working ?? []).map(name)
   const waiting = live ? record.waitingOn ?? null : null
   const responder = session.projection.agents.find((agent) => agent.id === run.responder)
-  const streamed = live ? responder?.reply ?? '' : ''
+  // Work a check step checks is not the answer until the checks are done (ADR 0062): it may yet
+  // go back, or wait for you to approve it. Before then it is only in what the agents said.
+  const checked = [...(team.configs?.values() ?? [])].some((config) => config.checks === run.responder)
+  const streamed = live && !checked ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
   // The files the answer names, for its tools: a scan of the whole text, so once per answer.
   const finishedAnswer = isTerminalRun(record.status)
@@ -249,7 +253,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
         <Swap key={talkKey(live, waiting, [...asking.map((request) => request.id), ...stops.map((stop) => stop.id)], working, run.status, pass)} className="tc-talk-line">
           {live
             ? waiting
-              ? <><b className="tc-wait">Waiting for you</b> · {waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
+              ? <><b className="tc-wait">Waiting for you</b> · {waiting.check ? checkStopTitle(waiting.check, name, name(waiting.node)).replace(/\.$/, '') : waiting.kind === 'review_stop' ? `${name(waiting.handoverFrom ?? '')}'s work is ready for your review` : `${name(waiting.node)} asked you something`}</>
               : asking.length > 0
                 ? <><b className="tc-wait">Waiting for you</b> · {askers(asking.map((request) => name(request.agent)))} your permission</>
               : stops.length > 0
@@ -302,7 +306,43 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
 
       {live && !open && <Decisions messages={session.projection.messages} autoRan={session.projection.autoRan} operators={team.operators} name={name} />}
 
-      {waiting?.kind === 'review_stop' && !onTheMessage && (
+      {waiting?.kind === 'review_stop' && waiting.check && (
+        <Appearing key={`check:${waiting.since}`} reveal className="tc-decision check-stop" role="group" aria-label={`Decide on ${name(waiting.check.checked)}'s work`}>
+          <p><b>{checkStopTitle(waiting.check, name, name(waiting.node))}</b></p>
+          <ul className="tc-check-misses" aria-label="Checks still not met">
+            {waiting.check.items.map((item, index) => (
+              <li key={index}>
+                <span className={`tc-check-verdict ${item.verdict}`}>{item.verdict === 'not_met' ? 'Not met' : 'Not sure'}</span> {item.item}
+                {item.evidence && <span className="t-meta"> — {item.evidence}</span>}
+              </li>
+            ))}
+          </ul>
+          {waiting.check.problems && (
+            <details className="tc-handover">
+              <summary>What {name(waiting.node)} wrote about it</summary>
+              <div className="chat-text"><Markdown>{waiting.check.problems}</Markdown></div>
+            </details>
+          )}
+          {waiting.context && (
+            <details className="tc-handover">
+              <summary>Read {name(waiting.check.checked)}’s work</summary>
+              <div className="chat-text"><Markdown>{waiting.context}</Markdown></div>
+            </details>
+          )}
+          <div className="tc-acts">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>
+              {draft.trim() ? 'Approve with your note' : 'Approve as it is'}
+            </button>
+            {waiting.sendBackAvailable && waiting.handoverFrom && (
+              <button type="button" className="btn" disabled={busy || !draft.trim()} onClick={sendBack}>
+                Send back to {name(waiting.handoverFrom)}
+              </button>
+            )}
+          </div>
+          <p className="tc-tip">{waiting.sendBackAvailable ? checkStopTip(waiting.check, name, name(waiting.node)) : 'Approve keeps the work as it is, with what wasn’t met marked on it.'}</p>
+        </Appearing>
+      )}
+      {waiting?.kind === 'review_stop' && !waiting.check && !onTheMessage && (
         <Appearing key={`review:${waiting.since}`} reveal className="tc-decision" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
           <p><b>{name(waiting.handoverFrom ?? '')}</b> handed over its work for your review.</p>
           {waiting.context && (

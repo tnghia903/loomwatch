@@ -110,6 +110,14 @@ describe('Team chat', () => {
     expect(within(approved).getByText('approved · passed on to Editor')).toBeInTheDocument()
   })
 
+  // ADR 0062: approved at a check step's stop, the line says whose work it kept and what was open.
+  it('tells an approval at a check step’s stop as the work kept as it was', () => {
+    const stop = message({ id: 'check-stop:e40', kind: 'question', from: 'editor', to: 'operator', text: 'Writer’s work still misses 2 checks.', seq: 40, state: 'answered', checkStop: { checked: 'writer', open: 2 }, reply: answer('operator', APPROVAL_TEXT, 41) })
+    setup([handover, stop])
+    expect(msg(/You: approved$/)).toHaveTextContent('You approved Writer’s work as it was, with 2 checks not met')
+    expect(screen.queryByText(/handover/)).not.toBeInTheDocument()
+  })
+
   it('tells a plain approval as a note in the chat, not as words you typed', () => {
     setup([reviewed(answer('review', APPROVAL_TEXT, 30)), passedOn])
     expect(msg(/You: approved$/)).toHaveTextContent('You approved Writer’s handover · passed on to Editor')
@@ -178,6 +186,18 @@ describe('Team chat', () => {
       'Research lead to Writer: clarifies',
       'Writer to Research lead: answer',
     ])
+  })
+
+  it('says under work handed to a teammate, and under its answer, whether it carried on or a fresh copy took it', () => {
+    const teamOrder = [{ id: 'lead', name: 'Editor', operator: false }, { id: 'writer', name: 'Writer', operator: false }]
+    render(<AgentMessages messages={[
+      message({ id: 'd1', kind: 'dispatch', from: 'lead', to: 'writer', text: 'Draft it.', seq: 1 }),
+      message({ id: 'd2', kind: 'dispatch', from: 'lead', to: 'writer', text: 'Fix the date.', seq: 2, reached: 'continued' }),
+      message({ id: 'd3', kind: 'dispatch', from: 'lead', to: 'writer', text: 'And the title.', seq: 3, reached: 'busy' }),
+      message({ id: 'q1', kind: 'ask', from: 'lead', to: 'writer', text: 'Which line backs it?', seq: 4, state: 'answered', reached: 'continued', reply: answer('writer', 'Line 12.', 6, { seq: 6, source: 'open' }) }),
+    ]} order={teamOrder} evidence={[]} live={false} onInspectEvidence={vi.fn()} />)
+    const captions = said().map((item) => item.querySelector('.chat-under span')?.textContent ?? null)
+    expect(captions).toEqual(['task', 'task · carries on', 'task · separate copy', null, 'answer · carries on'])
   })
 
   it('says in one line why a question was not asked, with the Team Bus’s words a hover away', () => {
