@@ -100,6 +100,8 @@
 .rd-pin:hover:not(:disabled), .rd-pin:focus-visible { scale: 1.12; box-shadow: 0 0 0 2px var(--color-accent), 0 4px 12px color-mix(in srgb, var(--lw-ink-950) 20%, transparent); }
 .rd-pin:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .rd-pin:disabled { cursor: default; }
+/* In a ring, the figure fills it (loom.css draws a plain one at the slot's own size). */
+:is(.rd-pin, .rd-ask) .chat-avatar > .chat-avatar-figure { inset: -20%; width: 140%; height: 140%; max-width: none; }
 
 /* ---------- The ask bubble: the agent leans in over the words you marked ---------- */
 .rd-ask {
