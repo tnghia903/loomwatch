@@ -28,9 +28,9 @@ describe('checkEffort', () => {
 })
 
 describe('checkStepFields', () => {
-  it('checks the work, sends a miss back once, and sets an effort only on a model that has one', () => {
-    expect(checkStepFields({ thinkingEffort: 'medium' }, job('writer'))).toEqual({ checks: 'writer', sendBackOnce: true, thinkingEffort: 'high' })
-    expect(checkStepFields({}, job('coder'))).toEqual({ checks: 'coder', sendBackOnce: true })
+  it('checks the work, sends a miss back up to twice then asks you, and sets an effort only on a model that has one', () => {
+    expect(checkStepFields({ thinkingEffort: 'medium' }, job('writer'))).toEqual({ checks: 'writer', sendBack: { rounds: 2, whenStillNotMet: 'ask' }, thinkingEffort: 'high' })
+    expect(checkStepFields({}, job('coder'))).toEqual({ checks: 'coder', sendBack: { rounds: 2, whenStillNotMet: 'ask' } })
   })
 })
 

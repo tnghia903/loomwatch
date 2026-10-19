@@ -66,7 +66,7 @@ Set agents up the way that works best, every time, without being asked; the pers
 - Make every line specific to this request (its audience, sources, length, format), and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
 - An agent that must search the web gets `allow: {web: true}`; leave `edits` and `commands` off unless the work is changing files or running commands.
 - Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five.
-- When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBackOnce: true`, so a missed check is fixed before the person sees the answer; leave it off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
+- When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBack: {rounds: 2, whenStillNotMet: ask}`, so what the check finds goes back to be fixed before the person sees the answer, and the run stops to ask them if it still isn't met; write `whenStillNotMet: answer` if they would rather see the answer with the problems marked, and leave `sendBack` off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
 - Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates use: `jobs` lists the usual kinds, `tiers` says which model each kind of agent runs on, and `efforts` how hard it thinks. Use another recommended model only when the person asks for one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
 
 A team file is YAML. A complete pipeline with a review stop:
@@ -440,10 +440,12 @@ async fn propose_team(
     }))
 }
 
-/// `yaml` with `sendBackOnce: true` under every check step that does not set it, written beside
-/// its `checks:` line so the rest of the file stays as it was written. A step that sets it either
-/// way, or whose `checks:` is not on a line of its own (flow style), is left as it is.
+/// `yaml` with a new check step's `sendBack` ([`crate::config::SendBack::NEW`]) under every check
+/// step that does not say how it sends work back, written beside its `checks:` line so the rest of
+/// the file stays as it was written. A step that says (`sendBack`, or the older `sendBackOnce`
+/// either way), or whose `checks:` is not on a line of its own (flow style), is left as it is.
 fn with_send_back(yaml: &str, team: &TeamConfig) -> String {
+    use std::fmt::Write as _;
     let Ok(raw) = serde_yaml::from_str::<serde_yaml::Value>(yaml) else {
         return yaml.to_owned();
     };
@@ -455,7 +457,9 @@ fn with_send_back(yaml: &str, team: &TeamConfig) -> String {
                     .iter()
                     .find(|agent| agent.get("id").and_then(serde_yaml::Value::as_str) == Some(id))
             })
-            .is_some_and(|agent| agent.get("sendBackOnce").is_some())
+            .is_some_and(|agent| {
+                agent.get("sendBack").is_some() || agent.get("sendBackOnce").is_some()
+            })
     };
     let mut pending: Vec<(&str, &str)> = team
         .agents
@@ -492,8 +496,18 @@ fn with_send_back(yaml: &str, team: &TeamConfig) -> String {
         if !out.ends_with('\n') {
             out.push('\n');
         }
-        out.push_str(&indent);
-        out.push_str("sendBackOnce: true\n");
+        let crate::config::SendBack {
+            rounds,
+            when_still_not_met,
+        } = crate::config::SendBack::NEW;
+        let exit = match when_still_not_met {
+            crate::config::WhenStillNotMet::Answer => "answer",
+            crate::config::WhenStillNotMet::Ask => "ask",
+        };
+        let _ = write!(
+            out,
+            "{indent}sendBack:\n{indent}  rounds: {rounds}\n{indent}  whenStillNotMet: {exit}\n"
+        );
         pending.retain(|(id, _)| *id != current);
         agent = None;
     }
@@ -721,7 +735,10 @@ mod tests {
             .lines()
             .find(|line| line.contains("end with a check step"))
             .expect("the instructions say when to add a check step");
-        assert!(rule.contains("Add `sendBackOnce: true`, so"), "{rule}");
+        assert!(
+            rule.contains("Add `sendBack: {rounds: 2, whenStillNotMet: ask}`, so"),
+            "{rule}"
+        );
         assert!(!rule.contains("only if the person wants"), "{rule}");
     }
 
@@ -741,22 +758,30 @@ mod tests {
         let proposed = file("    checks: writer  # the writer's piece\n");
         let written = super::with_send_back(&proposed, &TeamConfig::parse(&proposed).unwrap());
         assert!(
-            written.contains("    checks: writer  # the writer's piece\n    sendBackOnce: true\n"),
+            written.contains(
+                "    checks: writer  # the writer's piece\n    sendBack:\n      rounds: 2\n      \
+                 whenStillNotMet: ask\n"
+            ),
             "{written}"
         );
         let team = TeamConfig::parse(&written).unwrap();
-        assert!(team.agents[1].send_back_once);
+        assert_eq!(team.agents[1].send_back, Some(crate::config::SendBack::NEW));
         assert!(
             schema_problems(&written).is_empty(),
             "{:?}",
             schema_problems(&written)
         );
         // Said either way, it stands; and a team with no check step is left as written.
-        let kept = file("    checks: writer\n    sendBackOnce: false\n");
-        assert_eq!(
-            super::with_send_back(&kept, &TeamConfig::parse(&kept).unwrap()),
-            kept
-        );
+        for says in [
+            "    checks: writer\n    sendBackOnce: false\n",
+            "    checks: writer\n    sendBack: {rounds: 1}\n",
+        ] {
+            let kept = file(says);
+            assert_eq!(
+                super::with_send_back(&kept, &TeamConfig::parse(&kept).unwrap()),
+                kept
+            );
+        }
         let plain = file("");
         let plain = plain.replace("edges:\n  - { from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-18T00:00:00Z\" }\n", "edges: []\n");
         assert_eq!(

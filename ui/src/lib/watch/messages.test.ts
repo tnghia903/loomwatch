@@ -451,5 +451,56 @@ describe('a check step in the chat', () => {
     expect(messages[1]).toMatchObject({ kind: 'check', state: 'failed', text: '**Not met**\n- Under 300 words — 412 words' })
     expect(messages[1].error).toContain('not revised')
   })
+
+  // The loop: a round that fixed nothing stops it, the check step asks you, your send-back is the
+  // next round, and the round after that meets it. Each is said where it happened.
+  it('says why the rounds stopped, asks you, and shows your send-back as the next round', () => {
+    seq = 0
+    const stopped = (seconds: number, payload: Record<string, unknown>) =>
+      event(seconds, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', ...payload }, loomwatch('check_stopped'))
+    const revised = (seconds: number, text: string) => [say(seconds, 'writer', text), event(seconds + 1, 'writer', 'turn_end', { stopReason: 'end_turn' })]
+    const question = 'Writer’s work still misses 1 check: the last round fixed none of them. Approve it as it is, or send it back with what to change.'
+    const messages = projectRun([
+      checked(1, 1, [linked, short('not_met', '412 words')]),
+      sentBack(2, { round: 1, problems: '' }),
+      ...revised(10, 'Second draft.'),
+      checked(20, 2, [linked, short('not_met', '400 words')]),
+      stopped(21, { round: 2, sent: 1, reason: 'no_progress', exit: 'ask' }),
+      event(22, 'checker', 'session_meta', { phase: 'awaiting_operator', kind: 'review_stop', node: 'checker', question, handoverFrom: 'writer', check: { checked: 'writer', rounds: 1, reason: 'no_progress', met: 1, items: [short('not_met', '400 words')] } }, loomwatch('awaiting_operator')),
+      answer(30, 'operator', 'Cut the intro.', { askedBy: 'checker', sendBack: 'writer' }),
+      sentBack(31, { round: 2, problems: '', direction: 'Cut the intro.' }),
+      ...revised(40, 'Third draft.'),
+      checked(50, 3, [linked, short('met', '280 words')]),
+      stopped(51, { round: 3, sent: 2, reason: 'all_met', exit: 'ask' }),
+    ]).messages
+    // In the order it happened: the round it stopped at, its question to you, your answer, then
+    // what went back with it, the revision as its reply, and the round that met it.
+    expect(messages.map(({ kind, state, check }) => [kind, check?.round ?? null, state])).toEqual([
+      ['check', 1, 'answered'], ['check', 2, 'delivered'], ['question', null, 'answered'], ['check', 2, 'answered'], ['check', 3, 'delivered'],
+    ])
+    const checks = messages.filter((message) => message.kind === 'check')
+    expect(checks[1].text).toBe('**Not met**\n- Under 300 words — 400 words\n\n_It stopped sending the work back: this round fixed none of what went back. It asks you what to do._')
+    expect(checks[1].reply).toBeNull()
+    expect(checks[2]).toMatchObject({ text: '**You sent it back:** Cut the intro.\n\n**Not met**\n- Under 300 words — 400 words', check: { sentBack: true, direction: 'Cut the intro.' } })
+    expect(checks[2].reply).toMatchObject({ from: 'writer', text: 'Third draft.' })
+    expect(checks[3].text).toBe('All 2 met.')
+    const asked = messages.find((message) => message.kind === 'question')
+    expect(asked).toMatchObject({ from: 'checker', to: 'operator', text: question, context: '- Not met: Under 300 words — 400 words', checkStop: { checked: 'writer', open: 1 }, state: 'answered' })
+    expect(asked?.reply).toMatchObject({ from: 'operator', text: 'Cut the intro.', sentBackTo: 'writer' })
+    // Not a review step: the check step is still an agent.
+    expect(messages.some((message) => message.kind === 'note')).toBe(false)
+  })
+
+  it('says a loop that went back as often as it may, and shows the answer anyway', () => {
+    seq = 0
+    const messages = projectRun([
+      checked(1, 1, [short('not_met', '412 words')]),
+      sentBack(2, { round: 1, problems: '' }),
+      say(10, 'writer', 'Second draft.'), event(11, 'writer', 'turn_end', { stopReason: 'end_turn' }),
+      checked(20, 2, [short('not_met', '330 words')]),
+      event(21, 'checker', 'session_meta', { phase: 'check_stopped', checked: 'writer', round: 2, sent: 1, reason: 'rounds', exit: 'answer' }, loomwatch('check_stopped')),
+    ]).messages
+    expect(messages[1].text).toBe('**Not met**\n- Under 300 words — 330 words\n\n_It stopped after sending the work back once, as often as it may. The answer shows with this marked._')
+  })
 })
 

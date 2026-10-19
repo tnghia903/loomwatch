@@ -3703,7 +3703,7 @@ mod tests {
             turned_off: Vec::new(),
             done_when: Vec::new(),
             checks: None,
-            send_back_once: false,
+            send_back: None,
             spend: crate::spend::SpendConfig::default(),
         }
     }

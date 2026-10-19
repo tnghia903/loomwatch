@@ -827,7 +827,7 @@ async fn run_pipeline_nodes(
             .with_context(|| format!("pipeline node {} failed", agent.id))?;
 
         // A check step that may send the work back keeps the stage it checks open until it has.
-        let sends_back = agent.send_back_once && agent.checks.is_some();
+        let sends_back = agent.send_back.is_some() && agent.checks.is_some();
         if !sends_back {
             to_ask.remove(agent_id);
             release_answered(team, bus, &mut held, &to_ask, &mut outcome).await?;
@@ -869,22 +869,29 @@ async fn run_pipeline_nodes(
         drop(work);
         let mut checked_items = None;
         if let Some(checked) = agent.checks.as_deref() {
-            let (checked_reply, items) = run_checks(
+            // Boxed: its rounds and its stop would otherwise sit inside this loop's future.
+            let outcome = Box::pin(run_checks(
                 CheckStep {
                     team,
                     checker: agent,
                     checked,
                     bus,
                     log: shared_log.as_ref(),
+                    desk: lineage.operator.as_ref(),
                 },
                 &mut session,
                 reply,
                 &mut replies,
                 &mut handovers,
-            )
+            ))
             .await?;
-            reply = checked_reply;
-            checked_items = Some(items);
+            reply = outcome.reply;
+            checked_items = Some(outcome.items);
+            // Approved as it was at the check step's stop: what the operator wrote is direction
+            // for the stages after it, as at a review stop.
+            if let Some(approval) = outcome.approval {
+                directions.insert(agent_id.clone(), approval);
+            }
         }
         if sends_back {
             to_ask.remove(agent_id);
@@ -1470,6 +1477,7 @@ async fn run_review_stop(
             park_note: tier.sentence(predecessor_name.as_deref()),
             send_back_available: tier == operator::ParkTier::Reloadable,
             question_id: None,
+            check: None,
         };
         log.append(
             &node.id,
@@ -3017,6 +3025,8 @@ pub(crate) struct CheckItem {
 
 /// The evidence on an item a check step's reply gave no verdict.
 const NOT_CHECKED: &str = "Not checked";
+/// The evidence on an item a check step marked Met without saying what it saw.
+const MET_WITHOUT_EVIDENCE: &str = "Marked Met without evidence";
 /// The evidence on every item when a check step's reply had no block to read.
 const UNREADABLE: &str = "The check step's reply had no readable Check block.";
 
@@ -3329,7 +3339,7 @@ fn checked_line(
 fn held_to_evidence(verdict: Verdict, evidence: String) -> (&'static str, String) {
     match verdict {
         Verdict::Met if !evidence.chars().any(char::is_alphanumeric) => {
-            ("not_sure", "Marked Met without evidence".to_owned())
+            ("not_sure", MET_WITHOUT_EVIDENCE.to_owned())
         }
         Verdict::Met => ("met", evidence),
         Verdict::NotMet => ("not_met", evidence),
@@ -3457,13 +3467,15 @@ fn checked_work_handover(
     Some(text)
 }
 
-/// What a check step needs to record its checks and, when allowed, send the work back once.
+/// What a check step needs to record its checks, send the work back, and stop to ask.
 struct CheckStep<'a> {
     team: &'a TeamConfig,
     checker: &'a config::AgentConfig,
     checked: &'a str,
     bus: &'a TeamBus,
     log: Option<&'a EventLog>,
+    /// Where a check step that stops to ask parks the run. `None` on a run nobody can answer.
+    desk: Option<&'a operator::OperatorDesk>,
 }
 
 impl CheckStep<'_> {
@@ -3489,82 +3501,365 @@ impl CheckStep<'_> {
         }
         Ok(())
     }
+
+    async fn stopped(&self, checks: &Checks, end: CheckEnd, exit: &str) -> Result<()> {
+        self.note(
+            "check_stopped",
+            json!({
+                "checked": self.checked,
+                "round": checks.round,
+                "sent": checks.sent,
+                "reason": end.as_str(),
+                "exit": exit,
+            }),
+        )
+        .await
+    }
 }
 
-/// Record a check step's checks (ADR 0062). With `sendBackOnce`, missed checks go back to the
-/// checked agent's still-open session once, with the checker's own account of the problems, as
-/// findings rather than direction (only the operator's words are direction, `TEAM_MEMORY.md` §9).
-/// The checks then run once more, on the items that were not met or not sure and on what the
-/// revision changed; that second result is final. Returns the check step's reply and its last
-/// verdict on every item.
+/// Why a check step stopped sending the work back (ADR 0062).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckEnd {
+    /// Every check is met: quality reached.
+    AllMet,
+    /// The work went back as many times as `sendBack.rounds` allows.
+    Rounds,
+    /// The last round met none of the checks it went back for, so another would cost the same
+    /// and most likely fix nothing.
+    NoProgress,
+    /// What is still open is the check step's own gap (no verdict it backed with evidence), which
+    /// sending the work back cannot fix.
+    Unchecked,
+    /// The checked agent had already finished, so nothing could take the work back.
+    NotOpen,
+}
+
+impl CheckEnd {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AllMet => "all_met",
+            Self::Rounds => "rounds",
+            Self::NoProgress => "no_progress",
+            Self::Unchecked => "unchecked",
+            Self::NotOpen => "not_open",
+        }
+    }
+}
+
+/// A Not sure the check step's reply made rather than one it reached by looking: it gave no
+/// verdict, or no evidence for one. The checked agent cannot fix those; the recheck asks again.
+fn is_checker_gap(item: &CheckItem) -> bool {
+    item.verdict == "not_sure"
+        && (item.evidence == UNREADABLE
+            || item.evidence == MET_WITHOUT_EVIDENCE
+            || item.evidence.starts_with(NOT_CHECKED))
+}
+
+/// A check step's checks as they stand.
+struct Checks {
+    /// Its latest reply.
+    reply: String,
+    /// Its latest verdict on every item.
+    items: Vec<CheckItem>,
+    /// Which check this is: 1 for the first, one more after each time the work went back.
+    round: u32,
+    /// How many times the work has gone back.
+    sent: u32,
+}
+
+/// One time the work goes back: what the checked agent is told, the findings it is told about,
+/// the operator's direction when it was they who sent it, and whether it is the last round.
+struct SendBackTurn<'a> {
+    prompt: String,
+    findings: Vec<CheckItem>,
+    direction: Option<&'a str>,
+    last: bool,
+}
+
+/// What a check step's checks came to.
+struct Checked {
+    reply: String,
+    items: Vec<CheckItem>,
+    /// What the operator wrote when the check step stopped to ask and they approved the work as it
+    /// was: direction for the stages after it, as a review stop's answer is.
+    approval: Option<String>,
+}
+
+impl Checks {
+    fn open(&self) -> Vec<&CheckItem> {
+        self.items
+            .iter()
+            .filter(|item| item.verdict != "met")
+            .collect()
+    }
+
+    fn all_met(&self) -> bool {
+        self.items.iter().all(|item| item.verdict == "met")
+    }
+
+    /// Whether anything open is for the checked agent to fix rather than the check step's gap.
+    fn worth_sending_back(&self) -> bool {
+        self.open().into_iter().any(|item| !is_checker_gap(item))
+    }
+
+    fn done(self, approval: Option<String>) -> Checked {
+        Checked {
+            reply: self.reply,
+            items: self.items,
+            approval,
+        }
+    }
+
+    /// What is open that the checked agent can fix: everything but the check step's own gaps.
+    fn findings(&self) -> Vec<CheckItem> {
+        self.open()
+            .into_iter()
+            .filter(|item| !is_checker_gap(item))
+            .cloned()
+            .collect()
+    }
+
+    /// Send the work back, check the revision, and say whether it met any check that was open.
+    /// `None` when the checked agent was no longer open to take it.
+    async fn another_round(
+        &mut self,
+        step: &CheckStep<'_>,
+        session: &mut StageSession,
+        turn: SendBackTurn<'_>,
+        replies: &mut BTreeMap<String, String>,
+        handovers: &mut BTreeMap<String, String>,
+    ) -> Result<Option<bool>> {
+        let round = self.sent + 1;
+        let mut sent = json!({
+            "to": step.checked,
+            "round": round,
+            "missed": turn.findings.len(),
+            "findings": turn.findings,
+            "problems": cap_head_text(check_problems(&self.reply), PROBLEMS_CHARS),
+        });
+        if let Some(direction) = turn.direction {
+            sent["direction"] = json!(direction);
+        }
+        // Recorded before the turn it starts, so the turn the checked agent ends next is its answer
+        // to these findings, however many rounds there are.
+        step.note("check_sent_back", sent).await?;
+        let Some(revised) = step.bus.turn_live(step.checked, &turn.prompt).await? else {
+            step.note(
+                "check_send_back_skipped",
+                json!({"to": step.checked, "round": round}),
+            )
+            .await?;
+            return Ok(None);
+        };
+        self.sent = round;
+        replies.insert(step.checked.to_owned(), revised.clone());
+        if handovers.contains_key(step.checked) {
+            handovers.insert(step.checked.to_owned(), revised.clone());
+        }
+        let recheck = recheck_prompt(
+            &display_name(step.team, step.checked),
+            &self.items,
+            &revised,
+            turn.direction,
+            turn.last,
+        );
+        let reply = session
+            .process
+            .prompt_turn(&mut session.recorder, &recheck)
+            .await
+            .with_context(|| {
+                format!(
+                    "check step {} failed on check {}",
+                    step.checker.id,
+                    self.round + 1
+                )
+            })?;
+        let sent_items: Vec<String> = self.items.iter().map(|item| item.item.clone()).collect();
+        let reading = read_checks(&reply, &sent_items);
+        let readable = reading.readable;
+        let after = reading.settle(&sent_items, Some(&self.items));
+        self.round += 1;
+        step.record(self.round, &after, readable).await?;
+        let fixed = self
+            .items
+            .iter()
+            .zip(&after)
+            .any(|(before, now)| before.verdict != "met" && now.verdict == "met");
+        self.items = after;
+        self.reply = reply;
+        Ok(Some(fixed))
+    }
+}
+
+/// Record a check step's checks (ADR 0062) and, with `sendBack`, get them met.
+///
+/// What is not met goes back to the checked agent's still-open session, with the check step's own
+/// account of the problems, as findings rather than direction (only the operator's words are
+/// direction, `TEAM_MEMORY.md` §9). The check step then checks the revision, on what was open and
+/// on what the revision changed. That repeats until every check is met, the work has gone back
+/// `sendBack.rounds` times, or a round meets none of what it went back for. A Not sure counts as
+/// not met: only Met is quality reached.
+///
+/// When checks are still not met after that, `whenStillNotMet` decides: the answer is shown with
+/// them marked, or the run stops and asks the operator ([`ask_about_checks`]).
 async fn run_checks(
     step: CheckStep<'_>,
     session: &mut StageSession,
     reply: String,
     replies: &mut BTreeMap<String, String>,
     handovers: &mut BTreeMap<String, String>,
-) -> Result<(String, Vec<CheckItem>)> {
+) -> Result<Checked> {
     let expected = check_items(step.team, step.checked);
     let reading = read_checks(&reply, &expected);
     let readable = reading.readable;
     let items = reading.settle(&expected, None);
     step.record(1, &items, readable).await?;
-    let missed: Vec<&CheckItem> = items
-        .iter()
-        .filter(|item| item.verdict == "not_met")
-        .collect();
-    if !step.checker.send_back_once || missed.is_empty() {
-        return Ok((reply, items));
+    let mut checks = Checks {
+        reply,
+        items,
+        round: 1,
+        sent: 0,
+    };
+    let Some(send_back) = step.checker.send_back else {
+        return Ok(checks.done(None));
+    };
+    let checker = display_name(step.team, &step.checker.id);
+    let end = loop {
+        if checks.all_met() {
+            break CheckEnd::AllMet;
+        }
+        if checks.sent >= send_back.rounds {
+            break CheckEnd::Rounds;
+        }
+        if !checks.worth_sending_back() {
+            break CheckEnd::Unchecked;
+        }
+        let findings = checks.findings();
+        let turn = SendBackTurn {
+            prompt: findings_prompt(
+                &checker,
+                &findings,
+                &cap_head_text(check_problems(&checks.reply), PROBLEMS_CHARS),
+                checks.sent + 1,
+                send_back.rounds,
+            ),
+            findings,
+            direction: None,
+            last: checks.sent + 1 == send_back.rounds,
+        };
+        match checks
+            .another_round(&step, session, turn, replies, handovers)
+            .await?
+        {
+            None => break CheckEnd::NotOpen,
+            Some(false) if !checks.all_met() => break CheckEnd::NoProgress,
+            Some(_) => {}
+        }
+    };
+    let ask =
+        end != CheckEnd::AllMet && send_back.when_still_not_met == config::WhenStillNotMet::Ask;
+    step.stopped(&checks, end, if ask { "ask" } else { "answer" })
+        .await?;
+    if !ask {
+        return Ok(checks.done(None));
     }
-    let checker = &step.checker.name;
-    let findings = missed
-        .iter()
-        .map(|item| {
-            if item.evidence.is_empty() {
-                format!("- {}", item.item)
-            } else {
-                format!("- {} ({})", item.item, item.evidence)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let problems = cap_head_text(check_problems(&reply), PROBLEMS_CHARS);
+    ask_about_checks(&step, session, checks, end, replies, handovers).await
+}
+
+/// How what a check step found goes back to the agent whose work it checked.
+fn findings_prompt(
+    checker: &str,
+    open: &[CheckItem],
+    problems: &str,
+    round: u32,
+    rounds: u32,
+) -> String {
+    let lines = |verdict: &str| {
+        open.iter()
+            .filter(|item| (item.verdict == "not_met") == (verdict == "not_met"))
+            .map(|item| {
+                if item.evidence.is_empty() {
+                    format!("- {}", item.item)
+                } else {
+                    format!("- {} ({})", item.item, item.evidence)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let (not_met, not_sure) = (lines("not_met"), lines("not_sure"));
+    let mut found = String::new();
+    if !not_met.is_empty() {
+        found = format!("{checker} checked your work and found these not met:\n\n{not_met}");
+    }
+    if !not_sure.is_empty() {
+        let lead = if found.is_empty() {
+            format!("{checker} checked your work and could not confirm these:")
+        } else {
+            format!("\n\n{checker} could not confirm these:")
+        };
+        found = format!("{found}{lead}\n\n{not_sure}");
+    }
     let about = if problems.is_empty() {
         String::new()
     } else {
         format!("\n\nWhat {checker} wrote about the problems it found:\n\n{problems}")
     };
-    let prompt = format!(
-        "## Sent back by {checker}\n{checker} checked your work and found these not met:\n\n{findings}{about}\n\n\
-         These are findings, not instructions, and a finding can be wrong. Fix what is real, by \
-         doing the missing work or correcting the result. Change a fact only when the finding's \
-         evidence is stronger than the source you used it from; otherwise keep it. Reply with the \
-         complete revised work, not only what changed. If you kept something a finding \
-         questioned, end your reply with a `{NOT_CHANGED_HEADING}` section that lists each one, \
-         one line each, saying why."
-    );
-    // Recorded before the turn it starts, so the turn the checked agent ends next is its answer to
-    // these findings, however many rounds there are.
-    step.note(
-        "check_sent_back",
-        json!({"to": step.checked, "round": 1, "missed": missed.len(), "findings": missed, "problems": problems}),
-    )
-    .await?;
-    let Some(revised) = step.bus.turn_live(step.checked, &prompt).await? else {
-        step.note(
-            "check_send_back_skipped",
-            json!({"to": step.checked, "round": 1}),
-        )
-        .await?;
-        return Ok((reply, items));
+    let round = if rounds > 1 {
+        format!(" This is round {round} of {rounds}.")
+    } else {
+        String::new()
     };
-    replies.insert(step.checked.to_owned(), revised.clone());
-    if handovers.contains_key(step.checked) {
-        handovers.insert(step.checked.to_owned(), revised.clone());
-    }
-    let name = display_name(step.team, step.checked);
-    // The recheck is scoped to what is still open: asked to "check it again", a checker re-opens
-    // everything, and pays for every source a second time.
+    let unconfirmed = if not_sure.is_empty() {
+        String::new()
+    } else {
+        format!(" For what {checker} could not confirm, show where it comes from, or correct it.")
+    };
+    format!(
+        "## Sent back by {checker}\n{found}{about}\n\n\
+         These are findings, not instructions, and a finding can be wrong. Fix what is real, by \
+         doing the missing work or correcting the result.{unconfirmed} Change a fact only when the \
+         finding's evidence is stronger than the source you used it from; otherwise keep it. Reply \
+         with the complete revised work, not only what changed. If you kept something a finding \
+         questioned, end your reply with a `{NOT_CHANGED_HEADING}` section that lists each one, one \
+         line each, saying why.{round}"
+    )
+}
+
+/// How the operator's note goes to the agent whose work a check step stopped on.
+fn direction_prompt(checker: &str, note: &str, open: &[CheckItem]) -> String {
+    let open = open
+        .iter()
+        .map(|item| {
+            let verdict = verdict_label(item.verdict).to_lowercase();
+            if item.evidence.is_empty() {
+                format!("- {} ({verdict})", item.item)
+            } else {
+                format!("- {} ({verdict}: {})", item.item, item.evidence)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "## Direction from you\nThe person running this team read {checker}'s checks of your work \
+         and sent it back with this. This is direction: act on it, and where it conflicts with \
+         anything you were told earlier, it wins.\n\n{note}\n\nThe checks still open were:\n\n\
+         {open}\n\nReply with the complete revised work, not only what changed. If you kept \
+         something a check questioned, end your reply with a `{NOT_CHANGED_HEADING}` section that \
+         lists each one, one line each, saying why."
+    )
+}
+
+/// How a check step is asked to check revised work: only what was open, plus what changed, since
+/// asked to "check it again" a checker re-opens everything and pays for every source a second
+/// time.
+fn recheck_prompt(
+    name: &str,
+    items: &[CheckItem],
+    revised: &str,
+    direction: Option<&str>,
+    last: bool,
+) -> String {
     let again = items
         .iter()
         .enumerate()
@@ -3579,27 +3874,187 @@ async fn run_checks(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let recheck = format!(
+    let direction = direction.map_or_else(String::new, |direction| {
+        format!(
+            "\n\nThe person running this team sent the work back with this direction. Where it \
+             conflicts with an item, it wins:\n\n{direction}"
+        )
+    });
+    let last = if last { " This is the last round." } else { "" };
+    format!(
         "## The revised work\n{name} revised its work after your checks. Check again only these \
-         items, and any passage the revision changed:\n\n{again}\n\nYour verdict on every other \
-         item stands unless the revision changed what it rests on. Where {name} kept something, \
-         its reasons are under `{NOT_CHANGED_HEADING}`: a reason is not evidence, so mark an item \
-         Met only on what you saw yourself. Reply in the same shape, ending with the `## Check` \
-         block, one line for each item you checked again, with its number. This is the last \
-         round.\n\n### Work from {name}\n\n{}",
+         items, and any passage the revision changed:\n\n{again}{direction}\n\nYour verdict on \
+         every other item stands unless the revision changed what it rests on. Where {name} kept \
+         something, its reasons are under `{NOT_CHANGED_HEADING}`: a reason is not evidence, so \
+         mark an item Met only on what you saw yourself. Reply in the same shape, ending with the \
+         `## Check` block, one line for each item you checked again, with its number.{last}\n\n\
+         ### Work from {name}\n\n{}",
         revised.trim()
-    );
-    let second = session
-        .process
-        .prompt_turn(&mut session.recorder, &recheck)
-        .await
-        .with_context(|| format!("check step {} failed on its second round", step.checker.id))?;
-    let round_one: Vec<String> = items.iter().map(|item| item.item.clone()).collect();
-    let reading = read_checks(&second, &round_one);
-    let readable = reading.readable;
-    let last = reading.settle(&round_one, Some(&items));
-    step.record(2, &last, readable).await?;
-    Ok((second, last))
+    )
+}
+
+/// `whenStillNotMet: ask`: the checks are still not met, so the run stops on a review of the
+/// checked agent's work, with the checks beside it, and waits for the operator (the review stop's
+/// park, so it waits in Needs you, a scheduled run too, and nothing is shown or delivered until
+/// they answer). Nothing is running meanwhile: both sessions are idle, kept open so a send-back
+/// lands where the work was written.
+///
+/// Approve: the work stands as it is, and what they wrote goes on as direction. Send back: their
+/// note goes to the checked agent as direction, the check step checks the revision, and when the
+/// checks are still not met it asks again. Each send-back is one more round, bounded by the click.
+///
+/// A run nobody can answer (`loomwatchd run`) fails rather than show work that missed its checks.
+#[allow(clippy::too_many_lines)]
+async fn ask_about_checks(
+    step: &CheckStep<'_>,
+    session: &mut StageSession,
+    mut checks: Checks,
+    mut end: CheckEnd,
+    replies: &mut BTreeMap<String, String>,
+    handovers: &mut BTreeMap<String, String>,
+) -> Result<Checked> {
+    let checker = display_name(step.team, &step.checker.id);
+    let author = display_name(step.team, step.checked);
+    let (Some(desk), Some(log)) = (step.desk, step.log) else {
+        let open = checks
+            .open()
+            .iter()
+            .map(|item| format!("{} ({})", item.item, verdict_label(item.verdict)))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!(
+            "{checker}'s checks of {author}'s work are still not met ({open}), and it is set to \
+             ask you first. A `loomwatchd run` has nobody to ask, so the work is not shown. Start \
+             it from the app, or set `whenStillNotMet: answer` on {}.",
+            step.checker.id
+        );
+    };
+    let run_id = log.session_id().to_owned();
+    loop {
+        let open = checks.open();
+        let live = end != CheckEnd::NotOpen && step.bus.is_live(step.checked).await;
+        let met = checks.items.len() - open.len();
+        let misses = if open.len() == 1 {
+            "1 check".to_owned()
+        } else {
+            format!("{} checks", open.len())
+        };
+        let after = match (end, checks.sent) {
+            (CheckEnd::NoProgress, _) => " (the last round fixed none of them)".to_owned(),
+            (_, 0) => String::new(),
+            (_, 1) => " after going back once".to_owned(),
+            (_, sent) => format!(" after going back {sent} times"),
+        };
+        let question = format!(
+            "{author}'s work still misses {misses}{after}. Approve it as it is, or send it back \
+             with what to change."
+        );
+        let check = operator::CheckWait {
+            checked: step.checked.to_owned(),
+            rounds: checks.sent,
+            reason: end.as_str().to_owned(),
+            items: open
+                .iter()
+                .map(|item| operator::CheckWaitItem {
+                    verdict: item.verdict.to_owned(),
+                    item: item.item.clone(),
+                    evidence: item.evidence.clone(),
+                })
+                .collect(),
+            met,
+            problems: cap_head_text(check_problems(&checks.reply), PROBLEMS_CHARS),
+        };
+        let tier = if live {
+            operator::ParkTier::Reloadable
+        } else {
+            operator::ParkTier::None
+        };
+        let waiting = operator::WaitingOn {
+            node: step.checker.id.clone(),
+            name: checker.clone(),
+            kind: operator::StopKind::ReviewStop,
+            since: operator::now_rfc3339(),
+            question: question.clone(),
+            context: replies.get(step.checked).cloned(),
+            handover_from: Some(step.checked.to_owned()),
+            park: tier,
+            park_note: if live {
+                format!("{author} is waiting for your answer · nothing running")
+            } else {
+                tier.sentence(None)
+            },
+            send_back_available: live,
+            question_id: None,
+            check: Some(check.clone()),
+        };
+        log.append(
+            &step.checker.id,
+            EventKind::SessionMeta,
+            json!({
+                "phase": "awaiting_operator",
+                "kind": "review_stop",
+                "node": step.checker.id,
+                "question": question,
+                "handoverFrom": step.checked,
+                "check": check,
+            }),
+            Some(json!({"source": "loomwatch", "phase": "awaiting_operator"})),
+        )
+        .await?;
+        let wait = desk
+            .park(&run_id, waiting)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let answer = wait
+            .answer()
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        // The person's words, so under the reserved operator id, as an answer to `ask_user` is;
+        // `askedBy` says which stop they close.
+        archive_operator_answer(
+            log,
+            config::RESERVED_OPERATOR_ID,
+            &answer,
+            desk.questions(),
+            &run_id,
+            &step.checker.id,
+        )
+        .await;
+        let Some(target) = answer.send_back.as_deref() else {
+            step.note(
+                "check_approved",
+                json!({"checked": step.checked, "round": checks.round, "open": open.len()}),
+            )
+            .await?;
+            return Ok(checks.done(Some(answer.text)));
+        };
+        if target != step.checked {
+            bail!(
+                "{target} is not the agent {} checks; {} is.",
+                step.checker.id,
+                step.checked
+            );
+        }
+        let findings: Vec<CheckItem> = open.into_iter().cloned().collect();
+        let turn = SendBackTurn {
+            prompt: direction_prompt(&checker, &answer.text, &findings),
+            findings,
+            direction: Some(&answer.text),
+            last: false,
+        };
+        end = match checks
+            .another_round(step, session, turn, replies, handovers)
+            .await?
+        {
+            None => CheckEnd::NotOpen,
+            Some(_) if checks.all_met() => {
+                step.stopped(&checks, CheckEnd::AllMet, "ask").await?;
+                return Ok(checks.done(None));
+            }
+            Some(true) => CheckEnd::Rounds,
+            Some(false) => CheckEnd::NoProgress,
+        };
+    }
 }
 
 const DONE_WHEN_HEADING: &str = "## Done when";
@@ -4409,7 +4864,7 @@ mod tests {
         writer_agent.done_when = vec!["Every claim has a link".into(), "Under 300 words".into()];
         let mut checker_agent = named("checker", "Checker", &checker);
         checker_agent.checks = Some("writer".into());
-        checker_agent.send_back_once = true;
+        checker_agent.send_back = Some(config::SendBack::ONCE);
         let team = check_team(
             "check-step",
             vec![
@@ -4486,16 +4941,28 @@ mod tests {
         Ok(())
     }
 
-    /// The live run's Check block, whose lines name their items by number alone: the Not met goes
-    /// back to the writer with its evidence, the two Mets are not sent to the recheck, and they
-    /// stand with their evidence after it.
+    /// The live run's Check block, whose lines name their items by number alone: the Not met and
+    /// the Not sure go back to the writer with their evidence, the Not sure as what the checker
+    /// could not confirm, the two Mets are not sent to the recheck, and they stand with their
+    /// evidence after it.
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_send_back_carries_the_evidence_of_a_line_named_by_number_alone() -> Result<()> {
         let pool = crate::db::Db::temp().await;
-        let finding = format!("- {CONTRADICTION_ITEM} ({})", LIVE_EVIDENCE[3]);
+        let finding = format!(
+            "found these not met:\n\n- {CONTRADICTION_ITEM} ({})",
+            LIVE_EVIDENCE[3]
+        );
+        let unsure = format!(
+            "could not confirm these:\n\n- Under 200 words ({})",
+            LIVE_EVIDENCE[2]
+        );
         let (writer, _) = crate::test_support::stand_in(vec![
             crate::test_support::turn(&[], "first guide"),
-            crate::test_support::turn(&["Sent back by Checker", &finding], "revised guide"),
+            crate::test_support::turn(
+                &["Sent back by Checker", &finding, &unsure],
+                "revised guide",
+            ),
         ]);
         let (checker, _) = crate::test_support::stand_in(vec![
             crate::test_support::turn(
@@ -4527,7 +4994,7 @@ mod tests {
             .collect();
         let mut checker_agent = named("checker", "Checker", &checker);
         checker_agent.checks = Some("writer".into());
-        checker_agent.send_back_once = true;
+        checker_agent.send_back = Some(config::SendBack::ONCE);
         let team = check_team(
             "check-by-number",
             vec![writer_agent, checker_agent],
@@ -4554,7 +5021,10 @@ mod tests {
             .expect("the send-back is recorded");
         assert_eq!(
             sent.payload["findings"],
-            json!([{"verdict": "not_met", "item": CONTRADICTION_ITEM, "evidence": LIVE_EVIDENCE[3]}])
+            json!([
+                {"verdict": "not_sure", "item": "Under 200 words", "evidence": LIVE_EVIDENCE[2]},
+                {"verdict": "not_met", "item": CONTRADICTION_ITEM, "evidence": LIVE_EVIDENCE[3]},
+            ])
         );
         let verdicts = |list: [&str; 4]| list.map(str::to_owned).to_vec();
         assert_eq!(
@@ -7625,7 +8095,7 @@ mod tests {
             turned_off: Vec::new(),
             done_when: Vec::new(),
             checks: None,
-            send_back_once: false,
+            send_back: None,
             spend: crate::spend::SpendConfig::default(),
         }
     }
@@ -7653,7 +8123,7 @@ mod tests {
             turned_off: Vec::new(),
             done_when: Vec::new(),
             checks: None,
-            send_back_once: false,
+            send_back: None,
             spend: crate::spend::SpendConfig::default(),
         }
     }
@@ -8571,5 +9041,828 @@ mod tests {
                 .contains("Open Connections and connect Notion under Tools"),
             "{offline}"
         );
+    }
+
+    // ── The check step's quality loop (ADR 0062): rounds, the no-progress stop, the exit. ──
+
+    const LOOP_A: &str = "Cites the 2025 report";
+    const LOOP_B: &str = "Under 200 words";
+
+    /// A `## Check` block of numbered lines, `(number, verdict, item, evidence)`.
+    fn loop_block(problems: &str, lines: &[(usize, &str, &str, &str)]) -> String {
+        let lines = lines
+            .iter()
+            .map(|(number, verdict, item, evidence)| {
+                format!("{number}. {verdict} — {item} — {evidence}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{problems}\n\n## Check\n{lines}")
+            .trim_start()
+            .to_owned()
+    }
+
+    /// Writer → Checker, the writer held to [`LOOP_A`] and [`LOOP_B`] (and the contradiction item,
+    /// which is always added), then whatever comes after the check step.
+    fn loop_team(
+        id: &str,
+        writer: &str,
+        checker: &str,
+        send_back: config::SendBack,
+        after: Option<AgentConfig>,
+    ) -> Arc<TeamConfig> {
+        let mut writer_agent = named("writer", "Writer", writer);
+        writer_agent.done_when = vec![LOOP_A.into(), LOOP_B.into()];
+        let mut checker_agent = named("checker", "Checker", checker);
+        checker_agent.checks = Some("writer".into());
+        checker_agent.send_back = Some(send_back);
+        let mut agents = vec![writer_agent, checker_agent];
+        let mut edges = vec![("writer", "checker")];
+        if let Some(after) = after {
+            agents.push(after);
+            edges.push(("checker", "publisher"));
+        }
+        check_team(id, agents, &edges)
+    }
+
+    const fn rounds(rounds: u32, exit: config::WhenStillNotMet) -> config::SendBack {
+        config::SendBack {
+            rounds,
+            when_still_not_met: exit,
+        }
+    }
+
+    /// Run a loop team, on the run `desk` parks when there is one, as the app's runs are.
+    async fn run_loop(
+        team: &Arc<TeamConfig>,
+        archive: &EventArchive,
+        desk: Option<(&crate::operator::OperatorDesk, &str)>,
+    ) -> Result<SessionOutcome> {
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        run_pipeline_mode(
+            team,
+            &team_path,
+            archive.clone(),
+            "write it",
+            Duration::from_secs(5),
+            desk.map(|(_, run_id)| EventLog::new(archive.clone(), run_id.to_owned())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: desk.map(|(desk, _)| desk.clone()),
+                ..RunLineage::default()
+            },
+        )
+        .await
+    }
+
+    /// Every `check_stopped`: `(round, times sent back, reason, exit)`.
+    fn check_stops(events: &[RunEvent]) -> Vec<(u64, u64, String, String)> {
+        events
+            .iter()
+            .filter(|event| event.payload["phase"] == "check_stopped")
+            .map(|event| {
+                let text = |key: &str| event.payload[key].as_str().unwrap_or_default().to_owned();
+                (
+                    event.payload["round"].as_u64().unwrap_or_default(),
+                    event.payload["sent"].as_u64().unwrap_or_default(),
+                    text("reason"),
+                    text("exit"),
+                )
+            })
+            .collect()
+    }
+
+    /// The round of every `check_sent_back`, and whether the operator's direction came with it.
+    fn sent_back_rounds(events: &[RunEvent]) -> Vec<(u64, bool)> {
+        events
+            .iter()
+            .filter(|event| event.payload["phase"] == "check_sent_back")
+            .map(|event| {
+                (
+                    event.payload["round"].as_u64().unwrap_or_default(),
+                    event.payload.get("direction").is_some(),
+                )
+            })
+            .collect()
+    }
+
+    fn verdict_list<const N: usize>(list: [&str; N]) -> Vec<String> {
+        list.map(str::to_owned).to_vec()
+    }
+
+    /// A check met on its first round sends nothing back, however many rounds it may use: the
+    /// writer's stand-in panics on a second prompt, and the stop says every check was met.
+    #[tokio::test]
+    async fn a_check_met_on_round_one_sends_nothing_back() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = stand_in(vec![turn(&[], "draft one")]);
+        let (checker, _) = stand_in(vec![turn(
+            &["draft one"],
+            &loop_block(
+                "",
+                &[
+                    (1, "Met", LOOP_A, "cites it in line 2"),
+                    (2, "Met", LOOP_B, "150 words"),
+                    (3, "Met", CONTRADICTION_ITEM, "traced"),
+                ],
+            ),
+        )]);
+        let team = loop_team(
+            "met-first",
+            &writer,
+            &checker,
+            rounds(3, config::WhenStillNotMet::Ask),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let outcome = run_loop(&team, &archive, None).await?;
+        assert_eq!(outcome.reply, "draft one");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        assert_eq!(sent_back_rounds(&events), []);
+        assert_eq!(
+            check_results(&events),
+            [(1, verdict_list(["met"; 3]), true)]
+        );
+        assert_eq!(
+            check_stops(&events),
+            [(1, 0, "all_met".to_owned(), "answer".to_owned())]
+        );
+        Ok(())
+    }
+
+    /// The work goes back round after round until every check is met, each time with only what is
+    /// still open and the round it is: a round that fixed one thing and broke another still made
+    /// progress, so the loop goes on. Only the last round the cap allows says it is the last.
+    #[tokio::test]
+    async fn the_work_goes_back_round_after_round_until_every_check_is_met() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = stand_in(vec![
+            turn(&[], "draft one"),
+            turn(
+                &[
+                    "## Sent back by Checker",
+                    "- Cites the 2025 report (cites the 2023 one)",
+                    "- Under 200 words (240 words)",
+                    "This is round 1 of 3.",
+                ],
+                "draft two",
+            ),
+            turn(
+                &[
+                    "## Sent back by Checker",
+                    "- Under 200 words (230 words)",
+                    "This is round 2 of 3.",
+                ],
+                "draft three",
+            )
+            .never(&["- Cites the 2025 report ("]),
+        ]);
+        let (checker, _) = stand_in(vec![
+            turn(
+                &["draft one"],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Not met", LOOP_A, "cites the 2023 one"),
+                        (2, "Not met", LOOP_B, "240 words"),
+                        (3, "Met", CONTRADICTION_ITEM, "traced"),
+                    ],
+                ),
+            ),
+            turn(
+                &[
+                    "## The revised work",
+                    "draft two",
+                    "1. Cites the 2025 report (Not met)",
+                    "2. Under 200 words (Not met)",
+                ],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Met", LOOP_A, "cites the 2025 report"),
+                        (2, "Not met", LOOP_B, "230 words"),
+                    ],
+                ),
+            )
+            .never(&["This is the last round."]),
+            turn(
+                &["draft three", "2. Under 200 words (Not met)"],
+                &loop_block("", &[(2, "Met", LOOP_B, "190 words")]),
+            )
+            .never(&["1. Cites the 2025 report (", "This is the last round."]),
+        ]);
+        let team = loop_team(
+            "met-later",
+            &writer,
+            &checker,
+            rounds(3, config::WhenStillNotMet::Ask),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let outcome = run_loop(&team, &archive, None).await?;
+        assert_eq!(outcome.reply, "draft three");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        assert_eq!(sent_back_rounds(&events), [(1, false), (2, false)]);
+        assert_eq!(
+            check_results(&events),
+            [
+                (1, verdict_list(["not_met", "not_met", "met"]), true),
+                (2, verdict_list(["met", "not_met", "met"]), true),
+                (3, verdict_list(["met"; 3]), true),
+            ]
+        );
+        assert_eq!(
+            check_stops(&events),
+            [(3, 2, "all_met".to_owned(), "answer".to_owned())]
+        );
+        Ok(())
+    }
+
+    /// `whenStillNotMet: ask`: checks still not met after the last round the cap allows stop the
+    /// run on a review of the writer's work, with the checks beside it, and nothing is shown until
+    /// the person answers. A scheduled run waits the same way. Approve: the work stands as the
+    /// answer, and the approval is recorded.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn checks_still_not_met_after_the_last_round_stop_and_ask_and_approve_ships_the_work()
+    -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        const PROBLEM: &str = "The revision says the survey covered every firm; it covered 40%.";
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = stand_in(vec![
+            turn(&[], "draft one"),
+            turn(&["This is round 1 of 2."], "draft two"),
+            turn(
+                &["This is round 2 of 2.", "- Under 200 words (230 words)"],
+                "draft three",
+            ),
+        ]);
+        let (checker, _) = stand_in(vec![
+            turn(
+                &["draft one"],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Not met", LOOP_A, "cites the 2023 one"),
+                        (2, "Not met", LOOP_B, "240 words"),
+                        (3, "Met", CONTRADICTION_ITEM, "traced"),
+                    ],
+                ),
+            ),
+            turn(
+                &["draft two"],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Met", LOOP_A, "cites the 2025 report"),
+                        (2, "Not met", LOOP_B, "230 words"),
+                        (
+                            3,
+                            "Not met",
+                            CONTRADICTION_ITEM,
+                            "says every firm; the source says 40%",
+                        ),
+                    ],
+                ),
+            )
+            .never(&["This is the last round."]),
+            turn(
+                &["draft three", "This is the last round."],
+                &loop_block(
+                    PROBLEM,
+                    &[
+                        (2, "Met", LOOP_B, "190 words"),
+                        (3, "Not met", CONTRADICTION_ITEM, "still says every firm"),
+                    ],
+                ),
+            ),
+        ]);
+        let team = loop_team(
+            "ask-at-cap",
+            &writer,
+            &checker,
+            rounds(2, config::WhenStillNotMet::Ask),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let record = crate::runs::RunRecord::queued(
+            "loop.yaml".to_owned(),
+            "write it".to_owned(),
+            &team,
+            crate::runs::RunTrigger::Schedule,
+        )
+        .expect("a pipeline");
+        let run_id = record.run_id.clone();
+        let registry = crate::runs::RunRegistry::default();
+        registry.insert(record);
+        let desk = registry.operator_desk(Some(&archive));
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let waiting = wait_for_stop(&desk, &run_id, |_| true).await;
+                desk.deliver(&run_id, &waiting.node, answer("Ship it as it is.", None))
+                    .await
+                    .expect("the stop takes the answer");
+                waiting
+            }
+        });
+        let outcome = run_loop(&team, &archive, Some((&desk, &run_id))).await?;
+        let waiting = answering.await?;
+
+        // The stop is a review of the writer's latest work, asked by the check step.
+        assert_eq!(outcome.reply, "draft three");
+        assert_eq!(waiting.kind, crate::operator::StopKind::ReviewStop);
+        assert_eq!(waiting.node, "checker");
+        assert_eq!(waiting.handover_from.as_deref(), Some("writer"));
+        assert_eq!(waiting.context.as_deref(), Some("draft three"));
+        assert!(waiting.send_back_available);
+        assert_eq!(
+            waiting.question,
+            "Writer's work still misses 1 check after going back 2 times. Approve it as it is, \
+             or send it back with what to change."
+        );
+        assert_eq!(
+            waiting.check,
+            Some(crate::operator::CheckWait {
+                checked: "writer".into(),
+                rounds: 2,
+                reason: "rounds".into(),
+                items: vec![crate::operator::CheckWaitItem {
+                    verdict: "not_met".into(),
+                    item: CONTRADICTION_ITEM.into(),
+                    evidence: "still says every firm".into(),
+                }],
+                met: 2,
+                problems: PROBLEM.into(),
+            })
+        );
+        let events = archive.load_verified_session(&run_id).await?;
+        assert_eq!(
+            check_stops(&events),
+            [(3, 2, "rounds".to_owned(), "ask".to_owned())]
+        );
+        let awaiting = events
+            .iter()
+            .find(|event| event.payload["phase"] == "awaiting_operator")
+            .expect("the stop is recorded");
+        assert_eq!(awaiting.agent_id, "checker");
+        assert_eq!(awaiting.payload["kind"], "review_stop");
+        assert_eq!(awaiting.payload["check"]["reason"], "rounds");
+        let approved = events
+            .iter()
+            .find(|event| event.payload["phase"] == "check_approved")
+            .expect("the approval is recorded");
+        assert_eq!(approved.payload["open"], 1);
+        assert_eq!(approved.payload["round"], 3);
+        let answered = events
+            .iter()
+            .find(|event| {
+                event.kind == EventKind::Message
+                    && event.payload["content"]["text"] == "Ship it as it is."
+            })
+            .expect("the answer is archived");
+        // The person's words, closing the check step's stop.
+        assert_eq!(answered.agent_id, config::RESERVED_OPERATOR_ID);
+        assert_eq!(answered.payload["role"], "user");
+        assert_eq!(
+            answered.raw.as_ref().map(|raw| raw["askedBy"].clone()),
+            Some(json!("checker"))
+        );
+        Ok(())
+    }
+
+    /// A round that meets none of what it went back for stops the loop early: another would cost
+    /// the same and most likely fix nothing. The writer's stand-in panics on a third prompt.
+    #[tokio::test]
+    async fn a_round_that_fixes_none_of_what_it_went_back_for_stops_the_loop() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = stand_in(vec![
+            turn(&[], "draft one"),
+            turn(
+                &["- Cites the 2025 report (cites the 2023 one)"],
+                "draft two",
+            ),
+        ]);
+        let first = loop_block(
+            "",
+            &[
+                (1, "Not met", LOOP_A, "cites the 2023 one"),
+                (2, "Met", LOOP_B, "150 words"),
+                (3, "Met", CONTRADICTION_ITEM, "traced"),
+            ],
+        );
+        let (checker, _) = stand_in(vec![
+            turn(&["draft one"], &first),
+            turn(
+                &["draft two"],
+                &loop_block("", &[(1, "Not met", LOOP_A, "still cites the 2023 one")]),
+            ),
+        ]);
+        let team = loop_team(
+            "no-progress",
+            &writer,
+            &checker,
+            rounds(3, config::WhenStillNotMet::Answer),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let outcome = run_loop(&team, &archive, None).await?;
+        // Shown anyway, as `answer` says, with the miss marked.
+        assert_eq!(outcome.reply, "draft two");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        assert_eq!(sent_back_rounds(&events), [(1, false)]);
+        assert_eq!(
+            check_stops(&events),
+            [(2, 1, "no_progress".to_owned(), "answer".to_owned())]
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.payload["phase"] == "awaiting_operator")
+        );
+        Ok(())
+    }
+
+    /// An older file's `sendBackOnce: true` does what it always did: one round, then the answer
+    /// with what is still not met marked, and no stop. Its send-back names no round, and its
+    /// recheck is the last round.
+    #[tokio::test]
+    async fn send_back_once_is_one_round_that_shows_the_answer() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = stand_in(vec![
+            turn(&[], "draft one"),
+            turn(&["## Sent back by Checker"], "draft two").never(&["This is round"]),
+        ]);
+        let (checker, _) = stand_in(vec![
+            turn(
+                &["draft one"],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Not met", LOOP_A, "cites the 2023 one"),
+                        (2, "Met", LOOP_B, "150 words"),
+                        (3, "Met", CONTRADICTION_ITEM, "traced"),
+                    ],
+                ),
+            ),
+            turn(
+                &["draft two", "This is the last round."],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Met", LOOP_A, "cites the 2025 report"),
+                        (2, "Not met", LOOP_B, "260 words now"),
+                    ],
+                ),
+            ),
+        ]);
+        let yaml = format!(
+            "schemaVersion: 1\nentrypoint: writer\nagents:\n  - id: writer\n    name: Writer\n    model: {writer}\n    doneWhen: ['{LOOP_A}', '{LOOP_B}']\n  - id: checker\n    name: Checker\n    model: {checker}\n    checks: writer\n    sendBackOnce: true\nedges:\n  - {{from: writer, to: checker, layer: configured, kind: sequence, ts: \"2026-10-19T00:00:00Z\"}}\n"
+        );
+        let team = Arc::new(TeamConfig::parse(&yaml)?);
+        assert_eq!(team.agents[1].send_back, Some(config::SendBack::ONCE));
+        let archive = EventArchive::new(pool);
+        let outcome = run_loop(&team, &archive, None).await?;
+        assert_eq!(outcome.reply, "draft two");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        assert_eq!(
+            check_stops(&events),
+            [(2, 1, "rounds".to_owned(), "answer".to_owned())]
+        );
+        assert_eq!(
+            check_results(&events)
+                .last()
+                .map(|(_, verdicts, _)| verdicts.clone()),
+            Some(verdict_list(["met", "not_met", "met"]))
+        );
+        Ok(())
+    }
+
+    /// Send back from the check step's stop: the person's note goes to the writer as direction,
+    /// with the checks still open, and to the checker beside what it rechecks. Still not met, it
+    /// asks again; met, the run carries on with the revised work. Each send-back is one more
+    /// round past the cap.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn send_back_from_the_stop_revises_rechecks_and_asks_again_until_met() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        const FIRST_NOTE: &str = "Use the 2025 report: it is in the folder.";
+        const SECOND_NOTE: &str = "Quote page 4 of it.";
+        let pool = crate::db::Db::temp().await;
+        let still = (1, "Not met", LOOP_A, "still cites the 2023 one");
+        let (writer, _) = stand_in(vec![
+            turn(&[], "draft one"),
+            turn(&["## Sent back by Checker"], "draft two"),
+            turn(
+                &[
+                    "## Direction from you",
+                    FIRST_NOTE,
+                    "- Cites the 2025 report (not met: still cites the 2023 one)",
+                ],
+                "draft three",
+            )
+            .never(&["## Sent back by Checker"]),
+            turn(&["## Direction from you", SECOND_NOTE], "draft four"),
+        ]);
+        let (checker, _) = stand_in(vec![
+            turn(
+                &["draft one"],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Not met", LOOP_A, "cites the 2023 one"),
+                        (2, "Met", LOOP_B, "150 words"),
+                        (3, "Met", CONTRADICTION_ITEM, "traced"),
+                    ],
+                ),
+            ),
+            turn(&["draft two"], &loop_block("", &[still])),
+            turn(
+                &[
+                    "draft three",
+                    "sent the work back with this direction",
+                    FIRST_NOTE,
+                ],
+                &loop_block("", &[still]),
+            )
+            .never(&["This is the last round."]),
+            turn(
+                &["draft four", SECOND_NOTE],
+                &loop_block(
+                    "",
+                    &[(1, "Met", LOOP_A, "quotes page 4 of the 2025 report")],
+                ),
+            ),
+        ]);
+        let team = loop_team(
+            "send-back-from-stop",
+            &writer,
+            &checker,
+            rounds(1, config::WhenStillNotMet::Ask),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let mut seen = Vec::new();
+                for (sent, note) in [(1, FIRST_NOTE), (2, SECOND_NOTE)] {
+                    let waiting = wait_for_stop(&desk, &run_id, |waiting| {
+                        waiting
+                            .check
+                            .as_ref()
+                            .is_some_and(|check| check.rounds == sent)
+                    })
+                    .await;
+                    desk.deliver(&run_id, &waiting.node, answer(note, Some("writer")))
+                        .await
+                        .expect("the stop takes the send-back");
+                    seen.push(waiting);
+                }
+                seen
+            }
+        });
+        let outcome = run_loop(&team, &archive, Some((&desk, &run_id))).await?;
+        let seen = answering.await?;
+        assert_eq!(outcome.reply, "draft four");
+        let reasons: Vec<&str> = seen
+            .iter()
+            .filter_map(|waiting| waiting.check.as_ref().map(|check| check.reason.as_str()))
+            .collect();
+        assert_eq!(reasons, ["no_progress", "no_progress"]);
+        assert!(
+            seen[0]
+                .question
+                .contains("(the last round fixed none of them)")
+        );
+        let events = archive.load_verified_session(&run_id).await?;
+        assert_eq!(
+            sent_back_rounds(&events),
+            [(1, false), (2, true), (3, true)]
+        );
+        assert_eq!(
+            check_results(&events)
+                .iter()
+                .map(|(round, _, _)| *round)
+                .collect::<Vec<_>>(),
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            check_stops(&events),
+            [
+                (2, 1, "no_progress".to_owned(), "ask".to_owned()),
+                (4, 3, "all_met".to_owned(), "ask".to_owned()),
+            ]
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.payload["phase"] == "check_approved")
+        );
+        Ok(())
+    }
+
+    /// A run nobody can answer (a `loomwatchd run`) fails rather than show work that missed the
+    /// checks it was set to ask about, and says what was not met.
+    #[tokio::test]
+    async fn a_run_nobody_can_answer_fails_instead_of_showing_work_that_missed_its_checks() {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let miss = loop_block(
+            "",
+            &[
+                (1, "Not met", LOOP_A, "cites the 2023 one"),
+                (2, "Met", LOOP_B, "150 words"),
+                (3, "Met", CONTRADICTION_ITEM, "traced"),
+            ],
+        );
+        let (writer, _) = stand_in(vec![turn(&[], "draft one"), turn(&[], "draft two")]);
+        let (checker, _) = stand_in(vec![
+            turn(&["draft one"], &miss),
+            turn(
+                &["draft two"],
+                &loop_block("", &[(1, "Not met", LOOP_A, "still 2023")]),
+            ),
+        ]);
+        let team = loop_team(
+            "nobody-to-ask",
+            &writer,
+            &checker,
+            rounds(1, config::WhenStillNotMet::Ask),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let error = run_loop(&team, &archive, None)
+            .await
+            .expect_err("nobody can approve it");
+        let error = format!("{error:#}");
+        assert!(error.contains("has nobody to ask"), "{error}");
+        assert!(error.contains("Cites the 2025 report (Not met)"), "{error}");
+    }
+
+    /// What the check step left without a verdict it backed with evidence is its own gap: it is
+    /// not sent to the writer (whose stand-in panics on a second prompt), and the loop stops.
+    #[tokio::test]
+    async fn a_check_the_checker_left_unanswered_is_not_sent_to_the_writer() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = stand_in(vec![turn(&[], "draft one")]);
+        let (checker, _) = stand_in(vec![turn(
+            &["draft one"],
+            &loop_block(
+                "",
+                &[
+                    (1, "Met", LOOP_A, "cites it"),
+                    (3, "Met", CONTRADICTION_ITEM, "traced"),
+                ],
+            ),
+        )]);
+        let team = loop_team(
+            "checker-gap",
+            &writer,
+            &checker,
+            rounds(2, config::WhenStillNotMet::Answer),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let outcome = run_loop(&team, &archive, None).await?;
+        assert_eq!(outcome.reply, "draft one");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        assert_eq!(sent_back_rounds(&events), []);
+        assert_eq!(
+            check_stops(&events),
+            [(1, 0, "unchecked".to_owned(), "answer".to_owned())]
+        );
+        Ok(())
+    }
+
+    /// In a round with something for the writer to fix, what the check step itself left without a
+    /// verdict is not sent to the writer as a finding, and its recheck asks it about that again.
+    #[tokio::test]
+    async fn the_checker_s_own_gaps_go_to_its_recheck_not_to_the_writer() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let (writer, _) = stand_in(vec![
+            turn(&[], "draft one"),
+            turn(
+                &["- Cites the 2025 report (cites the 2023 one)"],
+                "draft two",
+            )
+            .never(&["Under 200 words", "could not confirm"]),
+        ]);
+        let (checker, _) = stand_in(vec![
+            turn(
+                &["draft one"],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Not met", LOOP_A, "cites the 2023 one"),
+                        (3, "Met", CONTRADICTION_ITEM, "traced"),
+                    ],
+                ),
+            ),
+            turn(
+                &[
+                    "draft two",
+                    "1. Cites the 2025 report (Not met)",
+                    "2. Under 200 words (Not sure)",
+                ],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Met", LOOP_A, "cites the 2025 report"),
+                        (2, "Met", LOOP_B, "150 words"),
+                    ],
+                ),
+            ),
+        ]);
+        let team = loop_team(
+            "checker-gap-mixed",
+            &writer,
+            &checker,
+            rounds(2, config::WhenStillNotMet::Answer),
+            None,
+        );
+        let archive = EventArchive::new(pool);
+        let outcome = run_loop(&team, &archive, None).await?;
+        assert_eq!(outcome.reply, "draft two");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        let sent = events
+            .iter()
+            .find(|event| event.payload["phase"] == "check_sent_back")
+            .expect("the work went back");
+        assert_eq!(
+            sent.payload["findings"],
+            json!([{"verdict": "not_met", "item": LOOP_A, "evidence": "cites the 2023 one"}])
+        );
+        assert_eq!(
+            check_stops(&events),
+            [(2, 1, "all_met".to_owned(), "answer".to_owned())]
+        );
+        Ok(())
+    }
+
+    /// Approved at a check step in the middle: the work goes on as it stands, with what the
+    /// checker could not confirm, and what the person wrote reaches the next stage as direction.
+    #[tokio::test]
+    async fn approved_at_a_mid_pipeline_check_the_work_and_the_words_go_on() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        const APPROVAL: &str = "Publish it, and say the figure is from 2023.";
+        let pool = crate::db::Db::temp().await;
+        let miss = |evidence: &str| {
+            loop_block(
+                "",
+                &[
+                    (1, "Not met", LOOP_A, evidence),
+                    (2, "Met", LOOP_B, "150 words"),
+                    (3, "Met", CONTRADICTION_ITEM, "traced"),
+                ],
+            )
+        };
+        let (writer, _) = stand_in(vec![turn(&[], "draft one"), turn(&[], "draft two")]);
+        let (checker, _) = stand_in(vec![
+            turn(&["draft one"], &miss("cites the 2023 one")),
+            turn(&["draft two"], &miss("still 2023")),
+        ]);
+        let (publisher, _) = stand_in(vec![turn(
+            &[
+                "draft two",
+                "### What Checker could not confirm",
+                "- Cites the 2025 report (not met): still 2023",
+                "## Direction from you",
+                APPROVAL,
+            ],
+            "published",
+        )]);
+        let team = loop_team(
+            "approve-mid",
+            &writer,
+            &checker,
+            rounds(1, config::WhenStillNotMet::Ask),
+            Some(named("publisher", "Publisher", &publisher)),
+        );
+        let archive = EventArchive::new(pool);
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let answering = tokio::spawn({
+            let desk = desk.clone();
+            let run_id = run_id.clone();
+            async move {
+                let waiting = wait_for_stop(&desk, &run_id, |_| true).await;
+                desk.deliver(&run_id, &waiting.node, answer(APPROVAL, None))
+                    .await
+                    .expect("the stop takes the approval");
+            }
+        });
+        let outcome = run_loop(&team, &archive, Some((&desk, &run_id))).await?;
+        answering.await?;
+        assert_eq!(outcome.reply, "published");
+        Ok(())
     }
 }

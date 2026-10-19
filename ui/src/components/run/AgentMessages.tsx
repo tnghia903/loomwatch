@@ -269,6 +269,16 @@ function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: 
       </li>
     )
   }
+  const stop = bubble.item.line.message.checkStop
+  if (stop) {
+    // Approved at a check step's stop (ADR 0062): the work as it was, with what was still open.
+    return (
+      <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, You: approved`}>
+        <span>You approved {member(stop.checked).name}’s work as it was, with {stop.open === 1 ? '1 check' : `${stop.open} checks`} not met</span>
+        <time dateTime={bubble.ts}>{when(bubble)}</time>
+      </li>
+    )
+  }
   const onward = bubble.to.map((id) => member(id).name)
   return (
     <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, You: approved`}>

@@ -127,6 +127,9 @@ export function answerVerdict(input: VerdictInput): AnswerVerdict {
       reviewable: true,
     }
   }
+  // Approved at a check step's stop: you saw what was not met and kept the work as it was.
+  const approvedOpen = (input.checks ?? []).filter((round) => round.approved).reduce((count, round) => count + round.items.filter((item) => item.verdict !== 'met').length, 0)
+  if (findings.length && approvedOpen > 0) return { tone: 'look', label: `Approved with ${plural(approvedOpen, 'check')} not met`, detail: withFixed(`You approved it as it was. ${first}`), findings, reviewable: true }
   if (findings.length) return { tone: 'look', label: `${plural(findings.length, 'thing')} to check`, detail: withFixed(first), findings, reviewable: true }
   const read = readPhrase(input.read)
   return {

@@ -842,6 +842,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           if (p.phase === 'check_result') letters.checkResult(event)
           if (p.phase === 'check_sent_back') letters.checkSentBack(event)
           if (p.phase === 'check_send_back_skipped') letters.checkSendBackSkipped(event)
+          if (p.phase === 'check_stopped') letters.checkStopped(event)
           if (p.phase === 'permission_answered' && p.outcome === 'auto_approved') {
             autoRan.push({ agentId: agent.id, title: typeof p.title === 'string' ? p.title : 'A command', detail: typeof p.detail === 'string' ? p.detail : null, ts: event.ts })
           }

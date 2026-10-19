@@ -489,7 +489,7 @@ impl TeamBus {
             .with_context(|| format!("kept-alive agent {agent_id} failed to close"))
     }
 
-    async fn is_live(&self, agent_id: &str) -> bool {
+    pub(crate) async fn is_live(&self, agent_id: &str) -> bool {
         self.state.live.lock().await.contains_key(agent_id)
     }
 
@@ -1586,6 +1586,7 @@ impl TeamBus {
                 .to_owned(),
             send_back_available: false,
             question_id: None,
+            check: None,
         };
         let wait = desk
             .park(&run_id, waiting)
@@ -3256,7 +3257,7 @@ mod tests {
             turned_off: Vec::new(),
             done_when: Vec::new(),
             checks: None,
-            send_back_once: false,
+            send_back: None,
             spend: crate::spend::SpendConfig::default(),
         }
     }
