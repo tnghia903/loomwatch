@@ -27,6 +27,7 @@ export function WorkspaceMenu({ runView, onMemory }: WorkspaceMenuProps) {
         <div role="menu">
           <button role="menuitem" onClick={item(onMemory)}>Team memory</button>
           <button role="menuitem" onClick={item(() => window.location.assign('/agents'))}>My agents…</button>
+          <button role="menuitem" onClick={item(() => window.location.assign('/you'))}>About you…</button>
           <button role="menuitem" onClick={item(() => window.location.assign('/connections'))}>Connections…</button>
           <button role="menuitem" onClick={item(startTour)}>Getting started guide</button>
           <button role="menuitem" onClick={item(() => openFeedback({ screen: runView ? 'run' : 'build' }))}>Send feedback…</button>

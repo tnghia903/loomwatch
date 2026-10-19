@@ -630,6 +630,70 @@ async fn the_person_chooses_the_model_a_conversation_uses() {
     }
 }
 
+/// ADR 0074: Ask LoomWatch knows who it is talking to, as every agent does. The rewrite of an
+/// agent's instructions is not told: it writes `LoomWatch`'s text, which "answer in Vietnamese"
+/// must not translate.
+#[tokio::test]
+async fn ask_is_told_who_the_person_is_and_a_rewrite_is_not() {
+    let pool = crate::db::Db::temp().await;
+    // One model answers both; the rewrite's own instructions tell its requests apart.
+    let demo = assistant();
+    let fixture = Fixture::start(
+        Some(EventArchive::new(pool)),
+        Some(crate::engine::demo_model(demo.clone())),
+    )
+    .await;
+    let _told = crate::you::testing::tell_agents_under(
+        &fixture.root.0,
+        crate::you::AboutYou {
+            name: Some("Mai".into()),
+            about: Some("Answer in Vietnamese.".into()),
+            skipped: false,
+        },
+    );
+    let instructions = |rewrite: bool| {
+        demo.requests()
+            .iter()
+            .filter_map(|request| match request.messages.first() {
+                Some(Message::System { content }) => Some(content.clone()),
+                _ => None,
+            })
+            .filter(|content| content.contains("You edit the instructions of agents") == rewrite)
+            .collect::<Vec<_>>()
+    };
+
+    let (status, started) = fixture.post("/api/ask/conversations", &json!({})).await;
+    assert_eq!(status, 201, "{started}");
+    let id = started["id"].as_str().expect("id").to_owned();
+    fixture.say(&id, "What do I have here?").await;
+    let asked = instructions(false);
+    assert!(!asked.is_empty());
+    for content in &asked {
+        assert!(content.contains("working on a task for Mai,"), "{content}");
+        assert!(content.contains("> Answer in Vietnamese.\n"), "{content}");
+    }
+    fixture.end(&id).await;
+
+    let (status, answer) = fixture
+        .post(
+            "/api/ask/instructions",
+            &json!({
+                "removed": {"name": "EKIS", "kind": "Notion page"},
+                "agents": [{"id": "plan", "name": "Plan writer", "role": "Keep the plan on the EKIS page."}],
+            }),
+        )
+        .await;
+    assert_eq!(status, 200, "{answer}");
+    let rewritten = instructions(true);
+    assert!(!rewritten.is_empty());
+    for content in &rewritten {
+        assert!(
+            !content.contains("Mai") && !content.contains("The person you work for"),
+            "{content}"
+        );
+    }
+}
+
 /// ADR 0059: one turn of the assistant, with no tools, answers with edits to numbered sentences,
 /// and the daemon returns each changed agent's instructions with them made: every sentence the
 /// assistant didn't name, and the spacing between, stays as it was. Nothing is written and no

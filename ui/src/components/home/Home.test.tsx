@@ -5,6 +5,7 @@ import { parse } from 'yaml'
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { readTourState, resetTourForTests } from '../../lib/tour/store'
+import { forgetYou } from '../../lib/you/client'
 import type { TeamDocument } from '../../lib/team-file/types'
 import { Home } from './Home'
 
@@ -21,6 +22,7 @@ beforeEach(() => {
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
   forgetKeyStatus()
+  forgetYou()
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
@@ -161,6 +163,55 @@ describe('Home', () => {
     expect(await screen.findByText('Agents run on OpenRouter with key sk-or-v1-abc...xyz')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Add your OpenRouter key' })).toBeNull()
     expect(screen.getByRole('link', { name: 'Manage key' })).toHaveAttribute('href', '/connections')
+  })
+
+  // ADR 0074: once a key is in, Home asks once what agents should know about the person.
+  describe('telling the agents about you', () => {
+    /** The daemon with a key as `key` says, and `you` as what agents are told. */
+    const told = (key: Record<string, unknown>, you: Record<string, unknown>) => (url: string, init?: RequestInit) =>
+      url === '/api/you' ? respond(init?.method === 'PUT' ? JSON.parse(String(init.body)) : you) : keyed(key)(url)
+
+    it('waits for the key, then asks once, and Not now puts the card away', async () => {
+      fetchMock.mockImplementation(told({ connected: false }, { skipped: false }))
+      renderHome()
+      expect(await screen.findByRole('region', { name: 'Add your OpenRouter key' })).toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'Tell your agents about you' })).toBeNull()
+      cleanup()
+      forgetKeyStatus()
+      forgetYou()
+
+      fetchMock.mockImplementation(told({ connected: true }, { skipped: false }))
+      renderHome()
+      const card = await screen.findByRole('region', { name: 'Tell your agents about you' })
+      fireEvent.click(await within(card).findByRole('button', { name: 'Not now' }))
+      await waitFor(() => expect(screen.queryByRole('region', { name: 'Tell your agents about you' })).toBeNull())
+      const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/you' && (init as RequestInit | undefined)?.method === 'PUT') as [string, RequestInit] | undefined
+      expect(put).toBeDefined()
+      expect(JSON.parse(String(put![1].body))).toEqual({ skipped: true })
+    })
+
+    it('keeps the card on screen after Save, so the person sees it was kept', async () => {
+      fetchMock.mockImplementation(told({ connected: true }, { skipped: false }))
+      renderHome()
+      const card = await screen.findByRole('region', { name: 'Tell your agents about you' })
+      fireEvent.change(await within(card).findByLabelText('What should your agents call you?'), { target: { value: 'Mai' } })
+      fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
+      expect(await within(card).findByRole('status')).toHaveTextContent('Saved.')
+      expect(screen.getByRole('region', { name: 'Tell your agents about you' })).toBeInTheDocument()
+    })
+
+    it('is never offered to someone who already told them, or said not now', async () => {
+      for (const you of [{ name: 'Mai', skipped: false }, { skipped: true }]) {
+        fetchMock.mockImplementation(told({ connected: true, label: 'sk-or-v1-abc...xyz' }, you))
+        renderHome()
+        expect(await screen.findByText('Agents run on OpenRouter with key sk-or-v1-abc...xyz')).toBeInTheDocument()
+        await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/you')).toBe(true))
+        expect(screen.queryByRole('region', { name: 'Tell your agents about you' })).toBeNull()
+        cleanup()
+        forgetKeyStatus()
+        forgetYou()
+      }
+    })
   })
 
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {

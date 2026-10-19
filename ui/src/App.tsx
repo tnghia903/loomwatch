@@ -11,6 +11,7 @@ import { useNeedsYou } from './lib/story/useNeedsYou'
 import { useTheme } from './lib/theme'
 
 const Connections = lazy(() => import('./components/Connections'))
+const AboutYouPage = lazy(() => import('./components/you/AboutYouPage'))
 const AgentsPage = lazy(() => import('./components/agents/AgentsPage').then((module) => ({ default: module.AgentsPage })))
 const QuestsPage = lazy(() => import('./components/quests/QuestsPage').then((module) => ({ default: module.QuestsPage })))
 const SkillsPage = lazy(() => import('./components/skills/SkillsPage').then((module) => ({ default: module.SkillsPage })))
@@ -108,6 +109,9 @@ export default function App() {
   if (pathname === '/skills') return <Skills />
   if (pathname === '/connections') {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading connections…</p>}><Connections /></Suspense>
+  }
+  if (pathname === '/you') {
+    return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading…</p>}><AboutYouPage /></Suspense>
   }
   // The old /watch route folds into the workspace: a session id opens that run in replay, and a
   // bare /watch opens the team list, where each team's chat holds its past work (ADR 0051).

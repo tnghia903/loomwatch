@@ -88,7 +88,7 @@
 .home-foot .link:disabled { color: var(--color-ink-3); }
 /* ---- The OpenRouter key card, until a key is added -------------------------- */
 .home-key { max-width: 720px; }
-.home-key .lw-key-card { padding: var(--sp-6); border-radius: var(--r-lg); }
+.home-key .lw-key-card, .home-key .lw-you-card { padding: var(--sp-6); border-radius: var(--r-lg); }
 
 @media (max-width: 720px) {
   .home-top, .home-main, .home-foot { padding-left: var(--sp-4); padding-right: var(--sp-4); }
@@ -96,7 +96,7 @@
   .home-steps { grid-template-columns: 1fr; gap: var(--sp-3); }
   .home-hero-acts .btn { width: 100%; justify-content: center; }
   .home-filter input { width: 120px; }
-  .home-key .lw-key-card { padding: var(--sp-4); }
+  .home-key .lw-key-card, .home-key .lw-you-card { padding: var(--sp-4); }
 }
 
 /* ---- New team dialog ------------------------------------------------------ */

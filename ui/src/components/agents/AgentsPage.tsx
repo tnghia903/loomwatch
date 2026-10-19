@@ -10,6 +10,7 @@ import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
+import { toldNothing, useYou } from '../../lib/you/client'
 import { QuestsLink } from '../quests/QuestsLink'
 import { SkillsLink } from '../skills/SkillsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
@@ -17,6 +18,20 @@ import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
 import { FigureStill } from './FigureStill'
 import { navigate, useAgentsRoute } from './route'
+
+/** What every agent here is told about the person (ADR 0074), with the way to change it. */
+function KnowYou() {
+  const you = useYou()
+  if (!you) return null
+  const name = you.name?.trim()
+  return (
+    <p className="t-meta agents-know-you">
+      {toldNothing(you)
+        ? <>Your agents don’t know you yet. <a className="link" href="/you">Tell them about you</a></>
+        : <>{name ? <>Your agents know you as <strong>{name}</strong>.</> : 'Your agents know about you.'} <a className="link" href="/you">Edit</a></>}
+    </p>
+  )
+}
 
 export interface AgentsPageProps {
   skills: DetectedCapability[]
@@ -105,6 +120,7 @@ function AgentsList() {
       <section className="home-hero agents-hero">
         <h1 className="t-display">My agents</h1>
         <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the version it was given until you update it there.</p>
+        <KnowYou />
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
         </div>

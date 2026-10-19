@@ -428,7 +428,11 @@ pub(crate) async fn conversation(
         path: record.team_path.clone(),
     };
     match gather(&store, registry, &team_ref, &record).await {
-        Ok(history) => render(&team, &history, &record),
+        Ok(history) => {
+            let told = crate::you::told_in(team_path);
+            let person = Person::named(told.as_ref().and_then(|you| you.name.as_deref()));
+            render(&team, &history, &record, &person)
+        }
         Err(error) => {
             eprintln!("loomwatchd: could not read the team's chat for run {run_id}: {error}");
             None
@@ -475,6 +479,30 @@ async fn gather(
     })
 }
 
+/// What the conversation calls the person: "You", or the name they told their agents (ADR 0074),
+/// so an agent reading "Mai to the team" knows who asked, and never takes "You" for itself.
+struct Person {
+    /// Starting a sentence: "You", "Mai".
+    subject: String,
+    /// Inside one: "you", "Mai".
+    object: String,
+}
+
+impl Person {
+    fn named(name: Option<&str>) -> Self {
+        match name.map(str::trim).filter(|name| !name.is_empty()) {
+            Some(name) => Self {
+                subject: name.to_owned(),
+                object: name.to_owned(),
+            },
+            None => Self {
+                subject: "You".to_owned(),
+                object: "you".to_owned(),
+            },
+        }
+    }
+}
+
 /// One entry of the section: when it happened, and what to say about it.
 struct Entry {
     at: String,
@@ -505,7 +533,7 @@ enum EntryKind {
 }
 
 /// Every entry the section could hold, newest first.
-fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
+fn entries(team: &TeamConfig, history: &History, person: &Person) -> Vec<Entry> {
     let name = |id: &str| {
         team.agents
             .iter()
@@ -516,8 +544,8 @@ fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
     for run in &history.runs {
         let (by, to) = match (run.trigger, run.only_agent.as_deref()) {
             (RunTrigger::Schedule, _) => ("The schedule".to_owned(), "the team".to_owned()),
-            (RunTrigger::Manual, Some(only)) => ("You".to_owned(), name(only)),
-            (RunTrigger::Manual, None) => ("You".to_owned(), "the team".to_owned()),
+            (RunTrigger::Manual, Some(only)) => (person.subject.clone(), name(only)),
+            (RunTrigger::Manual, None) => (person.subject.clone(), "the team".to_owned()),
         };
         let continued = run.follows_run_id.is_some()
             && run.only_agent.is_none()
@@ -531,7 +559,8 @@ fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
             kind: if continued {
                 EntryKind::Decision {
                     line: format!(
-                        "You pressed Continue with the team, from {}.",
+                        "{} pressed Continue with the team, from {}.",
+                        person.subject,
                         name(run.start_at.as_deref().unwrap_or_default())
                     ),
                 }
@@ -561,7 +590,7 @@ fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
                 run_id: Some(run.run_id.clone()),
                 kind: EntryKind::Stopped {
                     why: if run.status == RunStatus::Cancelled {
-                        "you stopped it".to_owned()
+                        format!("{} stopped it", person.object)
                     } else {
                         run.error
                             .as_deref()
@@ -589,7 +618,7 @@ fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
         history
             .decisions
             .iter()
-            .map(|decision| decision_entry(team, decision)),
+            .map(|decision| decision_entry(team, decision, person)),
     );
     // Newest first, with a stable order for entries stamped the same millisecond.
     entries.sort_by(|left, right| right.at.cmp(&left.at));
@@ -597,7 +626,7 @@ fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
 }
 
 /// An answer the operator gave inside a run, said the way they gave it.
-fn decision_entry(team: &TeamConfig, decision: &Decision) -> Entry {
+fn decision_entry(team: &TeamConfig, decision: &Decision, person: &Person) -> Entry {
     let name = |id: &str| {
         team.agents
             .iter()
@@ -610,15 +639,21 @@ fn decision_entry(team: &TeamConfig, decision: &Decision) -> Entry {
         .any(|agent| agent.id == decision.asked_of && agent.is_operator());
     let line = match (&decision.sent_back_to, stop) {
         (Some(to), _) => format!(
-            "You sent the work back to {}: {}",
+            "{} sent the work back to {}: {}",
+            person.subject,
             name(to),
             decision.answer
         ),
-        (None, true) => format!("You, at the review step: {}", decision.answer),
+        (None, true) => format!(
+            "{}, at the review step: {}",
+            person.subject, decision.answer
+        ),
         (None, false) => format!(
-            "{} asked you: {}\nYou answered: {}",
+            "{} asked {}: {}\n{} answered: {}",
             name(&decision.asked_of),
+            person.object,
             decision.question,
+            person.subject,
             decision.answer
         ),
     };
@@ -629,12 +664,17 @@ fn decision_entry(team: &TeamConfig, decision: &Decision) -> Entry {
     }
 }
 
-fn render(team: &TeamConfig, history: &History, record: &RunRecord) -> Option<String> {
-    let entries = entries(team, history);
+fn render(
+    team: &TeamConfig,
+    history: &History,
+    record: &RunRecord,
+    person: &Person,
+) -> Option<String> {
+    let entries = entries(team, history, person);
     if entries.is_empty() {
         return None;
     }
-    let (mut detailed, cutoff) = detail(&entries, record.follows_run_id.as_deref());
+    let (mut detailed, cutoff) = detail(&entries, record.follows_run_id.as_deref(), person);
     let mut earlier = earlier(&entries, cutoff);
     let mut section = String::new();
     if !earlier.is_empty() {
@@ -652,7 +692,7 @@ fn render(team: &TeamConfig, history: &History, record: &RunRecord) -> Option<St
 ///
 /// The followed run's answer is already in `## Previous output`, so it is pointed to rather than
 /// repeated: saying it twice would spend the budget on a copy.
-fn detail(entries: &[Entry], followed: Option<&str>) -> (Vec<String>, usize) {
+fn detail(entries: &[Entry], followed: Option<&str>, person: &Person) -> (Vec<String>, usize) {
     let mut newest_answer_done = false;
     let mut detailed = Vec::new();
     let mut used = 0;
@@ -682,11 +722,13 @@ fn detail(entries: &[Entry], followed: Option<&str>) -> (Vec<String>, usize) {
                 "The work stopped (work {}): {why}",
                 short_id(entry.run_id.as_deref().unwrap_or_default())
             ),
-            EntryKind::Note { to: Some(to), text } => {
-                format!("You, in a note to {to} while it worked: {}", text.trim())
-            }
+            EntryKind::Note { to: Some(to), text } => format!(
+                "{}, in a note to {to} while it worked: {}",
+                person.subject,
+                text.trim()
+            ),
             EntryKind::Note { to: None, text } => {
-                format!("You, in a note to the team: {}", text.trim())
+                format!("{}, in a note to the team: {}", person.subject, text.trim())
             }
             EntryKind::Decision { line } => line.clone(),
         };
@@ -1537,9 +1579,12 @@ mod tests {
             )],
             decisions: Vec::new(),
         };
-        let section = render(&team(), &history, &now).unwrap();
+        let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         // Same input, same bytes.
-        assert_eq!(render(&team(), &history, &now).unwrap(), section);
+        assert_eq!(
+            render(&team(), &history, &now, &Person::named(None)).unwrap(),
+            section
+        );
         // Oldest first.
         let first = section.find("first digest").unwrap();
         let second = section.find("second digest").unwrap();
@@ -1578,7 +1623,7 @@ mod tests {
             notes: Vec::new(),
             decisions: Vec::new(),
         };
-        let section = render(&team(), &history, &now).unwrap();
+        let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
             section.chars().count() <= DETAIL_BUDGET + EARLIER_BUDGET + 200,
             "{}",
@@ -1609,7 +1654,7 @@ mod tests {
             notes: Vec::new(),
             decisions: Vec::new(),
         };
-        let section = render(&team(), &history, &now).unwrap();
+        let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(!section.contains("THE ANSWER"), "{section}");
         assert!(section.contains("the answer is under Previous output"));
     }
@@ -1638,7 +1683,7 @@ mod tests {
                 sent_back_to: None,
             }],
         };
-        let section = render(&team(), &history, &now).unwrap();
+        let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
             section.contains("Researcher asked you: Which region?\nYou answered: Asia"),
             "{section}"
@@ -1646,6 +1691,47 @@ mod tests {
         assert!(
             section.contains("You, in a note to Writer while it worked: keep it under 300 words")
         );
+    }
+
+    /// With a name told to their agents (ADR 0074), the conversation says who asked and answered
+    /// by that name, so no agent reads "You" as itself.
+    #[test]
+    fn the_conversation_names_the_person_by_the_name_they_gave() {
+        let now = finished("ffffffff-now", "2026-10-06T03:00:00.000Z", "today", "");
+        let history = History {
+            runs: vec![finished(
+                "bbbbbbbb-2",
+                "2026-10-05T02:00:00.000Z",
+                "digest",
+                "done",
+            )],
+            notes: vec![note("2026-10-05T02:10:00.000Z", "shorter, please", None)],
+            decisions: vec![
+                Decision {
+                    run_id: "bbbbbbbb-2".to_owned(),
+                    asked_of: "researcher".to_owned(),
+                    question: "Which region?".to_owned(),
+                    at: "2026-10-05T02:05:00.000Z".to_owned(),
+                    answer: "Asia".to_owned(),
+                    sent_back_to: None,
+                },
+                Decision {
+                    run_id: "bbbbbbbb-2".to_owned(),
+                    asked_of: "researcher".to_owned(),
+                    question: String::new(),
+                    at: "2026-10-05T02:07:00.000Z".to_owned(),
+                    answer: "add sources".to_owned(),
+                    sent_back_to: Some("writer".to_owned()),
+                },
+            ],
+        };
+        let section = render(&team(), &history, &now, &Person::named(Some(" Mai "))).unwrap();
+        assert!(section.contains("Mai to the team: digest"), "{section}");
+        assert!(section.contains("Researcher asked Mai: Which region?\nMai answered: Asia"));
+        assert!(section.contains("Mai sent the work back to Writer: add sources"));
+        assert!(section.contains("Mai, in a note to the team: shorter, please"));
+        assert!(!section.contains("You"), "{section}");
+        assert!(!section.contains(" you"), "{section}");
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2164,6 +2250,85 @@ mod tests {
         );
     }
 
+    /// What the person told their agents (ADR 0074) reaches every agent a message reaches: each
+    /// step of a team, and an agent written to on its own, as My agents' own chat writes to one.
+    /// The conversation they are handed names the person too.
+    #[tokio::test]
+    async fn every_agent_a_message_reaches_is_told_who_the_person_is() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let _told = crate::you::testing::tell_agents_under(
+            &dir.0,
+            crate::you::AboutYou {
+                name: Some("Mai".into()),
+                about: Some("I teach English in Da Nang.\nAnswer in Vietnamese.".into()),
+                skipped: false,
+            },
+        );
+        let stand_in = |name: &'static str| {
+            crate::agent::Demo::responder(move |request: &crate::agent::SeenRequest| {
+                Some(crate::agent::Completion::text(&if request
+                    .prompt()
+                    .contains("Write the handover")
+                {
+                    format!("{name} handover")
+                } else {
+                    format!("{name} work")
+                }))
+            })
+        };
+        let (researcher, writer) = (stand_in("researcher"), stand_in("writer"));
+        let yaml = format!(
+            "schemaVersion: 1\nid: news-desk\nname: News desk\nentrypoint: researcher\nagents:\n  - id: researcher\n    name: Researcher\n    role: find the news\n    model: {}\n  - id: writer\n    name: Writer\n    role: write the digest\n    model: {}\nedges:\n  - from: researcher\n    to: writer\n    layer: configured\n    kind: sequence\n    ts: 2026-09-13T00:00:00Z\n",
+            crate::engine::demo_model(researcher.clone()),
+            crate::engine::demo_model(writer.clone()),
+        );
+        std::fs::write(dir.0.join("news.yaml"), yaml).unwrap();
+        let rig = rig(pool, &dir);
+
+        let (_, first) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "today's digest", "to": {"kind": "team"}}),
+        )
+        .await;
+        let first_id = first["run"]["runId"].as_str().unwrap().to_owned();
+        let first = wait_for(&rig.registry, &first_id, |run| run.status.is_terminal()).await;
+        assert_eq!(first.status, RunStatus::Succeeded, "{first:?}");
+        let (status, turn) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "shorter", "to": {"kind": "agent", "agent": "writer"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{turn}");
+        let turn_id = turn["run"]["runId"].as_str().unwrap().to_owned();
+        let turn = wait_for(&rig.registry, &turn_id, |run| run.status.is_terminal()).await;
+        assert_eq!(turn.status, RunStatus::Succeeded, "{turn:?}");
+
+        for (name, demo) in [("researcher", &researcher), ("writer", &writer)] {
+            let requests = demo.requests();
+            assert!(!requests.is_empty(), "{name} was never asked");
+            for request in &requests {
+                let Some(crate::agent::Message::System { content }) = request.messages.first()
+                else {
+                    panic!("{name}'s request opens with no instructions");
+                };
+                assert!(
+                    content.contains("working on a task for Mai, the person who runs this team."),
+                    "{name}: {content}"
+                );
+                assert!(
+                    content.contains("> I teach English in Da Nang.\n> Answer in Vietnamese.\n"),
+                    "{name}: {content}"
+                );
+            }
+        }
+        let writer_prompt = &prompts(&rig.archive, &turn_id, "writer").await[0];
+        assert!(
+            writer_prompt.contains("Mai to the team: today's digest"),
+            "{writer_prompt}"
+        );
+    }
+
     #[test]
     fn the_agents_are_given_the_request_without_the_mention_that_routed_it() {
         let team = team();
@@ -2191,6 +2356,6 @@ mod tests {
             notes: Vec::new(),
             decisions: Vec::new(),
         };
-        assert_eq!(render(&team(), &history, &now), None);
+        assert_eq!(render(&team(), &history, &now, &Person::named(None)), None);
     }
 }

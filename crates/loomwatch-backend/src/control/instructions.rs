@@ -92,7 +92,12 @@ pub(super) async fn rewrite(
     };
     // No tools: the answer is the reply itself.
     let mut process = match AgentRun::spawn(&ask_spec(workspace)) {
-        Ok(process) => process.without_tools().with_instructions(SYSTEM_PROMPT),
+        // Not told about the person (ADR 0074): their "answer in Vietnamese" is for answers, and
+        // must not translate the instructions they wrote.
+        Ok(process) => process
+            .without_tools()
+            .without_the_person()
+            .with_instructions(SYSTEM_PROMPT),
         Err(failure) => {
             return error(
                 StatusCode::BAD_GATEWAY,

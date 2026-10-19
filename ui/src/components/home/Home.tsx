@@ -16,6 +16,8 @@ import { isUnread } from '../../lib/chat/seen'
 import { fabricFor } from '../../lib/story/fabric'
 import { TeamFabric } from './TeamFabric'
 import { OpenRouterKey } from '../connections/OpenRouterKey'
+import { AboutYou } from '../you/AboutYou'
+import { toldNothing, useYou } from '../../lib/you/client'
 import { UpdateBadge } from '../updates/Updates'
 import { QuestsLink } from '../quests/QuestsLink'
 import { SkillsLink } from '../skills/SkillsLink'
@@ -99,6 +101,11 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
   // OpenRouter accepted it before the card makes way.
   const [keyCard, setKeyCard] = useState(false)
   if (key && !key.connected && !keyCard) setKeyCard(true)
+  // Then, once a key is in, what agents should know about the person (ADR 0074): asked once, and
+  // kept on screen after Save so they see it was kept. Not now puts it away for good.
+  const you = useYou()
+  const [youCard, setYouCard] = useState<'offered' | 'gone' | null>(null)
+  if (youCard === null && key?.connected && you && !you.skipped && toldNothing(you)) setYouCard('offered')
   // Teams are listed as chats (ADR 0051): the one with the newest work first, then the rest.
   const previews = useMemo(() => new Map((teams ?? []).map((team) => [team.path, chatPreview(runs, team.path)])), [teams, runs])
   const shown = useMemo(() => {
@@ -168,6 +175,9 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
         </section>
 
         {keyCard && <div className="home-key" data-tour="key"><OpenRouterKey variant="card" /></div>}
+        {youCard === 'offered' && <div className="home-key">
+          <AboutYou variant="card" onDone={(kept) => { if (toldNothing(kept)) setYouCard('gone') }} />
+        </div>}
 
         {/* In the order the work is done: agents first, then the teams they work in. */}
         <YourAgentsShelf />

@@ -40,6 +40,7 @@ pub mod updates;
 pub mod wardrobe;
 pub mod watch_api;
 pub mod workspace;
+pub mod you;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
