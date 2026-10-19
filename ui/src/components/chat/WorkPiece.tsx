@@ -165,7 +165,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
 
   const took_ = took(run.startedAt ?? run.createdAt, run.finishedAt)
   const workers = workersOf(run, team)
-  const working = (record.working ?? []).map(name)
+  const working = record.working ?? []
   const waiting = live ? record.waitingOn ?? null : null
   const responder = session.projection.agents.find((agent) => agent.id === run.responder)
   // Work a check step checks is not the answer until the checks are done (ADR 0062): it may yet
@@ -303,9 +303,9 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
             : stops.length > 0
               ? <><b className="tc-wait">Waiting for you</b> · {stopSentence(stops[0]).replace(/\.$/, '')}</>
             : passLine
-              ? <>{passLine.map((part, index) => (part.name ? <b key={index}>{part.text}</b> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              ? <>{passLine.map((part, index) => (part.agent ? <Named key={index} hue={hue(part.agent)}>{part.text}</Named> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
             : working.length > 0
-              ? <><b>{listNames(working)}</b> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              ? <><span>{working.map((id, index) => <Fragment key={id}>{index === 0 ? '' : index === working.length - 1 ? ' and ' : ', '}<Named hue={hue(id)}>{name(id)}</Named></Fragment>)}</span> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
               : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'}
         </Swap>}
         <Spool spend={record.spend} stops={stops} name={name} hue={hue} />
@@ -654,7 +654,7 @@ function Answer({ tour, run, answer, streaming, name, hue, open, flash = false, 
 
 /**
  * The team on a piece of work as a thread on a loom: each agent a knot, the thread gold as far as
- * the work has come, and a bead in the gap after whoever has it now — blue while it works, gold
+ * the work has come, and a bead in the gap after whoever has it now — green while it works, gold
  * while it waits on you. When the work passes on, the gold runs to the next agent and the bead
  * slides after it.
  */
@@ -662,12 +662,17 @@ function Weft({ workers, at, live, waiting, status, children }: { workers: reado
   const many = workers.length > 1
   const fill = many ? Math.min(1, at / (workers.length - 1)) : 0
   return (
-    <span className={`tc-weft${live ? ' live' : ''}${waiting ? ' waiting' : ''} st-${status}`} aria-hidden="true" style={{ '--weft-at': at, '--weft-fill': fill } as CSSProperties}>
+    <span className={`tc-weft${many ? '' : ' one'}${live ? ' live' : ''}${waiting ? ' waiting' : ''} st-${status}`} aria-hidden="true" style={{ '--weft-at': at, '--weft-fill': fill } as CSSProperties}>
       {many && <><i className="tc-weft-track" /><i className="tc-weft-fill" /></>}
       {children}
       {live && many && at < workers.length - 1 && <i className="tc-weft-bead" />}
     </span>
   )
+}
+
+/** An agent named on the piece's line: in its own colour, as its name is on its messages. */
+function Named({ hue, children }: { hue: number; children: ReactNode }) {
+  return <b className={`chat-name hue-${hue}`}>{children}</b>
 }
 
 /** How far along the thread the work has come: the agent that has it now, or the end once done. */
