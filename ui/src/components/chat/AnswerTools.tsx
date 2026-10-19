@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Share2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Reply, Share2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { answerFileName } from '../../lib/chat/format'
@@ -34,6 +34,10 @@ interface AnswerToolsProps {
   onReviewed: () => void
   /** A finding's record, opened in Details beside the chat. */
   onOpenFinding: (line: ReceiptLine) => void
+  /** Reply to the answer: more to ask of the agent that gave it (ADR 0051). Absent, there is none. */
+  onReply?: () => void
+  /** What Reply says to a screen reader: whose answer it answers. */
+  replyLabel?: string
 }
 
 /** Past this many files, the rest wait behind "N more" so the chat stays a chat. */
@@ -46,7 +50,7 @@ const FILES_SHOWN = 3
  * these lives here, once. Kept to one quiet row: the verdict, Copy, and Share for the rest; where
  * the answer went in Notion is said beside them once it has gone somewhere.
  */
-export function AnswerTools({ run, answer, check, files, makers, finished, reviewed, onReviewed, onOpenFinding }: AnswerToolsProps) {
+export function AnswerTools({ run, answer, check, files, makers, finished, reviewed, onReviewed, onOpenFinding, onReply, replyLabel }: AnswerToolsProps) {
   const [copied, setCopied] = useState(false)
   const [allFiles, setAllFiles] = useState(false)
   const [reviewing, setReviewing] = useState(false)
@@ -72,6 +76,7 @@ export function AnswerTools({ run, answer, check, files, makers, finished, revie
             ? <button type="button" className={`delivery-output-badge tc-verdict tone-${verdict.tone}`} title={verdict.detail} aria-haspopup="dialog" onClick={() => setReviewing(true)}>{VERDICT_ICON[verdict.tone]}{verdict.label}</button>
             : <span className={`delivery-output-badge tc-verdict tone-${verdict.tone}`} title={verdict.detail}>{VERDICT_ICON[verdict.tone]}{verdict.label}</span>)}
           <span className="tc-quiet">
+            {onReply && <button type="button" className="tc-link" aria-label={replyLabel} onClick={onReply}><Reply size={12} aria-hidden="true" />Reply</button>}
             <button type="button" className="tc-link" onClick={copy}><Copy size={12} aria-hidden="true" />{copied ? 'Copied' : 'Copy'}</button>
             <Share onSave={save} notion={notion} />
           </span>

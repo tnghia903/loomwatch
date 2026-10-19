@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { keepIfSame } from '../keepIfSame'
 import { isTerminalRun, RunApiError, type RunRecord } from '../runs/client'
-import { fetchChatPage, itemAt, itemKey, type ChatItem, type ChatMessage, type ChatTarget, type SendResult } from './client'
+import { fetchChatPage, itemAt, itemKey, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo, type SendResult } from './client'
 
 /** Newest items are re-read this often while something is working or waiting, and when idle. */
 const LIVE_POLL_MS = 1500
@@ -15,6 +15,8 @@ export interface PendingMessage {
   text: string
   to: ChatTarget
   now: boolean
+  /** The message it replies to, kept so Try again sends it as the same reply. */
+  replyTo: ReplyTo | null
   state: 'sending' | 'failed'
   error?: string
   sentAt: string
@@ -125,9 +127,9 @@ export function useTeamChat(teamPath: string | null) {
   }, [teamPath, current.loadingOlder, current.more, items, merge])
 
   /** Show a message before the daemon answers. Returns its local id. */
-  const beginSend = useCallback((text: string, to: ChatTarget, now: boolean) => {
+  const beginSend = useCallback((text: string, to: ChatTarget, now: boolean, replyTo: ReplyTo | null = null) => {
     const localId = `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    setPending((list) => [...list, { localId, text, to, now, state: 'sending', sentAt: new Date().toISOString() }])
+    setPending((list) => [...list, { localId, text, to, now, replyTo, state: 'sending', sentAt: new Date().toISOString() }])
     return localId
   }, [])
 

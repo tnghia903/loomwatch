@@ -1,7 +1,8 @@
-import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Users, X, Zap } from 'lucide-react'
+import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Reply, Users, X, Zap } from 'lucide-react'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
-import type { ChatTarget } from '../../lib/chat/client'
+import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
+import { quoteLine, replyWhat } from '../../lib/chat/reply'
 import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent, type Destination } from '../../lib/chat/route'
 import { Swap } from './Appearing'
 import { AutoModeSwitch, type AutoModeControl } from './AutoModeSwitch'
@@ -44,6 +45,16 @@ interface ChatComposerProps {
    * turn as a note while it works.
    */
   solo?: ChatAgent | null
+  /**
+   * The message this one replies to (Reply under something an agent said): shown above the box
+   * until it is sent or let go. The message still goes where its @ sends it.
+   */
+  replyTo?: ReplyTo | null
+  onCancelReply?: () => void
+  /** Address the message to another agent the reply is about: its @ takes the place of the one there. */
+  onAddress?: (agent: string) => void
+  /** Counts the times Reply was pressed on what the team waits on you for: the box goes back to answering it. */
+  answerAsked?: number
 }
 
 /**
@@ -52,7 +63,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, autoMode, spendLimit, solo = null }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, autoMode, spendLimit, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0 }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
@@ -95,7 +106,17 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
     setSeenDecision(decisionKey)
     setTeamInstead(false)
   }
-  const answering = decision && !teamInstead ? decision : null
+  // So does Reply on the message that asks.
+  const [seenAsked, setSeenAsked] = useState(answerAsked)
+  if (answerAsked !== seenAsked) {
+    setSeenAsked(answerAsked)
+    setTeamInstead(false)
+  }
+  useEffect(() => {
+    if (answerAsked > 0) box.current?.focus()
+  }, [answerAsked])
+  // A reply to something else is a message of its own, not your answer to what the team waits on.
+  const answering = decision && !teamInstead && !replyTo ? decision : null
 
   const mention = useMemo(() => (solo ? null : findMention(text, agents)), [solo, text, agents])
   const target: ChatTarget = solo ? { kind: 'agent', agent: solo.id } : mention?.target ?? null
@@ -163,6 +184,13 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
         return
       }
     }
+    if (event.key === 'Escape' && replyTo && onCancelReply) {
+      // Lets go of the reply and nothing else; the words stay in the box.
+      event.preventDefault()
+      event.stopPropagation()
+      onCancelReply()
+      return
+    }
     if (event.key === 'Escape' && answering) {
       event.preventDefault()
       event.stopPropagation()
@@ -179,7 +207,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
 
   // An empty box says how to start work; once there are words, it says where they will go. A chat
   // with one agent has only one place a message can go, so it says that from the start.
-  const hint = !solo && !answering && !trimmed
+  const hint = !solo && !answering && !trimmed && !replyTo
   const answeringLabel = answering
     ? answering.kind === 'question'
       ? `Your answer to ${answering.fromName}'s question`
@@ -192,9 +220,16 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
         : <MessageSquareText size={14} aria-hidden="true" />
   const starts = !answering && (route === 'team' || route === 'agent')
   const sendLabel = answering ? 'Reply' : starts ? (solo ? 'Send' : 'Start') : 'Send note'
+  const name = (id: string) => names.get(id) ?? id
   const placeholder = answering?.kind === 'question' ? `Answer ${answering.fromName}…`
     : answering ? 'A note for Approve, or what to change'
-      : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
+      : replyTo ? `Reply to ${name(replyTo.from)}…`
+        : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
+  // A reply about two agents — a handover, a question between them — can go to either: the other
+  // one is a click away.
+  const addressed = target?.kind === 'agent' ? target.agent : null
+  const parties = replyTo && !solo ? [replyTo.from, replyTo.to].filter((id): id is string => id !== null && agents.some((agent) => agent.id === id && !agent.operator)) : []
+  const other = parties.length === 2 && parties[0] !== parties[1] ? parties.find((id) => id !== addressed) ?? null : null
 
   return (
     <form className={`tc-composer${answering ? ' answering' : ''}`} data-tour="composer" onSubmit={(event) => { event.preventDefault(); void send(false) }}>
@@ -214,6 +249,17 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       {spendLimit && <SpendLimitChip {...spendLimit} />}
       {autoMode && <AutoModeSwitch {...autoMode} />}
       </div>
+      {replyTo && (
+        <div className="tc-replying" role="group" aria-label={`Replying to ${replyWhat(replyTo, name)}`}>
+          <Reply size={14} aria-hidden="true" />
+          <span className="tc-replying-body">
+            <span className="tc-replying-what">Replying to {replyWhat(replyTo, name)}</span>
+            <span className="tc-replying-quote">{quoteLine(replyTo.text)}</span>
+          </span>
+          {other && onAddress && <button type="button" className="tc-link" onClick={() => onAddress(other)}>To {name(other)} instead</button>}
+          {onCancelReply && <button type="button" className="tc-link tc-replying-close" onClick={onCancelReply} aria-label="Don't reply to it" title="Don't reply to it (Esc)"><X size={13} aria-hidden="true" /></button>}
+        </div>
+      )}
       <div className="tc-box">
         {sent > 0 && <span key={sent} className="tc-ripple" aria-hidden="true" />}
         {mentioned > 0 && <span key={`mention-${mentioned}`} className="tc-mention-glow" aria-hidden="true" />}

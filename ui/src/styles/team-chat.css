@@ -814,3 +814,36 @@
 @media (prefers-reduced-motion: no-preference) {
   .tc-mode-menu { animation: tc-pop var(--t-quick) var(--ease-out) both; transform-origin: bottom right; }
 }
+
+/*
+ * Replying (ADR 0051): Reply under what an agent said, the message being answered above the box
+ * while you write, and its quote kept on top of what you sent. The quote is the talk's own
+ * (`.chat-quote`), so a reply reads like the agents' answers that quote a question.
+ */
+.chat-reply { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: inherit; color: var(--color-ink-3); cursor: pointer; }
+.chat-reply:hover, .chat-reply:focus-visible { color: var(--color-accent); }
+/* There when you reach for it, as Info is, and always on a touch screen, which has no hover. */
+@media (hover: hover) {
+  .chat-reply { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .chat-msg:hover .chat-reply, .chat-msg:focus-within .chat-reply { opacity: 1; }
+}
+.tc-replying {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 6px 10px;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-panel-solid));
+  font-size: 12px;
+}
+.tc-replying > svg { flex: none; color: var(--color-accent); }
+.tc-replying-body { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.tc-replying-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--color-ink-2); }
+.tc-replying-quote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-3); }
+.tc-replying .tc-link { flex: none; }
+.tc-reply-quote { box-sizing: border-box; width: 100%; min-width: 0; margin: 0 0 6px; text-align: left; font: inherit; font-size: 12px; color: inherit; }
+.tc-reply-quote b { display: inline-flex; align-items: center; gap: 4px; }
+button.tc-reply-quote { border-top: 0; border-right: 0; border-bottom: 0; cursor: pointer; }
+button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-color: var(--color-accent); }

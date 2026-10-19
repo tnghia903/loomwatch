@@ -4,7 +4,7 @@ import { Fragment, lazy, Suspense, useCallback, useContext, useEffect, useMemo, 
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../../lib/chat/baton'
 import { useFollow } from '../../lib/chat/follow'
-import type { ChatItem, ChatMessage } from '../../lib/chat/client'
+import type { ChatItem, ChatMessage, ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { clockTime, listNames, took } from '../../lib/chat/format'
 import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/runs/client'
@@ -28,6 +28,7 @@ import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
 import { Appearing, Swap } from './Appearing'
 import { Spool } from './Spool'
+import { ReplyQuote } from './ReplyQuote'
 
 const AgentMessages = lazy(() => import('../run/AgentMessages').then((module) => ({ default: module.AgentMessages })))
 
@@ -83,6 +84,10 @@ interface WorkPieceProps {
   onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
   /** A finding of the answer's review: its record, or the agent's work, opened in Details. */
   onOpenFinding: (runId: string, line: ReceiptLine) => void
+  /** Reply to something said in this piece — what an agent said, or the answer (ADR 0051). */
+  onReply?: (reply: ReplyTo) => void
+  /** Show what one of your replies replied to, where it was said; absent when the chat cannot. */
+  onShowReplied?: (reply: ReplyTo) => (() => void) | undefined
 }
 
 /**
@@ -91,7 +96,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -99,9 +104,14 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const [toggled, setToggled] = useState<boolean | null>(null)
   // The record beside the chat asking to show one of this piece's messages opens its talk.
   const [revealed, setRevealed] = useState(reveal)
+  // A reply's quote can point at the answer itself, which is always in view: it is flashed, and
+  // the talk stays as it is.
+  const answerKey = `answer:${run.runId}`
+  const [answerFlash, setAnswerFlash] = useState<number | null>(null)
   if (reveal !== revealed) {
     setRevealed(reveal)
-    if (reveal) setToggled(true)
+    if (reveal?.id === answerKey) setAnswerFlash(reveal.at)
+    else if (reveal) setToggled(true)
   }
   const open = toggled ?? (live || newest)
   const setOpen = (next: (value: boolean) => boolean) => setToggled(next(open))
@@ -111,6 +121,12 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // has been on screen — not every piece of a long history the moment the chat opens.
   const piece = useRef<HTMLLIElement>(null)
   const seen = useSeen(piece)
+  useEffect(() => {
+    if (answerFlash === null) return
+    piece.current?.querySelector('.tc-answer')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    const timer = window.setTimeout(() => setAnswerFlash(null), 1800)
+    return () => window.clearTimeout(timer)
+  }, [answerFlash])
   // The record and its events: for work in progress, talk that is shown, and an answer you saw.
   const session = useRunSession(live || open || seen ? run.runId : null, run.responder)
   const name = (id: string) => team.names.get(id) ?? id
@@ -239,8 +255,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   return (
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
-      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} />
-      {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} />)}
+      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} />
+      {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} onShowReplied={onShowReplied} />)}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
         <Weft workers={workers} at={weftAt(workers, record, live, waiting)} live={live} waiting={Boolean(waiting) || asking.length > 0 || stops.length > 0} status={record.status}>
@@ -293,6 +309,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
                 reveal={revealed}
                 yourTurn={onTheMessage ? yourTurn : undefined}
                 permissionTurn={permissionTurn}
+                onReply={onReply ? (reply) => onReply({ ...reply, runId: run.runId }) : undefined}
               />
             </AppearContext.Provider>
           </Suspense>
@@ -334,7 +351,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
       {stops.length > 0 && <SpendStopCard inline run={{ runId: run.runId, spendStops: stops }} onDecide={pin} onRun={onRun} />}
 
-      <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} solo={Boolean(team.solo)} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
+      <Outcome tour={newest} run={record} answer={answer} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -345,6 +362,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
           reviewed={reviewedText === answer}
           onReviewed={() => setReviewedText(answer)}
           onOpenFinding={(line) => onOpenFinding(run.runId, line)}
+          onReply={onReply && answer.trim() ? () => onReply({ runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer }) : undefined}
+          replyLabel={`Reply to ${name(run.responder)}'s answer`}
         />
       </Outcome>
 
@@ -420,7 +439,7 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
 }
 
 /** What started this piece: your message, the schedule's, or your Continue. */
-function Request({ run, request, continuedFrom, name, solo }: { run: RunRecord; request: ChatMessage | null; continuedFrom: string | null; name: (id: string) => string; solo?: string }) {
+function Request({ run, request, continuedFrom, name, solo, onShowReplied }: { run: RunRecord; request: ChatMessage | null; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined }) {
   if (continuedFrom) {
     return <div className="chat-notice"><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
   }
@@ -441,14 +460,17 @@ function Request({ run, request, continuedFrom, name, solo }: { run: RunRecord; 
     <div className="chat-msg mine">
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(request?.createdAt ?? run.createdAt)}</time></div>
-        <div className="chat-bubble"><div className="chat-text tc-plain">{text}</div></div>
+        <div className="chat-bubble">
+          {request?.replyTo && <ReplyQuote reply={request.replyTo} name={name} onShow={onShowReplied?.(request.replyTo)} />}
+          <div className="chat-text tc-plain">{text}</div>
+        </div>
       </div>
     </div>
   )
 }
 
 /** A note you sent into this piece while an agent worked. */
-function Note({ note, live, name }: { note: ChatMessage; live: boolean; name: (id: string) => string }) {
+function Note({ note, live, name, onShowReplied }: { note: ChatMessage; live: boolean; name: (id: string) => string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined }) {
   const appear = useAppear()
   const state = note.deliveredAt ? `${name(note.agentId ?? '')} took it in its next turn`
     : live ? note.now ? `Stopping ${name(note.agentId ?? '')}'s current step…` : `Waits for ${name(note.agentId ?? '')}'s current step to end`
@@ -457,7 +479,10 @@ function Note({ note, live, name }: { note: ChatMessage; live: boolean; name: (i
     <div className={`chat-msg mine tc-note${appear ? ' tc-appear' : ''}${note.deliveredAt ? ' taken' : ''}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">Note → {name(note.agentId ?? '')}</span><time>{clockTime(note.createdAt)}</time></div>
-        <div className="chat-bubble"><div className="chat-text tc-plain">{note.text}</div></div>
+        <div className="chat-bubble">
+          {note.replyTo && <ReplyQuote reply={note.replyTo} name={name} onShow={onShowReplied?.(note.replyTo)} />}
+          <div className="chat-text tc-plain">{note.text}</div>
+        </div>
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
       </div>
     </div>
@@ -473,6 +498,8 @@ interface AnswerProps {
   hue: (id: string) => number
   /** A document answer is open in the pane beside the chat. */
   open: boolean
+  /** A reply's quote asked to show this answer. */
+  flash?: boolean
   onOpen: () => void
   /** An agent's own chat: every answer is to you, there being no team. */
   solo: boolean
@@ -511,14 +538,14 @@ function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (
  * message. A long one, or one with a title, is a document: a card with its title, its opening
  * words and its length, read in full in the pane beside the chat (lib/chat/document.ts).
  */
-function Answer({ tour, run, answer, streaming, name, hue, open, onOpen, solo, children }: AnswerProps) {
+function Answer({ tour, run, answer, streaming, name, hue, open, flash = false, onOpen, solo, children }: AnswerProps) {
   const appear = useAppear()
   // Names listed under a folder read as files in the sentence too; copy and save keep the agent's words.
   const shown = useMemo(() => withFolderPaths(answer), [answer])
   const facts = useMemo(() => (isDocument(answer) ? describeDocument(answer) : null), [answer])
   const responder = run.responder
   return (
-    <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}`} data-tour={tour ? 'output' : undefined}>
+    <div className={`chat-msg tc-answer${appear ? ' tc-appear' : ''}${flash ? ' flash' : ''}`} data-tour={tour ? 'output' : undefined}>
       <span className="chat-gutter"><AgentFace id={responder}><AvatarFace id={responder} hue={hue(responder)} size={28} text={initials(name(responder))} /></AgentFace></span>
       <div className="chat-stack">
         <div className={`chat-meta hue-${hue(responder)}`}><span className="chat-name">{name(responder)}</span><span className="tc-to">{run.onlyAgent || solo ? 'to you' : "the team's answer"}</span><time>{clockTime(run.finishedAt)}</time></div>

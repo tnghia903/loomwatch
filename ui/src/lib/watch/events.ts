@@ -562,6 +562,12 @@ export type PromptSectionKind =
    * starts, above its task. Added here and in `memory::PromptSectionKind` in the same change.
    */
   | 'conversation'
+  /**
+   * `## The message this replies to` — the message from the team's work your request replies to
+   * (ADR 0051), quoted as the chat showed it, straight above the task. Added here and in
+   * `memory::PromptSectionKind` in the same change.
+   */
+  | 'reply_to'
   | 'task'
   | 'stage_results'
   /**
