@@ -1,5 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 
+import { modelEfforts } from '../../lib/ai/efforts'
+import { useAiStatus } from '../../lib/ai/useKeyStatus'
+import { useModels } from '../../lib/ai/useModels'
 import { appendToRole, checkup, fixFields, type CheckupFinding, type CheckupInput } from '../../lib/team-file/checkup'
 import { mergeFindings, runLessons, teamUsage, type LessonRun, type TeamUsage } from '../../lib/team-file/runLessons'
 import type { AllowSwitch } from '../../lib/team-file/types'
@@ -54,6 +57,9 @@ export function useTeamCheckup(doc: TeamDocumentController, responder: string | 
   const [hidden, setHidden] = useState(readHidden)
   const agents = useMemo(() => doc.nodes.map((node) => node.data.agent), [doc.nodes])
   const usage = useMemo(() => teamUsage(lessons, agents), [lessons, agents])
+  // The efforts each model takes, so the overthinking card judges the effort it runs at.
+  const ai = useAiStatus()
+  const { catalog } = useModels()
   const input = useMemo<CheckupInput>(() => ({
     agents,
     edges: doc.edges.map((edge) => ({ from: edge.source, to: edge.target })),
@@ -61,7 +67,8 @@ export function useTeamCheckup(doc: TeamDocumentController, responder: string | 
     responder,
     scheduled: Boolean(doc.teamSchedule && doc.teamSchedule.enabled !== false),
     usage,
-  }), [agents, doc.edges, doc.entrypoint, responder, doc.teamSchedule, usage])
+    efforts: (model) => modelEfforts(model, ai, catalog),
+  }), [agents, doc.edges, doc.entrypoint, responder, doc.teamSchedule, usage, ai, catalog])
   const all = useMemo(() => mergeFindings(checkup(input), runLessons(lessons, input)), [input, lessons])
   const hiddenHere = useMemo(() => new Set(hidden[teamKey] ?? []), [hidden, teamKey])
   const findings = useMemo(() => all.filter((finding) => !hiddenHere.has(finding.id)), [all, hiddenHere])

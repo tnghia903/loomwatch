@@ -17,6 +17,7 @@ import type { CapabilityNode } from './capabilityNode'
 import { roleGlyph } from './roleGlyph'
 import { depthForZoom, storyLine } from '../../lib/story/depth'
 import { markLabel, markState } from '../../lib/story/mark'
+import { effortWord } from '../../lib/ai/efforts'
 import { FigureStill } from '../agents/FigureStill'
 import { useAgentFigure } from '../agents/figureContext'
 import { AgentMark } from '../ui/AgentMark'
@@ -25,7 +26,7 @@ import { AgentMark } from '../ui/AgentMark'
 function modelLine(agent: Pick<AgentConfig, 'model' | 'thinkingEffort'>): string {
   const { modelId, thinkingEffort } = splitModelSelector(agent.model ?? '')
   const effort = agent.thinkingEffort ?? thinkingEffort
-  return `${modelId || 'Default model'}${effort ? ` · ${effort} effort` : ''}`
+  return `${modelId || 'Default model'}${effort && effort !== 'default' ? ` · ${effortWord(effort).toLowerCase()} effort` : ''}`
 }
 
 /** Everything connected to an agent, by name; a skill or a tool says which it is. */

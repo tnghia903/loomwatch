@@ -583,6 +583,13 @@ select.input, .inspector-fields label > select { appearance: none; -webkit-appea
 .thinking-scale > span:first-child { transform: translateX(calc(var(--thinking-thumb) / -2)); }
 .thinking-scale > span:last-child { transform: translateX(calc(-100% + var(--thinking-thumb) / 2)); }
 .thinking-scale > span.on { color: var(--color-ink); font-weight: 500; }
+/* A model with six or seven stops (Extra high, Max, Ultra) in a narrow panel names only the chosen
+   stop and the two ends, and drops an end beside the chosen one, so no two names overlap. */
+.thinking-scale { container-type: inline-size; }
+@container (max-width: 350px) {
+  .thinking-scale.many > span:not(.on, :first-child, :last-child) { visibility: hidden; }
+  .thinking-scale.many > span:first-child:has(+ span.on), .thinking-scale.many > span.on + span:last-child { visibility: hidden; }
+}
 .thinking-about {
   display: flex; flex-direction: column; gap: var(--sp-2); margin-top: 2px; padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-ink) 4%, transparent);

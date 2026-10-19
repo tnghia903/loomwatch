@@ -62,10 +62,11 @@ agents:
   model in its model list takes the line out, and the model stays as picked. A run always uses
   `model`, so a file edited elsewhere keeps its model until the agent is next changed in the app.
 - **`thinkingEffort`** says how hard the model reasons: `none`, `minimal`, `low`, `medium`, `high`,
-  `xhigh` or `max`. LoomWatch sends it to OpenRouter as `reasoning.effort`, with `ultra` read as
+  `xhigh`, `max` or `ultra`. LoomWatch sends it to OpenRouter as `reasoning.effort`, with `ultra` read as
   `max`. On the Claude credit it goes as `output_config.effort`, with `none` and `minimal` read as
-  `low`; on the ChatGPT plan as `reasoning.effort`, with `minimal` read as `low`. Either takes the
-  nearest effort the model offers. If it is absent or set to `default`, the model decides. The older combined form
+  `low` and `ultra` as `max`; on the ChatGPT plan as `reasoning.effort`, with `minimal` read as `low`.
+  Either takes the nearest effort at or below it that the model offers, and none if there is none.
+  The app's effort slider shows the efforts each model offers. If it is absent or set to `default`, the model decides. The older combined form
   `model[effort]`, such as `openai/gpt-6.1-sol[high]`, still works, and `thinkingEffort` wins when
   a file has both. LoomWatch's built-in jobs and starter teams set the effort by job: `low` for
   tidying, `medium` for most work, `high` for checking, analysis and code.

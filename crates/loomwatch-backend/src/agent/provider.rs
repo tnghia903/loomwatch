@@ -139,7 +139,8 @@ impl Default for WebLimits {
 #[derive(Debug, Clone, Copy)]
 pub struct ChatRequest<'a> {
     pub model: &'a str,
-    /// `low`, `medium`, `high`, `xhigh`, `max`, `minimal` or `none`; `None` leaves it to the model.
+    /// `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, `minimal` or `none`; `None` leaves it to
+    /// the model. Each provider moves one its model doesn't take to the nearest it does.
     pub effort: Option<&'a str>,
     pub messages: &'a [Message],
     pub tools: &'a [ToolSpec],
