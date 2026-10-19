@@ -18,6 +18,8 @@ use crate::ai::Source;
 /// One message of the conversation, in the agent's own order. It is append-only: a model that
 /// signs its reasoning (Claude's "preserved thinking") refuses a history whose earlier turns were
 /// edited, so nothing here is rewritten once sent. Compaction replaces the whole history instead.
+/// The one exception is a tool's result, which no provider signs: a conversation too long for the
+/// model has its results cut down to their start before it is summarised.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum Message {

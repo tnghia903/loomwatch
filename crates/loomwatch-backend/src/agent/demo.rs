@@ -43,15 +43,17 @@ struct Script {
     /// Every request waits here before it is answered — only the ones `hold_when` picks, when
     /// there is one, after streaming `hold_partial`.
     hold: Option<Arc<Hold>>,
-    hold_when: Option<Arc<HoldWhen>>,
+    hold_when: Option<Arc<Picks>>,
     hold_partial: String,
     /// Once the replies run out, every request streams the first and then fails, as `OpenRouter`
     /// reporting the second.
     fail: Option<(String, String)>,
+    /// The requests refused as too long for the model, before any reply is used up.
+    too_long: Option<Arc<Picks>>,
 }
 
-/// Which requests [`Demo::responder_holding`] holds.
-type HoldWhen = dyn Fn(&SeenRequest) -> bool + Send + Sync;
+/// Which requests [`Demo::responder_holding`] holds, or [`Demo::limited`] refuses.
+type Picks = dyn Fn(&SeenRequest) -> bool + Send + Sync;
 
 /// Where [`Demo::held`] keeps its requests until a test lets them through.
 #[derive(Debug)]
@@ -217,6 +219,23 @@ impl Demo {
         }
     }
 
+    /// [`Demo::scripted`], refusing every request `too_long` picks as too long for the model, as a
+    /// provider refuses a conversation that outgrew the model's context. A refused request is kept
+    /// with the others and uses up no reply.
+    #[must_use]
+    pub fn limited(
+        replies: Vec<Completion>,
+        too_long: impl Fn(&SeenRequest) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            script: Some(Arc::new(Script {
+                replies: Mutex::new(replies.into()),
+                too_long: Some(Arc::new(too_long)),
+                ..Script::default()
+            })),
+        }
+    }
+
     /// Every request the scripted demo has been sent, oldest first. Empty for [`Demo::offline`].
     #[must_use]
     pub fn requests(&self) -> Vec<SeenRequest> {
@@ -261,6 +280,9 @@ impl Demo {
                         .await
                         .map_err(|_| CallError::Cancelled)?
                         .forget();
+                }
+                if script.too_long.as_ref().is_some_and(|picks| picks(&seen)) {
+                    return Err(AgentError::ContextTooLong.into());
                 }
                 let scripted = script
                     .replies

@@ -12,7 +12,9 @@
 //! The conversation is append-only (see [`Message`]), and the tools offered never change, so the
 //! provider's prompt cache holds for the whole session. A long output is set aside rather than put
 //! in it whole, and a conversation that nears the model's context limit, or 160k tokens, is
-//! replaced by a summary.
+//! replaced by a summary. One the provider refuses as too long all the same has its tool results
+//! cut down to their start, their whole text set aside, and is summarised, once a turn, before
+//! that ends the run.
 //!
 //! Each turn's message ends with today's date, worked out when the turn starts, so a session
 //! parked overnight or a scheduled run is never a day out. Each model call is recorded with what
@@ -57,6 +59,14 @@ const MAX_CUT_OFFS: usize = 2;
 /// A tool result longer than this is set aside, and the model sees its start.
 const SET_ASIDE_CHARS: usize = 24_000;
 const SET_ASIDE_PREVIEW_CHARS: usize = 6_000;
+/// How much of its start a tool result the model has read keeps when it is cut down to make room.
+const TRIMMED_PREVIEW_CHARS: usize = 1_500;
+/// What a set-aside output's note starts with, after its start.
+const SET_ASIDE_MARK: &str = "\n… this output is ";
+/// About how many bytes of text make a token, for the part of a request no provider has counted
+/// yet (see [`Session::estimate`]). Bytes rather than characters, so accented letters and other
+/// scripts, which take more tokens to a character than English, count for more.
+const BYTES_PER_TOKEN: u64 = 4;
 /// How much of a tool's result the run record keeps. The model still gets all of it.
 const RECORDED_OUTPUT_CHARS: usize = 4_000;
 const READ_OUTPUT_DEFAULT_CHARS: usize = 20_000;
@@ -454,7 +464,10 @@ impl Session {
     /// # Errors
     ///
     /// When the provider refuses or fails ([`AgentError`]), or the run can't be recorded. A
-    /// cancelled turn is not an error: it ends with [`StopReason::Cancelled`].
+    /// cancelled turn is not an error: it ends with [`StopReason::Cancelled`]. A conversation the
+    /// provider refuses as too long is only an error the second time in a turn: the first time,
+    /// room is made and it is summarised ([`Self::make_room`]).
+    #[allow(clippy::too_many_lines)] // Every way a turn goes on or ends, in one loop.
     pub async fn prompt(&mut self, text: &str) -> Result<TurnEnd, AgentError> {
         self.cancel.send_replace(false);
         let cancel = Cancel::new(self.cancel.subscribe());
@@ -465,6 +478,10 @@ impl Session {
         // Replies the length limit cut off in a row, and whether the last one was text to carry on.
         let mut cut_offs = 0usize;
         let mut carrying_on = false;
+        // Whether the provider just refused a call as too long for the model, the work's or a
+        // summary's, and whether this turn has made room once already.
+        let mut overflowed = false;
+        let mut made_room = false;
         loop {
             if cancel.is_cancelled() {
                 return Ok(ended(StopReason::Cancelled, turn, &reply));
@@ -472,9 +489,27 @@ impl Session {
             if !self.may_call(&cancel).await {
                 return Ok(ended(stopped(&cancel), turn, &reply));
             }
-            if self.needs_compacting() {
-                match self.compact(&cancel, &mut turn).await {
-                    Ok(()) => {}
+            if overflowed || self.needs_compacting() {
+                let summarised = if overflowed {
+                    self.make_room(&cancel, &mut turn).await
+                } else {
+                    self.compact(&cancel, &mut turn).await
+                };
+                overflowed = false;
+                match summarised {
+                    // A reply cut off before the summary isn't carried on: the summary says where
+                    // the work stands, and what the model writes next is a reply of its own.
+                    Ok(true) => {
+                        cut_offs = 0;
+                        carrying_on = false;
+                    }
+                    Ok(false) => {}
+                    // The summary was refused too: the newest step added more than estimated.
+                    Err(CallError::Failed(AgentError::ContextTooLong)) if !made_room => {
+                        made_room = true;
+                        overflowed = true;
+                        continue;
+                    }
                     Err(CallError::Cancelled) => {
                         return Ok(ended(StopReason::Cancelled, turn, &reply));
                     }
@@ -494,6 +529,13 @@ impl Session {
                 Ok(completion) => completion,
                 Err(CallError::Cancelled) => {
                     return Ok(ended(StopReason::Cancelled, turn, &reply));
+                }
+                // Once a turn, room is made and the call made again; a second refusal is the
+                // error, whose words are then true.
+                Err(CallError::Failed(AgentError::ContextTooLong)) if !made_room => {
+                    made_room = true;
+                    overflowed = true;
+                    continue;
                 }
                 Err(CallError::Failed(error)) => return Err(error),
             };
@@ -1025,16 +1067,12 @@ impl Session {
     /// What goes into the conversation for a tool's result: all of it, or its start and an id to
     /// read the rest by.
     fn for_conversation(&mut self, id: &str, text: String) -> String {
-        let total = text.chars().count();
-        if total <= SET_ASIDE_CHARS {
+        if text.chars().count() <= SET_ASIDE_CHARS {
             return text;
         }
-        let preview: String = text.chars().take(SET_ASIDE_PREVIEW_CHARS).collect();
+        let note = set_aside_note(&text, id, SET_ASIDE_PREVIEW_CHARS);
         self.outputs.insert(id.to_owned(), text);
-        format!(
-            "{preview}\n… this output is {total} characters long; the rest was set aside. Read it \
-             with read_tool_output, id {id}, starting at offset {SET_ASIDE_PREVIEW_CHARS}."
-        )
+        note
     }
 
     fn needs_compacting(&self) -> bool {
@@ -1044,8 +1082,137 @@ impl Session {
             .unwrap_or(DEFAULT_CONTEXT)
             .min(COMPACT_WINDOW_CAP);
         #[allow(clippy::cast_precision_loss)]
-        let used = self.last_prompt_tokens as f64 / window as f64;
+        let used = self.estimate() as f64 / window as f64;
         used >= COMPACT_AT && self.history.len() > 3
+    }
+
+    /// About how many tokens the next request will take: what the provider counted for the last
+    /// call, and the messages added since at [`BYTES_PER_TOKEN`]. With nothing counted yet (a
+    /// resumed session, one just summarised, a provider that doesn't say), the whole conversation
+    /// is estimated that way.
+    ///
+    /// Going by the last call alone, one step that read several long files or pages could carry the
+    /// next call past the model's limit before anything was summarised. Counting bytes is rough,
+    /// but it guesses only what was added since the last count, and a guess that comes out low is
+    /// caught when the provider refuses the call ([`Self::make_room`]). The models' own tokenizers
+    /// aren't all published, and asking the provider to count would be a call of its own.
+    fn estimate(&self) -> u64 {
+        let counted = if self.last_prompt_tokens == 0 {
+            0
+        } else {
+            self.unread_from()
+        };
+        self.last_prompt_tokens + tokens(self.history[counted..].iter().map(size).sum())
+    }
+
+    /// Where the messages the model hasn't read yet start: after its newest message.
+    fn unread_from(&self) -> usize {
+        self.history
+            .iter()
+            .rposition(|message| matches!(message, Message::Assistant { .. }))
+            .map_or(0, |index| index + 1)
+    }
+
+    /// How many tokens a request may take and leave the model room for its longest reply.
+    fn request_room(&self) -> u64 {
+        self.config
+            .context_window
+            .unwrap_or(DEFAULT_CONTEXT)
+            .saturating_sub(u64::from(self.config.max_tokens))
+    }
+
+    /// Cuts tool results down, each to its start with its whole text set aside for
+    /// `read_tool_output`, until the conversation is estimated to take no more than `room` tokens.
+    /// The newest go first, to the preview a long output gets: the model hasn't read them yet, so
+    /// they were never sent. Then the ones it has read, oldest first and shorter, and last the
+    /// newest as short. Nothing is cut while the conversation fits.
+    ///
+    /// A tool result is the one part of the conversation cut once sent: the providers send it as
+    /// plain text, never signed, so the model's reasoning stays valid.
+    fn make_fit(&mut self, room: u64) {
+        let unread = self.unread_from();
+        let results = |range: std::ops::Range<usize>| -> Vec<usize> {
+            range
+                .filter(|&index| matches!(self.history[index], Message::Tool { .. }))
+                .collect()
+        };
+        let newest = results(unread..self.history.len());
+        let older = results(0..unread);
+        let cuts = newest
+            .iter()
+            .map(|&index| (index, SET_ASIDE_PREVIEW_CHARS))
+            .chain(older.iter().map(|&index| (index, TRIMMED_PREVIEW_CHARS)))
+            .chain(newest.iter().map(|&index| (index, TRIMMED_PREVIEW_CHARS)));
+        for (index, keep) in cuts {
+            if self.estimate() <= room {
+                return;
+            }
+            let removed = self.cut_result(index, keep);
+            if index < unread {
+                // Part of what the last call counted.
+                self.last_prompt_tokens = self.last_prompt_tokens.saturating_sub(tokens(removed));
+            }
+        }
+    }
+
+    /// Cuts the tool result at `index` down to its first `keep` characters and sets its whole text
+    /// aside. Gives back how many bytes the conversation lost.
+    fn cut_result(&mut self, index: usize, keep: usize) -> usize {
+        let Some(Message::Tool {
+            tool_call_id,
+            content,
+        }) = self.history.get(index)
+        else {
+            return 0;
+        };
+        // One set aside before is cut from its whole text, which stays under its id.
+        let (id, whole) = match self.set_aside_whole(tool_call_id, content) {
+            Some(whole) => (tool_call_id.clone(), whole.clone()),
+            None => (self.free_id(tool_call_id), content.clone()),
+        };
+        let cut = set_aside_note(&whole, &id, keep);
+        let removed = content.len().saturating_sub(cut.len());
+        if removed == 0 {
+            return 0;
+        }
+        self.outputs.insert(id, whole);
+        if let Some(Message::Tool { content, .. }) = self.history.get_mut(index) {
+            *content = cut;
+        }
+        removed
+    }
+
+    /// The whole text of a tool result set aside before, when `content` is what the conversation
+    /// kept of it.
+    fn set_aside_whole(&self, id: &str, content: &str) -> Option<&String> {
+        let whole = self.outputs.get(id)?;
+        let (kept, note) = content.rsplit_once(SET_ASIDE_MARK)?;
+        (whole.starts_with(kept) && note.contains(&format!("read_tool_output, id {id},")))
+            .then_some(whole)
+    }
+
+    /// `id`, or `id-2`, `id-3`… when another output was set aside under it already.
+    fn free_id(&self, id: &str) -> String {
+        let mut key = id.to_owned();
+        let mut copy = 1;
+        while self.outputs.contains_key(&key) {
+            copy += 1;
+            key = format!("{id}-{copy}");
+        }
+        key
+    }
+
+    /// Makes room after the provider refused a call because the conversation no longer fits the
+    /// model, and summarises it. Gives back whether it was summarised.
+    ///
+    /// The tool results are cut down until the conversation is estimated at half of what the model
+    /// has room for, or of the request just refused if that is less. The estimate didn't see this
+    /// coming, so it, or the context size the catalog gave, is out by an amount nobody knows: half
+    /// leaves room for both, and every cut result can still be read whole.
+    async fn make_room(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<bool, CallError> {
+        let room = self.request_room().min(self.estimate()) / 2;
+        self.make_fit(room);
+        self.compact(cancel, turn).await
     }
 
     /// One request for a summary, which is not part of the work whatever happens. `shorter` asks
@@ -1070,8 +1237,14 @@ impl Session {
     }
 
     /// Replaces the conversation with a summary of it, keeping the instructions and the current
-    /// task. The model writes the summary, so it keeps what matters for the work.
-    async fn compact(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<(), CallError> {
+    /// task. The model writes the summary, so it keeps what matters for the work. Gives back whether
+    /// the conversation was replaced.
+    async fn compact(&mut self, cancel: &Cancel, turn: &mut Usage) -> Result<bool, CallError> {
+        // The summary reads the whole conversation and the request for it. Most of the time they
+        // fit beside the summary's reply and nothing is cut; when the newest step added more than
+        // that, its results are cut down first rather than have the summary refused.
+        let request = tokens(summary_request(true).len());
+        self.make_fit(self.request_room().saturating_sub(request));
         let task = self.task.clone();
         // The conversation plus one more message: everything before it is read from the cache.
         let mut completion = self.summarise(cancel, Call::Summary, turn, false).await?;
@@ -1087,10 +1260,10 @@ impl Session {
         }
         if completion.content.trim().is_empty() || completion.finish == Finish::Length {
             // No summary to carry on from: the conversation stays as it was.
-            return Ok(());
+            return Ok(false);
         }
         let Some(Message::System { content: system }) = self.history.first().cloned() else {
-            return Ok(());
+            return Ok(false);
         };
         // The Brief came in the opening message; a summary of a later turn would drop it.
         let brief = loomwatch_brief(&self.config.cwd)
@@ -1113,8 +1286,46 @@ impl Session {
             "(The conversation was summarised to make room in the model's memory.)",
         ))
         .await
-        .map_err(CallError::Failed)
+        .map_err(CallError::Failed)?;
+        Ok(true)
     }
+}
+
+/// About how many tokens `bytes` of text make.
+fn tokens(bytes: usize) -> u64 {
+    u64::try_from(bytes).unwrap_or(u64::MAX) / BYTES_PER_TOKEN
+}
+
+/// How many bytes of text a message sends: its words, and the names and arguments of the tools it
+/// calls. The reasoning a provider hands back is left out: some send it again, some don't.
+fn size(message: &Message) -> usize {
+    match message {
+        Message::System { content } | Message::User { content } | Message::Tool { content, .. } => {
+            content.len()
+        }
+        Message::Assistant {
+            content,
+            tool_calls,
+            ..
+        } => {
+            content.len()
+                + tool_calls
+                    .iter()
+                    .map(|call| call.name.len() + call.arguments.len())
+                    .sum::<usize>()
+        }
+    }
+}
+
+/// What the conversation keeps of an output set aside under `id`: its first `keep` characters,
+/// and how to read the rest.
+fn set_aside_note(text: &str, id: &str, keep: usize) -> String {
+    let total = text.chars().count();
+    let preview: String = text.chars().take(keep).collect();
+    format!(
+        "{preview}{SET_ASIDE_MARK}{total} characters long; the rest was set aside. Read it with \
+         read_tool_output, id {id}, starting at offset {keep}."
+    )
 }
 
 /// Why a turn that may not make its next call ends: it was cancelled, or the spool is used up.
