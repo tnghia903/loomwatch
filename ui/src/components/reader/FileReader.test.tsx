@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { passageId, type AskedPassage } from '../../lib/files/passage'
@@ -26,7 +26,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-const names = new Map([['writer', 'Writer']])
+const names = new Map([['writer', 'Writer'], ['research', 'Researcher'], ['editor', 'Editor']])
 const renderReader = (props: Partial<Parameters<typeof FileReader>[0]> = {}) => {
   const onAsk = vi.fn()
   const onShowAsked = vi.fn()
@@ -63,7 +63,7 @@ describe('reading a file an agent made', () => {
     const bubble = await mark('Sales grew 12% in Q3.')
     expect(bubble).toHaveTextContent('Ask')
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
-    expect(onAsk).toHaveBeenCalledWith({ runId: 'run-1', messageId: passageId(REPORT, 'Sales grew 12% in Q3.'), from: 'writer', to: null, kind: 'passage', text: 'Sales grew 12% in Q3.', file: REPORT }, undefined)
+    expect(onAsk).toHaveBeenCalledWith({ runId: 'run-1', messageId: passageId(REPORT, 'Sales grew 12% in Q3.'), from: 'writer', to: null, kind: 'passage', text: 'Sales grew 12% in Q3.', file: REPORT }, undefined, 'writer')
     expect(document.getSelection()!.isCollapsed).toBe(true)
     expect(screen.queryByRole('toolbar')).toBeNull()
     // The tip has done its work, here and next time.
@@ -75,7 +75,27 @@ describe('reading a file an agent made', () => {
     const { onAsk } = renderReader()
     await mark('Costs fell.')
     fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
-    expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ kind: 'passage', text: 'Costs fell.' }), EXPLAIN_WORDS)
+    expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ kind: 'passage', text: 'Costs fell.' }), EXPLAIN_WORDS, 'writer')
+    // With nobody else on hand, there is nobody else to choose.
+    expect(screen.queryByRole('group', { name: 'Or ask someone else' })).toBeNull()
+  })
+
+  it('asks the agent who made the file unless another face on the team is pressed', async () => {
+    const { onAsk } = renderReader({ team: ['research', 'writer', 'editor'] })
+    const bubble = await mark('Sales grew 12% in Q3.')
+    const others = within(bubble).getByRole('group', { name: 'Or ask someone else' })
+    expect(within(others).getAllByRole('button').map((face) => face.getAttribute('aria-label'))).toEqual(['Ask Researcher instead', 'Ask Editor instead'])
+    fireEvent.click(within(others).getByRole('button', { name: 'Ask Researcher instead' }))
+    // The face pressed is the one asked; the maker is a press away again.
+    const chosen = await screen.findByRole('toolbar', { name: 'Ask Researcher about the words you marked' })
+    expect(within(chosen).getAllByRole('button', { name: /instead$/ }).map((face) => face.getAttribute('aria-label'))).toEqual(['Ask Writer, who made this, instead', 'Ask Editor instead'])
+    fireEvent.click(within(chosen).getByRole('button', { name: 'Explain' }))
+    // Still a part of the Writer's file, asked of the Researcher.
+    expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ kind: 'passage', from: 'writer', text: 'Sales grew 12% in Q3.' }), EXPLAIN_WORDS, 'research')
+    // Other words are asked of the maker again.
+    await mark('Costs fell.')
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'Costs fell.' }), undefined, 'writer')
   })
 
   it('Esc lets go of the marked words', async () => {
@@ -99,7 +119,7 @@ describe('reading a file an agent made', () => {
   it('puts the face of the agent asked beside each part asked about, and shows the answer when pressed', async () => {
     const asked: AskedPassage[] = [{ file: REPORT, text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2' }, { file: '/other.md', text: 'Costs fell.', from: 'writer', asked: 'x', runId: 'run-3', messageId: 'm-3' }]
     const { onShowAsked } = renderReader({ asked })
-    const face = await screen.findByRole('button', { name: /^You asked Writer about “Sales grew 12% in Q3\.”: @Writer why\?/ })
+    const face = await screen.findByRole('button', { name: 'You asked Writer about “Sales grew 12% in Q3.”: @Writer why? Show the answer' })
     expect(screen.getAllByRole('button', { name: /^You asked/ })).toHaveLength(1)
     fireEvent.click(face)
     expect(onShowAsked).toHaveBeenCalledWith(asked[0])

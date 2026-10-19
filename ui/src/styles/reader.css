@@ -119,6 +119,13 @@
 .rd-ask-quick { padding: 0 13px; color: color-mix(in srgb, var(--color-ground) 78%, transparent) !important; }
 .rd-ask-quick::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: color-mix(in srgb, var(--color-ground) 22%, transparent); }
 .rd-ask .rd-ask-face { box-shadow: 0 0 0 2px var(--lw-gold-400); background-color: var(--color-panel-solid); }
+/* The rest of the team, smaller, after the actions: press one and it is the one asked. */
+.rd-ask-others { position: relative; display: inline-flex; align-items: center; gap: 2px; padding: 0 3px 0 6px; }
+.rd-ask-others::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: color-mix(in srgb, var(--color-ground) 22%, transparent); }
+.rd-ask .rd-ask-other { width: 28px; height: 32px; justify-content: center; padding: 0; }
+.rd-ask-other .chat-avatar { background-color: var(--color-panel-solid); opacity: .72; transition: opacity var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out); }
+.rd-ask .rd-ask-other:hover, .rd-ask .rd-ask-other:focus-visible { background: none; }
+.rd-ask-other:hover .chat-avatar, .rd-ask-other:focus-visible .chat-avatar { opacity: 1; translate: 0 -2px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--lw-gold-400) 70%, transparent); }
 
 /* ---------- The tip, until the first part is asked about ---------- */
 .rd-hint {

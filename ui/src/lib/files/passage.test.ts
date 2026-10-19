@@ -48,6 +48,19 @@ describe('the parts a chat asked about', () => {
       ['On its way', '@Writer explain', 'run-1', null],
     ])
   })
+
+  it('names the agent asked, which need not be the one who made the file', () => {
+    const items: ChatItem[] = [
+      work('run-2', { ...message('m-2', '@Researcher why?', passage('Sales grew'), 'run-2'), agentId: 'researcher' }),
+      { kind: 'note', message: { ...message('n-1', 'for everyone', passage('Costs fell'), null), route: 'team_note', agentId: null } },
+    ]
+    const found = askedPassages(items, [{ text: '@Researcher explain', replyTo: passage('On its way'), to: { kind: 'agent', agent: 'researcher' } }])
+    expect(found.map((item) => [item.text, item.from])).toEqual([
+      ['Costs fell', 'writer'],
+      ['Sales grew', 'researcher'],
+      ['On its way', 'researcher'],
+    ])
+  })
 })
 
 describe('finding a part on the page again', () => {

@@ -218,14 +218,14 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const starts = !answering && (route === 'team' || route === 'agent')
   const sendLabel = answering ? 'Reply' : starts ? (solo ? 'Send' : 'Start') : 'Send note'
   const name = (id: string) => names.get(id) ?? id
+  const addressed = target?.kind === 'agent' ? target.agent : null
   const placeholder = answering?.kind === 'question' ? `Answer ${answering.fromName}…`
     : answering ? 'A note for Approve, or what to change'
-      : replyTo?.kind === 'passage' ? `Ask ${name(replyTo.from)} about this part…`
+      : replyTo?.kind === 'passage' ? `Ask ${name(addressed ?? replyTo.from)} about this part…`
         : replyTo ? `Reply to ${name(replyTo.from)}…`
         : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
   // A reply about two agents — a handover, a question between them — can go to either: the other
   // one is a click away.
-  const addressed = target?.kind === 'agent' ? target.agent : null
   const parties = replyTo && !solo ? [replyTo.from, replyTo.to].filter((id): id is string => id !== null && agents.some((agent) => agent.id === id && !agent.operator)) : []
   const other = parties.length === 2 && parties[0] !== parties[1] ? parties.find((id) => id !== addressed) ?? null : null
 

@@ -1606,6 +1606,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     const step = (id: string) => stepById.get(id)?.step ?? Infinity
     return [...doc.nodes].sort((left, right) => step(left.id) - step(right.id)).map((node) => ({ id: node.id, name: node.data.agent.name || node.id, operator: node.data.agent.kind === 'operator' }))
   }, [doc.nodes, stepById])
+  // Anyone on the team can be asked about a part of a file, as anyone can be @mentioned.
+  const askable = useMemo(() => chatAgents.filter((agent) => !agent.operator).map((agent) => agent.id), [chatAgents])
   const chatTeam = useMemo<TeamView>(() => {
     const members = chatAgents.filter((agent) => !agent.operator)
     return {
@@ -1680,9 +1682,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const closeFile = useCallback(() => { setReading(null); setPaneTab(null) }, [])
   // What is marked in the file goes to the chat; on a narrow screen the pane covers the chat, so it
   // steps aside for the message box and the file waits in its tab.
-  const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; at: number } | null>(null)
-  const askInChat = useCallback((reply: ReplyTo, words?: string) => {
-    setChatAsk({ reply, words, at: Date.now() })
+  const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; agent: string; at: number } | null>(null)
+  const askInChat = useCallback((reply: ReplyTo, words: string | undefined, agent: string) => {
+    setChatAsk({ reply, words, agent, at: Date.now() })
     if (!wide && !words) closeDetails()
   }, [wide, closeDetails])
   const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null }>({ asked: [], asking: null })
@@ -2578,7 +2580,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               </header>
               <div className="tc-details-body" id="tc-pane-body" role={paneDocument || reading ? 'tabpanel' : undefined} aria-labelledby={paneDocument || reading ? `tc-pane-${shownTab}` : undefined}>
                 {shownTab === 'file' && reading ? (
-                  <FileReader key={reading.path} file={reading} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1}
+                  <FileReader key={reading.path} file={reading} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable}
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} onShowAsked={showAsked} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>

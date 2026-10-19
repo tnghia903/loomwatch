@@ -1215,6 +1215,21 @@ describe('asking about a part of a file', () => {
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Writer Explain this part in plain words.', to: { kind: 'agent', agent: 'writer' }, replyTo: part } }))
   })
 
+  it('a teammate chosen in the reader is asked about the part, which stays the maker’s', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    renderChat({ ask: { reply: part, agent: 'researcher', at: 3 } })
+    await waitFor(() => expect(box()).toHaveValue('@Researcher '))
+    expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toBeInTheDocument()
+    expect(box()).toHaveAttribute('placeholder', 'Ask Researcher about this part…')
+  })
+
+  it('Explain goes at once to a teammate chosen in the reader', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    answer = () => new Response(JSON.stringify({ error: 'later' }), { status: 500 })
+    renderChat({ ask: { reply: part, words: 'Explain this part in plain words.', agent: 'researcher', at: 4 } })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Researcher Explain this part in plain words.', to: { kind: 'agent', agent: 'researcher' }, replyTo: part } }))
+  })
+
   it('says which parts were asked about, from what the chat holds', async () => {
     page = [{ kind: 'work', run: run({ runId: 'run-2' }), request: message({ id: 'm-2', runId: 'run-2', text: '@Writer why?', replyTo: part }), notes: [] }]
     const onPassages = vi.fn()

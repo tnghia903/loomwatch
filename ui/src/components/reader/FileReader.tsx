@@ -19,8 +19,10 @@ export interface FileReaderProps {
   file: FileToRead
   name: (id: string) => string
   hue: (id: string) => number
-  /** Ask about a marked part: put it in the message box with its quote, or send `words` about it at once. */
-  onAsk?: (reply: ReplyTo, words?: string) => void
+  /** Ask `agent` about a marked part: put it in the message box with its quote, or send `words` about it at once. */
+  onAsk?: (reply: ReplyTo, words: string | undefined, agent: string) => void
+  /** The team's agents who can be asked instead of the one who made the file, in the team's order. */
+  team?: readonly string[]
   /** Parts of files asked about in this chat; this file's are lit and get a face in the margin. */
   asked?: readonly AskedPassage[]
   /** The part in the message box now, being asked about. */
@@ -38,6 +40,7 @@ const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
 const BUBBLE_GUESS = { width: 168, height: 40 }
 const NO_PASSAGES: readonly AskedPassage[] = []
+const NO_TEAM: readonly string[] = []
 type Pin = { passage: AskedPassage; top: number }
 
 /**
@@ -50,7 +53,7 @@ type Pin = { passage: AskedPassage; top: number }
  * file is read again whenever it changes on disk, so a part the agent was asked to change is seen
  * changed.
  */
-export function FileReader({ file, name, hue, onAsk, asked = NO_PASSAGES, asking = null, onShowAsked }: FileReaderProps) {
+export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, asked = NO_PASSAGES, asking = null, onShowAsked }: FileReaderProps) {
   const { path, from } = file
   const format = readerFormat(path) ?? 'text'
   const words = format !== 'picture' && format !== 'media'
@@ -119,6 +122,12 @@ export function FileReader({ file, name, hue, onAsk, asked = NO_PASSAGES, asking
     return () => document.removeEventListener('keydown', away, true)
   }, [marked])
 
+  // Who is asked: the agent who made the file, unless another face in the bubble was chosen for
+  // these words. Marking other words asks the maker again.
+  const [chosen, setChosen] = useState<{ text: string; agent: string } | null>(null)
+  const askee = chosen && marked && chosen.text === marked.text && team.includes(chosen.agent) ? chosen.agent : from
+  const others = askee ? team.filter((id) => id !== askee) : NO_TEAM
+
   // Where the bubble sits over the marked words, in the coordinates of the page's stage it floats on.
   const [size, setSize] = useState(BUBBLE_GUESS)
   useLayoutEffect(() => {
@@ -126,7 +135,7 @@ export function FileReader({ file, name, hue, onAsk, asked = NO_PASSAGES, asking
     if (!element) return
     const measured = { width: element.offsetWidth, height: element.offsetHeight }
     if (measured.width && (measured.width !== size.width || measured.height !== size.height)) setSize(measured)
-  }, [marked, size])
+  }, [marked, size, others.length])
   const [place, setPlace] = useState<ReturnType<typeof bubblePlace> | null>(null)
   useLayoutEffect(() => {
     const box = stage.current?.getBoundingClientRect()
@@ -134,10 +143,10 @@ export function FileReader({ file, name, hue, onAsk, asked = NO_PASSAGES, asking
   }, [marked, size])
 
   const ask = (words?: string) => {
-    if (!marked || !from || !onAsk) return
+    if (!marked || !from || !askee || !onAsk) return
     const reply = passageReply({ path, runId: file.runId, from }, marked.text)
     flyToMessageBox(bubble.current, marked.text)
-    onAsk(reply, words)
+    onAsk(reply, words, askee)
     document.getSelection()?.removeAllRanges()
     setCleared((count) => count + 1)
     setMarked(null)
@@ -291,7 +300,7 @@ export function FileReader({ file, name, hue, onAsk, asked = NO_PASSAGES, asking
                 <button key={passage.text} type="button" className="rd-pin" style={{ top }}
                   onMouseEnter={() => setFocus(passage.text)} onMouseLeave={() => setFocus(null)} onFocus={() => setFocus(passage.text)} onBlur={() => setFocus(null)}
                   onClick={() => onShowAsked?.(passage)} disabled={!onShowAsked || !passage.runId}
-                  aria-label={`You asked ${name(passage.from)} about “${quoteLine(passage.text).slice(0, 60)}”: ${passage.asked}. Show the answer`}
+                  aria-label={`You asked ${name(passage.from)} about “${quoteLine(passage.text).slice(0, 60)}”: ${sentence(passage.asked)} Show the answer`}
                   title={`You asked ${name(passage.from)}: ${passage.asked}`}>
                   <AvatarFace id={passage.from} hue={hue(passage.from)} size={22} fontSize={9} text={initials(name(passage.from))} />
                 </button>
@@ -299,13 +308,25 @@ export function FileReader({ file, name, hue, onAsk, asked = NO_PASSAGES, asking
             </div>
           )}
         </div>
-        {askable && marked && place && from && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(from)} about the words you marked`} onMouseDown={(event) => event.preventDefault()}>
-            <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(from)} about this`}>
-              <AvatarFace id={from} hue={hue(from)} size={24} fontSize={9} text={initials(name(from))} className="rd-ask-face" />
+        {askable && marked && place && from && askee && (
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the words you marked`} onMouseDown={(event) => event.preventDefault()}>
+            <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
+              <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>
             </button>
-            <button type="button" className="rd-ask-quick" onClick={() => ask(EXPLAIN_WORDS)} title={`${name(from)} explains it in plain words`}>Explain</button>
+            <button type="button" className="rd-ask-quick" onClick={() => ask(EXPLAIN_WORDS)} title={`${name(askee)} explains it in plain words`}>Explain</button>
+            {others.length > 0 && (
+              <span className="rd-ask-others" role="group" aria-label="Or ask someone else">
+                {others.map((id) => {
+                  const words = id === from ? `Ask ${name(id)}, who made this, instead` : `Ask ${name(id)} instead`
+                  return (
+                    <button key={id} type="button" className="rd-ask-other" onClick={() => setChosen({ text: marked.text, agent: id })} aria-label={words} title={words}>
+                      <AvatarFace id={id} hue={hue(id)} size={20} fontSize={8} text={initials(name(id))} />
+                    </button>
+                  )
+                })}
+              </span>
+            )}
           </div>
         )}
         {askable && hint && !marked && from && text !== null && (
@@ -319,6 +340,12 @@ export function FileReader({ file, name, hue, onAsk, asked = NO_PASSAGES, asking
     </article>
     </FileOriginContext.Provider>
   )
+}
+
+/** What was asked, ending as a sentence does: "why?" stays, "explain it" gets its stop. */
+function sentence(words: string): string {
+  const said = words.trim()
+  return /[.!?…]$/.test(said) ? said : `${said}.`
 }
 
 function initials(name: string): string {
