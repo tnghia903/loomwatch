@@ -8,6 +8,7 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 use super::BoxFuture;
+use super::anthropic::Anthropic;
 use super::demo::Demo;
 use super::error::CallError;
 use super::openrouter::OpenRouter;
@@ -143,6 +144,10 @@ pub struct ChatRequest<'a> {
     pub tools: &'a [ToolSpec],
     pub server_tools: ServerTools,
     pub max_tokens: u32,
+    /// The tools are offered only so the conversation stays as it was: the model must not call
+    /// one. A summary on a provider that signs its reasoning asks this rather than offering none,
+    /// which would change what came before and undo the signatures and the prompt cache.
+    pub tools_off: bool,
     /// Groups the calls of one session, so the provider keeps routing them to the same place and
     /// its prompt cache keeps working.
     pub session_key: &'a str,
@@ -263,6 +268,8 @@ pub(crate) trait DeltaSink: Send + Sync {
 #[derive(Debug, Clone)]
 pub enum Provider {
     OpenRouter(Arc<OpenRouter>),
+    /// The person's own Claude API key (ADR 0073).
+    Anthropic(Arc<Anthropic>),
     Demo(Demo),
 }
 
@@ -276,6 +283,8 @@ impl Provider {
     ) -> Result<Completion, CallError> {
         match self {
             Self::OpenRouter(provider) => provider.complete(request, deltas, cancel).await,
+            // Boxed: a provider's call is a large future, and Windows builds count it larger still.
+            Self::Anthropic(provider) => Box::pin(provider.complete(request, deltas, cancel)).await,
             // A stopped turn stops the demo too, as it stops a stream.
             Self::Demo(demo) => tokio::select! {
                 completion = demo.complete(request, deltas) => completion,
@@ -288,6 +297,14 @@ impl Provider {
     #[must_use]
     pub fn is_demo(&self) -> bool {
         matches!(self, Self::Demo(_))
+    }
+
+    /// Whether a summary keeps the session's tools, asking the model not to call them
+    /// ([`ChatRequest::tools_off`]), rather than going without: true where the conversation is signed
+    /// and must not change under it.
+    #[must_use]
+    pub fn keeps_tools_for_summaries(&self) -> bool {
+        !matches!(self, Self::OpenRouter(_) | Self::Demo(_))
     }
 }
 

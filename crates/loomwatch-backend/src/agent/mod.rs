@@ -21,6 +21,7 @@
 //! The API key lives in an [`ApiKey`]. It is sent to the provider and nowhere else: not into the
 //! events, not into errors, and not into the environment of a command an agent runs.
 
+mod anthropic;
 mod demo;
 mod error;
 mod events;
@@ -44,6 +45,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+pub use anthropic::{Anthropic, Price, list_price};
 pub use demo::{Demo, Hold, OFFLINE_MODEL, Respond, SeenRequest};
 pub use error::{AgentError, CHATGPT_USAGE_URL, Problem, ProblemKind};
 pub use events::{EventSink, ToolKind, ToolStatus};

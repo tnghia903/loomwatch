@@ -25,8 +25,8 @@ pub(crate) use bridge::tool_spec;
 pub(crate) use recorder::{EventLog, Recorder, ReplyText, new_event_id};
 
 use crate::agent::{
-    AgentError, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter, Problem, ProblemKind,
-    Provider, Session, SessionConfig, ToolSet,
+    AgentError, Anthropic, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter, Problem,
+    ProblemKind, Provider, Session, SessionConfig, ToolSet,
 };
 use crate::ai::{ModelRef, Source};
 use crate::archive::EventArchive;
@@ -169,7 +169,8 @@ static OPENROUTER: LazyLock<tokio::sync::Mutex<KeptConnection>> =
 async fn provider_for(model: &ModelRef) -> Result<Provider, AppReportedError> {
     match model.source {
         Source::OpenRouter => {}
-        source @ (Source::ChatGpt | Source::Anthropic) => return Err(not_connected(source)),
+        Source::Anthropic => return claude_provider().await,
+        Source::ChatGpt => return Err(not_connected(Source::ChatGpt)),
     }
     let model = model.id.as_str();
     if model == OFFLINE_MODEL {
@@ -206,6 +207,50 @@ async fn provider_for(model: &ModelRef) -> Result<Provider, AppReportedError> {
     })?);
     *held = Some((key.expose().to_owned(), provider.clone()));
     Ok(Provider::OpenRouter(provider))
+}
+
+/// A connection to Anthropic with the person's Claude key, the models its check listed and their
+/// list prices. Made for each session: it is cheap, and a key changed between runs is picked up.
+async fn claude_provider() -> Result<Provider, AppReportedError> {
+    let missing = || not_connected(Source::Anthropic);
+    let ai = crate::ai::installed().ok_or_else(missing)?;
+    let key = ai
+        .claude_key()
+        .await
+        .map_err(|error| {
+            AppReportedError::said(format!(
+                "LoomWatch couldn't read your Claude API key: {error:#}"
+            ))
+        })?
+        .ok_or_else(missing)?;
+    let models = ai.claude_status().models;
+    let catalog = ai.models().catalog().await.ok();
+    let prices = models
+        .iter()
+        .filter_map(|model| {
+            let listed = catalog.as_ref()?.find(
+                &ModelRef {
+                    source: Source::Anthropic,
+                    id: model.id.clone(),
+                }
+                .openrouter_equivalent(),
+            )?;
+            let mut price = crate::agent::Price::from_list(listed.input_price, listed.output_price);
+            if let Some(read) = listed.cached_input_price {
+                price.cache_read = read;
+            }
+            if let Some(written) = listed.cache_write_price {
+                price.cache_write = written;
+            }
+            Some((model.id.clone(), price))
+        })
+        .collect();
+    let provider = Anthropic::new(key, ai.anthropic_base(), models, prices).map_err(|error| {
+        AppReportedError::said(format!(
+            "LoomWatch couldn't set up its connection to Anthropic: {error:#}"
+        ))
+    })?;
+    Ok(Provider::Anthropic(Arc::new(provider)))
 }
 
 /// An agent whose source has nothing connected on this computer, said with what to connect.
@@ -938,10 +983,24 @@ impl AgentRun {
         ];
         if let Some(ai) = crate::ai::installed() {
             config.skill_library.push(ai.skills_folder());
-            config.context_window = ai
-                .models()
-                .context_length(&ModelRef::parse(model).openrouter_equivalent())
-                .await;
+            let model = ModelRef::parse(model);
+            config.context_window = match model.source {
+                // What the key's check said, else the catalog's figure for the same model.
+                Source::Anthropic => ai
+                    .claude_status()
+                    .models
+                    .iter()
+                    .find(|listed| listed.id == model.id)
+                    .map(|listed| listed.context_length)
+                    .filter(|length| *length > 0),
+                _ => None,
+            };
+            if config.context_window.is_none() {
+                config.context_window = ai
+                    .models()
+                    .context_length(&model.openrouter_equivalent())
+                    .await;
+            }
         }
         config
     }

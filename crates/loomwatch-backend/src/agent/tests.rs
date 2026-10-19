@@ -105,12 +105,23 @@ fn session(
     sink: Arc<Recorded>,
     permissions: Arc<dyn Permissions>,
 ) -> Session {
-    let config = SessionConfig::new(
-        "session-1",
-        "writer",
-        folder.0.clone(),
+    session_on(
+        folder,
+        provider,
+        sink,
+        permissions,
         "anthropic/claude-haiku-5.5",
-    );
+    )
+}
+
+fn session_on(
+    folder: &Folder,
+    provider: Provider,
+    sink: Arc<Recorded>,
+    permissions: Arc<dyn Permissions>,
+    model: &str,
+) -> Session {
+    let config = SessionConfig::new("session-1", "writer", folder.0.clone(), model);
     Session::open(config, provider, sink, permissions, Arc::new(NoHostTools))
 }
 
@@ -657,6 +668,7 @@ async fn chat(State(stand): State<Stand>, headers: HeaderMap, body: String) -> R
     stand.auth.lock().unwrap().push(
         headers
             .get(header::AUTHORIZATION)
+            .or_else(|| headers.get("x-api-key"))
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
             .to_owned(),
@@ -687,6 +699,7 @@ async fn stand(replies: Vec<Reply>) -> (Stand, String) {
     };
     let app = Router::new()
         .route("/api/v1/chat/completions", post(chat))
+        .route("/v1/messages", post(chat))
         .with_state(stand.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -1605,4 +1618,246 @@ async fn the_skills_listed_are_the_ones_its_first_message_calls_for() {
         system.contains("- slides: Builds a presentation deck"),
         "{system}"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A stand-in for Anthropic (ADR 0073)
+// ---------------------------------------------------------------------------------------------
+
+const CLAUDE_KEY: &str = "sk-ant-api03-test-0123456789abcdef";
+
+fn claude(base: &str) -> Provider {
+    let opus = crate::ai::ClaudeModel {
+        id: "claude-opus-5-5".into(),
+        name: "Claude Opus 5.5".into(),
+        context_length: 1_000_000,
+        max_output: 128_000,
+        adaptive_thinking: true,
+        efforts: vec!["low".into(), "medium".into(), "high".into()],
+    };
+    let anthropic = base.strip_suffix("/api/v1").unwrap_or(base);
+    Provider::Anthropic(Arc::new(
+        Anthropic::new(
+            ApiKey::new(CLAUDE_KEY).unwrap(),
+            anthropic,
+            vec![opus],
+            std::collections::HashMap::new(),
+        )
+        .unwrap()
+        .with_backoff(Duration::from_millis(5)),
+    ))
+}
+
+/// Anthropic's stream: each event as a `data:` line, the way it sends them.
+fn events(events: &[Value]) -> Reply {
+    let mut body = String::new();
+    for event in events {
+        let kind = event["type"].as_str().unwrap_or("message");
+        let _ = write!(body, "event: {kind}\ndata: {event}\n\n");
+    }
+    Reply {
+        status: StatusCode::OK,
+        body,
+        delay: Duration::ZERO,
+    }
+}
+
+fn message_start(input: u64, cached: u64) -> Value {
+    json!({"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "content": [],
+           "usage": {"input_tokens": input, "cache_read_input_tokens": cached, "cache_creation_input_tokens": 0, "output_tokens": 1}}})
+}
+
+fn text_block(index: u64, text: &str) -> [Value; 3] {
+    [
+        json!({"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}}),
+        json!({"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": text}}),
+        json!({"type": "content_block_stop", "index": index}),
+    ]
+}
+
+fn ended(stop: &str, output: u64) -> [Value; 2] {
+    [
+        json!({"type": "message_delta", "delta": {"stop_reason": stop}, "usage": {"output_tokens": output}}),
+        json!({"type": "message_stop"}),
+    ]
+}
+
+/// A turn on Claude: thinking and a tool call put back together from the stream, the signed
+/// message sent back exactly as Anthropic wrote it, the cost worked out from list prices and marked
+/// so, and the key in no event.
+#[tokio::test]
+async fn claude_streams_signed_thinking_and_tool_calls_and_sends_them_back_unchanged() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "hello").unwrap();
+    let first: Vec<Value> = [
+        vec![
+            message_start(50, 1_000),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Let me look."}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig-1"}}),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({"type": "ping"}),
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"pa"}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "th\":\"notes.md\"}"}}),
+            json!({"type": "content_block_stop", "index": 1}),
+        ],
+        ended("tool_use", 30).to_vec(),
+    ]
+    .concat();
+    let second: Vec<Value> = [
+        vec![message_start(70, 1_050)],
+        text_block(0, "It says hello.").to_vec(),
+        ended("end_turn", 5).to_vec(),
+    ]
+    .concat();
+    let (stand, base) = stand(vec![events(&first), events(&second)]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    let end = session.prompt("What does notes.md say?").await.unwrap();
+
+    assert_eq!(end.reply, "It says hello.");
+    assert_eq!(end.usage.paid_by, Some(Source::Anthropic));
+    assert!(end.usage.cost_estimated);
+    assert_eq!(end.usage.cached_read_tokens, 2_050);
+    // Opus 5.5 at $4 / $20, cache reads at $0.20, per million tokens.
+    let expected = (120.0 * 4.0 + 2_050.0 * 0.2 + 35.0 * 20.0) / 1_000_000.0;
+    assert!(
+        (end.usage.cost_usd - expected).abs() < 1e-12,
+        "{}",
+        end.usage.cost_usd
+    );
+    assert_eq!(end.as_result()["_meta"]["loomwatch"]["paidBy"], "anthropic");
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    assert_eq!(bodies[0]["model"], "claude-opus-5-5");
+    assert!(
+        bodies[0]["system"]
+            .as_str()
+            .is_some_and(|system| !system.is_empty())
+    );
+    let sent_back = &bodies[1]["messages"][1];
+    assert_eq!(sent_back["role"], "assistant");
+    assert_eq!(
+        sent_back["content"],
+        json!([
+            {"type": "thinking", "thinking": "Let me look.", "signature": "sig-1"},
+            {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "notes.md"}},
+        ])
+    );
+    let results = &bodies[1]["messages"][2];
+    assert_eq!(results["role"], "user");
+    assert_eq!(results["content"][0]["type"], "tool_result");
+    assert_eq!(results["content"][0]["tool_use_id"], "toolu_1");
+    // The first request is the second's prefix: the cache and the signature both hold.
+    assert_eq!(bodies[0]["system"], bodies[1]["system"]);
+    assert_eq!(bodies[0]["tools"], bodies[1]["tools"]);
+    assert_eq!(bodies[0]["messages"][0], bodies[1]["messages"][0]);
+
+    assert!(
+        stand
+            .auth
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|key| key == CLAUDE_KEY)
+    );
+    let recorded = serde_json::to_string(&*sink.0.lock().unwrap()).unwrap();
+    assert!(!recorded.contains(CLAUDE_KEY));
+}
+
+/// A reply `pause_turn` stopped is carried on in the same call, and Claude is told what it wrote.
+#[tokio::test]
+async fn a_paused_claude_reply_is_carried_on() {
+    let folder = Folder::new();
+    let paused: Vec<Value> = [
+        vec![message_start(10, 0)],
+        text_block(0, "Searching… ").to_vec(),
+        ended("pause_turn", 4).to_vec(),
+    ]
+    .concat();
+    let finished: Vec<Value> = [
+        vec![message_start(20, 0)],
+        text_block(0, "found it.").to_vec(),
+        ended("end_turn", 3).to_vec(),
+    ]
+    .concat();
+    let (stand, base) = stand(vec![events(&paused), events(&finished)]).await;
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    let end = session.prompt("Look it up.").await.unwrap();
+    assert_eq!(end.reply, "Searching… found it.");
+    assert_eq!(end.usage.output_tokens, 7);
+    let bodies = stand.bodies.lock().unwrap().clone();
+    let carried = bodies[1]["messages"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(carried["role"], "assistant");
+    assert_eq!(carried["content"][0]["text"], "Searching… ");
+}
+
+/// A busy Anthropic, before any word, is tried again; a used-up credit is said plainly with where
+/// to see it, and never retried.
+#[tokio::test]
+async fn claude_retries_when_busy_and_says_when_the_credit_is_used_up() {
+    let folder = Folder::new();
+    let overloaded = events(&[
+        message_start(5, 0),
+        json!({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}),
+    ]);
+    let fine: Vec<Value> = [
+        vec![message_start(5, 0)],
+        text_block(0, "Hi.").to_vec(),
+        ended("end_turn", 2).to_vec(),
+    ]
+    .concat();
+    let (busy, base) = stand(vec![overloaded, events(&fine)]).await;
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    assert_eq!(session.prompt("Hi").await.unwrap().reply, "Hi.");
+    assert_eq!(busy.bodies.lock().unwrap().len(), 2);
+
+    let (refusing, base) = stand(vec![Reply {
+        status: StatusCode::BAD_REQUEST,
+        body: json!({"type": "error", "error": {"type": "invalid_request_error",
+            "message": "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}})
+        .to_string(),
+        delay: Duration::ZERO,
+    }])
+    .await;
+    let mut broke = session_on(
+        &folder,
+        claude(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    let said = broke.prompt("Hi").await.unwrap_err();
+    assert!(matches!(said, AgentError::OutOfCredits(Source::Anthropic)));
+    let problem = said.problem().unwrap();
+    assert_eq!(
+        problem.url,
+        Some("https://platform.claude.com/settings/billing")
+    );
+    assert!(said.to_string().contains("Claude API credit"));
+    assert_eq!(refusing.bodies.lock().unwrap().len(), 1);
 }

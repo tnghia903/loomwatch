@@ -844,6 +844,7 @@ mod tests {
                 limits: crate::agent::WebLimits::default(),
             },
             max_tokens: 8192,
+            tools_off: false,
             session_key: "s-1",
             agent_id: "writer",
         }

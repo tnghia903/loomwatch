@@ -363,6 +363,10 @@ pub struct Model {
     /// Dollars per million prompt tokens served from the cache, when the model caches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cached_input_price: Option<f64>,
+    /// Dollars per million prompt tokens written to the cache, when writing costs more than
+    /// reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_price: Option<f64>,
     /// Costs nothing; such models are limited per day and may learn from what they're sent.
     pub free: bool,
     /// Takes a reasoning effort.
@@ -625,6 +629,7 @@ fn model_from(entry: &Value) -> Option<Model> {
         input_price,
         output_price,
         cached_input_price: price("input_cache_read"),
+        cache_write_price: price("input_cache_write"),
         reasoning,
         note: None,
         id,

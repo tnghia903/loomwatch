@@ -6,13 +6,17 @@
 //!   is never kept.
 //! - `POST /api/ai/openrouter/check` asks `OpenRouter` about the kept key again.
 //! - `DELETE /api/ai/openrouter` forgets it.
-//! - `GET /api/models` lists the models an agent can use.
+//! - `PUT`/`DELETE /api/ai/anthropic` and `POST /api/ai/anthropic/check` do the same for a Claude
+//!   API key (ADR 0073), checked by listing its models; `GET /api/ai` says what was last learned.
+//! - `GET /api/models` lists the models an agent can use: `OpenRouter`'s catalog, and the Claude
+//!   key's models when one is kept.
 //! - `/api/models/reading` reads an agent's whole setup to suggest a model, when the operator turns
 //!   that on (`reading.rs`).
 //!
 //! The router must only be mounted on a loopback listener. Changing requests need the
 //! `X-LoomWatch-Request: 1` header the app sends, so another site can't set a key.
 
+pub mod anthropic;
 mod keys;
 mod models;
 mod reading;
@@ -31,6 +35,7 @@ use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub use anthropic::{ClaudeModel, ClaudeStatus};
 /// The key file's name in the state folder, where it is kept off a Mac: no agent may touch it.
 pub(crate) use keys::FILE_NAME as KEY_FILE;
 pub(crate) use keys::PLANS_FILE;
@@ -65,6 +70,9 @@ struct Inner {
     key_url: String,
     client: Option<reqwest::Client>,
     reader: Reader,
+    claude_status: anthropic::StatusFile,
+    /// Where the Claude key is checked and agents' Claude calls go.
+    anthropic_base: String,
 }
 
 /// The one [`Ai`] the daemon's runs use, set once at startup.
@@ -155,8 +163,65 @@ impl Ai {
                     state_dir,
                     &reading::decisions_url(key_url.strip_suffix("/key").unwrap_or(key_url)),
                 ),
+                claude_status: anthropic::StatusFile::new(state_dir),
+                anthropic_base: anthropic::base_url(),
             }),
         }
+    }
+
+    /// The same, with Claude keys checked and Claude calls sent to `base`, for tests.
+    ///
+    /// # Panics
+    ///
+    /// When called on an [`Ai`] that was already cloned.
+    #[must_use]
+    pub fn with_anthropic_at(mut self, base: &str) -> Self {
+        let inner = Arc::get_mut(&mut self.inner)
+            .expect("set where the Claude key goes before sharing the Ai");
+        base.trim_end_matches('/')
+            .clone_into(&mut inner.anthropic_base);
+        self
+    }
+
+    /// The Claude API key a run uses, if one is kept.
+    ///
+    /// # Errors
+    ///
+    /// When the key store can't be read.
+    pub async fn claude_key(&self) -> anyhow::Result<Option<ApiKey>> {
+        Ok(self
+            .inner
+            .keys
+            .plan_secrets()
+            .await?
+            .anthropic
+            .as_deref()
+            .and_then(ApiKey::new))
+    }
+
+    /// What was last learned about the Claude key: its models among it. Never reads the key.
+    #[must_use]
+    pub fn claude_status(&self) -> ClaudeStatus {
+        self.inner.claude_status.read()
+    }
+
+    /// Where Claude calls go.
+    #[must_use]
+    pub fn anthropic_base(&self) -> &str {
+        &self.inner.anthropic_base
+    }
+
+    /// The sources the person has connected, as their statuses say. Never reads a key.
+    #[must_use]
+    pub fn connected_sources(&self) -> Vec<Source> {
+        let mut sources = Vec::new();
+        if self.claude_status().connected {
+            sources.push(Source::Anthropic);
+        }
+        if self.status().connected {
+            sources.push(Source::OpenRouter);
+        }
+        sources
     }
 
     /// The key a run uses, if one is set.
@@ -260,6 +325,11 @@ pub fn router(ai: Ai) -> Router {
         .route("/api/ai", get(status))
         .route("/api/ai/openrouter", put(connect).delete(disconnect))
         .route("/api/ai/openrouter/check", post(recheck))
+        .route(
+            "/api/ai/anthropic",
+            put(connect_claude).delete(disconnect_claude),
+        )
+        .route("/api/ai/anthropic/check", post(recheck_claude))
         .route("/api/models", get(list_models))
         .layer(DefaultBodyLimit::max(4096))
         // A setup carries an agent's whole instructions.
@@ -283,7 +353,7 @@ async fn protect(request: Request, next: Next) -> Response {
     {
         return ApiError::new(
             StatusCode::FORBIDDEN,
-            "Open Connections in LoomWatch to change the OpenRouter key.".to_owned(),
+            "Open Connections in LoomWatch to change how agents' models are paid.".to_owned(),
         )
         .into_response();
     }
@@ -291,7 +361,7 @@ async fn protect(request: Request, next: Next) -> Response {
 }
 
 async fn status(State(ai): State<Ai>) -> Json<Value> {
-    Json(json!({"openrouter": ai.status()}))
+    Json(json!({"openrouter": ai.status(), "anthropic": ai.claude_status()}))
 }
 
 #[derive(Deserialize)]
@@ -360,13 +430,119 @@ async fn disconnect(State(ai): State<Ai>) -> Result<Json<Value>, ApiError> {
     Ok(Json(json!({"openrouter": status})))
 }
 
-async fn list_models(State(ai): State<Ai>) -> Result<Json<Arc<Catalog>>, ApiError> {
-    ai.models().catalog().await.map(Json).map_err(|error| {
+async fn connect_claude(
+    State(ai): State<Ai>,
+    Json(body): Json<Connect>,
+) -> Result<Json<Value>, ApiError> {
+    let Some(key) = ApiKey::new(&body.key) else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Paste your Claude API key first.".to_owned(),
+        ));
+    };
+    if let Some(said) = anthropic::refuse_shape(key.expose()) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, said.to_owned()));
+    }
+    let models = anthropic::check(ai.anthropic_base(), &key)
+        .await
+        .map_err(|said| ApiError::new(StatusCode::BAD_REQUEST, said))?;
+    let kept = key.expose().to_owned();
+    ai.inner
+        .keys
+        .change_plan_secrets(move |secrets| secrets.anthropic = Some(kept))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, format!("{error:#}")))?;
+    let status = anthropic::accepted(&key, models);
+    ai.inner.claude_status.keep(&status);
+    Ok(Json(json!({"anthropic": status})))
+}
+
+async fn recheck_claude(State(ai): State<Ai>) -> Result<Json<Value>, ApiError> {
+    let key = ai
+        .claude_key()
+        .await
+        .map_err(|error| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, format!("{error:#}")))?;
+    let Some(key) = key else {
+        let status = ClaudeStatus::default();
+        ai.inner.claude_status.keep(&status);
+        return Ok(Json(json!({"anthropic": status})));
+    };
+    let status = match anthropic::check(ai.anthropic_base(), &key).await {
+        Ok(models) => anthropic::accepted(&key, models),
+        Err(problem) => ClaudeStatus {
+            connected: true,
+            checked_at: Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)),
+            problem: Some(problem),
+            ..ai.claude_status()
+        },
+    };
+    ai.inner.claude_status.keep(&status);
+    Ok(Json(json!({"anthropic": status})))
+}
+
+async fn disconnect_claude(State(ai): State<Ai>) -> Result<Json<Value>, ApiError> {
+    ai.inner
+        .keys
+        .change_plan_secrets(|secrets| secrets.anthropic = None)
+        .await
+        .map_err(|error| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, format!("{error:#}")))?;
+    let status = ClaudeStatus::default();
+    ai.inner.claude_status.keep(&status);
+    Ok(Json(json!({"anthropic": status})))
+}
+
+/// The model list as the app gets it: `OpenRouter`'s catalog as before, and the Claude key's models
+/// beside it, priced as the catalog lists the same model.
+#[derive(Serialize)]
+struct ModelList {
+    #[serde(flatten)]
+    catalog: Arc<Catalog>,
+    anthropic: Vec<Model>,
+}
+
+async fn list_models(State(ai): State<Ai>) -> Result<Json<Value>, ApiError> {
+    let catalog = ai.models().catalog().await.map_err(|error| {
         ApiError::new(
             StatusCode::BAD_GATEWAY,
             format!("The model list isn't available right now: {error:#}"),
         )
-    })
+    })?;
+    let claude = ai.claude_status();
+    let anthropic = if claude.connected {
+        claude
+            .models
+            .iter()
+            .map(|model| claude_listing(model, &catalog))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(Json(json!(ModelList { catalog, anthropic })))
+}
+
+/// A Claude key's model as the picker lists it, with the prices `OpenRouter` lists for the same
+/// model: Anthropic's own list prices, which the API doesn't report.
+fn claude_listing(model: &ClaudeModel, catalog: &Catalog) -> Model {
+    let reference = ModelRef {
+        source: Source::Anthropic,
+        id: model.id.clone(),
+    };
+    let listed = catalog.find(&reference.openrouter_equivalent());
+    Model {
+        id: reference.selector(),
+        name: model.name.clone(),
+        description: listed
+            .map(|listed| listed.description.clone())
+            .unwrap_or_default(),
+        context_length: model.context_length,
+        input_price: listed.map_or(0.0, |listed| listed.input_price),
+        output_price: listed.map_or(0.0, |listed| listed.output_price),
+        cached_input_price: listed.and_then(|listed| listed.cached_input_price),
+        cache_write_price: listed.and_then(|listed| listed.cache_write_price),
+        free: false,
+        reasoning: model.adaptive_thinking || !model.efforts.is_empty(),
+        note: None,
+    }
 }
 
 #[cfg(test)]
@@ -426,6 +602,124 @@ mod tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+
+    async fn fake_anthropic() -> String {
+        async fn models(headers: axum::http::HeaderMap) -> Response {
+            let key = headers
+                .get("x-api-key")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            let versioned = headers.get("anthropic-version").is_some();
+            if key == "sk-ant-api03-good" && versioned {
+                Json(json!({"data": [{
+                    "id": "claude-opus-5-5", "display_name": "Claude Opus 5.5",
+                    "max_input_tokens": 1_000_000, "max_tokens": 128_000,
+                    "capabilities": {"thinking": {"supported": true, "types": {"adaptive": {"supported": true}}},
+                                     "effort": {"supported": true, "low": {"supported": true}, "high": {"supported": true}}}
+                }], "has_more": false, "last_id": "claude-opus-5-5"}))
+                .into_response()
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}})),
+                )
+                    .into_response()
+            }
+        }
+        let app = Router::new().route("/v1/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{address}")
+    }
+
+    /// Only a Claude API key Anthropic accepts is kept, beside the `OpenRouter` key and never in its
+    /// place, and what its check learned is what `/api/ai` says. A Claude sign-in token is refused
+    /// before Anthropic is asked.
+    #[tokio::test]
+    async fn a_claude_key_is_kept_only_after_anthropic_accepts_it() {
+        let folder = std::env::temp_dir().join(format!("loomwatch-ai-{}", uuid::Uuid::new_v4()));
+        let keys = Keys::in_memory();
+        keys.set_openrouter("sk-or-v1-kept").await.unwrap();
+        let ai = Ai::with(
+            keys.clone(),
+            Models::with_url("http://127.0.0.1:9/models", None),
+            &folder,
+            &fake_openrouter().await,
+        )
+        .with_anthropic_at(&fake_anthropic().await);
+        let app = router(ai.clone());
+
+        let (_, body) = send(&app, "GET", "/api/ai", None, false).await;
+        assert_eq!(body["anthropic"]["connected"], false);
+        assert!(ai.connected_sources().is_empty());
+
+        let (status, body) = send(
+            &app,
+            "PUT",
+            "/api/ai/anthropic",
+            Some(json!({"key": "sk-ant-oat01-subscription"})),
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("sign-in token"));
+
+        let (status, body) = send(
+            &app,
+            "PUT",
+            "/api/ai/anthropic",
+            Some(json!({"key": "sk-ant-api03-wrong"})),
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("refused this key"));
+        assert!(ai.claude_key().await.unwrap().is_none());
+
+        let (status, body) = send(
+            &app,
+            "PUT",
+            "/api/ai/anthropic",
+            Some(json!({"key": " sk-ant-api03-good "})),
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["anthropic"]["models"][0]["id"], "claude-opus-5-5");
+        assert_eq!(
+            body["anthropic"]["models"][0]["efforts"],
+            json!(["low", "high"])
+        );
+        assert_eq!(
+            ai.claude_key().await.unwrap().unwrap().expose(),
+            "sk-ant-api03-good"
+        );
+        assert_eq!(
+            keys.openrouter().await.unwrap().unwrap().expose(),
+            "sk-or-v1-kept"
+        );
+        assert_eq!(ai.connected_sources(), [Source::Anthropic]);
+        let (_, body) = send(&app, "GET", "/api/ai", None, false).await;
+        assert_eq!(body["anthropic"]["connected"], true);
+        assert!(!body.to_string().contains("sk-ant-api03-good"));
+
+        let (status, body) = send(&app, "POST", "/api/ai/anthropic/check", None, true).await;
+        assert_eq!(
+            (status, body["anthropic"]["connected"].clone()),
+            (StatusCode::OK, json!(true))
+        );
+
+        let (status, body) = send(&app, "DELETE", "/api/ai/anthropic", None, true).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["anthropic"]["connected"], false);
+        assert!(ai.claude_key().await.unwrap().is_none());
+        assert_eq!(
+            keys.openrouter().await.unwrap().unwrap().expose(),
+            "sk-or-v1-kept"
+        );
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[tokio::test]

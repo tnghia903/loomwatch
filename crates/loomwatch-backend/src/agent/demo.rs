@@ -390,6 +390,7 @@ mod tests {
             tools: &[],
             server_tools: ServerTools::default(),
             max_tokens: 1,
+            tools_off: false,
             session_key: "s",
             agent_id: agent,
         })
