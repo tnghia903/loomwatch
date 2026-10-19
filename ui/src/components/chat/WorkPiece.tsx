@@ -148,7 +148,10 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const working = (record.working ?? []).map(name)
   const waiting = live ? record.waitingOn ?? null : null
   const responder = session.projection.agents.find((agent) => agent.id === run.responder)
-  const streamed = live ? responder?.reply ?? '' : ''
+  // Work a check step checks is not the answer until the checks are done (ADR 0062): it may yet
+  // go back, or wait for you to approve it. Before then it is only in what the agents said.
+  const checked = [...(team.configs?.values() ?? [])].some((config) => config.checks === run.responder)
+  const streamed = live && !checked ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
   // The files the answer names, for its tools: a scan of the whole text, so once per answer.
   const finishedAnswer = isTerminalRun(record.status)

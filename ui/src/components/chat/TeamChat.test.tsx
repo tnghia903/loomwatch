@@ -12,11 +12,11 @@ import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
 // saying what the agents said when a test gives it messages.
-const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false }))
+const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[] }))
 vi.mock('../../lib/runs/useRunSession', () => ({
   useRunSession: (runId: string | null) => ({
     record: null, applyRecord: vi.fn(), missing: false, events: runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
-    projection: { agents: [], evidence: [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
+    projection: { agents: runId ? said.agents : [], evidence: [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
     latest: null, cursor: null, setCursor: vi.fn(), lastSeq: -1, mode: 'replay', terminal: true, evidenceComplete: true,
   }),
 }))
@@ -56,6 +56,7 @@ beforeEach(() => {
   page = []
   posted = []
   said.messages = []
+  said.agents = []
   said.read = false
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -638,6 +639,19 @@ describe('a piece of work', () => {
 
   // ADR 0062, `whenStillNotMet: ask`: the check step's stop leads with what is still not met, and
   // decides like a review: Approve as it is needs no words, Send back needs them.
+  // ADR 0062: work a check step checks may yet go back, or wait for you to approve it, so while
+  // the run is live it is not shown as the team's answer.
+  it('holds back work a check step checks until the run is done, and shows other work as it comes', async () => {
+    said.agents = [{ id: 'writer', reply: 'Draft three: three times as often.', taskState: 'COMPLETED' }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null }), request: message({}), notes: [] }]
+    renderChat()
+    expect(await screen.findByText(/Draft three: three times as often/)).toBeInTheDocument()
+    cleanup()
+    renderChat({ team: { ...team, configs: new Map([['checker', { id: 'checker', name: 'Checker', role: 'Check it.', checks: 'writer' }]]) } })
+    expect((await screen.findAllByText(/today’s digest/)).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Draft three/)).not.toBeInTheDocument()
+  })
+
   const checkStop = async () => {
     const check = { checked: 'researcher', rounds: 2, reason: 'rounds' as const, met: 2, problems: 'Two figures are from 2023.', items: [{ verdict: 'not_met' as const, item: 'Cites the 2025 report', evidence: 'cites the 2023 one' }, { verdict: 'not_sure' as const, item: 'Under 200 words', evidence: '' }] }
     const waitingOn = { node: 'writer', name: 'Writer', kind: 'review_stop' as const, since: '2026-10-06T02:01:00.000Z', question: 'Researcher’s work still misses 2 checks after going back 2 times.', context: 'Draft three.', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true, check }

@@ -186,9 +186,10 @@ export interface TeamMessage {
   check?: CheckExchange
   /**
    * For a `question`: it is a check step that stopped to ask about checks still not met (ADR 0062,
-   * `whenStillNotMet: ask`), so your answer approves the work or sends it back.
+   * `whenStillNotMet: ask`), so your answer approves the work or sends it back. Whose work, and how
+   * many checks were open.
    */
-  checkStop?: true
+  checkStop?: { checked: string; open: number }
 }
 
 /** Whether a check round found nothing missing: every item met, from a reply that could be read. */
@@ -208,8 +209,8 @@ export function checkText(check: CheckExchange): string {
     return items.length ? [`**${heading}**`, ...items.map((item) => `- ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)].join('\n') : ''
   }
   const direction = check.direction ? `**You sent it back:** ${check.direction}` : ''
-  // In the order it happened: what it found, why it stopped there, then what you said.
-  return [check.problems ?? '', list('not_met', 'Not met'), list('not_sure', 'Not sure'), stopText(check), direction].filter(Boolean).join('\n\n')
+  // What you said, when it was you who sent it back, then what is open, then why it stopped there.
+  return [direction, check.problems ?? '', list('not_met', 'Not met'), list('not_sure', 'Not sure'), stopText(check)].filter(Boolean).join('\n\n')
 }
 
 /** Why the check step stopped sending the work back at this round, when checks were still open. */
@@ -393,7 +394,7 @@ export class Correspondence {
       const lines = items.map((item) => `- ${item.verdict === 'not_met' ? 'Not met' : 'Not sure'}: ${item.item}${item.evidence ? ` — ${item.evidence}` : ''}`)
       this.add(event, {
         id: `check-stop:${event.id}`, kind: 'question', from: event.agentId, to: OPERATOR_ID, text: words(p.question) ?? '',
-        context: lines.length ? lines.join('\n') : null, state: 'pending', checkStop: true,
+        context: lines.length ? lines.join('\n') : null, state: 'pending', checkStop: { checked: words(p.check.checked) ?? '', open: items.length },
       })
     } else if (p.kind === 'review_stop') {
       this.reviewSteps.add(event.agentId)
@@ -449,9 +450,16 @@ export class Correspondence {
     const to = words(p.to)
     const message = this.messages.findLast((candidate) => candidate.kind === 'check' && candidate.from === event.agentId && candidate.to === to && !candidate.check?.sentBack)
     if (!to || !message?.check) return
+    const direction = words(p.direction)
+    if (direction) {
+      // You sent it back from the check step's stop: an exchange of its own, after your answer, so
+      // the revision answers what you sent rather than the round before the stop.
+      const check: CheckExchange = { round: message.check.round, items: message.check.items.filter((item) => item.verdict !== 'met'), readable: true, sentBack: true, problems: null, direction }
+      this.add(event, { id: `check-back:${event.id}`, kind: 'check', from: event.agentId, to, text: checkText(check), state: 'pending', check })
+      return
+    }
     message.check.sentBack = true
     message.check.problems = words(p.problems)
-    message.check.direction = words(p.direction)
     message.text = checkText(message.check)
     if (typeof p.round === 'number') { message.state = 'pending'; return }
     const last = this.lastTurn.get(to)

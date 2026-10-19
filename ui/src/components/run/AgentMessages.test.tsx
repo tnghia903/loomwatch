@@ -110,6 +110,14 @@ describe('Team chat', () => {
     expect(within(approved).getByText('approved · passed on to Editor')).toBeInTheDocument()
   })
 
+  // ADR 0062: approved at a check step's stop, the line says whose work it kept and what was open.
+  it('tells an approval at a check step’s stop as the work kept as it was', () => {
+    const stop = message({ id: 'check-stop:e40', kind: 'question', from: 'editor', to: 'operator', text: 'Writer’s work still misses 2 checks.', seq: 40, state: 'answered', checkStop: { checked: 'writer', open: 2 }, reply: answer('operator', APPROVAL_TEXT, 41) })
+    setup([handover, stop])
+    expect(msg(/You: approved$/)).toHaveTextContent('You approved Writer’s work as it was, with 2 checks not met')
+    expect(screen.queryByText(/handover/)).not.toBeInTheDocument()
+  })
+
   it('tells a plain approval as a note in the chat, not as words you typed', () => {
     setup([reviewed(answer('review', APPROVAL_TEXT, 30)), passedOn])
     expect(msg(/You: approved$/)).toHaveTextContent('You approved Writer’s handover · passed on to Editor')

@@ -448,13 +448,19 @@ describe('a check step in the chat', () => {
       checked(50, 3, [linked, short('met', '280 words')]),
       stopped(51, { round: 3, sent: 2, reason: 'all_met', exit: 'ask' }),
     ]).messages
+    // In the order it happened: the round it stopped at, its question to you, your answer, then
+    // what went back with it, the revision as its reply, and the round that met it.
+    expect(messages.map(({ kind, state, check }) => [kind, check?.round ?? null, state])).toEqual([
+      ['check', 1, 'answered'], ['check', 2, 'delivered'], ['question', null, 'answered'], ['check', 2, 'answered'], ['check', 3, 'delivered'],
+    ])
     const checks = messages.filter((message) => message.kind === 'check')
-    expect(checks.map(({ state, check }) => [check?.round, state, check?.sentBack])).toEqual([[1, 'answered', true], [2, 'answered', true], [3, 'delivered', false]])
-    expect(checks[1].text).toBe('**Not met**\n- Under 300 words — 400 words\n\n_It stopped sending the work back: this round fixed none of what went back. It asks you what to do._\n\n**You sent it back:** Cut the intro.')
-    expect(checks[1].reply).toMatchObject({ from: 'writer', text: 'Third draft.' })
-    expect(checks[2].text).toBe('All 2 met.')
+    expect(checks[1].text).toBe('**Not met**\n- Under 300 words — 400 words\n\n_It stopped sending the work back: this round fixed none of what went back. It asks you what to do._')
+    expect(checks[1].reply).toBeNull()
+    expect(checks[2]).toMatchObject({ text: '**You sent it back:** Cut the intro.\n\n**Not met**\n- Under 300 words — 400 words', check: { sentBack: true, direction: 'Cut the intro.' } })
+    expect(checks[2].reply).toMatchObject({ from: 'writer', text: 'Third draft.' })
+    expect(checks[3].text).toBe('All 2 met.')
     const asked = messages.find((message) => message.kind === 'question')
-    expect(asked).toMatchObject({ from: 'checker', to: 'operator', text: question, context: '- Not met: Under 300 words — 400 words', checkStop: true, state: 'answered' })
+    expect(asked).toMatchObject({ from: 'checker', to: 'operator', text: question, context: '- Not met: Under 300 words — 400 words', checkStop: { checked: 'writer', open: 1 }, state: 'answered' })
     expect(asked?.reply).toMatchObject({ from: 'operator', text: 'Cut the intro.', sentBackTo: 'writer' })
     // Not a review step: the check step is still an agent.
     expect(messages.some((message) => message.kind === 'note')).toBe(false)

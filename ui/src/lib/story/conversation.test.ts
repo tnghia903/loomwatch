@@ -90,7 +90,7 @@ describe('bubbles', () => {
 
   it('says your answer at a check step’s stop approved the work, or sent it back (ADR 0062)', () => {
     const reply = (text: string, sentBackTo: string | null = null) => ({ from: 'operator', text, eventId: 'r', seq: 2, ts: '', offsetMs: 0, source: null, sentBackTo })
-    const stop = (text: string, sentBackTo: string | null = null) => message({ id: 's', kind: 'question', from: 'editor', to: 'operator', text: 'Editor’s work still misses 1 check.', checkStop: true, state: 'answered', reply: reply(text, sentBackTo) })
+    const stop = (text: string, sentBackTo: string | null = null) => message({ id: 's', kind: 'question', from: 'editor', to: 'operator', text: 'Editor’s work still misses 1 check.', checkStop: { checked: 'editor', open: 1 }, state: 'answered', reply: reply(text, sentBackTo) })
     expect(lay([stop('APPROVED')])[1]).toMatchObject({ part: 'reply', word: 'approved', text: '' })
     expect(lay([stop('Ship it, with the 2023 figure.')])[1]).toMatchObject({ word: 'approved, with a note', text: 'Ship it, with the 2023 figure.' })
     expect(lay([stop('Cut the intro.', 'collector')])[1]).toMatchObject({ word: 'sent back', to: ['collector'], text: 'Cut the intro.' })
