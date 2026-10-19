@@ -96,24 +96,6 @@ export function endTour(status: 'finished' | 'dismissed') {
   write({ status, step: state?.step ?? TOUR_STEPS[0].id })
 }
 
-/**
- * Offer the guide to someone who has never seen it and has never run a team. Anyone who has finished
- * or closed it, or who has run something, is left alone: they can still open it from the menu or ⌘K.
- *
- * The teams folder alone cannot tell: `./loomwatch` creates it with an offline demo team in it, so a
- * newcomer always has one team. Run history can; when it cannot be read, an empty teams folder is
- * the best sign left.
- */
-export async function offerTourIfFirstRun(teamCount: number, listRuns: () => Promise<readonly unknown[]>) {
-  if (read()) return
-  let neverRan: boolean
-  try {
-    neverRan = (await listRuns()).length === 0
-  } catch {
-    neverRan = teamCount === 0
-  }
-  if (neverRan && !read()) startTour()
-}
 
 /** Tests only. */
 export function resetTourForTests() {

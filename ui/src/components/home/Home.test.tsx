@@ -4,7 +4,8 @@ import { parse } from 'yaml'
 
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
-import { readTourState, resetTourForTests } from '../../lib/tour/store'
+import { resetFirstRunForTests } from '../../lib/firstrun/store'
+import { readTourState, resetTourForTests, startTour } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
 import type { TeamDocument } from '../../lib/team-file/types'
 import { Home } from './Home'
@@ -165,55 +166,6 @@ describe('Home', () => {
     expect(screen.getByRole('link', { name: 'Manage key' })).toHaveAttribute('href', '/connections')
   })
 
-  // ADR 0074: once a key is in, Home asks once what agents should know about the person.
-  describe('telling the agents about you', () => {
-    /** The daemon with a key as `key` says, and `you` as what agents are told. */
-    const told = (key: Record<string, unknown>, you: Record<string, unknown>) => (url: string, init?: RequestInit) =>
-      url === '/api/you' ? respond(init?.method === 'PUT' ? JSON.parse(String(init.body)) : you) : keyed(key)(url)
-
-    it('waits for the key, then asks once, and Not now puts the card away', async () => {
-      fetchMock.mockImplementation(told({ connected: false }, { skipped: false }))
-      renderHome()
-      expect(await screen.findByRole('region', { name: 'Add your OpenRouter key' })).toBeInTheDocument()
-      expect(screen.queryByRole('region', { name: 'Tell your agents about you' })).toBeNull()
-      cleanup()
-      forgetKeyStatus()
-      forgetYou()
-
-      fetchMock.mockImplementation(told({ connected: true }, { skipped: false }))
-      renderHome()
-      const card = await screen.findByRole('region', { name: 'Tell your agents about you' })
-      fireEvent.click(await within(card).findByRole('button', { name: 'Not now' }))
-      await waitFor(() => expect(screen.queryByRole('region', { name: 'Tell your agents about you' })).toBeNull())
-      const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/you' && (init as RequestInit | undefined)?.method === 'PUT') as [string, RequestInit] | undefined
-      expect(put).toBeDefined()
-      expect(JSON.parse(String(put![1].body))).toEqual({ skipped: true })
-    })
-
-    it('keeps the card on screen after Save, so the person sees it was kept', async () => {
-      fetchMock.mockImplementation(told({ connected: true }, { skipped: false }))
-      renderHome()
-      const card = await screen.findByRole('region', { name: 'Tell your agents about you' })
-      fireEvent.change(await within(card).findByLabelText('What should your agents call you?'), { target: { value: 'Mai' } })
-      fireEvent.click(within(card).getByRole('button', { name: 'Save' }))
-      expect(await within(card).findByRole('status')).toHaveTextContent('Saved.')
-      expect(screen.getByRole('region', { name: 'Tell your agents about you' })).toBeInTheDocument()
-    })
-
-    it('is never offered to someone who already told them, or said not now', async () => {
-      for (const you of [{ name: 'Mai', skipped: false }, { skipped: true }]) {
-        fetchMock.mockImplementation(told({ connected: true, label: 'sk-or-v1-abc...xyz' }, you))
-        renderHome()
-        expect(await screen.findByText('Agents run on OpenRouter with key sk-or-v1-abc...xyz')).toBeInTheDocument()
-        await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/you')).toBe(true))
-        expect(screen.queryByRole('region', { name: 'Tell your agents about you' })).toBeNull()
-        cleanup()
-        forgetKeyStatus()
-        forgetYou()
-      }
-    })
-  })
-
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {
     fetchMock.mockImplementation(keyed({ connected: true, freeTier: true }))
     renderHome()
@@ -331,23 +283,42 @@ describe('Home', () => {
 
 })
 
-describe('Home and the getting-started guide', () => {
-  beforeEach(() => resetTourForTests())
+describe('Home, the first run and the getting-started guide', () => {
+  beforeEach(() => { resetTourForTests(); resetFirstRunForTests() })
 
   const demoTeam = { root: '/teams', files: ['operator-stop.yaml'], teams: [{ path: 'operator-stop.yaml', name: 'Review stop demo', agentCount: 3, modifiedAt: null }] }
 
-  it('offers the guide to someone who has never run a team, though the demo team is there', async () => {
+  // ADR 0075: a newcomer makes something first. The guide no longer opens by itself over it.
+  it('opens on the first run for someone who has never run anything, though the demo team is there', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
     renderHome()
-    await screen.findByText('Review stop demo')
-    await waitFor(() => expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' }))
+    expect(await screen.findByText('What shall we make first?')).toBeInTheDocument()
+    expect(screen.queryByText('Put AI agents to work as a team.')).toBeNull()
+    expect(readTourState()).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Just look around' }))
+    expect(await screen.findByText('Review stop demo')).toBeInTheDocument()
+    expect(localStorage.getItem('loomwatch:first-run')).toBe('skipped')
+    expect(readTourState()).toBeNull()
   })
 
-  it('leaves someone who has run a team alone, but lets them start it', async () => {
+  it('is Home for someone who has met the guide, or looked around before', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
+    for (const before of [() => startTour(), () => localStorage.setItem('loomwatch:first-run', 'skipped')]) {
+      resetTourForTests(); resetFirstRunForTests()
+      before()
+      renderHome()
+      expect(await screen.findByText('Review stop demo')).toBeInTheDocument()
+      expect(screen.queryByText('What shall we make first?')).toBeNull()
+      cleanup()
+    }
+  })
+
+  it('leaves someone who has run a team on Home, and lets them start the guide', async () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [{ runId: 'run-1', teamPath: 'operator-stop.yaml', status: 'succeeded' }] : demoTeam))
     renderHome()
     await screen.findByText('Review stop demo')
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
+    expect(screen.queryByText('What shall we make first?')).toBeNull()
     expect(readTourState()).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Take the 3-minute guide/ }))
     expect(readTourState()).toMatchObject({ status: 'active', step: 'welcome' })

@@ -1,5 +1,5 @@
 import { ArrowRight, MessageSquareWarning, Moon, Plus, Search, Sun, UserRoundPlus, Users } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { openFeedback } from '../../lib/feedback/report'
 import { relativeTime } from '../../lib/format'
@@ -7,7 +7,9 @@ import { useKeyStatus } from '../../lib/ai/useKeyStatus'
 import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, teamViewFor, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
-import { offerTourIfFirstRun, startTour } from '../../lib/tour/store'
+import { readTourState, startTour } from '../../lib/tour/store'
+import { markFirstRun, opensOnFirstRun, readFirstRun } from '../../lib/firstrun/store'
+import { FirstRun } from '../firstrun/FirstRun'
 import { ChipDot, LoomMark, LoomWordmark } from '../ui/glyphs'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import type { LoomMarkState } from '../../lib/story/loomMark'
@@ -16,8 +18,6 @@ import { isUnread } from '../../lib/chat/seen'
 import { fabricFor } from '../../lib/story/fabric'
 import { TeamFabric } from './TeamFabric'
 import { OpenRouterKey } from '../connections/OpenRouterKey'
-import { AboutYou } from '../you/AboutYou'
-import { toldNothing, useYou } from '../../lib/you/client'
 import { UpdateBadge } from '../updates/Updates'
 import { QuestsLink } from '../quests/QuestsLink'
 import { SkillsLink } from '../skills/SkillsLink'
@@ -101,11 +101,16 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
   // OpenRouter accepted it before the card makes way.
   const [keyCard, setKeyCard] = useState(false)
   if (key && !key.connected && !keyCard) setKeyCard(true)
-  // Then, once a key is in, what agents should know about the person (ADR 0074): asked once, and
-  // kept on screen after Save so they see it was kept. Not now puts it away for good.
-  const you = useYou()
-  const [youCard, setYouCard] = useState<'offered' | 'gone' | null>(null)
-  if (youCard === null && key?.connected && you && !you.skipped && toldNothing(you)) setYouCard('offered')
+  // Someone who has never had anything made opens on the first run (ADR 0075),
+  // instead of this page; see lib/firstrun/store.ts. Asked once per visit. It replaces the
+  // getting-started guide opening by itself, which stays a link here and in the menu.
+  const [firstRun, setFirstRun] = useState<'checking' | 'on' | 'off'>(() => (readFirstRun() || readTourState() ? 'off' : 'checking'))
+  useEffect(() => {
+    if (firstRun !== 'checking') return
+    let live = true
+    void opensOnFirstRun(fetchRuns, Boolean(readTourState())).then((on) => { if (live) setFirstRun(on ? 'on' : 'off') })
+    return () => { live = false }
+  }, [firstRun])
   // Teams are listed as chats (ADR 0051): the one with the newest work first, then the rest.
   const previews = useMemo(() => new Map((teams ?? []).map((team) => [team.path, chatPreview(runs, team.path)])), [teams, runs])
   const shown = useMemo(() => {
@@ -115,21 +120,16 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
     return [...matching].sort((left, right) => at(right.path).localeCompare(at(left.path)))
   }, [teams, query, previews])
 
-  // Someone who has never run a team is offered the getting-started guide, once per browser; see
-  // lib/tour/store.ts. Asked once per visit to Home, not on every refresh of the team list.
-  const tourChecked = useRef(false)
-  useEffect(() => {
-    if (!teams || tourChecked.current) return
-    tourChecked.current = true
-    void offerTourIfFirstRun(teams.length, fetchRuns)
-  }, [teams])
-
   // ⌘N / the palette's "New team…" reach the dialog through this event, so Home owns its state.
   useEffect(() => {
     const open = () => setCreating(true)
     window.addEventListener('loomwatch:new-team', open)
     return () => window.removeEventListener('loomwatch:new-team', open)
   }, [])
+
+  if (firstRun === 'on') {
+    return <FirstRun onLookAround={() => { markFirstRun('skipped'); setFirstRun('off') }} onDone={() => setFirstRun('off')} />
+  }
 
   // What the footer says about the one thing every run needs: the OpenRouter key.
   let status: { state: 'dirty' | 'saved' | 'incomplete' | 'invalid'; text: string; action?: ReactNode }
@@ -175,9 +175,6 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
         </section>
 
         {keyCard && <div className="home-key" data-tour="key"><OpenRouterKey variant="card" /></div>}
-        {youCard === 'offered' && <div className="home-key">
-          <AboutYou variant="card" onDone={(kept) => { if (toldNothing(kept)) setYouCard('gone') }} />
-        </div>}
 
         {/* In the order the work is done: agents first, then the teams they work in. */}
         <YourAgentsShelf />
