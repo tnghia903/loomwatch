@@ -70,6 +70,32 @@ describe('fileRefsIn', () => {
     expect(fileRefsIn('In `/b/out`: `notes.md`.', touched)).toEqual(['/b/out/notes.md'])
   })
 
+  it('finds a file the agent made with a command, from a link, under the folder it works in', () => {
+    const folder = '/Users/me/LoomWatch/teams/.loomwatch/bench-coby/coby'
+    // `cat > "LLM Prefill Guide.html"` leaves no path behind: nothing was touched by name.
+    const reply = '### [Open the guide](./LLM%20Prefill%20Guide.html)\n\nAlso [the plan](drafts/plan.md).'
+    expect(fileRefsIn(reply, [], folder)).toEqual([`${folder}/LLM Prefill Guide.html`, `${folder}/drafts/plan.md`])
+    expect(withFolderPaths(reply, [], folder).split('\n')[0]).toBe(`### [Open the guide](${folder}/LLM%20Prefill%20Guide.html)`)
+    // A file the run did touch says where it is, wherever the answering agent works.
+    expect(fileRefsIn('[notes](./notes.md)', ['/a/helper/notes.md'], folder)).toEqual(['/a/helper/notes.md'])
+    // On Windows, with Windows separators.
+    expect(fileRefsIn('[plan](./drafts/plan.md)', [], 'C:\\Users\\ana\\work')).toEqual(['C:\\Users\\ana\\work\\drafts\\plan.md'])
+  })
+
+  it('takes only a link from the agent’s folder: never code, and nothing that leaves it or is not a file', () => {
+    const folder = '/teams/.loomwatch/news/writer'
+    // A name in code may be a file the agent ran or quoted, not one it made: it still needs a touched file.
+    expect(fileRefsIn('**File:** `guide.html`, run `build.sh`', [], folder)).toEqual([])
+    expect(withFolderPaths('**File:** `guide.html`', [], folder)).toBe('**File:** `guide.html`')
+    expect(fileRefsIn([
+      '[up](../secret.md)', '[encoded up](%2E%2E/secret.md)', '[hidden](./.cache/page.html)', '[site](www.example.com)',
+      '[part](./guide.html#intro)', '[query](./guide.html?v=2)', '[web](https://x.com/a.html)', '[mail](mailto:a@b.co)',
+      '[top](#summary)', '[no kind](./build)',
+    ].join(' '), [], folder)).toEqual([])
+    // A folder that is not a full path says nothing.
+    expect(fileRefsIn('[guide](./guide.html)', [], 'writer')).toEqual([])
+  })
+
   it('reads a link’s %20s as the spaces in a file’s name', () => {
     expect(filePathFromLink('/Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')
     expect(filePathFromLink('file:///Users/me/My%20Report.pdf')).toBe('/Users/me/My Report.pdf')

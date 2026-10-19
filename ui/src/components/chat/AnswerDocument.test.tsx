@@ -1,9 +1,9 @@
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AnswerDocument } from './AnswerDocument'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('a document answer, read beside the chat', () => {
   it('is read in full, as written, and never runs HTML or loads remote images', async () => {
@@ -53,6 +53,25 @@ describe('a document answer, read beside the chat', () => {
     // Opened in a new tab, a name from a folder the page cannot know would only load LoomWatch again.
     expect(screen.queryByRole('link', { name: 'notes' })).toBeNull()
     expect(container.querySelector('.md-unlinked')).toHaveTextContent('notes')
+  })
+
+  it('opens a file the agent made with a command, linked from the folder it works in', async () => {
+    const folder = '/Users/me/LoomWatch/teams/.loomwatch/bench-coby/coby'
+    const guide = `${folder}/LLM Prefill Guide.html`
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify({
+      path: new URL(url, 'http://x').searchParams.get('path'), name: 'LLM Prefill Guide.html', exists: true, isDir: false, sizeBytes: 9_000,
+      modifiedAt: null, kind: 'web', folder: '.loomwatch/bench-coby/coby', openable: true,
+    }), { status: 200 }))))
+    render(<AnswerDocument by="Coby" streaming={false} folder={folder} text={[
+      '### [Open the interactive guide](./LLM%20Prefill%20Guide.html)',
+      '**File:** `LLM Prefill Guide.html`',
+    ].join('\n\n')} />)
+    const chip = await screen.findByRole('button', { name: 'Open LLM Prefill Guide.html (Web page)' })
+    expect(chip).toBeEnabled()
+    expect(chip.getAttribute('title')?.split('\n')[0]).toBe(guide)
+    // The bare name in code is not taken from the folder: it stays the agent's words.
+    expect(screen.getAllByRole('button', { name: /LLM Prefill Guide\.html/ })).toHaveLength(1)
+    expect(screen.getByText('LLM Prefill Guide.html', { selector: 'code' })).toBeInTheDocument()
   })
 
   it('says it is still being written', () => {

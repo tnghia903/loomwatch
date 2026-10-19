@@ -1284,6 +1284,13 @@ $defs:
       pid:
         type: integer
         minimum: 0
+      cwd:
+        description: >-
+          On `spawned`: the folder the agent works in, by its full path, so a file its answer names
+          from there can be found. `null` when that path is not UTF-8; absent in older runs.
+        type:
+          - string
+          - "null"
       exitCode:
         type:
           - integer

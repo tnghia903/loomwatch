@@ -188,10 +188,12 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   useEffect(() => { onTyping?.(run.runId, typingKey ? typingKey.split('\n') : []) }, [onTyping, run.runId, typingKey])
   useEffect(() => () => onTyping?.(run.runId, []), [onTyping, run.runId])
   // The files the answer names, for its tools: a scan of the whole text, so once per answer. An
-  // agent names a file from its own folder ("./guide.html"); what it read or wrote says which.
+  // agent names a file from its own folder ("./guide.html"); what it read or wrote, else where it
+  // works, says which.
   const finishedAnswer = isTerminalRun(record.status)
   const touched = useMemo(() => filesTouched(session.projection.evidence), [session.projection.evidence])
-  const answerFiles = useMemo(() => (finishedAnswer ? fileRefsIn(answer, touched) : []), [finishedAnswer, answer, touched])
+  const folder = responder?.folder ?? null
+  const answerFiles = useMemo(() => (finishedAnswer ? fileRefsIn(answer, touched, folder) : []), [finishedAnswer, answer, touched, folder])
   // Your review lasts while this chat is open, and only for the answer you reviewed.
   const [reviewedText, setReviewedText] = useState<string | null>(null)
   const streaming = live && responder?.taskState === 'STREAMING'
@@ -433,7 +435,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
       {stops.length > 0 && <SpendStopCard inline run={{ runId: run.runId, spendStops: stops }} onDecide={pin} onRun={onRun} />}
 
       <FileOriginContext.Provider value={fileOrigin}>
-      <Outcome tour={newest} run={record} answer={answer} touched={touched} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
+      <Outcome tour={newest} run={record} answer={answer} touched={touched} folder={folder} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -578,6 +580,8 @@ interface AnswerProps {
   answer: string
   /** Every file the run's agents read or wrote, for names the answer gives from an agent's folder. */
   touched: readonly string[]
+  /** The folder the answering agent works in, for a link to a file it made with a command. */
+  folder: string | null
   streaming: boolean
   name: (id: string) => string
   hue: (id: string) => number
@@ -635,11 +639,11 @@ function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (
  * message. A long one, or one with a title, is a document: a card with its title, its opening
  * words and its length, read in full in the pane beside the chat (lib/chat/document.ts).
  */
-function Answer({ tour, run, answer, touched, streaming, name, hue, open, flash = false, onOpen, solo, reactions, children }: AnswerProps) {
+function Answer({ tour, run, answer, touched, folder, streaming, name, hue, open, flash = false, onOpen, solo, reactions, children }: AnswerProps) {
   const appear = useAppear()
   // Names listed under a folder, or given from the agent's own folder, read as files in the sentence
   // too; copy and save keep the agent's words.
-  const shown = useMemo(() => withFolderPaths(answer, touched), [answer, touched])
+  const shown = useMemo(() => withFolderPaths(answer, touched, folder), [answer, touched, folder])
   const facts = useMemo(() => (isDocument(answer) ? describeDocument(answer) : null), [answer])
   const responder = run.responder
   return (

@@ -759,6 +759,27 @@ describe('a piece of work', () => {
     return screen.findByRole('group', { name: "Decide on Researcher's work" })
   }
 
+  it('offers a file the answering agent made with a command and linked from its folder', async () => {
+    const folder = '/teams/.loomwatch/news/writer'
+    said.agents = [{ id: 'writer', folder, reply: '', taskState: 'COMPLETED' }]
+    page = [{ kind: 'work', run: run({ reply: 'Made the page.\n\n[Open the digest](./digest.html)' }), request: message({}), notes: [] }]
+    const chatFetch = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (!url.startsWith('/api/files/stat')) return chatFetch(input, init)
+      return Promise.resolve(new Response(JSON.stringify({
+        path: new URL(url, 'http://x').searchParams.get('path'), name: 'digest.html', exists: true, isDir: false, sizeBytes: 2_048,
+        modifiedAt: null, kind: 'web', folder: '.loomwatch/news/writer', openable: true,
+      }), { status: 200 }))
+    }))
+    renderChat()
+    const chip = await screen.findByRole('button', { name: 'Open digest.html (Web page)' })
+    expect(chip).toBeEnabled()
+    expect(chip.getAttribute('title')?.split('\n')[0]).toBe(`${folder}/digest.html`)
+    const files = screen.getByRole('group', { name: 'Files in this answer' })
+    expect(await within(files).findByRole('button', { name: 'Open digest.html' })).toBeEnabled()
+  })
+
   it('shows a check step’s stop with what is still not met, and approves the work as it is', async () => {
     const card = await checkStop()
     expect(card).toHaveTextContent('Researcher’s work still misses 2 checks after going back 2 times.')
