@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 
 import { shortName } from '../lib/ai/client'
 import { useAiStatus } from '../lib/ai/useKeyStatus'
-import { SOURCE_INFO, missingSourceSaid, missingSources, sourceOf } from '../lib/ai/sources'
+import { SOURCE_INFO, missingSourceSaid, missingSources } from '../lib/ai/sources'
 import { useModels } from '../lib/ai/useModels'
 import { briefFileNameFor, exportPack, fetchMemory, fetchNoteHistory, fetchNotes, fetchRunCheckpoints, fetchRunContext, reviseNote, writeMemoryFile, type Checkpoint, type ContextPacket, type MemoryView, type Note, type NotebookView } from '../lib/memory/client'
 import { nodeFromDrop, type AgentNode } from '../lib/library/nodeFromDrop'
@@ -53,7 +53,7 @@ import { DeleteTeamDialog } from './home/DeleteTeamDialog'
 import { TeamReviewDialog } from './run/TeamReviewDialog'
 import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
-import type { AgentConfig, PermissionMode } from '../lib/team-file/types'
+import type { AgentConfig } from '../lib/team-file/types'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
 import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
@@ -90,7 +90,6 @@ import { isDocument } from '../lib/chat/document'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PermissionPrompt } from './run/PermissionPrompt'
 import { SpendStopCard } from './run/SpendStopCard'
-import { dollars } from '../lib/runs/spend'
 import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
 import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
@@ -1686,32 +1685,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     void doc.save()
     setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on.`)
   }, [doc])
-  // ADR 0061: the chat's Auto mode switch. Saved at once, like "Always allow": it is a decision
-  // about the team's next commands, not a draft.
-  const chooseAutoMode = useCallback(async (mode: PermissionMode) => {
-    doc.updateTeamPermissionMode(mode)
-    // A team with something left to fix is not saved, and runs as it is on disk until it is.
-    const saved = await doc.save()
-    setStatusAnnouncement(!saved
-      ? `Auto mode is ${mode === 'auto' ? 'on' : 'off'} in your unsaved changes. It applies once the team is saved.`
-      : mode === 'auto'
-        ? 'Auto mode is on. Commands that only read files or download pages run without asking; anything else still asks you.'
-        : 'Auto mode is off. Commands an agent isn’t allowed to run on its own ask you first.')
-  }, [doc])
-  const autoMode = useMemo(() => ({ mode: doc.teamPermissionMode, onChange: editable ? (mode: PermissionMode) => void chooseAutoMode(mode) : undefined }), [doc.teamPermissionMode, editable, chooseAutoMode])
-  // ADR 0068: what one run may spend, beside Auto mode. Saved at once, like Auto mode.
-  const chooseSpend = useCallback(async (perRun: number | null) => {
-    doc.updateTeamSpend(perRun)
-    const saved = await doc.save()
-    const said = perRun === null ? 'Runs of this team have no limit on what they spend.' : `Each run of this team may spend up to ${dollars(perRun)}. Past it, the agents wait for you.`
-    setStatusAnnouncement(saved ? said : `${said} It applies once the team is saved.`)
-  }, [doc])
-  // Which plans pay for some of the team's agents, so the spend menu says how their calls count.
-  const plansPaying = useMemo(() => {
-    const paid = new Set(docAgents.filter((agent) => agent.kind !== 'operator').map((agent) => sourceOf(agent.model)))
-    return { chatgpt: paid.has('chatgpt'), anthropic: paid.has('anthropic') }
-  }, [docAgents])
-  const spendLimit = useMemo(() => ({ perRun: doc.teamSpendPerRun, onChange: editable ? (perRun: number | null) => void chooseSpend(perRun) : undefined, plans: plansPaying }), [doc.teamSpendPerRun, editable, chooseSpend, plansPaying])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -2537,8 +2510,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onTeamReview={(review, retry) => setChatReview({ review, retry })}
             onStale={() => void doc.checkDiskRevision()}
             onAlwaysAllow={editable ? allowAlways : undefined}
-            autoMode={autoMode}
-            spendLimit={spendLimit}
             announce={setStatusAnnouncement}
             reveal={chatReveal}
             onOpenFinding={openFinding}

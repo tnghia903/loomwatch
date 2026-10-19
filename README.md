@@ -1006,8 +1006,7 @@ as "You allowed it, this once". The same question shows up in the Needs-you tray
 any screen. If nobody answers within 10 minutes it is declined, and scheduled runs decline it
 straight away because nobody is watching.
 
-To ask less often, switch the team to **Auto** beside the chat's message box (**Commands · Ask me**
-→ **Auto**), or set `permissions: {mode: auto}` in the team file. A command an agent isn't allowed
+To ask less often, set `permissions: {mode: auto}` in the team file. A command an agent isn't allowed
 to run on its own then runs without asking when every part of it only reads inside the agent's
 folder, its knowledge or the temp folder, or is a plain download for an agent allowed the web.
 Anything that deletes, pushes, publishes, deploys, needs admin rights, touches credentials or runs a
