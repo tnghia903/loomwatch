@@ -361,6 +361,152 @@ impl ChatStore {
             })
             .collect()
     }
+
+    /// The operator's reactions on these runs, oldest first, by run.
+    async fn reactions(
+        &self,
+        runs: &[String],
+    ) -> Result<BTreeMap<String, Vec<Reaction>>, sqlx::Error> {
+        let mut by_run: BTreeMap<String, Vec<Reaction>> = BTreeMap::new();
+        if runs.is_empty() {
+            return Ok(by_run);
+        }
+        let rows = sqlx::query(
+            "SELECT * FROM chat_reactions
+             WHERE anchor IN (SELECT value FROM json_each($1))
+             ORDER BY created_at ASC, target ASC",
+        )
+        .bind(crate::db::json_list(runs))
+        .fetch_all(self.db.reader())
+        .await?;
+        for row in &rows {
+            by_run
+                .entry(row.try_get("anchor")?)
+                .or_default()
+                .push(Reaction {
+                    target: row.try_get("target")?,
+                    face: row.try_get("face")?,
+                    at: row.try_get("created_at")?,
+                    about: About {
+                        agent: row.try_get("agent_id")?,
+                        what: row.try_get("what")?,
+                        quote: row.try_get("quote")?,
+                    },
+                });
+        }
+        Ok(by_run)
+    }
+
+    /// Whether `run_id` is one of this team's runs.
+    async fn holds(&self, team: &TeamRef, run_id: &str) -> Result<bool, sqlx::Error> {
+        let found: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM runs WHERE run_id = $1
+               AND (team_key = $2 OR team_key = 'path:' || $3 OR (team_key IS NULL AND team_path = $3))",
+        )
+        .bind(run_id)
+        .bind(&team.key)
+        .bind(&team.path)
+        .fetch_optional(self.db.reader())
+        .await?;
+        Ok(found.is_some())
+    }
+
+    /// Put one face on something an agent said, replacing the face it had; `None` takes it off.
+    async fn react(
+        &self,
+        team: &TeamRef,
+        run_id: &str,
+        target: &str,
+        face: Option<&str>,
+        about: &About,
+    ) -> Result<(), sqlx::Error> {
+        match face {
+            Some(face) => {
+                sqlx::query(
+                    "INSERT INTO chat_reactions
+                     (team_key, anchor, target, face, created_at, agent_id, what, quote)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                     ON CONFLICT (anchor, target)
+                     DO UPDATE SET face = excluded.face, created_at = excluded.created_at,
+                                   agent_id = excluded.agent_id, what = excluded.what,
+                                   quote = excluded.quote",
+                )
+                .bind(&team.key)
+                .bind(run_id)
+                .bind(target)
+                .bind(face)
+                .bind(now())
+                .bind(&about.agent)
+                .bind(&about.what)
+                .bind(&about.quote)
+                .execute(self.db.writer())
+                .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM chat_reactions WHERE anchor = $1 AND target = $2")
+                    .bind(run_id)
+                    .bind(target)
+                    .execute(self.db.writer())
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The reactions the operator can pick (`ui/src/lib/chat/reactions.ts` draws them), and what each
+/// tells the team: the word the chat shows, and what it means, said in the next work's
+/// conversation. `seen` tells the team nothing; it says only that you read it. The agents' own
+/// faces (`seen` when they took something up, `met` from a check step) are read from the record
+/// and never stored.
+const FACES: &[(&str, &str, Option<&str>)] = &[
+    ("glad", "Good", Some("good work; keep doing this")),
+    (
+        "love",
+        "Love it",
+        Some("exactly what you wanted; keep to it"),
+    ),
+    (
+        "hmm",
+        "Not sure",
+        Some("you were not convinced; address that before building on it"),
+    ),
+    (
+        "off",
+        "Wrong",
+        Some("you think it is wrong; do not build on it"),
+    ),
+    ("seen", "Seen", None),
+];
+/// The longest `target` a reaction may name: a line of the agents' talk is keyed by its event id.
+const MAX_TARGET_BYTES: usize = 256;
+/// How much of what an agent said a reaction keeps, to say what it was on.
+const QUOTE_CHARS: usize = 300;
+
+/// One reaction of the operator's, on something an agent said in a piece of work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reaction {
+    /// What in the piece: `answer`, or `talk:<line>` for a line of the agents' talk.
+    pub target: String,
+    pub face: String,
+    pub at: String,
+    /// What a line of talk was, kept so the conversation can say it; an answer is read from its run.
+    #[serde(skip)]
+    pub about: About,
+}
+
+/// What a reacted-to line of the agents' talk was: who said it, what kind of thing, how it began.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct About {
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// In a word, as the chat says it: "handover", "question", "task", "answer".
+    #[serde(default)]
+    pub what: Option<String>,
+    #[serde(default)]
+    pub quote: Option<String>,
 }
 
 fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessage, sqlx::Error> {
@@ -441,6 +587,8 @@ struct History {
     runs: Vec<RunRecord>,
     notes: Vec<ChatMessage>,
     decisions: Vec<Decision>,
+    /// The operator's reactions on those runs, by run.
+    reactions: Vec<(String, Reaction)>,
 }
 
 async fn gather(
@@ -468,10 +616,21 @@ async fn gather(
         .map(|run| run.run_id.clone())
         .collect::<Vec<_>>();
     let decisions = store.decisions(&ids).await?;
+    let reactions = store
+        .reactions(&ids)
+        .await?
+        .into_iter()
+        .flat_map(|(run_id, reactions)| {
+            reactions
+                .into_iter()
+                .map(move |reaction| (run_id.clone(), reaction))
+        })
+        .collect();
     Ok(History {
         runs,
         notes,
         decisions,
+        reactions,
     })
 }
 
@@ -505,7 +664,9 @@ enum EntryKind {
 }
 
 /// Every entry the section could hold, newest first.
-fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
+///
+/// `before` is when the run reading it was created: what came later is not in its conversation.
+fn entries(team: &TeamConfig, history: &History, before: &str) -> Vec<Entry> {
     let name = |id: &str| {
         team.agents
             .iter()
@@ -591,9 +752,80 @@ fn entries(team: &TeamConfig, history: &History) -> Vec<Entry> {
             .iter()
             .map(|decision| decision_entry(team, decision)),
     );
+    entries.extend(
+        history
+            .reactions
+            .iter()
+            .filter(|(_, reaction)| reaction.at.as_str() <= before)
+            .filter_map(|(run_id, reaction)| reaction_entry(team, history, run_id, reaction)),
+    );
     // Newest first, with a stable order for entries stamped the same millisecond.
     entries.sort_by(|left, right| right.at.cmp(&left.at));
     entries
+}
+
+/// A face the operator put on something an agent said, said as what it tells the team, with what
+/// it was on: "You reacted “Not sure” to Researcher's handover (work 1a2b3c4d): “…” — you were not
+/// convinced; address that before building on it." `None` for a face that tells the team nothing.
+fn reaction_entry(
+    team: &TeamConfig,
+    history: &History,
+    run_id: &str,
+    reaction: &Reaction,
+) -> Option<Entry> {
+    let (_, label, means) = FACES.iter().find(|(face, ..)| *face == reaction.face)?;
+    let means = (*means)?;
+    let name = |id: &str| {
+        team.agents
+            .iter()
+            .find(|agent| agent.id == id)
+            .map_or_else(|| id.to_owned(), |agent| display(&agent.name, id))
+    };
+    let (agent, what, quote) = if reaction.target == "answer" {
+        let run = history.runs.iter().find(|run| run.run_id == run_id)?;
+        (
+            Some(run.responder.clone()),
+            "answer".to_owned(),
+            run.reply.clone(),
+        )
+    } else {
+        (
+            reaction.about.agent.clone(),
+            reaction
+                .about
+                .what
+                .clone()
+                .unwrap_or_else(|| "message".to_owned()),
+            reaction.about.quote.clone(),
+        )
+    };
+    let whose = agent.map_or_else(
+        || format!("a {what}"),
+        |agent| format!("{}'s {what}", name(&agent)),
+    );
+    // How it began, past any heading: the words the reaction answers.
+    let quote = quote
+        .as_deref()
+        .map(|quote| {
+            let opening = quote
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty() && !line.starts_with('#'))
+                .unwrap_or(quote);
+            first_line(opening, 160)
+        })
+        .filter(|quote| !quote.is_empty())
+        .map_or_else(String::new, |quote| format!(": “{quote}”"));
+    Some(Entry {
+        at: reaction.at.clone(),
+        run_id: Some(run_id.to_owned()),
+        kind: EntryKind::Decision {
+            line: format!(
+                "You reacted “{label}” to {whose} (work {}){quote} — {means}.",
+                short_id(run_id)
+            ),
+        },
+    })
 }
 
 /// An answer the operator gave inside a run, said the way they gave it.
@@ -630,7 +862,7 @@ fn decision_entry(team: &TeamConfig, decision: &Decision) -> Entry {
 }
 
 fn render(team: &TeamConfig, history: &History, record: &RunRecord) -> Option<String> {
-    let entries = entries(team, history);
+    let entries = entries(team, history, &record.created_at);
     if entries.is_empty() {
         return None;
     }
@@ -849,6 +1081,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/chat/messages", post(send_message))
         .route("/api/chat/messages/{id}/start", post(start_from_note))
         .route("/api/chat/continue", post(continue_team))
+        .route("/api/chat/reactions", post(react))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(ChatState {
             archive,
@@ -916,6 +1149,8 @@ enum Item {
         run: Box<RunRecord>,
         request: Option<ChatMessage>,
         notes: Vec<ChatMessage>,
+        /// How the operator reacted to what the agents said in it.
+        reactions: Vec<Reaction>,
     },
     /// A team note.
     Note { message: ChatMessage },
@@ -986,6 +1221,7 @@ async fn chat_page(
                 run: Box::new(run),
                 request: requests.into_iter().next(),
                 notes,
+                reactions: Vec::new(),
             }
         })
         .chain(notes.into_iter().map(|message| Item::Note { message }))
@@ -994,6 +1230,26 @@ async fn chat_page(
     let limit = usize::try_from(limit).unwrap_or(20);
     let more = items.len() > limit;
     items.truncate(limit);
+    let shown = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Work { run, .. } => Some(run.run_id.clone()),
+            Item::Note { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    let mut reactions = store
+        .reactions(&shown)
+        .await
+        .map_err(|error| database(&error))?;
+    for item in &mut items {
+        if let Item::Work {
+            run, reactions: on, ..
+        } = item
+            && let Some(found) = reactions.remove(&run.run_id)
+        {
+            *on = found;
+        }
+    }
     Ok(Json(json!({
         "teamKey": team_ref.key,
         "teamPath": relative,
@@ -1327,6 +1583,114 @@ async fn start_from_note(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ReactRequest {
+    team_path: String,
+    /// The run it was said in.
+    anchor: String,
+    /// What in it: `answer`, or `talk:<line>`.
+    target: String,
+    /// The face to put on it; `null` takes the reaction off.
+    face: Option<String>,
+    /// For a line of talk: who said it, what it was, how it began.
+    #[serde(default)]
+    about: Option<About>,
+}
+
+/// `POST /api/chat/reactions`: put one of [`FACES`] on something an agent said, or take it off.
+/// Answers with every reaction in that piece of work, so the chat shows what is stored.
+///
+/// A face tells the team something: the next work's conversation says it, with what it was on
+/// ([`entries`]). A run already working is not told; nothing is sent to an agent mid-turn.
+async fn react(
+    State(state): State<ChatState>,
+    body: Result<Json<ReactRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid reaction: {}", rejection.body_text()),
+        )
+    })?;
+    let bad = |message: String| ApiError::new(StatusCode::BAD_REQUEST, message);
+    if let Some(face) = request.face.as_deref()
+        && !FACES.iter().any(|(known, ..)| *known == face)
+    {
+        let faces = FACES.iter().map(|(face, ..)| *face).collect::<Vec<_>>();
+        return Err(bad(format!(
+            "{face} is not a reaction. Pick one of {}.",
+            faces.join(", ")
+        )));
+    }
+    let target = request.target.trim();
+    let talk = target
+        .strip_prefix("talk:")
+        .is_some_and(|line| !line.is_empty());
+    if !(target == "answer" || talk)
+        || target.len() > MAX_TARGET_BYTES
+        || !target.chars().all(|c| c.is_ascii_graphic())
+    {
+        return Err(bad(
+            "A reaction goes on an answer or a line of the agents' talk, named as the chat names it."
+                .to_owned(),
+        ));
+    }
+    let (relative, team) = open_team(&state.teams_root, &request.team_path)?;
+    let team_ref = TeamRef {
+        key: team.chat_key(&relative),
+        path: relative,
+    };
+    let store = state.registry.chat_store().ok_or_else(no_store)?;
+    if !store
+        .holds(&team_ref, &request.anchor)
+        .await
+        .map_err(|error| database(&error))?
+    {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "That work is not in this team's chat.".to_owned(),
+        ));
+    }
+    // An answer is read from its run. A line of talk keeps what the chat said it was, within
+    // bounds, and only an agent of this team as who said it.
+    let about = match request.about {
+        Some(about) if talk => {
+            let words = |text: Option<String>, chars: usize| {
+                text.map(|text| text.trim().chars().take(chars).collect::<String>())
+                    .filter(|text| !text.is_empty())
+            };
+            About {
+                agent: about.agent.filter(|agent| {
+                    team.agents
+                        .iter()
+                        .any(|candidate| &candidate.id == agent && !candidate.is_operator())
+                }),
+                what: words(about.what, 40),
+                quote: words(about.quote, QUOTE_CHARS),
+            }
+        }
+        _ => About::default(),
+    };
+    store
+        .react(
+            &team_ref,
+            &request.anchor,
+            target,
+            request.face.as_deref(),
+            &about,
+        )
+        .await
+        .map_err(|error| database(&error))?;
+    let reactions = store
+        .reactions(std::slice::from_ref(&request.anchor))
+        .await
+        .map_err(|error| database(&error))?
+        .remove(&request.anchor)
+        .unwrap_or_default();
+    Ok(Json(json!({ "anchor": request.anchor, "reactions": reactions })).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ContinueRequest {
     run_id: String,
     #[serde(default)]
@@ -1536,6 +1900,7 @@ mod tests {
                 None,
             )],
             decisions: Vec::new(),
+            reactions: Vec::new(),
         };
         let section = render(&team(), &history, &now).unwrap();
         // Same input, same bytes.
@@ -1577,6 +1942,7 @@ mod tests {
             runs,
             notes: Vec::new(),
             decisions: Vec::new(),
+            reactions: Vec::new(),
         };
         let section = render(&team(), &history, &now).unwrap();
         assert!(
@@ -1608,6 +1974,7 @@ mod tests {
             )],
             notes: Vec::new(),
             decisions: Vec::new(),
+            reactions: Vec::new(),
         };
         let section = render(&team(), &history, &now).unwrap();
         assert!(!section.contains("THE ANSWER"), "{section}");
@@ -1637,6 +2004,7 @@ mod tests {
                 answer: "Asia".to_owned(),
                 sent_back_to: None,
             }],
+            reactions: Vec::new(),
         };
         let section = render(&team(), &history, &now).unwrap();
         assert!(
@@ -2190,7 +2558,198 @@ mod tests {
             runs: Vec::new(),
             notes: Vec::new(),
             decisions: Vec::new(),
+            reactions: Vec::new(),
         };
         assert_eq!(render(&team(), &history, &now), None);
+    }
+
+    fn reaction(anchor: &str, target: &str, face: &Value, about: &Value) -> Value {
+        json!({"teamPath": "news.yaml", "anchor": anchor, "target": target, "face": face, "about": about})
+    }
+
+    /// One piece of finished work on the news desk: its run.
+    async fn finished_work(rig: &Rig, text: &str) -> RunRecord {
+        let (_, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": text, "to": {"kind": "team"}}),
+        )
+        .await;
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        done
+    }
+
+    #[tokio::test]
+    async fn a_reaction_is_one_face_per_thing_an_agent_said_in_this_teams_work() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let work = finished_work(&rig, "today's digest").await.run_id;
+        let react = |target: &str, face: Value| reaction(&work, target, &face, &Value::Null);
+
+        // A second face replaces the first, as a tapback does.
+        let (status, loved) = post(
+            &rig.app,
+            "/api/chat/reactions",
+            react("answer", json!("love")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{loved}");
+        assert_eq!(loved["reactions"][0]["face"], "love");
+        let (_, nice) = post(
+            &rig.app,
+            "/api/chat/reactions",
+            react("answer", json!("glad")),
+        )
+        .await;
+        assert_eq!(nice["reactions"].as_array().unwrap().len(), 1, "{nice}");
+        assert_eq!(nice["reactions"][0]["face"], "glad");
+        post(
+            &rig.app,
+            "/api/chat/reactions",
+            react("talk:handover:e1:said", json!("hmm")),
+        )
+        .await;
+        let shown = page(&rig.app).await;
+        let on = shown["items"][0]["reactions"].as_array().unwrap();
+        assert_eq!(on.len(), 2, "{shown}");
+        assert!(
+            on[0].get("about").is_none(),
+            "kept for the conversation, not sent"
+        );
+
+        // Only the operator's faces, only on what agents said, only in this team's work.
+        for (target, face) in [
+            ("answer", "met"),
+            ("answer", "wow"),
+            ("request", "glad"),
+            ("talk:", "glad"),
+            ("note:n-1", "glad"),
+        ] {
+            let (status, refused) =
+                post(&rig.app, "/api/chat/reactions", react(target, json!(face))).await;
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{target} {face}: {refused}"
+            );
+        }
+        let elsewhere = reaction("elsewhere", "answer", &json!("glad"), &Value::Null);
+        let (status, _) = post(&rig.app, "/api/chat/reactions", elsewhere).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // `null` takes it off.
+        let (status, off) = post(
+            &rig.app,
+            "/api/chat/reactions",
+            react("answer", Value::Null),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{off}");
+        assert_eq!(off["reactions"].as_array().unwrap().len(), 1);
+        assert_eq!(off["reactions"][0]["target"], "talk:handover:e1:said");
+    }
+
+    #[tokio::test]
+    async fn a_face_tells_the_next_work_what_it_means_and_what_it_was_on() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let first = finished_work(&rig, "today's digest").await;
+        let work = &first.run_id[..8];
+        let faces = [
+            ("answer", "glad", Value::Null),
+            // A line of the agents' talk keeps who said it, what it was and how it began.
+            (
+                "talk:handover:e1:said",
+                "hmm",
+                json!({"agent": "researcher", "what": "handover", "quote": "## Findings\nThree chip stories, two sourced."}),
+            ),
+            // Someone the team does not have is not named.
+            (
+                "talk:task:e2:said",
+                "off",
+                json!({"agent": "mallory", "what": "task", "quote": "Wire the money"}),
+            ),
+            ("talk:question:e3:said", "seen", json!({"agent": "writer"})),
+        ];
+        for (target, face, about) in faces {
+            let (status, body) = post(
+                &rig.app,
+                "/api/chat/reactions",
+                reaction(&first.run_id, target, &json!(face), &about),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+        }
+
+        // Seen tells the next work nothing; the others say what they mean.
+        let second = finished_work(&rig, "and tomorrow's").await;
+        let researcher = prompts(&rig.archive, &second.run_id, "researcher").await;
+        let answer = first.reply.as_deref().unwrap_or_default();
+        let opening = answer
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty() && !line.starts_with('#'))
+            .unwrap();
+        for line in [
+            format!(
+                "You reacted “Good” to Writer's answer (work {work}): “{opening}” — good work; keep doing this."
+            ),
+            format!(
+                "You reacted “Not sure” to Researcher's handover (work {work}): “Three chip stories, two sourced.” — you were not convinced; address that before building on it."
+            ),
+            format!(
+                "You reacted “Wrong” to a task (work {work}): “Wire the money” — you think it is wrong; do not build on it."
+            ),
+        ] {
+            assert!(
+                researcher[0].contains(&line),
+                "missing {line:?} in\n{}",
+                researcher[0]
+            );
+        }
+        assert!(!researcher[0].contains("“Seen”"), "{}", researcher[0]);
+    }
+
+    #[test]
+    fn a_reaction_says_how_the_answer_began_and_only_one_made_before_the_work_counts() {
+        let now = finished("ffffffff-now", "2026-10-06T03:00:00.000Z", "today", "");
+        let reaction = |at: &str| Reaction {
+            target: "answer".to_owned(),
+            face: "off".to_owned(),
+            at: at.to_owned(),
+            about: About::default(),
+        };
+        let history = History {
+            runs: vec![finished(
+                "bbbbbbbb-2",
+                "2026-10-06T02:00:00.000Z",
+                "digest",
+                "# Digest\nChips are up.",
+            )],
+            notes: Vec::new(),
+            decisions: Vec::new(),
+            reactions: vec![(
+                "bbbbbbbb-2".to_owned(),
+                reaction("2026-10-06T02:30:00.000Z"),
+            )],
+        };
+        let section = render(&team(), &history, &now).unwrap();
+        assert!(
+            section.contains("You reacted “Wrong” to Writer's answer (work bbbbbbbb): “Chips are up.” — you think it is wrong; do not build on it."),
+            "{section}"
+        );
+        // A face put on after this work was created is not in its conversation.
+        let mut later = history;
+        later.reactions[0].1.at = "2026-10-06T03:30:00.000Z".to_owned();
+        assert!(
+            !render(&team(), &later, &now)
+                .unwrap()
+                .contains("You reacted")
+        );
     }
 }

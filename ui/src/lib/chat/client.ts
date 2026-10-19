@@ -1,5 +1,6 @@
 import { daemonFetch } from '../daemonFetch'
 import { readRun, type RunRecord } from '../runs/client'
+import type { Face, Reaction, ReactionAbout } from './reactions'
 
 /**
  * A team's chat (ADR 0051): its runs and what you wrote to it, read as one conversation.
@@ -34,7 +35,7 @@ export interface ChatMessage {
 /** One item of the chat, newest first from the daemon. */
 export type ChatItem =
   /** A piece of work: a run, the message that started it, and the notes you sent into it. */
-  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[] }
+  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[] }
   /** A team note: it started nothing, and the next work reads it. */
   | { kind: 'note'; message: ChatMessage }
 
@@ -122,4 +123,18 @@ export async function continueWithTeam(runId: string, expectedRevision?: string 
     cache: 'no-store',
   })
   return readRun<{ route: 'team'; run: RunRecord }>(response)
+}
+
+/**
+ * Put one face on something an agent said in a piece of work, or take yours off with `null`. A line
+ * of talk goes with what it was, for the next work's conversation; an answer is read from its run.
+ */
+export async function reactTo(teamPath: string, runId: string, target: string, face: Face | null, about?: ReactionAbout): Promise<{ anchor: string; reactions: Reaction[] }> {
+  const response = await daemonFetch('/api/chat/reactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ teamPath, anchor: runId, target, face, ...(about ? { about } : {}) }),
+    cache: 'no-store',
+  })
+  return readRun<{ anchor: string; reactions: Reaction[] }>(response)
 }
