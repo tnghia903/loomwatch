@@ -1,0 +1,178 @@
+/* ---------------------------------------------------------------------------
+   The reader (ADR 0077): a file an agent made, read inside LoomWatch beside the
+   chat it came from. Marked words are lit with a gold highlighter and the agent
+   leans in over them to be asked; parts already asked about keep their light,
+   with the agent's face in the margin.
+   --------------------------------------------------------------------------- */
+
+.rd { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: var(--color-ground); --rd-mark: color-mix(in srgb, var(--lw-gold-400) 26%, transparent); }
+
+/* ---------- The bar: what the file is, who made it, and its own app a click away ---------- */
+.rd-bar { position: relative; flex: none; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px 12px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-panel); }
+/* When the file changes on disk, a gold stitch runs along the bar's foot. */
+.rd-bar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: repeating-linear-gradient(90deg, var(--color-accent) 0 7px, transparent 7px 12px); opacity: 0; transform: scaleX(0); transform-origin: left; pointer-events: none; }
+.rd.updated .rd-bar::after { opacity: 1; transform: none; }
+.rd-sheet {
+  position: relative; flex: none; display: grid; place-items: center; width: 30px; height: 38px;
+  border-radius: 3px 9px 3px 3px; background: var(--color-paper); color: var(--color-accent-fill);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lw-ink-950) 8%, transparent), 0 2px 6px color-mix(in srgb, var(--lw-ink-950) 10%, transparent);
+  transform: rotate(-3deg);
+}
+.rd-sheet svg { margin-top: -6px; }
+.rd-sheet::after { content: ''; position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 0 9px 0 3px; background: linear-gradient(225deg, transparent 50%, var(--color-paper-rule) 50%); }
+.rd-sheet b { position: absolute; left: -5px; bottom: 4px; padding: 1px 4px; border-radius: 3px; background: var(--color-accent-fill); color: var(--color-accent-on-fill); font: 700 7.5px/1.2 var(--font-mono); letter-spacing: .06em; }
+.rd-bar-words { flex: 1; min-width: 0; }
+.rd-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 17px/1.25 var(--font-serif); letter-spacing: -.01em; color: var(--color-ink); }
+.rd-meta { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 3px 0 0; font-size: 12px; line-height: 16px; color: var(--color-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rd-meta > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rd-from { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--color-ink-2); }
+.rd-updated { font-weight: 600; color: var(--color-accent); }
+.rd-views { flex: none; }
+.rd-acts { display: inline-flex; flex: none; gap: 2px; }
+.rd-note { flex: none; margin: 0; padding: 8px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-accent-tint); font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
+
+/* ---------- The page ---------- */
+.rd-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.rd-scroll { position: absolute; inset: 0; overflow: auto; }
+.rd .rd-scroll.tc-document { overflow: auto; }
+/* The workspace turns text selection off; the reader is for marking words, so its page turns it on. */
+.rd-page { position: relative; user-select: text; -webkit-user-select: text; }
+.rd-page ::selection { background: color-mix(in srgb, var(--lw-gold-400) 42%, transparent); color: var(--color-ink); }
+::highlight(lw-read-asked) { background-color: color-mix(in srgb, var(--lw-gold-400) 24%, transparent); }
+::highlight(lw-read-asking) { background-color: color-mix(in srgb, var(--lw-gold-400) 46%, transparent); }
+::highlight(lw-read-focus) { background-color: color-mix(in srgb, var(--lw-gold-400) 68%, transparent); color: var(--color-ink); }
+.rd-loading, .rd-empty { margin: 40px auto; max-width: 720px; padding: 0 40px; color: var(--color-ink-3); font-size: 13px; }
+.rd-failed { max-width: 520px; margin: 48px auto; padding: 16px 18px; border: 1px solid var(--color-hairline); border-left: 3px solid var(--color-alert); border-radius: 8px; background: var(--color-panel-solid); }
+.rd-failed p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--color-ink-2); }
+.rd-more { margin: 12px 0 0; }
+
+/* Code, data and plain text: by line, the numbers drawn beside and never marked with the words. */
+.tc-document .tc-document-page:is(.rd-as-code, .rd-as-text) { max-width: none; padding: 18px 22px 96px 12px; font-size: 13px; }
+.rd-lines { margin: 0; padding: 0; counter-reset: line; background: none; border: 0; font: 12.5px/1.7 var(--font-mono); color: var(--color-ink); white-space: pre; tab-size: 4; }
+.rd-lines .rd-line { position: relative; display: block; padding-left: calc(var(--rd-gutter, 3ch) + 20px); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rd-lines .rd-line::before { counter-increment: line; content: counter(line); position: absolute; left: 0; width: var(--rd-gutter, 3ch); text-align: right; color: var(--color-ink-3); opacity: .55; user-select: none; }
+.rd-lines .rd-line:hover::before { opacity: 1; color: var(--color-accent); }
+
+/* A table as a sheet: its header stays as you scroll, numbers sit right, rows are counted. */
+.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
+.rd-table-wrap { max-width: 100%; overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel-solid); }
+.rd-as-table .rd-table-wrap { overflow: visible; max-width: none; }
+.rd-table { min-width: 100%; border-collapse: separate; border-spacing: 0; counter-reset: row; font: 13px/1.45 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
+.rd-table th, .rd-table td { max-width: 420px; padding: 7px 12px; border-right: 1px solid var(--color-hairline); border-bottom: 1px solid var(--color-hairline); text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rd-table tr > :last-child { border-right: 0; }
+.rd-table tbody tr:last-child > * { border-bottom: 0; }
+.rd-table thead th { position: sticky; top: 0; z-index: 1; background: var(--color-panel); font-weight: 600; }
+.rd-table td.num { text-align: right; white-space: nowrap; }
+.rd-table .rd-row-n { width: 1%; padding: 7px 8px; background: var(--color-panel); color: var(--color-ink-3); font: 11px/1.7 var(--font-mono); text-align: right; user-select: none; }
+.rd-table tbody .rd-row-n::before { counter-increment: row; content: counter(row); }
+.rd-table tbody tr:hover > td:not(.rd-row-n) { background: color-mix(in srgb, var(--color-accent) 5%, transparent); }
+.rd-table.compact { font-size: 12.5px; }
+.rd-table.compact td { padding: 5px 10px; }
+
+/* A document's words: paragraphs as they came, a short line on its own as a heading. */
+.rd-doc-paragraph { white-space: pre-wrap; }
+.tc-document .tc-document-page .rd-doc-heading { margin: 36px 0 10px; font: 400 21px/1.3 var(--font-serif); color: var(--color-ink); text-wrap: balance; }
+.tc-document .tc-document-page .rd-doc-heading:first-child { margin-top: 0; font-size: 30px; }
+
+/* A web page runs as itself, on its own sheet. */
+.rd-scroll-frame { overflow: hidden; padding: 12px; background: color-mix(in srgb, var(--color-ink) 4%, var(--color-ground)); }
+.rd-frame { display: block; width: 100%; height: 100%; border: 0; border-radius: 8px; background: var(--color-white); box-shadow: 0 0 0 1px var(--color-hairline), 0 10px 30px color-mix(in srgb, var(--lw-ink-950) 10%, transparent); }
+.rd-scroll-frame .rd-loading { margin: 40px auto; }
+
+/* A picture on a light check, so a transparent one shows where it ends. */
+.rd-picture { box-sizing: border-box; display: grid; place-items: center; min-height: 100%; margin: 0; padding: 24px;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--color-ink) 5%, transparent) 0 25%, transparent 0 50%) 0 0 / 18px 18px; }
+.rd-picture img { max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 4px color-mix(in srgb, var(--lw-ink-950) 8%, transparent), 0 16px 40px color-mix(in srgb, var(--lw-ink-950) 14%, transparent); }
+.rd-media { display: block; width: calc(100% - 48px); max-width: 720px; margin: 40px auto; }
+
+/* ---------- The faces in the margin: a part you asked about, and who you asked ---------- */
+.rd-pins { position: absolute; top: 0; width: 26px; height: 0; }
+.rd-pin {
+  position: absolute; left: 0; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--color-panel-solid); box-shadow: 0 0 0 1.5px var(--color-accent), 0 2px 6px color-mix(in srgb, var(--lw-ink-950) 16%, transparent);
+  cursor: pointer; translate: 0 -3px; transition: scale var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+}
+/* A short stitch from the face to the words it is about. */
+.rd-pin::after { content: ''; position: absolute; top: 50%; left: calc(100% + 2px); width: 7px; border-top: 1.5px dashed var(--color-accent); }
+.rd-pin:hover:not(:disabled), .rd-pin:focus-visible { scale: 1.12; box-shadow: 0 0 0 2px var(--color-accent), 0 4px 12px color-mix(in srgb, var(--lw-ink-950) 20%, transparent); }
+.rd-pin:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-pin:disabled { cursor: default; }
+
+/* ---------- The ask bubble: the agent leans in over the words you marked ---------- */
+.rd-ask {
+  position: absolute; z-index: 6; display: inline-flex; align-items: center; gap: 0; padding: 3px;
+  border-radius: 999px; background: var(--color-ink); color: var(--color-ground);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--lw-ink-950) 14%, transparent), 0 14px 34px color-mix(in srgb, var(--lw-ink-950) 26%, transparent);
+  transform: translateX(-50%);
+}
+.rd-ask::after { content: ''; position: absolute; left: 50%; bottom: -4px; width: 10px; height: 10px; border-radius: 2px; background: inherit; transform: translateX(-50%) rotate(45deg); }
+.rd-ask.below::after { top: -4px; bottom: auto; }
+.rd-ask button { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 7px; height: 32px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: 600 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: background-color var(--t-quick) var(--ease-out); }
+.rd-ask button:hover, .rd-ask button:focus-visible { background: color-mix(in srgb, var(--color-ground) 16%, transparent); }
+.rd-ask button:focus-visible { outline: 2px solid var(--lw-gold-400); outline-offset: 1px; }
+.rd-ask-main { padding: 0 13px 0 4px; }
+.rd-ask-quick { padding: 0 13px; color: color-mix(in srgb, var(--color-ground) 78%, transparent) !important; }
+.rd-ask-quick::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: color-mix(in srgb, var(--color-ground) 22%, transparent); }
+.rd-ask .rd-ask-face { box-shadow: 0 0 0 2px var(--lw-gold-400); background-color: var(--color-panel-solid); }
+
+/* ---------- The tip, until the first part is asked about ---------- */
+.rd-hint {
+  position: absolute; left: 50%; bottom: 18px; z-index: 4; display: inline-flex; align-items: center; gap: 8px; max-width: calc(100% - 32px); margin: 0;
+  padding: 5px 6px 5px 5px; border: 1px solid var(--color-hairline); border-radius: 999px; background: var(--color-panel-solid);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--lw-ink-950) 6%, transparent), 0 12px 30px color-mix(in srgb, var(--lw-ink-950) 12%, transparent);
+  font-size: 12.5px; color: var(--color-ink-2); white-space: nowrap; transform: translateX(-50%);
+}
+.rd-hint > span { overflow: hidden; text-overflow: ellipsis; }
+.rd-hint mark { padding: 0 2px; border-radius: 3px; color: var(--color-ink); background: linear-gradient(var(--rd-mark), var(--rd-mark)) no-repeat 0 0 / 100% 100%; }
+.rd-hint b { font-weight: 600; color: var(--color-ink); }
+.rd-hint-close { display: grid; flex: none; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--color-ink-3); cursor: pointer; }
+.rd-hint-close:hover { background: var(--color-hairline); color: var(--color-ink); }
+
+/* The marked words on their way to the message box. */
+.rd-flight {
+  position: fixed; z-index: 1000; max-width: 260px; padding: 6px 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent); border-radius: 8px;
+  background: color-mix(in srgb, var(--lw-gold-400) 22%, var(--color-panel-solid)); color: var(--color-ink);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--lw-ink-950) 22%, transparent); font: 500 12.5px/1.3 var(--font-sans); text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
+}
+
+/* ---------- Around the reader ---------- */
+/* The part being asked about, in the message box: the words lit as they are in the file. */
+.tc-replying.passage .tc-replying-quote { justify-self: start; max-width: 100%; padding: 0 4px; border-radius: 3px; background: var(--rd-mark, color-mix(in srgb, var(--lw-gold-400) 26%, transparent)); color: var(--color-ink-2); }
+.tc-replying.passage { --rd-mark: color-mix(in srgb, var(--lw-gold-400) 26%, transparent); }
+
+/* The file's tab in the pane beside the chat, with its own close. */
+.tc-pane-file { display: inline-flex; align-items: center; min-width: 0; }
+.tc-pane-tabs .tc-pane-file > button[role='tab'] { display: inline-flex; align-items: center; gap: 5px; max-width: 190px; padding-right: 6px; }
+.tc-pane-file > button[role='tab'] span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-pane-tabs .tc-pane-file-close { display: grid; place-items: center; width: 18px; height: 18px; margin: 0 2px 0 -1px; padding: 0; border-radius: 4px; color: var(--color-ink-3); }
+.tc-pane-tabs .tc-pane-file-close:hover { background: var(--color-hairline); color: var(--color-ink); }
+
+/* Over an agent's bench: the reader fills what the long answer would. */
+.agent-file { position: relative; }
+.agent-file .rd { position: relative; inset: auto; flex: 1; min-height: 0; margin-top: var(--sp-3); border-top: 1px solid var(--color-hairline); background: transparent; }
+.agent-file .rd .rd-scroll.tc-document { position: absolute; inset: 0; flex: none; }
+.agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px; }
+.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px; }
+
+@container details (max-width: 560px) {
+  .rd-bar { padding-left: 14px; }
+  .rd-title { font-size: 15.5px; }
+  .rd-sheet { display: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rd .rd-scroll.tc-document, .rd-scroll-frame { animation: tc-fade var(--t-move) var(--ease-out) both; }
+  .rd.updated .rd-bar::after { animation: rd-stitch 1.2s var(--ease-out) both; }
+  .rd-ask { animation: rd-ask-in 220ms cubic-bezier(.34, 1.45, .64, 1) both; }
+  .rd-ask .rd-ask-face { animation: rd-lean-in 460ms cubic-bezier(.34, 1.56, .64, 1) 40ms both; }
+  .rd-pin { animation: rd-pin-in 380ms cubic-bezier(.34, 1.56, .64, 1) both; }
+  .rd-hint { animation: rd-hint-in 420ms var(--ease-out) 600ms both; }
+  .rd-hint mark { animation: rd-mark-sweep 2.8s var(--ease-out) 900ms infinite; }
+}
+@keyframes rd-stitch { from { opacity: 1; transform: scaleX(0); } 65% { opacity: 1; transform: scaleX(1); } to { opacity: 0; transform: scaleX(1); } }
+@keyframes rd-ask-in { from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(.84); } }
+/* The face comes up from behind the bubble's edge, tilted, and settles: it leans in to look. */
+@keyframes rd-lean-in { 0% { opacity: 0; transform: translateY(9px) rotate(-16deg) scale(.6); } 55% { opacity: 1; transform: translateY(-2px) rotate(7deg) scale(1.06); } 100% { transform: none; } }
+@keyframes rd-pin-in { from { opacity: 0; scale: .4; } }
+@keyframes rd-hint-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
+@keyframes rd-mark-sweep { 0% { background-size: 0% 100%; } 30%, 85% { background-size: 100% 100%; } 100% { background-size: 100% 100%; } }

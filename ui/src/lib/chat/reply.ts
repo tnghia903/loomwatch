@@ -1,3 +1,4 @@
+import { baseName } from '../files/paths'
 import type { ReplyKind, ReplyTo } from './client'
 
 /**
@@ -28,6 +29,7 @@ export const SAID: Record<ReplyKind, string> = {
   answer: 'answer',
   task: 'task',
   check: 'check',
+  passage: 'part of a file',
   message: 'message',
 }
 
@@ -35,9 +37,10 @@ export const SAID: Record<ReplyKind, string> = {
  * "Researcher's handover to Writer": the message a reply answers, by the team's names, the way the
  * daemon names it to the agent (`chat::ReplyTo::described`).
  */
-export function replyWhat(reply: Pick<ReplyTo, 'from' | 'to' | 'kind'>, name: (id: string) => string): string {
+export function replyWhat(reply: Pick<ReplyTo, 'from' | 'to' | 'kind' | 'file'>, name: (id: string) => string): string {
   const from = name(reply.from)
   const to = reply.to ? name(reply.to) : null
+  if (reply.kind === 'passage') return `a part of ${reply.file ? baseName(reply.file) : 'a file'} from ${from}`
   if (reply.kind === 'task') return `the task ${from} sent${to ? ` to ${to}` : ''}`
   if (reply.kind === 'check') return `${from}'s check${to ? ` of ${to}'s work` : ''}`
   return `${from}'s ${SAID[reply.kind]}${to ? ` to ${to}` : ''}`

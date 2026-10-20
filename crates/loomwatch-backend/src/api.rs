@@ -213,6 +213,9 @@ pub fn router_with_archive(
         .route("/api/about", get(get_about))
         .route("/api/files/stat", get(get_file_stat))
         .route("/api/files/open", axum::routing::post(post_file_open))
+        // ADR 0077: a file read inside LoomWatch, to ask about a part of it.
+        .route("/api/files/read", get(get_file_read))
+        .route("/api/files/raw", get(get_file_raw))
         .route("/api/jobs", get(get_jobs))
         .route(
             "/api/jobs/{id}",
@@ -385,6 +388,47 @@ async fn post_file_open(
 ) -> Result<StatusCode, ApiError> {
     crate::files::open(&state.teams_root, &request).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A produced file's text, for reading it inside `LoomWatch` (ADR 0077): a text file as it is, a
+/// document's words as the agents read them. The same boundary as the card's.
+async fn get_file_read(
+    State(state): State<ApiState>,
+    Query(query): Query<TeamPath>,
+) -> Result<Json<crate::files::FileText>, ApiError> {
+    let teams_root = state.teams_root.clone();
+    tokio::task::spawn_blocking(move || crate::files::read(&teams_root, &query.path))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map(Json)
+}
+
+/// A produced picture or recording as it is (ADR 0077). Answered sandboxed: opened on its own, an
+/// SVG's scripts would otherwise run as this daemon's page.
+async fn get_file_raw(
+    State(state): State<ApiState>,
+    Query(query): Query<TeamPath>,
+) -> Result<Response, ApiError> {
+    let teams_root = state.teams_root.clone();
+    let (media_type, bytes) =
+        tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
+            .await
+            .map_err(|error| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+            })??;
+    Ok((
+        [
+            (header::CONTENT_TYPE, media_type),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+            ),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1880,6 +1924,54 @@ mod tests {
                     .body(Body::empty())
                     .expect("request"),
             )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// A file read inside `LoomWatch`: its text as JSON, and a picture as it is — sandboxed, so an
+    /// SVG opened on its own never runs as this daemon's page.
+    #[tokio::test]
+    async fn file_read_answers_text_and_raw_answers_a_sandboxed_picture() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(workspace.join("brief.md"), "# Brief\n").expect("write brief");
+        fs::write(workspace.join("chart.svg"), "<svg/>").expect("write chart");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let get = |uri: String| {
+            Request::builder()
+                .uri(uri)
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request")
+        };
+        let brief = canonical.join(".loomwatch/team/writer/brief.md");
+        let response = test_router(&root.0)
+            .oneshot(get(format!("/api/files/read?path={}", brief.display())))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["text"], "# Brief\n");
+        assert_eq!(json["extracted"], false);
+
+        let chart = canonical.join(".loomwatch/team/writer/chart.svg");
+        let response = test_router(&root.0)
+            .oneshot(get(format!("/api/files/raw?path={}", chart.display())))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/svg+xml");
+        assert!(
+            response.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .expect("policy")
+                .starts_with("sandbox")
+        );
+
+        let response = test_router(&root.0)
+            .oneshot(get("/api/files/read?path=/etc/hosts".to_owned()))
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);

@@ -1,4 +1,4 @@
-import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Reply, Users, X, Zap } from 'lucide-react'
+import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Reply, TextQuote, Users, X, Zap } from 'lucide-react'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
@@ -220,7 +220,8 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const name = (id: string) => names.get(id) ?? id
   const placeholder = answering?.kind === 'question' ? `Answer ${answering.fromName}…`
     : answering ? 'A note for Approve, or what to change'
-      : replyTo ? `Reply to ${name(replyTo.from)}…`
+      : replyTo?.kind === 'passage' ? `Ask ${name(replyTo.from)} about this part…`
+        : replyTo ? `Reply to ${name(replyTo.from)}…`
         : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
   // A reply about two agents — a handover, a question between them — can go to either: the other
   // one is a click away.
@@ -250,10 +251,10 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       )}
       {quiet && typingNow && <div className="tc-where">{typingNow}</div>}
       {replyTo && (
-        <div className="tc-replying" role="group" aria-label={`Replying to ${replyWhat(replyTo, name)}`}>
-          <Reply size={14} aria-hidden="true" />
+        <div className={`tc-replying${replyTo.kind === 'passage' ? ' passage' : ''}`} role="group" aria-label={`${replyTo.kind === 'passage' ? 'Asking about' : 'Replying to'} ${replyWhat(replyTo, name)}`}>
+          {replyTo.kind === 'passage' ? <TextQuote size={14} aria-hidden="true" /> : <Reply size={14} aria-hidden="true" />}
           <span className="tc-replying-body">
-            <span className="tc-replying-what">Replying to {replyWhat(replyTo, name)}</span>
+            <span className="tc-replying-what">{replyTo.kind === 'passage' ? 'Asking about' : 'Replying to'} {replyWhat(replyTo, name)}</span>
             <span className="tc-replying-quote">{quoteLine(replyTo.text)}</span>
           </span>
           {other && onAddress && <button type="button" className="tc-link" onClick={() => onAddress(other)}>To {name(other)} instead</button>}

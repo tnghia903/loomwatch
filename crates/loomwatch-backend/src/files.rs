@@ -11,6 +11,11 @@
 //! refused, so a page cannot use this daemon to probe or launch arbitrary files. Opening is further
 //! limited to documents, media and data: the system's default app is launched for those, never for a
 //! program, script or app bundle — those can still be shown in their folder.
+//!
+//! A file can also be read inside `LoomWatch` (ADR 0077), so a part of it can be asked about in the
+//! chat: [`read`] answers its text — the file itself, or the words of a PDF, Word, Excel or
+//! `PowerPoint` file — and [`raw`] answers a picture or a recording as it is. Nothing is run here:
+//! the page shows a web page in a sandbox of its own.
 
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
@@ -386,6 +391,203 @@ pub(crate) fn open_target(teams_root: &Path, request: &OpenRequest) -> Result<Pa
     Ok(resolved)
 }
 
+/// What the reader shows of one file (`GET /api/files/read`).
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FileText {
+    /// The path as the caller asked for it.
+    pub(crate) path: String,
+    pub(crate) name: String,
+    /// As [`FileFacts::kind`].
+    pub(crate) kind: &'static str,
+    /// The file's text, or the words read out of a document.
+    pub(crate) text: String,
+    /// The words were read out of a PDF, Word, Excel or `PowerPoint` file: the text without its
+    /// layout, as the agents read it.
+    pub(crate) extracted: bool,
+    /// Only the start of it fits in [`READ_MAX_BYTES`].
+    pub(crate) truncated: bool,
+    pub(crate) size_bytes: u64,
+    pub(crate) modified_at: Option<String>,
+}
+
+/// The most text the reader is sent. A report, a page or a table is far smaller; a log can be
+/// larger, and its start is what fits.
+pub(crate) const READ_MAX_BYTES: usize = 2 * 1024 * 1024;
+
+/// The largest picture or recording [`raw`] answers.
+const RAW_MAX_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Kinds whose bytes are text the reader shows as they are.
+const TEXT_KINDS: &[&str] = &["markdown", "text", "web", "data", "code"];
+
+/// Read an allowed, existing file — or say why not, as [`open_target`] does.
+fn existing(teams_root: &Path, requested: &Path) -> Result<PathBuf, ApiError> {
+    match resolve_allowed(teams_root, requested) {
+        Ok(resolved) if resolved.is_dir() => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("{} is a folder", requested.display()),
+        )),
+        Ok(resolved) => Ok(resolved),
+        Err(error)
+            if error.status == StatusCode::NOT_FOUND && would_be_allowed(teams_root, requested) =>
+        {
+            Err(ApiError::new(
+                StatusCode::NOT_FOUND,
+                format!("{} is not on this computer any more", requested.display()),
+            ))
+        }
+        Err(error) if error.status == StatusCode::NOT_FOUND => {
+            Err(outside(&requested.to_string_lossy()))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn unreadable(name: &str, why: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        format!("{name} can't be read in LoomWatch: {why}. Open it in its own app instead."),
+    )
+}
+
+/// `bytes` as text, cut to [`READ_MAX_BYTES`] at a character, or `None` for a binary file.
+fn as_text(bytes: &[u8]) -> Option<(String, bool)> {
+    let sample = &bytes[..bytes.len().min(8192)];
+    if sample.contains(&0) {
+        return None;
+    }
+    let truncated = bytes.len() > READ_MAX_BYTES;
+    let mut kept = &bytes[..bytes.len().min(READ_MAX_BYTES)];
+    // A cut in the middle of a character leaves its start off, rather than a replacement mark.
+    if truncated
+        && let Err(error) = std::str::from_utf8(kept)
+        && error.error_len().is_none()
+    {
+        kept = &kept[..error.valid_up_to()];
+    }
+    let text = String::from_utf8_lossy(kept);
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned();
+    Some((text, truncated))
+}
+
+/// A file's text for the reader: text files as they are, and the words of a PDF, Word, Excel or
+/// `PowerPoint` file. Pictures and recordings come from [`raw`]; anything else opens in its own app.
+/// Blocking: it reads the file, and a document in a helper process of its own.
+pub(crate) fn read(teams_root: &Path, requested: &Path) -> Result<FileText, ApiError> {
+    let resolved = existing(teams_root, requested)?;
+    let name = resolved.file_name().map_or_else(
+        || requested.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let metadata = std::fs::metadata(&resolved).map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read {name}: {error}"),
+        )
+    })?;
+    let kind = kind_of(&resolved, false);
+    let document = crate::documents::Kind::of(&resolved);
+    let (text, extracted, truncated) = if document.is_some_and(crate::documents::Kind::has_text) {
+        let text = crate::documents::text(&resolved)
+            .map_err(|why| unreadable(&name, why.trim_end_matches('.')))?;
+        let (text, truncated) = as_text(text.as_bytes()).unwrap_or_default();
+        (text, true, truncated)
+    } else if TEXT_KINDS.contains(&kind)
+        || matches!(extension(&resolved).as_deref(), Some("csv" | "tsv"))
+    {
+        let mut bytes = Vec::new();
+        std::fs::File::open(&resolved)
+            .and_then(|file| {
+                std::io::Read::read_to_end(
+                    &mut std::io::Read::take(file, READ_MAX_BYTES as u64 + 4),
+                    &mut bytes,
+                )
+            })
+            .map_err(|error| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to read {name}: {error}"),
+                )
+            })?;
+        let (text, truncated) =
+            as_text(&bytes).ok_or_else(|| unreadable(&name, "it isn't text"))?;
+        (
+            text,
+            false,
+            truncated || metadata.len() > bytes.len() as u64,
+        )
+    } else {
+        let why = match kind {
+            "image" | "media" => "it is a picture or a recording",
+            _ => "it isn't a kind of file LoomWatch reads",
+        };
+        return Err(unreadable(&name, why));
+    };
+    Ok(FileText {
+        path: requested.to_string_lossy().into_owned(),
+        name,
+        kind,
+        text,
+        extracted,
+        truncated,
+        size_bytes: metadata.len(),
+        modified_at: metadata.modified().ok().map(iso),
+    })
+}
+
+/// The media type a picture or a recording is answered with, by its extension.
+fn media_type(path: &Path) -> Option<&'static str> {
+    Some(match extension(path)?.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "heic" => "image/heic",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "m4a" => "audio/mp4",
+        "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        _ => return None,
+    })
+}
+
+/// A picture or a recording as it is, with its media type, for the reader and for a web page's own
+/// pictures. Only those: a page, a script or a document is never answered as bytes, so nothing an
+/// agent wrote can run as this daemon's page. Blocking.
+pub(crate) fn raw(
+    teams_root: &Path,
+    requested: &Path,
+) -> Result<(&'static str, Vec<u8>), ApiError> {
+    let resolved = existing(teams_root, requested)?;
+    let name = resolved.file_name().map_or_else(
+        || requested.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let Some(media_type) = media_type(&resolved) else {
+        return Err(unreadable(
+            &name,
+            "only pictures and recordings are shown as they are",
+        ));
+    };
+    let size = std::fs::metadata(&resolved).map_or(0, |metadata| metadata.len());
+    if size > RAW_MAX_BYTES {
+        return Err(unreadable(&name, "it is larger than 50 MB"));
+    }
+    let bytes = std::fs::read(&resolved).map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read {name}: {error}"),
+        )
+    })?;
+    Ok((media_type, bytes))
+}
+
 /// Open the file with its default app, or show it in its folder.
 pub(crate) async fn open(teams_root: &Path, request: &OpenRequest) -> Result<(), ApiError> {
     let resolved = open_target(teams_root, request)?;
@@ -445,6 +647,84 @@ mod tests {
         assert_eq!(facts.folder.as_deref(), Some(".loomwatch/team/writer"));
         assert!(facts.openable);
         assert!(facts.modified_at.is_some());
+    }
+
+    #[test]
+    fn reads_a_text_file_an_agent_made_and_cuts_a_long_one_at_a_character() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        let report = workspace.join("report.md");
+        std::fs::write(&report, "\u{feff}# Market\n\nSales grew.\n").expect("write report");
+        let read = read(&root.0, &report).expect("read");
+        assert_eq!(read.name, "report.md");
+        assert_eq!(read.kind, "markdown");
+        assert_eq!(read.text, "# Market\n\nSales grew.\n");
+        assert!(!read.extracted && !read.truncated);
+
+        let table = workspace.join("sales.csv");
+        std::fs::write(&table, "month,sales\nMay,12\n").expect("write table");
+        assert_eq!(
+            super::read(&root.0, &table).expect("read table").text,
+            "month,sales\nMay,12\n"
+        );
+
+        // Past what the reader is sent, the start is what fits, and no character is cut in two.
+        let log = workspace.join("run.log");
+        let mut written = "a".repeat(READ_MAX_BYTES - 1);
+        written.push_str("éééé");
+        std::fs::write(&log, &written).expect("write log");
+        let read = super::read(&root.0, &log).expect("read log");
+        assert!(read.truncated);
+        assert_eq!(read.text.len(), READ_MAX_BYTES - 1);
+        assert!(!read.text.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn reads_neither_programs_nor_pictures_nor_anything_outside_the_root() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        let binary = workspace.join("data.json");
+        std::fs::write(&binary, b"{\0\x01}").expect("write binary");
+        assert_eq!(
+            read(&root.0, &binary).unwrap_err().status,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let picture = workspace.join("chart.png");
+        std::fs::write(&picture, b"\x89PNG\r\n\x1a\n").expect("write picture");
+        let error = read(&root.0, &picture).unwrap_err();
+        assert!(error.message.contains("picture"), "{}", error.message);
+        let gone = workspace.join("old.md");
+        assert_eq!(
+            read(&root.0, &gone).unwrap_err().status,
+            StatusCode::NOT_FOUND
+        );
+        let elsewhere =
+            std::env::temp_dir().join(format!("loomwatch-elsewhere-{}.md", uuid::Uuid::new_v4()));
+        std::fs::write(&elsewhere, "secret").expect("write elsewhere");
+        let refused = read(&root.0, &elsewhere).unwrap_err();
+        let _ = std::fs::remove_file(&elsewhere);
+        assert_eq!(refused.status, StatusCode::FORBIDDEN);
+        assert!(!refused.message.contains("secret"));
+    }
+
+    #[test]
+    fn answers_pictures_as_they_are_and_never_a_page_or_a_script() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        let picture = workspace.join("chart.svg");
+        std::fs::write(&picture, "<svg/>").expect("write picture");
+        let (media_type, bytes) = raw(&root.0, &picture).expect("raw picture");
+        assert_eq!(media_type, "image/svg+xml");
+        assert_eq!(bytes, b"<svg/>");
+        for name in ["page.html", "app.js", "report.md"] {
+            let file = workspace.join(name);
+            std::fs::write(&file, "x").expect("write file");
+            assert_eq!(
+                raw(&root.0, &file).unwrap_err().status,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{name}"
+            );
+        }
     }
 
     #[test]

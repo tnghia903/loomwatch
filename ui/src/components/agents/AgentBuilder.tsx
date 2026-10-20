@@ -18,7 +18,8 @@ import { relativeTime } from '../../lib/format'
 import type { RunRecord } from '../../lib/runs/client'
 import { SegmentThumb } from '../ui/SegmentThumb'
 import { AgentBadge } from './AgentBadge'
-import { AgentAnswer, AgentChat } from './AgentChat'
+import { useBenchFile } from '../../lib/files/useBenchFile'
+import { AgentAnswer, AgentChat, AgentFile } from './AgentChat'
 import { ByHand } from './ByHand'
 import { FigurePicker } from './FigurePicker'
 import { navigate, withView, type AgentView } from './route'
@@ -75,6 +76,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const [benchRecord, setBenchRecord] = useState<RunRecord | null>(null)
   // A long answer from the chat, read in full over the bench.
   const [answerRun, setAnswerRun] = useState<string | null>(null)
+  // A file its answers name, read over the bench too (ADR 0077).
+  const benchFile = useBenchFile()
 
   // Start once per agent: from the saved version, from a built-in job, or blank on the default model.
   // Later reloads of the list (every save anywhere) must never overwrite edits on screen.
@@ -205,9 +208,9 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
       <ByHand
         draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
-        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} /> : undefined}
+        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} file={benchFile.chat} /> : undefined}
         onBuild={() => showView('build')}
-        cover={view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
+        cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={draft.name.trim() || 'New agent'} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
       />
 
       {view === 'build' && <div className="agent-builder-grid">

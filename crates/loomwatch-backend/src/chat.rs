@@ -176,6 +176,9 @@ pub enum ReplyKind {
     Task,
     /// A check step's round on the work it checks (ADR 0062).
     Check,
+    /// A part of a file the operator marked while reading it in `LoomWatch` (ADR 0077): the words
+    /// are the part, and [`ReplyTo::file`] names the file.
+    Passage,
     /// Anything else an agent said.
     #[serde(other)]
     Message,
@@ -201,6 +204,9 @@ pub struct ReplyTo {
     pub kind: ReplyKind,
     /// Its words, verbatim, cut in the middle past [`QUOTE_KEPT_CHARS`].
     pub text: String,
+    /// The file a [`ReplyKind::Passage`] is a part of, by its full path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 
 impl ReplyTo {
@@ -215,12 +221,14 @@ impl ReplyTo {
             ReplyKind::Answer => format!("{from}'s answer"),
             ReplyKind::Task => format!("the task {from} sent"),
             ReplyKind::Check => format!("{from}'s check"),
+            ReplyKind::Passage => format!("a part of {} from {from}", self.file_name()),
             ReplyKind::Message => format!("{from}'s message"),
         };
+        // A part of a file is from whoever made it, to nobody.
         match (self.kind, to) {
             (ReplyKind::Check, Some(to)) => format!("{said} of {to}'s work"),
-            (_, Some(to)) => format!("{said} to {to}"),
-            (_, None) => said,
+            (kind, Some(to)) if kind != ReplyKind::Passage => format!("{said} to {to}"),
+            _ => said,
         }
     }
 
@@ -232,10 +240,28 @@ impl ReplyTo {
             .as_deref()
             .map(|run| format!(" (work {})", short_id(run)))
             .unwrap_or_default();
+        // The part alone is not enough to act on: the agent is told where the whole file is, so it
+        // can read around the part or change it.
+        let file = match (self.kind, self.file.as_deref()) {
+            (ReplyKind::Passage, Some(path)) => format!(", in the file {path}"),
+            _ => String::new(),
+        };
         crate::Replied {
-            named: format!("{}{work}", capitalized(&self.described(team))),
+            named: format!("{}{work}{file}", capitalized(&self.described(team))),
             text: crate::cap_middle_text(self.text.trim(), QUOTE_HANDED_CHARS),
         }
+    }
+
+    /// The name of the file a passage is a part of: `report.md`.
+    fn file_name(&self) -> String {
+        self.file
+            .as_deref()
+            .map(|path| {
+                path.rsplit(['/', '\\'])
+                    .find(|part| !part.is_empty())
+                    .unwrap_or(path)
+            })
+            .map_or_else(|| "a file".to_owned(), str::to_owned)
     }
 
     /// The reply in the conversation section: the message named, and its first words (an answer's
@@ -1801,6 +1827,18 @@ fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
     if reply.text.trim().is_empty() {
         return bad("A reply quotes the message it answers.");
     }
+    let named_file = reply
+        .file
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && path.len() <= 4096 && !path.contains(['\n', '\r']));
+    if reply.kind == ReplyKind::Passage && named_file.is_none() {
+        return bad("A part of a file names the file it is a part of.");
+    }
+    // Only a passage names a file.
+    reply.file = named_file
+        .filter(|_| reply.kind == ReplyKind::Passage)
+        .map(str::to_owned);
     let yours = reply.from == crate::config::RESERVED_OPERATOR_ID
         || team
             .agents
@@ -3755,6 +3793,7 @@ mod tests {
             to: to.map(str::to_owned),
             kind,
             text: text.to_owned(),
+            file: None,
         };
         assert_eq!(
             reply(ReplyKind::Handover, Some("writer"), "x").described(&team),
@@ -3790,12 +3829,49 @@ mod tests {
             reply(ReplyKind::Answer, None, "# A guide\n\nShort.").mentioned(&team),
             "Researcher's answer (\u{201c}A guide\u{201d})"
         );
+        // A part of a file read in LoomWatch names the file, and the agent is told where it is.
+        let passage = ReplyTo {
+            file: Some("/Users/mai/reports/market.md".to_owned()),
+            ..reply(ReplyKind::Passage, None, "Sales grew 12%\nin Q3.")
+        };
+        assert_eq!(
+            passage.described(&team),
+            "a part of market.md from Researcher"
+        );
+        assert_eq!(
+            passage.for_agents(&team).quoted(),
+            "A part of market.md from Researcher (work 3f2a9c1e), in the file /Users/mai/reports/market.md:\n> Sales grew 12%\n> in Q3."
+        );
         // An unknown kind from a newer chat still reads, as a message.
         let parsed: ReplyTo = serde_json::from_value(
             json!({"messageId": "m", "from": "writer", "kind": "shrug", "text": "x"}),
         )
         .unwrap();
         assert_eq!(parsed.kind, ReplyKind::Message);
+    }
+
+    #[test]
+    fn a_part_of_a_file_names_its_file_and_only_a_part_keeps_one() {
+        let team = team();
+        let mut passage = ReplyTo {
+            run_id: None,
+            message_id: "passage:1".to_owned(),
+            from: "researcher".to_owned(),
+            to: None,
+            kind: ReplyKind::Passage,
+            text: "Sales grew".to_owned(),
+            file: None,
+        };
+        assert!(check_reply(&mut passage.clone(), &team).is_err());
+        passage.file = Some(" /a/market.md ".to_owned());
+        check_reply(&mut passage, &team).expect("a part that names its file");
+        assert_eq!(passage.file.as_deref(), Some("/a/market.md"));
+        let mut answer = ReplyTo {
+            kind: ReplyKind::Answer,
+            ..passage
+        };
+        check_reply(&mut answer, &team).expect("an answer");
+        assert_eq!(answer.file, None);
     }
 
     /// What the person told their agents (ADR 0074) reaches every agent a message reaches: each
