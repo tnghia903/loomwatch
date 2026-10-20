@@ -173,6 +173,9 @@ pub struct SessionConfig {
     pub agent_id: String,
     /// The work folder. File paths are relative to it, and commands run in it.
     pub cwd: PathBuf,
+    /// The folders the operator connected as knowledge. A read by a name the work folder doesn't
+    /// have finds the file in one of them.
+    pub knowledge: Vec<PathBuf>,
     /// An `OpenRouter` model id, such as `anthropic/claude-sonnet-5.5`.
     pub model: String,
     /// The team file's effort, if any: `low`, `medium`, `high`, `xhigh`, `max`, …
@@ -224,6 +227,7 @@ impl SessionConfig {
             session_id: session_id.to_owned(),
             agent_id: agent_id.to_owned(),
             cwd,
+            knowledge: Vec::new(),
             model: model.to_owned(),
             effort: None,
             tools: ToolSet::all(false),
@@ -502,7 +506,7 @@ impl Session {
         let cancel = Cancel::new(self.cancel.subscribe());
         self.begin_turn(text);
         let mut turn = Usage::default();
-        let mut reply: Vec<String> = Vec::new();
+        let mut reply = Words::default();
         let mut calls_made = 0usize;
         // Replies the length limit cut off in a row, and whether the last one was text to carry on.
         let mut cut_offs = 0usize;
@@ -572,9 +576,13 @@ impl Session {
             self.record_server_tools(&completion.server_tool_calls)
                 .await?;
             let cut = completion.finish == Finish::Length;
-            take_reply(&mut reply, &completion.content, carrying_on, cut);
-            let wrote_nothing = completion.content.trim().is_empty();
             let calls = completion.tool_calls.clone();
+            if calls.is_empty() {
+                take_reply(&mut reply.answer, &completion.content, carrying_on, cut);
+            } else {
+                take_reply(&mut reply.on_the_way, &completion.content, false, cut);
+            }
+            let wrote_nothing = completion.content.trim().is_empty();
             let finish = completion.finish;
             self.history.push(Message::Assistant {
                 content: completion.content,
@@ -601,6 +609,11 @@ impl Session {
                     Finish::Stop | Finish::ToolCalls | Finish::Length => StopReason::EndTurn,
                 };
                 return Ok(ended(reason, turn, &reply));
+            }
+            // What it wrote alongside its calls was said on the way, and the record says so now
+            // the message is whole: its words streamed before its calls did.
+            if !wrote_nothing {
+                self.emit(events::commentary(&self.message_id())).await?;
             }
             self.run_calls(&calls, cut, &cancel, &mut calls_made)
                 .await?;
@@ -734,9 +747,14 @@ impl Session {
         specs
     }
 
+    /// The id of the model's latest message, which its words are recorded under.
+    fn message_id(&self) -> String {
+        format!("{}-{}", self.config.session_id, self.messages_written)
+    }
+
     async fn call_model(&mut self, cancel: &Cancel, call: Call) -> Result<Completion, CallError> {
         self.messages_written += 1;
-        let message_id = format!("{}-{}", self.config.session_id, self.messages_written);
+        let message_id = self.message_id();
         let bare = call == Call::BareSummary;
         let offered = !bare || self.provider.keeps_tools_for_summaries();
         let tools = if offered {
@@ -971,7 +989,9 @@ impl Session {
             Builtin::ReadFile => {
                 // Only a plain file is looked into: opening a pipe to read its start would wait
                 // for whatever writes to it.
-                let file = text("path").map(|path| tools::resolve(&self.config.cwd, path));
+                let file = text("path").map(|path| {
+                    tools::resolve_reading(&self.config.cwd, &self.config.knowledge, path)
+                });
                 if file.is_some_and(|file| {
                     std::fs::metadata(&file).is_ok_and(|meta| meta.is_file())
                         && Kind::of(&file) == Some(Kind::Picture)
@@ -1122,7 +1142,7 @@ impl Session {
         call: &ToolCall,
         mut input: Value,
     ) -> Result<Result<Value, Output>, AgentError> {
-        let prepared = match tool.prepare(&input, &self.config.cwd) {
+        let prepared = match tool.prepare(&input, &self.config.cwd, &self.config.knowledge) {
             Ok(prepared) => prepared,
             Err(said) => {
                 self.emit(events::tool_call(
@@ -1158,7 +1178,9 @@ impl Session {
             match self.permissions.request(&request).await {
                 Decision::Allow => {}
                 Decision::AllowEdited(edited) => {
-                    if let Err(said) = tool.prepare(&edited, &self.config.cwd) {
+                    if let Err(said) =
+                        tool.prepare(&edited, &self.config.cwd, &self.config.knowledge)
+                    {
                         let said = format!("The person's change didn't work: {said}");
                         self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                             .await?;
@@ -1203,6 +1225,7 @@ impl Session {
                 };
                 let context = Context {
                     cwd: &self.config.cwd,
+                    connected: &self.config.knowledge,
                     cancel,
                     command: &settings,
                     pictures: {
@@ -1583,12 +1606,26 @@ fn stopped(cancel: &Cancel) -> StopReason {
     }
 }
 
-fn ended(stop_reason: StopReason, usage: Usage, reply: &[String]) -> TurnEnd {
+fn ended(stop_reason: StopReason, usage: Usage, words: &Words) -> TurnEnd {
+    let said = if words.answer.is_empty() {
+        &words.on_the_way
+    } else {
+        &words.answer
+    };
     TurnEnd {
         stop_reason,
         usage,
-        reply: reply.join("\n\n").trim_end().to_owned(),
+        reply: said.join("\n\n").trim_end().to_owned(),
     }
+}
+
+/// What a turn wrote, each message a paragraph. The reply is its answer: the messages that asked
+/// for no tool. What it wrote alongside tool calls was said on the way ("I'll read the notes
+/// first."), and is the reply only when the turn wrote nothing else.
+#[derive(Default)]
+struct Words {
+    answer: Vec<String>,
+    on_the_way: Vec<String>,
 }
 
 /// Adds a message's words to the turn's reply: a paragraph of its own, or, when `carrying_on`,

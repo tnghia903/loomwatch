@@ -16,7 +16,9 @@ instructions and tools.
 - **A turn** adds the prompt to the conversation and streams the model's reply. It then works
   through every tool call the model asks for, each one allowed or declined first (see
   [Permissions](#permissions)). It ends when the model replies without a tool call, when the turn
-  has made 200 tool calls, or when it is cancelled. A reply the length limit cut off is carried on
+  has made 200 tool calls, or when it is cancelled. What the model writes alongside tool calls
+  ("I'll read the notes first.") is recorded as said on the way, and the turn's reply leaves it out
+  unless it is all the turn wrote. A reply the length limit cut off is carried on
   (twice at most), and a tool call it cut off is sent back with the reason, so the model makes it
   smaller instead of repeating it. A long tool output is set aside behind an id the agent can read
   back. A conversation that nears the model's context window, or 160k tokens on a larger one, is

@@ -390,6 +390,25 @@ describe('message boundaries', () => {
     expect(recordedReplyText(narrated(true), 'lead', 'A reply this archive never streamed')).toBe('A reply this archive never streamed')
   })
 
+  /** The live run of 2026-10-20: the harness marks a message written alongside tool calls. */
+  it('leaves out what the agent said on the way to a tool call, as the daemon does', () => {
+    const marked = [
+      event(0, 'message', { role: 'user', content: { type: 'text', text: 'What will Basic cost?' } }),
+      say(1, 'Paths are probably absolute.', 'lead-1'),
+      event(2, 'session_meta', { sessionUpdate: 'agent_message_phase', messageId: 'lead-1', phase: 'commentary' }),
+      event(3, 'tool_call', { callId: 'c1', title: 'Read prices.md', toolKind: 'read', status: 'pending' }),
+      event(4, 'tool_update', { callId: 'c1', status: 'completed' }),
+      say(5, 'Basic will cost ', 'lead-2'),
+      say(6, '159,000 VND.', 'lead-2'),
+      event(7, 'turn_end', { stopReason: 'end_turn' }),
+    ]
+    const agent = projectRun(marked).agents[0]
+    expect(agent.reply).toBe('Basic will cost 159,000 VND.')
+    expect(agent.text).toBe('Paths are probably absolute.\n\nBasic will cost 159,000 VND.')
+    expect(projectRun(marked, 5).agents[0].reply).toBe('Basic will cost ')
+    expect(recordedReplyText(marked, 'lead', 'Basic will cost 159,000 VND.')).toBe('Basic will cost 159,000 VND.')
+  })
+
   it('separates final-answer messages by the same rule', () => {
     const final = (seq: number, text: string, messageId: string) => event(seq, 'message', { role: 'agent', content: { type: 'text', text }, messageId, phase: 'final_answer' })
     const events = [

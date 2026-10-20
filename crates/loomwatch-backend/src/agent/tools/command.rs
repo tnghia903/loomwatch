@@ -365,6 +365,7 @@ mod tests {
         let settings = CommandSettings::default();
         let context = Context {
             cwd,
+            connected: &[],
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
@@ -422,6 +423,7 @@ mod tests {
         let settings = CommandSettings::default();
         let context = Context {
             cwd: &folder.0,
+            connected: &[],
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
@@ -463,6 +465,7 @@ mod tests {
         };
         let context = Context {
             cwd: &folder.0,
+            connected: &[],
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),
@@ -568,6 +571,7 @@ mod tests {
         let settings = CommandSettings::default();
         let context = Context {
             cwd: &folder.0,
+            connected: &[],
             cancel: &cancel,
             command: &settings,
             pictures: super::super::Pictures::default(),

@@ -15,7 +15,7 @@ use std::time::SystemTime;
 use regex::RegexBuilder;
 use serde_json::Value;
 
-use super::{Builtin, Output, Pictures, resolve, shown, slashed};
+use super::{Builtin, Output, Pictures, resolve_reading, shown};
 use crate::agent::provider::Picture;
 use crate::documents::{self, Document, Kind};
 
@@ -53,8 +53,22 @@ struct Kept {
 /// The documents read lately, the newest last.
 static READ_LATELY: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
 
-pub(super) fn run(tool: Builtin, input: &Value, cwd: &Path, pictures: Pictures) -> Output {
-    let path = |key: &str| resolve(cwd, input.get(key).and_then(Value::as_str).unwrap_or("."));
+/// Runs `tool`. A reading tool also looks in the `connected` folders ([`resolve_reading`]).
+pub(super) fn run(
+    tool: Builtin,
+    input: &Value,
+    cwd: &Path,
+    connected: &[PathBuf],
+    pictures: Pictures,
+) -> Output {
+    let connected = if tool.only_reads() { connected } else { &[] };
+    let path = |key: &str| {
+        resolve_reading(
+            cwd,
+            connected,
+            input.get(key).and_then(Value::as_str).unwrap_or("."),
+        )
+    };
     let text = |key: &str| input.get(key).and_then(Value::as_str).unwrap_or_default();
     match tool {
         Builtin::ListFiles => list(
@@ -117,9 +131,8 @@ fn list(cwd: &Path, folder: &Path, recursive: bool) -> Output {
             }
             let name = child.file_name().to_string_lossy().into_owned();
             let path = child.path();
-            let relative = path
-                .strip_prefix(folder)
-                .map_or_else(|_| path.display().to_string(), slashed);
+            // Named as the file tools take it back: from the work folder, else in full.
+            let relative = shown(cwd, &path);
             // Symlinks are listed but not followed, so a loop can't run the listing forever.
             let kind = child.file_type();
             let is_dir = kind.as_ref().is_ok_and(fs::FileType::is_dir);
@@ -491,7 +504,7 @@ mod tests {
     };
 
     fn run(tool: Builtin, input: &Value, cwd: &Path) -> Output {
-        super::run(tool, input, cwd, SEEN)
+        super::run(tool, input, cwd, &[], SEEN)
     }
 
     struct Folder(PathBuf);
@@ -556,6 +569,64 @@ mod tests {
         assert_eq!(found.text, "notes/plan.md:2: 2\nnotes/plan.md:3: 2");
         let listed = run(Builtin::ListFiles, &json!({"recursive": true}), cwd);
         assert_eq!(listed.text, "notes/\nnotes/plan.md");
+    }
+
+    /// A listing names each entry as the file tools take it back, from the work folder or in full
+    /// outside it, so a read of a listed name finds the file. A read by a name inside a connected
+    /// folder finds it there; a write by that name stays in the work folder.
+    #[test]
+    fn a_listing_names_what_the_tools_take_back() {
+        let folder = Folder::new();
+        let (work, notes) = (folder.0.join("work"), folder.0.join("notes"));
+        fs::create_dir_all(work.join("sub")).unwrap();
+        fs::write(work.join("sub/a.md"), "a").unwrap();
+        fs::create_dir_all(notes.join("drafts")).unwrap();
+        fs::write(notes.join("drafts/prices.md"), "Basic: 139,000 VND").unwrap();
+
+        let inside = run(Builtin::ListFiles, &json!({"path": "sub"}), &work);
+        assert_eq!(inside.text, "sub/a.md");
+        let listed = run(
+            Builtin::ListFiles,
+            &json!({"path": notes.to_string_lossy(), "recursive": true}),
+            &work,
+        );
+        // Joined part by part, so Windows names it with `\` throughout, as the listing does.
+        let prices = notes.join("drafts").join("prices.md").display().to_string();
+        assert_eq!(
+            listed.text,
+            format!("{}/\n{prices}", notes.join("drafts").display())
+        );
+        let read = run(Builtin::ReadFile, &json!({"path": prices}), &work);
+        assert!(read.text.contains("139,000"), "{}", read.text);
+
+        let connected = [notes.clone()];
+        let by_name = json!({"path": "drafts/prices.md"});
+        let found = super::run(Builtin::ReadFile, &by_name, &work, &connected, SEEN);
+        assert!(
+            !found.failed && found.text.contains("139,000"),
+            "{}",
+            found.text
+        );
+        assert!(
+            run(Builtin::ReadFile, &by_name, &work).failed,
+            "not connected"
+        );
+        let wrote = super::run(
+            Builtin::WriteFile,
+            &json!({"path": "drafts/prices.md", "content": "mine"}),
+            &work,
+            &connected,
+            SEEN,
+        );
+        assert!(!wrote.failed, "{}", wrote.text);
+        assert_eq!(
+            fs::read_to_string(work.join("drafts/prices.md")).unwrap(),
+            "mine"
+        );
+        assert_eq!(
+            fs::read_to_string(notes.join("drafts/prices.md")).unwrap(),
+            "Basic: 139,000 VND"
+        );
     }
 
     #[test]
@@ -670,6 +741,7 @@ mod tests {
             Builtin::ReadFile,
             &input,
             &folder.0,
+            &[],
             Pictures {
                 seen: false,
                 ..SEEN
@@ -687,6 +759,7 @@ mod tests {
             Builtin::ReadFile,
             &input,
             &folder.0,
+            &[],
             Pictures { room: 0, ..SEEN },
         );
         assert!(full.failed && full.pictures.is_empty());
@@ -699,6 +772,7 @@ mod tests {
             Builtin::ReadFile,
             &input,
             &folder.0,
+            &[],
             Pictures { bytes: 10, ..SEEN },
         );
         assert!(heavy.failed && heavy.pictures.is_empty());

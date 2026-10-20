@@ -151,10 +151,7 @@ async fn a_turn_writes_a_file_and_replies() {
     let end = session.prompt("Write the report.").await.unwrap();
 
     assert_eq!(end.stop_reason, StopReason::EndTurn);
-    assert_eq!(
-        end.reply,
-        "I'll write it.\n\nDone: out/report.md is written."
-    );
+    assert_eq!(end.reply, "Done: out/report.md is written.");
     assert_eq!(
         std::fs::read_to_string(folder.0.join("out/report.md")).unwrap(),
         "# Report\n"
@@ -163,12 +160,13 @@ async fn a_turn_writes_a_file_and_replies() {
         sink.kinds(),
         [
             "agent_message_chunk",
+            "agent_message_phase",
             "tool_call",
             "tool_call_update",
             "agent_message_chunk"
         ]
     );
-    let started = &sink.all()[1];
+    let started = &sink.all()[2];
     assert_eq!(started["kind"], "edit");
     assert_eq!(started["title"], "Write out/report.md");
     assert_eq!(
@@ -196,6 +194,101 @@ async fn a_turn_writes_a_file_and_replies() {
         requests[1].messages.last(),
         Some(Message::Tool { tool_call_id, content, .. }) if tool_call_id == "c1" && content.starts_with("Created")
     ));
+}
+
+/// What the agent writes alongside tool calls is said on the way: the record marks its message
+/// once the message is whole, before its calls run, and the reply is what it wrote after. When it
+/// wrote nothing after, the reply is what it said on the way rather than nothing.
+#[tokio::test]
+async fn words_said_on_the_way_to_a_tool_are_not_the_reply() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("prices.md"), "Basic: 139,000 VND").unwrap();
+    let read = || call("r", "read_file", &json!({"path": "prices.md"}));
+    for (said, last, reply) in [
+        (
+            "Paths are probably absolute.",
+            "The Basic plan costs 139,000 VND.",
+            "The Basic plan costs 139,000 VND.",
+        ),
+        (
+            "Paths are probably absolute.",
+            "",
+            "Paths are probably absolute.",
+        ),
+        ("", "139,000 VND.", "139,000 VND."),
+    ] {
+        let demo = Demo::scripted(vec![
+            Completion::calls(said, vec![read()]),
+            Completion::text(last),
+        ]);
+        let sink = Arc::new(Recorded::default());
+        let mut session = session(
+            &folder,
+            Provider::Demo(demo),
+            sink.clone(),
+            Arc::new(AllowAll),
+        );
+        let end = session.prompt("What does Basic cost?").await.unwrap();
+        assert_eq!(end.reply, reply);
+
+        let updates = sink.all();
+        let marks: Vec<usize> = (0..updates.len())
+            .filter(|at| updates[*at]["sessionUpdate"] == "agent_message_phase")
+            .collect();
+        if said.is_empty() {
+            assert!(
+                marks.is_empty(),
+                "a call with no words says nothing on the way"
+            );
+            continue;
+        }
+        let [mark] = marks[..] else {
+            panic!("one message asked for a tool: {updates:#?}");
+        };
+        assert_eq!(updates[mark]["phase"], "commentary");
+        assert_eq!(updates[0]["sessionUpdate"], "agent_message_chunk");
+        assert_eq!(updates[mark]["messageId"], updates[0]["messageId"]);
+        assert_eq!(updates[mark + 1]["sessionUpdate"], "tool_call");
+    }
+}
+
+/// A folder the operator connected is read by the names its listing shows inside it, though the
+/// agent works in a folder of its own, and the operator's policy is asked about that file.
+#[tokio::test]
+async fn a_connected_folder_is_read_by_the_names_it_shows() {
+    let folder = Folder::new();
+    let (work, notes) = (folder.0.join("work"), folder.0.join("notes"));
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(notes.join("drafts")).unwrap();
+    std::fs::write(notes.join("drafts/prices.md"), "Basic: 139,000 VND").unwrap();
+    let demo = Demo::scripted(vec![
+        Completion::calls(
+            "",
+            vec![call("r", "read_file", &json!({"path": "drafts/prices.md"}))],
+        ),
+        Completion::text("139,000 VND."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", work, "m");
+    config.knowledge = vec![notes.clone()];
+    let answers = Answers::new(vec![]);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        answers.clone(),
+        Arc::new(NoHostTools),
+    );
+    session.prompt("What does Basic cost?").await.unwrap();
+
+    assert_eq!(
+        answers.asked.lock().unwrap()[0].locations,
+        [notes.join("drafts/prices.md")]
+    );
+    let answered = demo.requests()[1].messages.last().cloned();
+    assert!(
+        matches!(&answered, Some(Message::Tool { content, .. }) if content.contains("139,000")),
+        "{answered:?}"
+    );
 }
 
 #[tokio::test]

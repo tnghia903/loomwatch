@@ -77,6 +77,18 @@ pub(crate) fn message_chunk(text: &str, message_id: &str) -> Value {
     })
 }
 
+/// Says the model's message `message_id` asked for tool calls, so its words were said on the way
+/// ("I'll read the notes first."), not the answer. Sent once the message is whole: its words stream
+/// before its calls do. The run's record keeps them; the reply leaves them out
+/// (`engine::ReplyText`).
+pub(crate) fn commentary(message_id: &str) -> Value {
+    json!({
+        "sessionUpdate": "agent_message_phase",
+        "messageId": message_id,
+        "phase": "commentary",
+    })
+}
+
 /// A piece of the model's visible reasoning.
 pub(crate) fn thought_chunk(text: &str) -> Value {
     json!({

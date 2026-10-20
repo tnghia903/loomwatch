@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ReplyText } from './replyText'
 
-/** Mirrors `reply_text_keeps_a_message_whole_and_separates_the_next` in acp.rs: the two must agree. */
+/** Mirrors the `ReplyText` tests in `engine/recorder.rs`: the two must agree. */
 describe('ReplyText', () => {
   it('joins one message verbatim and puts the next a paragraph apart', () => {
     const ided = new ReplyText()
@@ -34,6 +34,27 @@ describe('ReplyText', () => {
     padded.push('', 'm-2')
     padded.push('\n## Report', 'm-2')
     expect(padded.text).toBe('Intro\n\n## Report')
+  })
+
+  it('leaves out a message said on the way to a tool call, unless that is all there is', () => {
+    const reply = new ReplyText()
+    reply.push('Paths are relative to the work folder; ', 'm1')
+    reply.push("I'll use the full paths.", 'm1')
+    reply.setAside('m1')
+    reply.noteActivity()
+    reply.push('Basic costs ', 'm2')
+    reply.push('139,000 VND.', 'm2')
+    reply.setAside('m1')
+    reply.push('Team costs 349,000 VND.', 'm3')
+    expect(reply.said).toBe("Paths are relative to the work folder; I'll use the full paths.\n\nBasic costs 139,000 VND.\n\nTeam costs 349,000 VND.")
+    expect(reply.text).toBe('Basic costs 139,000 VND.\n\nTeam costs 349,000 VND.')
+
+    const onlyAsides = new ReplyText()
+    onlyAsides.push("I'll read the notes first.", 'm1')
+    onlyAsides.setAside('m1')
+    onlyAsides.push('Now the prices.', 'm2')
+    onlyAsides.setAside('m2')
+    expect(onlyAsides.text).toBe("I'll read the notes first.\n\nNow the prices.")
   })
 
   it('starts a new message at a turn boundary even when the ID repeats', () => {
