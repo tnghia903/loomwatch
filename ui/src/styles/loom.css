@@ -390,8 +390,11 @@ span.story-schedule { cursor: default; }
 }
 .needs-you-bell:hover { color: var(--color-ink); }
 .needs-you-bell.working { color: var(--color-live); }
-.needs-you-bell.has { color: var(--color-accent-on-fill); background: var(--color-accent-fill); border-color: transparent; font-weight: 600; }
-.needs-you-bell.has svg { animation: needs-you-ring 2.4s ease-in-out infinite; transform-origin: 50% 10%; }
+/* Lit, the bell is a gold ring, not a fill: it sits beside Run team or Save, the screen's one gold
+   fill. Its words stay ink, since gold text on the tint is 4.45:1 in light; the ringing glyph is the
+   second signal. */
+.needs-you-bell.has { color: var(--color-ink); background: var(--color-accent-tint); border-color: var(--color-accent); font-weight: 600; }
+.needs-you-bell.has svg { color: var(--color-accent); animation: needs-you-ring 2.4s ease-in-out infinite; transform-origin: 50% 10%; }
 @keyframes needs-you-ring { 0%, 70%, 100% { transform: rotate(0); } 75% { transform: rotate(14deg); } 82% { transform: rotate(-12deg); } 89% { transform: rotate(6deg); } }
 .needs-you-panel {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 80; width: min(420px, calc(100vw - 24px)); max-height: min(70vh, 640px); overflow: auto;

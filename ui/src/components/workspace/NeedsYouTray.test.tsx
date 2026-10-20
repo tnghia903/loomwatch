@@ -57,6 +57,30 @@ const pointerless = new Set(sheets.flatMap((css) => [...css.replace(/\/\*[\s\S]*
   .filter(([, , body]) => /pointer-events:\s*none/.test(body))
   .flatMap(([, selectors]) => selectors.split(',').map((one) => one.trim()).filter((one) => /^\.[\w-]+$/.test(one)).map((one) => one.slice(1)))))
 
+// One gold fill per screen: the bell sits beside Run team or Save, so when something needs you it
+// lights as a gold ring with a gold glyph, and its words stay ink (gold on the tint is 4.45:1 in light).
+const rules = sheets.flatMap((css) => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)])
+  .filter(([, selectors]) => selectors.includes('needs-you-bell'))
+const declared = (selector: string, property: string) => rules
+  .filter(([, selectors]) => selectors.split(',').some((one) => one.trim() === selector))
+  .flatMap(([, , body]) => [...body.matchAll(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`, 'g'))].map(([, value]) => value.trim()))
+
+describe('the bell when something needs you', () => {
+  it('lights as a gold ring with ink words, never a second gold fill', () => {
+    render(<NeedsYouTray tickets={[ticket]} working={0} onAnswer={vi.fn()} onDismiss={vi.fn()} />)
+    const bell = screen.getByRole('button', { name: /1 needs you/ })
+    expect(bell).toHaveClass('needs-you-bell', 'has')
+    expect(bell.querySelector('svg')).not.toBeNull()
+    expect(rules.length).toBeGreaterThan(0)
+    expect(rules.filter(([, , body]) => /--color-accent-(?:fill|on-fill)\b/.test(body)).map(([, selectors]) => selectors.trim())).toEqual([])
+    expect(declared('.needs-you-bell.has', 'background')).toEqual(['var(--color-accent-tint)'])
+    expect(declared('.needs-you-bell.has', 'border-color')).toEqual(['var(--color-accent)'])
+    expect(declared('.needs-you-bell.has', 'color')).toEqual(['var(--color-ink)'])
+    expect(declared('.needs-you-bell.has svg', 'color')).toEqual(['var(--color-accent)'])
+    expect(declared('.needs-you-bell.has svg', 'animation')).toEqual([expect.stringMatching(/^needs-you-ring .* infinite$/)])
+  })
+})
+
 describe('a stopped run’s ticket', () => {
   it('opens its run and dismisses from buttons the pointer can reach', () => {
     const onDismiss = vi.fn()
