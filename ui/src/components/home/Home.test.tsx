@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
@@ -53,6 +57,17 @@ describe('Home', () => {
     expect(screen.queryByText(/cloth/)).toBeNull()
     fireEvent.click(cards[0])
     expect(assign).toHaveBeenCalledWith('/?path=new.yaml')
+  })
+
+  // The app follows the landing page: Home opens on its headline, word for word, with the same words in gold.
+  it('opens on the landing page’s headline', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    renderHome()
+    const heading = await screen.findByRole('heading', { level: 1 })
+    const landing = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../site/index.html'), 'utf8').match(/<h1 id="hero-h">(.*?)<\/h1>/s)![1]
+    const words = (text: string) => text.replace(/<[^>]+>/g, '').replace(/&nbsp;|\s+/g, ' ').trim()
+    expect(words(heading.textContent!)).toBe(words(landing))
+    expect(words(heading.querySelector('em')!.textContent!)).toBe(words(landing.match(/<em>(.*?)<\/em>/s)![1]))
   })
 
   // A newcomer coming back to use their agent landed on Build and had to look for Chat.
@@ -319,7 +334,7 @@ describe('Home, the first run and the getting-started guide', () => {
     fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
     renderHome()
     expect(await screen.findByText('What shall we make first?')).toBeInTheDocument()
-    expect(screen.queryByText('Put AI agents to work as a team.')).toBeNull()
+    expect(screen.queryByRole('heading', { name: /Put AI agents to work/ })).toBeNull()
     expect(readTourState()).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Just look around' }))
     expect(await screen.findByText('Review stop demo')).toBeInTheDocument()

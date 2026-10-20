@@ -1625,7 +1625,7 @@ describe('Home', () => {
     documentState.path = ''
     try {
       renderWorkspace()
-      expect(await screen.findByRole('heading', { name: 'Put AI agents to work as a team.' })).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: /^Put AI agents to work as one team\./ })).toBeInTheDocument()
       expect(screen.getByLabelText('Or describe the job')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Ask LoomWatch/ })).not.toBeInTheDocument()
     } finally {
