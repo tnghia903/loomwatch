@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { LoomMark } from '../../components/ui/glyphs'
 import type { RunRecord } from '../runs/client'
 import { useNeedsYou } from './useNeedsYou'
 
@@ -28,7 +29,12 @@ function Probe() {
 }
 
 const icon = () => document.querySelector<HTMLLinkElement>('link[rel="icon"]')!
-const dot = () => /<circle cx="416" cy="96" r="92" fill="([^"]+)"/.exec(decodeURIComponent(icon().href.replace(/^data:image\/svg\+xml,/, '')))?.[1]
+const drawing = () => new DOMParser().parseFromString(decodeURIComponent(icon().href.replace(/^data:image\/svg\+xml,/, '')), 'image/svg+xml')
+const dot = () => drawing().querySelector('circle[cx="416"][cy="96"]')?.getAttribute('fill') ?? undefined
+// The mouth: the master's stitch, or a ring that isn't the dot.
+const stitch = () => drawing().querySelector('path[d="M222 354Q256 382 290 354"]')
+const ring = () => drawing().querySelector('circle:not([cx="416"])')
+const shape = (circle: Element | null) => circle && ['cx', 'cy', 'r', 'fill', 'stroke', 'stroke-width'].map((name) => circle.getAttribute(name))
 
 beforeEach(() => {
   document.head.innerHTML = '<link rel="icon" type="image/svg+xml" href="/icon.svg" />'
@@ -50,11 +56,27 @@ describe('the tab icon', () => {
     expect(document.title).toBe('(1) LoomWatch')
   })
 
+  // Gold against blue is a difference of hue alone where the "(1)" is hidden (a pinned tab, a
+  // crowded strip), so the face asks too: the header mark's small "o" in place of the stitch.
+  it('opens the mark’s mouth into the header mark’s "o" when something needs you', async () => {
+    const { container } = render(<LoomMark size={16} state="asking" />)
+    const header = shape(container.querySelector('.lw-mark-o'))
+    cleanup()
+    expect(header).toEqual(['256', '362', '26', 'none', mouth, '30'])
+    registry.runs = [review]
+    render(<Probe />)
+    await waitFor(() => expect(dot()).toBeDefined())
+    expect(shape(ring())).toEqual(header)
+    expect(stitch()).toBeNull()
+  })
+
   it('keeps the blue dot while a team works', async () => {
     registry.runs = [run('running')]
     render(<Probe />)
     await waitFor(() => expect(dot()).toBeDefined())
     expect(dot()).toBe(token('lw-blue-300'))
+    expect(stitch()).not.toBeNull()
+    expect(ring()).toBeNull()
     expect(document.title).toBe('LoomWatch')
   })
 
