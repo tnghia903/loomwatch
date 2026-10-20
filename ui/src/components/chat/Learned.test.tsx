@@ -35,6 +35,9 @@ describe('Learned', () => {
     ])
     expect(lines[0].closest('p')?.getAttribute('title')).toBe('From what you said: Too long. Three bullets, please.')
     expect(lines[1].closest('p')?.getAttribute('title')).toMatch(/^From the check: Cites the 2025 report/)
+    cleanup()
+    render(<Learned lessons={[lesson({ source: 'liked', feedback: 'You marked this answer Love it.' })]} name={name} />)
+    expect(screen.getByText(/learned:/).closest('p')?.getAttribute('title')).toBe('From your Love it: You marked this answer Love it.')
     // Nothing to take back where nothing can be taken back.
     expect(screen.queryByRole('button')).toBeNull()
   })

@@ -4,8 +4,9 @@ import { readRun } from '../runs/client'
 /**
  * What an agent learned from your feedback on its work (ADR 0078, `crates/…/lessons.rs`): one
  * sentence each, in its standing instructions from its next work on. Learned only from something
- * outside the agent: your own words about a finished answer, or a check that found a Done when item
- * not met and then met after the send-back. Each shows where it came from; Undo takes it back.
+ * outside the agent: your own words about a finished answer, an answer you marked Love it, or a
+ * check that found a Done when item not met and then met after the send-back. Each shows where it
+ * came from; Undo takes it back.
  */
 export interface Lesson {
   id: string
@@ -13,8 +14,8 @@ export interface Lesson {
   scope: string
   agentId: string
   text: string
-  /** `you`: your words. `check`: the check's missed-then-met item. */
-  source: 'you' | 'check'
+  /** `you`: your words. `check`: the check's missed-then-met item. `liked`: an answer you loved. */
+  source: 'you' | 'check' | 'liked'
   /** What it was learned from, as you saw it: your words, or the check's item and finding. */
   feedback: string
   /** The piece of work the feedback was about. */
@@ -74,7 +75,9 @@ export async function rewriteLesson(of: LessonsOf, id: string, text: string): Pr
   return readRun<{ lesson: Lesson }>(response)
 }
 
-/** Where a lesson came from, in a few words: "From your reply" or "From the check". */
+/** Where a lesson came from, in a few words: "From what you said", "From the check", "From your Love it". */
 export function learnedFrom(lesson: Pick<Lesson, 'source'>): string {
-  return lesson.source === 'check' ? 'From the check' : 'From what you said'
+  if (lesson.source === 'check') return 'From the check'
+  if (lesson.source === 'liked') return 'From your Love it'
+  return 'From what you said'
 }

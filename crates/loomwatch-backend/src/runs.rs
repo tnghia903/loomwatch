@@ -3819,6 +3819,7 @@ async fn answer_run(
             ),
         ));
     }
+    learn_from_review(&state, &run_id, &waiting, &request.text);
     desk.deliver(
         &run_id,
         &request.node,
@@ -3832,6 +3833,66 @@ async fn answer_run(
     .await
     .map(|record| (StatusCode::ACCEPTED, Json(record)).into_response())
     .map_err(operator_status)
+}
+
+/// What the person says at a review stop is about the work it reviews, so the stage that did it
+/// learns from it (ADR 0078), in the background: "Send back: the sources are blogs, use the
+/// official pages" teaches the Researcher. An answer to an agent's question is not feedback on
+/// work, and teaches nothing.
+fn learn_from_review(
+    state: &RunsState,
+    run_id: &str,
+    waiting: &crate::operator::WaitingOn,
+    text: &str,
+) {
+    if waiting.kind != crate::operator::StopKind::ReviewStop
+        || text.chars().count() > crate::lessons::MAX_FEEDBACK_CHARS
+    {
+        return;
+    }
+    let (Some(learner), Some(reviewed), Some(record)) = (
+        state.registry.learner(&state.teams_root),
+        waiting.handover_from.as_deref(),
+        state.registry.get(run_id),
+    ) else {
+        return;
+    };
+    let path = state.teams_root.join(&record.team_path);
+    let Ok(team) = TeamConfig::load(&path) else {
+        return;
+    };
+    let Some(agent) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id == reviewed && agent.learns && !agent.is_operator())
+    else {
+        return;
+    };
+    if agent.model.starts_with(crate::agent::OFFLINE_MODEL) {
+        return;
+    }
+    learner.spawn(crate::lessons::LearnRequest {
+        from: crate::lessons::LearnedFrom {
+            scope: crate::lessons::scope_of(&team, &path, agent),
+            agent_id: agent.id.clone(),
+            source: crate::lessons::LessonSource::You,
+            feedback: text.trim().to_owned(),
+            run_id: Some(run_id.to_owned()),
+        },
+        learning: crate::lessons::Learning {
+            agent: if agent.name.trim().is_empty() {
+                agent.id.clone()
+            } else {
+                agent.name.clone()
+            },
+            instructions: agent.role.clone(),
+            done_when: agent.done_when.clone(),
+            request: record.prompt.clone(),
+            work: waiting.context.clone().unwrap_or_default(),
+            said: text.trim().to_owned(),
+            ..crate::lessons::Learning::default()
+        },
+    });
 }
 
 #[derive(Debug, Deserialize)]
@@ -6454,6 +6515,107 @@ pub(crate) mod tests {
             registry.get(&accepted.run_id).unwrap().status,
             RunStatus::Cancelled
         );
+    }
+
+    /// ADR 0078: what the person says at a review stop teaches the stage whose work it reviewed, with
+    /// that work as what it answered; an answer to an agent's question teaches nothing.
+    #[tokio::test]
+    async fn a_review_stops_words_teach_the_stage_it_reviewed() {
+        use crate::operator::{ParkTier, StopKind, WaitingOn};
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let yaml = "schemaVersion: 1\nid: review-desk\nentrypoint: writer\nagents:\n  - id: writer\n    name: Writer\n    model: test/model\n  - id: you\n    kind: operator\n    role: Check it.\nedges:\n  - {from: writer, to: you, layer: configured, kind: sequence, ts: \"2026-10-20T00:00:00Z\"}\n";
+        fs::write(dir.0.join("review.yaml"), yaml).unwrap();
+        let team = TeamConfig::load(&dir.0.join("review.yaml")).unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::durable(archive.run_store());
+        let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        registry.set_learner_model(crate::engine::demo_model(crate::agent::Demo::responder(
+            move |request| {
+                seen.lock().unwrap().push(request.prompt().to_owned());
+                Some(crate::agent::Completion::text(
+                    r#"{"edits": [{"do": "add", "lesson": "When citing prices, use the official sites."}]}"#,
+                ))
+            },
+        )));
+        let record = RunRecord::queued(
+            "review.yaml".into(),
+            "price list".into(),
+            &team,
+            RunTrigger::Manual,
+        )
+        .unwrap();
+        let run_id = record.run_id.clone();
+        registry.insert(record);
+        assert!(registry.mark_starting(&run_id));
+        assert!(registry.mark_running(&run_id));
+        let desk = registry.operator_desk(Some(&archive));
+        let stop = |kind: StopKind, node: &str| WaitingOn {
+            node: node.into(),
+            name: "You".into(),
+            kind,
+            since: now(),
+            question: "Check it.".into(),
+            context: Some("Prices from blog.example.".into()),
+            handover_from: Some("writer".into()),
+            park: ParkTier::None,
+            park_note: String::new(),
+            send_back_available: false,
+            question_id: None,
+            check: None,
+        };
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let endpoint = format!("/api/runs/{run_id}/answers");
+        let _question = desk
+            .park(&run_id, stop(StopKind::Question, "writer"))
+            .await
+            .unwrap();
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &endpoint,
+                &json!({"node": "writer", "text": "The bigger budget."}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            asked.lock().unwrap().is_empty(),
+            "an answer to a question is not feedback"
+        );
+        let _review = desk
+            .park(&run_id, stop(StopKind::ReviewStop, "you"))
+            .await
+            .unwrap();
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &endpoint,
+                &json!({"node": "you", "text": "These are blog prices. Use the official sites."}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let lessons = archive.lessons();
+        let mut kept = Vec::new();
+        for _ in 0..200 {
+            kept = lessons.active("team:review-desk#writer").await.unwrap();
+            if !kept.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(kept.len(), 1);
+        assert_eq!(
+            kept[0].feedback,
+            "These are blog prices. Use the official sites."
+        );
+        assert_eq!(kept[0].run_id.as_deref(), Some(run_id.as_str()));
+        let asked = asked.lock().unwrap();
+        assert!(asked[0].contains("It was asked:\n> price list"));
+        assert!(asked[0].contains("It answered:\n> Prices from blog.example."));
     }
 
     #[allow(clippy::too_many_lines)]

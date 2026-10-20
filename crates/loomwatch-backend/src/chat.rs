@@ -2089,6 +2089,83 @@ impl Answered {
 /// answered: past a few of the person's own notes, the answer is not what they are talking about.
 const NOTES_LOOKED_BACK: i64 = 5;
 
+/// The face that says an answer was exactly what the person wanted (`FACES`).
+const LOVE: &str = "love";
+
+/// Love it on an answer, or on an agent's own answer to a team note, asks what made it right, so
+/// the agent keeps doing it on work like this (ADR 0078). Only when the face becomes Love it: Love
+/// it again on an answer already loved asks nothing.
+async fn learn_from_love(
+    state: &ChatState,
+    store: &ChatStore,
+    team: &TeamConfig,
+    team_ref: &TeamRef,
+    anchor: &str,
+    said: Said<'_>,
+) {
+    let Some(learner) = state.registry.learner(&state.teams_root) else {
+        return;
+    };
+    let (answered, agent_id) = match said {
+        Said::Answer => {
+            let Some(stored) = store.run(team_ref, anchor).await.ok().flatten() else {
+                return;
+            };
+            let Some(answered) = Answered::run(state, stored) else {
+                return;
+            };
+            let responder = answered.said.first().map(|(id, _)| id.clone());
+            (answered, responder)
+        }
+        Said::Reply(agent) => {
+            let Some(note) = store.team_note(team_ref, anchor).await.ok().flatten() else {
+                return;
+            };
+            let Some(answered) = Answered::note(note) else {
+                return;
+            };
+            (answered, Some(agent.to_owned()))
+        }
+        _ => return,
+    };
+    let Some(agent) = agent_id.and_then(|id| {
+        team.agents
+            .iter()
+            .find(|agent| agent.id == id && !agent.is_operator())
+    }) else {
+        return;
+    };
+    if !agent.learns || agent.model.starts_with(crate::agent::OFFLINE_MODEL) {
+        return;
+    }
+    let Some(work) = answered
+        .said
+        .iter()
+        .find(|(id, _)| *id == agent.id)
+        .map(|(_, said)| said.clone())
+    else {
+        return;
+    };
+    let resolved = state.teams_root.join(&team_ref.path);
+    learner.spawn(crate::lessons::LearnRequest {
+        from: crate::lessons::LearnedFrom {
+            scope: crate::lessons::scope_of(team, &resolved, agent),
+            agent_id: agent.id.clone(),
+            source: crate::lessons::LessonSource::Liked,
+            feedback: "You marked this answer Love it.".to_owned(),
+            run_id: Some(answered.anchor),
+        },
+        learning: crate::lessons::Learning {
+            agent: display(&agent.name, &agent.id),
+            instructions: agent.role.clone(),
+            done_when: agent.done_when.clone(),
+            request: task_text(&answered.request, team).to_owned(),
+            work,
+            ..crate::lessons::Learning::default()
+        },
+    });
+}
+
 /// The person's words after something finished with an answer, as feedback the agent that answered
 /// learns from (ADR 0078), in the background.
 ///
@@ -2172,6 +2249,7 @@ async fn learn_from_words(
             work,
             said: text.to_owned(),
             missed_items: Vec::new(),
+            steps: Vec::new(),
         },
     });
 }
@@ -2650,6 +2728,16 @@ async fn react(
         request.about.unwrap_or_default(),
     )
     .await?;
+    let was_loved = store
+        .reactions(std::slice::from_ref(&request.anchor))
+        .await
+        .map_err(|error| database(&error))?
+        .remove(&request.anchor)
+        .is_some_and(|faces| {
+            faces
+                .iter()
+                .any(|face| face.target == target && face.face == LOVE)
+        });
     store
         .react(
             &team_ref,
@@ -2660,6 +2748,9 @@ async fn react(
         )
         .await
         .map_err(|error| database(&error))?;
+    if request.face.as_deref() == Some(LOVE) && !was_loved {
+        learn_from_love(&state, &store, &team, &team_ref, &request.anchor, said).await;
+    }
     // Good or Love it on an answer backs the lessons its work was given (ADR 0078); any other face,
     // or none, takes that back. A face on anything else says nothing about the lessons.
     if said == Said::Answer
@@ -4896,6 +4987,69 @@ mod tests {
         assert_eq!(
             note["lessons"][0]["text"],
             "When writing the digest, use three bullets."
+        );
+    }
+
+    /// Love it on an answer asks what made it right (ADR 0078), and the lesson is kept as liked.
+    /// Taking the face off and putting it back on is still one answer loved once; Good asks nothing.
+    #[tokio::test]
+    async fn love_on_an_answer_teaches_what_to_keep_doing() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        rig.registry
+            .set_learner_model(crate::engine::demo_model(crate::agent::Demo::responder(
+                move |request| {
+                    seen.lock().unwrap().push(request.prompt().to_owned());
+                    Some(crate::agent::Completion::text(
+                        r#"{"edits": [{"do": "add", "lesson": "When writing the digest, open with a one-line summary."}]}"#,
+                    ))
+                },
+            )));
+        let work = finished_work(&rig, "today's digest").await;
+        let face = |face: &str| reaction(&work.run_id, "answer", &json!(face), &Value::Null);
+        post(&rig.app, "/api/chat/reactions", face("glad")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            asked.lock().unwrap().is_empty(),
+            "Good backs lessons, it doesn't make one"
+        );
+        let (status, _) = post(&rig.app, "/api/chat/reactions", face("love")).await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert_eq!(kept[0].source, crate::lessons::LessonSource::Liked);
+        assert_eq!(kept[0].feedback, "You marked this answer Love it.");
+        assert_eq!(kept[0].run_id.as_deref(), Some(work.run_id.as_str()));
+        {
+            let asked = asked.lock().unwrap();
+            assert_eq!(asked.len(), 1);
+            assert!(
+                asked[0].contains("It answered:\n> writer work 1"),
+                "{}",
+                asked[0]
+            );
+            assert!(asked[0].contains("Then the person marked the answer Love it"));
+        }
+        // Off and on again: no second learning.
+        post(
+            &rig.app,
+            "/api/chat/reactions",
+            reaction(&work.run_id, "answer", &Value::Null, &Value::Null),
+        )
+        .await;
+        post(&rig.app, "/api/chat/reactions", face("love")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let calls = asked.lock().unwrap().len();
+        assert_eq!(calls, 2, "taken off, a face is a new Love it the next time");
+        post(&rig.app, "/api/chat/reactions", face("love")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            asked.lock().unwrap().len(),
+            calls,
+            "Love it again on a loved answer asks nothing"
         );
     }
 }

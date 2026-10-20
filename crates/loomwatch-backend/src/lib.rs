@@ -3721,6 +3721,7 @@ fn learn_from_checks(
             work: work.work.to_owned(),
             said: String::new(),
             missed_items: fixed,
+            steps: Vec::new(),
         },
     });
 }

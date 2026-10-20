@@ -2,8 +2,8 @@
 -- given to the agent in its standing instructions from its next session on.
 --
 -- A lesson is made only from something outside the agent: the person's own words about a piece of
--- its work, or a check step that found a Done when item not met and then met after the send-back.
--- Never from the agent's view of its own work.
+-- its work, an answer they marked Love it, or a check step that found a Done when item not met and
+-- then met after the send-back. Never from the agent's view of its own work.
 --
 -- `scope` is whose lesson it is: `agent:<id>` for one of My agents, shared by its own chat and by
 -- every team that places it; `team:<memory scope>#<agent id>` for a team's own agent. `agent_id`
@@ -16,8 +16,9 @@ CREATE TABLE agent_lessons (
     scope      TEXT NOT NULL,
     agent_id   TEXT NOT NULL,
     text       TEXT NOT NULL,
-    -- `you`: the person's words. `check`: a check step's missed-then-met item.
-    source     TEXT NOT NULL CHECK (source IN ('you', 'check')),
+    -- `you`: the person's words. `check`: a check step's missed-then-met item. `liked`: what made
+    -- an answer the person marked Love it right.
+    source     TEXT NOT NULL CHECK (source IN ('you', 'check', 'liked')),
     -- What it was learned from, as the person sees it: their words, or the check item, cut.
     feedback   TEXT NOT NULL,
     -- The piece of work the feedback was about.
