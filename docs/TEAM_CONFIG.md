@@ -582,7 +582,7 @@ whole team** when the run has more than one agent. A request is declined if nobo
 which has nobody watching. The agent is told the call was declined and carries on without it.
 
 A team in Auto mode lets its agents run, without asking, the commands that only read or download.
-It is the "Commands · Ask me / Auto" switch beside the team chat's message box:
+It is set in the team file:
 
 ```yaml
 permissions:

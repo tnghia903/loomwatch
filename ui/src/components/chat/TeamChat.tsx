@@ -22,8 +22,6 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
-import type { AutoModeControl } from './AutoModeSwitch'
-import type { SpendLimitControl } from './SpendLimitChip'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { ReplyQuote } from './ReplyQuote'
 import { WorkPiece, type TeamView } from './WorkPiece'
@@ -56,10 +54,6 @@ interface TeamChatProps {
   onTeamReview: (review: TeamReview, retry: () => void) => void
   onStale: () => void
   onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
-  /** Who decides the commands agents ask to run, the switch beside the message box (ADR 0061). */
-  autoMode?: AutoModeControl
-  /** What one run of the team may spend (ADR 0068): the chip beside Auto mode. */
-  spendLimit?: SpendLimitControl
   announce: (text: string) => void
   /** The newest piece of work in the chat, whenever it changes: what Details follows. */
   onNewest?: (runId: string | null) => void
@@ -96,7 +90,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, spendLimit, onNewestRun, startTeam = false, onStartTeamTaken }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Run team means start the team. Without an @, what is written is a note that starts nothing,
   // which is not what someone who pressed Run team expects, so the box it opens starts with @team.
@@ -585,8 +579,6 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         live={live}
         decision={decision}
         disabled={blocked}
-        autoMode={autoMode}
-        spendLimit={spendLimit}
         value={draft}
         onChange={setDraft}
         onSend={async (text, to, now) => {

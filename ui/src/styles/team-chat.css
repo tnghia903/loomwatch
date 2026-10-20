@@ -407,8 +407,6 @@
 .tc-where.route-team, .tc-where.route-agent { color: var(--color-accent); }
 .tc-where.route-note { color: var(--color-live); }
 .tc-where.route-answer { color: var(--color-accent); }
-.tc-where.route-hint { font-weight: 400; color: var(--color-ink-3); }
-.tc-where.route-hint b { font-weight: 600; color: var(--color-ink-2); }
 .tc-where .tc-swap { position: relative; }
 .tc-where-hint { font-style: normal; font-weight: 400; color: var(--color-ink-3); }
 .tc-where-escape { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding: 0; border: 0; background: none; font-size: 12px; font-weight: 400; color: var(--color-ink-3); cursor: pointer; }
@@ -792,49 +790,6 @@
 .delivery-heading h1 .delivery-outcome:is(.status-failed, .status-partial) { color: var(--color-alert); }
 .delivery-heading h1 .delivery-outcome:is(.status-running, .status-starting, .status-queued) { color: var(--color-live); }
 .delivery-heading h1 .delivery-took { margin-left: 10px; font-size: .55em; font-weight: 400; color: var(--color-ink-3); }
-
-/* ---------- Auto mode (ADR 0061): who decides the agents' commands, beside the message box ---------- */
-/* The hint keeps a readable width; in a narrow chat the chips beside it (what a run may spend,
-   Auto mode) move to a line of their own rather than squeezing it into a column. */
-.tc-composer-top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
-.tc-composer-top > .tc-where { flex: 1 1 15em; min-width: 0; }
-.tc-mode { position: relative; flex: none; }
-.tc-mode-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid var(--color-hairline); border-radius: 999px; background: none; font: 400 12px/1.5 var(--font-sans); color: var(--color-ink-3); cursor: pointer; white-space: nowrap; }
-.tc-mode-chip b { font-weight: 600; color: var(--color-ink-2); }
-.tc-mode-chip:hover:not(:disabled), .tc-mode-chip:focus-visible, .tc-mode-chip[aria-expanded='true'] { border-color: color-mix(in srgb, var(--color-ink) 30%, transparent); color: var(--color-ink-2); }
-.tc-mode-chip:disabled { cursor: default; }
-.tc-mode-chip.mode-auto { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
-.tc-mode-chip.mode-auto b { color: var(--color-accent); }
-.tc-mode-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 6;
-  display: grid;
-  gap: 2px;
-  width: min(340px, calc(100cqi - 32px));
-  padding: 6px;
-  border: 1px solid var(--color-hairline);
-  border-radius: 12px;
-  background: var(--color-panel-solid);
-}
-.tc-mode-title { margin: 2px 6px 4px; font-size: 12px; font-weight: 600; color: var(--color-ink-2); }
-.tc-mode-item { display: grid; grid-template-columns: 16px minmax(0, 1fr) 14px; align-items: center; gap: 2px 8px; padding: 7px 8px; border: 0; border-radius: 8px; background: none; font: inherit; text-align: left; color: var(--color-ink-2); cursor: pointer; }
-.tc-mode-item:hover:not(:disabled), .tc-mode-item:focus-visible { background: var(--color-accent-tint); outline: none; }
-.tc-mode-item:disabled { cursor: default; opacity: .55; }
-.tc-mode-item svg { color: var(--color-accent); }
-.tc-mode-name { font-size: 13px; font-weight: 600; color: var(--color-ink); }
-.tc-mode-says { grid-column: 2 / -1; font-size: 12px; line-height: 1.4; color: var(--color-ink-3); }
-.tc-mode-foot { margin: 4px 8px 2px; font-size: 11.5px; line-height: 1.45; color: var(--color-ink-3); }
-/* What one run may spend (ADR 0068): set, it reads like Auto mode on; with no limit, quiet. */
-.tc-mode-chip.mode-spend b { color: var(--color-ink); }
-.tc-spend-menu { display: grid; gap: 6px; padding: 10px; }
-.tc-spend-field { display: inline-flex; align-items: center; gap: 6px; margin: 0 6px; font: 500 13px/1 var(--font-mono); color: var(--color-ink-2); }
-.tc-spend-field .input { width: 7em; font-variant-numeric: tabular-nums; }
-.tc-spend-acts { display: flex; gap: 8px; margin: 2px 6px 0; }
-@media (prefers-reduced-motion: no-preference) {
-  .tc-mode-menu { animation: tc-pop var(--t-quick) var(--ease-out) both; transform-origin: bottom right; }
-}
 
 /*
  * Replying (ADR 0051): Reply under what an agent said, the message being answered above the box
