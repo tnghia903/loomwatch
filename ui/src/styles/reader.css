@@ -126,6 +126,16 @@
 .rd-ask-other .chat-avatar { background-color: var(--color-panel-solid); opacity: .72; transition: opacity var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out); }
 .rd-ask .rd-ask-other:hover, .rd-ask .rd-ask-other:focus-visible { background: none; }
 .rd-ask-other:hover .chat-avatar, .rd-ask-other:focus-visible .chat-avatar { opacity: 1; translate: 0 -2px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--lw-gold-400) 70%, transparent); }
+/* A big team: the rest are counted, and the count opens everyone with what each is for. */
+.rd-ask .rd-ask-more { min-width: 30px; height: 24px; margin-left: 2px; padding: 0 7px; justify-content: center; background: color-mix(in srgb, var(--color-ground) 16%, transparent); color: var(--color-ground); font: 650 11.5px/1 var(--font-sans); font-variant-numeric: tabular-nums; }
+.rd-ask .rd-ask-more[aria-expanded='true'] { background: var(--lw-gold-400); color: var(--lw-ink-950); }
+.rd-ask.listing { flex-wrap: wrap; width: 316px; max-width: calc(100% - 16px); border-radius: 18px; }
+.rd-ask-list { flex: 1 0 100%; display: grid; gap: 1px; max-height: 236px; margin: 4px 0 0; padding: 5px 0 1px; overflow-y: auto; overscroll-behavior: contain; list-style: none; border-top: 1px solid color-mix(in srgb, var(--color-ground) 18%, transparent); scrollbar-color: color-mix(in srgb, var(--color-ground) 30%, transparent) transparent; }
+.rd-ask .rd-ask-list button { display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; row-gap: 1px; align-items: center; width: 100%; height: auto; padding: 6px 10px 6px 6px; border-radius: 12px; text-align: left; white-space: normal; }
+.rd-ask-list .chat-avatar { grid-row: span 2; background-color: var(--color-panel-solid); }
+.rd-ask-who { display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 600 13px/1.3 var(--font-sans); }
+.rd-ask-who i { font: 500 11px/1 var(--font-sans); font-style: normal; color: var(--lw-gold-400); white-space: nowrap; }
+.rd-ask-job { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/1.35 var(--font-sans); color: color-mix(in srgb, var(--color-ground) 68%, transparent); }
 
 /* ---------- The tip, until the first part is asked about ---------- */
 .rd-hint {

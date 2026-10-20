@@ -23,6 +23,8 @@ export interface FileReaderProps {
   onAsk?: (reply: ReplyTo, words: string | undefined, agent: string) => void
   /** The team's agents who can be asked instead of the one who made the file, in the team's order. */
   team?: readonly string[]
+  /** What an agent on the team is for, so a teammate can be chosen by its job. */
+  role?: (id: string) => string
   /** Parts of files asked about in this chat; this file's are lit and get a face in the margin. */
   asked?: readonly AskedPassage[]
   /** The part in the message box now, being asked about. */
@@ -41,6 +43,8 @@ const UPDATED_MS = 2_400
 const BUBBLE_GUESS = { width: 168, height: 40 }
 const NO_PASSAGES: readonly AskedPassage[] = []
 const NO_TEAM: readonly string[] = []
+/** Teammates' faces shown in the bubble beside the one asked; past this the rest are a list away. */
+const FACES_SHOWN = 3
 type Pin = { passage: AskedPassage; top: number }
 
 /**
@@ -53,7 +57,7 @@ type Pin = { passage: AskedPassage; top: number }
  * file is read again whenever it changes on disk, so a part the agent was asked to change is seen
  * changed.
  */
-export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, asked = NO_PASSAGES, asking = null, onShowAsked }: FileReaderProps) {
+export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked = NO_PASSAGES, asking = null, onShowAsked }: FileReaderProps) {
   const { path, from } = file
   const format = readerFormat(path) ?? 'text'
   const words = format !== 'picture' && format !== 'media'
@@ -127,6 +131,18 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, asked = NO_
   const [chosen, setChosen] = useState<{ text: string; agent: string } | null>(null)
   const askee = chosen && marked && chosen.text === marked.text && team.includes(chosen.agent) ? chosen.agent : from
   const others = askee ? team.filter((id) => id !== askee) : NO_TEAM
+  // A small team shows every face. A big one shows the maker (a press back to the default) and the
+  // first of the rest in the team's order; everyone, with what each is for, is a list away.
+  const shownFaces = others.length <= FACES_SHOWN + 1 ? others
+    : [...others.filter((id) => id === from), ...others.filter((id) => id !== from)].slice(0, FACES_SHOWN)
+  const unshown = others.length - shownFaces.length
+  const [listFor, setListFor] = useState<string | null>(null)
+  const listing = Boolean(marked && unshown > 0 && listFor === marked.text)
+  const choose = (agent: string) => {
+    if (!marked) return
+    setChosen({ text: marked.text, agent })
+    setListFor(null)
+  }
 
   // Where the bubble sits over the marked words, in the coordinates of the page's stage it floats on.
   const [size, setSize] = useState(BUBBLE_GUESS)
@@ -135,7 +151,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, asked = NO_
     if (!element) return
     const measured = { width: element.offsetWidth, height: element.offsetHeight }
     if (measured.width && (measured.width !== size.width || measured.height !== size.height)) setSize(measured)
-  }, [marked, size, others.length])
+  }, [marked, size, others.length, listing])
   const [place, setPlace] = useState<ReturnType<typeof bubblePlace> | null>(null)
   useLayoutEffect(() => {
     const box = stage.current?.getBoundingClientRect()
@@ -309,7 +325,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, asked = NO_
           )}
         </div>
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the words you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the words you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>
@@ -317,15 +333,35 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, asked = NO_
             <button type="button" className="rd-ask-quick" onClick={() => ask(EXPLAIN_WORDS)} title={`${name(askee)} explains it in plain words`}>Explain</button>
             {others.length > 0 && (
               <span className="rd-ask-others" role="group" aria-label="Or ask someone else">
-                {others.map((id) => {
+                {shownFaces.map((id) => {
                   const words = id === from ? `Ask ${name(id)}, who made this, instead` : `Ask ${name(id)} instead`
                   return (
-                    <button key={id} type="button" className="rd-ask-other" onClick={() => setChosen({ text: marked.text, agent: id })} aria-label={words} title={words}>
+                    <button key={id} type="button" className="rd-ask-other" onClick={() => choose(id)} aria-label={words} title={words}>
                       <AvatarFace id={id} hue={hue(id)} size={20} fontSize={8} text={initials(name(id))} />
                     </button>
                   )
                 })}
+                {unshown > 0 && (
+                  <button type="button" className="rd-ask-more" onClick={() => setListFor(listing ? null : marked.text)} aria-expanded={listing}
+                    aria-label={`Everyone on the team: ${unshown} more`} title="Everyone on the team">+{unshown}</button>
+                )}
               </span>
+            )}
+            {listing && (
+              <ul className="rd-ask-list" aria-label="Everyone on the team">
+                {others.map((id) => {
+                  const job = role ? roleLine(role(id)) : ''
+                  return (
+                    <li key={id}>
+                      <button type="button" onClick={() => choose(id)} aria-label={`Ask ${name(id)}${id === from ? ', who made this,' : ''} instead${job ? `: ${job}` : ''}`}>
+                        <AvatarFace id={id} hue={hue(id)} size={22} fontSize={8} text={initials(name(id))} />
+                        <span className="rd-ask-who"><b>{name(id)}</b>{id === from && <i>made this</i>}</span>
+                        {job && <span className="rd-ask-job" title={job}>{job}</span>}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
             )}
           </div>
         )}
@@ -340,6 +376,13 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, asked = NO_
     </article>
     </FileOriginContext.Provider>
   )
+}
+
+/** An agent's job in a line, as the team list shows it: the first line of its role that is not a heading. */
+function roleLine(role: string): string {
+  const lines = role.split('\n').map((part) => part.trim()).filter(Boolean)
+  const line = (lines.find((part) => !part.startsWith('#')) ?? lines[0] ?? '').replace(/^[#>*\-\s]+/, '')
+  return line.length > 120 ? `${line.slice(0, 119).trimEnd()}…` : line
 }
 
 /** What was asked, ending as a sentence does: "why?" stays, "explain it" gets its stop. */

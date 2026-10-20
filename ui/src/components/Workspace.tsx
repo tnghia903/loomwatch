@@ -1608,6 +1608,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [doc.nodes, stepById])
   // Anyone on the team can be asked about a part of a file, as anyone can be @mentioned.
   const askable = useMemo(() => chatAgents.filter((agent) => !agent.operator).map((agent) => agent.id), [chatAgents])
+  const agentRoles = useMemo(() => new Map(doc.nodes.map((node) => [node.id, node.data.agent.role ?? ''])), [doc.nodes])
   const chatTeam = useMemo<TeamView>(() => {
     const members = chatAgents.filter((agent) => !agent.operator)
     return {
@@ -2580,7 +2581,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               </header>
               <div className="tc-details-body" id="tc-pane-body" role={paneDocument || reading ? 'tabpanel' : undefined} aria-labelledby={paneDocument || reading ? `tc-pane-${shownTab}` : undefined}>
                 {shownTab === 'file' && reading ? (
-                  <FileReader key={reading.path} file={reading} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable}
+                  <FileReader key={reading.path} file={reading} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable} role={(id) => agentRoles.get(id) ?? ''}
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} onShowAsked={showAsked} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>
