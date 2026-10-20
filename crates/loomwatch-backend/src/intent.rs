@@ -97,6 +97,7 @@ pub(crate) async fn read(
         READER_PROMPT,
         model,
         &prompt,
+        &[],
     );
     match tokio::time::timeout(READ_LIMIT, turn).await {
         Ok(Some(reply)) => talkers(&reply, addressed),
@@ -121,6 +122,7 @@ pub(crate) async fn reply(
     message: &str,
     context: &Context,
     own: Option<&OwnWords>,
+    lessons: &[String],
 ) -> Option<String> {
     let agent = addressed.speaker;
     let instructions = own_instructions(addressed.team, agent);
@@ -133,6 +135,7 @@ pub(crate) async fn reply(
         &instructions,
         &model,
         &prompt,
+        lessons,
     );
     let answer = tokio::time::timeout(REPLY_LIMIT, turn).await.ok()??;
     let answer = answer.trim();
@@ -150,6 +153,7 @@ async fn one_turn(
     instructions: &str,
     model: &str,
     prompt: &str,
+    lessons: &[String],
 ) -> Option<String> {
     let workspace = match crate::control::prepare_workspace(teams_root) {
         Ok(workspace) => workspace,
@@ -158,7 +162,10 @@ async fn one_turn(
             return None;
         }
     };
-    let mut process = AgentRun::spawn(&crate::control::ask_spec(workspace))
+    // An agent answering as itself keeps to what it learned (ADR 0078); the reader learned nothing.
+    let mut spec = crate::control::ask_spec(workspace);
+    spec.lessons = lessons.to_vec();
+    let mut process = AgentRun::spawn(&spec)
         .ok()?
         .without_tools()
         .with_instructions(instructions);
@@ -584,7 +591,8 @@ mod tests {
 
     /// **One turn reads, and only TALK holds the workflow back; each agent answers on its own
     /// model.** "WORK", or a turn that fails, starts the workflow; PASS or a failed answer is
-    /// silence from that agent.
+    /// silence from that agent. An agent answering as itself is given what it learned (ADR 0078).
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn a_hello_is_read_once_and_each_agent_answers_on_its_own_model() -> anyhow::Result<()> {
         let folder =
@@ -663,12 +671,20 @@ mod tests {
             "hi @team",
             &context,
             None,
+            &["When greeting, say what you work on.".to_owned()],
         )
         .await;
         assert_eq!(said.as_deref(), Some("Hi! I write enterprise RAG briefs."));
         let asked = researcher.requests();
         assert_eq!(asked.len(), 1);
         assert!(asked[0].prompt().contains("Fact checker is reading it too"));
+        // An agent answering as itself keeps to what it learned (ADR 0078).
+        assert!(matches!(
+            asked[0].messages.first(),
+            Some(crate::agent::Message::System { content })
+                if content.contains("## What you have learned")
+                    && content.contains("- When greeting, say what you work on.\n")
+        ));
         let as_checker = Addressed {
             team: &team,
             speaker: &team.agents[1],
@@ -681,6 +697,7 @@ mod tests {
             "hi @team",
             &context,
             None,
+            &[],
         )
         .await;
         assert_eq!(passed, None, "PASS is silence");

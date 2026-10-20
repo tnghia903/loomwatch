@@ -2196,6 +2196,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
     let mut replies = tokio::task::JoinSet::new();
     for id in answers.waiting.clone() {
         let answering = answering.clone();
+        let team_path = message.team_path.clone();
         let own = remembered
             .get(&id)
             .zip(newest_work.as_ref())
@@ -2212,6 +2213,19 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
                 speaker,
                 whole_team: answering.whole_team,
             };
+            let lessons = match &answering.archive {
+                Some(archive) => crate::lessons::kept(
+                    archive,
+                    &answering.team,
+                    &answering.teams_root.join(&team_path),
+                    speaker,
+                )
+                .await
+                .into_iter()
+                .map(|lesson| lesson.text)
+                .collect(),
+                None => Vec::new(),
+            };
             let said = crate::intent::reply(
                 answering.archive.as_ref(),
                 &answering.teams_root,
@@ -2219,6 +2233,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
                 &answering.task,
                 &answering.context,
                 own.as_ref(),
+                &lessons,
             )
             .await;
             (id, said)

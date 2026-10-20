@@ -222,25 +222,40 @@ pub(crate) async fn supply(
     let Some(run_id) = run_id else {
         return Vec::new();
     };
-    if !agent.learns || agent.is_operator() {
-        return Vec::new();
-    }
-    let lessons = archive.lessons();
-    let scope = scope_of(team, team_path, agent);
-    let given = match lessons.active(&scope).await {
-        Ok(given) => given,
-        Err(error) => {
-            eprintln!("loomwatchd: {} is given no lessons: {error}", agent.id);
-            return Vec::new();
-        }
-    };
-    if let Err(error) = lessons.give(&given, run_id, &agent.id).await {
+    let given = kept(archive, team, team_path, agent).await;
+    if let Err(error) = archive.lessons().give(&given, run_id, &agent.id).await {
         eprintln!(
             "loomwatchd: could not record the lessons {} was given: {error}",
             agent.id
         );
     }
     given.into_iter().map(|lesson| lesson.text).collect()
+}
+
+/// The lessons `agent` keeps, oldest first: none for an agent that doesn't learn or an operator
+/// node, and none, said in the log, when the store can't be read. For an answer outside any run,
+/// such as an agent answering a team note itself ([`crate::intent::reply`]), which nothing records
+/// as given.
+pub(crate) async fn kept(
+    archive: &crate::archive::EventArchive,
+    team: &TeamConfig,
+    team_path: &Path,
+    agent: &AgentConfig,
+) -> Vec<Lesson> {
+    if !agent.learns || agent.is_operator() {
+        return Vec::new();
+    }
+    match archive
+        .lessons()
+        .active(&scope_of(team, team_path, agent))
+        .await
+    {
+        Ok(kept) => kept,
+        Err(error) => {
+            eprintln!("loomwatchd: {} is given no lessons: {error}", agent.id);
+            Vec::new()
+        }
+    }
 }
 
 /// The lessons store, on the archive's database.
