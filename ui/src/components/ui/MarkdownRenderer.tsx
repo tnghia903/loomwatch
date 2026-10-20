@@ -6,9 +6,9 @@ import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
 
 /**
- * The real Markdown renderer. Loaded on demand by [`Markdown`](./Markdown.tsx): the unified /
- * micromark stack is the largest dependency in the app and nothing needs it until a run has an
- * answer to show.
+ * The real Markdown renderer, shown by [`Markdown`](./Markdown.tsx). Its own download
+ * (markdownCode.ts), fetched beside the app's first draw: the unified / micromark stack is the
+ * largest dependency in the app, and the page draws before it is in.
  *
  * Raw HTML is skipped and images are never fetched — a report is untrusted model output, and an
  * embedded `<img src>` is a tracking pixel the operator never agreed to load.

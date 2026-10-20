@@ -37,7 +37,7 @@ const SCENE_URL = '/agent/workbench.glb'
  * button for its part and follows its object every frame, so the words stay on the things they
  * name. The words on the nameplate, the job sheet and the laptop's lid are page text too, laid
  * over their faces: painted into the picture they blurred, because the bench is drawn small.
- * Loaded only when Build by hand opens, because it brings three.js with it.
+ * Its own download, because it brings three.js with it: fetched as an agent's page opens (benchFigure.ts).
  */
 export default function AgentFigure({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFail }: AgentFigureProps) {
   const stage = useRef<HTMLDivElement>(null)
@@ -58,8 +58,10 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
     if (!canvas || !box) return
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
     // The words on each face, and each label, follow their object; a label is kept inside the
-    // stage so none runs off its edge.
+    // stage so none runs off its edge. Every label's width is read before anything moves: a read
+    // after a move would make the browser lay the page out again, for each label, every frame.
     const place = (anchors: BenchAnchors, quads: BenchFaces) => {
+      const wides = new Map([...tags.current.values()].map((element) => [element, (element.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0]))
       for (const [face, element] of faces.current) placeFace(element, quads[face])
       // The thought bubble rides above its head, its cloud to the right, or to the left near the edge.
       const thought = bubble.current
@@ -70,7 +72,7 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
       }
       for (const [anchor, element] of tags.current) {
         const at = anchors[anchor]
-        const wide = (element.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0
+        const wide = wides.get(element) ?? 0
         const right = element.classList.contains('right')
         const x = !wide || !width.current ? at.x
           : right ? Math.min(at.x, width.current - wide - 14)

@@ -288,6 +288,13 @@ const UP = new Vector3(0, 1, 0)
 /** How far above the top of its head (and what it wears there) its thought bubble starts. */
 const THOUGHT_GAP = 0.06
 /**
+ * At rest it only breathes and looks about slowly, so it draws about 30 frames a second, not every
+ * frame the screen shows; the moods it rests in, and how long it settles first after anything moves.
+ */
+const RESTING_FRAME_MS = 1000 / 30 - 4
+const RESTING_MOODS: ReadonlySet<FigureMood> = new Set(['still', 'done', 'failed', 'stopped'])
+const SETTLE_S = 1
+/**
  * Where helpers sit (ADR 0079): along the back of the bench top, either side of the figure's
  * laptop, nearest first, clear of the job sheet, the tray and your dish. Each is where its laptop
  * goes; its figure sits behind it, as the bench's figure sits behind its own. A helper past the
@@ -626,6 +633,8 @@ export class WorkbenchScene {
   private flicker = 0
   private screenLight: PointLight | null = null
   private moodSince = 0
+  /** When something last moved besides its breathing (resting). */
+  private movedAt = 0
   /** What it is at while it works, and while it uses a tool its screen's flashes as pages and results come up. */
   private readonly acting: Acting = { busy: null, flash: 0, nextFlash: 0 }
   /** The parts of its figure its pose moves, once the model is in. */
@@ -823,6 +832,7 @@ export class WorkbenchScene {
 
   pointerMove(x: number, y: number) {
     this.pointer = new Vector2(x, y)
+    this.movedAt = this.now
     if (this.drag) {
       if (!this.drag.moved && Math.hypot(x - this.drag.x, y - this.drag.y) > 5) {
         this.drag.moved = true
@@ -879,6 +889,7 @@ export class WorkbenchScene {
 
   pointerLeave() {
     this.pointer = null
+    this.movedAt = this.now
     this.hovered = null
     this.hoveredKey = null
     this.callbacks.onHover(null, false)
@@ -1267,11 +1278,26 @@ export class WorkbenchScene {
   private tick = (time: number) => {
     if (!this.running) return
     this.frameId = requestAnimationFrame(this.tick)
+    if (this.loaded && time - this.last < RESTING_FRAME_MS && this.resting()) return
     const dt = Math.min(0.05, Math.max(0, (time - this.last) / 1000))
     this.last = time
     this.now += dt
     if (this.loaded) this.update(dt)
     this.frame()
+  }
+
+  /**
+   * Nothing moves but its breathing and slow looks about (RESTING_FRAME_MS): it rests in its mood,
+   * and for a second there has been no action, key or card moving, trip, helper, flash, or pointer
+   * moving over it (pointerMove).
+   */
+  private resting() {
+    const view = this.view
+    const moving = !view || !RESTING_MOODS.has(view.mood) || view.dropping || this.actions.length > 0 || this.tweens.length > 0
+      || this.trip !== null || this.errands.length > 0 || this.seats.size > 0 || this.drag !== null || this.press !== null
+      || this.flicker > 0 || this.acting.flash > 0
+    if (moving) this.movedAt = this.now
+    return this.now - Math.max(this.movedAt, this.moodSince) >= SETTLE_S
   }
 
   private frame() {

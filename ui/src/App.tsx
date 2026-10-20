@@ -1,7 +1,13 @@
 import { ReactFlowProvider } from '@xyflow/react'
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 
+import { AgentsPage } from './components/agents/AgentsPage'
+import Connections from './components/Connections'
 import { Feedback } from './components/feedback/Feedback'
+import { QuestsPage } from './components/quests/QuestsPage'
+import { SkillsPage } from './components/skills/SkillsPage'
+import { UsagePage } from './components/usage/UsagePage'
+import AboutYouPage from './components/you/AboutYouPage'
 import { Updates } from './components/updates/Updates'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
@@ -11,13 +17,6 @@ import { connectedSources } from './lib/ai/sources'
 import { fetchCapabilities, SKILLS_CHANGED_EVENT, type CapabilityInventory } from './lib/library/client'
 import { useNeedsYou } from './lib/story/useNeedsYou'
 import { useTheme } from './lib/theme'
-
-const Connections = lazy(() => import('./components/Connections'))
-const AboutYouPage = lazy(() => import('./components/you/AboutYouPage'))
-const AgentsPage = lazy(() => import('./components/agents/AgentsPage').then((module) => ({ default: module.AgentsPage })))
-const QuestsPage = lazy(() => import('./components/quests/QuestsPage').then((module) => ({ default: module.QuestsPage })))
-const SkillsPage = lazy(() => import('./components/skills/SkillsPage').then((module) => ({ default: module.SkillsPage })))
-const UsagePage = lazy(() => import('./components/usage/UsagePage').then((module) => ({ default: module.UsagePage })))
 
 function useCapabilities() {
   const [inventory, setInventory] = useState<CapabilityInventory>({ skills: [], sources: [] })
