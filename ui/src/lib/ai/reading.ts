@@ -130,17 +130,19 @@ export interface SetupReadingState {
 /**
  * The reading of `agent`'s whole setup, asked for once `active` (its picker is open), reading is
  * on, a key is set and the free reading can't place the agent; else null and nothing is asked.
+ * One already read is given while not active too, so a closed picker's button names the same
+ * suggestion as its list.
  */
 export function useSetupReading(agent: SuggestedAgent | undefined, active: boolean): SetupReadingState {
   const status = useReadingStatus()
   const key = useKeyStatus()
-  const wanted = Boolean(active && agent && status?.enabled && key?.connected && needsReading(agent))
+  const wanted = Boolean(agent && status?.enabled && key?.connected && needsReading(agent))
   const setup = wanted && agent ? setupOf(agent) : null
   const id = setup ? JSON.stringify(setup) : ''
   const [answer, setAnswer] = useState<{ id: string; reading: SetupReading | null; problem: string }>({ id: '', reading: null, problem: '' })
 
   useEffect(() => {
-    if (!id || !setup || read.has(id)) return
+    if (!active || !id || !setup || read.has(id)) return
     let live = true
     readOnce(id, setup).then(
       (found) => { if (live) setAnswer({ id, reading: found, problem: '' }) },
@@ -154,11 +156,12 @@ export function useSetupReading(agent: SuggestedAgent | undefined, active: boole
     return () => { live = false }
     // `setup` is `id` parsed; the id alone says when it changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
+  }, [id, active])
 
   if (!id) return { reading: null, pending: false, problem: '' }
   const kept = read.get(id)
   if (kept) return { reading: kept, pending: false, problem: '' }
+  if (!active) return { reading: null, pending: false, problem: '' }
   if (answer.id === id) return { reading: answer.reading, pending: false, problem: answer.problem }
   return { reading: null, pending: true, problem: '' }
 }

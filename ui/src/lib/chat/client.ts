@@ -99,8 +99,8 @@ export interface ReplyTo {
 export type ChatItem =
   /** A piece of work: a run, the message that started it, and the notes you sent into it. */
   | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[] }
-  /** A team note: it started nothing, and the next work reads it. */
-  | { kind: 'note'; message: ChatMessage }
+  /** A team note: it started nothing, and the next work reads it. With your reactions to it and to its replies. */
+  | { kind: 'note'; message: ChatMessage; reactions?: Reaction[] }
 
 export interface ChatPage {
   teamKey: string
@@ -137,6 +137,9 @@ export interface SendResult {
 
 /** Every item the key identifies, so a refreshed page can replace what an older one showed. */
 export const itemKey = (item: ChatItem): string => (item.kind === 'work' ? `run:${item.run.runId}` : `note:${item.message.id}`)
+
+/** What an item's reactions are kept on: its run, or the team note itself. */
+export const itemAnchor = (item: ChatItem): string => (item.kind === 'work' ? item.run.runId : item.message.id)
 
 /** When an item happened, for ordering pages and asking for the next one. */
 export const itemAt = (item: ChatItem): string => (item.kind === 'work' ? item.run.createdAt : item.message.createdAt)
@@ -192,14 +195,15 @@ export async function continueWithTeam(runId: string, expectedRevision?: string 
 }
 
 /**
- * Put one face on something an agent said in a piece of work, or take yours off with `null`. A line
- * of talk goes with what it was, for the next work's conversation; an answer is read from its run.
+ * Put one face on something said in a piece of work or on a team note (`anchor`: the run, or the
+ * note), or take yours off with `null`. A line of talk goes with what it was, for the next work's
+ * conversation; anything else is read from the chat.
  */
-export async function reactTo(teamPath: string, runId: string, target: string, face: Face | null, about?: ReactionAbout): Promise<{ anchor: string; reactions: Reaction[] }> {
+export async function reactTo(teamPath: string, anchor: string, target: string, face: Face | null, about?: ReactionAbout): Promise<{ anchor: string; reactions: Reaction[] }> {
   const response = await daemonFetch('/api/chat/reactions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ teamPath, anchor: runId, target, face, ...(about ? { about } : {}) }),
+    body: JSON.stringify({ teamPath, anchor, target, face, ...(about ? { about } : {}) }),
     cache: 'no-store',
   })
   return readRun<{ anchor: string; reactions: Reaction[] }>(response)

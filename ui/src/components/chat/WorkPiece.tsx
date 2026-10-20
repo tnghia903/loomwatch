@@ -92,7 +92,7 @@ interface WorkPieceProps {
   onReply?: (reply: ReplyTo) => void
   /** Show what one of your replies replied to, where it was said; absent when the chat cannot. */
   onShowReplied?: (reply: ReplyTo) => (() => void) | undefined
-  /** Put your face on something an agent said in this piece, or take it off. Absent, only the agents' faces show. */
+  /** Put your face on something said in this piece, or take it off. Absent, only the agents' faces show. */
   onReact?: (runId: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>
 }
 
@@ -168,7 +168,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
 
   const took_ = took(run.startedAt ?? run.createdAt, run.finishedAt)
   const workers = workersOf(run, team)
-  const working = (record.working ?? []).map(name)
+  const working = record.working ?? []
   const waiting = live ? record.waitingOn ?? null : null
   const responder = session.projection.agents.find((agent) => agent.id === run.responder)
   // Work a check step checks is not the answer until the checks are done (ADR 0062): it may yet
@@ -224,22 +224,19 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // A pass is named on the line; plain work keeps saying who is working.
   const pass = live && baton && baton.kind !== 'working' && baton.kind !== 'you' ? baton : null
   const passLine = pass ? batonWords(pass, name).line : null
-  // Reactions (lib/chat/reactions.ts). Yours go on what the agents said — their answer and their
-  // talk — and tell the team next time; your own words carry only the agents' faces, which are
-  // receipts read from the record: whoever took the work up looks up at what it was handed.
+  // Reactions (lib/chat/reactions.ts). Yours go on anything said — the agents' answer and talk,
+  // and your own words — and tell the team next time. The agents' faces are receipts read from the
+  // record: whoever took the work up looks up at what it was handed.
   const checks = useMemo(() => checkReactions(session.projection.messages), [session.projection.messages])
-  const receipts = (agents: readonly AgentReaction[], about: string, mine = true) => (said: ReactNode) => (
-    <Reactions yours={null} agents={agents} about={about} name={name} hue={hue} mine={mine}>{said}</Reactions>
-  )
-  const reactOn = (target: string, about: string, agents: readonly AgentReaction[], what?: ReactionAbout) => (said: ReactNode) => (
-    <Reactions yours={yoursOn(item.reactions, target)} agents={agents} about={about} name={name} hue={hue} onReact={onReact && ((face) => onReact(run.runId, target, face, what))}>{said}</Reactions>
+  const reactOn = (target: string, about: string, agents: readonly AgentReaction[], { what, mine = false, own = mine }: { what?: ReactionAbout; mine?: boolean; own?: boolean } = {}) => (said: ReactNode) => (
+    <Reactions yours={yoursOn(item.reactions, target)} agents={agents} about={about} name={name} hue={hue} mine={mine} own={own} onReact={onReact && ((face) => onReact(run.runId, target, face, what))}>{said}</Reactions>
   )
   const isYou = (id: string | undefined) => id === OPERATOR_ID || (id !== undefined && team.operators.has(id))
   const talkReacts = (bubble: Bubble, said: ReactNode) => {
     const speaker = bubble.from[0]
     const agents = talkReactions(bubble, team.operators, checks)
-    if (isYou(speaker) || !speaker) return receipts(agents, `your ${bubble.word}`, isYou(speaker))(said)
-    return reactOn(targets.talk(bubble), `${name(speaker)}'s ${bubble.word}`, agents, { agent: speaker, what: bubble.word, quote: bubble.text })(said)
+    if (isYou(speaker) || !speaker) return reactOn(targets.mine(bubble), `your ${bubble.word}`, agents, { what: { agent: null, what: bubble.word, quote: bubble.text }, mine: isYou(speaker), own: true })(said)
+    return reactOn(targets.talk(bubble), `${name(speaker)}'s ${bubble.word}`, agents, { what: { agent: speaker, what: bubble.word, quote: bubble.text } })(said)
   }
   // Your request carries who took it up while the work runs, and once it is done, everyone who
   // worked on it and how long it took, as their faces rather than a line of words.
@@ -290,8 +287,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   return (
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
-      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={receipts(onRequest, run.trigger === 'schedule' ? "the schedule's request" : 'your request', run.trigger !== 'schedule')} />
-      {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} onShowReplied={onShowReplied} reactions={receipts(note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], `your note to ${name(note.agentId ?? '')}`)} />)}
+      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
+      {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], { mine: true })} />)}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
         {/* Done, the faces on your request say who worked on it; the line says only what is still happening. */}
@@ -308,9 +305,9 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
             : stops.length > 0
               ? <><b className="tc-wait">Waiting for you</b> · {stopSentence(stops[0]).replace(/\.$/, '')}</>
             : passLine
-              ? <>{passLine.map((part, index) => (part.name ? <b key={index}>{part.text}</b> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              ? <>{passLine.map((part, index) => (part.agent ? <Named key={index} hue={hue(part.agent)}>{part.text}</Named> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
             : working.length > 0
-              ? <><b>{listNames(working)}</b> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              ? <><span>{working.map((id, index) => <Fragment key={id}>{index === 0 ? '' : index === working.length - 1 ? ' and ' : ', '}<Named hue={hue(id)}>{name(id)}</Named></Fragment>)}</span> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
               : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'}
         </Swap>}
         <Spool spend={record.spend} stops={stops} name={name} hue={hue} />
@@ -664,7 +661,7 @@ function Answer({ tour, run, answer, touched, streaming, name, hue, open, flash 
 
 /**
  * The team on a piece of work as a thread on a loom: each agent a knot, the thread gold as far as
- * the work has come, and a bead in the gap after whoever has it now — blue while it works, gold
+ * the work has come, and a bead in the gap after whoever has it now — green while it works, gold
  * while it waits on you. When the work passes on, the gold runs to the next agent and the bead
  * slides after it.
  */
@@ -672,12 +669,17 @@ function Weft({ workers, at, live, waiting, status, children }: { workers: reado
   const many = workers.length > 1
   const fill = many ? Math.min(1, at / (workers.length - 1)) : 0
   return (
-    <span className={`tc-weft${live ? ' live' : ''}${waiting ? ' waiting' : ''} st-${status}`} aria-hidden="true" style={{ '--weft-at': at, '--weft-fill': fill } as CSSProperties}>
+    <span className={`tc-weft${many ? '' : ' one'}${live ? ' live' : ''}${waiting ? ' waiting' : ''} st-${status}`} aria-hidden="true" style={{ '--weft-at': at, '--weft-fill': fill } as CSSProperties}>
       {many && <><i className="tc-weft-track" /><i className="tc-weft-fill" /></>}
       {children}
       {live && many && at < workers.length - 1 && <i className="tc-weft-bead" />}
     </span>
   )
+}
+
+/** An agent named on the piece's line: in its own colour, as its name is on its messages. */
+function Named({ hue, children }: { hue: number; children: ReactNode }) {
+  return <b className={`chat-name hue-${hue}`}>{children}</b>
 }
 
 /** How far along the thread the work has come: the agent that has it now, or the end once done. */

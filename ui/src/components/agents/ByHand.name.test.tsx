@@ -22,13 +22,14 @@ const bench = (start: Partial<AgentDraft>, hideDoes = false) => render(
 )
 
 describe('By hand: the Name block', () => {
-  it('says the name once, in its box', () => {
+  it('says the name once, in its box, labelled as for one of My agents', () => {
     bench({ name: 'RAG researcher' }, true)
     const block = screen.getByRole('region', { name: 'Name' })
     expect(within(block).getByRole('textbox', { name: 'Name' })).toHaveValue('RAG researcher')
     expect(within(block).queryByText(/RAG researcher/)).not.toBeInTheDocument()
-    // Its one box sits under the block's own "Name": the box keeps the word, but not on screen.
-    expect(within(block).getByText('Name', { selector: 'label > span' })).toHaveClass('visually-hidden')
+    // A team's own agent has no "What it does", but its Name box reads the same as one of My agents'.
+    expect(within(block).queryByRole('textbox', { name: /What it does/ })).not.toBeInTheDocument()
+    expect(within(block).queryByText('Name', { selector: '.visually-hidden' })).not.toBeInTheDocument()
   })
 
   it('says what it does once too, in its own box', () => {

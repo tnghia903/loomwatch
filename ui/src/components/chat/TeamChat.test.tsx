@@ -504,6 +504,18 @@ describe('who has the work', () => {
     expect(pill()?.querySelector('.chat-dots')).toBeNull()
   })
 
+  it('names each agent at work in its own colour, as its messages do, with green dots for the work', async () => {
+    fold()
+    page = working({ working: ['researcher', 'writer'] })
+    renderChat()
+    const line = await within(screen.getByRole('log')).findByText(/are working/)
+    expect(line).toHaveTextContent('Researcher and Writer are working')
+    expect([...line.querySelectorAll('b')].map((name) => [name.textContent, name.className])).toEqual([['Researcher', 'chat-name hue-1'], ['Writer', 'chat-name hue-2']])
+    expect(line.querySelector('.chat-dots')).not.toBeNull()
+    // Two agents are a thread, not one knot in the gutter.
+    expect(document.querySelector('.tc-weft')).not.toHaveClass('one')
+  })
+
   it('flashes nothing between two agents, and brings the count back once the work is done', async () => {
     fold()
     page = working({ working: [] })
@@ -576,6 +588,7 @@ describe('the piece’s line and the header’s pill', () => {
     asking()
     renderChat()
     await waitFor(() => expect(line()?.querySelector('.tc-talk-line')).toHaveTextContent('Writer is asking Researcher'))
+    expect([...line()!.querySelectorAll('.tc-talk-line b')].map((name) => name.className)).toEqual(['chat-name hue-2', 'chat-name hue-1'])
     scrollLine(true)
     expect(pill()).toBeNull()
     // Scrolled away: the line sets off from the chat's edge, and the pill waits hidden until it lands.
@@ -825,29 +838,69 @@ describe('reactions', () => {
     expect(screen.getByRole('button', { name: 'Not sure: you. The team looks at it again. Take yours off' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('reacts only to what the agents said: your own words carry only their faces', async () => {
+  it('reacts to anything said: your team note, your request, your note in the work, and the agents’ words', async () => {
     page = [
       { kind: 'note', message: message({ id: 'n-1', route: 'team_note', runId: null, text: 'we only cover listed companies', createdAt: '2026-10-06T01:00:00.000Z' }) },
       { kind: 'work', run: run({}), request: message({}), notes: [message({ id: 'n-2', route: 'note', agentId: 'writer', text: 'keep it short', deliveredAt: '2026-10-06T02:02:00.000Z' })] },
     ]
     renderChat()
     expect(await screen.findByRole('button', { name: "React to Writer's answer" })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Writer picked this up' })).toBeDisabled()
-    expect(screen.queryByRole('button', { name: /React to your/ })).not.toBeInTheDocument()
+    for (const yours of ['React to your note', 'React to your request', 'React to your note to Writer']) {
+      expect(screen.getByRole('button', { name: yours })).toBeInTheDocument()
+    }
+    // The agents' receipts stay theirs: a face only they put on is not yours to pick from the chip.
+    expect(screen.getByRole('button', { name: 'Researcher and Writer worked on this · 4 min' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Writer picked this up. Add yours' })).toBeEnabled()
   })
 
-  it('puts no React button on your own answer in the agents\u2019 talk, only the face of the agent it reached', async () => {
+  it('reacts to your own answer in the agents’ talk, and says what a face means on your own words', async () => {
     said.messages = [{
       id: 'q-1', kind: 'question', from: 'writer', handedBy: null, to: 'operator', text: 'Which region?', context: null,
       eventId: 'e1', evidenceId: null, seq: 1, ts: '2026-10-06T02:02:00.000Z', offsetMs: 120_000, state: 'answered', error: null, carried: false,
       reply: { from: 'operator', text: 'Europe only', eventId: 'e2', seq: 2, ts: '2026-10-06T02:03:00.000Z', offsetMs: 180_000, source: null, sentBackTo: null },
     }]
     page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    stores()
     renderChat()
     const talk = await screen.findByRole('region', { name: 'What the agents said' })
     expect(within(talk).getByRole('button', { name: "React to Writer's question" })).toBeInTheDocument()
-    expect(within(talk).getByRole('button', { name: 'Writer picked this up' })).toBeDisabled()
-    expect(within(talk).queryByRole('button', { name: /React to your/ })).not.toBeInTheDocument()
+    expect(within(talk).getByRole('button', { name: 'Writer picked this up. Add yours' })).toBeEnabled()
+    fireEvent.click(within(talk).getByRole('button', { name: 'React to your answer' }))
+    const tray = screen.getByRole('toolbar', { name: 'Pick a reaction' })
+    expect(within(tray).getByRole('button', { name: 'Wrong' })).toHaveAttribute('aria-description', 'You take it back')
+    fireEvent.pointerEnter(within(tray).getByRole('button', { name: 'Not sure' }))
+    expect(tray).toHaveTextContent('Not sure · You’re having second thoughts')
+    fireEvent.click(within(tray).getByRole('button', { name: 'Not sure' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({
+      url: '/api/chat/reactions',
+      body: { anchor: 'run-1', target: 'mine:q-1:reply', face: 'hmm', about: { agent: null, what: 'answer', quote: 'Europe only' } },
+    }))
+    expect(within(talk).getByRole('button', { name: 'Not sure: you. You’re having second thoughts. Take yours off' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('reacts to a message the agents answered and to each answer, kept on the note across a reload', async () => {
+    const hello = message({
+      id: 'n-1', route: 'team_note', runId: null, text: '@team hi team, I am Colin', createdAt: '2026-10-06T01:00:00.000Z',
+      answers: { waiting: [], said: [{ from: 'researcher', text: 'Hi Colin, nice to meet you!', at: '2026-10-06T01:00:05.000Z' }, { from: 'writer', text: 'Hello Colin!', at: '2026-10-06T01:00:06.000Z' }] },
+    })
+    page = [{ kind: 'note', message: hello, reactions: [{ target: 'reply:writer', face: 'love', at: '2026-10-06T01:01:00.000Z' }] }]
+    answer = (_url, body) => {
+      const { target, face } = body as { target: string; face: string | null }
+      return new Response(JSON.stringify({ anchor: 'n-1', reactions: [{ target: 'reply:writer', face: 'love', at: '2026-10-06T01:01:00.000Z' }, ...(face ? [{ target, face, at: '2026-10-06T01:02:00.000Z' }] : [])] }), { status: 200 })
+    }
+    renderChat()
+    // What the page read says shows on the answer it was on.
+    expect(await screen.findByRole('button', { name: 'Love it: you. Exactly right. The team keeps to it. Take yours off' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: "React to Researcher's reply" }))
+    fireEvent.click(screen.getByRole('button', { name: 'Good' }))
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/reactions', body: { teamPath: 'news.yaml', anchor: 'n-1', target: 'reply:researcher', face: 'glad' } }))
+    expect(await screen.findByRole('button', { name: 'Good: you. The team keeps doing this. Take yours off' })).toBeInTheDocument()
+    // Your own message, on the right, says what a face means on your words.
+    fireEvent.click(screen.getByRole('button', { name: 'React to your message' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Wrong' }))
+    await waitFor(() => expect(posted[1]).toMatchObject({ body: { anchor: 'n-1', target: 'note:n-1', face: 'off' } }))
+    const yours = await screen.findByRole('button', { name: 'Wrong: you. You take it back. Take yours off' })
+    expect(yours.closest('.tc-reactable')).toHaveClass('mine')
   })
 
   it('opens a tray that says what each reaction tells the team, keeps the one you pick, and takes it off again', async () => {
@@ -935,6 +988,16 @@ describe('one agent’s own chat', () => {
     fireEvent.keyDown(soloBox(), { key: 'Enter' })
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { to: { kind: 'agent', agent: 'ada' } } }))
     expect(props.prepare).not.toHaveBeenCalled()
+  })
+
+  it('says it is working in its own colour, its face one knot in the gutter', async () => {
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] }), request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
+    renderSolo()
+    const line = await within(screen.getByRole('log')).findByText(/is working/)
+    expect(line).toHaveTextContent('Ada is working')
+    expect(line.querySelector('b')).toHaveClass('chat-name', 'hue-3')
+    expect(document.querySelector('.tc-weft')).toHaveClass('one')
+    expect(document.querySelector('.tc-weft .chat-avatar')).toHaveClass('hue-3', 'working')
   })
 
   it('reports the newest piece’s run, for the figure at the bench', async () => {

@@ -4,7 +4,7 @@ import { bubbles, converse, fold, type Party } from '../story/conversation'
 import { APPROVAL_TEXT } from '../story/needsYou'
 import type { CheckItemResult } from '../story/checks'
 import type { TeamMessage } from '../watch/messages'
-import { checkReactions, chipsOf, chipWords, talkReactions, yoursOn, type AgentReaction } from './reactions'
+import { checkReactions, chipsOf, chipWords, faceTells, PALETTE, talkReactions, targets, yoursOn, type AgentReaction } from './reactions'
 
 const T0 = Date.parse('2026-10-19T04:00:00.000Z')
 const at = (s: number) => new Date(T0 + s * 1000).toISOString()
@@ -108,5 +108,21 @@ describe('chips', () => {
     expect(yoursOn(reactions, 'talk:h1:said')).toBe('hmm')
     expect(yoursOn(reactions, 'talk:h2:said')).toBeNull()
     expect(yoursOn(undefined, 'answer')).toBeNull()
+  })
+})
+
+describe('what your face tells the team', () => {
+  it('says one thing of what an agent said and another of your own words', () => {
+    expect(faceTells('off')).toBe('The team won’t build on it')
+    expect(faceTells('off', true)).toBe('You take it back')
+    expect(faceTells('glad', true)).toBe('You stand by it')
+    // A face only the agents put on tells the team nothing of yours.
+    expect(faceTells('done', true)).toBeNull()
+    expect(PALETTE.every((entry) => entry.tells && entry.yours)).toBe(true)
+  })
+
+  it('names everything said, so the daemon can tell your words from the agents\u2019', () => {
+    expect([targets.answer, targets.talk({ key: 'h-1:said' }), targets.request, targets.note('n-1'), targets.mine({ key: 'q-1:reply' }), targets.reply('writer')])
+      .toEqual(['answer', 'talk:h-1:said', 'request', 'note:n-1', 'mine:q-1:reply', 'reply:writer'])
   })
 })

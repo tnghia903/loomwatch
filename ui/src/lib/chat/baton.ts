@@ -128,8 +128,8 @@ export function sameBaton(left: Baton | null, right: Baton | null): boolean {
   return left === right || (left !== null && right !== null && left.agent === right.agent && left.kind === right.kind && left.from === right.from)
 }
 
-/** One run of the line's words: an agent's name, drawn as names are, or the words between them. */
-export type LinePart = { text: string; name?: true }
+/** One run of the line's words: an agent's name, with its id so it is drawn in the agent's colour, or the words between them. */
+export type LinePart = { text: string; agent?: string }
 
 export interface BatonWords {
   /**
@@ -146,8 +146,8 @@ export interface BatonWords {
 }
 
 export function batonWords(baton: Baton, name: (id: string) => string): BatonWords {
-  const to: LinePart = { text: name(baton.agent), name: true }
-  const from: LinePart | null = baton.from ? { text: name(baton.from), name: true } : null
+  const to: LinePart = { text: name(baton.agent), agent: baton.agent }
+  const from: LinePart | null = baton.from ? { text: name(baton.from), agent: baton.from } : null
   const say = (pill: string, row: string, line: LinePart[]): BatonWords => ({ pill, row, line, sentence: line.map((part) => part.text).join('') })
   switch (baton.kind) {
     case 'ask':

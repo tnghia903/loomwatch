@@ -8,6 +8,7 @@ import { replyOf } from '../../lib/chat/reply'
 import { askedPassages, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
+import { targets, yoursOn, type Face, type Reaction, type ReactionAbout } from '../../lib/chat/reactions'
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
 import { useTeamChat, type PendingMessage } from '../../lib/chat/useTeamChat'
@@ -24,9 +25,8 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
-import type { AutoModeControl } from './AutoModeSwitch'
-import type { SpendLimitControl } from './SpendLimitChip'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
+import { Reactions } from './Reactions'
 import { ReplyQuote } from './ReplyQuote'
 import { WorkPiece, type TeamView } from './WorkPiece'
 
@@ -58,10 +58,6 @@ interface TeamChatProps {
   onTeamReview: (review: TeamReview, retry: () => void) => void
   onStale: () => void
   onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
-  /** Who decides the commands agents ask to run, the switch beside the message box (ADR 0061). */
-  autoMode?: AutoModeControl
-  /** What one run of the team may spend (ADR 0068): the chip beside Auto mode. */
-  spendLimit?: SpendLimitControl
   announce: (text: string) => void
   /** The newest piece of work in the chat, whenever it changes: what Details follows. */
   onNewest?: (runId: string | null) => void
@@ -105,7 +101,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, autoMode, spendLimit, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
   // Run team means start the team. Without an @, what is written is a note that starts nothing,
   // which is not what someone who pressed Run team expects, so the box it opens starts with @team.
@@ -599,7 +595,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} />
-                  : <TeamNote message={item.message} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} />}
+                  : <TeamNote message={item.message} reactions={item.reactions} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} />}
               </Fragment>
             )
           })}
@@ -623,8 +619,6 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         live={live}
         decision={decision}
         disabled={blocked}
-        autoMode={autoMode}
-        spendLimit={spendLimit}
         value={draft}
         onChange={setDraft}
         onSend={async (text, to, now) => {
@@ -744,12 +738,17 @@ function useChatSearch(teamPath: string) {
 /**
  * A note to the whole team: it starts nothing, and the next work reads it. An @ message that needed
  * no workflow ("hi @team") is drawn as you sent it, with each agent's own answer under it, and the
- * ones still writing typing, in place of the work it would have started.
+ * ones still writing typing, in place of the work it would have started. You can react to the note
+ * and to each answer, as to anything said in the chat; the faces are kept on the note.
  */
-function TeamNote({ message, name, hue, onShowReplied, onStart }: { message: ChatMessage; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void }) {
+function TeamNote({ message, reactions, name, hue, onShowReplied, onStart, onReact }: { message: ChatMessage; reactions?: readonly Reaction[]; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void> }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
   const answers = message.answers
+  const reactOn = (target: string, about: string, mine = false) => (said: ReactNode) => (
+    <Reactions yours={yoursOn(reactions, target)} about={about} name={name} hue={hue} mine={mine} onReact={onReact && ((face) => onReact(message.id, target, face))}>{said}</Reactions>
+  )
+  const yours = reactOn(targets.note(message.id), answers ? 'your message' : 'your note', true)
   if (answers) {
     const to = message.agentId ? name(message.agentId) : 'the team'
     const waiting = stillAnswering(message)
@@ -759,10 +758,10 @@ function TeamNote({ message, name, hue, onShowReplied, onStart }: { message: Cha
         <li className={`chat-msg mine tc-answered-note${appear ? ' tc-appear' : ''}`}>
           <div className="chat-stack">
             <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(message.createdAt)}</time></div>
-            <div className="chat-bubble">
+            {yours(<div className="chat-bubble">
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
               <div className="chat-text tc-plain">{message.text}</div>
-            </div>
+            </div>)}
           </div>
         </li>
         {answers.said.map((said) => (
@@ -770,7 +769,7 @@ function TeamNote({ message, name, hue, onShowReplied, onStart }: { message: Cha
             {face(said.from)}
             <div className="chat-stack">
               <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
-              <div className="chat-bubble"><div className="chat-text tc-plain">{said.text}</div></div>
+              {reactOn(targets.reply(said.from), `${name(said.from)}'s reply`)(<div className="chat-bubble"><div className="chat-text tc-plain">{said.text}</div></div>)}
             </div>
           </li>
         ))}
@@ -796,10 +795,10 @@ function TeamNote({ message, name, hue, onShowReplied, onStart }: { message: Cha
     <li className={`chat-msg mine tc-team-note${appear ? ' tc-appear' : ''}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">You → the team · note</span><time>{clockTime(message.createdAt)}</time></div>
-        <div className="chat-bubble">
+        {yours(<div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
           <div className="chat-text tc-plain">{message.text}</div>
-        </div>
+        </div>)}
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>
           <button type="button" className="tc-link" disabled={starting} onClick={() => { setStarting(true); onStart() }}><Play size={11} aria-hidden="true" />Start the team on this</button>

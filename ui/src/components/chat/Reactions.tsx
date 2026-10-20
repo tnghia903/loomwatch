@@ -52,6 +52,8 @@ interface ReactionsProps {
   hue: (id: string) => number
   /** Your message: the row sits on the right, and the tray opens from there. */
   mine?: boolean
+  /** Your own words, wherever they sit: a face on them says what you think of them. Yours by default. */
+  own?: boolean
   /** Absent where your reactions cannot be kept: the agents' faces still show. */
   onReact?: (face: Face | null) => Promise<void>
   children: ReactNode
@@ -63,7 +65,7 @@ interface ReactionsProps {
  * the face says it, and its name is in its title. Hovering the message shows a button that opens
  * the tray. With no reactions yet, the button rests on the message's lower corner and takes no room.
  */
-export function Reactions({ yours, agents = [], about, name, hue, mine = false, onReact, children }: ReactionsProps) {
+export function Reactions({ yours, agents = [], about, name, hue, mine = false, own = mine, onReact, children }: ReactionsProps) {
   const chips = chipsOf(yours, agents)
   // Open, the tray says which way it opens: up, or down near the top of the chat; and from the
   // button's left, or back from its right where the chat has no room for it.
@@ -103,14 +105,14 @@ export function Reactions({ yours, agents = [], about, name, hue, mine = false, 
       {(!empty || onReact) && (
         <div className={`tc-reacts${empty ? ' empty' : ''}${open ? ' open' : ''}`} role="group" aria-label={`Reactions to ${about}`}>
           {chips.map((chip) => (
-            <ReactionChip key={chip.face} chip={chip} fresh={fresh === chip.face} name={name} hue={hue} disabled={!onReact} onClick={() => pick(chip.you ? null : chip.face)} />
+            <ReactionChip key={chip.face} chip={chip} fresh={fresh === chip.face} own={own} name={name} hue={hue} disabled={!onReact} onClick={() => pick(chip.you ? null : chip.face)} />
           ))}
           {onReact && (
             <span className="tc-react-add-wrap">
               <button ref={add} type="button" className="tc-react-add" aria-label={`React to ${about}`} aria-haspopup="true" aria-expanded={Boolean(open)} title="React" onClick={toggle}>
                 <SmilePlus size={14} strokeWidth={1.6} aria-hidden="true" />
               </button>
-              {open && <Tray yours={yours} placement={open} anchor={add} onPick={pick} onClose={() => { setOpen(null); add.current?.focus() }} />}
+              {open && <Tray yours={yours} own={own} placement={open} anchor={add} onPick={pick} onClose={() => { setOpen(null); add.current?.focus() }} />}
             </span>
           )}
           {error && <span className="tc-react-error" role="alert">Not saved: {error}</span>}
@@ -120,12 +122,13 @@ export function Reactions({ yours, agents = [], about, name, hue, mine = false, 
   )
 }
 
-function ReactionChip({ chip, fresh, name, hue, disabled, onClick }: { chip: Chip; fresh: boolean; name: (id: string) => string; hue: (id: string) => number; disabled: boolean; onClick: () => void }) {
+function ReactionChip({ chip, fresh, own, name, hue, disabled, onClick }: { chip: Chip; fresh: boolean; own: boolean; name: (id: string) => string; hue: (id: string) => number; disabled: boolean; onClick: () => void }) {
   // A chip that comes while you watch arrives; one you just made is sewn on.
   const arrives = useAppear()
   const words = chipWords(chip, name)
-  const tells = faceTells(chip.face)
+  const tells = faceTells(chip.face, own)
   const thread = `tc-stitch-${useId().replace(/[^\w-]/g, '')}`
+  // A face only the agents put on (done, all met) is theirs to put on: yours come from the tray.
   return (
     <button
       type="button"
@@ -133,7 +136,7 @@ function ReactionChip({ chip, fresh, name, hue, disabled, onClick }: { chip: Chi
       aria-pressed={chip.you}
       aria-label={chip.you ? `${words}. ${tells}. Take yours off` : disabled || !tells ? words : `${words}. Add yours`}
       title={chip.you && tells ? `${words}\n${tells}` : words}
-      disabled={disabled && !chip.you}
+      disabled={(disabled || !tells) && !chip.you}
       onClick={onClick}
     >
       <CrewFace face={chip.face} />
@@ -187,8 +190,11 @@ function placeTray(button: HTMLElement | null, mine: boolean): Placement {
   return { below: at.top - view.top < 96, end: mine ? fitsLeft || !fitsRight : !fitsRight && fitsLeft }
 }
 
-/** The reactions to pick from, in a row above the button (below it, near the top of the chat). */
-function Tray({ yours, placement, anchor, onPick, onClose }: { yours: Face | null; placement: Placement; anchor: { current: HTMLElement | null }; onPick: (face: Face | null) => void; onClose: () => void }) {
+/**
+ * The reactions to pick from, in a row above the button (below it, near the top of the chat). Each
+ * says what it tells the team: of what an agent said, or of your own words.
+ */
+function Tray({ yours, own, placement, anchor, onPick, onClose }: { yours: Face | null; own: boolean; placement: Placement; anchor: { current: HTMLElement | null }; onPick: (face: Face | null) => void; onClose: () => void }) {
   const tray = useRef<HTMLDivElement>(null)
   // The reaction you point at, or move to with the keys, says what it would tell the team. The
   // focus the tray takes on opening is not a choice, so the tray says what reactions do until you move.
@@ -226,7 +232,7 @@ function Tray({ yours, placement, anchor, onPick, onClose }: { yours: Face | nul
   return (
     <div ref={tray} className={`tc-react-tray${placement.end ? ' end' : ''}${placement.below ? ' below' : ''}`} role="toolbar" aria-label="Pick a reaction" aria-description={TRAY_SAYS} onKeyDown={keys} onPointerLeave={() => setPointed(null)}>
       <div className="tc-react-faces">
-        {PALETTE.map(({ face, label, tells }, index) => (
+        {PALETTE.map(({ face, label, tells, yours: onYours }, index) => (
           <button
             key={face}
             type="button"
@@ -234,7 +240,7 @@ function Tray({ yours, placement, anchor, onPick, onClose }: { yours: Face | nul
             style={{ '--i': index } as CSSProperties}
             aria-pressed={yours === face}
             aria-label={yours === face ? `${label}, yours. Take it off` : label}
-            aria-description={tells}
+            aria-description={own ? onYours : tells}
             onPointerEnter={() => setPointed(face)}
             onFocus={() => { if (moved.current) setPointed(face) }}
             onClick={() => onPick(yours === face ? null : face)}
@@ -244,7 +250,7 @@ function Tray({ yours, placement, anchor, onPick, onClose }: { yours: Face | nul
         ))}
       </div>
       <p className="tc-react-says" aria-hidden="true">
-        {says ? <><b>{says.label}</b> · {says.tells}</> : TRAY_SAYS}
+        {says ? <><b>{says.label}</b> · {own ? says.yours : says.tells}</> : TRAY_SAYS}
       </p>
     </div>
   )

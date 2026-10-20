@@ -60,6 +60,8 @@
 .agent-builder-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .agent-builder-title h1 { margin: 0; font: 600 28px/1.15 var(--font-sans); letter-spacing: -.02em; overflow-wrap: anywhere; }
 .agent-builder-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
+/* A team's own agent says how it is kept in a sentence, where one of My agents says its version. */
+.agent-builder-note { font: 400 13px/1.45 var(--font-sans); color: var(--color-ink-2); }
 /* Build · Chat: the agent's two tabs, the same switch as a team's Agents · Workflow · Chat. */
 .agent-view-tabs { align-self: flex-start; margin-top: var(--sp-2); }
 .agent-view-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 96px; height: 32px; padding: 0 16px; border: 0; background: transparent; color: var(--color-ink-2); font: 500 13px var(--font-sans); cursor: pointer; }
@@ -343,10 +345,9 @@
 .team-agents-chip:hover { border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline)); }
 .team-agents-chip[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-tint); }
 .team-agents-chip[aria-pressed="true"] em { color: var(--color-accent); }
-.team-agents-own, .team-agents-linked { display: flex; flex-direction: column; gap: var(--sp-4); }
-.team-agents-own-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-4); }
-.team-agents-own-head .agent-view-tabs { margin-top: 0; }
-.team-agents-note { margin: 0; }
+.team-agents-linked { display: flex; flex-direction: column; gap: var(--sp-4); }
+/* Spaced as one of My agents' page (.agent-builder), whose head it shares. */
+.team-agents-own { display: flex; flex-direction: column; gap: var(--sp-5); }
 .team-agents-linked > :first-child { max-width: 760px; }
 /* Choosing agents for the team: the first step of a team, and the strip's last chip. */
 .team-agents-chip.add { border-style: dashed; color: var(--color-ink-2); }

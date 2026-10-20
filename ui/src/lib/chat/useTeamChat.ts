@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { keepIfSame } from '../keepIfSame'
 import { isTerminalRun, RunApiError, type RunRecord } from '../runs/client'
-import { fetchChatPage, itemAt, itemKey, reactTo, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo, type SendResult } from './client'
+import { fetchChatPage, itemAnchor, itemAt, itemKey, reactTo, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo, type SendResult } from './client'
 import { yoursOn, type Face, type Reaction, type ReactionAbout } from './reactions'
 
 /** Newest items are re-read this often while something is working or waiting, and when idle. */
@@ -41,20 +41,20 @@ interface ChatState {
  * agrees, or after a while in case another window changed it since.
  */
 interface Override {
-  runId: string
+  /** The run, or the team note, it is on. */
+  anchor: string
   target: string
   face: Face | null
   settled: number | null
 }
 const OVERRIDE_MS = 30_000
 
-/** The piece with your reactions that are on their way put in, or the item itself when they change nothing. */
+/** The piece or note with your reactions that are on their way put in, or the item itself when they change nothing. */
 function withOverrides(item: ChatItem, overrides: ReadonlyMap<string, Override>): ChatItem {
-  if (item.kind !== 'work') return item
   let reactions: Reaction[] = item.reactions ?? []
   let changed = false
   for (const override of overrides.values()) {
-    if (override.runId !== item.run.runId || yoursOn(reactions, override.target) === override.face) continue
+    if (override.anchor !== itemAnchor(item) || yoursOn(reactions, override.target) === override.face) continue
     reactions = reactions.filter((reaction) => reaction.target !== override.target)
     if (override.face) reactions = [...reactions, { target: override.target, face: override.face, at: new Date().toISOString() }]
     changed = true
@@ -117,7 +117,7 @@ export function useTeamChat(teamPath: string | null) {
           for (const read of page.items) {
             // A reaction on its way stays until the daemon has it and a page shows it back.
             for (const [key, override] of overrides.current) {
-              if (read.kind !== 'work' || override.runId !== read.run.runId || override.settled === null) continue
+              if (override.anchor !== itemAnchor(read) || override.settled === null) continue
               if (yoursOn(read.reactions, override.target) === override.face || Date.now() - override.settled > OVERRIDE_MS) overrides.current.delete(key)
             }
             const item = withOverrides(read, overrides.current)
@@ -225,19 +225,20 @@ export function useTeamChat(teamPath: string | null) {
   const refresh = useCallback(() => setGeneration((value) => value + 1), [])
 
   /**
-   * Put one face on something an agent said in a piece of work, or take yours off with `null`. It
-   * shows at once; if the daemon refuses, it goes back to what it was and the error is thrown.
+   * Put one face on something said in a piece of work or on a team note (`anchor`: its run, or the
+   * note), or take yours off with `null`. It shows at once; if the daemon refuses, it goes back to
+   * what it was and the error is thrown.
    */
-  const react = useCallback(async (runId: string, target: string, face: Face | null, about?: ReactionAbout) => {
+  const react = useCallback(async (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => {
     if (!teamPath) return
-    const key = `${runId}\n${target}`
-    const override: Override = { runId, target, face, settled: null }
+    const key = `${anchor}\n${target}`
+    const override: Override = { anchor, target, face, settled: null }
     let before: Face | null = null
     const show = (reactions?: Reaction[], first = false) => setState((previous) => {
       if (previous.teamPath !== teamPath) return previous
-      const found = `run:${runId}`
-      const item = previous.byKey.get(found)
-      if (item?.kind !== 'work') return previous
+      const found = [`run:${anchor}`, `note:${anchor}`].find((candidate) => previous.byKey.has(candidate))
+      const item = found ? previous.byKey.get(found) : undefined
+      if (!found || !item) return previous
       if (first) before = yoursOn(item.reactions, target)
       const next = withOverrides(reactions ? { ...item, reactions } : item, overrides.current)
       if (next === item) return previous
@@ -248,13 +249,13 @@ export function useTeamChat(teamPath: string | null) {
     overrides.current.set(key, override)
     show(undefined, true)
     try {
-      const result = await reactTo(teamPath, runId, target, face, about)
+      const result = await reactTo(teamPath, anchor, target, face, about)
       if (overrides.current.get(key) === override) override.settled = Date.now()
       show(result.reactions)
     } catch (caught) {
       // Back to what it was, until a page says otherwise.
       if (overrides.current.get(key) === override) {
-        overrides.current.set(key, { runId, target, face: before, settled: Date.now() })
+        overrides.current.set(key, { anchor, target, face: before, settled: Date.now() })
         show()
       }
       throw caught
