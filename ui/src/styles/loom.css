@@ -41,7 +41,7 @@
 }
 .story-face { flex: none; width: 24px; height: 24px; margin: -4px 2px -4px -4px; }
 .story-face > * { display: block; width: 100%; height: 100%; object-fit: contain; }
-.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); color: var(--color-accent); }
+.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); }
 .story-name.you { background: transparent; border-style: dashed; }
 .story-schedule { color: var(--color-accent); background: transparent; }
 span.story-schedule { cursor: default; }
@@ -55,7 +55,7 @@ span.story-schedule { cursor: default; }
   border-radius: 7px; border: 1px solid var(--color-accent-dim); background: transparent; cursor: pointer;
   font: 500 12.5px/1.4 var(--font-sans); color: var(--color-accent); vertical-align: middle;
 }
-.story-fix:hover, .story-fix:focus-visible { background: var(--color-accent-tint); }
+.story-fix:hover, .story-fix:focus-visible { background: var(--color-accent-tint); color: var(--color-ink); }
 
 /* ---------- hire by job (Build palette) ---------- */
 .palette-item .palette-engine { display: block; margin-top: 3px; font: 500 10.5px/1.2 var(--font-mono); font-style: normal; color: var(--color-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -122,7 +122,7 @@ span.story-schedule { cursor: default; }
 .depth-dial { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 8px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); }
 .depth-dial button { border: 0; background: transparent; padding: 4px 9px; border-radius: 6px; font: 500 11.5px/1.2 var(--font-sans); color: var(--color-ink-3); cursor: pointer; }
 .depth-dial button:hover { color: var(--color-ink); }
-.depth-dial button[aria-checked="true"] { background: var(--color-accent-tint); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.depth-dial button[aria-checked="true"] { background: var(--color-accent-tint); color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-accent); }
 
 /* ---------- weft timeline (Run) ---------- */
 .weft { margin: 0 0 20px; padding: 16px 18px 14px; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel); }
@@ -349,7 +349,7 @@ span.story-schedule { cursor: default; }
 .receipt-checks li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding-left: 14px; position: relative; }
 .receipt-checks li::before { content: "!"; position: absolute; left: 0; color: var(--color-accent); font-weight: 600; }
 .receipt-open { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; border: 0; background: transparent; color: var(--color-ink-3); cursor: pointer; }
-.receipt-open:hover, .receipt-open:focus-visible { color: var(--color-accent); background: var(--color-accent-tint); }
+.receipt-open:hover, .receipt-open:focus-visible { color: var(--color-ink); background: var(--color-accent-tint); }
 /* ADR 0037: a refused line offers the switch that covers it, under its sentence. */
 .receipt-allow, .receipt-allowed { display: block; margin-top: 2px; font-size: 12px; }
 .receipt-allowed { color: var(--color-ok); }
@@ -382,7 +382,13 @@ span.story-schedule { cursor: default; }
   .needs-you-bell .needs-you-label { display: none; }
   .needs-you-bell .needs-you-n { display: inline; font-variant-numeric: tabular-nums; }
   .needs-you-bell:not(.has):not(.working) { display: none; }
-  .needs-you-bell { padding: 0 10px; }
+  /* A finger needs 44 px: the bell keeps its 30 px look and reaches further, 8 px out from inside
+     its 1 px border (28 + 16). That stops 1 px short of the controls 8 px beside it. */
+  .needs-you-bell { position: relative; padding: 0 10px; }
+  .needs-you-bell::before { content: ''; position: absolute; inset: -8px; }
+  /* On a team page the view tabs sit 3 px above the bell and keep their taps, so it reaches down
+     instead, into the heading's empty corner: 28 + 16 = 44 px. */
+  .workspace-chrome .needs-you-bell::before { inset: 0 -8px -16px; }
 }
 .needs-you-bell {
   display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px 0 10px; border-radius: 99px; cursor: pointer;
@@ -390,13 +396,25 @@ span.story-schedule { cursor: default; }
 }
 .needs-you-bell:hover { color: var(--color-ink); }
 .needs-you-bell.working { color: var(--color-live); }
-.needs-you-bell.has { color: var(--color-accent-on-fill); background: var(--color-accent-fill); border-color: transparent; font-weight: 600; }
-.needs-you-bell.has svg { animation: needs-you-ring 2.4s ease-in-out infinite; transform-origin: 50% 10%; }
-@keyframes needs-you-ring { 0%, 70%, 100% { transform: rotate(0); } 75% { transform: rotate(14deg); } 82% { transform: rotate(-12deg); } 89% { transform: rotate(6deg); } }
+/* Lit, the bell is a gold ring, not a fill: it sits beside Run team or Save, the screen's one gold
+   fill. Its words stay ink, since gold text on the tint is 4.45:1 in light; the words or the count
+   say it without the colour, and the glyph rings when something new arrives. */
+.needs-you-bell.has { color: var(--color-ink); background: var(--color-accent-tint); border-color: var(--color-accent); font-weight: 600; }
+.needs-you-bell.has svg { color: var(--color-accent); transform-origin: 50% 10%; }
+/* It rings twice when something new needs you, then rests: 4.8 s, inside WCAG 2.2.2's five
+   seconds, and at least 5 s before it rings again (NeedsYouTray). The swing comes first so it meets
+   the count going up. Reduced motion stops it (app.css). */
+.needs-you-bell.has svg.ringing { animation: needs-you-ring var(--t-breathe) ease-in-out 2; }
+@keyframes needs-you-ring { 0%, 30%, 100% { transform: rotate(0); } 5% { transform: rotate(14deg); } 12% { transform: rotate(-12deg); } 19% { transform: rotate(6deg); } }
 .needs-you-panel {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 80; width: min(420px, calc(100vw - 24px)); max-height: min(70vh, 640px); overflow: auto;
   display: flex; flex-direction: column; border-radius: 14px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); text-align: left;
 }
+/* While the open tray shows its fill (NeedsYouTray marks <html>), the page's own gold fills step
+   back to a ring, so the tray's is the screen's one. At 0,4,0 it outranks dark's
+   `.lw-shell .btn-primary` (0,3,0) whatever the import order. */
+[data-needs-you-fill] .btn-primary:not(.needs-you-panel *):not(:disabled) { background: transparent; color: var(--color-ink); border-color: var(--color-accent); filter: none; }
+[data-needs-you-fill] .btn-primary:not(.needs-you-panel *):not(:disabled):hover { background: var(--color-accent-tint); }
 .needs-you-panel > header { display: flex; align-items: baseline; gap: 10px; padding: 14px 12px 12px 16px; border-bottom: 1px solid var(--color-hairline); }
 .needs-you-panel > header h2 { margin: 0; font: 600 18px/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--color-ink); }
 .needs-you-panel > header span { flex: 1; font-size: 12px; color: var(--color-ink-3); }
@@ -405,14 +423,24 @@ span.story-schedule { cursor: default; }
 .needs-you-list .ticket { display: grid; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--color-hairline); outline: none; }
 .needs-you-list .ticket.active { background: color-mix(in srgb, var(--color-accent-tint) 70%, transparent); box-shadow: inset 2px 0 0 var(--color-accent); }
 .ticket-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--color-ink-3); }
-.ticket-tag { font-weight: 600; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; background: var(--color-ground); color: var(--color-ink-2); }
-.ticket-tag.kind-review { background: var(--color-accent-tint); color: var(--color-accent); }
+/* A tag on the tint keeps ink words (gold on the tint is 4.45:1 in light) and takes its gold as a
+   1 px border; every tag carries the border, clear unless lit, so all tags are one size. */
+.ticket-tag { font-weight: 600; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; padding: 1px 6px; border: 1px solid transparent; border-radius: 5px; background: var(--color-ground); color: var(--color-ink-2); }
+.ticket-tag.kind-review { background: var(--color-accent-tint); border-color: var(--color-accent); color: var(--color-ink); }
 .ticket-tag.kind-failed { color: var(--color-alert); }
 .ticket-text { margin: 0; font-size: 14px; line-height: 1.45; color: var(--color-ink); overflow-wrap: anywhere; }
 .ticket-acts, .ticket-reply { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.ticket-acts .btn, .ticket-reply .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; font-size: 12.5px; }
-.ticket-acts kbd { font: 500 10px/1 var(--font-mono); padding: 2px 4px; border-radius: 4px; border: 1px solid currentColor; opacity: .55; margin-left: 2px; }
+/* 32 px: the active ticket's main action is a gold fill, and a gold fill is never smaller. */
+.ticket-acts .btn, .ticket-reply .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; font-size: 12.5px; }
+/* The key's letter is its button's label colour, so it reads as well as the label; only the box is faint. */
+.ticket-acts kbd { font: 500 10px/1 var(--font-mono); padding: 2px 4px; border-radius: 4px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); margin-left: 2px; }
 .ticket-reply input { flex: 1 1 200px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--color-hairline); background: var(--color-ground); color: var(--color-ink); font: inherit; font-size: 13px; }
+/* A phone makes every button a 44 px touch target (app.css), but the rules above outrank that one.
+   16 px type in the answer box, or iOS Safari zooms the page when it takes focus. */
+@media (max-width: 767px) {
+  .ticket-acts .btn, .ticket-reply .btn, .ticket-reply input { height: 44px; }
+  .ticket-reply input { font-size: 16px; }
+}
 .needs-you-error { margin: 0; padding: 8px 16px; color: var(--color-alert); font-size: 12.5px; }
 .needs-you-said { margin: 0; padding: 0 16px; font-size: 12.5px; color: var(--color-ok); }
 .needs-you-said:not(:empty) { padding: 10px 16px; }
@@ -435,7 +463,7 @@ span.story-schedule { cursor: default; }
 .fabric-thread.st-working { fill: var(--color-live); animation: weft-breathe 1.6s ease-in-out infinite; }
 .fabric-thread.st-waiting { fill: transparent; stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 3 2; }
 .home-card.waiting { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
-.home-card-waiting { margin-left: 8px; padding: 1px 7px; border-radius: 99px; background: var(--color-accent-tint); color: var(--color-accent); font: 600 10.5px/1.6 var(--font-sans); font-style: normal; letter-spacing: .02em; vertical-align: 2px; }
+.home-card-waiting { margin-left: 8px; padding: 1px 7px; border-radius: 99px; background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px var(--color-accent); color: var(--color-ink); font: 600 10.5px/1.6 var(--font-sans); font-style: normal; letter-spacing: .02em; vertical-align: 2px; }
 
 /* ---------- outcome-first templates (New team) ---------- */
 .lw-newteam { width: min(660px, calc(100vw - 32px)); }
@@ -457,7 +485,7 @@ span.story-schedule { cursor: default; }
 .pop-row.understood { align-items: flex-start; border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent); background: var(--color-accent-tint); margin-bottom: 4px; }
 .pop-row.understood .name { display: flex; flex-direction: column; gap: 2px; color: var(--color-ink); font-weight: 500; }
 .understood-detail { font-size: 12px; color: var(--color-ink-3); font-weight: 400; }
-.understood-dialect { flex: none; margin-left: auto; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--color-accent-dim); color: var(--color-accent); font: 600 10px/1.6 var(--font-sans); letter-spacing: .04em; }
+.pop-row.understood .understood-dialect { flex: none; margin-left: auto; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--color-accent); color: var(--color-ink); font: 600 10px/1.6 var(--font-sans); letter-spacing: .04em; }
 .pop-hint { margin: 6px 10px 4px; padding-top: 8px; border-top: 1px solid var(--color-hairline); color: var(--color-ink-3); line-height: 1.6; }
 .pop-hint code { font-size: 11px; padding: 1px 4px; border-radius: 4px; background: var(--color-ground); color: var(--color-ink-2); }
 .weft-head-acts { margin-left: auto; display: inline-flex; gap: 14px; align-items: center; }
@@ -748,7 +776,7 @@ span.story-schedule { cursor: default; }
 }
 .md-source-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .md-source svg { flex: none; color: var(--color-ink-3); transition: color var(--t-quick) var(--ease-out); }
-.md-source:any-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.md-source:any-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-ink); }
 .md-source:any-link:hover svg { color: var(--color-accent); }
 .md-source:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .file-chip:disabled { cursor: default; }

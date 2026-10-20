@@ -70,6 +70,9 @@ interface WorkPieceProps {
   continuedFrom: boolean
   /** The newest piece in the chat: its talk is shown, and the getting-started guide points here. */
   newest?: boolean
+  /** False while the chat waits on you for something newer, a review or a question: then this
+   *  Approve is a gold ring, and the newest one's is the screen's one gold fill (DESIGN_LANGUAGE §8). */
+  approveFilled?: boolean
   /** A message the record beside the chat asked to show — the timeline's "Read the message". */
   reveal?: { id: string; at: number } | null
   team: TeamView
@@ -114,7 +117,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onTyping, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, approveFilled = true, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onTyping, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -294,13 +297,14 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
     }
   }
 
+  const approveClass = `btn ${approveFilled ? 'btn-primary' : 'btn-ring'}`
   const approve = () => void act(async () => { pin(); const next = await answerRun(run.runId, waiting?.node ?? '', draft.trim() || APPROVAL_TEXT); onDecided(); return next })
   const sendBack = () => void act(async () => { pin(); const next = await answerRun(run.runId, waiting?.node ?? '', draft.trim(), waiting?.handoverFrom ?? undefined); onDecided(); return next })
   // Your turn, drawn on the message that asks: the review's buttons, or where to answer.
   const yourTurn = waiting?.kind === 'review_stop' ? (
     <Appearing key={`turn:${waiting.since}`} reveal className="tc-turn" role="group" aria-label={`Review ${name(waiting.handoverFrom ?? '')}'s work`}>
       <div className="tc-acts">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>{draft.trim() ? 'Approve with your note' : 'Approve'}</button>
+        <button type="button" className={approveClass} disabled={busy} onClick={approve}>{draft.trim() ? 'Approve with your note' : 'Approve'}</button>
         {waiting.sendBackAvailable && waiting.handoverFrom && (
           <button type="button" className="btn" disabled={busy || !draft.trim()} onClick={sendBack}>Send back to {name(waiting.handoverFrom)}</button>
         )}
@@ -408,7 +412,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
             </details>
           )}
           <div className="tc-acts">
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>
+            <button type="button" className={approveClass} disabled={busy} onClick={approve}>
               {draft.trim() ? 'Approve with your note' : 'Approve as it is'}
             </button>
             {waiting.sendBackAvailable && waiting.handoverFrom && (
@@ -430,7 +434,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
             </details>
           )}
           <div className="tc-acts">
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>
+            <button type="button" className={approveClass} disabled={busy} onClick={approve}>
               {draft.trim() ? 'Approve with your note' : 'Approve'}
             </button>
             {waiting.sendBackAvailable && waiting.handoverFrom && (

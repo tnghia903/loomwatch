@@ -172,14 +172,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-builder"][data-tour-saved]')
       ? {
           title: 'Now put it in a team',
-          body: 'It is in My agents now, ready for any team. Go to Your teams to make one.',
+          body: 'It is in My agents now, ready for any team. Click LoomWatch at the top to see your teams and make one.',
           target: ['[data-tour="your-teams"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
         }
       : {
           title: 'Save it to My agents',
-          body: 'Press Save to My agents. Every team you add it to keeps the version it was given, until you update it there.',
+          body: 'Press Save to My agents. Every team you add it to keeps the copy it was given, until you press Update in that team.',
           target: ['[data-tour="save-agent"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
@@ -213,7 +213,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-picker"]')
       ? {
           title: 'Add your agent',
-          body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as the version you saved. More agents join the same way.',
+          body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as you saved it. More agents join the same way.',
           target: ['[data-tour="agent-picker"]'],
           sides: ['bottom', 'right', 'left'],
           advance: 'action',
@@ -307,7 +307,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     screen: 'any',
     view: () => ({
       title: 'You’re all set',
-      body: `That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat and says so at the top of every screen. To see this guide again, press ${keys('⌘K')} and choose Getting started guide, or use the menu in any team.`,
+      body: `That is the whole loop: build an agent, put it in a team’s workflow, and give the team work in its chat. When a team needs you, for an answer or an approval, it asks in its chat and says so at the top of every screen. To see this guide again, choose Getting started guide from the menu at the top right, or press ${keys('⌘K')}.`,
       advance: 'finish',
     }),
   },

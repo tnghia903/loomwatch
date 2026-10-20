@@ -120,7 +120,7 @@ import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
 import { SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
-import { savedJobPreset, toolAllowOf, useSavedJobs, versionOf, type SavedJob } from '../lib/library/jobs'
+import { savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
 import { fieldsForVersion, linkState } from '../lib/library/link'
 import { teamAgentEdit } from '../lib/library/teamDraft'
 import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
@@ -141,6 +141,9 @@ import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-fi
 import { filesTouched } from '../lib/files/fileRefs'
 import type { AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
+import type { TeamView as TeamTab } from '../lib/team-file/useTeamList'
+import type { LeaveGuard } from './rail/CrewRail'
+import { TeamRail } from './rail/TeamRail'
 import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
@@ -174,21 +177,6 @@ interface WorkspaceProps {
 }
 
 type AnyNode = Node
-
-function linesDiffer(a: string, b: string): number {
-  if (a === b) return 0
-  const left = a.split('\n')
-  const right = b.split('\n')
-  const rightSet = new Map<string, number>()
-  right.forEach((line) => rightSet.set(line, (rightSet.get(line) ?? 0) + 1))
-  let onlyLeft = 0
-  const leftSet = new Map<string, number>()
-  left.forEach((line) => leftSet.set(line, (leftSet.get(line) ?? 0) + 1))
-  for (const [line, count] of leftSet) onlyLeft += Math.max(0, count - (rightSet.get(line) ?? 0))
-  let onlyRight = 0
-  for (const [line, count] of rightSet) onlyRight += Math.max(0, count - (leftSet.get(line) ?? 0))
-  return Math.max(onlyLeft, onlyRight, 1)
-}
 
 /**
  * One stable key for "which memory is this", so a sidecar card and a `memory.inherits` entry that
@@ -360,6 +348,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
    */
   const [forcedInspectorField, setForcedInspectorField] = useState<{ agentId: string; field: AgentField; hint: string } | null>(null)
   const [scheduleEditorOpen, setScheduleEditorOpen] = useState(false)
+  // The open schedule panel has something to save: its Save schedule is then the one gold fill.
+  const [schedulePending, setSchedulePending] = useState(false)
   /** The Schedule button's not-yet-saved schedule: drawn on the canvas only while its editor is open. */
   const [draftSchedule, setDraftSchedule] = useState<ScheduleConfig | null>(null)
   const [scheduleSaveAttempt, setScheduleSaveAttempt] = useState(0)
@@ -2283,6 +2273,19 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // ---- commands + keys ----------------------------------------------------------------------
   // With a team open the dialog belongs to the workspace; on Home, Home owns it.
   const openNewTeam = useCallback(() => { if (doc.path) setNewTeamSheet(true); else window.dispatchEvent(new Event('loomwatch:new-team')) }, [doc.path])
+  // The team rail: this team as it is on screen, and leaving it for another. Changes not saved are
+  // saved or dropped first (the rail asks), and the page moves once they are, so the browser's own
+  // "Leave site?" prompt never asks a second time.
+  const railAgents = useMemo(() => doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => node.data.agent), [doc.nodes])
+  const railTeam = useMemo(() => (doc.path ? { path: doc.path, name: doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, ''), agents: railAgents } : null), [doc.path, doc.teamName, railAgents])
+  const railTab: TeamTab = runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'
+  const unsavedTeam = ['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)
+  const [leavingTo, setLeavingTo] = useState<string | null>(null)
+  useEffect(() => { if (leavingTo && !unsavedTeam) window.location.assign(leavingTo) }, [leavingTo, unsavedTeam])
+  const { save: saveTeam, reloadFromDisk } = doc
+  const leaveTeam = useCallback((): LeaveGuard | null => (unsavedTeam
+    ? { save: saveTeam, problem: doc.isValid ? null : 'It has problems to fix before it can be saved.', discard: async () => { await reloadFromDisk() } }
+    : null), [unsavedTeam, saveTeam, reloadFromDisk, doc.isValid])
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
     { label: 'Ask LoomWatch…', shortcut: '⌘J', icon: MessageSquareText, run: () => askFor() },
@@ -2461,8 +2464,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Lineage as a thread: follow-ups indented under the run they follow, retries labelled as today.
   const leadAgent = projection.agents.find((agent) => agent.id === leadId)
   const lifecycleResult = phase === 'queued' || phase === 'starting' ? 'not started' : phase === 'running' ? (responseText ? 'streaming' : 'pending') : phase === 'succeeded' ? 'done' : phase
-  const loadedYaml = doc.loadedYaml ?? ''
-  const differ = doc.documentChipState === 'dirty' ? linesDiffer(loadedYaml, doc.yamlPreview) : 0
 
   const askNotice = askActions.notice && (
     <div role="status" className="ask-notice e2">
@@ -2514,6 +2515,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     <SavedAgentsContext.Provider value={savedJobs}>
     <TeamFiguresContext.Provider value={agentFigures}>
     <CanvasActionsContext.Provider value={canvasActions}>
+      <div className="lw-railed">
+      {railTeam && <TeamRail open={railTeam} runs={needsYou.records} savedJobs={savedJobs} view={railTab} go={setLeavingTo} onNewTeam={openNewTeam} leave={leaveTeam} />}
       <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {/* ADR 0040: an agent paused on a request its switches do not cover, waiting for you. */}
         {runView && !deliveryShown && record && (record.permissionRequests?.length ?? 0) > 0 && (
@@ -2663,7 +2666,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={keyProblem} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); setStartTeam(true); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
+        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={keyProblem} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); setStartTeam(true); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} scheduling={scheduleOpen && schedulePending} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -2712,7 +2715,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                 const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
                 if (!agent || !editable) return
                 doc.applyAgentFields(agentId, fieldsForVersion(job, agent, previous))
-                setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
+                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
               }}
               onUnlink={(agentId) => {
                 if (!editable) return
@@ -2730,7 +2733,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
+          <a className="delivery-brand" href="/" aria-label="LoomWatch, your teams" title="Your teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
           <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
@@ -2741,11 +2744,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); setRunPresentation('delivery'); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher
-            path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError} linesDiffer={differ}
+            path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError}
             entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames}
             isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768}
             onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()}
-            onNewTeam={openNewTeam} onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
+            onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
             onSelectProblem={selectProblem} problemsOpen={problemsOpen} onProblemsOpenChange={setProblemsOpen}
           />
           {runView && runPresentation === 'trace' && (
@@ -2793,7 +2796,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               onApply: (job, previous) => {
                 if (!editable) return
                 doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent, previous))
-                setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
+                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
               },
               onUnlink: () => {
                 if (!editable) return
@@ -2890,6 +2893,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onRemove={editable && doc.teamSchedule ? removeSchedule : undefined}
             isNew={!doc.teamSchedule && scheduleProblems.length === 0}
             status={routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
+            onPending={setSchedulePending}
           />
         )}
         {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} calls={projection.evidence.filter((item) => item.agentId === inspectedEvidence.agentId)} onInspectEvidence={setInspectedEvidenceId} onClose={() => setInspectedEvidenceId(null)} />}
@@ -3013,6 +3017,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />
         )}
+      </div>
       </div>
     </CanvasActionsContext.Provider>
     </TeamFiguresContext.Provider>

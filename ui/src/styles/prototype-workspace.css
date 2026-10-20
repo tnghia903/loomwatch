@@ -14,7 +14,7 @@
 .build-node .node-kind { display:block; color:var(--color-ink-3); text-transform:uppercase; letter-spacing:.065em; font-size:10px; margin-bottom:5px; }
 .build-node strong { display:block; font-size:12px; font-weight:550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .build-node small { display:block; color:var(--color-ink-2); font-size:11px; margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.build-node .primary-chip { position:absolute; right:8px; top:7px; font-size:10px; color:var(--color-accent); }
+.build-node .primary-chip { position:absolute; right:8px; top:7px; font-size:10px; color:var(--color-ink); }
 .build-node-issue { position:absolute; bottom:-18px; color:var(--color-accent); font-size:10px; }
 .build-resource-remove { position:absolute; right:5px; top:5px; color:var(--color-ink-3); background:transparent; border:0; padding:3px; opacity:0; }
 .build-node:hover .build-resource-remove,.build-node.selected .build-resource-remove,.build-resource-remove:focus-visible { opacity:1; }
@@ -37,8 +37,8 @@
 .delivery-review-dialog>div { display:flex; justify-content:flex-end; gap:10px; margin-top:24px; }
 .delivery-review-success { color:var(--color-ok)!important; }
 .build-graph .resource-edge { stroke-dasharray:5 4; }
-.lw-shell { --workspace-glass: color-mix(in srgb,var(--color-panel-solid) 94%,transparent); }
-[data-theme=dark] .lw-shell { --color-ground:#0b0c0e; --color-panel:#111315; --color-panel-solid:#17191c; --color-ink:#f5f3ee; --color-ink-2:#cac9cf; --color-ink-3:#b2b1b7; --color-hairline:#303236; --color-accent:#e9c46a; }
+:is(.lw-shell, .lw-railed) { --workspace-glass: color-mix(in srgb,var(--color-panel-solid) 94%,transparent); }
+[data-theme=dark] :is(.lw-shell, .lw-railed) { --color-ground:#0b0c0e; --color-panel:#111315; --color-panel-solid:#17191c; --color-ink:#f5f3ee; --color-ink-2:#cac9cf; --color-ink-3:#b2b1b7; --color-hairline:#303236; --color-accent:#e9c46a; }
 .lw-shell .workspace-chrome { top:0!important; left:0; right:0; height:64px; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); padding:0 28px; gap:24px; border:0; border-bottom:1px solid var(--color-hairline); border-radius:0; box-shadow:none; background:var(--workspace-glass); }
 .lw-shell .delivery-brand { display:flex; align-items:center; gap:10px; }
 .lw-shell .workspace-chrome>.lw-chip { justify-self:end; min-width:0; max-width:330px; background:transparent; box-shadow:none; border-color:transparent; }
@@ -47,7 +47,7 @@
 .lw-shell .workspace-view-tabs button { min-width:100px; height:34px; font-size:13px; }
 /* Selected is a tint, not a fill: the screen's one gold fill belongs to its primary action (Run team,
    Review output), DESIGN_LANGUAGE §8 Law 2. Same selected-segment look as the depth dial. */
-.lw-shell .workspace-view-tabs button[aria-pressed=true] { background:var(--color-accent-tint); color:var(--color-accent); font-weight:600; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.lw-shell .workspace-view-tabs button[aria-pressed=true] { background:var(--color-accent-tint); color:var(--color-ink); font-weight:600; box-shadow:inset 0 0 0 1px var(--color-accent); }
 .delivery-shown .delivery-lane { inset:64px 0 0; grid-template-columns:minmax(0,1fr); gap:0; background:transparent; }
 .delivery-shown .delivery-work { padding:0 30px 24px; background:transparent; border:0; border-radius:0; box-shadow:none; backdrop-filter:none; }
 .delivery-heading { min-height:115px; padding:26px 0 22px; margin-bottom:0; border-bottom:1px solid var(--color-hairline); }
@@ -123,7 +123,13 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .build-graph .react-flow__handle { min-width:9px; min-height:9px; background:var(--color-accent); }
 @media(max-width:1100px) { .delivery-stages { flex-direction:column; gap:28px; } .delivery-stage-wrap { min-width:0; } .delivery-handoff-arrow { left:50%; top:-25px; transform:rotate(90deg); } .delivery-stage-meta { display:none; } .delivery-shown .delivery-work { padding-inline:20px; } }
 @media(max-width:767px) {
- .lw-shell .workspace-chrome { padding:0 14px; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+ /* The brand keeps its width and the tabs take what is left. When the brand's column was the one
+    that gave way, the wordmark ran under the tabs on a phone and showed through them. A notice
+    spans both columns, so its width never widens the brand's column and pushes the tabs off screen. */
+ .lw-shell .workspace-chrome { padding:0 14px; grid-template-columns:auto minmax(0,1fr); gap:8px; }
+ .lw-shell .workspace-chrome .workspace-view-tabs { justify-self:end; }
+ .lw-shell .workspace-chrome>.delivery-brand { min-height:44px; }
+ .lw-shell .workspace-chrome>:is(.lw-notice,.mode-switch-note,.pop-inline) { grid-column:1/-1; justify-self:start; }
  .lw-shell .workspace-chrome>.lw-chip,.lw-shell .workspace-chrome>div:has(.lw-chip) { display:none; }
  .lw-shell .workspace-view-tabs button { min-width:60px; }
  .delivery-shown .delivery-lane { display:flex; flex-direction:column; overflow:auto; bottom:calc(var(--lw-composer-height,150px) + 28px); }
@@ -134,4 +140,13 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
  .build-workspace .lw-canvas { top:220px; }
  .build-workspace .lw-viewctl { top:auto!important; bottom:calc(var(--lw-composer-height,150px) + 28px); }
  .lw-shell.build-workspace .lw-inspector { top:234px; bottom:14px; }
+}
+/* The wordmark and the three tabs side by side need about 500 px. Narrower, the brand is its mark
+   alone (still the way home, a 44 px target with the mark where it was) and the tabs share the rest
+   of the row. Their padding is small enough for all three to fit at 320 px. */
+@media(max-width:559px) {
+ .lw-shell .workspace-chrome .delivery-brand .lw-wordmark { display:none; }
+ .lw-shell .workspace-chrome>.delivery-brand { justify-content:center; min-width:44px; margin-left:calc((26px - 44px) / 2); }
+ .lw-shell .workspace-chrome .workspace-view-tabs { justify-self:stretch; }
+ .lw-shell .workspace-chrome .workspace-view-tabs button { flex:1 1 0; min-width:max-content; padding:0 4px; }
 }

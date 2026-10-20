@@ -2,7 +2,7 @@ import { ArrowRight, Check } from 'lucide-react'
 import { useId, useState } from 'react'
 
 import { figureFor } from '../../lib/library/figures'
-import { useSavedJobs, versionOf } from '../../lib/library/jobs'
+import { useSavedJobs } from '../../lib/library/jobs'
 import { saveTeamFile } from '../../lib/team-file/client'
 import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
 import { agentsTeamYaml, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
@@ -82,7 +82,7 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false 
                 <span className="nt-check" aria-hidden="true">{start === 'agents' && <Check size={12} />}</span>
                 <span className="nt-body">
                   <span className="nt-title">My agents{hasAgents && <em>Recommended</em>}</span>
-                  <span className="nt-desc">{!saved.loaded ? 'Loading your agents…' : hasAgents ? 'The agents you built and tried. Each joins as the version you saved.' : 'You have no agents yet. Build one first, or start from a template below.'}</span>
+                  <span className="nt-desc">{!saved.loaded ? 'Loading your agents…' : hasAgents ? 'The agents you built and tried. Each joins as you saved it.' : 'You have no agents yet. Build one first, or start from a template below.'}</span>
                 </span>
               </label>
             )}
@@ -95,7 +95,7 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false 
                     <label key={job.id} className={`nt-agent ${on ? 'on' : ''}`}>
                       <input type="checkbox" checked={on} onChange={(event) => tick(job.id, event.target.checked)} />
                       <FigureStill className="nt-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={28} height={28} loading="lazy" decoding="async" />
-                      <b>{job.name}</b><span>v{versionOf(job)}</span>
+                      <b>{job.name}</b>
                     </label>
                   )
                 })}

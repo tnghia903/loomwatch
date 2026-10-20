@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 
 import type { FigurePart } from '../../lib/library/figure'
+import { useTheme } from '../../lib/theme'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { placeFace, WorkbenchScene, type BenchAnchor, type BenchAnchors, type BenchFace, type BenchFaces, type BenchView } from './workbenchScene'
 
@@ -114,6 +115,9 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
   }, [])
 
   useEffect(() => { scene.current?.set(view) }, [view])
+  // The bench's furniture follows the app's theme; the landing page's bench stays dark.
+  const { resolved } = useTheme()
+  useEffect(() => { scene.current?.setTone(resolved) }, [resolved])
 
   const face = (which: BenchFace) => (element: HTMLDivElement | null) => { if (element) faces.current.set(which, element); else faces.current.delete(which) }
   const name = view.look.name.trim() || 'New agent'

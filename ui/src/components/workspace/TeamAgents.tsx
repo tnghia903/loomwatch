@@ -77,7 +77,7 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
           return (
             <button key={candidate.id} type="button" className="team-agents-chip" aria-pressed={candidate.id === agent?.id} onClick={() => onSelect(candidate.id)}>
               <FigureStill className="team-agents-figure" figure={agentFigure(candidate, savedJobs)} alt="" width={40} height={40} />
-              <span><b>{candidate.name}</b><em>{linked ? `From My agents · v${linked.version}${linked.behind ? ` · v${linked.latest} ready` : ''}` : 'This team’s own'}</em></span>
+              <span><b>{candidate.name}</b><em>{linked ? `From My agents${linked.behind ? ' · update ready' : ''}` : 'This team’s own'}</em></span>
             </button>
           )
         })}

@@ -1,0 +1,147 @@
+/* The crew rail (components/rail/CrewRail.tsx): every agent you have, or every team, as figures
+   down the side of its page, and along the top on a phone. What each is doing is its figure's
+   glow, as in the team chat (team-chat.css): gold waiting for you, blue working, red failed. A pose
+   says it too, so colour is never alone: a waiting figure leans in, a working one breathes, a
+   failed one greys. The page you are on has the gold line. */
+
+.crew-rail {
+  position: relative; z-index: 45; flex: none; box-sizing: border-box;
+  width: 72px; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+}
+.crew-rail-find {
+  flex: none; width: 40px; height: 40px; display: grid; place-items: center;
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--color-ink-3); cursor: pointer;
+}
+.crew-rail-find:hover, .crew-rail-find[aria-expanded='true'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 7%, transparent); }
+/* The last 16 px fade, over the list's own end padding: a figure cut off there says the rail goes on. */
+.crew-rail-scroll { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; overflow: hidden auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent); }
+.crew-rail-scroll::-webkit-scrollbar { display: none; }
+.crew-rail-list { list-style: none; margin: 0; padding: 4px 0 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.crew-rail-who, .crew-rail-add {
+  position: relative; display: grid; place-items: center; box-sizing: border-box;
+  width: 56px; height: 56px; border-radius: var(--r-md); text-decoration: none; color: var(--color-ink-3);
+}
+.crew-rail-who:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
+.crew-rail-add { width: 44px; height: 44px; margin: 6px; border: 1px dashed color-mix(in srgb, var(--color-ink) 28%, transparent); background: transparent; cursor: pointer; }
+.crew-rail-add:hover { color: var(--color-ink); border-color: color-mix(in srgb, var(--color-ink) 50%, transparent); }
+.crew-rail-add[aria-current='page'] { color: var(--color-ink); border-style: solid; }
+.crew-rail :is(.crew-rail-who, .crew-rail-add, .crew-rail-find):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+
+/* The gold line beside the page you are on: a line, not a fill. */
+.crew-rail-mark { position: absolute; pointer-events: none; }
+.crew-rail-mark::before { content: ''; position: absolute; left: -8px; top: 14px; bottom: 14px; width: 3px; border-radius: 3px; background: var(--color-accent); }
+
+/* A figure: the agent's own, or a team's crew. */
+.crew-rail-art { display: grid; place-items: center; width: 48px; height: 48px; }
+.crew-rail-figure { width: 46px; height: 46px; object-fit: contain; -webkit-user-drag: none; }
+/* Each still carries a faint shadow out to its square edges: fade the square to a round, or a light
+   page shows plates where crews overlap and a glow outlines a box instead of the figure. */
+.crew-rail-art :is(img, .figure-still) { -webkit-mask-image: radial-gradient(closest-side, #000 78%, transparent); mask-image: radial-gradient(closest-side, #000 78%, transparent); }
+.crew-team { position: relative; display: block; width: 48px; height: 48px; }
+.crew-team > * { position: absolute; object-fit: contain; -webkit-user-drag: none; }
+.crew-team.n1 > :nth-child(1) { left: 1px; top: 1px; width: 46px; height: 46px; }
+.crew-team.n2 > :nth-child(1) { left: -3px; top: 1px; width: 34px; height: 34px; }
+.crew-team.n2 > :nth-child(2) { right: -3px; bottom: -1px; width: 34px; height: 34px; }
+.crew-team.n3 > :nth-child(1) { left: -2px; top: -1px; width: 29px; height: 29px; }
+.crew-team.n3 > :nth-child(2) { right: -2px; top: -1px; width: 29px; height: 29px; }
+.crew-team.n3 > :nth-child(3) { left: 8px; bottom: -3px; width: 32px; height: 32px; }
+.crew-team.none { width: 34px; height: 34px; border: 1px dashed color-mix(in srgb, var(--color-ink) 28%, transparent); border-radius: var(--r-md); }
+
+/* What it is doing. */
+:is(.crew-rail-who, .crew-rail-hit) { --glow: transparent; }
+:is(.crew-rail-who, .crew-rail-hit).waiting { --glow: var(--color-accent); }
+:is(.crew-rail-who, .crew-rail-hit).working { --glow: var(--color-live); }
+:is(.crew-rail-who, .crew-rail-hit).failed { --glow: var(--color-alert); }
+:is(.crew-rail-who, .crew-rail-hit):is(.waiting, .working, .failed) .crew-rail-art { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
+/* 2: each state has a pose as well as a colour, held still: it leans in to ask you, stands up
+   while it works, slumps when it failed. Motion only adds the working breath. */
+:is(.crew-rail-who, .crew-rail-hit).waiting .crew-rail-art { rotate: -8deg; }
+:is(.crew-rail-who, .crew-rail-hit).working .crew-rail-art { translate: 0 -3px; }
+:is(.crew-rail-who, .crew-rail-hit).failed .crew-rail-art { rotate: 8deg; translate: 0 3px; filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
+
+.crew-rail-tip {
+  position: fixed; z-index: 120; pointer-events: none; white-space: nowrap;
+  padding: 5px 9px; border-radius: var(--r-sm); border: 1px solid var(--color-hairline);
+  background: var(--color-panel-solid); box-shadow: var(--e1-shadow);
+  font: 500 12.5px/1.3 var(--font-sans); color: var(--color-ink);
+}
+.crew-rail-tip.beside { translate: 0 -50%; }
+
+/* Unsaved changes, and the find box: beside the rail. */
+.crew-rail-float { position: fixed; z-index: 110; }
+.crew-rail-leave {
+  flex-wrap: wrap; max-width: min(360px, calc(100vw - 16px)); box-sizing: border-box;
+  border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel-solid); box-shadow: var(--e2-shadow);
+}
+.crew-rail-findbox.pop { position: fixed; width: min(360px, calc(100vw - 16px)); }
+/* Save first answers the question, but the name chip's Save is the screen's one gold fill: a gold line. */
+.crew-rail-leave .crew-rail-keep:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.crew-rail-found { list-style: none; margin: 0; padding: var(--sp-2); max-height: min(420px, 60vh); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.crew-rail-hit {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; flex-shrink: 0;
+  padding: 4px var(--sp-2); border-radius: var(--r-sm); cursor: pointer; color: var(--color-ink-2);
+}
+.crew-rail-hit.active { background: color-mix(in srgb, var(--color-ink) 7%, transparent); color: var(--color-ink); }
+.crew-rail-hit[aria-current='page'] { box-shadow: inset 3px 0 0 var(--color-accent); }
+.crew-rail-hit .crew-rail-art { width: 40px; height: 40px; }
+.crew-rail-hit .crew-rail-figure { width: 38px; height: 38px; }
+.crew-rail-hit .crew-team { scale: .84; }
+.crew-rail-hit-text { display: flex; flex-direction: column; min-width: 0; }
+.crew-rail-hit-text b { font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crew-rail-hit-text em { font-style: normal; font-size: 12.5px; line-height: 1.35; color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crew-rail-hit-state { font-size: 12px; color: var(--color-ink-2); white-space: nowrap; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .crew-rail-art { transition: translate var(--t-quick) var(--ease-out), scale var(--t-quick) var(--ease-out), rotate var(--t-quick) var(--ease-out); }
+  .crew-rail-who:hover .crew-rail-art { scale: 1.06; }
+  .crew-rail-who:active .crew-rail-art { scale: .94; }
+  /* The one you just picked hops into place, and the gold line slides to it. The hop is on the
+     figure inside, so it never takes the working breath's place on the same element. */
+  .crew-rail-who[aria-current='page'] .crew-rail-art > * { animation: crew-rail-hop var(--t-entrance) var(--ease-out) 1; }
+  .crew-rail-mark { transition: top var(--t-quick) var(--ease-out), left var(--t-quick) var(--ease-out); }
+  .crew-rail-who.working .crew-rail-art { animation: crew-rail-breathe var(--t-flow) ease-in-out infinite; }
+}
+@keyframes crew-rail-hop { 0% { translate: 0 0; } 35% { translate: 0 -7px; } 70% { translate: 0 1px; } 100% { translate: 0 0; } }
+@keyframes crew-rail-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); } }
+
+/* A team's page and an agent's (AgentFrame) alike: the rail runs the height of the window, its find
+   button in the header's row, and the page beside it. */
+.lw-railed { --lw-rail-w: 72px; display: flex; width: 100%; height: 100%; }
+/* A dialog's scrim covers the rail too, so nothing beside a dialog stays clickable. */
+.lw-railed .lw-scrim { position: fixed; }
+.lw-railed > .lw-shell { flex: 1; min-width: 0; }
+/* An agent's page: the team header's own parts in a 64 px bar, then the page, which scrolls. */
+.agent-frame-root { position: absolute; inset: 0; background: var(--color-ground); color: var(--color-ink); }
+.agent-frame { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.lw-shell.agent-bar { flex: none; width: auto; height: 64px; overflow: visible; z-index: 40; }
+.agent-frame-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; }
+/* In a narrow window the header has no room for the name chip, the bell or the menu (a team's page
+   hides them); an agent's page puts them in a row under it, since its Save is in its chip. */
+.agent-bar-narrow { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
+.agent-bar-narrow .agent-narrow-chip { flex: 1; min-width: 0; }
+.agent-bar-narrow .agent-narrow-chip .lw-chip { width: 100%; max-width: 100%; box-sizing: border-box; }
+.agent-bar-narrow .needs-you-anchor { position: static; }
+.agent-bar-narrow .prototype-workspace-menu { display: flex; position: relative; right: auto; top: auto; }
+/* The places the agent on screen fills: its tabs stand where a team's do, its chip where a team's does. */
+.agent-bar .workspace-chrome > .agent-bar-tabs { display: contents; }
+.lw-shell.agent-bar .agent-bar-tabs > .workspace-view-tabs { grid-column: 2; grid-row: 1; }
+.lw-railed > .crew-rail { padding-top: 0; border-right: 1px solid var(--color-hairline); background: var(--color-ground); }
+.lw-railed > .crew-rail > .crew-rail-find { width: 100%; height: 64px; border-radius: 0; border-bottom: 1px solid var(--color-hairline); }
+
+/* On a phone the rail lies along the top, and the gold line runs under the page you are on. */
+@media (max-width: 767px) {
+  .lw-railed { --lw-rail-w: 0px; }
+  .crew-rail { width: 100%; flex-direction: row; padding: 4px var(--sp-3); gap: var(--sp-1); }
+  .crew-rail-scroll { overflow: auto hidden; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent); }
+  .crew-rail-list { flex-direction: row; padding: 0 16px 6px 0; }
+  .crew-rail-who { width: 48px; height: 48px; }
+  .crew-rail-art { width: 42px; height: 42px; }
+  .crew-rail-figure { width: 40px; height: 40px; }
+  .crew-rail .crew-team { scale: .88; }
+  .crew-rail-add { width: 44px; height: 44px; }
+  .crew-rail-mark::before { left: 12px; right: 12px; top: auto; bottom: -5px; width: auto; height: 3px; }
+  .lw-railed { flex-direction: column; }
+  .lw-railed > .crew-rail { border-right: 0; border-bottom: 1px solid var(--color-hairline); }
+  .crew-rail-find, .lw-railed > .crew-rail > .crew-rail-find { width: 44px; height: 44px; border-radius: var(--r-md); border-bottom: 0; }
+}

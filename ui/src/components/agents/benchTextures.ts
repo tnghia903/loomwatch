@@ -70,12 +70,16 @@ function wrap(context: CanvasRenderingContext2D, text: string, width: number, ma
   return lines
 }
 
+/** A pegboard's colours: its face, its holes, and the gold thread across it. */
+export interface PegboardColors { face: string; holes: string; thread: string }
+export const OBSIDIAN_PEGBOARD: PegboardColors = { face: '#16161B', holes: '#2C2C34', thread: 'rgba(216, 169, 60, 0.55)' }
+
 /** The pegboard: obsidian with the canvas's dot grid, and one gold thread across it. */
-export function pegboardTexture(): Texture {
+export function pegboardTexture(colors: PegboardColors = OBSIDIAN_PEGBOARD): Texture {
   const [element, context] = canvas(2048, 904)
-  context.fillStyle = '#16161B'
+  context.fillStyle = colors.face
   context.fillRect(0, 0, element.width, element.height)
-  context.fillStyle = '#2C2C34'
+  context.fillStyle = colors.holes
   const step = 44
   for (let y = step / 2; y < element.height; y += step) {
     for (let x = step / 2; x < element.width; x += step) {
@@ -84,7 +88,7 @@ export function pegboardTexture(): Texture {
       context.fill()
     }
   }
-  context.strokeStyle = 'rgba(216, 169, 60, 0.55)'
+  context.strokeStyle = colors.thread
   context.lineWidth = 4
   context.beginPath()
   context.moveTo(-20, 760)

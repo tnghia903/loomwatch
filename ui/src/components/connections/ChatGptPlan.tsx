@@ -29,9 +29,10 @@ function welcomed(): boolean {
  * The person's ChatGPT Plus or Pro plan (ADR 0073): one click opens ChatGPT's own page in a new tab,
  * where they sign in and allow LoomWatch; this card carries on by itself when they come back.
  * LoomWatch never sees the password, and agents never see the sign-in. `onConnected` hears when a
- * sign-in it started comes back with plan use on, as the first run waits to.
+ * sign-in it started comes back with plan use on, as the first run waits to. `fill={false}` makes its
+ * Continue a gold ring, where another button is the screen's one gold fill.
  */
-export function ChatGptPlan({ variant = 'section', onConnected }: { variant?: 'section' | 'card'; onConnected?: () => void }) {
+export function ChatGptPlan({ variant = 'section', onConnected, fill = true }: { variant?: 'section' | 'card'; onConnected?: () => void; fill?: boolean }) {
   const ai = useAiStatus()
   const connectedHeard = useRef(onConnected)
   useEffect(() => { connectedHeard.current = onConnected })
@@ -119,7 +120,7 @@ export function ChatGptPlan({ variant = 'section', onConnected }: { variant?: 's
 
   const info = SOURCE_INFO.chatgpt
   const continueButton = (label: string) => (
-    <a className="btn btn-primary lw-chatgpt-continue" href={consent?.url ?? '#'} target="_blank" rel="noopener noreferrer" aria-disabled={!consent} onClick={begin}>
+    <a className={`btn ${fill ? 'btn-primary' : 'btn-ring'} lw-chatgpt-continue`} href={consent?.url ?? '#'} target="_blank" rel="noopener noreferrer" aria-disabled={!consent} onClick={begin}>
       <MakerMark maker={sourceMaker('chatgpt')} />{label}
     </a>
   )

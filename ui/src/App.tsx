@@ -5,6 +5,7 @@ import { Feedback } from './components/feedback/Feedback'
 import { Updates } from './components/updates/Updates'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
+import { NeedsYouTray } from './components/workspace/NeedsYouTray'
 import { useAiStatus } from './lib/ai/useKeyStatus'
 import { connectedSources } from './lib/ai/sources'
 import { fetchCapabilities, SKILLS_CHANGED_EVENT, type CapabilityInventory } from './lib/library/client'
@@ -79,14 +80,16 @@ function Editor({ initialRunId }: { initialRunId: string | null }) {
 /** Your agents (`/agents`): build and try one agent at a time, then use it in any team. */
 function Agents() {
   const capabilities = useCapabilities()
-  // The same poll as the workspace's, so the header's mark and the tab icon say the same here.
-  const { mark } = useNeedsYou()
+  // The same poll as the workspace's, so the header's mark, the tab icon and the rail's figures say the same here.
+  const needsYou = useNeedsYou()
+  // The bell an agent's header has, as a team's does: answer what waits on you from here.
+  const tray = <NeedsYouTray tickets={needsYou.tickets} working={needsYou.working} onAnswer={needsYou.answer} onPermission={needsYou.answerPermission} onSpend={needsYou.answerSpend} onDismiss={needsYou.dismiss} />
   return (
     <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading your agents…</p>}>
       {/* The guide starts with building an agent, here, then carries on at Home and in a team. */}
       <Guide />
       <Feedback />
-      <AgentsPage skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} mark={mark} />
+      <AgentsPage skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} mark={needsYou.mark} records={needsYou.records} tray={tray} />
     </Suspense>
   )
 }

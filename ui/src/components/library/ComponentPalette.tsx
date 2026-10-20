@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { BookmarkCheck, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, UserRound, Wrench, type LucideIcon } from 'lucide-react'
 import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
-import { removeJob, savedJobPreset, useSavedJobs, versionOf } from '../../lib/library/jobs'
+import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
 import { usedInRun, type UsedInRun } from '../../lib/library/observed'
 import { isOpenTeam, teamAgentSource, useAgentUses, type TeamOwnAgent } from '../../lib/library/uses'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
@@ -236,7 +236,7 @@ const EXPLAIN: Record<string, ReactNode> = {
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
-  [YOURS]: <>A team’s agents come from here: the ones you built, then the ones that live in your teams. A team keeps the version of a built agent it was given until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
+  [YOURS]: <>A team’s agents come from here: the ones you built, then the ones that live in your teams. A team keeps its copy of a built agent until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
 }
 
 /**
@@ -289,7 +289,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   // and tried on its own before a team depends on it. After them, the agents that live in teams:
   // this team's own (found on the canvas) and other teams' (added as a copy).
   const yours = { name: YOURS, items: [
-    ...saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, engine: `v${versionOf(job)} · ${item.engine}`, figure: figureFor(job.id, job.figure) } }),
+    ...saved.jobs.map(job => { const item = jobItem(savedJobPreset(job), job.id); return { ...item, figure: figureFor(job.id, job.figure) } }),
     ...teamAgents.map(agent => hereItem(agent, onRevealAgent)),
     ...(teamOwn ?? []).filter(agent => !isOpenTeam(agent.teamPath, teamPath, teamsRoot)).map(elsewhereItem),
   ] }

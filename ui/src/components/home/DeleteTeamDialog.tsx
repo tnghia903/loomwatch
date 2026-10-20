@@ -18,7 +18,7 @@ export interface DeleteTeamDialogProps {
 const LIVE_RECHECK_MS = 4000
 
 /**
- * The one confirmation for deleting a team, from Home and from the team switcher alike.
+ * The one confirmation for deleting a team, from Home and from the team menu alike.
  *
  * It says what happens in the operator's words: the team leaves the list, nothing is erased, and
  * moving the files back brings it back with its history. A team with an unfinished run cannot be

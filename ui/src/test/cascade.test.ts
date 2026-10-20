@@ -1,0 +1,33 @@
+import { describe, expect, it } from 'vitest'
+
+import { cascaded, DESKTOP, mediaHolds, PHONE, rulesOf } from './cascade'
+
+// The tests that ask "is this gold? is it 32 px?" trust this cascade, so it has to keep a phone's
+// rules off a desktop, and the other way round, or a 44 px phone height would pass for 32.
+describe('the stylesheet cascade the tests run', () => {
+  it('applies a width rule only at the widths it names', () => {
+    expect(mediaHolds('(max-width: 767px)', PHONE)).toBe(true)
+    expect(mediaHolds('(max-width: 767px)', DESKTOP)).toBe(false)
+    expect(mediaHolds('(min-width: 768px)', DESKTOP)).toBe(true)
+    expect(mediaHolds('(min-width: 768px) and (max-width: 1179px)', DESKTOP)).toBe(false)
+    expect(mediaHolds('(prefers-reduced-motion: reduce)', DESKTOP)).toBe(false)
+    expect(mediaHolds('(prefers-reduced-motion: reduce)', { ...DESKTOP, reducedMotion: true })).toBe(true)
+  })
+
+  it('cascades a rule inside @media only where it holds, and by specificity, order and !important', () => {
+    const rules = rulesOf(`
+      .x { min-height: 32px; color: red }
+      @media (max-width: 767px) { .x { min-height: 44px } }
+      @keyframes spin { from { color: blue } }
+      .y .x { color: green }
+      .x { color: navy !important }
+    `)
+    const outer = document.createElement('div')
+    outer.className = 'y'
+    const element = outer.appendChild(document.createElement('div'))
+    element.className = 'x'
+    expect(cascaded(element, 'min-height', DESKTOP, rules)).toBe('32px')
+    expect(cascaded(element, 'min-height', PHONE, rules)).toBe('44px')
+    expect(cascaded(element, 'color', DESKTOP, rules)).toBe('navy')
+  })
+})

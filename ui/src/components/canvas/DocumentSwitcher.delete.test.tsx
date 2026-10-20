@@ -15,22 +15,22 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 function renderSwitcher(overrides: Partial<DocumentSwitcherProps> = {}) {
   render(
     <DocumentSwitcher
-      path="trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null} linesDiffer={0}
+      path="trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null}
       entrypointProblem={null} documentProblems={[]} fieldProblemsByAgent={new Map()} agentNames={new Map()} isValid
       readOnlyReason={null} onSave={vi.fn()} onSaveCopy={vi.fn()} onReload={vi.fn()} onDiscard={vi.fn()}
-      onNewTeam={vi.fn()} onSelectProblem={vi.fn()} problemsOpen={false} onProblemsOpenChange={vi.fn()}
+      onSelectProblem={vi.fn()} problemsOpen={false} onProblemsOpenChange={vi.fn()}
       {...overrides}
     />,
   )
-  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
 }
 
-it('hands "Delete team…" to the workspace’s confirmation and closes the switcher', () => {
+it('hands "Delete team…" to the workspace’s confirmation and closes the menu', () => {
   const onDelete = vi.fn()
   renderSwitcher({ onDelete })
   fireEvent.click(screen.getByRole('button', { name: 'Delete team…' }))
   expect(onDelete).toHaveBeenCalledTimes(1)
-  expect(screen.queryByRole('dialog', { name: 'Team switcher' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('dialog', { name: 'Team menu' })).not.toBeInTheDocument()
 })
 
 // Deleting goes back to Home, and leaving a page with unsaved edits stops on the browser's prompt.

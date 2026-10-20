@@ -24,10 +24,13 @@ export function SegmentThumb() {
     place()
     // The first placement lands before paint; only later moves glide.
     const settled = requestAnimationFrame(() => element.classList.add('ready'))
-    const selection = new MutationObserver(place)
-    selection.observe(group, { subtree: true, childList: true, attributeFilter: ['aria-pressed', 'aria-checked'] })
+    // The group and each segment: when the group's width is set from outside (a phone's header
+    // stretches its tabs across the row), a segment can change width while the group does not.
     const size = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place)
-    size?.observe(group)
+    const watch = () => { for (const child of [group, ...group.children]) if (child !== element) size?.observe(child) }
+    watch()
+    const selection = new MutationObserver(() => { watch(); place() })
+    selection.observe(group, { subtree: true, childList: true, attributeFilter: ['aria-pressed', 'aria-checked'] })
     return () => { cancelAnimationFrame(settled); selection.disconnect(); size?.disconnect() }
   }, [])
   return <span ref={thumb} className="segment-thumb" aria-hidden="true" />

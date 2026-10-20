@@ -150,7 +150,10 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const runs = useMemo(() => new Map(chat.items.flatMap((item) => (item.kind === 'work' ? [[item.run.runId, item.run] as const] : []))), [chat.items])
   const continuedFrom = useMemo(() => new Set(chat.items.flatMap((item) => (item.kind === 'work' && item.run.followsRunId && !item.run.onlyAgent ? [item.run.followsRunId] : []))), [chat.items])
 
-  // What the team is waiting on you for: the newest open review or question.
+  // What the team is waiting on you for: the newest open review or question, which the box below
+  // answers. If it is a review, its Approve is the screen's one gold fill; an older piece waiting too
+  // has its Approve as a ring (DESIGN_LANGUAGE §8). With none known yet (a piece reads its own
+  // fresher record), each Approve is filled, so a run waiting on you never shows no fill.
   const decision = useMemo<OpenDecision | null>(() => {
     for (const run of [...chat.live].sort((left, right) => right.createdAt.localeCompare(left.createdAt))) {
       const waiting = run.waitingOn
@@ -613,7 +616,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
               <Fragment key={item.kind === 'work' ? item.run.runId : item.message.id}>
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
-                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
+                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onTyping={onTyping} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
                   : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}

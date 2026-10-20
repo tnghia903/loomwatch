@@ -6,6 +6,7 @@ import { forgetModels } from '../lib/ai/useModels'
 import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { keys } from '../lib/platform'
+import { background, cascaded, goldFilled, heightOf, isGoldFill } from '../test/cascade'
 import { Workspace } from './Workspace'
 
 // The Run button shows its key as this computer writes it: ↵ on a Mac, Enter elsewhere.
@@ -294,7 +295,7 @@ describe('Workspace', () => {
   it('shows the team canvas with the document chip, composer and the configured pipeline', () => {
     renderWorkspace()
     expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /demo.yaml, .*open team switcher/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /demo.yaml, .*open team menu/ })).toBeInTheDocument()
     expect(screen.getByText('2 steps in order')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: RUN_BUTTON })).toBeDisabled()
     expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
@@ -750,7 +751,7 @@ describe('Workspace', () => {
     expect(screen.queryByRole('complementary', { name: /cargo test/ })).not.toBeInTheDocument()
   })
 
-  // A newcomer never meets the team file's raw YAML: there is no Show YAML in the team switcher or
+  // A newcomer never meets the team file's raw YAML: there is no Show YAML in the team menu or
   // the palette, and a problem with nothing on the canvas to point at no longer opens it.
   it('never shows the team file as YAML', async () => {
     Object.assign(documentState, {
@@ -760,8 +761,8 @@ describe('Workspace', () => {
       yamlPreview: 'schemaVersion: 1\nunexpected: true\nagents: []\n',
     })
     renderWorkspace()
-    fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
-    expect(screen.getByRole('dialog', { name: 'Team switcher' })).toHaveTextContent('Copy path')
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    expect(screen.getByRole('dialog', { name: 'Team menu' })).toHaveTextContent('Copy path')
     expect(screen.queryByRole('button', { name: 'Show YAML' })).not.toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'k', metaKey: true })
@@ -868,6 +869,65 @@ describe('Workspace', () => {
     fireEvent.change(screen.getByLabelText('Scheduled task'), { target: { value: 'Prepare the morning digest.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(documentState.updateTeamSchedule).toHaveBeenCalledWith(expect.objectContaining({ cron: '0 8 * * 1-5', prompt: 'Prepare the morning digest.' }))
+  })
+
+  // One gold fill per screen (DESIGN_LANGUAGE §8): once the schedule can be saved, Save schedule is
+  // the fill; Run team steps back to a ring and the chosen frequency is a ring, as a selection is (§5).
+  it('keeps one gold fill while the schedule is open: Save schedule, with Run team and the chosen frequency as rings', async () => {
+    renderWorkspace()
+    const run = screen.getByRole('button', { name: 'Run team' })
+    expect(goldFilled()).toEqual(['Run team'])
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }))
+    // No task yet, so Save schedule can't be pressed: Run team keeps the fill.
+    expect(screen.getByRole('button', { name: 'Save schedule' })).toBeDisabled()
+    expect(goldFilled()).toEqual(['Run team'])
+    fireEvent.change(screen.getByLabelText('Scheduled task'), { target: { value: 'Prepare the morning digest.' } })
+    expect(goldFilled()).toEqual(['Save schedule'])
+    expect(run).toHaveClass('btn-ring')
+    expect(background(run)).toBe('transparent')
+    expect(cascaded(run, 'color')).toBe('var(--color-ink)')
+    expect(cascaded(run, 'border-color')).toBe('var(--color-accent)')
+    // At the fill's weight, as the tray's stepped-back ring is: two rings side by side match.
+    expect(cascaded(run, 'font-weight')).toBe('600')
+    const chosen = screen.getByRole('tab', { selected: true })
+    expect(isGoldFill(chosen)).toBe(false)
+    expect(cascaded(chosen, 'color')).toBe('var(--color-ink)')
+    expect(cascaded(chosen, 'box-shadow')).toBe('inset 0 0 0 1px var(--color-accent)')
+    // The row clips to its rounded corner inside a 1 px border; the ring follows that corner.
+    expect(cascaded(chosen.parentElement!, 'border-radius')).toBe('var(--r-sm)')
+    expect(cascaded(chosen, 'border-radius')).toBe('calc(var(--r-sm) - 1px)')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(goldFilled()).toEqual(['Run team'])
+  })
+
+  // Gold means the action at hand: an unchanged schedule's Save schedule would do nothing, so on
+  // reopening one Run team keeps the fill, until the schedule is changed.
+  it('keeps Run team the one fill on reopening an unchanged schedule, until it is changed', async () => {
+    Object.assign(documentState, { teamSchedule: { cron: '0 8 * * *', timezone: 'Asia/Singapore', prompt: 'Prepare the daily digest.' } })
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: /Schedule trigger.*Daily/ }))
+    expect(screen.getByRole('form', { name: 'Edit schedule' })).toHaveTextContent('This schedule matches the team file on disk.')
+    expect(screen.getByRole('button', { name: 'Save schedule' })).toBeEnabled()
+    expect(goldFilled()).toEqual(['Run team'])
+    fireEvent.change(screen.getByLabelText('Scheduled task'), { target: { value: 'Prepare the evening digest.' } })
+    expect(goldFilled()).toEqual(['Save schedule'])
+    fireEvent.click(screen.getByRole('button', { name: 'Close schedule' }))
+    expect(goldFilled()).toEqual(['Run team'])
+    Object.assign(documentState, { teamSchedule: null })
+  })
+
+  // A team with unsaved changes: Run team saves before it starts, so it keeps the one gold fill and
+  // the name chip's Save is a gold ring, 32 px like the chip's other buttons.
+  it('keeps Run team the one fill on a team with unsaved changes, with Save as a ring', async () => {
+    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
+    renderWorkspace()
+    const save = screen.getAllByRole('button', { name: /^Save/ }).find((button) => button.closest('.lw-chip'))!
+    expect(save).toBeEnabled()
+    expect(goldFilled()).toEqual(['Run team'])
+    expect(save).toHaveClass('btn-ring')
+    expect(cascaded(save, 'border-color')).toBe('var(--color-accent)')
+    expect(heightOf(save)).toBe(32)
+    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean' })
   })
 
   it('drops an unsaved schedule when its editor closes', async () => {
@@ -1631,5 +1691,85 @@ describe('Home', () => {
     } finally {
       documentState.path = path
     }
+  })
+})
+
+// The team rail: every team beside the open one, one click away, without going back to Home.
+describe('the team rail', () => {
+  let assign: ReturnType<typeof vi.fn>
+  let real: Location
+  beforeEach(() => {
+    const fallback = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/teams')) return new Response(JSON.stringify({ root: '/teams', files: ['demo.yaml', 'trip.yaml'], teams: [{ path: 'demo.yaml', name: 'Demo', agentCount: 2 }, { path: 'trip.yaml', name: 'Trip', agentCount: 1 }] }), { status: 200 })
+      if (url.startsWith('/api/team?')) {
+        const path = new URLSearchParams(url.split('?')[1]).get('path')
+        return new Response(JSON.stringify({ path, revision: 'r1', yaml: path === 'trip.yaml' ? 'name: Trip\nagents:\n  - {id: planner, name: Planner}\n' : 'name: Demo\nagents: []\n' }), { status: 200 })
+      }
+      return fallback(input, init)
+    }))
+    // jsdom makes location.assign non-configurable, so stand in a whole location.
+    real = window.location
+    assign = vi.fn()
+    Object.defineProperty(window, 'location', { configurable: true, value: { href: real.href, pathname: real.pathname, search: real.search, assign } })
+  })
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { configurable: true, value: real })
+    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean', isValid: true })
+  })
+
+  it('lists the teams, this one as it is on screen, and opens another on the same tab', async () => {
+    renderWorkspace()
+    const rail = screen.getByRole('navigation', { name: 'Your teams' })
+    const trip = await within(rail).findByRole('link', { name: 'Trip' })
+    // The open team's name and agents are the canvas's, saved or not.
+    expect(within(rail).getByRole('link', { name: 'demo' })).toHaveAttribute('aria-current', 'page')
+    expect(within(rail).getByRole('link', { name: 'demo' }).querySelector('.crew-team')).toHaveClass('n2')
+    expect(trip).toHaveAttribute('href', '/?path=trip.yaml')
+    fireEvent.click(trip)
+    expect(assign).toHaveBeenCalledWith('/?path=trip.yaml')
+  })
+
+  it('asks before leaving changes, and opens the other team once they are saved', async () => {
+    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
+    const view = renderWorkspace()
+    fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
+    expect(assign).not.toHaveBeenCalled()
+    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).getByRole('button', { name: 'Save first' })) })
+    expect(documentState.save).toHaveBeenCalledOnce()
+    // The page moves only once the team says it is saved, so the browser's own "Leave site?",
+    // which asks while there are changes, never asks a second time.
+    expect(assign).not.toHaveBeenCalled()
+    Object.assign(documentState, { documentChipState: 'saved', saveState: 'saved' })
+    view.rerender(<Workspace onDocumentOpen={vi.fn()} initialRunId={null} />)
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
+  })
+
+  it('drops the changes by reading the file again, then goes', async () => {
+    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
+    const view = renderWorkspace()
+    fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Discard' })) })
+    expect(documentState.reloadFromDisk).toHaveBeenCalledOnce()
+    expect(documentState.save).not.toHaveBeenCalled()
+    expect(assign).not.toHaveBeenCalled()
+    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean' })
+    view.rerender(<Workspace onDocumentOpen={vi.fn()} initialRunId={null} />)
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
+  })
+
+  // ADR 0043: the rail is the one way to another team or a new one; the team menu is this team's file.
+  it('opens New team from the rail’s +, and the team menu lists no teams', async () => {
+    renderWorkspace()
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Your teams' })).getByRole('button', { name: 'New team' }))
+    expect(await screen.findByRole('dialog', { name: 'Create a team' })).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Create a team' }), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    const menu = screen.getByRole('dialog', { name: 'Team menu' })
+    expect(within(menu).queryByRole('listbox')).not.toBeInTheDocument()
+    expect(within(menu).queryByText(/New team/)).not.toBeInTheDocument()
+    // However a list might come back, the other team's name is not in it.
+    expect(within(menu).queryByText('Trip')).not.toBeInTheDocument()
   })
 })

@@ -21,6 +21,9 @@
 .home-brand { display: inline-flex; align-items: center; gap: 10px; }
 .home-brand .fr-mark { animation: none; }
 .home-top-acts { display: inline-flex; gap: var(--sp-2); }
+/* The menu stands in the row, and stays on a phone, where it is the only way to Skills, Quests,
+   Feedback and the theme. */
+.home-top-acts .prototype-workspace-menu { display: flex; position: relative; right: auto; top: auto; }
 
 .home-main {
   position: relative; flex: 1; width: min(1040px, 100%); margin: 0 auto;
@@ -99,6 +102,22 @@
   .home-hero-acts .btn { width: 100%; justify-content: center; }
   .home-filter input { width: 120px; }
   .home-key .lw-key-card, .home-key .lw-you-card { padding: var(--sp-4); }
+}
+/* A phone. The header's buttons go under the name when they don't fit beside it, lined up on their
+   middles, so the page never scrolls sideways. The needs-you tray hangs from the header, not from the
+   bell: the bell sits mid-row, and a tray as wide as the screen hung from it ran off the left edge.
+   It sits 12 px in from each side of the header (a scrollbar that takes room narrows the header, not
+   the tray's margins) and starts 8 px under the buttons, as it does under the bell elsewhere. */
+@media (max-width: 767px) {
+  .home-top { flex-wrap: wrap; gap: var(--sp-3); }
+  .home-top-acts { flex-wrap: wrap; justify-content: flex-end; align-items: center; margin-left: auto; }
+  .home-top .needs-you { position: static; }
+  .home-top .needs-you-panel { top: calc(100% - var(--sp-3)); right: var(--sp-3); width: min(420px, calc(100% - 2 * var(--sp-3))); }
+}
+/* Narrower, the header takes three rows (176 px) and the tray starts 164 px down, so it stops 12 px
+   above the screen's foot. At 320 by 568 that still holds its title and the first ticket, unscrolled. */
+@media (max-width: 350px) {
+  .home-top .needs-you-panel { max-height: min(70vh, calc(100dvh - 176px)); }
 }
 
 /* ---- New team dialog ------------------------------------------------------ */

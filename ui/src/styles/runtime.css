@@ -8,7 +8,7 @@
    COMPOSER — TNG89 §1. 720 × 56, bottom-centre, absorbs the mode pill.
    --------------------------------------------------------------------------- */
 .lw-composer {
-  width: min(var(--lw-composer-w), calc(100vw - 2 * var(--lw-panel-inset)));
+  width: min(var(--lw-composer-w), calc(100vw - var(--lw-rail-w, 0px) - 2 * var(--lw-panel-inset)));
   min-height: 56px; padding: 0;
   display: flex; align-items: stretch; overflow: visible;
 }
@@ -47,7 +47,8 @@
 /* The same line in the Schedule panel, where there is room to wrap instead of truncate. */
 .schedule-routine { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--sp-2); color: var(--color-ink-2); }
 .lw-composer .comp-act { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2) 0 0; flex: none; }
-.lw-composer .comp-act .btn kbd { font: 500 11px/1 var(--font-mono); opacity: .75; }
+.lw-composer .comp-act .btn kbd { font: 500 11px/1 var(--font-mono); padding: 2px 4px; border-radius: 4px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); }
+@media (hover: none) { .lw-composer .comp-act .btn kbd { display: none; } }
 .lw-composer .comp-act .iconbtn { margin-right: 2px; }
 
 .mode-switch-note { color: var(--color-ink-2); background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); padding: 4px var(--sp-3); }
@@ -135,7 +136,7 @@
 /* §3.4: `[ Reuse ]` on a failed response node — the strip is the node, this is its action. */
 .rt-response > .rt-strip { margin-inline: calc(-1 * var(--sp-4)); }
 .rt-response .rr-reuse { display: block; width: calc(100% + 2 * var(--sp-4)); margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-3)); padding: var(--sp-2) var(--sp-4); background: none; border: 0; border-top: 1px solid var(--color-hairline); color: var(--color-accent); font: 400 12px/16px var(--font-sans); text-align: left; cursor: pointer; }
-.rt-response .rr-reuse:hover { background: var(--color-accent-tint); }
+.rt-response .rr-reuse:hover { background: var(--color-accent-tint); color: var(--color-ink); }
 
 /* live activity evidence cards — TNG-113 */
 .activity-ent {
@@ -237,11 +238,11 @@
    centred 720 px would run under the open Library, so it centres in the space beside it. */
 @media (min-width: 768px) and (max-width: 1179px) {
   .lib-open .lw-composer {
-    --lw-beside: calc(100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset));
+    --lw-beside: calc(100vw - var(--lw-rail-w, 0px) - var(--lw-library-w) - 3 * var(--lw-panel-inset));
     width: min(var(--lw-composer-w), var(--lw-beside));
     left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + var(--lw-beside) / 2);
   }
-  .lib-open .lw-history { left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + (100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset)) / 2); }
+  .lib-open .lw-history { left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + (100vw - var(--lw-rail-w, 0px) - var(--lw-library-w) - 3 * var(--lw-panel-inset)) / 2); }
   /* the view controls would sit under the composer's right end; stack them above it */
   .lib-open .lw-viewctl { bottom: calc(var(--lw-panel-inset) + 68px); }
   .lib-open .lw-legend { display: none; }

@@ -36,7 +36,6 @@
 .agent-badge-who strong { font: 600 15px/1.25 var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
 .agent-badge-does { font-size: 13px; color: var(--color-ink-2); }
 .agent-badge-app { color: var(--color-ink-3); overflow-wrap: anywhere; }
-.agent-badge-version { flex: none; font: 600 11px/1 var(--font-mono); color: var(--color-accent); background: var(--color-accent-tint); padding: 4px 7px; border-radius: var(--r-full); }
 .agent-badge-row { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: var(--sp-2); align-items: baseline; font-size: 12.5px; color: var(--color-ink-2); }
 .agent-badge.compact .agent-badge-row { grid-template-columns: 64px minmax(0, 1fr); }
 .agent-badge-label { font: 600 10.5px/1.4 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--color-ink-3); }
@@ -44,7 +43,8 @@
 .agent-badge-tile { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: var(--r-sm); border: 1px solid var(--color-hairline); font-size: 12px; color: var(--color-ink-2); white-space: nowrap; }
 .agent-badge-tile em { font-style: normal; color: var(--color-ink-3); }
 .agent-badge-tile.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-ink); }
-.agent-badge-tile.on em { color: var(--color-accent); }
+.agent-badge-tile.on > svg { color: var(--color-accent); }
+.agent-badge-tile.on em { color: var(--color-ink); }
 .agent-badge-tile.wild { border-color: color-mix(in srgb, var(--color-alert) 45%, transparent); color: var(--color-alert); }
 .agent-badge-tile.wild em { color: var(--color-alert); font-weight: 600; }
 .agent-badge-warn { margin: 0; font-size: 12px; color: var(--color-alert); }
@@ -53,7 +53,14 @@
 .agent-badge-behind { font-style: normal; color: var(--color-accent); }
 
 /* ---------- the builder ---------- */
-.agent-builder { display: flex; flex-direction: column; gap: var(--sp-5); }
+.agent-builder { position: relative; display: flex; flex-direction: column; gap: var(--sp-5); }
+/* On an agent's own page: the way back to a team, and what a save did. With nothing to say it keeps
+   its place for screen readers and takes none on screen. */
+.agent-notices { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); }
+.agent-builder > .agent-notices:not(:has(a)):has(> .agent-save-state:is(:empty, .quiet)) { position: absolute; }
+.agent-notices .agent-save-state { flex-basis: auto; text-align: left; }
+/* Read out, not shown: the chip already says Saved. */
+.agent-notices .agent-save-state.quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .agent-back { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; align-self: flex-start; }
 .agent-builder-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-5); align-items: end; }
 .agent-backs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); }
@@ -68,7 +75,8 @@
 .agent-view-tabs button[aria-pressed='true'] { color: var(--color-accent); font-weight: 600; }
 .agent-view-tabs button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .agent-builder-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); max-width: 560px; }
-.agent-note { width: 280px; max-width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; font-size: 13px; }
+/* Save is the page's one gold fill, and a gold fill is never under 32 px (DESIGN_LANGUAGE §4). */
+.agent-builder-save .btn { min-height: 32px; }
 .agent-save-state { flex-basis: 100%; text-align: right; min-height: 16px; color: var(--color-ink-3); }
 .agent-save-error { color: var(--color-alert); }
 /* Under the bench (its chat is a tab): the ID card, where it is used and its versions on the left,
@@ -85,7 +93,7 @@
 /* Our own chevron, inset as far from the edge as the text is, so the box reads balanced. */
 .agent-field select { appearance: none; -webkit-appearance: none; padding-right: 36px; background-image: var(--select-chevron); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px; cursor: pointer; }
 .agent-field select:disabled { cursor: default; opacity: .6; }
-.agent-field input:focus, .agent-field select:focus, .agent-instructions:focus, .agent-note:focus { outline: 2px solid var(--color-accent); outline-offset: -1px; border-color: transparent; }
+.agent-field input:focus, .agent-field select:focus, .agent-instructions:focus { outline: 2px solid var(--color-accent); outline-offset: -1px; border-color: transparent; }
 .agent-field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
 .agent-section .agent-permissions { display: flex; flex-direction: column; gap: var(--sp-2); }
 .agent-remove { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); justify-content: flex-end; }
@@ -105,15 +113,12 @@
 .agent-bench-error { margin: 0; color: var(--color-alert); font-size: 13px; }
 
 /* used in, versions */
-.agent-uses, .agent-versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.agent-uses { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .agent-uses li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); font-size: 13.5px; }
 .agent-uses a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-ink); text-decoration: none; font-weight: 500; }
 .agent-uses a:hover { color: var(--color-accent); }
 .agent-use-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
 .agent-use-version.behind { color: var(--color-accent); }
-.agent-versions li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: baseline; font-size: 13px; color: var(--color-ink-2); }
-.agent-versions b { font: 600 12px var(--font-mono); color: var(--color-ink); }
-.agent-versions time { font-size: 12px; color: var(--color-ink-3); white-space: nowrap; }
 
 /* ---------- Home's row of agents ---------- */
 .home-agents-all { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
@@ -132,7 +137,6 @@
 .linked-agent { display: flex; flex-direction: column; gap: 8px; padding: var(--sp-3); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline)); border-radius: var(--r-md); background: var(--color-accent-tint); }
 .linked-agent p { margin: 0; }
 .linked-agent-line { font-size: 13.5px; color: var(--color-ink); }
-.linked-agent-version { font: 600 11px/1 var(--font-mono); color: var(--color-accent); margin-left: 4px; }
 .linked-agent-update, .linked-agent-changed { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
 .linked-agent-changed p { color: var(--color-alert); }
 .linked-agent-acts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -180,7 +184,8 @@
 .bench-tag:focus-visible { outline: none; }
 .bench-tag:focus-visible > span { box-shadow: 0 0 0 2px #E9C46A; }
 .bench-tag.plate { width: 140px; height: 40px; margin: -20px 0 0 -70px; border-radius: 12px; pointer-events: none; }
-.bench-tag.plate:focus-visible { outline: 2px solid #E9C46A; outline-offset: 2px; }
+/* A dark band inside the gold ring, as a label has, so it reads on the bench in either theme. */
+.bench-tag.plate:focus-visible { outline: 2px solid #E9C46A; outline-offset: 2px; box-shadow: 0 0 0 2px rgba(8, 8, 10, .84); }
 /* What its model is thinking about, in a comic thought bubble over its head while it thinks (AgentFigure):
    a cloud in the bench's own bone and ink, and two little puffs trailing down to its head. It breathes. */
 .bench-thought { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .3s ease; }
@@ -317,19 +322,20 @@
 .figure-wardrobe-item { width: 100%; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel); font: inherit; color: inherit; cursor: pointer; min-width: 0; }
 .figure-wardrobe-item .accessory-icon { width: 40px; height: 40px; border-radius: var(--r-sm, 6px); }
 .figure-wardrobe-item:hover:not(.locked) { border-color: color-mix(in srgb, var(--color-ink-3) 50%, transparent); }
-.figure-wardrobe-item[aria-pressed="true"] { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); background: var(--color-accent-tint); }
+.figure-wardrobe-item[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-tint); }
 .figure-wardrobe-item:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .figure-wardrobe-item.locked { cursor: default; border-style: dashed; background: transparent; }
 .figure-wardrobe-item.locked .accessory-icon { filter: brightness(0) opacity(.18); }
 [data-theme="dark"] .figure-wardrobe-item.locked .accessory-icon, [data-theme="dark"] .figure-picker-kind.locked img { filter: brightness(0) invert(1) opacity(.2); }
 .figure-wardrobe-name { display: block; font: 600 13px/1.25 var(--font-sans); color: var(--color-ink); }
 .figure-wardrobe-note { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.35; color: var(--color-ink-3); }
-.figure-wardrobe-item[aria-pressed="true"] .figure-wardrobe-note { color: var(--color-accent); }
+.figure-wardrobe-item[aria-pressed="true"] .figure-wardrobe-note { color: var(--color-ink); }
 @media (max-width: 520px) { .figure-picker-kinds { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 .byhand-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
 .byhand-keys li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; padding: var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--color-hairline); color: var(--color-ink-3); }
-.byhand-keys li.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.byhand-keys li.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); }
+.byhand-keys li.on > svg { color: var(--color-accent); }
 .byhand-keys li span { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; color: var(--color-ink); }
 .byhand-keys li em { font-style: normal; font-size: 12.5px; color: var(--color-ink-2); }
 .byhand-reads { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
@@ -379,7 +385,7 @@
 .team-agents-chip em { font-style: normal; font-size: 12px; color: var(--color-ink-3); }
 .team-agents-chip:hover { border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline)); }
 .team-agents-chip[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-tint); }
-.team-agents-chip[aria-pressed="true"] em { color: var(--color-accent); }
+.team-agents-chip[aria-pressed="true"] em { color: var(--color-ink); }
 .team-agents-linked { display: flex; flex-direction: column; gap: var(--sp-4); }
 /* Spaced as one of My agents' page (.agent-builder), whose head it shares. */
 .team-agents-own { display: flex; flex-direction: column; gap: var(--sp-5); }

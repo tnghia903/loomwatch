@@ -1,37 +1,27 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 
 import { DocumentSwitcher, type DocumentSwitcherProps } from './DocumentSwitcher'
 
-beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    root: '/teams',
-    files: ['trip-planner.yaml', 'trip-planner-2.yaml'],
-    teams: [
-      { path: 'trip-planner.yaml', name: 'Trip planner', agentCount: 1 },
-      { path: 'trip-planner-2.yaml', name: 'Trip planner', agentCount: 1 },
-    ],
-  }), { status: 200, headers: { 'content-type': 'application/json' } })))
-})
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup() })
 
 function renderSwitcher(overrides: Partial<DocumentSwitcherProps> = {}) {
   render(
     <DocumentSwitcher
-      path="/teams/trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null} linesDiffer={0}
+      path="/teams/trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null}
       entrypointProblem={null} documentProblems={[]} fieldProblemsByAgent={new Map()} agentNames={new Map()} isValid
       readOnlyReason={null} onSave={vi.fn()} onSaveCopy={vi.fn()} onReload={vi.fn()} onDiscard={vi.fn()}
-      onNewTeam={vi.fn()} onSelectProblem={vi.fn()} problemsOpen={false} onProblemsOpenChange={vi.fn()}
+      onSelectProblem={vi.fn()} problemsOpen={false} onProblemsOpenChange={vi.fn()}
       {...overrides}
     />,
   )
 }
 
 // There was no way to rename a team short of editing its YAML.
-it('renames the open team from the switcher', () => {
+it('renames the open team from its menu', () => {
   const onRename = vi.fn()
   renderSwitcher({ onRename })
-  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
   fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
   const form = screen.getByRole('form', { name: 'Rename team' })
   const field = within(form).getByLabelText('Team name')
@@ -44,29 +34,24 @@ it('renames the open team from the switcher', () => {
 
 it('offers no rename where the team cannot be edited', () => {
   renderSwitcher()
-  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
   expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
 })
 
-it('tells two teams with the same name apart by their files', async () => {
-  renderSwitcher()
-  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
-  const list = screen.getByRole('listbox', { name: 'Your teams' })
-  expect(await within(list).findByText('trip-planner-2.yaml')).toBeInTheDocument()
+// ADR 0043: other teams, and a new one, are the team rail's; the chip's menu is this team's file.
+it('lists no other teams and no New team', () => {
+  renderSwitcher({ saveState: 'dirty' })
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+  const menu = screen.getByRole('dialog', { name: 'Team menu' })
+  expect(within(menu).queryByRole('listbox')).not.toBeInTheDocument()
+  expect(within(menu).queryByRole('textbox', { name: 'Filter teams' })).not.toBeInTheDocument()
+  expect(within(menu).queryByText(/New team/)).not.toBeInTheDocument()
 })
 
-// On Windows the open team's path is `C:\Users\…`, and the list names it under the root.
-it('marks the open team in the list when its path is a Windows one', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    root: 'C:\\Users\\ana\\LoomWatch\\teams',
-    files: ['trip-planner.yaml', 'blog.yaml'],
-    teams: [{ path: 'trip-planner.yaml', name: 'Trip planner', agentCount: 1 }, { path: 'blog.yaml', name: 'Blog', agentCount: 1 }],
-  }), { status: 200, headers: { 'content-type': 'application/json' } })))
-  renderSwitcher({ path: 'C:\\Users\\ana\\LoomWatch\\teams\\trip-planner.yaml' })
-  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
-  const list = screen.getByRole('listbox', { name: 'Your teams' })
-  expect(await within(list).findByRole('option', { name: /Trip planner/ })).toHaveAttribute('aria-selected', 'true')
-  expect(within(list).getByRole('option', { name: /Blog/ })).toHaveAttribute('aria-selected', 'false')
+// A saved team says Saved under its name, as a saved agent does; its file is in the menu.
+it('says Saved under a saved team’s name', () => {
+  renderSwitcher()
+  expect(screen.getByRole('button', { name: 'Trip planner, Saved, open team menu' })).toBeInTheDocument()
 })
 
 it('says nothing is left to finish on a valid saved team', () => {
@@ -75,12 +60,12 @@ it('says nothing is left to finish on a valid saved team', () => {
   expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument()
 })
 
-// ADR 0043: Reload from disk and Discard both read the file again, so the switcher shows one of
+// ADR 0043: Reload from disk and Discard both read the file again, so the menu shows one of
 // them: Discard, which asks first, while there are changes; Reload otherwise.
 it('offers Discard with unsaved changes and Reload from disk without, never both', () => {
   const onDiscard = vi.fn()
   renderSwitcher({ saveState: 'dirty', onDiscard })
-  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
   expect(screen.queryByRole('button', { name: 'Reload from disk' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
   fireEvent.click(screen.getByRole('button', { name: 'Discard changes?' }))
@@ -89,7 +74,7 @@ it('offers Discard with unsaved changes and Reload from disk without, never both
 
   const onReload = vi.fn()
   renderSwitcher({ saveState: 'clean', onReload })
-  fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
+  fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
   expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Reload from disk' }))
   expect(onReload).toHaveBeenCalledOnce()

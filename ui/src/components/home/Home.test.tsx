@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
+import { FEEDBACK_EVENT } from '../../lib/feedback/report'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { resetFirstRunForTests } from '../../lib/firstrun/store'
 import { readTourState, resetTourForTests, startTour } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
+import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
 import type { TeamDocument } from '../../lib/team-file/types'
 import { Home } from './Home'
 
@@ -198,6 +200,34 @@ describe('Home', () => {
     expect(screen.getByLabelText('Claude API key')).toHaveAttribute('type', 'password')
   })
 
+  // One gold fill per screen (DESIGN_LANGUAGE §8): Build an agent. Until a way to pay is connected,
+  // the three cards' buttons are gold rings, with the same weight (ADR 0073), even with a key typed.
+  it('fills only Build an agent while the ways to pay wait, their buttons as rings', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/ai') return respond({ openrouter: { connected: false }, anthropic: { connected: false }, chatgpt: { available: true, connected: false, planUse: false } })
+      if (url === '/api/ai/chatgpt/sign-in') return respond({ url: 'https://auth.openai.com/oauth/authorize?state=s' })
+      return respond({ root: '/teams', files: [], teams: [] })
+    })
+    renderHome()
+    const go = await screen.findByRole('link', { name: /Continue with ChatGPT/ })
+    fireEvent.change(await screen.findByLabelText('OpenRouter key'), { target: { value: 'sk-or-v1-typed' } })
+    fireEvent.change(screen.getByLabelText('Claude API key'), { target: { value: 'sk-ant-api03-typed' } })
+    const saves = screen.getAllByRole('button', { name: 'Save key' })
+    expect(saves).toHaveLength(2)
+    for (const save of saves) expect(save).toBeEnabled()
+    expect(goldFilled()).toEqual(['Build an agent'])
+    for (const ring of [go, ...saves]) {
+      expect(isGoldFill(ring)).toBe(false)
+      expect(cascaded(ring, 'border-color')).toBe('var(--color-accent)')
+      expect(cascaded(ring, 'color')).toBe('var(--color-ink)')
+    }
+    // The maker's mark sits in the button without its own tile, which touched the ring's edge.
+    const mark = go.querySelector('.maker-mark')!
+    expect(cascaded(mark, ['background', 'background-color'])).toBe('none')
+    expect(cascaded(mark, 'box-shadow')).toBe('none')
+    expect(cascaded(mark, 'height')).toBe('20px')
+  })
+
   it('keeps the cards away once a way to pay is connected, and says what agents can run on', async () => {
     fetchMock.mockImplementation(keyed({ connected: true, label: 'sk-or-v1-abc...xyz' }))
     renderHome()
@@ -205,6 +235,38 @@ describe('Home', () => {
     expect(screen.queryByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeNull()
     expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/connections')
     expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/usage')
+  })
+
+  // Home wears the header a team's and an agent's page have, the bell beside the menu. Skills,
+  // Quests, the theme and feedback are in the menu rather than in buttons of their own.
+  it('has the menu a team’s page has, with Skills, Quests, the theme and feedback in it', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    const sent = vi.fn()
+    window.addEventListener(FEEDBACK_EVENT, sent)
+    render(<Home onPalette={vi.fn()} topActions={<button type="button">1 needs you</button>} />)
+    const header = screen.getByRole('banner')
+    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Open the command palette', '1 needs you', 'Menu'])
+    expect(within(header).queryAllByRole('link')).toEqual([])
+    const menu = within(header).getByRole('button', { name: 'Menu' })
+    fireEvent.click(menu)
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'My agents…', 'About you…', 'Connections…', 'Usage…', 'Skills…', 'Quests…', expect.stringMatching(/^Switch to (light|dark) theme$/), 'Getting started guide', 'Send feedback…',
+    ])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Skills…' }))
+    expect(assign).toHaveBeenLastCalledWith('/skills')
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.click(menu)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Quests…' }))
+    expect(assign).toHaveBeenLastCalledWith('/quests')
+    const before = document.documentElement.dataset.theme
+    fireEvent.click(menu)
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Switch to (light|dark) theme$/ }))
+    expect(document.documentElement.dataset.theme).not.toBe(before)
+    fireEvent.click(menu)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send feedback…' }))
+    expect(sent.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([{ screen: 'home' }])
+    window.removeEventListener(FEEDBACK_EVENT, sent)
+    localStorage.removeItem('loomwatch:theme')
   })
 
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {

@@ -60,7 +60,7 @@
   cursor: pointer;
 }
 .tour-example:hover { border-style: solid; }
-.tour-example .t-micro { color: var(--color-accent); }
+.tour-example .t-micro { color: var(--color-ink); }
 
 .tour-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
 .tour-acts .btn { gap: 6px; }

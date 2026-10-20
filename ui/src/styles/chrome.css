@@ -20,7 +20,7 @@
 /* The replay strip belongs to the run, not to the header: centre it under the view tabs. */
 .lw-shell .workspace-chrome > .life-strip {
   position: absolute; top: var(--lw-below-header); left: 50%; transform: translateX(-50%);
-  max-width: calc(100vw - 2 * var(--lw-library-w) - 64px); flex-wrap: nowrap;
+  max-width: calc(100vw - var(--lw-rail-w, 0px) - 2 * var(--lw-library-w) - 64px); flex-wrap: nowrap;
 }
 @media (max-width: 1100px) {
   .lw-shell .workspace-chrome > .life-strip { max-width: calc(100vw - 32px); flex-wrap: wrap; }

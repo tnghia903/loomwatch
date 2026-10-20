@@ -25,3 +25,18 @@ it('closes before it opens Team memory', () => {
   expect(onMemory).toHaveBeenCalledOnce()
   expect(screen.queryByRole('menu')).not.toBeInTheDocument()
 })
+
+// Open over Home's first screenful, it must not stay in the way: Escape or a click elsewhere closes it.
+it('closes on Escape, back on its button, and on a click anywhere else', () => {
+  render(<><WorkspaceMenu screen="home" /><p>Elsewhere</p></>)
+  const button = screen.getByRole('button', { name: 'Menu' })
+  fireEvent.click(button)
+  fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Usage…' }), { key: 'Escape' })
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  expect(button).toHaveFocus()
+  fireEvent.click(button)
+  fireEvent.mouseDown(screen.getByRole('menuitem', { name: 'Usage…' }))
+  expect(screen.getByRole('menu')).toBeInTheDocument()
+  fireEvent.mouseDown(screen.getByText('Elsewhere'))
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+})

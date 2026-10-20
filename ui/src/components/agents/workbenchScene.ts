@@ -37,7 +37,7 @@ import { BUSY, BUSY_SECONDS, CARD_SLOTS, FIGURE_KEYS, nextBusy, partOfNode, reac
 import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { dress, type Dressed } from './accessoryMeshes'
-import { cardTexture, keyLabelTexture, pegboardTexture, toolTexture, woundTexture } from './benchTextures'
+import { cardTexture, keyLabelTexture, OBSIDIAN_PEGBOARD, pegboardTexture, toolTexture, woundTexture, type PegboardColors } from './benchTextures'
 import { benchMaterial, fitCanvas, LIVE, readModel, readyToDraw } from './workbenchModel'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
@@ -144,6 +144,44 @@ export interface BenchOptions {
    * them hides them.
    */
   clipboardOnBoard?: boolean
+  /** The app's theme, which the bench's furniture follows (setTone). Left out, it stays dark. */
+  tone?: BenchTone
+}
+
+export type BenchTone = 'dark' | 'light'
+interface Furniture { body: string; kick: string; hooks: string; frame: string; front: string; mouth: string; inside: string; foam: string; board: PegboardColors }
+/**
+ * The bench itself in each theme: its body and kick, the bar the keys hang on, the pegboard and its
+ * frame, and the drawers (front, the opening each slides out of, its box, the tool drawer's foam).
+ * Dark is the model as made. Light is warm stone, the light theme's
+ * own greys: still darker than the cream top, so the bench reads as furniture on the paper page
+ * without a black block on it. What stands on it (the laptop, the tray, your dish, the clipboard)
+ * stays as it is in both.
+ */
+export const FURNITURE: Record<BenchTone, Furniture> = {
+  dark: { body: '#24242B', kick: '#2B2B33', hooks: '#24242B', frame: '#1C1C21', front: '#3A3A44', mouth: '#0C0C10', inside: '#24242B', foam: '#1E1E24', board: OBSIDIAN_PEGBOARD },
+  light: { body: '#8E887F', kick: '#7A746B', hooks: '#6E6862', frame: '#857F76', front: '#A19B91', mouth: '#4A463F', inside: '#7A746B', foam: '#6E6862', board: { face: '#B5AEA2', holes: '#9F978A', thread: 'rgba(138, 106, 22, 0.7)' } },
+}
+
+/** The bench's own parts, which its tone paints. */
+export interface BenchFurniture { body?: Mesh; kick?: Mesh; hooks?: Mesh; frame?: Mesh; face?: Mesh; fronts: readonly Mesh[]; mouths: readonly Mesh[]; insides: readonly Mesh[]; foams: readonly Mesh[] }
+
+/** Paint the bench's furniture in a tone (FURNITURE); `board` gives the pegboard's face in it. */
+export function paintFurniture(parts: BenchFurniture, tone: BenchTone, board: (tone: BenchTone) => Texture) {
+  const look = FURNITURE[tone]
+  const color = (mesh: Mesh | undefined, value: string) => { (mesh?.material as MeshStandardMaterial | undefined)?.color.set(value) }
+  color(parts.body, look.body)
+  color(parts.kick, look.kick)
+  color(parts.hooks, look.hooks)
+  color(parts.frame, look.frame)
+  for (const front of parts.fronts) color(front, look.front)
+  for (const mouth of parts.mouths) color(mouth, look.mouth)
+  for (const inside of parts.insides) color(inside, look.inside)
+  for (const foam of parts.foams) color(foam, look.foam)
+  const face = parts.face?.material as MeshStandardMaterial | undefined
+  if (!face) return
+  face.map = board(tone)
+  face.needsUpdate = true
 }
 
 /**
@@ -611,11 +649,17 @@ export class WorkbenchScene {
   private dressed: Dressed | null = null
 
   private readonly options: BenchOptions
+  private tone: BenchTone
+  /** Each drawer's front, opening, box and foam, which the tone paints with the bench. */
+  private readonly drawerParts = { fronts: [] as Mesh[], mouths: [] as Mesh[], insides: [] as Mesh[], foams: [] as Mesh[] }
+  /** The pegboard's face in each tone, made the first time it is worn. */
+  private readonly boards = new Map<BenchTone, Texture>()
 
   constructor(canvas: HTMLCanvasElement, callbacks: BenchCallbacks, reduced: boolean, options: BenchOptions = {}) {
     this.callbacks = callbacks
     this.reduced = reduced
     this.options = options
+    this.tone = options.tone ?? 'dark'
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'low-power' })
     this.renderer.setClearColor(0x000000, 0)
     // Neutral keeps the bench's bone, graphite and gold close to the app's own tokens.
@@ -685,6 +729,7 @@ export class WorkbenchScene {
     if (this.options.clipboardOnBoard) this.hangClipboard()
     this.buildDrawer('reads')
     this.buildDrawer('tools')
+    if (this.tone !== 'dark') this.repaint()
     model.updateMatrixWorld(true)
     for (const { key, node } of FIGURE_KEYS) {
       const found = this.node(`key_${node}`)
@@ -998,20 +1043,25 @@ export class WorkbenchScene {
     const box = (width: number, height: number, depth: number, material: Material) => new Mesh(new BoxGeometry(width, height, depth), material)
     const { width, height, depth } = DRAWER
     // The mouth it slides out of, dark, so an open drawer reads as coming out of the bench.
-    const mouth = add(holder, new Mesh(new PlaneGeometry(width + 0.02, height + 0.02), new MeshStandardMaterial({ color: '#0C0C10', roughness: 1 })), 'mouth', 0, height / 2, 0.001)
+    const mouth = add(holder, new Mesh(new PlaneGeometry(width + 0.02, height + 0.02), new MeshStandardMaterial({ color: FURNITURE.dark.mouth, roughness: 1 })), 'mouth', 0, height / 2, 0.001)
     mouth.castShadow = false
+    this.drawerParts.mouths.push(mouth)
     // Its front, a shade lighter than the bench so it shows, with a card in a brass frame and a pull.
-    const front = add(drawer, box(width, height, 0.024, new MeshPhysicalMaterial({ color: '#3A3A44', roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.35 })), 'front', 0, height / 2, 0.012)
+    const front = add(drawer, box(width, height, 0.024, new MeshPhysicalMaterial({ color: FURNITURE.dark.front, roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.35 })), 'front', 0, height / 2, 0.012)
+    this.drawerParts.fronts.push(front)
     add(drawer, box(0.13, 0.054, 0.006, this.material('gold', name)), 'frame', 0, height * 0.68, 0.026)
     add(drawer, box(0.11, 0.036, 0.004, this.material('paper', name)), 'card', 0, height * 0.68, 0.029)
     add(drawer, box(0.12, 0.016, 0.014, this.material('gold', name)), 'pull', 0, height * 0.3, 0.044)
     for (const x of [-0.05, 0.05]) add(drawer, box(0.012, 0.012, 0.022, this.material('gold', name)), `post_${x < 0 ? 'l' : 'r'}`, x, height * 0.3, 0.034)
     // Its box: the floor, sides and back that hold what is in it, inside the bench while it is shut.
     const inside = () => this.material('graphite', name)
-    add(drawer, box(width - 0.03, 0.008, depth, inside()), 'floor', 0, 0.012, -depth / 2)
-    for (const sign of [-1, 1]) add(drawer, box(0.008, height * 0.7, depth, inside()), `side_${sign < 0 ? 'l' : 'r'}`, sign * (width / 2 - 0.02), height * 0.35 + 0.008, -depth / 2)
-    add(drawer, box(width - 0.03, height * 0.7, 0.008, inside()), 'back', 0, height * 0.35 + 0.008, -depth)
-    if (name === 'tools') add(drawer, box(width - 0.048, TOOL_FOAM - 0.016, depth - 0.008, new MeshStandardMaterial({ color: '#1E1E24', roughness: 0.95 })), 'foam', 0, (TOOL_FOAM + 0.016) / 2, -depth / 2)
+    const insides = [
+      add(drawer, box(width - 0.03, 0.008, depth, inside()), 'floor', 0, 0.012, -depth / 2),
+      ...[-1, 1].map((sign) => add(drawer, box(0.008, height * 0.7, depth, inside()), `side_${sign < 0 ? 'l' : 'r'}`, sign * (width / 2 - 0.02), height * 0.35 + 0.008, -depth / 2)),
+      add(drawer, box(width - 0.03, height * 0.7, 0.008, inside()), 'back', 0, height * 0.35 + 0.008, -depth),
+    ]
+    this.drawerParts.insides.push(...insides)
+    if (name === 'tools') this.drawerParts.foams.push(add(drawer, box(width - 0.048, TOOL_FOAM - 0.016, depth - 0.008, new MeshStandardMaterial({ color: FURNITURE.dark.foam, roughness: 0.95 })), 'foam', 0, (TOOL_FOAM + 0.016) / 2, -depth / 2))
     DRAWER_SLOTS[name].forEach((place, slot) => {
       const at = new Group()
       at.name = `${name}_${slot + 1}`
@@ -1852,8 +1902,26 @@ export class WorkbenchScene {
     this.camera.updateProjectionMatrix()
   }
 
+  /** Paint the bench in the app's theme (BenchOptions.tone). Before it loads, it is painted when it does. */
+  setTone(tone: BenchTone) {
+    if (tone === this.tone) return
+    this.tone = tone
+    if (this.nodes.has('bench_body')) this.repaint()
+  }
+
+  private repaint() {
+    const part = (name: string) => this.nodes.get(name) as Mesh | undefined
+    paintFurniture({ body: part('bench_body'), kick: part('bench_kick'), hooks: part('hooks_bar'), frame: part('pegboard_panel'), face: part('pegboard_face'), ...this.drawerParts }, this.tone, (tone) => this.boardFor(tone))
+  }
+
   private material(role: string, mesh: string): Material {
-    return benchMaterial(role, mesh, { pegboard: () => this.own(pegboardTexture()), wound: this.wound })
+    return benchMaterial(role, mesh, { pegboard: () => this.boardFor('dark'), wound: this.wound })
+  }
+
+  private boardFor(tone: BenchTone): Texture {
+    const made = this.boards.get(tone) ?? this.own(pegboardTexture(FURNITURE[tone].board))
+    this.boards.set(tone, made)
+    return made
   }
 
   private own<T extends { dispose: () => void }>(item: T): T {

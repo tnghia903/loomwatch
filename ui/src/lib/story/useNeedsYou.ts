@@ -16,8 +16,9 @@ function loadDismissed(): Set<string> {
 /**
  * Polls the run registry for the needs-you tray, and shows the result where the operator looks
  * when they are not looking at LoomWatch: the tab title counts what waits on them, and the tab
- * icon carries a dot — red when something needs them, blue while a team is working. The header's
- * mark says the same from inside the app (`mark`, lib/story/loomMark.ts).
+ * icon carries a dot — gold, with the mark's "o" mouth, when something needs them, blue while a
+ * team is working. The header's mark says the same from inside the app (`mark`,
+ * lib/story/loomMark.ts).
  */
 export function useNeedsYou() {
   const [records, setRecords] = useState<RunRecord[]>([])
@@ -100,8 +101,14 @@ function usePresence(waiting: number, working: number) {
     const original = link.dataset.original ?? link.href
     link.dataset.original = original
     if (waiting === 0 && working === 0) { link.href = original; return }
-    const dot = waiting > 0 ? '#F2635C' : '#6AB8FF'
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" stroke-width="26" stroke-linecap="round" stroke-dasharray="49.28 49.28" stroke-dashoffset="24.64"/><rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" stroke-width="40" stroke-linecap="round"/><circle cx="416" cy="96" r="92" fill="${dot}" stroke="#08080A" stroke-width="24"/></svg>`
+    // Waiting on you is your turn, not something wrong: the mark's own gold for "asking", not red,
+    // and its "o" mouth (LoomMark's asking pose), so the two dots differ by shape as well as hue
+    // where the title's count is hidden. Blue is the live work, as everywhere; it keeps the stitch.
+    const dot = waiting > 0 ? '#E9C46A' : '#6AB8FF'
+    const mouth = waiting > 0
+      ? '<circle cx="256" cy="362" r="26" fill="none" stroke="#E9C46A" stroke-width="30"/>'
+      : '<path d="M222 354Q256 382 290 354" fill="none" stroke="#E9C46A" stroke-width="40" stroke-linecap="round"/>'
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#08080A"/><path d="M256 40H384A88 88 0 0 1 472 128V384A88 88 0 0 1 384 472H128A88 88 0 0 1 40 384V128A88 88 0 0 1 128 40Z" fill="none" stroke="#D8A93C" stroke-width="26" stroke-linecap="round" stroke-dasharray="49.28 49.28" stroke-dashoffset="24.64"/><rect x="152" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/><rect x="290" y="146" width="70" height="150" rx="35" fill="#F5F3EE"/>${mouth}<circle cx="416" cy="96" r="92" fill="${dot}" stroke="#08080A" stroke-width="24"/></svg>`
     link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`
   }, [waiting, working])
   useEffect(() => () => {
