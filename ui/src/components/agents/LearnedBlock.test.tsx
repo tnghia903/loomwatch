@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Lesson } from '../../lib/lessons/client'
@@ -10,7 +10,7 @@ afterEach(() => {
 })
 
 const lesson = (id: string, text: string, over: Partial<Lesson> = {}): Lesson => ({
-  id, scope: 'agent:writer', agentId: 'writer', text, source: 'you', feedback: 'Too long.', runId: 'run-1', state: 'active',
+  id, scope: 'agent:writer', agentId: 'writer', text, source: 'you', aboutYou: false, feedback: 'Too long.', runId: 'run-1', state: 'active',
   given: 3, backed: 2, missed: 0, createdAt: '2026-10-20T08:00:00.000Z', updatedAt: '2026-10-20T08:00:00.000Z', ...over,
 })
 
@@ -47,10 +47,50 @@ describe('LearnedBlock', () => {
     expect(await screen.findByText(/Learning is off for this agent/)).toBeTruthy()
   })
 
-  it('offers no Forget where nothing can be changed', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ scope: 'agent:writer', learns: true, max: 12, lessons: [lesson('a', 'Use bullets.')] })))
+  it('offers no Forget, and no Tell all my agents, where nothing can be changed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ scope: 'agent:writer', learns: true, max: 12, lessons: [lesson('a', 'Use bullets.'), lesson('b', 'Always write in Vietnamese.', { aboutYou: true })] })))
     render(<LearnedBlock of={{ savedAgent: 'writer' }} name="Writer" readOnly />)
     await screen.findByText('Use bullets.')
     expect(screen.queryByRole('button', { name: /Forget/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Tell all my agents/ })).toBeNull()
+  })
+
+  it('moves a lesson about you to About you once you say yes, and Undo moves it back', async () => {
+    const vietnamese = 'When replying to this person, always write in Vietnamese.'
+    const calls: Array<{ url: string; body?: unknown; asPage: boolean }> = []
+    const bullets = lesson('a', 'When writing the digest, use three bullets.')
+    const about = lesson('b', vietnamese, { aboutYou: true })
+    const you = { name: 'Mai', about: `I teach English.\n${vietnamese}`, skipped: false }
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined, asPage: headers.get('X-LoomWatch-Request') === '1' })
+      if (url.startsWith('/api/lessons?')) return json({ scope: 'agent:writer', learns: true, max: 12, lessons: [bullets, about] })
+      if (url === '/api/lessons/tell-all') return json({ lesson: { ...about, state: 'dropped', droppedBy: 'about_you' }, lessons: [bullets], you, added: true })
+      return json({ lesson: about, lessons: [bullets, about], you: { ...you, about: 'I teach English.' }, removed: true })
+    }))
+    render(<LearnedBlock of={{ savedAgent: 'writer' }} name="Writer" />)
+    await screen.findByText(vietnamese)
+    expect(screen.getAllByRole('button', { name: /^Tell all my agents/ }).map((button) => button.getAttribute('aria-label'))).toEqual([`Tell all my agents: ${vietnamese}`])
+    const tell = screen.getByRole('button', { name: `Tell all my agents: ${vietnamese}` })
+    fireEvent.click(tell)
+    expect(screen.getByRole('group', { name: 'Tell all my agents' }).textContent).toContain('Add to About you, so every agent does this?')
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(tell)
+    expect(calls).toHaveLength(1)
+    fireEvent.click(tell)
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain(`All your agents know: ${vietnamese}`))
+    expect(calls[1]).toEqual({ url: '/api/lessons/tell-all', body: { savedAgent: 'writer', id: 'b' }, asPage: true })
+    expect(screen.queryByRole('group', { name: 'Tell all my agents' })).toBeNull()
+    expect(screen.getByText(/1 of 12/)).toBeTruthy()
+    const undo = within(screen.getByRole('status')).getByRole('button', { name: `Undo: ${vietnamese}` })
+    expect(document.activeElement).toBe(undo)
+    fireEvent.click(undo)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: `Tell all my agents: ${vietnamese}` }))
+    expect(calls[2]).toEqual({ url: '/api/lessons/tell-all/undo', body: { savedAgent: 'writer', id: 'b' }, asPage: true })
+    expect(screen.getByText(vietnamese)).toBeTruthy()
+    expect(screen.getByText(/2 of 12/)).toBeTruthy()
   })
 })

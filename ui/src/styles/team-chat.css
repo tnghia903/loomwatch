@@ -391,7 +391,14 @@
 .tc-learned-mark { flex: none; align-self: center; color: var(--color-ink-3); }
 .tc-learned-words { min-width: 0; overflow-wrap: anywhere; }
 .tc-learned-words b { font-weight: 600; color: var(--color-ink); }
-.tc-learned-undo { flex: none; font-size: 12px; }
+.tc-learned-act { flex: none; font-size: 12px; }
+/* Tell all my agents asks first, on a row of its own under the lesson, in line with its words. */
+.tc-learned-ask { margin: 0 0 0 20px; font-size: 12px; line-height: 1.45; color: var(--color-ink-2); }
+.tell-all-ask { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.tell-all-ask .link { font-size: inherit; }
+/* Add and Cancel wrap together, never apart. */
+.tell-all-choices { display: inline-flex; gap: 8px; }
+.tc-learned-dot { flex: none; color: var(--color-ink-3); }
 .tc-said-learned { list-style: none; }
 .tc-continue .btn { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -524,6 +531,10 @@
 @container (max-width: 560px) {
   .tc-decision, .tc-stopped, .tc-continue, .tc-learned, .tc-piece .permission-prompt.inline { margin-left: 0; }
   .tc-talk-acts { margin-left: 0; }
+  /* Narrow: the lesson keeps the width, and what you can do with it goes under it. */
+  .tc-learned-line { flex-wrap: wrap; row-gap: 2px; }
+  .tc-learned-words { flex: 1 1 calc(100% - 20px); }
+  .tc-learned-act:first-of-type { margin-left: 20px; }
 }
 @container (max-width: 400px) {
   .tc-send .btn span { display: none; }

@@ -10446,7 +10446,10 @@ mod tests {
                     run_id: None,
                 },
                 &[],
-                &[lessons::Edit::Add("Keep answers short.".to_owned())],
+                &[lessons::Edit::Add {
+                    text: "Keep answers short.".to_owned(),
+                    about_you: false,
+                }],
             )
             .await?;
         for (learns, run_id) in [(true, "learning-run"), (false, "quiet-run")] {

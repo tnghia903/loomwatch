@@ -4764,7 +4764,8 @@ mod tests {
     }
 
     /// A learner on a stand-in model (ADR 0078): it keeps every prompt it is sent and, for words
-    /// that say "Too long", adds a lesson; for anything else it learns nothing.
+    /// that say "Too long", adds a lesson; for "In Vietnamese", a lesson about the person; for
+    /// anything else it learns nothing.
     fn learner(rig: &Rig) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
         let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = asked.clone();
@@ -4774,6 +4775,8 @@ mod tests {
                     let prompt = request.prompt().to_owned();
                     let edits = if prompt.contains("> Too long") {
                         r#"{"edits": [{"do": "add", "lesson": "When writing the digest, use three bullets."}]}"#
+                    } else if prompt.contains("> In Vietnamese") {
+                        r#"{"edits": [{"do": "add", "lesson": "When replying to this person, always write in Vietnamese.", "aboutYou": true}]}"#
                     } else {
                         r#"{"edits": []}"#
                     };
@@ -4873,7 +4876,11 @@ mod tests {
                 .is_empty()
         );
         // Undo, from the agent's list.
-        let lessons = crate::lessons::router(dir.0.clone(), rig.registry.clone());
+        let lessons = crate::lessons::router(
+            dir.0.clone(),
+            rig.registry.clone(),
+            crate::you::You::in_memory(crate::you::AboutYou::default()),
+        );
         let listed = page_at(&lessons, "/api/lessons?teamPath=news.yaml&agent=writer").await;
         assert_eq!(listed["learns"], true);
         assert_eq!(listed["lessons"][0]["id"], kept[0].id.as_str());
@@ -5051,5 +5058,131 @@ mod tests {
             calls,
             "Love it again on a loved answer asks nothing"
         );
+    }
+
+    /// A POST as `LoomWatch`'s own page sends it, with `X-LoomWatch-Request`.
+    async fn post_from_page(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("host", "localhost")
+                    .header("x-loomwatch-request", "1")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// Tell all my agents (ADR 0078): a lesson about the person shows on the work it came from,
+    /// marked so, and goes to About you only when the person says so on `LoomWatch`'s page. Then
+    /// the chat shows it moved, the agent's list no longer has it, and Undo puts both back.
+    #[tokio::test]
+    async fn a_lesson_about_you_goes_to_about_you_only_on_your_click_and_undo_puts_it_back() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        learner(&rig);
+        let you = crate::you::You::in_memory(crate::you::AboutYou {
+            name: Some("Mai".to_owned()),
+            about: Some("I teach English.".to_owned()),
+            skipped: false,
+        });
+        let before = you.get();
+        let lessons = crate::lessons::router(dir.0.clone(), rig.registry.clone(), you.clone());
+        let work = finished_work(&rig, "today's digest").await;
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "In Vietnamese, please.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert!(kept[0].about_you);
+        let on_work = |chat: &Value| {
+            chat["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["run"]["runId"] == work.run_id.as_str())
+                .unwrap()["lessons"][0]
+                .clone()
+        };
+        let shown = on_work(&page(&rig.app).await);
+        assert_eq!(shown["aboutYou"], true);
+        assert_eq!(shown["state"], "active");
+        // Learning marked it, and told nobody.
+        assert_eq!(you.get(), before);
+
+        let whose = json!({"teamPath": "news.yaml", "agent": "writer", "id": kept[0].id});
+        // Not from LoomWatch's own page: refused, and nothing changes.
+        let (status, _) = post(&lessons, "/api/lessons/tell-all", whose.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(you.get(), before);
+        assert_eq!(
+            learned(&rig, "team:news-desk#writer", 1).await[0].id,
+            kept[0].id
+        );
+
+        let (status, told) = post_from_page(&lessons, "/api/lessons/tell-all", whose.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{told}");
+        let with_it = "I teach English.\nWhen replying to this person, always write in Vietnamese.";
+        assert_eq!(told["added"], true);
+        assert_eq!(told["you"]["about"], with_it);
+        assert_eq!(told["lessons"], json!([]));
+        assert_eq!(you.get().about.as_deref(), Some(with_it));
+        assert_eq!(you.get().name.as_deref(), Some("Mai"));
+        let listed = page_at(&lessons, "/api/lessons?teamPath=news.yaml&agent=writer").await;
+        assert_eq!(listed["lessons"], json!([]));
+        let shown = on_work(&page(&rig.app).await);
+        assert_eq!(shown["state"], "dropped");
+        assert_eq!(shown["droppedBy"], "about_you");
+
+        let (status, _) = post(&lessons, "/api/lessons/tell-all/undo", whose.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(you.get().about.as_deref(), Some(with_it));
+        let (status, back) =
+            post_from_page(&lessons, "/api/lessons/tell-all/undo", whose.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{back}");
+        assert_eq!(back["removed"], true);
+        assert_eq!(back["lessons"][0]["id"], kept[0].id.as_str());
+        assert_eq!(you.get(), before);
+        assert_eq!(on_work(&page(&rig.app).await)["state"], "active");
+        let (status, again) = post_from_page(&lessons, "/api/lessons/tell-all/undo", whose).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(again["error"], "That is undone already.");
+
+        // A lesson about the work stays with the agent.
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Too long. Three bullets, please.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let both = learned(&rig, "team:news-desk#writer", 2).await;
+        let work_lesson = both.iter().find(|lesson| !lesson.about_you).unwrap();
+        let (status, refused) = post_from_page(
+            &lessons,
+            "/api/lessons/tell-all",
+            json!({"teamPath": "news.yaml", "agent": "writer", "id": work_lesson.id}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            refused["error"],
+            "That lesson is about this agent's work, so it stays with this agent."
+        );
+        assert_eq!(you.get(), before);
     }
 }

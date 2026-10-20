@@ -14,8 +14,9 @@ tool calls:
   in "__<call>" (a connected tool's, such as deepwiki__ask_question), then a summary
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
 - the learner (ADR 0078)              -> a lesson when the person's words ask for something shorter
-                                         or in bullets, else no edits; an agent whose instructions
-                                         hold that lesson answers in three bullets
+                                         or in bullets, one about the person ("aboutYou") when they
+                                         ask for Vietnamese, else no edits; an agent whose
+                                         instructions hold the bullets lesson answers in three bullets
 - a Research lead (its role says so)  -> two dispatch calls at once, then ask the Writer
 - a Researcher / a Writer             -> findings / a cited report
 - anything else                       -> a short text reply
@@ -141,6 +142,8 @@ def plan(body):
     # The learner (ADR 0078): one turn, JSON only. It learns only from the person's words.
     if "You keep the lessons a LoomWatch agent learns" in system:
         said = latest.split("Then the person wrote this about the work:", 1)[-1].split("\n\n", 1)[0].lower()
+        if "Then the person wrote" in latest and "vietnamese" in said:
+            return ("text", json.dumps({"edits": [{"do": "add", "lesson": "When replying to this person, always write in Vietnamese.", "aboutYou": True}]}))
         if "Then the person wrote" in latest and any(word in said for word in ("too long", "shorter", "bullet")):
             if "1. When answering, keep it to three short bullets." in latest:
                 return ("text", json.dumps({"edits": [{"do": "missed", "number": 1}]}))
