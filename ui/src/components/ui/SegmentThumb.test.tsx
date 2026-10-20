@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { SegmentThumb } from './SegmentThumb'
 
@@ -39,6 +39,28 @@ describe('SegmentThumb', () => {
     expect(thumb().style.width).toBe('89px')
     expect(thumb().style.height).toBe('34px')
     expect(thumb()).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  // A phone's header stretches its tabs across the row, so the group keeps its width while a tab
+  // grows (its label's font arriving, say). The thumb must follow the tab, not wait for the group.
+  it('follows a segment that changes size while the group does not', () => {
+    const observed = new Map<Element, () => void>()
+    vi.stubGlobal('ResizeObserver', class {
+      changed: () => void
+      constructor(changed: () => void) { this.changed = changed }
+      observe(target: Element) { observed.set(target, this.changed) }
+      unobserve(target: Element) { observed.delete(target) }
+      disconnect() { observed.clear() }
+    })
+    try {
+      render(<Switch />)
+      const build = screen.getByRole('button', { name: 'Build' })
+      build.dataset.width = '120'
+      observed.get(build)?.()
+      expect(thumb().style.width).toBe('120px')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('follows the selection to the other segment', async () => {

@@ -123,7 +123,13 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .build-graph .react-flow__handle { min-width:9px; min-height:9px; background:var(--color-accent); }
 @media(max-width:1100px) { .delivery-stages { flex-direction:column; gap:28px; } .delivery-stage-wrap { min-width:0; } .delivery-handoff-arrow { left:50%; top:-25px; transform:rotate(90deg); } .delivery-stage-meta { display:none; } .delivery-shown .delivery-work { padding-inline:20px; } }
 @media(max-width:767px) {
- .lw-shell .workspace-chrome { padding:0 14px; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+ /* The brand keeps its width and the tabs take what is left. When the brand's column was the one
+    that gave way, the wordmark ran under the tabs on a phone and showed through them. A notice
+    spans both columns, so its width never widens the brand's column and pushes the tabs off screen. */
+ .lw-shell .workspace-chrome { padding:0 14px; grid-template-columns:auto minmax(0,1fr); gap:8px; }
+ .lw-shell .workspace-chrome .workspace-view-tabs { justify-self:end; }
+ .lw-shell .workspace-chrome>.delivery-brand { min-height:44px; }
+ .lw-shell .workspace-chrome>:is(.lw-notice,.mode-switch-note,.pop-inline) { grid-column:1/-1; justify-self:start; }
  .lw-shell .workspace-chrome>.lw-chip,.lw-shell .workspace-chrome>div:has(.lw-chip) { display:none; }
  .lw-shell .workspace-view-tabs button { min-width:60px; }
  .delivery-shown .delivery-lane { display:flex; flex-direction:column; overflow:auto; bottom:calc(var(--lw-composer-height,150px) + 28px); }
@@ -134,4 +140,13 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
  .build-workspace .lw-canvas { top:220px; }
  .build-workspace .lw-viewctl { top:auto!important; bottom:calc(var(--lw-composer-height,150px) + 28px); }
  .lw-shell.build-workspace .lw-inspector { top:234px; bottom:14px; }
+}
+/* The wordmark and the three tabs side by side need about 500 px. Narrower, the brand is its mark
+   alone (still the way home, a 44 px target with the mark where it was) and the tabs share the rest
+   of the row. Their padding is small enough for all three to fit at 320 px. */
+@media(max-width:559px) {
+ .lw-shell .workspace-chrome .delivery-brand .lw-wordmark { display:none; }
+ .lw-shell .workspace-chrome>.delivery-brand { justify-content:center; min-width:44px; margin-left:calc((26px - 44px) / 2); }
+ .lw-shell .workspace-chrome .workspace-view-tabs { justify-self:stretch; }
+ .lw-shell .workspace-chrome .workspace-view-tabs button { flex:1 1 0; min-width:max-content; padding:0 4px; }
 }
