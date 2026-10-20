@@ -32,7 +32,7 @@ from outside it (section 8). So LoomWatch learns from two sources and nothing el
 
 | Source | When | What the learner is told |
 |---|---|---|
-| **Your words** | Any message you send after a piece of work finished with an answer: a reply to it, a follow-up such as "@team redo it shorter", or a plain note. A reply to one agent's message teaches that agent. A message to one agent teaches it. Otherwise the agent whose answer it was learns. | The request, the answer (or the message you replied to) and your words. |
+| **Your words** | Any message you send after something finished with an answer: a piece of work, or a short question the agents answered themselves. It can be a reply, a follow-up such as "@team redo it shorter", or a plain note. A reply to one agent's message teaches that agent, and so does a message to one agent. Otherwise the agent who answered learns. | The request, the answer (or the message you replied to) and your words. |
 | **The check step** | A check step found a Done when item **not met** on its first round, and the item was **met** after the work was sent back. | Each such item, with what the check found the first time. |
 
 Never learned from:
@@ -210,7 +210,28 @@ What it leaves out on purpose:
 - automatic edits to your instructions;
 - periodic reviews of every transcript.
 
-## 9. What is not built yet
+## 9. Does it work?
+
+Checked on 2026-10-20 on Claude Sonnet 5.5 through OpenRouter. Each of seven corrections was made
+once in one team, for example "Too long. Next time give me just three short bullet points." Then
+the same agent, placed in another team, got a new task of the same kind. That chat had never seen
+the correction, so only a lesson could carry it there.
+
+| | Learning off | Learning on |
+|---|---|---|
+| New task follows the correction | 2 of 7 | 7 of 7 |
+| An explicit request still wins ("reply with just the number", "about 400 words") | 4 of 4 | 4 of 4 |
+| Lessons made from four messages that were not feedback | — | 0 |
+
+- Every correction made exactly one lesson, each saying when it applies. For example: "When
+  comparing options, put the comparison in a table, with the options as columns and the criteria as
+  rows, rather than describing them in prose."
+- The whole check cost $1.06. One learning turn costs about half a cent.
+- The check used one run per case, one model, and corrections about form and preference. It shows
+  that a correction reaches new work and doesn't override a clear request. It does not grade answer
+  quality in general. The details are in ADR 0078.
+
+## 10. What is not built yet
 
 - A switch for learning in the agent's builder. Today it is `learns: false` in the team file, and
   Forget per lesson.
@@ -220,5 +241,5 @@ What it leaves out on purpose:
   belongs in About you (ADR 0074). That path is for you to confirm.
 - A lesson that keeps proving itself could be offered as an edit to the agent's instructions, for
   you to accept.
-- An effectiveness check on real models: a correction, then a new task in a fresh chat, with and
-  without learning. It is set out in ADR 0078, and its results go there.
+- Moving a lesson about you to About you. Four of the seven checked lessons were about the person
+  ("When replying to this person, always write in Vietnamese"), and those fit every agent.
