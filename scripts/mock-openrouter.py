@@ -17,6 +17,9 @@ Replies are scripted from what the request says, so a run exercises real tool ca
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
                                          instructions hold the bullets lesson answers in three bullets
+- "MOCK-HELPERS: <n>" in the task     -> n start_helper calls at once (ADR 0079); each helper lists
+  its folder, waits a few seconds ("MOCK-WAIT: <s>" in its brief) and sends back its findings, and
+  the agent then answers with what they found
 - a Research lead (its role says so)  -> two dispatch calls at once, then ask the Writer
 - a Researcher / a Writer             -> findings / a cited report
 - anything else                       -> a short text reply
@@ -107,6 +110,12 @@ def find_tool(names, suffix):
     return None
 
 
+def latest_task(messages):
+    """The text after the last "## Task" in the newest user message: what this turn was asked."""
+    users = [text_of(m.get("content")) for m in messages if m.get("role") == "user"]
+    return (users[-1] if users else "").rsplit("## Task", 1)[-1]
+
+
 def plan(body):
     """What to answer: ("text", str) or ("calls", [(name, args)])."""
     messages = body.get("messages") or []
@@ -136,6 +145,13 @@ def plan(body):
             except (ValueError, AttributeError):
                 reply = said
             return ("text", f"{reply}\n\n## Not confirmed\n- Nothing: both sources agreed.")
+        if call_name.endswith("start_helper"):
+            return ("text", "I started helpers on the parts. Their work comes back next.")
+        if call_name.endswith("list_files") and "MOCK-WAIT:" in latest_task(messages):
+            brief = latest_task(messages)
+            time.sleep(float(brief.rsplit("MOCK-WAIT:", 1)[1].split()[0]))
+            part = brief.strip().splitlines()[0]
+            return ("text", f"- {part}: three sources agree ([Example](https://example.com/{len(part)}), 2026-10-01).\n- Not confirmed: the 2026 figure.")
         if call_name.endswith("dispatch"):
             # Both dispatches answered with "accepted": end this turn; the results come back later.
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
@@ -155,6 +171,18 @@ def plan(body):
         return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
 
     task = latest.rsplit("## Task", 1)[-1]
+    if "## What your helpers came back with" in latest:
+        parts = [line.split(":", 1)[0].lstrip("- ").strip() for line in latest.splitlines() if line.startswith("- Part ")]
+        return ("text", "# What I found\n\nI split this into " + str(len(parts)) + " parts and checked what came back.\n\n"
+                + "\n".join(f"- **{part}**: three sources agree." for part in parts) + "\n\nNot confirmed: the 2026 figure.")
+    helper = find_tool(names, "start_helper")
+    if "MOCK-HELPERS:" in task and helper:
+        count = int(task.rsplit("MOCK-HELPERS:", 1)[1].split()[0])
+        return ("calls", [(helper, {"title": f"Part {i}", "task": f"Part {i} of the question. MOCK-WAIT: {2 + 2 * i}",
+                                    "send_back": "A list of findings with links, and what you could not confirm."})
+                          for i in range(1, count + 1)])
+    if "MOCK-WAIT:" in task and find_tool(names, "list_files"):
+        return ("calls", [(find_tool(names, "list_files"), {"path": "."})])
     if "MOCK-RUN:" in task:
         command = task.rsplit("MOCK-RUN:", 1)[1].strip().splitlines()[0]
         return ("calls", [(find_tool(names, "run_command") or "run_command", {"command": command})])

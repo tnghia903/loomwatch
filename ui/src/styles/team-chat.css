@@ -955,3 +955,97 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
 @keyframes tc-face-shake { 20%, 60% { translate: -1.4px 0; } 40%, 80% { translate: 1.4px 0; } }
 @keyframes tc-face-glance { 0%, 30% { translate: -2.4px 0; } }
 @keyframes tc-face-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+
+/* ---------- Helpers (ADR 0079) ----------
+   An agent working alone brought in copies of itself. Laid out as a message is (loom.css .chat-msg):
+   faces in the gutter, centred under the message faces' 28px, and words in the text column, so the
+   card lines up with the talk above it and the answer below. The one line shows the agent's figure
+   fanned out once for each helper, as wide as the gutter allows; each part's row has its face, with
+   its number, in the gutter and its title where a message's words start. */
+.tc-helpers {
+  --tc-gutter: 42px;
+  min-width: 0;
+  margin: 6px 0 2px;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+@container (max-width: 520px) {
+  .tc-helpers { --tc-gutter: 36px; }
+}
+.tc-helpers-head {
+  display: grid;
+  grid-template-columns: var(--tc-gutter) auto auto;
+  align-items: center;
+  padding: 2px 8px 2px 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tc-helpers-head:hover, .tc-helpers-head:focus-visible { color: var(--color-accent); }
+/* Words start where a message's name does: the text column, and the 2px a name sits in from it
+   (loom.css .chat-meta). */
+.tc-helpers-line { margin: 0 6px 0 2px; font-weight: 550; color: var(--color-ink-2); }
+.tc-helpers-head:hover .tc-helpers-line, .tc-helpers-head:focus-visible .tc-helpers-line { color: inherit; }
+/* The fan: 20px faces from 4px in (centred under a 28px face), overlapping just enough to end 10px
+   before the words, whatever their count (--count, set on it). */
+.tc-helpers-faces { display: flex; padding-left: 4px; }
+.tc-helpers-faces .chat-avatar + .chat-avatar { margin-left: calc((var(--tc-gutter) - 14px - 20px * var(--count, 1)) / (var(--count, 2) - 1)); }
+/* The helper's number, worn on the agent's face in the agent's colour. */
+.tc-helper-number {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  z-index: 1;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background: var(--hue);
+  color: var(--color-panel-solid);
+  font: 700 8px/12px var(--font-sans);
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--color-panel);
+}
+.tc-helper-face.failed .tc-helper-number { background: var(--color-alert); }
+/* As wide as the chat and no wider: a long step on a helper's line is cut short, and its Stop stays in view. */
+.tc-helpers-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-width: calc(560px + var(--tc-gutter)); margin: 4px 0 0; padding: 0; list-style: none; }
+.tc-helper { min-width: 0; }
+.tc-helper-row {
+  display: grid;
+  grid-template-columns: var(--tc-gutter) minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  padding: 4px 8px 4px 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-ink-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tc-helper-row .tc-helper-face { margin-left: 3px; }
+
+.tc-helper-row:not(:disabled):hover, .tc-helper-row:focus-visible { background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+.tc-helper-row:disabled { cursor: default; }
+.tc-helper-title { margin-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; color: var(--color-ink); }
+.tc-helper-state { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
+.tc-helper.done .tc-helper-state svg { color: var(--color-ok); }
+.tc-helper.failed .tc-helper-state { color: var(--color-alert); }
+.tc-helper.stopped .tc-helper-title { color: var(--color-ink-2); }
+/* What a helper at work is doing now: its newest step, under its part, in the text column. */
+.tc-helper-now { display: flex; align-items: baseline; gap: 10px; margin: -3px 8px 3px calc(var(--tc-gutter) + 2px); font-size: 11.5px; color: var(--color-ink-3); }
+.tc-helper-now span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Stop, beside what it is doing: its agent gets what it had and does the rest. */
+.tc-helper-stop { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-left: auto; font-size: 11.5px; }
+@media (prefers-reduced-motion: no-preference) {
+  /* A helper at work bobs on its line, as its agent's figure moves at the bench; one done stands. */
+  .tc-helpers.busy .tc-helper-face.working { animation: tc-helper-bob 1.4s ease-in-out infinite; }
+  .tc-helpers.busy .tc-helper-face.working:nth-child(3n + 2) { animation-delay: -.45s; }
+  .tc-helpers.busy .tc-helper-face.working:nth-child(3n) { animation-delay: -.9s; }
+  @keyframes tc-helper-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -2px; } }
+}

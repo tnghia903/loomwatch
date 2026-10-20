@@ -423,14 +423,14 @@ export interface RunContext {
  */
 const MEMORY_TOOLS = new Set(['memory_search', 'memory_read', 'memory_write', 'checkpoint'])
 const TEAM_BUS_TOOLS = new Set([
-  'roster', 'dispatch', 'ask', 'handoff', 'report', 'escalate', ...MEMORY_TOOLS,
+  'roster', 'dispatch', 'ask', 'handoff', 'report', 'escalate', 'start_helper', ...MEMORY_TOOLS,
 ])
 
 function toolCallKind(name: string | null, title: string, toolKind: string | null, locations: Evidence['locations'], rawInput?: unknown): { kind: EvidenceKind; relation: string } {
   // Memory before delegation: both are bus tools, and `TEAM_BUS_TOOLS` contains both.
   if (name && MEMORY_TOOLS.has(name)) return memoryEvidence(name, rawInput)
   if (name && TEAM_BUS_TOOLS.has(name)) {
-    return { kind: 'delegation', relation: name === 'ask' ? 'asked' : name === 'handoff' ? 'handed off to' : name === 'dispatch' ? 'dispatched' : name === 'escalate' ? 'escalated' : name === 'report' ? 'reported' : 'read roster' }
+    return { kind: 'delegation', relation: name === 'ask' ? 'asked' : name === 'handoff' ? 'handed off to' : name === 'dispatch' ? 'dispatched' : name === 'start_helper' ? 'brought in' : name === 'escalate' ? 'escalated' : name === 'report' ? 'reported' : 'read roster' }
   }
   const lowerName = (name ?? title).toLowerCase()
   const lowerTitle = title.toLowerCase()
@@ -556,6 +556,12 @@ export type PromptSectionKind =
    * in the same change, which is the rule.
    */
   | 'team'
+  /**
+   * `## Helpers` — an agent working alone may bring in copies of itself for the parts of a big
+   * task, and when that pays (ADR 0079). Added here and in `memory::PromptSectionKind` in the same
+   * change, which is the rule.
+   */
+  | 'helpers'
   /**
    * `## Reading the request` — the role says who the agent is, the task is what you want now, read
    * for what it means: a question answered, a change made, a greeting greeted, not the role's whole
@@ -863,6 +869,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           if (p.phase === 'check_sent_back') letters.checkSentBack(event)
           if (p.phase === 'check_send_back_skipped') letters.checkSendBackSkipped(event)
           if (p.phase === 'check_stopped') letters.checkStopped(event)
+          if (p.phase === 'delegated_result') letters.delegatedResult(event)
           if (p.phase === 'permission_answered' && p.outcome === 'auto_approved') {
             autoRan.push({ agentId: agent.id, title: typeof p.title === 'string' ? p.title : 'A command', detail: typeof p.detail === 'string' ? p.detail : null, ts: event.ts })
           }
@@ -1071,6 +1078,15 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
               if (target.status === 'idle') { target.status = 'waiting'; target.taskState = 'QUEUED'; target.task = 'Waiting for the delegation' }
               delegations.set(key, { id: key, from: agent.id, to, kind: call.busName as Delegation['kind'], status: 'accepted', seq: event.seq })
               if (call.busName === 'handoff') { agent.handedOff = true; agent.status = 'stopped'; agent.task = `Handed off to ${to}` }
+            } else if (call.busName === 'start_helper') {
+              // ADR 0079: the helper is named by the bus's answer, not the call, since the agent
+              // asks for a helper and the bus gives it its id.
+              const output = object(p.rawOutput) ? p.rawOutput : {}
+              if (typeof output.agent === 'string' && output.agent) {
+                call.target = output.agent
+                call.name = `start_helper → ${output.agent}`
+                ensureAgent(output.agent, event)
+              }
             } else if (call.busName === 'escalate') {
               agent.status = 'waiting'
               agent.task = 'Waiting for you'

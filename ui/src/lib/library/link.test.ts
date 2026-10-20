@@ -32,11 +32,15 @@ describe('the versioned link to My agents', () => {
       role: 'Check every story twice.',
       capabilities: [{ kind: 'knowledge', name: 'sources.md', path: 'sources.md' }, { kind: 'skill', name: 'source-check' }, { kind: 'skill', name: 'house-style' }, { kind: 'tool', name: 'github' }],
       allow: { web: true, edits: true },
+      allowRecruiting: true,
       from: { agent: 'reader', version: 3 },
       model: 'anthropic/claude-sonnet-5.5',
     })
     // Where it works is the team's own.
     expect(fields).not.toHaveProperty('spawn')
+    // Whether it brings in helpers is the version's (ADR 0079).
+    expect(fieldsForVersion({ ...next, helpers: false }, withTool)).toMatchObject({ allowRecruiting: false })
+    expect(changedHere({ ...placed, allowRecruiting: false }, { ...job, version: 2 })).toEqual(['helpers'])
   })
 
   it('moves the agent to the version’s model, and its thinking effort with it', () => {

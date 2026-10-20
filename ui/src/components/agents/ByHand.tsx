@@ -6,6 +6,7 @@ import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { useModels } from '../../lib/ai/useModels'
+import { helpersOf } from '../../lib/chat/helpers'
 import { uniqueLabel } from '../../lib/composer-layout/types'
 import { listNames, middleTruncate } from '../../lib/format'
 import { addAgentFile, addTeamFile } from '../../lib/knowledge/client'
@@ -39,7 +40,7 @@ import { SkillDetails } from '../skills/SkillDetails'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
 import type { BenchLabel } from './AgentFigure'
-import type { BenchView } from './workbenchScene'
+import type { BenchHelper, BenchView } from './workbenchScene'
 import { LearnedBlock } from './LearnedBlock'
 
 const AgentFigure = lazy(() => import('./AgentFigure'))
@@ -205,7 +206,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   }
 
   const kit = useMemo<BenchKit>(() => ({ skills: draft.skills, reads, tools: draft.tools }), [draft.skills, reads, draft.tools])
-  const { mood, events, phase, thought, uses } = useFigureMood(record, kit)
+  const { mood, events, phase, thought, uses, helpers } = useFigureMood(record, kit)
 
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.model, model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },
@@ -224,7 +225,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     dropping: dragging === 'skill',
     reads,
     tools: benchTools,
-  }), [draft, figure, model, mood, events, phase, thought, uses, asked, focus, dragging, reads, benchTools])
+    helpers,
+  }), [draft, figure, model, mood, events, phase, thought, uses, asked, focus, dragging, reads, benchTools, helpers])
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (target: FigurePart) => {
@@ -346,6 +348,11 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
             <ModelPicker value={draft.model} disabled={readOnly} suggestFor={suggestFor ?? { agent: suggestedOfDraft(draft) }} follows={following?.follows} moved={following?.moved} onChange={(id, follow) => { if (readOnly) return; if (following) following.onPick(id, follow); else set('model', id) }} />
             <EffortSlider className="thinking-field agent-field" model={draft.model} value={draft.effort} disabled={readOnly} onChange={(effort) => set('effort', effort ?? '')} />
             <p className="t-meta">A bigger model can think more through, and costs more per run or uses more of your plan. Prices are per million tokens.</p>
+            {/* ADR 0079: on by default, as the way a big task is done well; off, it works alone. */}
+            <button type="button" className={`check byhand-helpers${draft.helpers !== false ? ' on' : ''}`} disabled={readOnly} aria-pressed={draft.helpers !== false} onClick={() => set('helpers', draft.helpers === false ? undefined : false)}>
+              <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+              <span className="txt"><b className="t-body">Brings in helpers for big tasks</b><span className="t-meta">On a wide task it can start copies of itself on the parts at once, then put their work together. Each copy runs on its model too.</span></span>
+            </button>
           </>)}
 
           {block('skills', <Shelf kind="skill" chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} onMarket={readOnly ? undefined : (query) => setMarket({ query })} fromMarket={fromMarket.filter((skill) => draft.skills.includes(skill))} />)}
@@ -466,8 +473,18 @@ function useFigureMood(record: RunRecord | null, kit: BenchKit) {
   const fresh = live ? benchUses(followed, record.responder || null, now, kit) : []
   const [uses, setUses] = useState<readonly BenchUse[]>([])
   if (fresh.length > 0 && fresh.map((use) => use.id).join() !== uses.map((use) => use.id).join()) setUses(fresh)
-  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events, phase, thought, uses }
+  // Its helpers (ADR 0079), each acting out its own events as the figure acts out its agent's; one
+  // that finished stays a moment to hand its part back, then goes.
+  const helpers: BenchHelper[] = live
+    ? helpersOf(followed)
+      .filter((helper) => helper.state === 'working' || now - Date.parse(helper.finishedAt ?? '') < HELPER_LINGER_MS)
+      .map((helper) => ({ id: helper.id, state: helper.state === 'stopped' ? 'failed' as const : helper.state, phase: helper.state === 'working' ? workPhase(followed, helper.id, now) : null }))
+    : []
+  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events, phase, thought, uses, helpers }
 }
+
+/** How long a helper that finished stays at the bench, handing its part back, before it goes. */
+const HELPER_LINGER_MS = 3500
 
 /** What the skills shelf says: recipe cards on the pegboard. */
 const SHELF = {

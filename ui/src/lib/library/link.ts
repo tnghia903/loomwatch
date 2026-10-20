@@ -54,6 +54,7 @@ export function fieldsForVersion(job: SavedJob, agent: AgentConfig, previous?: P
     capabilities: capabilities.length > 0 ? capabilities : undefined,
     doneWhen: job.doneWhen?.length ? [...job.doneWhen] : undefined,
     allow: onlyOn(job.allow),
+    allowRecruiting: job.helpers !== false,
     from: { agent: job.id, version: versionOf(job) },
   }
   if (job.model) {
@@ -84,6 +85,7 @@ export function changedHere(agent: AgentConfig, pinned: JobSpec): string[] {
   const reads = new Set((agent.capabilities ?? []).filter((capability) => capability.kind === 'knowledge').map(readKey))
   if ((pinned.reads ?? []).some((read) => !reads.has(readKey(read)))) changed.push('what it reads')
   if ((agent.doneWhen ?? []).join('\n') !== (pinned.doneWhen ?? []).join('\n')) changed.push('done when')
+  if ((agent.allowRecruiting !== false) !== (pinned.helpers !== false)) changed.push('helpers')
   const mine = onlyOn(agent.allow) ?? {}
   const theirs = onlyOn(pinned.allow) ?? {}
   if (SWITCHES.some((key) => Boolean(mine[key]) !== Boolean(theirs[key])) || !sameAllow(toolAllowOf(agent), pinned.toolAllow ?? {}, tools)) changed.push('what it may do without asking')

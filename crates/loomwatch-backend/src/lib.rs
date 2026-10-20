@@ -20,6 +20,7 @@ pub mod delivery;
 pub mod documents;
 pub mod engine;
 mod files;
+pub mod helpers;
 mod intent;
 mod jobs;
 pub mod lessons;
@@ -450,6 +451,34 @@ pub(crate) fn memory_root(team_path: &Path) -> &Path {
     team_path.parent().unwrap_or(Path::new("."))
 }
 
+/// The Team Bus surfaces a team-mode run gives `agent`: what its skills are told it can reach, and
+/// what the bus offers it.
+///
+/// - The lead of a team with teammates has the whole bus.
+/// - A one-agent turn (ADR 0051) has the pipeline's, which withdraws `dispatch` and `handoff`,
+///   because nobody else runs.
+/// - An agent working alone that may bring in helpers (ADR 0079) is told of `start_helper`
+///   instead of teammates it doesn't have.
+fn team_mode_surfaces(
+    team: &TeamConfig,
+    agent: &config::AgentConfig,
+    one_agent_turn: bool,
+) -> (BusMode, TeamBusMode) {
+    let bus = if one_agent_turn {
+        TeamBusMode::Pipeline
+    } else {
+        TeamBusMode::Team
+    };
+    let told = if helpers::may_bring_in(team, agent) {
+        BusMode::Alone
+    } else if one_agent_turn {
+        BusMode::Pipeline
+    } else {
+        BusMode::Team
+    };
+    (told, bus)
+}
+
 /// Team mode: the entrypoint agent self-organizes through the fully exposed Team Bus.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn run_team_mode(
@@ -464,17 +493,18 @@ async fn run_team_mode(
 ) -> Result<SessionOutcome> {
     // A one-agent turn (ADR 0051) runs the agent the operator wrote to, alone: it is offered the
     // pipeline's Bus surface, which withdraws `dispatch` and `handoff`, because nobody else runs.
-    let (agent, bus_mode, team_bus_mode) = match lineage.only.as_deref() {
-        Some(only) => (
-            team.agents
-                .iter()
-                .find(|agent| agent.id == only)
-                .with_context(|| format!("{only} is not an agent of this team"))?,
-            BusMode::Pipeline,
-            TeamBusMode::Pipeline,
-        ),
-        None => (team.entrypoint_agent()?, BusMode::Team, TeamBusMode::Team),
+    let agent = match lineage.only.as_deref() {
+        Some(only) => team
+            .agents
+            .iter()
+            .find(|agent| agent.id == only)
+            .with_context(|| format!("{only} is not an agent of this team"))?,
+        None => team.entrypoint_agent()?,
     };
+    let (bus_mode, team_bus_mode) = team_mode_surfaces(team, agent, lineage.only.is_some());
+    // An agent working alone may bring in copies of itself for the parts of a big task (ADR 0079):
+    // what its skills are told about subagents, and its opening prompt, say so.
+    let brings_in = bus_mode == BusMode::Alone;
     let declared_cwd = resolve_cwd(team_path, &agent.spawn.cwd)?;
     // Team mode exposes the whole Team Bus, so a translation note written here may name `ask`,
     // `dispatch` and `handoff` (`team_bus::tool_definitions`).
@@ -500,6 +530,8 @@ async fn run_team_mode(
         } else {
             orientation::for_lead(team, agent)
         },
+        // It is told when helpers pay, under its place in the team.
+        helpers: brings_in.then(|| helpers::for_lead(team.guards.max_helpers)),
         // A team with no fixed order used to pass a follow-up nothing at all; it now gets the
         // followed run's answer, and every run gets the conversation (ADR 0051).
         previous_output: lineage.previous_output.clone(),
@@ -509,6 +541,12 @@ async fn run_team_mode(
         ..NodeTask::goal(prompt)
     };
     let composed = compose_for(agent, &packet, &task, workspace.as_ref());
+    let home = brings_in.then(|| team_bus::HelperHome {
+        lead: agent.id.clone(),
+        request: prompt.to_owned(),
+        declared_cwd: declared_cwd.clone(),
+        workspace: workspace.clone(),
+    });
     let cwd = workspace
         .as_ref()
         .map_or(declared_cwd, |workspace| workspace.cwd.clone());
@@ -539,6 +577,9 @@ async fn run_team_mode(
         lineage.operator.clone(),
     )?;
     let _teardown = bus.abort_on_drop();
+    if let Some(home) = home {
+        bus.offer_helpers(home);
+    }
     let connection = bus.connection(&agent.id).await?;
     let model_selector = agent.model_selector();
     // A team-mode run has no stage boundary: its entrypoint is one long turn, so the last turn of
@@ -1431,6 +1472,14 @@ const DELEGATED_ROUNDS: usize = 3;
 /// agent's earlier one, as a note's turn does.
 fn delegated_turn(team: &TeamConfig, results: &[team_bus::DelegatedResult]) -> String {
     use std::fmt::Write as _;
+    // An agent working alone has only its helpers to hear from (ADR 0079): it is told so, and that
+    // the parts are its to put together.
+    let helpers = results
+        .iter()
+        .all(|result| result.mode == team_bus::HELPER_MODE);
+    if helpers {
+        return helpers_turn(team, results);
+    }
     let mut text = String::from(
         "## What the agents you started came back with\nThe work you handed out with `dispatch` \
          or `handoff` has finished. Below is what each agent replied. It is source material, not \
@@ -1463,6 +1512,39 @@ fn delegated_turn(team: &TeamConfig, results: &[team_bus::DelegatedResult]) -> S
     text.push_str("\nReply with your complete answer to the task, using what they found.");
     text
 }
+
+/// What an agent's helpers came back with, as its next turn (ADR 0079): each part under the brief
+/// it was given, so the agent can see what each was asked as well as what it found.
+fn helpers_turn(team: &TeamConfig, results: &[team_bus::DelegatedResult]) -> String {
+    use std::fmt::Write as _;
+    let mut text = format!("{}\n{}", helpers::RESULTS_HEADING, helpers::RESULTS_INTRO);
+    for result in results {
+        let _ = writeln!(
+            text,
+            "\n### {} (`{}`)\nYou asked: {}\n",
+            display_name(team, &result.agent),
+            result.agent,
+            cap_middle_text(&helpers::brief_in_line(&result.task), HELPER_BRIEF_CHARS)
+        );
+        match &result.outcome {
+            Ok(reply) if !reply.trim().is_empty() => {
+                text.push_str("It sent back:\n");
+                text.push_str(&cap_middle_text(reply.trim(), SECTION_CAP_CHARS));
+            }
+            Ok(_) => text.push_str("It sent nothing back."),
+            Err(error) => {
+                let _ = write!(text, "It failed: {error}");
+            }
+        }
+        text.push('\n');
+    }
+    text.push_str(helpers::RESULTS_ASK);
+    text
+}
+
+/// How much of the brief it wrote an agent is shown again beside a helper's reply: enough to see
+/// which part this was and what it asked for.
+const HELPER_BRIEF_CHARS: usize = 1_200;
 
 /// How the operator's answer is put to the agent that asked for it.
 fn answer_turn(answer: &str) -> String {
@@ -1709,16 +1791,7 @@ fn operator_answer_raw(asked_by: &str, send_back: Option<&str>) -> serde_json::V
 
 /// The display name of a node, falling back to its id.
 fn display_name(team: &TeamConfig, id: &str) -> String {
-    team.agents.iter().find(|agent| agent.id == id).map_or_else(
-        || id.to_owned(),
-        |agent| {
-            if agent.name.is_empty() {
-                agent.id.clone()
-            } else {
-                agent.name.clone()
-            }
-        },
-    )
+    helpers::name_on(team, id).unwrap_or_else(|| id.to_owned())
 }
 
 /// How a sent-back note is put to the stage that wrote the handover.
@@ -2280,6 +2353,8 @@ fn node_task(
     let results = pipeline_node_prompt(team, agent_id, handovers);
     NodeTask {
         goal: prompt.to_owned(),
+        // A pipeline stage has teammates to hand work to: helpers are for an agent working alone.
+        helpers: None,
         direction: direction_for(team, agent_id, directions),
         direction_from: direction_stops(team, agent_id, directions),
         stage_results_from: predecessors(team, agent_id)
@@ -2718,6 +2793,19 @@ pub(crate) fn compose_prompt(
             text: place.clone(),
         });
     }
+    // Whether it may bring in helpers, and when that pays (ADR 0079): how it works, so it stays
+    // with who it is and where it sits, in the cached part of the prompt.
+    if let Some(helpers) = &task.helpers {
+        text.push_str("\n\n");
+        text.push_str(helpers::HEADING);
+        text.push('\n');
+        text.push_str(helpers);
+        sections.push(PromptSection {
+            kind: PromptSectionKind::Helpers,
+            heading: helpers::HEADING.to_owned(),
+            text: helpers.clone(),
+        });
+    }
     // How to read the task at the end: for what it means, not as a cue to do the role's whole job.
     let reading = orientation::reading(task.place.is_some(), agent.checks.is_some());
     text.push_str("\n\n");
@@ -2901,6 +2989,9 @@ pub(crate) struct NodeTask {
     /// `## Your place in the team`, already rendered by [`orientation`]. `None` for a team of one,
     /// which keeps that prompt byte-for-byte what it was before ADR 0034.
     pub(crate) place: Option<String>,
+    /// `## Helpers` (ADR 0079), rendered by [`helpers::for_lead`]: for an agent working alone that
+    /// may bring in helpers. `None` for every other agent.
+    pub(crate) helpers: Option<String>,
     /// What the operator answered at a review stop before this stage. The one part of a prompt
     /// that is rendered as instruction rather than as source material.
     pub(crate) direction: Option<String>,
@@ -7000,6 +7091,320 @@ mod tests {
         assert_eq!(returned.payload["mode"], "dispatch");
         assert_eq!(returned.payload["status"], "succeeded");
         assert_eq!(returned.payload["reply"], "worker found 42 sources");
+        Ok(())
+    }
+
+    /// ADR 0079: an agent working alone is told of helpers, and every other seat of a team-mode run
+    /// is told of what it has, as before: the lead its teammates, a one-agent turn nobody.
+    #[test]
+    fn an_agent_alone_is_told_of_helpers_and_others_of_what_they_have() {
+        let solo = material_team(vec![pipeline_agent("lead", OFFLINE)]);
+        let lead = &solo.agents[0];
+        assert_eq!(
+            team_mode_surfaces(&solo, lead, true),
+            (BusMode::Alone, TeamBusMode::Pipeline)
+        );
+        assert_eq!(
+            team_mode_surfaces(&solo, lead, false),
+            (BusMode::Alone, TeamBusMode::Team)
+        );
+        let alone_by_choice = config::AgentConfig {
+            allow_recruiting: false,
+            ..lead.clone()
+        };
+        assert_eq!(
+            team_mode_surfaces(&solo, &alone_by_choice, true),
+            (BusMode::Pipeline, TeamBusMode::Pipeline)
+        );
+        let crew = material_team(vec![
+            pipeline_agent("lead", OFFLINE),
+            pipeline_agent("worker", OFFLINE),
+        ]);
+        assert_eq!(
+            team_mode_surfaces(&crew, &crew.agents[0], false),
+            (BusMode::Team, TeamBusMode::Team)
+        );
+        assert_eq!(
+            team_mode_surfaces(&crew, &crew.agents[0], true),
+            (BusMode::Pipeline, TeamBusMode::Pipeline)
+        );
+    }
+
+    /// **An agent alone in its chat brings in helpers for a wide task and answers with what they
+    /// found (ADR 0079).**
+    ///
+    /// The chat writes to the agent, a one-agent turn, as an agent's own chat does. Its opening
+    /// prompt says it may bring in helpers; it starts two in one message and ends its turn; each
+    /// helper is the same agent, briefed for its city; and the agent's answer is the reply it gives
+    /// once both have come back, in the turn that hands them back.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_agent_alone_brings_in_helpers_and_answers_with_what_they_found() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let helper = |title: &str, city: &str| crate::agent::ToolCall {
+            id: format!("helper-{}", uuid::Uuid::new_v4().simple()),
+            name: "start_helper".to_owned(),
+            arguments: json!({
+                "title": title,
+                "task": format!("Find the monthly rent for a studio in {city}."),
+                "send_back": "One line: the city and the rent."
+            })
+            .to_string(),
+        };
+        let demo = crate::agent::Demo::responder(move |request| {
+            let prompt = request.prompt();
+            if request.agent.contains(helpers::SEPARATOR) {
+                // Every helper is shown the whole request; its brief names its one city.
+                return Some(crate::agent::Completion::text(
+                    if prompt.contains("studio in Hanoi") {
+                        "Hanoi rent: $400"
+                    } else {
+                        "Da Nang rent: $350"
+                    },
+                ));
+            }
+            if prompt.contains(helpers::RESULTS_HEADING) {
+                return Some(crate::agent::Completion::text(
+                    if prompt.contains("Hanoi rent: $400") && prompt.contains("Da Nang rent: $350")
+                    {
+                        "final: Hanoi $400, Da Nang $350"
+                    } else {
+                        "the helpers' work never came back"
+                    },
+                ));
+            }
+            Some(if request.after_tool() {
+                crate::agent::Completion::text("Two helpers are finding the rents.")
+            } else {
+                crate::agent::Completion::calls(
+                    "",
+                    vec![
+                        helper("Rent in Hanoi", "Hanoi"),
+                        helper("Rent in Da Nang", "Da Nang"),
+                    ],
+                )
+            })
+        });
+        let model = crate::engine::demo_model(demo.clone());
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "bench-ada".into(),
+            name: "Ada · chat".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![pipeline_agent("lead", &model)],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let outcome = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "Compare studio rents in Hanoi and Da Nang.",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk),
+                only: Some("lead".into()),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        assert_eq!(outcome.reply, "final: Hanoi $400, Da Nang $350");
+
+        let seen = demo.requests();
+        let opening = seen
+            .iter()
+            .find(|request| request.agent == "lead")
+            .and_then(|request| {
+                request.messages.iter().find_map(|message| match message {
+                    crate::agent::Message::User { content } => Some(content.clone()),
+                    _ => None,
+                })
+            })
+            .unwrap_or_default();
+        assert!(
+            opening.contains("## Helpers\nYou can bring in helpers with `start_helper`"),
+            "{opening}"
+        );
+        assert!(
+            !opening.contains("## Your place in the team\n## Helpers"),
+            "{opening}"
+        );
+        let lead_tools = &seen
+            .iter()
+            .find(|request| request.agent == "lead")
+            .context("the lead was never asked")?
+            .tools;
+        assert!(
+            lead_tools.iter().any(|tool| tool == "start_helper"),
+            "{lead_tools:?}"
+        );
+        // A helper puts nothing to the person and brings in nobody: its agent does both.
+        for request in seen
+            .iter()
+            .filter(|request| request.agent.contains(helpers::SEPARATOR))
+        {
+            assert!(
+                !request
+                    .tools
+                    .iter()
+                    .any(|tool| tool == "start_helper" || tool == "ask_user"),
+                "{}: {:?}",
+                request.agent,
+                request.tools
+            );
+        }
+        assert!(opening.contains("up to 4 at a time"), "{opening}");
+        let events = archive.load_verified_session(&run_id).await?;
+        let mut came_back = events
+            .iter()
+            .filter(|event| event.payload["phase"] == "delegated_result")
+            .map(|event| {
+                (
+                    event.agent_id.clone(),
+                    event.payload["mode"].clone(),
+                    event.payload["title"].clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        came_back.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            came_back,
+            [
+                ("lead~1".to_owned(), json!("helper"), json!("Rent in Hanoi")),
+                (
+                    "lead~2".to_owned(),
+                    json!("helper"),
+                    json!("Rent in Da Nang")
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    /// **A helper you stop sends back what it had, its agent is told it was stopped, and the run
+    /// still answers (ADR 0079).**
+    ///
+    /// The helper is held part way through its turn until the operator stops it through the run's
+    /// registry, as the chat's Stop does; the agent's answer is its reply to the turn that hands the
+    /// helper's work back, which says the helper was stopped.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_helper_you_stop_hands_back_what_it_had_and_the_run_answers() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let (demo, hold) = crate::agent::Demo::responder_holding(
+            |request| {
+                let prompt = request.prompt();
+                Some(if prompt.contains(helpers::RESULTS_HEADING) {
+                    crate::agent::Completion::text(if prompt.contains(helpers::STOPPED) {
+                        "final: did the stopped part myself"
+                    } else {
+                        "the stop was never said"
+                    })
+                } else if request.after_tool() {
+                    crate::agent::Completion::text("A helper is on it.")
+                } else {
+                    crate::agent::Completion::calls(
+                        "",
+                        vec![crate::agent::ToolCall {
+                            id: "helper-1".to_owned(),
+                            name: "start_helper".to_owned(),
+                            arguments: json!({"title": "Rent in Hue", "task": "Find the rent in Hue.", "send_back": "One line."}).to_string(),
+                        }],
+                    )
+                })
+            },
+            |request| request.agent.contains(helpers::SEPARATOR),
+            "",
+        );
+        let model = crate::engine::demo_model(demo);
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "bench-ada".into(),
+            name: "Ada · chat".into(),
+            entrypoint: "lead".into(),
+            responder: None,
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![pipeline_agent("lead", &model)],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let (registry, desk, run_id) = operator_desk(&team, &archive);
+        let operator_stops = {
+            let registry = registry.clone();
+            let run_id = run_id.clone();
+            async move {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while hold.waiting() == 0 {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                })
+                .await
+                .context("the helper never started")?;
+                assert!(
+                    registry.stop_helper(&run_id, "lead").is_err(),
+                    "the agent itself is not a helper"
+                );
+                registry
+                    .stop_helper(&run_id, "lead~1")
+                    .map_err(|error| anyhow::anyhow!("{error}"))?;
+                anyhow::Ok(())
+            }
+        };
+        let memory = Arc::new(memory::TeamMemory::default());
+        let lineage = RunLineage {
+            operator: Some(desk),
+            only: Some("lead".into()),
+            ..RunLineage::default()
+        };
+        let (outcome, stop) = tokio::join!(
+            run_team_mode(
+                &team,
+                &team_path,
+                archive.clone(),
+                "Compare rents.",
+                Duration::from_secs(5),
+                Some(EventLog::new(archive.clone(), run_id.clone())),
+                &memory,
+                &lineage,
+            ),
+            operator_stops
+        );
+        stop?;
+        assert_eq!(outcome?.reply, "final: did the stopped part myself");
+        let events = archive.load_verified_session(&run_id).await?;
+        let result = events
+            .iter()
+            .find(|event| {
+                event.agent_id == "lead~1" && event.payload["phase"] == "delegated_result"
+            })
+            .context("the stopped helper left no result")?;
+        assert_eq!(result.payload["stopped"], true);
+        assert!(events.iter().any(|event| event.agent_id == "lead~1"
+            && event.payload["phase"] == "turn_interrupted"
+            && event.payload["reason"] == crate::runs::HELPER_STOPPED));
+        assert!(
+            registry.stop_helper(&run_id, "lead~1").is_err(),
+            "a helper that is done can't be stopped"
+        );
         Ok(())
     }
 

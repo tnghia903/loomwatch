@@ -2,6 +2,7 @@ import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
+import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { replyOf } from '../../lib/chat/reply'
@@ -379,7 +380,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const onTyping = useCallback((runId: string, ids: readonly string[]) => {
     setTypingIn((now) => ((now.get(runId) ?? []).join('\n') === ids.join('\n') ? now : new Map(now).set(runId, ids)))
   }, [])
-  const typingNames = [...new Set([...typingIn.values()].flat())].map((id) => team.names.get(id) ?? id)
+  const typingNames = [...new Set([...typingIn.values()].flat())].map((id) => nameWithHelpers(team.names, id) ?? id)
   const baton = held?.baton ?? null
   const batonText = baton ? batonWords(baton, (id) => members.find((agent) => agent.id === id)?.name || id) : null
   const holding = baton && batonText ? { agent: baton.agent, words: batonText.pill, hue: team.hues.get(baton.agent) ?? 1, waiting: baton.kind === 'you' } : null
@@ -472,7 +473,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     : reply.runId && runs.has(reply.runId)
       ? () => setShown({ runId: reply.runId as string, id: reply.messageId, at: Date.now() })
       : undefined)
-  const name = (id: string) => team.names.get(id) ?? id
+  const name = (id: string) => nameWithHelpers(team.names, id) ?? id
   const [rosterOpen, setRosterOpen] = useState(readRosterOpen)
   const rosterId = useId()
   const toggleRoster = () => {

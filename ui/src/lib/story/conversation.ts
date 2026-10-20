@@ -1,5 +1,6 @@
 import type { Evidence } from '../watch/events'
 import { allMet, OPERATOR_ID, type MessageKind, type PermissionOutcome, type TeamMessage } from '../watch/messages'
+import { nameWithHelpers } from '../chat/helpers'
 
 /**
  * The run's messages made ready to read (components/run/AgentMessages.tsx): who sent each one and
@@ -45,6 +46,7 @@ export interface Conversation {
  */
 export function converse(messages: readonly TeamMessage[], order: readonly Party[], predecessors?: ReadonlyMap<string, readonly string[]>): Conversation {
   const known = new Map(order.map((party) => [party.id, party]))
+  const names = new Map(order.map((party) => [party.id, party.name]))
   const firstOperator = order.find((party) => party.operator)
   const laneId = (id: string) => (id === OPERATOR_ID && !known.has(id) && firstOperator ? firstOperator.id : id)
   const before = (id: string): string[] => {
@@ -93,7 +95,8 @@ export function converse(messages: readonly TeamMessage[], order: readonly Party
   const lanes: Lane[] = order.filter((party) => involved.has(party.id))
   for (const id of involved) {
     if (known.has(id)) continue
-    lanes.push(id === OPERATOR_ID ? { id, name: 'You', operator: true } : { id, name: id, operator: false })
+    // A helper (ADR 0079) is named after the agent it helps.
+    lanes.push(id === OPERATOR_ID ? { id, name: 'You', operator: true } : { id, name: nameWithHelpers(names, id) ?? id, operator: false })
   }
   return { lanes, lines }
 }
@@ -171,7 +174,7 @@ export interface Bubble {
 
 const WORD: Record<MessageKind, string> = {
   handover: 'handover', direction: 'direction', ask: 'question', question: 'question',
-  escalate: 'needs you', dispatch: 'task', handoff: 'handover', note: 'note', permission: 'asks permission', check: 'checked',
+  escalate: 'needs you', dispatch: 'task', handoff: 'handover', helper: 'task', note: 'note', permission: 'asks permission', check: 'checked',
 }
 
 /** What a check step's round says, in a word: it sent the work back, found it all met, or reports. */
@@ -181,7 +184,7 @@ function checkWord(message: TeamMessage): string {
 }
 
 /** Kinds that expect an answer, so an answer not yet given shows as one owed. */
-const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note', 'permission'])
+const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note', 'permission', 'helper'])
 
 /** How a permission request was settled, in a word for the bubble that says so. */
 const SETTLED: Record<PermissionOutcome, string> = { allow_once: 'allowed once', allow_run: 'allowed for this run', allow_team: 'allowed for the whole team', deny: 'denied', edited: 'allowed, changed', answered: 'answered instead', timed_out: 'declined, no answer' }
@@ -224,7 +227,8 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
         key: `${key}:reply`, item, part: 'reply', from: [line.replier],
         // An answer goes back to whoever asked; your review goes back where you sent it, or on.
         to: back ? [back] : reviewing ? passedOn.map((passed) => passed.to) : line.senders.slice(0, 1),
-        word: back ? 'sent back' : deciding ? (plain ? 'approved' : 'approved, with a note') : message.kind === 'check' ? 'revised' : reply.asksBack ? 'asks back' : 'answer',
+        word: back ? 'sent back' : deciding ? (plain ? 'approved' : 'approved, with a note') : message.kind === 'check' ? 'revised' : reply.asksBack ? 'asks back'
+          : message.kind === 'helper' ? (reply.failed ? 'couldn’t finish' : reply.stopped ? 'stopped' : 'done') : 'answer',
         text: plain ? '' : reply.text, offsetMs: reply.offsetMs, ts: reply.ts,
       })
     } else if (message.state === 'pending' && line.receiver !== null && (ANSWERED.has(message.kind) || reviewing || message.kind === 'check')) {
@@ -232,7 +236,7 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
       const revising = message.kind === 'check'
       out.push({
         key: `${key}:waiting`, item, part: 'waiting', from: [line.receiver], to: line.senders.slice(0, 1),
-        word: live ? (reviewing ? 'waiting for your review' : owedByYou ? 'waiting for you' : revising ? 'revising' : 'thinking…') : (reviewing ? 'not reviewed' : revising ? 'not revised' : 'no answer'),
+        word: live ? (reviewing ? 'waiting for your review' : owedByYou ? 'waiting for you' : revising ? 'revising' : message.kind === 'helper' ? 'working…' : 'thinking…') : (reviewing ? 'not reviewed' : revising ? 'not revised' : 'no answer'),
         text: '', offsetMs: message.offsetMs, ts: message.ts,
       })
     }

@@ -401,6 +401,12 @@ export async function cancelRun(runId: string): Promise<RunRecord> {
   return readRun<RunRecord>(response)
 }
 
+/** Stop one helper at work (ADR 0079): its agent gets what it had so far and does the rest. */
+export async function stopHelper(runId: string, helperId: string): Promise<RunRecord> {
+  const response = await daemonFetch(`/api/runs/${encodeURIComponent(runId)}/agents/${encodeURIComponent(helperId)}/stop`, { method: 'POST', cache: 'no-store' })
+  return readRun<RunRecord>(response)
+}
+
 export async function fetchRun(runId: string, signal?: AbortSignal): Promise<RunRecord> {
   const response = await daemonFetch(`/api/runs/${encodeURIComponent(runId)}`, { signal, cache: 'no-store' })
   return readRun<RunRecord>(response)

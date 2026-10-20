@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 
+import { wearerOf } from '../../lib/chat/helpers'
 import { agentFigure, type FigureChoice } from '../../lib/library/figures'
 import type { SavedJob } from '../../lib/library/jobs'
 import type { AgentConfig } from '../../lib/team-file/types'
@@ -23,6 +24,8 @@ export const TeamFiguresContext = createContext<ReadonlyMap<string, FigureChoice
 
 /** The figure the open team's agent `id` wears, or `null` for you or an agent the team doesn't list. */
 export function useTeamFigure(id: string): FigureChoice | null {
-  return useContext(TeamFiguresContext).get(id) ?? null
+  const figures = useContext(TeamFiguresContext)
+  // A helper (ADR 0079) wears the figure of the agent it helps.
+  return figures.get(id) ?? figures.get(wearerOf(id)) ?? null
 }
 

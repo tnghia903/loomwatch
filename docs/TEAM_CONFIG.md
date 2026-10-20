@@ -346,6 +346,21 @@ depend on the document as a whole:
   Synchronous `ask` calls do not consume a background-dispatch permit. `Agent.allowRecruiting`
   defaults to `true`; `false` forbids that agent from recruiting helpers within its own
   pipeline step.
+- **Helpers (ADR 0079).** An agent working alone — the only agent of its team that runs on a model,
+  as in an agent's own chat — may bring in helpers with the Team Bus tool `start_helper`
+  (`title`, `task`, `send_back`): copies of itself, each started fresh on the brief it writes, with
+  its instructions, model, skills, tools, folders and switches, working in its own folder.
+  - `guards.maxHelpers` (default `4`, `0` turns helpers off for the team) is how many may work at
+    once. `Agent.allowRecruiting: false` turns them off for that agent; the agent builder's
+    "Brings in helpers for big tasks" switch writes it.
+  - A helper's id is the agent's, `~`, and its number (`writer~2`), which no team-file id can be.
+    It brings in no helpers of its own, puts no questions to the person, and leaves out the
+    agent's `doneWhen`, check duties and own spending guard; the run's `spend.perRun` covers it.
+  - What every helper sends back reaches the agent in one more turn, once all have finished
+    (up to three rounds). A helper that fails or is stopped does not fail the run: the agent is
+    told, and does that part itself.
+  - `POST /api/runs/{id}/agents/{helper}/stop` stops one helper; "Allow for this run" given to the
+    agent or any of its helpers covers all of them.
 - `handoff` starts the target as a background task and marks the caller's roster status as
   `stopped`, but it does not end the caller's current turn. The caller must return after a
   successful handoff; its model calls go on until that turn ends.

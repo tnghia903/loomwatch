@@ -26,6 +26,8 @@ export interface LibrarySource {
   capabilities?: CapabilityRef[]
   /** What the agent it places may do without asking (ADR 0037). */
   allow?: AgentAllow
+  /** `false`: the agent it places brings in no helpers (ADR 0079), `allowRecruiting: false`. */
+  helpers?: false
   /** One of Your agents: the placed agent links back to this version of it. */
   from?: AgentLink
 }

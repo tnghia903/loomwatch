@@ -6,9 +6,10 @@ import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../..
 import { useFollow } from '../../lib/chat/follow'
 import type { ChatItem, ChatMessage, ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
+import { helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
 import { clockTime, listNames, took } from '../../lib/chat/format'
 import { checkReactions, talkReactions, targets, yoursOn, type AgentReaction, type Face, type ReactionAbout } from '../../lib/chat/reactions'
-import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/runs/client'
+import { answerRun, cancelRun, isTerminalRun, stopHelper, type RunRecord } from '../../lib/runs/client'
 import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
@@ -29,6 +30,7 @@ import { SpendStopCard } from '../run/SpendStopCard'
 import { Markdown } from '../ui/Markdown'
 import { checkStopTip, checkStopTitle } from '../../lib/story/checkStop'
 import { AnswerTools } from './AnswerTools'
+import { Helpers } from './Helpers'
 import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
 import { Appearing, Swap } from './Appearing'
@@ -133,6 +135,10 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   }
   const open = toggled ?? (live || newest)
   const setOpen = (next: (value: boolean) => boolean) => setToggled(next(open))
+  // A helper's row (ADR 0079) opens the talk at the brief its agent wrote it.
+  const [shown, setShown] = useState<{ id: string; at: number } | null>(null)
+  const showMessage = useCallback((id: string) => { setShown({ id, at: Date.now() }); setToggled(true) }, [])
+  const talkReveal = shown && (!revealed || shown.at > revealed.at) ? shown : revealed
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // An answer says whether its record holds anything to check, so a piece reads its record once it
@@ -147,8 +153,9 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   }, [answerFlash])
   // The record and its events: for work in progress, talk that is shown, and an answer you saw.
   const session = useRunSession(live || open || seen ? run.runId : null, run.responder)
-  const name = (id: string) => team.names.get(id) ?? id
-  const hue = (id: string) => team.hues.get(id) ?? 1
+  // A helper (ADR 0079) is named after the agent it helps, and wears its colour.
+  const name = (id: string) => nameWithHelpers(team.names, id) ?? id
+  const hue = (id: string) => team.hues.get(wearerOf(id)) ?? 1
   // The session polls its own run every second; the chat page is the fallback between reads.
   const record = session.record?.runId === run.runId ? session.record : run
   // And the chat hears it, so the header's presence and the message box's label agree with this
@@ -189,8 +196,11 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   // Whoever is writing now (lib/watch/workPhase.ts), its figure typing at the bench: the message
   // box says so while it types.
   const now = useNow(live)
-  const typing = (live ? record.working ?? [] : []).filter((id) => workPhase(session.events, id, now) === 'typing')
+  // A helper writes to its agent, not to you: only the agent types in the chat.
+  const typing = (live ? record.working ?? [] : []).filter((id) => !helperOf(id) && workPhase(session.events, id, now) === 'typing')
   const typingKey = typing.join('\n')
+  // The helpers its agent brought in (ADR 0079), read off the piece's own record.
+  const helpers = useMemo(() => helpersOf(session.events, session.projection.evidence), [session.events, session.projection.evidence])
   useEffect(() => { onTyping?.(run.runId, typingKey ? typingKey.split('\n') : []) }, [onTyping, run.runId, typingKey])
   useEffect(() => () => onTyping?.(run.runId, []), [onTyping, run.runId])
   // The files the answer names, for its tools: a scan of the whole text, so once per answer. An
@@ -326,7 +336,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
             : passLine
               ? <>{passLine.map((part, index) => (part.agent ? <Named key={index} hue={hue(part.agent)}>{part.text}</Named> : <Fragment key={index}>{part.text}</Fragment>))}<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
             : working.length > 0
-              ? <><span>{working.map((id, index) => <Fragment key={id}>{index === 0 ? '' : index === working.length - 1 ? ' and ' : ', '}<Named hue={hue(id)}>{name(id)}</Named></Fragment>)}</span> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
+              ? <><span>{whoWorks(working).map((part, index, parts) => <Fragment key={part.agent ?? part.text}>{index === 0 ? '' : index === parts.length - 1 ? ' and ' : ', '}{part.agent ? <Named hue={hue(part.agent)}>{part.helpers ? `${name(part.agent)}’s ${part.text}` : name(part.agent)}</Named> : part.text}</Fragment>)}</span> {working.length === 1 ? 'is' : 'are'} working<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></>
               : run.status === 'queued' || run.status === 'starting' ? 'Starting…' : 'Handing over…'}
         </Swap>}
         <Spool spend={record.spend} stops={stops} name={name} hue={hue} />
@@ -346,6 +356,8 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
         </span>
       </div>
 
+      {helpers.length > 0 && <Helpers helpers={helpers} live={live} lead={name(helpers[0].lead)} name={name} hue={hue} onShow={showMessage} onStop={async (helper) => { await stopHelper(run.runId, helper) }} />}
+
       {open && (
         <div className="tc-said">
           <Suspense fallback={null}>
@@ -358,7 +370,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
                 evidence={session.projection.evidence}
                 live={live}
                 onInspectEvidence={() => onDetails(run.runId)}
-                reveal={revealed}
+                reveal={talkReveal}
                 yourTurn={onTheMessage ? yourTurn : undefined}
                 permissionTurn={permissionTurn}
                 onReply={onReply ? (reply) => onReply({ ...reply, runId: run.runId }) : undefined}

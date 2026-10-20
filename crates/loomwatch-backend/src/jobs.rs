@@ -133,6 +133,17 @@ fn first_version() -> u32 {
     1
 }
 
+/// A job brings in helpers unless it says it may not (ADR 0079).
+const fn brings_in_helpers() -> bool {
+    true
+}
+
+// serde's `skip_serializing_if` passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_on(switch: &bool) -> bool {
+    *switch
+}
+
 // serde's `skip_serializing_if` passes a reference.
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_first_version(version: &u32) -> bool {
@@ -189,6 +200,10 @@ pub(crate) struct JobSpec {
     /// What it may do without asking, copied into the team with the rest.
     #[serde(default, skip_serializing_if = "JobAllow::is_empty")]
     pub(crate) allow: JobAllow,
+    /// Whether it may bring in helpers for a big task (ADR 0079), copied into a team as
+    /// `allowRecruiting`. Written only when it may not.
+    #[serde(default = "brings_in_helpers", skip_serializing_if = "is_on")]
+    pub(crate) helpers: bool,
     /// Which version this is. The daemon owns it: a save that changes anything a team copies makes
     /// the next one, and whatever a client sends here is ignored.
     #[serde(default = "first_version", skip_serializing_if = "is_first_version")]
@@ -215,6 +230,7 @@ impl JobSpec {
             || self.reads != other.reads
             || self.done_when != other.done_when
             || self.allow != other.allow
+            || self.helpers != other.helpers
     }
 }
 
@@ -419,6 +435,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         reads,
         done_when,
         allow: spec.allow,
+        helpers: spec.helpers,
         version: spec.version.max(1),
         note,
         saved_at: spec.saved_at,
@@ -922,6 +939,7 @@ mod tests {
             reads: Vec::new(),
             done_when: Vec::new(),
             allow: JobAllow::default(),
+            helpers: true,
             version: 1,
             note: String::new(),
             saved_at: None,
@@ -1217,6 +1235,23 @@ mod tests {
             text.contains("version: 2") && text.contains("web: true"),
             "{text}"
         );
+    }
+
+    /// ADR 0079: an agent that may not bring in helpers says so in its file, which a team copies, so
+    /// turning helpers off makes a new version; one that may (the default) writes nothing.
+    #[test]
+    fn turning_helpers_off_is_a_new_version_and_only_off_is_written() {
+        let root = root();
+        save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(!text.contains("helpers"), "{text}");
+        let mut alone = spec("Notes");
+        alone.helpers = false;
+        let second = save_job(root.path(), "notes", alone, false, Some(1)).expect("second");
+        assert_eq!(second.spec.version, 2);
+        assert!(!second.spec.helpers);
+        let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
+        assert!(text.contains("helpers: false"), "{text}");
     }
 
     #[test]

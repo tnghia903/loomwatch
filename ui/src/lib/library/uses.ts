@@ -48,6 +48,7 @@ export function teamAgentSource(agent: AgentConfig): LibrarySource {
     ...(capabilities.length ? { capabilities: capabilities.map((capability) => ({ ...capability })) } : {}),
     ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(agent.allow ? { allow: { ...agent.allow } } : {}),
+    ...(agent.allowRecruiting === false ? { helpers: false as const } : {}),
   }
 }
 
