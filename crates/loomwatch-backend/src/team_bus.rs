@@ -1039,8 +1039,12 @@ impl TeamBus {
     /// A fresh copy started for it would know only its role and the question, and do its work
     /// again to answer. Its work is already handed on: the refusal says where, so the asker works
     /// from it instead of trying another way.
+    ///
+    /// Not for an agent asked about a part of a file (ADR 0077): in a one-agent turn every stage
+    /// before it counts as finished, and the question is one the stage's job answers, not its
+    /// handover, so a fresh copy of it is the expert it needs.
     fn refuse_finished(&self, session: &AgentSession, target: &str) -> Result<()> {
-        if !self.is_finished(target) {
+        if !self.is_finished(target) || self.asks_any_teammate(session) {
             return Ok(());
         }
         let name = self
@@ -4043,8 +4047,9 @@ mod tests {
     }
 
     /// ADR 0077: an agent asked about a part of a file, alone, is offered `ask` and may start any
-    /// teammate with it, though its seat has no stage before it and it may not recruit; any other
-    /// agent on the same bus is held to its seat and its switch as before.
+    /// teammate with it, though its seat has no stage before it, it may not recruit, and the step
+    /// it asks finished before it; any other agent on the same bus is held to its seat and its
+    /// switch as before.
     #[tokio::test]
     async fn an_agent_asked_about_a_part_of_a_file_may_ask_any_teammate() -> Result<()> {
         let pool = crate::db::Db::temp().await;
@@ -4080,6 +4085,8 @@ mod tests {
             None,
         )?;
         bus.lets_ask_teammates("writer");
+        // In a workflow, a one-agent turn counts every step before the agent asked as finished.
+        bus.finished("researcher");
         let event_log = EventLog::new(archive.clone(), "part-asked-run".into());
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}});
         let names = |listed: &Value| {
@@ -4105,16 +4112,18 @@ mod tests {
         writer.register(event_log.clone()).await;
         let response = post_json(&bus, &writer.token, &ask).await?;
         assert!(
-            !response.to_string().contains("may not recruit helpers"),
+            !response.to_string().contains("may not recruit helpers")
+                && !response.to_string().contains("has finished its part"),
             "{response}"
         );
 
         let editor = bus.connection("editor").await?;
         assert!(names(&post_json(&bus, &editor.token, &list).await?).is_empty());
         editor.register(event_log.clone()).await;
+        // Anyone else may not bring the finished step back.
         assert_tool_error_contains(
             &post_json(&bus, &editor.token, &ask).await?,
-            "may not recruit helpers within its own pipeline step",
+            "has finished its part of this run",
         );
         Ok(())
     }
