@@ -6,6 +6,8 @@
 //!   script cannot read the operator's key or the daemon's database address.
 //! - On a Mac it runs in a sandbox ([`super::super::sandbox`]): it can change files only in the
 //!   work folder and temporary folders, and reach the network only when the agent may use the web.
+//! - When the agent may use the web, Python's own web requests name `LoomWatch` ([`USER_AGENT`])
+//!   instead of Python, which some sites refuse ([`PythonName`]).
 //! - It stops at its timeout, or when the turn is cancelled, and everything it started goes with
 //!   it: its process group on macOS and Linux, its job ([`ProcessTree`]) on Windows. On Windows
 //!   the job also closes when the command finishes, so nothing it started keeps running after.
@@ -28,6 +30,15 @@ const MAX_TIMEOUT: Duration = Duration::from_mins(10);
 /// What a command may print before the rest is cut. The session sets long outputs aside, so
 /// this only stops a runaway command from filling the daemon's memory.
 const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+
+/// The name a command's Python web requests go out under, in place of `Python-urllib/3.x`, which
+/// Read the Docs and others refuse with 403. It names `LoomWatch` and where to read about it, as
+/// those sites ask of tools, and never claims to be a browser.
+pub(crate) const USER_AGENT: &str = concat!(
+    "LoomWatch/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://loomwatch.github.io/)"
+);
 
 /// How commands run for one agent.
 #[derive(Debug, Clone, Default)]
@@ -56,6 +67,15 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Kept until the command ends. A folder that can't be made leaves Python its own name.
+    let python = if context.command.network {
+        PythonName::new().ok()
+    } else {
+        None
+    };
+    if let Some(python) = &python {
+        process.env("PYTHONPATH", python.path());
+    }
     // Python on Windows writes to a pipe in the system's code page, which the output is not read
     // in: UTF-8 unless the operator chose otherwise.
     if cfg!(windows) && std::env::var_os("PYTHONUTF8").is_none() {
@@ -236,6 +256,42 @@ pub(crate) fn scrubbed(
     .collect()
 }
 
+/// A folder holding the `sitecustomize.py` that gives Python's web requests [`USER_AGENT`], made
+/// for one command and removed when it ends: a file every command shared is one any of them could
+/// change for the rest.
+struct PythonName(PathBuf);
+
+impl PythonName {
+    fn new() -> std::io::Result<Self> {
+        let folder =
+            std::env::temp_dir().join(format!("loomwatch-python-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&folder)?;
+        let name = Self(folder);
+        std::fs::write(
+            name.0.join("sitecustomize.py"),
+            include_str!("sitecustomize.py").replace("@USER_AGENT@", USER_AGENT),
+        )?;
+        Ok(name)
+    }
+
+    /// `PYTHONPATH` with this folder first, so its `sitecustomize` is the one Python finds. The
+    /// daemon's own `PYTHONPATH` follows unchanged.
+    fn path(&self) -> OsString {
+        let mut path = self.0.clone().into_os_string();
+        if let Some(rest) = std::env::var_os("PYTHONPATH").filter(|rest| !rest.is_empty()) {
+            path.push(if cfg!(windows) { ";" } else { ":" });
+            path.push(rest);
+        }
+        path
+    }
+}
+
+impl Drop for PythonName {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,6 +452,112 @@ mod tests {
             "{}",
             locked.text
         );
+    }
+
+    async fn run_in(folder: &Folder, network: bool, input: &serde_json::Value) -> Output {
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let cancel = Cancel::new(cancel_rx);
+        let settings = CommandSettings {
+            network,
+            ..CommandSettings::default()
+        };
+        let context = Context {
+            cwd: &folder.0,
+            cancel: &cancel,
+            command: &settings,
+            pictures: super::super::Pictures::default(),
+        };
+        run(input, &context).await
+    }
+
+    /// A web server on this computer that answers every request with "ok" and passes on the name
+    /// each request came with.
+    #[cfg(unix)]
+    fn names_heard() -> (u16, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (heard, names) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut name = String::new();
+                let mut reader = std::io::BufReader::new(&stream);
+                let mut line = String::new();
+                // Headers end at the first empty line.
+                while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                    if line.to_ascii_lowercase().starts_with("user-agent:") {
+                        line["user-agent:".len()..].trim().clone_into(&mut name);
+                    }
+                    line.clear();
+                }
+                let _ = (&stream).write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                );
+                let _ = heard.send(name);
+            }
+        });
+        (port, names)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn python_asks_for_pages_as_loomwatch_when_the_agent_may_use_the_web() {
+        let folder = Folder::new();
+        let (port, names) = names_heard();
+        let url = format!("http://127.0.0.1:{port}/");
+        let fetch = serde_json::json!({"command": format!(
+            "no_proxy='*' python3 -c \"import sys; print('urllib.request' in sys.modules); \
+             import urllib.request as r; r.urlopen('{url}').read(); \
+             r.urlopen(r.Request('{url}', headers={{'User-Agent': 'their-own/1'}})).read()\""
+        )});
+        let fetched = run_in(&folder, true, &fetch).await;
+        assert!(!fetched.failed, "{}", fetched.text);
+        // Nothing is imported before the script asks for it.
+        assert_eq!(fetched.text.trim(), "False");
+        let heard = || names.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(heard(), USER_AGENT);
+        // A name the script gives itself wins.
+        assert_eq!(heard(), "their-own/1");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_name_comes_only_with_the_web_and_hides_no_other_sitecustomize() {
+        let folder = Folder::new();
+        let theirs = folder.0.join("theirs");
+        std::fs::create_dir(&theirs).unwrap();
+        std::fs::write(theirs.join("sitecustomize.py"), "print('theirs ran')\n").unwrap();
+        let name = serde_json::json!({"command": "PYTHONPATH=\"$PYTHONPATH:$PWD/theirs\" python3 -c \
+            \"import urllib.request as r; print(dict(r.build_opener().addheaders)['User-agent'])\""});
+
+        let named = run_in(&folder, true, &name).await;
+        assert!(!named.failed, "{}", named.text);
+        assert!(named.text.contains("theirs ran"), "{}", named.text);
+        assert!(named.text.contains(USER_AGENT), "{}", named.text);
+
+        let own = run_in(&folder, false, &name).await;
+        assert!(!own.failed, "{}", own.text);
+        assert!(own.text.contains("theirs ran"), "{}", own.text);
+        assert!(own.text.contains("Python-urllib/"), "{}", own.text);
+    }
+
+    #[tokio::test]
+    async fn the_name_is_made_for_each_command_and_goes_when_it_ends() {
+        let folder = Folder::new();
+        let said = run_in(
+            &folder,
+            true,
+            &script("echo \"$PYTHONPATH\"", "echo %PYTHONPATH%"),
+        )
+        .await;
+        assert!(!said.failed, "{}", said.text);
+        let first = std::env::split_paths(said.text.trim()).next().unwrap();
+        assert!(
+            first.to_string_lossy().contains("loomwatch-python-"),
+            "{}",
+            said.text
+        );
+        assert!(!first.exists(), "{} was left behind", first.display());
     }
 
     #[tokio::test]

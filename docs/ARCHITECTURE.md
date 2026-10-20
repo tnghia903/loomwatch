@@ -47,7 +47,10 @@ instructions and tools.
   (`platform::ProcessTree`), which also ends whatever it leaves running when it finishes. On a
   Mac they also run in a Seatbelt sandbox (`agent/sandbox.rs`): they can change files only in the
   work folder and temporary folders, and reach the network only when the agent may use the web.
-  Windows and Linux have no sandbox, so the permission check is the only line there.
+  Windows and Linux have no sandbox, so the permission check is the only line there. For an agent
+  that may use the web, a `sitecustomize.py` written for each command and put first on
+  `PYTHONPATH` gives Python's `urllib` the name `LoomWatch/<version>` in place of
+  `Python-urllib/3.x`, which Read the Docs refuses; a name the script sets itself still wins.
 - **The opening instructions** (`agent/prompt.rs`) are the same for every agent, so the
   provider's prompt cache keeps them. The team's role, task and "Done when" come in the first
   user message. Skills are listed by name and description only, from the agent's folder
