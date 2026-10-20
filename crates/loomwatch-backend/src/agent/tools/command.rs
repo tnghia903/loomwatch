@@ -117,7 +117,7 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
             let code = status
                 .code()
                 .map_or_else(|| "a signal".to_owned(), |code| format!("exit code {code}"));
-            if sandbox::denied(&text) {
+            if sandbox::denied(&text, context.cwd, context.command) {
                 text.push_str(
                     "\n(The sandbox blocked this: commands may change files only in the work \
                      folder, and reach the network only when this agent may use the web.)",
@@ -354,6 +354,48 @@ mod tests {
             slow.text
         );
         never_written(&folder).await;
+    }
+
+    /// The agent learns the real reason when the sandbox stopped a command, and only then.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn on_a_mac_only_what_the_sandbox_blocked_says_so() {
+        let folder = Folder::new();
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let cancel = Cancel::new(cancel_rx);
+        let settings = CommandSettings::default();
+        let context = Context {
+            cwd: &folder.0,
+            cancel: &cancel,
+            command: &settings,
+            pictures: super::super::Pictures::default(),
+        };
+        let note = "(The sandbox blocked this";
+        let home = std::env::var("HOME").unwrap();
+        let outside = format!(
+            "echo x > '{home}/.loomwatch-outside-probe-{}'",
+            uuid::Uuid::new_v4()
+        );
+        let outside = run(&serde_json::json!({ "command": outside }), &context).await;
+        assert!(
+            outside.failed && outside.text.contains(note),
+            "{}",
+            outside.text
+        );
+        // A locked file in the work folder fails with the same words, but not for the sandbox.
+        let locked = run(
+            &serde_json::json!({ "command": "touch locked && chflags uchg locked && \
+                 { echo x > \"$PWD/locked\"; failed=$?; chflags nouchg locked; exit $failed; }" }),
+            &context,
+        )
+        .await;
+        assert!(
+            locked.failed
+                && locked.text.contains("Operation not permitted")
+                && !locked.text.contains(note),
+            "{}",
+            locked.text
+        );
     }
 
     #[tokio::test]
