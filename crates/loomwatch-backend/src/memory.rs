@@ -417,6 +417,10 @@ pub enum PromptSectionKind {
     /// whether its reply is the team's answer (ADR 0034). Absent for a team of one. Added here and
     /// in `ui/src/lib/watch/events.ts` in one change.
     Team,
+    /// `## Helpers` — an agent working alone may bring in copies of itself for the parts of a big
+    /// task, and when that pays (ADR 0079). Fixed text under its place, so it stays cached. Absent
+    /// for every other agent. Added here and in `ui/src/lib/watch/events.ts` in one change.
+    Helpers,
     /// `## Reading the request` — the role says who the agent is, the task is what the operator
     /// wants now, read for what it means: a question answered, a change made, a greeting greeted,
     /// not the role's whole job done again ([`crate::orientation::reading`]). Fixed text under the

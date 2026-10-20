@@ -420,3 +420,5 @@
 .figure-still { position: relative; display: inline-block; vertical-align: middle; }
 .figure-still > img, .figure-still > .worn-overlay, .figure-still > .worn-overlay > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .figure-still > .worn-overlay { pointer-events: none; }
+/* Whether it brings in helpers for a big task (ADR 0079), under its model: how it works, as a switch. */
+.byhand-helpers { margin-top: var(--sp-1); }

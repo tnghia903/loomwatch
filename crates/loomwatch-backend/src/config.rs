@@ -1072,6 +1072,10 @@ pub struct GuardsConfig {
     pub max_dispatch_depth: u32,
     #[serde(default = "default_max_concurrent_dispatches")]
     pub max_concurrent_dispatches: u32,
+    /// How many helpers an agent working alone may have at work at once (ADR 0079). `0` turns
+    /// helpers off for the team.
+    #[serde(default = "default_max_helpers")]
+    pub max_helpers: u32,
 }
 
 impl Default for GuardsConfig {
@@ -1079,6 +1083,7 @@ impl Default for GuardsConfig {
         Self {
             max_dispatch_depth: default_max_dispatch_depth(),
             max_concurrent_dispatches: default_max_concurrent_dispatches(),
+            max_helpers: default_max_helpers(),
         }
     }
 }
@@ -1098,6 +1103,13 @@ const fn default_max_dispatch_depth() -> u32 {
 
 const fn default_max_concurrent_dispatches() -> u32 {
     8
+}
+
+/// Four at once: Anthropic's research lead does well with three to five subagents for a broad
+/// question, and each one is a session the run pays for, so the limit is a ceiling the agent is
+/// told to stay well under for most tasks (`helpers::for_lead`).
+const fn default_max_helpers() -> u32 {
+    4
 }
 
 const fn default_allow_recruiting() -> bool {

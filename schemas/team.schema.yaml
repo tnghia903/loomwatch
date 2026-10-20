@@ -545,6 +545,15 @@ $defs:
         type: integer
         minimum: 0
         default: 8
+      maxHelpers:
+        description: >-
+          How many helpers an agent working alone (the only agent of its team, such as an agent's
+          own chat) may have at work at once: copies of itself it starts on parts of a big task
+          (ADR 0079). 0 turns helpers off for the team.
+        type: integer
+        minimum: 0
+        maximum: 8
+        default: 4
 
   Agent:
     description: >-

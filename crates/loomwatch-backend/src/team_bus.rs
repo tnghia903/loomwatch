@@ -27,6 +27,9 @@ use crate::{EventKind, SessionOutcome, resolve_cwd};
 /// that asked ended its turn first.
 pub(crate) const ASK_WITHDRAWN: &str = "ask_withdrawn";
 
+/// The `mode` of work a `start_helper` copy did, beside `dispatch` and `handoff` (ADR 0079).
+pub(crate) const HELPER_MODE: &str = "helper";
+
 /// Which execution mode is driving this run — see ARCHITECTURE.md §4.
 ///
 /// Pipeline mode restricts the tool surface because the backend, not the agent, owns
@@ -97,6 +100,32 @@ struct TeamBusState {
     /// how much is still working, and what finished but has not been handed back yet.
     delegated: std::sync::Mutex<BTreeMap<String, DelegatedWork>>,
     delegated_changed: Notify,
+    /// The agent working alone that may bring in helpers in this run, and the home they share with
+    /// it (ADR 0079). `None` until the run offers them, and for every team with teammates.
+    helper_home: std::sync::Mutex<Option<Arc<HelperHome>>>,
+    /// The helpers started in this run, by id: each is its agent, copied ([`crate::helpers`]).
+    copies: std::sync::Mutex<BTreeMap<String, HelperCopy>>,
+    /// The number the next helper is given, counted from 1 across the run.
+    next_copy: AtomicU64,
+}
+
+/// The agent working alone that may bring in helpers, and what its helpers work with: its own
+/// folder and the skills and tools delivered to it, so a helper writes where the agent reads and
+/// the answer's file links resolve (ADR 0079). A copy is never given a workspace of its own: that
+/// would put its files in a folder the agent doesn't work in.
+pub(crate) struct HelperHome {
+    pub(crate) lead: String,
+    /// The person's request, which each helper is shown for context.
+    pub(crate) request: String,
+    pub(crate) declared_cwd: PathBuf,
+    pub(crate) workspace: Option<crate::workspace::Workspace>,
+}
+
+/// A helper started in this run: the agent, copied, and the part it was given, in the words the
+/// person reads.
+struct HelperCopy {
+    config: AgentConfig,
+    title: String,
 }
 
 /// Each caller's `ask` calls in flight, by bearer token: an id, and the switch that withdraws it.
@@ -373,8 +402,52 @@ impl TeamBus {
             next_ask: AtomicU64::new(0),
             delegated: std::sync::Mutex::new(BTreeMap::new()),
             delegated_changed: Notify::new(),
+            helper_home: std::sync::Mutex::new(None),
+            copies: std::sync::Mutex::new(BTreeMap::new()),
+            next_copy: AtomicU64::new(1),
         });
         Ok(Self { state })
+    }
+
+    /// Let `home.lead` bring in helpers for the rest of the run, when it may
+    /// ([`crate::helpers::may_bring_in`]). Whether it may, which is what its opening prompt says.
+    pub(crate) fn offer_helpers(&self, home: HelperHome) -> bool {
+        let may = self
+            .state
+            .team
+            .agents
+            .iter()
+            .find(|agent| agent.id == home.lead)
+            .is_some_and(|lead| crate::helpers::may_bring_in(&self.state.team, lead));
+        if may {
+            *self
+                .state
+                .helper_home
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(home));
+        }
+        may
+    }
+
+    /// The home `agent_id`'s helpers share with it, when it may bring them in.
+    fn helper_home_of(&self, agent_id: &str) -> Option<Arc<HelperHome>> {
+        self.state
+            .helper_home
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .filter(|home| home.lead == agent_id)
+            .cloned()
+    }
+
+    /// The helper `agent_id`, when it is one started in this run.
+    fn copy(&self, agent_id: &str) -> Option<AgentConfig> {
+        self.state
+            .copies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(agent_id)
+            .map(|copy| copy.config.clone())
     }
 
     pub(crate) async fn connection(&self, agent_id: &str) -> Result<TeamBusConnection> {
@@ -1140,6 +1213,7 @@ impl TeamBus {
             .iter()
             .find(|agent| agent.id == agent_id)
             .cloned()
+            .or_else(|| self.copy(agent_id))
             .with_context(|| format!("agent {agent_id:?} is not on this team"))
     }
 
@@ -1315,6 +1389,10 @@ impl TeamBus {
                         })
                         .collect(),
                 ))
+            }
+            "start_helper" => {
+                self.start_helper(session, token, event_log, arguments)
+                    .await
             }
             "dispatch" => {
                 let target = self.resolve(&required_string(arguments, "agent")?)?;
@@ -1825,6 +1903,100 @@ impl TeamBus {
     ///
     /// `reach` says where it goes ([`Self::reach`]): a teammate's open conversation takes it as
     /// one more round, framed as more work from the caller; anything else starts it fresh.
+    /// `start_helper`: a copy of the caller, started in the background on the brief it wrote
+    /// (ADR 0079). It runs as a dispatched teammate runs, so what it comes back with reaches the
+    /// caller in one more turn ([`TeamBusConnection::collect_delegated`]).
+    async fn start_helper(
+        &self,
+        session: &AgentSession,
+        token: &str,
+        event_log: &EventLog,
+        arguments: &Value,
+    ) -> Result<Value> {
+        let Some(home) = self.helper_home_of(&session.agent_id) else {
+            return Err(refused(
+                "cannot_start",
+                format!(
+                    "{} may not bring in helpers here: only an agent working alone does.",
+                    session.agent_id
+                ),
+            ));
+        };
+        self.refuse_new_agent(session, "a helper", "start_helper")?;
+        let part = required_string(arguments, "task")?;
+        // A model that left the second half out is not refused for it: the helper is told to send
+        // back its result condensed, as every helper is (`helpers::for_copy`).
+        let task = match arguments
+            .get("send_back")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|words| !words.is_empty())
+        {
+            Some(send_back) => crate::helpers::brief(&part, send_back),
+            None => part.clone(),
+        };
+        let title = arguments
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map_or_else(|| first_line(&part), str::to_owned);
+        let at_once = self.state.team.guards.max_helpers;
+        let working = self
+            .state
+            .delegated
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(token)
+            .map_or(0, |work| work.running);
+        if u32::try_from(working).unwrap_or(u32::MAX) >= at_once {
+            return Err(refused(
+                "limit",
+                format!(
+                    "{working} helpers are already at work, as many as this team allows at once. \
+                     Do this part yourself, or end your turn and start it once theirs comes back."
+                ),
+            ));
+        }
+        let lead = self.agent(&home.lead)?;
+        let number = usize::try_from(self.state.next_copy.fetch_add(1, Ordering::Relaxed))
+            .context("too many helpers for this platform")?;
+        let copy = crate::helpers::copy_of(&lead, number);
+        let id = copy.id.clone();
+        let name = copy.name.clone();
+        self.state
+            .copies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                id.clone(),
+                HelperCopy {
+                    config: copy,
+                    title: title.clone(),
+                },
+            );
+        let context = self.guard_delegation(session, &id)?;
+        self.spawn_background(
+            &id,
+            &task,
+            event_log.clone(),
+            (context, Reach::Pipeline),
+            (session, token),
+            HELPER_MODE,
+        )
+        .await?;
+        Ok(json!({
+            "accepted": true,
+            "agent": id,
+            "name": name,
+            "title": title,
+            "mode": HELPER_MODE,
+            "working": working + 1,
+            "note": "It works in the background. What it sends back reaches you in one more turn, \
+                     once every helper you started has finished."
+        }))
+    }
+
     async fn spawn_background(
         &self,
         agent_id: &str,
@@ -1873,10 +2045,22 @@ impl TeamBus {
                 Ok(helped) => Ok(helped.outcome.reply.clone()),
                 Err(error) => Err(format!("{error:#}")),
             };
-            bus.record_delegated(&event_log, &caller, &agent_id, mode, &prompt, &returned)
-                .await;
+            let stopped = matches!(&outcome, Ok(helped) if helped.stopped);
+            bus.record_delegated(
+                &event_log,
+                (&caller, &agent_id),
+                (mode, &prompt),
+                &returned,
+                stopped,
+            )
+            .await;
             delegating.outcome = Some(returned);
             drop(delegating);
+            // A helper that failed has told its agent so, in what it came back with, and the agent
+            // does that part itself (ADR 0079): the run's answer is the agent's, and stands.
+            if mode == HELPER_MODE {
+                return Ok(());
+            }
             outcome.map(|_| ())
         });
         self.state.tasks.lock().await.push(task);
@@ -1888,11 +2072,10 @@ impl TeamBus {
     async fn record_delegated(
         &self,
         event_log: &EventLog,
-        caller: &str,
-        agent: &str,
-        mode: &str,
-        task: &str,
+        (caller, agent): (&str, &str),
+        (mode, task): (&str, &str),
         returned: &std::result::Result<String, String>,
+        stopped: bool,
     ) {
         let mut payload = json!({
             "phase": "delegated_result",
@@ -1900,6 +2083,20 @@ impl TeamBus {
             "for": caller,
             "task": task,
         });
+        if let Some(copy) = self
+            .state
+            .copies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(agent)
+        {
+            payload["title"] = json!(copy.title);
+            payload["name"] = json!(copy.config.name);
+        }
+        // Stopped by the operator or at a spending limit: what it came back with is what it had.
+        if stopped {
+            payload["stopped"] = json!(true);
+        }
         match returned {
             Ok(reply) => {
                 payload["status"] = json!("succeeded");
@@ -1995,6 +2192,26 @@ impl TeamBus {
         agent: &AgentConfig,
         mut outcome: crate::SessionOutcome,
     ) -> Helped {
+        // A helper the operator stopped (ADR 0079) comes back with what it had: its agent is told
+        // that is all there is, so it does the rest of the part itself.
+        if crate::helpers::lead_of(&agent.id).is_some()
+            && self
+                .state
+                .operator
+                .as_ref()
+                .is_some_and(|desk| desk.registry().helper_stopped(run_id, &agent.id))
+        {
+            let words = outcome.reply.trim();
+            outcome.reply = if words.is_empty() {
+                crate::helpers::STOPPED.to_owned()
+            } else {
+                format!("{}\n\n{words}", crate::helpers::STOPPED)
+            };
+            return Helped {
+                outcome,
+                stopped: true,
+            };
+        }
         let Some(limit) = self
             .state
             .operator
@@ -2033,26 +2250,41 @@ impl TeamBus {
         context: DelegationContext,
         keep: Option<Designation>,
     ) -> Result<crate::SessionOutcome> {
-        let declared_cwd = resolve_cwd(&self.state.team_path, &agent.spawn.cwd)?;
-        // A delegated helper used to skip `materialise` entirely, so it received neither the
-        // capabilities the operator wired to it nor the team's Brief — it started with its role
-        // and the one string its caller typed. It goes through the same delivery as a pipeline
-        // node now, which is what makes "a constraint written once reaches a delegated helper"
-        // true rather than aspirational.
-        let workspace = crate::workspace::materialise(
-            crate::capabilities::skills_folder().as_deref(),
-            crate::memory_root(&self.state.team_path),
-            &self.state.team_path,
-            &self.state.team.id,
-            agent,
-            &declared_cwd,
-            &self.state.memory,
-            // A helper's Bus surface is the surface of the bus that recruited it.
-            match self.state.mode {
-                TeamBusMode::Team => crate::workspace::BusMode::Team,
-                TeamBusMode::Pipeline => crate::workspace::BusMode::Pipeline,
-            },
-        )?;
+        // A copy started with `start_helper` works in its agent's own home, with what was delivered
+        // to it (ADR 0079): its files land where the agent reads them, and nothing is rebuilt
+        // under the agent while it works.
+        let home =
+            crate::helpers::lead_of(&agent.id).and_then(|(lead, _)| self.helper_home_of(lead));
+        let (declared_cwd, workspace) = if let Some(home) = home.as_deref() {
+            (home.declared_cwd.clone(), home.workspace.clone())
+        } else {
+            let declared_cwd = resolve_cwd(&self.state.team_path, &agent.spawn.cwd)?;
+            // A delegated helper used to skip `materialise` entirely, so it received neither the
+            // capabilities the operator wired to it nor the team's Brief — it started with its
+            // role and the one string its caller typed. It goes through the same delivery as a
+            // pipeline node now, which is what makes "a constraint written once reaches a
+            // delegated helper" true rather than aspirational.
+            let workspace = crate::workspace::materialise(
+                crate::capabilities::skills_folder().as_deref(),
+                crate::memory_root(&self.state.team_path),
+                &self.state.team_path,
+                &self.state.team.id,
+                agent,
+                &declared_cwd,
+                &self.state.memory,
+                // A helper's Bus surface is the surface of the bus that recruited it.
+                match self.state.mode {
+                    TeamBusMode::Team => crate::workspace::BusMode::Team,
+                    TeamBusMode::Pipeline => crate::workspace::BusMode::Pipeline,
+                },
+            )?;
+            (declared_cwd, workspace)
+        };
+        // A copy reads what its agent reads: the Brief's entries for that agent, by its id.
+        let reader = match &home {
+            Some(home) => self.agent(&home.lead)?,
+            None => agent.clone(),
+        };
         let cwd = workspace
             .as_ref()
             .map_or(declared_cwd, |workspace| workspace.cwd.clone());
@@ -2076,16 +2308,17 @@ impl TeamBus {
                 Some(event_log.session_id()),
                 agent,
             ),
+            // A helper learns as its agent did (ADR 0078, 0079): the agent's lessons, by the agent.
             lessons: crate::lessons::supply(
                 &self.state.archive,
                 &self.state.team,
                 &self.state.team_path,
-                agent,
+                &reader,
                 Some(event_log.session_id()),
             )
             .await,
         };
-        let mut packet = self.state.memory.packet_for(agent)?;
+        let mut packet = self.state.memory.packet_for(&reader)?;
         // A delegated helper's lineage is the server-owned `delegation_path` on its caller's
         // token, which is exactly the scope its memory should be selected from: it sees what the
         // chain that recruited it wrote, and not what an unrelated branch of the same run did.
@@ -2114,7 +2347,13 @@ impl TeamBus {
             .find(|id| **id != agent.id)
             .map(String::as_str);
         let task = crate::NodeTask {
-            place: crate::orientation::for_helper(&self.state.team, agent, caller),
+            place: match &home {
+                Some(home) => Some(crate::helpers::for_copy(
+                    shown_name(&reader),
+                    Some(&home.request),
+                )),
+                None => crate::orientation::for_helper(&self.state.team, agent, caller),
+            },
             ..crate::NodeTask::goal(prompt)
         };
         let composed = crate::compose_for(agent, &packet, &task, workspace.as_ref());
@@ -2477,6 +2716,21 @@ fn shown_name(agent: &AgentConfig) -> &str {
         &agent.id
     } else {
         &agent.name
+    }
+}
+
+/// A brief's first line, at most a few words long: a helper's part when its agent named none.
+fn first_line(text: &str) -> String {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("A part of the work");
+    let words: Vec<&str> = line.split_whitespace().collect();
+    if words.len() <= 8 {
+        line.to_owned()
+    } else {
+        format!("{}…", words[..8].join(" "))
     }
 }
 
@@ -2847,10 +3101,17 @@ pub(crate) struct BusSeat {
     pub(crate) operator: bool,
     /// Its opening message holds `## Conversation so far`, whose work ids `earlier_work` reads.
     pub(crate) conversation: bool,
+    /// How many helpers it may have at work at once: the agent working alone, in a run that
+    /// offers them (ADR 0079). `0` for everyone else.
+    pub(crate) helpers: u32,
 }
 
 impl TeamBus {
     /// Where the agent behind `holder` sits on this team.
+    ///
+    /// A helper sits nowhere: it has no teammates of its own to reach, brings in no helpers, and
+    /// puts nothing to the person, since the agent that brought it in talks to them. It still has
+    /// the notebook, as its agent does.
     fn seat(&self, holder: &Holder, conversation: bool) -> BusSeat {
         let team = &self.state.team;
         let runs_on_a_model = |id: &str| {
@@ -2858,21 +3119,33 @@ impl TeamBus {
                 .iter()
                 .any(|agent| agent.id == id && !agent.is_operator())
         };
+        let copy = crate::helpers::lead_of(&holder.agent_id).is_some();
+        let helpers = if !copy && !holder.helper && !holder.answering {
+            self.helper_home_of(&holder.agent_id)
+                .map_or(0, |_| team.guards.max_helpers)
+        } else {
+            0
+        };
         BusSeat {
             mode: self.state.mode,
-            teammates: team
-                .agents
-                .iter()
-                .filter(|agent| !agent.is_operator() && agent.id != holder.agent_id)
-                .count(),
-            has_stage_before: team
-                .edges
-                .iter()
-                .any(|edge| edge.to == holder.agent_id && runs_on_a_model(&edge.from)),
+            teammates: if copy {
+                0
+            } else {
+                team.agents
+                    .iter()
+                    .filter(|agent| !agent.is_operator() && agent.id != holder.agent_id)
+                    .count()
+            },
+            has_stage_before: !copy
+                && team
+                    .edges
+                    .iter()
+                    .any(|edge| edge.to == holder.agent_id && runs_on_a_model(&edge.from)),
             answering: holder.answering,
             notebook: self.state.memory.notebook_enabled,
-            operator: self.state.operator.is_some(),
-            conversation,
+            operator: self.state.operator.is_some() && !copy,
+            conversation: conversation && !copy,
+            helpers,
         }
     }
 }
@@ -2901,6 +3174,11 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
             seat.has_stage_before
         };
     let mut tools = Vec::new();
+    // First, as the way an agent working alone has to share the work: it is told when that pays
+    // in its opening prompt (`helpers::for_lead`), and how to brief one here, as it writes it.
+    if seat.helpers > 0 {
+        tools.push(start_helper_tool());
+    }
     if hands_out || asks {
         tools.push(tool(
             "roster",
@@ -2990,6 +3268,28 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
         ));
     }
     tools
+}
+
+/// `start_helper` (ADR 0079): the part's title the person reads, then the brief in its two halves.
+fn start_helper_tool() -> Value {
+    tool(
+        "start_helper",
+        crate::helpers::TOOL_DESCRIPTION,
+        &object(
+            &[
+                (
+                    "title",
+                    string_property(crate::helpers::TITLE_DESCRIPTION, 1),
+                ),
+                ("task", string_property(crate::helpers::TASK_DESCRIPTION, 1)),
+                (
+                    "send_back",
+                    string_property(crate::helpers::SEND_BACK_DESCRIPTION, 1),
+                ),
+            ],
+            &["title", "task", "send_back"],
+        ),
+    )
 }
 
 /// What `ask` is for. In team mode it also says who answers from the conversation it already has
@@ -3313,6 +3613,7 @@ mod tests {
                 notebook: true,
                 operator: true,
                 conversation: true,
+                helpers: 4,
             };
             for tool in offered_tools(&seat) {
                 let text = tool.to_string();
@@ -5967,6 +6268,275 @@ mod tests {
         Ok(())
     }
 
+    /// A one-agent team's bus with its agent's helpers on offer (ADR 0079), as a run from the app
+    /// sets it up: the agent's connection, registered on run `run`, and its home a temporary
+    /// folder that is not the team file's.
+    async fn alone_with_helpers(
+        lead: AgentConfig,
+        guards: GuardsConfig,
+        archive: &EventArchive,
+        run: &str,
+    ) -> Result<(TeamBus, TeamBusConnection, PathBuf)> {
+        let team = TeamConfig {
+            guards,
+            agents: vec![lead],
+            ..team_of("alone-team", "lead")
+        };
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let bus = TeamBus::start(
+            Arc::new(team),
+            &team_path,
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Pipeline,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let home = std::env::temp_dir().join(format!("loomwatch-helpers-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&home)?;
+        assert!(bus.offer_helpers(HelperHome {
+            lead: "lead".into(),
+            request: "Compare Hanoi and Da Nang for a remote worker".into(),
+            declared_cwd: home.clone(),
+            workspace: None,
+        }));
+        let lead = bus.connection("lead").await?;
+        lead.register(EventLog::new(archive.clone(), run.into()))
+            .await;
+        Ok((bus, lead, home))
+    }
+
+    /// One `start_helper` from the agent behind `token`, as its tools make it.
+    async fn helper(bus: &TeamBus, token: &str, title: &str, task: &str) -> Result<Value> {
+        post_json(
+            bus,
+            token,
+            &json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                "params": {"name": "start_helper", "arguments": {"title": title, "task": task,
+                    "send_back": "One line with the monthly rent."}}}),
+        )
+        .await
+    }
+
+    /// **An agent working alone brings in copies of itself that work at the same time, in its own
+    /// folder, each on the part it was briefed for, and what they send back comes to it together.**
+    ///
+    /// Both helpers are held mid-turn until both are there, which only two copies at work at once
+    /// can be. Each is the agent — its model and instructions — told it is one of its helpers and
+    /// shown the person's request, with no way to bring in helpers or put questions of its own.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_agent_alone_brings_in_copies_of_itself_that_work_at_once() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let (model, hold) = Demo::responder_holding(
+            |request| {
+                Some(says(if request.prompt().contains("rent in Hanoi") {
+                    "Hanoi: about $400 a month."
+                } else {
+                    "Da Nang: about $350 a month."
+                }))
+            },
+            |_| true,
+            "",
+        );
+        let demo = model;
+        let model = demo_model(demo.clone());
+        let archive = EventArchive::new(pool);
+        let run = "helpers-run";
+        let (bus, lead, home) = alone_with_helpers(
+            test_agent("lead", &model),
+            GuardsConfig::default(),
+            &archive,
+            run,
+        )
+        .await?;
+        let listed = post_json(
+            &bus,
+            &lead.token,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        )
+        .await?;
+        assert!(listed.to_string().contains("start_helper"), "{listed}");
+
+        let first = helper(
+            &bus,
+            &lead.token,
+            "Rent in Hanoi",
+            "Find the rent in Hanoi.",
+        )
+        .await?;
+        let first = &first["result"]["structuredContent"];
+        assert_eq!(first["agent"], "lead~1", "{first}");
+        assert_eq!(first["name"], "lead name's helper 1", "{first}");
+        helper(
+            &bus,
+            &lead.token,
+            "Rent in Da Nang",
+            "Find the rent in Da Nang.",
+        )
+        .await?;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() < 2 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .context("the two helpers never worked at the same time")?;
+        hold.release(2);
+        let mut both = came_back(&lead).await;
+        both.sort();
+        assert_eq!(
+            both,
+            [
+                Ok("Da Nang: about $350 a month.".to_owned()),
+                Ok("Hanoi: about $400 a month.".to_owned())
+            ]
+        );
+        bus.wait_for_tasks().await?;
+
+        let events = archive.load_session(run).await?;
+        for (id, title) in [("lead~1", "Rent in Hanoi"), ("lead~2", "Rent in Da Nang")] {
+            let spawned = events
+                .iter()
+                .find(|event| event.agent_id == id && event.payload["phase"] == "spawned")
+                .with_context(|| format!("{id} never started"))?;
+            assert_eq!(
+                spawned.payload["cwd"].as_str().map(Path::new),
+                Some(home.as_path()),
+                "{id} works in its agent's folder"
+            );
+            let result = events
+                .iter()
+                .find(|event| event.agent_id == id && event.payload["phase"] == "delegated_result")
+                .with_context(|| format!("{id} left no result"))?;
+            assert_eq!(result.payload["mode"], HELPER_MODE);
+            assert_eq!(result.payload["title"], title);
+            assert_eq!(result.payload["for"], "lead");
+        }
+        let seen = demo.requests();
+        let copy = seen
+            .iter()
+            .find(|request| request.agent == "lead~1")
+            .context("the first helper was never asked")?;
+        let opening = copy
+            .messages
+            .iter()
+            .find_map(|message| match message {
+                Message::User { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        assert!(opening.contains("one of lead name's helpers"), "{opening}");
+        assert!(opening.contains("Compare Hanoi and Da Nang"), "{opening}");
+        assert!(opening.contains("lead role"), "it is the agent: {opening}");
+        assert!(
+            opening.contains("## What to send back\nOne line with the monthly rent."),
+            "{opening}"
+        );
+        assert!(!copy.tools.iter().any(|tool| tool == "start_helper"));
+        assert!(!copy.tools.iter().any(|tool| tool == "ask_user"));
+        let _ = std::fs::remove_dir_all(&home);
+        Ok(())
+    }
+
+    /// **A helper that fails tells its agent so and leaves the run standing; past the limit no
+    /// helper starts, and the agent is told to do the part itself.**
+    #[tokio::test]
+    async fn a_failed_helper_leaves_the_run_standing_and_the_limit_holds() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let model = demo_model(Demo::dying("", "the provider is down"));
+        let archive = EventArchive::new(pool);
+        let (bus, lead, home) = alone_with_helpers(
+            test_agent("lead", &model),
+            GuardsConfig {
+                max_helpers: 1,
+                ..GuardsConfig::default()
+            },
+            &archive,
+            "failing-helper-run",
+        )
+        .await?;
+        helper(&bus, &lead.token, "One part", "Do the one part.").await?;
+        let second = helper(&bus, &lead.token, "Another part", "Do another part.").await?;
+        assert_eq!(second["result"]["isError"], true, "{second}");
+        assert!(
+            second
+                .to_string()
+                .contains("as many as this team allows at once"),
+            "{second}"
+        );
+        let back = came_back(&lead).await;
+        assert!(
+            matches!(back.as_slice(), [Err(error)] if error.contains("provider is down")),
+            "{back:?}"
+        );
+        bus.wait_for_tasks().await?;
+        let _ = std::fs::remove_dir_all(&home);
+        Ok(())
+    }
+
+    /// **Only an agent working alone brings in helpers**: one with teammates hands work to them,
+    /// one that says it may not doesn't, and a team that allows none has none.
+    #[tokio::test]
+    async fn only_an_agent_alone_that_may_is_offered_helpers() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let home = |lead: &str| HelperHome {
+            lead: lead.into(),
+            request: String::new(),
+            declared_cwd: PathBuf::from("."),
+            workspace: None,
+        };
+        let not_recruiting = AgentConfig {
+            allow_recruiting: false,
+            ..test_agent("lead", OFFLINE)
+        };
+        let cases = [
+            (
+                "with a teammate",
+                vec![test_agent("lead", OFFLINE), test_agent("worker", OFFLINE)],
+                GuardsConfig::default(),
+            ),
+            (
+                "allowRecruiting off",
+                vec![not_recruiting],
+                GuardsConfig::default(),
+            ),
+            (
+                "maxHelpers 0",
+                vec![test_agent("lead", OFFLINE)],
+                GuardsConfig {
+                    max_helpers: 0,
+                    ..GuardsConfig::default()
+                },
+            ),
+        ];
+        for (what, agents, guards) in cases {
+            let team = TeamConfig {
+                guards,
+                agents,
+                ..team_of("not-alone", "lead")
+            };
+            let bus = TeamBus::start(
+                Arc::new(team),
+                &team_path,
+                archive.clone(),
+                Duration::from_secs(5),
+                TeamBusMode::Team,
+                Arc::new(TeamMemory::default()),
+                None,
+            )?;
+            assert!(!bus.offer_helpers(home("lead")), "{what}");
+            let lead = bus.connection("lead").await?;
+            assert!(
+                !tool_names(&bus.seat(&lead.holder, false)).contains(&"start_helper".to_owned()),
+                "{what}"
+            );
+        }
+        Ok(())
+    }
+
     /// **Past `guards.maxConcurrentDispatches` open conversations, a teammate starts fresh every
     /// time, as before, and says why.**
     ///
@@ -6343,8 +6913,9 @@ mod tests {
             notebook: false,
             operator: true,
             conversation: false,
+            helpers: 0,
         };
-        let cases: [(&str, BusSeat, &[&str]); 9] = [
+        let cases: [(&str, BusSeat, &[&str]); 10] = [
             (
                 "one agent, team mode",
                 seat(TeamBusMode::Team, 0, false),
@@ -6410,6 +6981,14 @@ mod tests {
                     ..seat(TeamBusMode::Team, 0, false)
                 },
                 &[],
+            ),
+            (
+                "one agent that may bring in helpers",
+                BusSeat {
+                    helpers: 4,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &["start_helper", "ask_user"],
             ),
         ];
         for (what, seat, expected) in cases {

@@ -44,6 +44,9 @@ export interface JobSpec {
   doneWhen?: string[]
   /** What it may do without asking (ADR 0037); only switches that are on are written. */
   allow?: AgentAllow
+  /** `false`: it does not bring in helpers for a big task (ADR 0079), and a team copies that as
+      `allowRecruiting: false`. Absent, it may. */
+  helpers?: false
   /** Set by the daemon: which version this is. Absent means 1. */
   version?: number
   /** What changed in this version, in the operator's words. */
@@ -215,6 +218,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     ...(job.reads?.length ? { reads: job.reads } : {}),
     ...(job.doneWhen?.length ? { doneWhen: job.doneWhen } : {}),
     ...(allow ? { allow } : {}),
+    ...(job.helpers === false ? { helpers: false as const } : {}),
     from: { agent: job.id, version: versionOf(job) },
   }
 }

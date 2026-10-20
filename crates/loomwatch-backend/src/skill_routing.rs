@@ -329,6 +329,9 @@ pub fn route(portability: &SkillPortability) -> SkillRoute {
 pub enum BusMode {
     Team,
     Pipeline,
+    /// The only agent of its team, which has nobody to ask or hand work to and may bring in
+    /// helpers instead (ADR 0079).
+    Alone,
     None,
 }
 
@@ -339,35 +342,48 @@ pub enum BusMode {
 /// agent with `allowRecruiting: false` unless the target is a live predecessor, which a note
 /// written before the run cannot promise; `ask_user` exists in both modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct BusTools {
     pub ask: bool,
     pub delegate: bool,
     pub ask_user: bool,
+    /// `start_helper`: copies of itself for the parts of a big task (ADR 0079).
+    pub helpers: bool,
 }
 
 impl BusTools {
     /// Whether the agent has any way at all to reach another agent or the operator.
     #[must_use]
     pub const fn reachable(self) -> bool {
-        self.ask || self.delegate || self.ask_user
+        self.ask || self.delegate || self.ask_user || self.helpers
     }
 }
 
 /// What Team Bus tools an agent will have in `mode`.
 #[must_use]
 pub fn bus_tools(mode: BusMode, allow_recruiting: bool) -> BusTools {
-    if mode == BusMode::None {
-        return BusTools {
+    match mode {
+        BusMode::None => BusTools {
             ask: false,
             delegate: false,
             ask_user: false,
-        };
-    }
-    let team = mode == BusMode::Team;
-    BusTools {
-        ask: team || allow_recruiting,
-        delegate: team,
-        ask_user: true,
+            helpers: false,
+        },
+        BusMode::Alone => BusTools {
+            ask: false,
+            delegate: false,
+            ask_user: true,
+            helpers: allow_recruiting,
+        },
+        BusMode::Team | BusMode::Pipeline => {
+            let team = mode == BusMode::Team;
+            BusTools {
+                ask: team || allow_recruiting,
+                delegate: team,
+                ask_user: true,
+                helpers: false,
+            }
+        }
     }
 }
 
@@ -453,7 +469,11 @@ fn mapping(need: SkillNeed, request: &TranslationRequest<'_>) -> String {
     match need {
         SkillNeed::Subagents => {
             let fallback = "otherwise do the steps yourself, in sequence";
-            if request.bus.ask {
+            if request.bus.helpers {
+                format!(
+                    "Subagents: where it says to use the Task tool, a subagent, or to fan work out, give each part to a helper with `start_helper` when the parts are big and separate; {fallback}."
+                )
+            } else if request.bus.ask {
                 format!(
                     "Subagents: where it says to use the Task tool, a subagent, or to fan work out, call the Team Bus `ask` tool to put the step to another agent on this team{}; {fallback}.",
                     if request.bus.delegate {
@@ -901,6 +921,7 @@ mod tests {
         ask: true,
         delegate: true,
         ask_user: true,
+        helpers: false,
     };
 
     #[test]
@@ -1079,7 +1100,8 @@ mod tests {
             BusTools {
                 ask: true,
                 delegate: true,
-                ask_user: true
+                ask_user: true,
+                helpers: false,
             },
             "team mode offers ask even to an agent that may not recruit",
         );
@@ -1108,6 +1130,21 @@ mod tests {
         let busless = note_for(&[SkillNeed::Subagents], bus_tools(BusMode::None, true));
         assert!(busless.contains("no way to delegate"), "{busless}");
         assert!(!busless.contains("`ask`"), "{busless}");
+
+        // ADR 0079: the only agent of its team has nobody to ask, but may bring in helpers.
+        let alone = note_for(&[SkillNeed::Subagents], bus_tools(BusMode::Alone, true));
+        assert!(alone.contains("`start_helper`"), "{alone}");
+        assert!(
+            !alone.contains("`ask`") && !alone.contains("`dispatch`"),
+            "{alone}"
+        );
+        let alone_and_not_recruiting =
+            note_for(&[SkillNeed::Subagents], bus_tools(BusMode::Alone, false));
+        assert!(
+            !alone_and_not_recruiting.contains("`start_helper`")
+                && alone_and_not_recruiting.contains("do the steps yourself"),
+            "{alone_and_not_recruiting}"
+        );
     }
 
     #[test]

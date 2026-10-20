@@ -84,7 +84,7 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
         onKey: (key, given) => latest.current.onKey(key, given),
         onHover: (part, grab) => setCursor((current) => (current === 'grabbing' ? current : grab ? 'grab' : part ? 'pointer' : 'default')),
         onFrame: place,
-      }, reduced)
+      }, reduced, { clipboardOnBoard: true })
     } catch (failed) {
       latest.current.onFail(failed instanceof Error ? failed.message : String(failed))
       return

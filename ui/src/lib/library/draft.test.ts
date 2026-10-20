@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_MODEL, setConnectedSources } from '../ai/modelIds'
 import { agentFromDraft, BLANK_DRAFT, blankDraft, chatAgentId, chatTeamYaml, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft } from './draft'
-import { ROLE_PRESETS } from './roles'
+import { buildAgentFromSource } from './createAgent'
+import { savedJobPreset } from './jobs'
+import { ROLE_PRESETS, roleSource } from './roles'
+import { draftFromTeamAgent, teamAgentEdit } from './teamDraft'
 
 describe('the agent builder’s draft', () => {
   it('starts a blank agent on a model what is connected now can run (ADR 0073)', () => {
@@ -71,6 +74,25 @@ describe('the agent builder’s draft', () => {
 
   // ADR 0062: done-when travels with the agent: saved, a new version when it changes, copied
   // into the bench team, and started from a built-in job's own items.
+  it('brings in helpers unless switched off, which is saved, versioned, chatted with and copied into a team (ADR 0079)', () => {
+    const saved = draftFromJob({ name: 'Reader', instructions: 'Check.' })
+    expect(saved.helpers).toBeUndefined()
+    expect(specFromDraft(saved)).not.toHaveProperty('helpers')
+    expect(agentFromDraft(saved)).not.toHaveProperty('allowRecruiting')
+    const alone = { ...saved, helpers: false as const }
+    expect(makesNewVersion(alone, saved)).toBe(true)
+    expect(makesNewVersion({ ...alone, helpers: undefined }, saved)).toBe(false)
+    expect(specFromDraft(alone)).toMatchObject({ helpers: false })
+    expect(draftFromJob(specFromDraft(alone)).helpers).toBe(false)
+    const team = parse(chatTeamYaml(alone, 'sonnet', 'reader')) as { agents: Record<string, unknown>[] }
+    expect(team.agents[0]).toMatchObject({ allowRecruiting: false })
+    const placed = buildAgentFromSource(roleSource(savedJobPreset({ id: 'reader', file: 'reader.yaml', ...specFromDraft(alone) })), [])
+    expect(placed.allowRecruiting).toBe(false)
+    expect(buildAgentFromSource(roleSource(savedJobPreset({ id: 'reader', file: 'reader.yaml', ...specFromDraft(saved) })), []).allowRecruiting).toBe(true)
+    expect(teamAgentEdit(placed, 'helpers', undefined)).toEqual({ kind: 'fields', fields: { allowRecruiting: true } })
+    expect(draftFromTeamAgent(placed).helpers).toBe(false)
+  })
+
   it('saves done-when trimmed, versions it, and chats with it', () => {
     const saved = draftFromJob({ name: 'Reader', instructions: 'Check.', doneWhen: ['Every story has a link'] })
     expect(saved.doneWhen).toEqual(['Every story has a link'])

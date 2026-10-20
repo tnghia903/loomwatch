@@ -58,6 +58,8 @@ export interface RolePreset {
   /** What the agent may do without asking from the start (ADR 0037). Only what the job cannot be
       done without: a researcher that cannot search the web can only guess. */
   allow?: AgentAllow
+  /** `false` on one of Your agents that brings in no helpers (ADR 0079). */
+  helpers?: false
   /** Set on one of Your agents: the agent it places links back to this version of it. */
   from?: AgentLink
 }
@@ -266,6 +268,7 @@ export function roleSource(preset: RolePreset): LibrarySource {
     ...(preset.skills?.length || preset.tools?.length || preset.reads?.length ? { capabilities: capabilitiesOf(preset.skills ?? [], preset.tools ?? [], preset.toolAllow ?? {}, preset.reads ?? []) } : {}),
     ...(preset.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
     ...(preset.allow ? { allow: { ...preset.allow } } : {}),
+    ...(preset.helpers === false ? { helpers: false as const } : {}),
     ...(preset.from ? { from: { ...preset.from } } : {}),
   }
 }

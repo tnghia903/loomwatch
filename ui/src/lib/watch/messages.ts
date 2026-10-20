@@ -32,6 +32,11 @@ export type MessageKind =
   | 'dispatch'
   /** Team Bus `handoff`: the work handed to another agent; the sender stops. */
   | 'handoff'
+  /**
+   * `start_helper` (ADR 0079): one part of the work, briefed to a helper — a copy of the agent —
+   * whose reply is what it sent back, once it has.
+   */
+  | 'helper'
   /** `ask_user`: a question for you. */
   | 'question'
   /** Team Bus `escalate`, in older runs: something raised with you. */
@@ -79,6 +84,8 @@ export interface MessageReply {
    * asker first (`questionBack` in the record). The asker's next `ask` to it clarifies.
    */
   asksBack?: true
+  /** For a `helper`: it couldn't finish, and `text` says why. */
+  failed?: true
 }
 
 /**
@@ -250,7 +257,20 @@ export function reachedLine(reached: Reached, name: string): string {
 }
 
 /** Team Bus tools that carry a message from one agent to another. */
-const BUS_KINDS: Record<string, MessageKind> = { ask: 'ask', dispatch: 'dispatch', handoff: 'handoff', escalate: 'escalate' }
+const BUS_KINDS: Record<string, MessageKind> = { ask: 'ask', dispatch: 'dispatch', handoff: 'handoff', escalate: 'escalate', start_helper: 'helper' }
+
+/** The words a helper's stop is put before what it had (daemon `helpers::STOPPED`), left off in the chat. */
+const STOPPED_NOTE = /^\(The person stopped this helper[^)]*\)\s*/
+
+/**
+ * A helper's brief as its agent wrote it (ADR 0079): its part, then what to send back. In the chat
+ * the second half is a line of its own rather than a heading inside a bubble.
+ */
+function helperBrief(input: Record<string, unknown>): string {
+  const task = words(input.task) ?? ''
+  const back = words(input.send_back)
+  return back ? `${task.trim()}\n\n**Send back:** ${back.trim()}` : task
+}
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -337,7 +357,7 @@ export class Correspondence {
     const kind = busName ? BUS_KINDS[busName] : undefined
     if (!kind) return
     const input = object(item.rawInput) ? item.rawInput : {}
-    const text = words(kind === 'ask' ? input.question : kind === 'escalate' ? input.reason : input.task) ?? ''
+    const text = kind === 'helper' ? helperBrief(input) : words(kind === 'ask' ? input.question : kind === 'escalate' ? input.reason : input.task) ?? ''
     const to = kind === 'escalate' ? OPERATOR_ID : words(input.agent)
     const message = this.add(item.events[0], { id: item.id, kind, from: item.agentId, to, text, evidenceId: item.id, state: item.status === 'failed' ? 'failed' : 'pending' })
     this.byEvidence.set(item.id, message)
@@ -358,6 +378,8 @@ export class Correspondence {
     if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
     const reached = reachedOf(output)
     if (reached) message.reached = reached
+    // A helper started; what it sends back comes later, recorded on its own (`delegatedResult`).
+    if (message.kind === 'helper') return
     if (message.kind !== 'ask') { message.state = 'delivered'; return }
     message.state = 'answered'
     if (output.clarifies === true) message.clarifies = true
@@ -369,6 +391,29 @@ export class Correspondence {
       sentBackTo: null,
       ...(output.stopped === 'spend_limit' ? { stopped: true as const } : {}),
       ...(typeof output.questionBack === 'string' ? { asksBack: true as const } : {}),
+    }
+  }
+
+  /**
+   * `delegated_result` for a helper (ADR 0079): what it sent back to its agent, or why it couldn't
+   * finish, as the reply to the brief that started it. The bus writes it under the helper's id.
+   */
+  delegatedResult(event: RunEvent) {
+    const p = event.payload
+    if (p.mode !== 'helper') return
+    const message = this.messages.findLast((candidate) => candidate.kind === 'helper' && candidate.to === event.agentId)
+    if (!message || message.reply) return
+    const failed = p.status !== 'succeeded'
+    const said = failed ? words(p.error) ?? 'It stopped before it finished.' : typeof p.reply === 'string' ? p.reply : ''
+    message.state = 'answered'
+    message.reply = {
+      from: event.agentId,
+      text: p.stopped === true ? said.replace(STOPPED_NOTE, '') : said,
+      ...this.at(event),
+      source: null,
+      sentBackTo: null,
+      ...(p.stopped === true ? { stopped: true as const } : {}),
+      ...(failed ? { failed: true as const } : {}),
     }
   }
 

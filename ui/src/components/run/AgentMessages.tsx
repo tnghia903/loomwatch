@@ -17,6 +17,7 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
 import { Markdown } from '../ui/Markdown'
+import { helperOf, wearerOf } from '../../lib/chat/helpers'
 
 interface AgentMessagesProps {
   messages: readonly TeamMessage[]
@@ -368,7 +369,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
     ? bubble.word === 'sent back' ? 'sent back' : `approved${item.passedOn.length ? ` · passed on to ${nameList(item.passedOn.map((passed) => member(passed.to).name))}` : ''}`
     : message.kind === 'check' && part !== 'waiting'
       ? `${bubble.word}${message.check && message.check.round > 1 ? ` · round ${message.check.round}` : ''}`
-      : handover || bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' ? bubble.word : null
+      : handover || bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' || (message.kind === 'helper' && part === 'reply') ? bubble.word : null
   // In a team with no fixed order: whether the teammate carried on in its conversation or a fresh
   // copy took it, said under the work handed out, and under a teammate's answer.
   const reach = message.reached && (message.kind === 'ask' ? part === 'reply' : part === 'said') ? REACHED_WORD[message.reached] : null
@@ -539,7 +540,7 @@ function spoken(bubble: Bubble, member: (id: string) => Member): string {
 function typing(word: string, speaker: Member | null, live: boolean): string {
   const said = word.charAt(0).toUpperCase() + word.slice(1)
   if (!live || speaker?.you) return said
-  return `${speaker?.name ?? 'Someone'} is ${word === 'revising' ? 'revising its work' : 'writing an answer'}`
+  return `${speaker?.name ?? 'Someone'} is ${word === 'revising' ? 'revising its work' : word === 'working…' ? 'working on its part' : 'writing an answer'}`
 }
 
 /** Who a message is for, as a chat names them. */
@@ -573,8 +574,10 @@ function membersOf(lanes: readonly Party[], order: readonly Party[], figures: Re
   const members = new Map<string, Member>()
   let hue = 0
   for (const lane of lanes) {
-    const figure = figures.get(lane.id)
-    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: lane.operator ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
+    // A helper (ADR 0079) wears its agent's figure and colour, and its own number.
+    const helper = helperOf(lane.id)
+    const figure = figures.get(lane.id) ?? figures.get(wearerOf(lane.id))
+    members.set(lane.id, { id: lane.id, name: lane.operator ? 'You' : lane.name, you: lane.operator, number: helper ? helper.number : number.get(lane.id) ?? null, initials: initialsOf(lane.name), hue: lane.operator ? 0 : figure ? figureHue(figure) : (hue++ % FIGURE_HUES) + 1 })
   }
   return members
 }

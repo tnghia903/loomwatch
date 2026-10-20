@@ -64,6 +64,15 @@ const IDEMPOTENCY_CONFLICT: &str = "idempotency_conflict";
 /// Who an "Allow for the whole team" grant is kept under: never an agent id, which must be an
 /// identifier.
 const WHOLE_TEAM: &str = "*";
+
+/// The `turn_interrupted` reason when the operator stops a helper (ADR 0079).
+pub(crate) const HELPER_STOPPED: &str = "helper_stopped";
+
+/// Who "Allow for this run" is given to when `agent` asked: the agent itself, or for a helper, the
+/// agent it helps, which covers all of its helpers too (ADR 0079).
+fn grantee_of(agent: &str) -> &str {
+    crate::helpers::lead_of(agent).map_or(agent, |(lead, _)| lead)
+}
 /// What a record left non-terminal by a previous process is failed with at boot. Operator-facing
 /// prose, not a code: the contract defines no code for a supervisor that went away, and the UI
 /// already renders a `failed` record with its error verbatim.
@@ -469,6 +478,9 @@ struct RegistryInner {
     /// What "Send now" pulls for each agent at work, keyed `run_id\0agent_id` (ADR 0051). An agent
     /// is shown as working exactly while it has an entry here.
     interrupts: BTreeMap<String, Arc<Interrupt>>,
+    /// Helpers the operator stopped (ADR 0079), keyed `run_id\0agent_id`: what each comes back
+    /// with says so, so its agent takes what it had so far as that and does the rest itself.
+    stopped_helpers: BTreeSet<String>,
     /// The other half of each open spend stop (ADR 0068), keyed by stop id: every agent waiting at
     /// the stop watches it, and `POST /api/runs/{id}/spend` sends the operator's answer down it.
     spending: BTreeMap<String, tokio::sync::watch::Sender<Option<crate::spend::SpendAnswer>>>,
@@ -1184,9 +1196,12 @@ impl RunRegistry {
     }
 
     /// Whether the operator already allowed `scope` for `agent` for the rest of this run.
+    ///
+    /// A helper is its agent (ADR 0079): what the operator allowed the agent, or any of its
+    /// helpers, for this run, each of them may do, so one question isn't asked once per helper.
     pub(crate) fn allowed_for_run(&self, run_id: &str, agent: &str, scope: &str) -> bool {
         let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-        [agent, WHOLE_TEAM].iter().any(|who| {
+        [grantee_of(agent), WHOLE_TEAM].iter().any(|who| {
             inner
                 .allowed_for_run
                 .contains(&format!("{run_id}\0{who}\0{scope}"))
@@ -1398,7 +1413,7 @@ impl RunRegistry {
         }
         let record = entry.record.clone();
         let grantee = match decision {
-            crate::permissions::PermissionDecision::AllowRun => Some(request.agent.as_str()),
+            crate::permissions::PermissionDecision::AllowRun => Some(grantee_of(&request.agent)),
             crate::permissions::PermissionDecision::AllowTeam => Some(WHOLE_TEAM),
             _ => None,
         };
@@ -1640,11 +1655,18 @@ impl RunRegistry {
     /// pulls to stop its turn.
     pub(crate) fn begin_work(&self, run_id: &str, agent_id: &str) -> Arc<Interrupt> {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        // A helper (ADR 0079) takes no notes: what stops its turn is the operator stopping it.
         let interrupt = Arc::clone(
             inner
                 .interrupts
                 .entry(live_key(run_id, agent_id))
-                .or_default(),
+                .or_insert_with(|| {
+                    Arc::new(if crate::helpers::lead_of(agent_id).is_some() {
+                        Interrupt::because(HELPER_STOPPED)
+                    } else {
+                        Interrupt::default()
+                    })
+                }),
         );
         if let Some(entry) = inner.runs.get_mut(run_id)
             && !entry.record.working.iter().any(|id| id == agent_id)
@@ -1687,6 +1709,45 @@ impl RunRegistry {
                 .queued_notes
                 .retain(|note| note.agent != agent_id);
         }
+    }
+
+    /// Stop a helper at work in a live run (ADR 0079): its turn ends with what it wrote so far,
+    /// which goes back to its agent marked as stopped.
+    ///
+    /// # Errors
+    ///
+    /// Not found for a run or helper that doesn't exist; a conflict when the helper isn't working.
+    pub fn stop_helper(&self, run_id: &str, agent_id: &str) -> Result<RunRecord, OperatorError> {
+        if crate::helpers::lead_of(agent_id).is_none() {
+            return Err(OperatorError::not_found(format!(
+                "{agent_id} is not a helper: stop the whole run instead."
+            )));
+        }
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        let key = live_key(run_id, agent_id);
+        let Some(interrupt) = inner.interrupts.get(&key).cloned() else {
+            return Err(OperatorError::conflict(
+                "That helper is not working right now: it finished, or never started.",
+            ));
+        };
+        let Some(entry) = inner.runs.get(run_id) else {
+            return Err(OperatorError::not_found(format!(
+                "run {run_id} does not exist"
+            )));
+        };
+        let record = entry.record.clone();
+        inner.stopped_helpers.insert(key);
+        interrupt.request();
+        Ok(record)
+    }
+
+    /// Whether the operator stopped the helper `agent_id` of `run_id` (ADR 0079).
+    pub(crate) fn helper_stopped(&self, run_id: &str, agent_id: &str) -> bool {
+        self.inner
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .stopped_helpers
+            .contains(&live_key(run_id, agent_id))
     }
 
     /// Queue a note for an agent at work in a live run (ADR 0051), and stop its current turn when
@@ -1791,6 +1852,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/runs/{id}/questions", get(get_run_questions))
         .route("/api/runs/{id}/answers", post(answer_run))
         .route("/api/runs/{id}/agents/{agent}/ask", post(ask_agent))
+        .route("/api/runs/{id}/agents/{agent}/stop", post(stop_helper))
         .route("/api/runs/{id}/cancel", post(cancel_run))
         .route("/api/runs/{id}/deliver", post(deliver_run))
         .route("/api/runs/{id}/permissions", post(answer_permission))
@@ -4074,6 +4136,17 @@ fn operator_status(error: OperatorError) -> ApiError {
     )
 }
 
+/// `POST /api/runs/{id}/agents/{agent}/stop`: stop one helper, and let the run go on (ADR 0079).
+async fn stop_helper(
+    State(state): State<RunsState>,
+    RoutePath((run_id, agent_id)): RoutePath<(String, String)>,
+) -> Response {
+    match state.registry.stop_helper(&run_id, &agent_id) {
+        Ok(record) => (StatusCode::OK, Json(record)).into_response(),
+        Err(error) => operator_status(error).into_response(),
+    }
+}
+
 async fn cancel_run(
     State(state): State<RunsState>,
     RoutePath(run_id): RoutePath<String>,
@@ -4291,6 +4364,41 @@ pub(crate) mod tests {
             edit: None,
             scope: kind.to_owned(),
         }
+    }
+
+    /// ADR 0079: "allow for this run" given to an agent or to one of its helpers lets the agent and
+    /// every one of its helpers through, and nobody else.
+    #[tokio::test]
+    async fn a_run_grant_covers_an_agent_and_its_helpers() {
+        use crate::permissions::PermissionDecision;
+        let team = TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: x\n      cwd: .\n    model: m\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        let run =
+            RunRecord::queued("t.yaml".into(), "go".into(), &team, RunTrigger::Manual).unwrap();
+        let run_id = run.run_id.clone();
+        registry.insert(run);
+        let asked = crate::permissions::PermissionRequest {
+            agent: "a~2".to_owned(),
+            name: "A's helper 2".to_owned(),
+            ..permission_request("h1", "fetch")
+        };
+        let answer = registry
+            .open_permission_request(&run_id, asked)
+            .expect("a person-started run can ask");
+        registry
+            .answer_permission(&run_id, "h1", PermissionDecision::AllowRun, None)
+            .expect("open");
+        assert_eq!(answer.await.unwrap().decision, PermissionDecision::AllowRun);
+        for who in ["a", "a~1", "a~2", "a~9"] {
+            assert!(registry.allowed_for_run(&run_id, who, "fetch"), "{who}");
+        }
+        for who in ["b", "b~1", "a-2"] {
+            assert!(!registry.allowed_for_run(&run_id, who, "fetch"), "{who}");
+        }
+        assert!(!registry.allowed_for_run(&run_id, "a~1", "execute"));
     }
 
     /// ADR 0040: a person-started run can be asked, a routine cannot; an answer reaches the waiting
@@ -6248,6 +6356,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn run_end_to_end_archives_under_the_pre_minted_id() {
         let pool = crate::db::Db::temp().await;
@@ -6343,12 +6452,15 @@ pub(crate) mod tests {
             .find(|session| session.session_id == accepted.run_id)
             .expect("run is discoverable as an archive session");
         assert_eq!(session.first_agent_id.as_deref(), Some("solo"));
+        // An agent alone is told it may bring in helpers, under its place (ADR 0079).
         assert_eq!(
             session.prompt.as_deref(),
             Some(
                 format!(
-                    "## Your assigned role\nanswer directly\n\n## Reading the request\n{}\n\n\
-                     ## Task\nsay done",
+                    "## Your assigned role\nanswer directly\n\n{}\n{}\n\n## Reading the request\n\
+                     {}\n\n## Task\nsay done",
+                    crate::helpers::HEADING,
+                    crate::helpers::for_lead(4),
                     crate::orientation::reading(false, false)
                 )
                 .as_str()

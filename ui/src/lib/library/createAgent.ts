@@ -57,7 +57,7 @@ export function buildAgentFromSource(
     // A team's own new agent follows the model suggested for it (ADR 0072); one placed from Your
     // agents keeps the model its builder chose.
     ...(source.from ? {} : { followsSuggestion: true }),
-    allowRecruiting: true,
+    allowRecruiting: source.helpers !== false,
     ...(source.capabilities?.length ? { capabilities: source.capabilities.map((capability) => ({ ...capability })) } : {}),
     ...(source.doneWhen?.length ? { doneWhen: [...source.doneWhen] } : {}),
     ...(source.allow ? { allow: { ...source.allow } } : {}),
