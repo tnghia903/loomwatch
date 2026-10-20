@@ -24,6 +24,24 @@ const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: '
 
 const PERMISSION_SAID: Record<PermissionDecision, string> = { edit: 'Allowed as you changed it.', answer: 'Your answer was sent.', allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
 
+// Tickets the bell has already rung for, kept for the tab's session: Home, a team and an agent are
+// separate pages, and each page's tray starts empty until its first poll, so a tray's own memory
+// would ring again on every page.
+const RUNG_KEY = 'loomwatch.needsYou.rung'
+const rungHere = new Set<string>()
+function rungFor(): Set<string> {
+  try { for (const id of JSON.parse(sessionStorage.getItem(RUNG_KEY) ?? '[]') as string[]) rungHere.add(id) } catch { /* storage off: this page still remembers */ }
+  return rungHere
+}
+function remember(ids: readonly string[]) {
+  for (const id of ids) rungHere.add(id)
+  try { sessionStorage.setItem(RUNG_KEY, JSON.stringify([...rungHere].slice(-200))) } catch { /* storage off: this page still remembers */ }
+}
+// A ring under way finishes, then the bell rests at least this long, so tickets arriving in
+// back-to-back polls never add up to more than five seconds of motion (WCAG 2.2.2).
+const REST_MS = 5000
+let lastRingEnded = -REST_MS
+
 /**
  * Every place a team is waiting on the operator, across all teams, as one-question tickets.
  *
@@ -42,7 +60,26 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
   const bell = useRef<HTMLButtonElement>(null)
   const titleId = useId()
   const count = tickets.length
-  const current = tickets[Math.min(active, Math.max(0, count - 1))]
+  const shown = Math.min(active, Math.max(0, count - 1))
+  const current = tickets[shown]
+  // One gold fill per screen: only the active ticket's main action is filled; J and K move it.
+  const main = (index: number) => (index === shown ? 'btn btn-primary' : 'btn')
+
+  // The bell rings when something new needs you, then rests: ringing for as long as a ticket waits
+  // runs past WCAG 2.2.2's five seconds. A count that only goes down never rings. The ring is the
+  // glyph's CSS animation, started here and taken off when it ends.
+  useEffect(() => {
+    const glyph = bell.current?.querySelector('svg')
+    // Answering the last ticket mid-ring stops the ring with no animationend: it counts as ended.
+    if (tickets.length === 0 && glyph?.classList.contains('ringing')) { glyph.classList.remove('ringing'); lastRingEnded = Date.now() }
+    const rung = rungFor()
+    const fresh = tickets.filter((ticket) => !rung.has(ticket.id))
+    if (fresh.length === 0) return
+    remember(fresh.map((ticket) => ticket.id))
+    // A ring under way just carries on: the class is already there.
+    if (!glyph || Date.now() - lastRingEnded < REST_MS) return
+    glyph.classList.add('ringing')
+  }, [tickets])
 
   useEffect(() => {
     if (!open) return
@@ -54,7 +91,9 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
   }, [open])
   useEffect(() => {
     if (!open) return
-    panel.current?.querySelector<HTMLElement>(`[data-ticket="${active}"]`)?.focus()
+    // J and K move focus to the ticket; Tab into one of its buttons leaves focus on that button.
+    const ticket = panel.current?.querySelector<HTMLElement>(`[data-ticket="${active}"]`)
+    if (ticket && !ticket.contains(document.activeElement)) ticket.focus()
   }, [open, active])
 
   const send = async (ticket: Ticket, text: string, sendBack?: string) => {
@@ -110,8 +149,8 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
     if (typing || !current || event.metaKey || event.ctrlKey || event.altKey) return
     if (onScreen(current) && event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && !['j', 'k'].includes(event.key.toLowerCase())) return
     const key = event.key.toLowerCase()
-    if (key === 'j' || event.key === 'ArrowDown') { event.preventDefault(); setActive((index) => Math.min(count - 1, index + 1)) }
-    else if (key === 'k' || event.key === 'ArrowUp') { event.preventDefault(); setActive((index) => Math.max(0, index - 1)) }
+    if (key === 'j' || event.key === 'ArrowDown') { event.preventDefault(); setActive(Math.min(count - 1, shown + 1)) }
+    else if (key === 'k' || event.key === 'ArrowUp') { event.preventDefault(); setActive(Math.max(0, shown - 1)) }
     else if (key === 'a' && current.kind === 'review') { event.preventDefault(); void send(current, APPROVAL_TEXT) }
     else if (key === 'a' && current.kind === 'permission') { event.preventDefault(); void decide(current, 'allow_once') }
     else if (key === 'd' && current.kind === 'permission') { event.preventDefault(); void decide(current, 'deny') }
@@ -132,7 +171,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
         title="Needs you"
         onClick={() => { setOpen((value) => !value); setActive(0); setSaid('') }}
       >
-        <BellDot size={15} aria-hidden="true" />
+        <BellDot size={15} aria-hidden="true" onAnimationEnd={(event) => { event.currentTarget.classList.remove('ringing'); lastRingEnded = Date.now() }} />
         <span className="needs-you-label">{label}</span>
         {count > 0 && <b className="needs-you-n" aria-hidden="true">{count}</b>}
       </button>
@@ -146,7 +185,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
           {count === 0 && <p className="needs-you-empty">{working > 0 ? `${working} run${working === 1 ? ' is' : 's are'} working. Anything that needs your decision will show up here.` : 'When a team pauses for your review, asks a question or asks permission, it shows up here — from any team.'}</p>}
           <ul className="needs-you-list">
             {tickets.map((ticket, index) => (
-              <li key={ticket.id} data-ticket={index} tabIndex={-1} className={`ticket kind-${ticket.kind} ${index === active ? 'active' : ''}`} onFocus={() => setActive(index)}>
+              <li key={ticket.id} data-ticket={index} tabIndex={-1} className={`ticket kind-${ticket.kind} ${index === shown ? 'active' : ''}`} onFocus={() => setActive(index)}>
                 <div className="ticket-head">
                   <span className={`ticket-tag kind-${ticket.kind}`}>{TAG[ticket.kind]}</span>
                   <span className="ticket-where">{ticket.teamName} · {ago(ticket.since)}</span>
@@ -161,22 +200,22 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   <form className="ticket-reply" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void send(ticket, draft.trim(), ticket.kind === 'review' ? ticket.sendBackTo ?? undefined : undefined) }}>
                     <label className="visually-hidden" htmlFor={`reply-${ticket.id}`}>{ticket.kind === 'question' ? 'Your answer' : 'What should change?'}</label>
                     <input id={`reply-${ticket.id}`} autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={ticket.kind === 'question' ? 'Type your answer' : ticket.sendBackTo ? 'What should change?' : 'Add a note for the team'} />
-                    <button type="submit" className="btn btn-primary" disabled={!draft.trim() || busy === ticket.id}><CornerDownLeft size={13} aria-hidden="true" />Send</button>
+                    <button type="submit" className={main(index)} disabled={!draft.trim() || busy === ticket.id}><CornerDownLeft size={13} aria-hidden="true" />Send</button>
                     <button type="button" className="btn" onClick={() => setReplying(null)}>Cancel</button>
                   </form>
                 ) : (
                   <div className="ticket-acts">
-                    {ticket.kind === 'review' && <button type="button" className="btn btn-primary" disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Looks good<kbd>A</kbd></button>}
+                    {ticket.kind === 'review' && <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void send(ticket, APPROVAL_TEXT)}><Check size={13} aria-hidden="true" />Looks good<kbd>A</kbd></button>}
                     {ticket.kind === 'review' && <button type="button" className="btn" onClick={() => startReply(ticket)}>{ticket.sendBackTo ? 'Send back…' : 'Add a note…'}<kbd>R</kbd></button>}
-                    {ticket.kind === 'question' && <button type="button" className="btn btn-primary" onClick={() => startReply(ticket)}>Answer…<kbd>R</kbd></button>}
+                    {ticket.kind === 'question' && <button type="button" className={main(index)} onClick={() => startReply(ticket)}>Answer…<kbd>R</kbd></button>}
                     {ticket.kind === 'permission' && onPermission && <>
-                      <button type="button" className="btn btn-primary" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
+                      <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_once')}><Check size={13} aria-hidden="true" />Allow<kbd>A</kbd></button>
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_run')}>Allow for this run</button>
                       {ticket.team && <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'allow_team')}>Allow for the whole team</button>}
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void decide(ticket, 'deny')}>Deny<kbd>D</kbd></button>
                     </>}
                     {ticket.kind === 'spend' && onSpend && ticket.spendActions && <>
-                      <button type="button" className="btn btn-primary" disabled={busy === ticket.id} onClick={() => void spend(ticket, 'add')}>{ticket.spendActions.add}</button>
+                      <button type="button" className={main(index)} disabled={busy === ticket.id} onClick={() => void spend(ticket, 'add')}>{ticket.spendActions.add}</button>
                       <button type="button" className="btn" disabled={busy === ticket.id} onClick={() => void spend(ticket, 'finish')}>{ticket.spendActions.finish}</button>
                     </>}
                     {ticket.runId !== onScreenRunId && <button type="button" className="btn" onClick={() => openRun(ticket)}>Open run<ArrowUpRight size={13} aria-hidden="true" /></button>}
