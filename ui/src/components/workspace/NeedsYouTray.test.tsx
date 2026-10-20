@@ -69,12 +69,14 @@ const declaredIn = (list: RegExpExecArray[], selector: string, property: string)
   .filter(([, selectors]) => selectors.split(',').some((one) => one.trim() === selector))
   .flatMap(([, , body]) => [...body.matchAll(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`, 'g'))].map(([, value]) => value.trim()))
 const declared = (selector: string, property: string) => declaredIn(rules, selector, property)
-// The rules a phone gets: everything inside `@media (max-width: 767px)`, the app's phone layout.
-const phoneRules = sheets.flatMap((css) => [...uncommented(css).matchAll(/@media \(max-width: 767px\)\s*\{/g)].flatMap((match) => {
+// The rules a screen up to `width` px wide gets from `@media (max-width: <width>px)` blocks.
+const rulesUpTo = (width: number) => sheets.flatMap((css) => [...uncommented(css).matchAll(new RegExp(`@media \\(max-width: ${width}px\\)\\s*\\{`, 'g'))].flatMap((match) => {
   let at = match.index + match[0].length
   for (let depth = 1; depth > 0 && at < css.length; at += 1) depth += { '{': 1, '}': -1 }[uncommented(css)[at]] ?? 0
   return parsed(uncommented(css).slice(match.index + match[0].length, at - 1))
 }))
+// The rules a phone gets: everything inside `@media (max-width: 767px)`, the app's phone layout.
+const phoneRules = rulesUpTo(767)
 const px = (value: string) => Number(/^(-?[\d.]+)(?:px)?$/.exec(value)?.[1] ?? NaN)
 
 describe('the bell when something needs you', () => {
@@ -252,6 +254,86 @@ describe('the bell on a phone', () => {
     expect(height - 2 * border - team.top - team.bottom).toBeGreaterThanOrEqual(44)
     for (const side of [team.left, team.right]) expect(-side - border).toBeLessThan(8)
     expect(rules.filter(([selectors, , body]) => selectors.includes('::before') && /background|border|box-shadow|outline/.test(body))).toEqual([])
+  })
+})
+
+// Home on a phone. The bell sits mid-row in Home's header, and a tray as wide as the screen, hung
+// from the bell's right edge, began 155 px off the left edge at 390 px wide: Looks good and Open run
+// could not be reached. The header's own buttons ran 87 px past the right edge, so the page scrolled
+// sideways. The placement is CSS, which jsdom doesn't apply, so these read the rules a phone gets.
+describe('the tray on Home on a phone', () => {
+  const tokens = sheets.join('\n')
+  const length = (value: string) => {
+    const name = /^var\((--[\w-]+)\)$/.exec(value)?.[1]
+    return px(name ? new RegExp(`${name}:\\s*([^;]+);`).exec(tokens)?.[1]?.trim() ?? '' : value)
+  }
+  // A length as the browser works it out: min(), calc() with + - *, vw, vh, dvh, % of the frame, px, tokens.
+  type Screen = { wide: number, tall: number, frame: number }
+  const worked = (value: string, at: Screen): number => {
+    const inside = /^min\((.*)\)$/.exec(value)?.[1]
+    if (inside) return Math.min(...inside.split(/,(?![^(]*\))/).map((one) => worked(one.trim(), at)))
+    const sum = /^calc\((.+?) ([-+]) (.+)\)$/.exec(value)
+    if (sum) return worked(sum[1], at) + (sum[2] === '-' ? -1 : 1) * worked(sum[3], at)
+    const product = /^(\d+) \* (.+)$/.exec(value)
+    if (product) return Number(product[1]) * worked(product[2], at)
+    const share = /^([\d.]+)(vw|vh|dvh|%)$/.exec(value)
+    if (share) return Number(share[1]) / 100 * { vw: at.wide, vh: at.tall, dvh: at.tall, '%': at.frame }[share[2] as 'vw' | 'vh' | 'dvh' | '%']
+    return length(value)
+  }
+  // The tray's rule on Home wins where it says anything (two classes against one); otherwise the tray's own.
+  const onHome = (property: string, wide = 767) => [
+    ...declaredIn(everyRule, '.needs-you-panel', property),
+    ...declaredIn(phoneRules, '.home-top .needs-you-panel', property),
+    ...(wide <= 350 ? declaredIn(rulesUpTo(350), '.home-top .needs-you-panel', property) : []),
+  ].at(-1) ?? ''
+
+  it('hangs from the header, so its every edge is on screen at any phone width, scrollbar or not', () => {
+    // The header is the tray's frame: it is positioned, and on a phone nothing between them is.
+    expect(declaredIn(everyRule, '.home-top', 'position')).toEqual(['relative'])
+    expect(declaredIn(phoneRules, '.home-top', 'position')).toEqual([])
+    expect(declaredIn(everyRule, '.home-top-acts', 'position')).toEqual([])
+    expect(declaredIn(phoneRules, '.home-top .needs-you', 'position')).toEqual(['static'])
+    const right = worked(onHome('right'), { wide: 0, tall: 0, frame: 0 })
+    expect(right).toBeGreaterThanOrEqual(0)
+    // A scrollbar that stays in view (15 px) narrows the header, not the window. Narrower than the
+    // tray's 420 px, it is centred, the header's gutter on both sides.
+    for (let wide = 320; wide <= 767; wide += 1) {
+      for (const bar of [0, 15]) {
+        const frame = wide - bar
+        const width = worked(onHome('width'), { wide, tall: 0, frame })
+        const left = frame - right - width
+        expect(left, `${wide} px wide, ${bar} px scrollbar`).toBeGreaterThanOrEqual(0)
+        if (width < 420) expect(left, `${wide} px wide, ${bar} px scrollbar`).toBe(right)
+      }
+    }
+    // It starts as far under the header's buttons as it does under the bell elsewhere: the header's
+    // foot is padding, and the tray reaches back up into it.
+    const sides = declaredIn(everyRule, '.home-top', 'padding')[0]?.split(/\s+/) ?? []
+    const foot = length(sides[2] ?? sides[0] ?? '')
+    const under = (top: string) => worked(top, { wide: 0, tall: 0, frame: 100 }) - 100
+    expect(foot).toBeGreaterThan(0)
+    expect(foot + under(onHome('top'))).toBe(under(declaredIn(everyRule, '.needs-you-panel', 'top')[0] ?? ''))
+  })
+
+  it('ends 12 px above the screen’s foot, as at its sides, and at 320 px wide still shows its title over the first ticket', () => {
+    const margin = worked(onHome('right'), { wide: 0, tall: 0, frame: 0 })
+    // Where the tray starts, measured in the app: the header is three rows at 320 px, two at 375 and 390.
+    for (const { wide, tall, top } of [{ wide: 320, tall: 568, top: 164 }, { wide: 375, tall: 667, top: 112 }, { wide: 390, tall: 844, top: 112 }]) {
+      expect(top + worked(onHome('max-height', wide), { wide, tall, frame: 0 }), `${wide} by ${tall}`).toBeLessThanOrEqual(tall - margin)
+    }
+    // The title (80 px) and the first ticket (278 px), measured at 320 px: the tray opens on the active
+    // ticket, so any less and it opens scrolled, with its title and close button out of sight.
+    expect(worked(onHome('max-height', 320), { wide: 320, tall: 568, frame: 0 })).toBeGreaterThanOrEqual(80 + 278)
+  })
+
+  it('lets the header’s buttons wrap under the name, lined up, so the page never scrolls sideways', () => {
+    // Spelled in parts: Tailwind reads test files too, and the whole word would add its utility to the app's CSS.
+    const wrap = ['flex', 'wrap'].join('-')
+    expect(declaredIn(phoneRules, '.home-top', wrap)).toEqual(['wrap'])
+    expect(declaredIn(phoneRules, '.home-top-acts', wrap)).toEqual(['wrap'])
+    for (const selector of ['.home-top', '.home-top-acts']) expect(declaredIn(everyRule, selector, wrap).filter((value) => value !== 'wrap')).toEqual([])
+    // The 30 px pills and the 44 px buttons share a row: on their middles, not their tops.
+    expect(declaredIn(phoneRules, '.home-top-acts', 'align-items')).toEqual(['center'])
   })
 })
 
