@@ -50,7 +50,7 @@
 .permission-write .field { display: flex; flex-direction: column; gap: 4px; }
 .permission-write .input { font-size: 12.5px; }
 
-.ticket-tag.kind-permission, .ticket-tag.kind-spend { background: var(--color-accent-tint); color: var(--color-accent); }
+.ticket-tag.kind-permission, .ticket-tag.kind-spend { background: var(--color-accent-tint); border-color: var(--color-accent); color: var(--color-ink); }
 
 @media (prefers-reduced-motion: reduce) { .permission-prompt { animation: none; } }
 

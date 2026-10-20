@@ -423,14 +423,17 @@ span.story-schedule { cursor: default; }
 .needs-you-list .ticket { display: grid; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--color-hairline); outline: none; }
 .needs-you-list .ticket.active { background: color-mix(in srgb, var(--color-accent-tint) 70%, transparent); box-shadow: inset 2px 0 0 var(--color-accent); }
 .ticket-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--color-ink-3); }
-.ticket-tag { font-weight: 600; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; background: var(--color-ground); color: var(--color-ink-2); }
-.ticket-tag.kind-review { background: var(--color-accent-tint); color: var(--color-accent); }
+/* A tag on the tint keeps ink words (gold on the tint is 4.45:1 in light) and takes its gold as a
+   1 px border; every tag carries the border, clear unless lit, so all tags are one size. */
+.ticket-tag { font-weight: 600; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; padding: 1px 6px; border: 1px solid transparent; border-radius: 5px; background: var(--color-ground); color: var(--color-ink-2); }
+.ticket-tag.kind-review { background: var(--color-accent-tint); border-color: var(--color-accent); color: var(--color-ink); }
 .ticket-tag.kind-failed { color: var(--color-alert); }
 .ticket-text { margin: 0; font-size: 14px; line-height: 1.45; color: var(--color-ink); overflow-wrap: anywhere; }
 .ticket-acts, .ticket-reply { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 /* 32 px: the active ticket's main action is a gold fill, and a gold fill is never smaller. */
 .ticket-acts .btn, .ticket-reply .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; font-size: 12.5px; }
-.ticket-acts kbd { font: 500 10px/1 var(--font-mono); padding: 2px 4px; border-radius: 4px; border: 1px solid currentColor; opacity: .55; margin-left: 2px; }
+/* The key's letter is its button's label colour, so it reads as well as the label; only the box is faint. */
+.ticket-acts kbd { font: 500 10px/1 var(--font-mono); padding: 2px 4px; border-radius: 4px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); margin-left: 2px; }
 .ticket-reply input { flex: 1 1 200px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--color-hairline); background: var(--color-ground); color: var(--color-ink); font: inherit; font-size: 13px; }
 /* A phone makes every button a 44 px touch target (app.css), but the rules above outrank that one.
    16 px type in the answer box, or iOS Safari zooms the page when it takes focus. */

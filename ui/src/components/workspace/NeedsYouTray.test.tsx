@@ -92,6 +92,63 @@ describe('the bell when something needs you', () => {
   })
 })
 
+// The rules that reach an element of the rendered tray: jsdom applies no CSS, but it can match.
+const reaching = (element: Element) => everyRule.filter(([, selectors]) => selectors.split(',').some((one) => {
+  try { return element.matches(one.trim()) } catch { return false }
+}))
+const values = (list: RegExpExecArray[], property: string) => list
+  .flatMap(([, , body]) => [...body.matchAll(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`, 'g'))].map(([, value]) => value.trim()))
+
+// A key hint is part of its button's label. At .55 opacity its letter fell to 2.5–3.9:1; it takes the
+// label's own colour at full strength, and only its box is faint.
+describe('a ticket’s key hints', () => {
+  it('draw their letter as strong as the label, filled button or not, in a faint box', () => {
+    render(<NeedsYouTray tickets={[review('keys-a'), { ...ticket, id: 'keys-b:permission:p1', runId: 'keys-b' }]} working={0} onAnswer={vi.fn()} onPermission={vi.fn(() => Promise.resolve())} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
+    const hints = [...screen.getByRole('dialog').querySelectorAll('.ticket-acts kbd')]
+    expect(hints.filter((hint) => hint.closest('.btn-primary')).length).toBeGreaterThan(0)
+    expect(hints.filter((hint) => !hint.closest('.btn-primary')).length).toBeGreaterThan(0)
+    for (const hint of hints) {
+      const reach = reaching(hint)
+      expect(values(reach, 'border').length, hint.textContent ?? '').toBeGreaterThan(0)
+      expect(values(reach, 'opacity').filter((value) => Number(value) < 1), hint.textContent ?? '').toEqual([])
+      for (const property of ['color', 'filter', 'mix-blend-mode']) expect(values(reach, property), `${hint.textContent} ${property}`).toEqual([])
+      for (const border of values(reach, 'border')) {
+        const share = /color-mix\(in srgb, currentColor (\d+)%, transparent\)/.exec(border)?.[1]
+        expect(Number(share), border).toBeGreaterThan(0)
+        expect(Number(share), border).toBeLessThan(100)
+      }
+    }
+  })
+})
+
+// Words on the gold tint are ink: gold on the tint is 4.45:1 in light (DESIGN_LANGUAGE, colour rule 2).
+// A review, a permission and a spending limit keep their gold as a 1 px border, which every tag
+// carries so none is bigger than another.
+describe('the tags on tickets', () => {
+  it('put ink words on the gold tint, keep the gold as a border, and are all one size', () => {
+    const spend: Ticket = { ...ticket, id: 'tag-d:spend:s1', kind: 'spend', runId: 'tag-d', text: 'It reached its spending limit.', requestId: undefined, stopId: 's1', spendActions: { add: 'Add $5', finish: 'Finish' } }
+    const question: Ticket = { ...ticket, id: 'tag-c:question', kind: 'question', runId: 'tag-c', text: 'Which city?', requestId: undefined }
+    const stopped: Ticket = { ...ticket, id: 'tag-e:failed', kind: 'failed', runId: 'tag-e', text: 'It stopped.', context: null, requestId: undefined }
+    render(<NeedsYouTray tickets={[review('tag-a'), { ...ticket, id: 'tag-b:permission:p1', runId: 'tag-b' }, question, spend, stopped]} working={0} onAnswer={vi.fn()} onPermission={vi.fn(() => Promise.resolve())} onSpend={vi.fn(() => Promise.resolve())} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /5 need you/ }))
+    const tags = [...screen.getByRole('dialog').querySelectorAll('.ticket-tag')]
+    const tinted = tags.filter((tag) => values(reaching(tag), 'background').includes('var(--color-accent-tint)'))
+    expect(tinted.map((tag) => tag.textContent)).toEqual(['Review step', 'Permission', 'Spending'])
+    for (const tag of tinted) {
+      const lit = reaching(tag).filter(([, , body]) => /background:\s*var\(--color-accent-tint\)/.test(body))
+      expect(values(lit, 'color'), tag.textContent ?? '').toEqual(['var(--color-ink)'])
+      expect(values(lit, 'border-color'), tag.textContent ?? '').toEqual(['var(--color-accent)'])
+    }
+    for (const tag of tags) {
+      expect(values(reaching(tag), 'color'), tag.textContent ?? '').not.toContain('var(--color-accent)')
+      expect(values(reaching(tag), 'border').map((border) => border.split(' ')[0]), tag.textContent ?? '').toEqual(['1px'])
+      for (const property of ['border-width', 'padding', 'height', 'font-size']) expect(values(reaching(tag), property).length, `${tag.textContent} ${property}`).toBeLessThanOrEqual(1)
+    }
+    expect(new Set(tags.map((tag) => values(reaching(tag), 'padding').join())).size).toBe(1)
+  })
+})
+
 describe('a stopped run’s ticket', () => {
   it('opens its run and dismisses from buttons the pointer can reach', () => {
     const onDismiss = vi.fn()
