@@ -13,7 +13,7 @@ const receipt = (allowed: boolean): Receipt => ({
   endedAt: null,
   asked: 'Find the news',
   took: '1m',
-  team: '1 helper',
+  team: '1 agent',
   ranOn: 'Claude Opus 5.5',
   tokens: null,
   lines: [{ tone: 'bad', text: 'Researcher wasn’t allowed to search the web, and carried on without it', agentId: 'researcher', evidenceId: 'p1', allow: 'web', allowed }],

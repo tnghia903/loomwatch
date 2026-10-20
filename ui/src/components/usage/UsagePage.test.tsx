@@ -61,6 +61,35 @@ describe('Usage', () => {
     expect(within(table).getByText('Plan')).toBeInTheDocument()
   })
 
+  // What LoomWatch spends on its own, reading each message before the team works on it and learning
+  // from your feedback, used to read "A team · reader". A helper read as its id, "helper~1".
+  it('names LoomWatch’s own work and an agent’s helpers in plain words', async () => {
+    const own: UsageReport = {
+      ...report,
+      agents: [
+        { ask: false, agentId: 'reader', source: 'openrouter', runs: 8, ...tally(8, 14_000, 0.04) },
+        { team: 'Helper · chat', ask: false, agentId: 'helper', agentName: 'Helper', source: 'openrouter', runs: 7, ...tally(7, 12_000, 0.03) },
+        { ask: false, agentId: 'learner', source: 'openrouter', runs: 6, ...tally(6, 6_000, 0.02) },
+        { team: 'Helper · chat', ask: false, agentId: 'helper~1', source: 'openrouter', runs: 1, ...tally(1, 2_000, 0.006) },
+        // A team's own agent may have the same id: it is the team's, named as the team names it.
+        { team: 'Morning digest', ask: false, agentId: 'reader', agentName: 'Reader', source: 'openrouter', runs: 1, ...tally(1, 1_000, 0.003) },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => url.startsWith('/api/usage') ? respond(own) : respond({ openrouter: { connected: true } })))
+    render(<UsagePage />)
+    const table = await screen.findByRole('table')
+    const rows = within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell').slice(0, 2).map((cell) => cell.textContent))
+    expect(rows).toEqual([
+      ['LoomWatch', 'Working out what your messages need'],
+      ['Helper · chat', 'Helper'],
+      ['LoomWatch', 'Learning from your feedback'],
+      ['Helper · chat', 'Helper’s helper 1'],
+      ['Morning digest', 'Reader'],
+    ])
+    expect(table).not.toHaveTextContent('A team')
+    expect(table).not.toHaveTextContent('~')
+  })
+
   it('gives a heads-up for a limit hit today and credit nearly spent, and nothing otherwise', () => {
     const now = new Date()
     window.localStorage.setItem('loomwatch.usage.claudePlan', JSON.stringify({ monthly: 100, renewsOn: 1 }))

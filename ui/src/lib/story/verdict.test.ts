@@ -5,7 +5,7 @@ import type { CheckItemResult } from './checks'
 import { buildReceipt, type Receipt, type ReceiptLine } from './receipt'
 import { answerVerdict, findingsOf, type VerdictInput } from './verdict'
 
-const receipt = (lines: ReceiptLine[], checks: ReceiptLine[] = []): Receipt => ({ run: 'Run 3', outcome: { word: 'Finished', tone: 'ok' }, endedAt: null, asked: 'Brief', took: '2m', team: '2 helpers', ranOn: 'Claude Code', tokens: null, lines, checks })
+const receipt = (lines: ReceiptLine[], checks: ReceiptLine[] = []): Receipt => ({ run: 'Run 3', outcome: { word: 'Finished', tone: 'ok' }, endedAt: null, asked: 'Brief', took: '2m', team: '2 agents', ranOn: 'Claude Code', tokens: null, lines, checks })
 const finished: VerdictInput = { phase: 'succeeded', text: '# Brief', streaming: false, terminal: true, settled: true, reviewed: false, receipt: receipt([{ tone: 'ok', text: 'Writer finished' }]), read: { files: 0, pages: 0, notes: 0 } }
 
 describe('answerVerdict', () => {

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { markFirstRun } from '../../lib/firstrun/store'
+import { cascaded, DESKTOP, PHONE } from '../../test/cascade'
 import { Home } from './Home'
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -90,6 +91,21 @@ describe('Deleting a team from Home', () => {
     renderHome()
     await screen.findByText(/No teams yet/)
     expect(await createTeam('Blog writer')).toBe('blog-writer-2.yaml')
+  })
+
+  it('opens the delete box in the window even when Home is scrolled down to the teams', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: ['a.yaml'], teams: [{ path: 'a.yaml', name: 'Research desk', agentCount: 1 }] }))
+    renderHome()
+    await screen.findByRole('button', { name: /Research desk/ })
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete team…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete “Research desk”?' })
+    // Home scrolls inside itself, and the team cards sit below its fold. A scrim placed in Home's
+    // content stayed at the top of it, so the box opened above the window once Home was scrolled.
+    const home = dialog.closest('.lw-home')!
+    expect(cascaded(home, 'overflow-y')).toBe('auto')
+    const scrim = dialog.closest('.lw-scrim')!
+    for (const viewport of [DESKTOP, PHONE]) expect(cascaded(scrim, 'position', viewport)).toBe('fixed')
   })
 
   it('closes a card menu on Escape and hands the focus back', async () => {

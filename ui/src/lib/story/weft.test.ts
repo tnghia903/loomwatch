@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Evidence, ProjectedAgent, RunProjection } from '../watch/events'
-import { buildReceipt, receiptMarkdown } from './receipt'
+import type { TokenSummary } from '../watch/usage'
+import { buildReceipt, receiptMarkdown, receiptTokens } from './receipt'
 import { clock, describeEvidence, mendNote, momentAt, narrate, shortName, weave } from './weft'
 
 const T0 = Date.parse('2026-09-29T08:00:00Z')
@@ -43,6 +44,28 @@ describe('weave', () => {
     expect(weft.duration).toBe(165_000)
     expect(weft.lanes.map((lane) => [lane.id, lane.start, lane.end])).toEqual([['collector', 0, 110_000], ['editor', 112_000, 165_000]])
     expect(weft.live).toBe(false)
+  })
+
+  it('names a helper an agent brought in after that agent, never by its id', () => {
+    // ADR 0079: a helper runs as `editor~1`; the chat calls it "News Editor’s helper 1", so the
+    // timeline does too, on its lane and in what it says the helper did.
+    const helped = projection({
+      agents: [agent('collector', 0, 110), agent('editor', 112, 165), agent('editor~1', 120, 150)],
+      evidence: [evidence('e1', 'collector', 4), evidence('e3', 'editor~1', 130, { kind: 'file', relation: 'read file', name: '/x/notes.md' })],
+    })
+    const weft = weave(helped, order)
+    expect(weft.lanes.map((lane) => lane.name)).toEqual(['News Collector', 'News Editor', 'News Editor’s helper 1'])
+    const said = weft.stitches.find((stitch) => stitch.laneId === 'editor~1')!.sentence
+    expect(said).toMatch(/^News Editor’s helper 1 /)
+    expect(said).not.toContain('editor~1')
+  })
+
+  it('says what an agent waiting on your permission would do, in words for its kind of call', () => {
+    const waiting = { status: 'running', taskState: 'WAITING' } as Partial<ProjectedAgent>
+    const held = (item: Partial<Evidence>) => momentAt(weave(projection({ phase: 'running', agents: [agent('editor', 0, 30, waiting)], evidence: [evidence('e5', 'editor', 20, { status: 'pending', ...item })] }), order), 30_000).sentence
+    expect(held({ kind: 'command', relation: 'ran command', name: 'Run: pwd', rawInput: { command: 'pwd' } })).toBe('News Editor is waiting for you to allow “pwd”.')
+    expect(held({ kind: 'file', relation: 'edited file', name: '/x/notes.md' })).toBe('News Editor is waiting for you to allow changes to “notes.md”.')
+    expect(held({ kind: 'search', relation: 'searched', name: 'Web search: chip exports' })).toBe('News Editor is waiting for you to allow a search for “chip exports”.')
   })
 
   it('ties a knot where the next stage starts when no delegation was recorded', () => {
@@ -122,13 +145,28 @@ describe('buildReceipt', () => {
     evidenceByAgent, harnessLabels: new Map([['collector', 'Claude Code'], ['editor', 'Claude Code']]), answered: true,
   }
 
+  it('counts the helpers an agent brought in apart from the team’s agents', () => {
+    const helped = projection({ agents: [agent('collector', 0, 110), agent('editor', 112, 165), agent('editor~1', 120, 150), agent('editor~2', 121, 152)] })
+    expect(buildReceipt({ ...base, projection: helped }).team).toBe('2 agents + 2 helpers + your review')
+    const alone = [{ id: 'editor', name: 'News Editor', operator: false }]
+    expect(buildReceipt({ ...base, agents: alone, projection: helped }).team).toBe('1 agent + 2 helpers')
+  })
+
+  it('names a helper’s tokens after its agent, as the Team row counts it', () => {
+    const counts = (agentId: string, total: number) => ({ agentId, input: total, cacheRead: 0, cacheWrite: 0, output: 0, total, turns: 1, estimated: false })
+    const summary = { ...counts('all', 3_000), cacheShare: null, purposes: [], stoppedTurns: 0, costComplete: false, agents: [counts('editor', 2_000), counts('editor~1', 1_000)] } as TokenSummary
+    const tokens = receiptTokens(summary, new Map([['editor', 'News Editor']]))!
+    expect(tokens.agents.map((row) => row.label)).toEqual(['News Editor', 'News Editor’s helper 1'])
+  })
+
   it('lists who did what, then failures and what happened instead', () => {
     const receipt = buildReceipt({ ...base, projection: projection() })
     expect(receipt.run).toBe('Run 16')
     expect(receipt.outcome).toEqual({ word: 'Finished', tone: 'ok' })
     // The stamp is dated when the record ends, not when the run began.
     expect(receipt.endedAt).toBe(iso(165))
-    expect(receipt.team).toBe('2 helpers + your review')
+    // The team's agents are agents; "helpers" are the copies one brings in (ADR 0079).
+    expect(receipt.team).toBe('2 agents + your review')
     expect(receipt.ranOn).toBe('Claude Code')
     expect(receipt.lines.map((line) => [line.tone, line.text])).toEqual([
       ['ok', 'News Collector finished · read 1 web page'],

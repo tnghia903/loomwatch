@@ -101,6 +101,10 @@
 .delivery-status.status-starting {
   color: var(--color-live);
 }
+/* Waiting on you, for a decision or a permission: gold, as the figure glows. */
+.delivery-status.status-waiting {
+  color: var(--color-accent);
+}
 .delivery-section-head {
   display: flex;
   justify-content: space-between;

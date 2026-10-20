@@ -771,6 +771,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
   const appErrors = new Map<string, string>()
   /** Teammates whose conversation is open with nothing happening in it, with when its last turn ended. */
   const keptSince = new Map<string, string>()
+  /** Agents paused on a permission request LoomWatch put to you (ADR 0040), by the request's id: the
+      call it asked about is open in the record, but nothing runs until you answer. */
+  const asking = new Map<string, string>()
   for (const event of events) {
     if (event.seq > throughSeq) break
     lastSeq = event.seq
@@ -862,8 +865,14 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         if (sections) { agent.promptSections ??= sections; letters.promptRecord(event, sections) }
         if (object(event.raw) && event.raw.source === 'loomwatch') {
           // ADR 0040: LoomWatch put the app's request to you; in the team's chat it is a message.
-          if (p.phase === 'awaiting_permission') letters.permissionAsked(event, evidence.findLast((item) => item.kind === 'permission' && item.agentId === agent.id)?.id ?? null)
-          if (p.phase === 'permission_answered') letters.permissionAnswered(event)
+          if (p.phase === 'awaiting_permission') {
+            letters.permissionAsked(event, evidence.findLast((item) => item.kind === 'permission' && item.agentId === agent.id)?.id ?? null)
+            if (typeof p.requestId === 'string') asking.set(agent.id, p.requestId)
+          }
+          if (p.phase === 'permission_answered') {
+            letters.permissionAnswered(event)
+            if (p.requestId === asking.get(agent.id)) asking.delete(agent.id)
+          }
           // ADR 0062: each round of a check step is an exchange in the team's chat.
           if (p.phase === 'check_result') letters.checkResult(event)
           if (p.phase === 'check_sent_back') letters.checkSentBack(event)
@@ -1172,6 +1181,8 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
     if (!agent.reply && agent.turnText.text) agent.reply = agent.turnText.text
     agent.taskState = taskStateFor(agent.status, agent.streaming, agent.thinking)
     if (agent.status === 'waiting') agent.taskState = agent.task === 'Waiting for you' ? 'WAITING' : 'QUEUED'
+    // Still running, but waiting on you: what it asked to do hasn't run.
+    if (agent.status === 'running' && asking.has(agent.id)) agent.taskState = 'WAITING'
   }
 
   evidence.forEach((item, index) => { item.order = index + 1 })

@@ -234,8 +234,10 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
   const pin = () => follow?.pin()
   const crew = team.parties.filter((party) => !party.operator).length > 1
   // A permission request is answered the same way: on the agent's message that asks, once the
-  // talk shows it, and on a card of its own until then.
-  const asking = live ? record.permissionRequests ?? [] : []
+  // talk shows it, and on a card of its own until then. Answered there, it is over at once, though
+  // the run's record (polled each second) still lists it for a moment: then nothing asks it again.
+  const settled = new Set(session.projection.messages.flatMap((message) => (message.kind === 'permission' && message.permission?.outcome ? [message.permission.requestId] : [])))
+  const asking = live ? (record.permissionRequests ?? []).filter((request) => !settled.has(request.id)) : []
   // The run used what it may spend, or an agent its own guard (ADR 0068): those agents wait on you.
   const stops = live ? openStops(record) : []
   const atSpool = stops.flatMap((stop) => (stop.agent ? [stop.agent] : record.working ?? []))
