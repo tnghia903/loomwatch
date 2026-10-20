@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover appears in the chat and the team waits. The operator approves it with the note Keep it to one page, and Writer's answer appears in the chat, marked Nothing flagged.">
+  <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover arrives as a message to You, with Approve and Send back to Researcher under it, and the team waits. The operator types the note Keep it to one page in the message box and presses Approve with your note. The approval goes on to Writer, and Writer's answer appears in the chat, marked Nothing flagged.">
   <br>
   <sub>The bundled offline demo: ask the team in its chat, approve the handover with a note, read the answer.</sub>
 </p>
