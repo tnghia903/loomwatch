@@ -2308,11 +2308,12 @@ impl TeamBus {
                 Some(event_log.session_id()),
                 agent,
             ),
+            // A helper learns as its agent did (ADR 0078, 0079): the agent's lessons, by the agent.
             lessons: crate::lessons::supply(
                 &self.state.archive,
                 &self.state.team,
                 &self.state.team_path,
-                agent,
+                &reader,
                 Some(event_log.session_id()),
             )
             .await,

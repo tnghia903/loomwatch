@@ -10814,6 +10814,85 @@ mod tests {
         Ok(())
     }
 
+    /// ADR 0078 and 0079: a helper learns as its agent did. On a team of one that is not an agent's
+    /// own chat, its agent's lessons are kept under the agent's id; the helper, which has an id of
+    /// its own, is given them all the same.
+    #[tokio::test]
+    async fn a_helper_is_given_its_agents_lessons() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let helper_instructions = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = helper_instructions.clone();
+        let model = crate::engine::demo_model(crate::agent::Demo::responder(move |request| {
+            if request.agent.contains(helpers::SEPARATOR) {
+                if let Some(crate::agent::Message::System { content }) = request.messages.first() {
+                    seen.lock().unwrap().push(content.clone());
+                }
+                return Some(crate::agent::Completion::text("part done"));
+            }
+            Some(if request.prompt().contains(helpers::RESULTS_HEADING) {
+                crate::agent::Completion::text("final")
+            } else if request.after_tool() {
+                crate::agent::Completion::text("A helper is on it.")
+            } else {
+                crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: "helper-1".to_owned(),
+                        name: "start_helper".to_owned(),
+                        arguments: json!({"title": "A part", "task": "Do a part.", "send_back": "One line."})
+                            .to_string(),
+                    }],
+                )
+            })
+        }));
+        let team = Arc::new(material_team(vec![named("lead", "Lead", &model)]));
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let scope = lessons::scope_of(&team, &team_path, &team.agents[0]);
+        assert!(scope.starts_with("team:"), "{scope}");
+        archive
+            .lessons()
+            .apply(
+                &lessons::LearnedFrom {
+                    scope,
+                    agent_id: "lead".to_owned(),
+                    source: lessons::LessonSource::You,
+                    feedback: "Shorter.".to_owned(),
+                    run_id: None,
+                },
+                &[],
+                &[lessons::Edit::Add {
+                    text: "Keep answers short.".to_owned(),
+                    about_you: false,
+                }],
+            )
+            .await?;
+        let (_registry, desk, run_id) = operator_desk(&team, &archive);
+        let outcome = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "go",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id)),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        assert_eq!(outcome.reply, "final");
+        let instructions = helper_instructions.lock().unwrap().clone();
+        assert_eq!(instructions.len(), 1, "one helper ran");
+        assert!(
+            instructions[0].contains("- Keep answers short."),
+            "{}",
+            instructions[0]
+        );
+        Ok(())
+    }
+
     /// An agent that learns nothing is given nothing: `learns: false` turns its lessons off too.
     #[tokio::test]
     async fn an_agent_that_does_not_learn_is_given_no_lessons() -> Result<()> {
