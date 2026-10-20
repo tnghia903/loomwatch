@@ -360,7 +360,12 @@ async fn main() -> Result<()> {
                 registry.clone(),
             );
             // What agents learned from feedback (ADR 0078), on the same registry's database.
-            let lessons = loomwatch_backend::lessons::router(teams_root.clone(), registry.clone());
+            // Tell all my agents adds to the same About you every session reads.
+            let lessons = loomwatch_backend::lessons::router(
+                teams_root.clone(),
+                registry.clone(),
+                you.clone(),
+            );
             // The Notebook's own router: loopback-only, and it reads the same canonical root.
             let notebook =
                 loomwatch_backend::notebook_api::router(archive.clone(), teams_root.clone());

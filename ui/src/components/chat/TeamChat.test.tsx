@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PASS_BEAT_MS } from '../../lib/chat/baton'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
+import type { Lesson } from '../../lib/lessons/client'
 import type { RunRecord } from '../../lib/runs/client'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { TeamMessage } from '../../lib/watch/messages'
@@ -1183,5 +1184,47 @@ describe('asking about a part of a file', () => {
     render(<FileReaderContext.Provider value={open}><TeamChat {...props} /></FileReaderContext.Provider>)
     fireEvent.click(await screen.findByRole('button', { name: 'Replying to a part of market.md from Writer. Show it' }))
     expect(open).toHaveBeenCalledWith({ path: '/w/market.md', runId: 'run-1', from: 'writer' })
+  })
+})
+
+describe('what the agents learned', () => {
+  const vietnamese = 'When replying to this person, always write in Vietnamese.'
+  const lesson = (over: Partial<Lesson> = {}): Lesson => ({
+    id: 'l1', scope: 'team:news#writer', agentId: 'writer', text: vietnamese, source: 'you', aboutYou: true, feedback: 'In Vietnamese, please.',
+    runId: 'run-1', state: 'active', given: 0, backed: 0, missed: 0, createdAt: '2026-10-06T02:05:00.000Z', updatedAt: '2026-10-06T02:05:00.000Z', ...over,
+  })
+  const you = { name: 'Mai', about: vietnamese, skipped: false }
+
+  it('tells all your agents only after Add, and Undo on the moved lesson moves it back', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [], lessons: [lesson()] }]
+    answer = (url) => {
+      if (url === '/api/lessons/tell-all') {
+        page = [{ kind: 'work', run: run({}), request: message({}), notes: [], lessons: [lesson({ state: 'dropped', droppedBy: 'about_you' })] }]
+        return new Response(JSON.stringify({ lesson: lesson({ state: 'dropped', droppedBy: 'about_you' }), lessons: [], you, added: true }), { status: 200 })
+      }
+      page = [{ kind: 'work', run: run({}), request: message({}), notes: [], lessons: [lesson()] }]
+      return new Response(JSON.stringify({ lesson: lesson(), lessons: [lesson()], you: { ...you, about: null }, removed: true }), { status: 200 })
+    }
+    renderChat()
+    fireEvent.click(await screen.findByRole('button', { name: `Tell all my agents: ${vietnamese}` }))
+    expect(posted).toEqual([])
+    fireEvent.click(within(screen.getByRole('group', { name: 'Tell all my agents' })).getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText(`know: ${vietnamese}`, { exact: false })).toBeInTheDocument()
+    expect(posted).toEqual([{ url: '/api/lessons/tell-all', body: { teamPath: 'news.yaml', agent: 'writer', id: 'l1' } }])
+    fireEvent.click(screen.getByRole('button', { name: `Undo: ${vietnamese}` }))
+    expect(await screen.findByRole('button', { name: `Tell all my agents: ${vietnamese}` })).toBeInTheDocument()
+    expect(posted[1]).toEqual({ url: '/api/lessons/tell-all/undo', body: { teamPath: 'news.yaml', agent: 'writer', id: 'l1' } })
+  })
+
+  it('takes back a lesson still with its agent with the plain Undo, never touching About you', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [], lessons: [lesson()] }]
+    answer = () => {
+      page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+      return new Response(JSON.stringify({ undone: lesson({ state: 'dropped', droppedBy: 'you' }), lessons: [] }), { status: 200 })
+    }
+    renderChat()
+    fireEvent.click(await screen.findByRole('button', { name: `Undo: ${vietnamese}` }))
+    await waitFor(() => expect(screen.queryByText(vietnamese, { exact: false })).not.toBeInTheDocument())
+    expect(posted).toEqual([{ url: '/api/lessons/undo', body: { teamPath: 'news.yaml', agent: 'writer', id: 'l1' } }])
   })
 })

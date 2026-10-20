@@ -154,18 +154,47 @@ impl You {
             .contents
             .write()
             .unwrap_or_else(PoisonError::into_inner);
+        self.save(&next)?;
+        contents.clone_from(&next);
+        Ok(next)
+    }
+
+    /// Replace what is kept with what `change` makes of it, under one lock, so nothing saved
+    /// between the read and the write is lost. `change` answers `None` to leave it as it is.
+    /// Returns what is kept now, and whether it changed. Only ever on the person's click: Tell
+    /// all my agents and its Undo (ADR 0078, [`crate::lessons`]).
+    pub(crate) fn change(
+        &self,
+        change: impl FnOnce(&AboutYou) -> Option<AboutYou>,
+    ) -> Result<(AboutYou, bool), SetError> {
+        let mut contents = self
+            .contents
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(next) = change(&contents) else {
+            return Ok((contents.clone(), false));
+        };
+        let next = next.cleaned().map_err(SetError::Invalid)?;
+        self.save(&next)?;
+        contents.clone_from(&next);
+        Ok((next, true))
+    }
+
+    fn save(&self, next: &AboutYou) -> Result<(), SetError> {
         if let Some(file) = &self.file {
-            let text = serde_json::to_vec_pretty(&next)
+            let text = serde_json::to_vec_pretty(next)
                 .map_err(|error| SetError::Unsaved(error.to_string()))?;
             crate::approvals::write_private(file, &text)
                 .map_err(|error| SetError::Unsaved(error.to_string()))?;
         }
-        contents.clone_from(&next);
-        Ok(next)
+        Ok(())
     }
 }
 
-enum SetError {
+/// Why what was asked for is not kept.
+#[derive(Debug)]
+pub(crate) enum SetError {
+    /// Too long: the message says which part, and its limit.
     Invalid(String),
     Unsaved(String),
 }
@@ -277,7 +306,9 @@ pub fn router(you: You) -> Router {
         .with_state(you)
 }
 
-async fn from_loomwatch(request: Request, next: Next) -> Response {
+/// A change only from `LoomWatch`'s own page, which sends `X-LoomWatch-Request`. Also on the
+/// lessons routes that change About you ([`crate::lessons::router`]).
+pub(crate) async fn from_loomwatch(request: Request, next: Next) -> Response {
     if request.method() != axum::http::Method::GET
         && request
             .headers()

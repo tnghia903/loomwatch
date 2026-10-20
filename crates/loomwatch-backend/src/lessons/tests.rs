@@ -15,7 +15,18 @@ fn from(scope: &str) -> LearnedFrom {
 }
 
 fn add(text: &str) -> Edit {
-    Edit::Add(text.to_owned())
+    Edit::Add {
+        text: text.to_owned(),
+        about_you: false,
+    }
+}
+
+fn change(number: usize, text: &str) -> Edit {
+    Edit::Change {
+        number,
+        text: text.to_owned(),
+        about_you: false,
+    }
 }
 
 async fn store() -> Lessons {
@@ -152,7 +163,7 @@ fn the_learners_edits_are_read_and_held_to_the_rules() {
         vec![
             add("When writing a digest, use three bullets."),
             Edit::Missed(1),
-            Edit::Change(2, "When citing, link beside the claim.".to_owned()),
+            change(2, "When citing, link beside the claim."),
         ]
     );
     assert_eq!(parse_reply("{\"edits\": []}", 3).unwrap(), Vec::new());
@@ -184,6 +195,7 @@ fn lesson(text: &str) -> Lesson {
         agent_id: "writer".to_owned(),
         text: text.to_owned(),
         source: LessonSource::You,
+        about_you: false,
         feedback: String::new(),
         run_id: None,
         state: LessonState::Active,
@@ -244,10 +256,7 @@ async fn a_change_replaces_its_lesson_and_undoing_it_brings_the_old_one_back() {
         .apply(
             &from(scope),
             &shown,
-            &[Edit::Change(
-                1,
-                "When writing a digest, use three bullets.".to_owned(),
-            )],
+            &[change(1, "When writing a digest, use three bullets.")],
         )
         .await
         .unwrap();
@@ -292,11 +301,7 @@ async fn an_edit_on_a_lesson_dropped_meanwhile_is_skipped() {
     let shown = lessons.active(scope).await.unwrap();
     lessons.undo(scope, &shown[0].id).await.unwrap();
     let made = lessons
-        .apply(
-            &from(scope),
-            &shown,
-            &[Edit::Change(1, "Two.".to_owned()), Edit::Drop(1)],
-        )
+        .apply(&from(scope), &shown, &[change(1, "Two."), Edit::Drop(1)])
         .await
         .unwrap();
     assert!(made.is_empty());
@@ -699,4 +704,333 @@ async fn the_learner_reads_the_runs_steps_by_itself() {
     assert!(asked.lock().unwrap()[0].contains(
         "How it went about it, from the run's record:\n1. Read https://blog.example/prices\n"
     ));
+}
+
+const VIETNAMESE: &str = "When replying to this person, always write in Vietnamese.";
+
+fn about(text: &str) -> Edit {
+    Edit::Add {
+        text: text.to_owned(),
+        about_you: true,
+    }
+}
+
+fn mai(about: Option<&str>) -> crate::you::You {
+    crate::you::You::in_memory(crate::you::AboutYou {
+        name: Some("Mai".to_owned()),
+        about: about.map(str::to_owned),
+        skipped: false,
+    })
+}
+
+/// The learner marks a lesson about the person with `"aboutYou": true`, on an add or a change. Only
+/// `true` counts, and a stray value costs the edit its mark, never the reply.
+#[test]
+fn the_learner_marks_a_lesson_about_the_person_and_only_true_counts() {
+    let reply = "{\"edits\": [\
+        {\"do\": \"add\", \"lesson\": \"When replying to this person, always write in Vietnamese.\", \"aboutYou\": true},\
+        {\"do\": \"change\", \"number\": 1, \"lesson\": \"Give prices in VND.\", \"aboutYou\": true},\
+        {\"do\": \"missed\", \"number\": 1, \"aboutYou\": true}]}";
+    assert_eq!(
+        parse_reply(reply, 1).unwrap(),
+        vec![
+            about(VIETNAMESE),
+            Edit::Change {
+                number: 1,
+                text: "Give prices in VND.".to_owned(),
+                about_you: true,
+            },
+            Edit::Missed(1),
+        ]
+    );
+    let loose = "{\"edits\": [\
+        {\"do\": \"add\", \"lesson\": \"One.\", \"aboutYou\": \"yes\"},\
+        {\"do\": \"add\", \"lesson\": \"Two.\", \"about_you\": true}]}";
+    assert_eq!(
+        parse_reply(loose, 0).unwrap(),
+        vec![add("One."), about("Two.")]
+    );
+    let prompt = compose(&Learning::default(), LessonSource::You, &[]);
+    assert!(prompt.contains(
+        "Add \"aboutYou\": true to an add or change only when the lesson is about the person, not \
+         the work"
+    ));
+    assert!(prompt.contains("{\"do\": \"add\", \"lesson\": \"...\", \"aboutYou\": true}"));
+}
+
+/// A lesson about the person is kept marked, and stays so when the learner or the person puts it
+/// another way.
+#[tokio::test]
+async fn a_lesson_about_the_person_stays_about_them_however_it_is_put() {
+    let lessons = store().await;
+    let scope = "agent:writer";
+    let marks = |kept: &[Lesson]| {
+        let mut marks: Vec<(String, bool)> = kept
+            .iter()
+            .map(|lesson| (lesson.text.clone(), lesson.about_you))
+            .collect();
+        marks.sort();
+        marks
+    };
+    let made = lessons
+        .apply(&from(scope), &[], &[about(VIETNAMESE), add("Use bullets.")])
+        .await
+        .unwrap();
+    let both = vec![
+        ("Use bullets.".to_owned(), false),
+        (VIETNAMESE.to_owned(), true),
+    ];
+    assert_eq!(marks(&made), both);
+    let shown = lessons.active(scope).await.unwrap();
+    assert_eq!(marks(&shown), both);
+    let number = 1 + shown.iter().position(|lesson| lesson.about_you).unwrap();
+    let changed = lessons
+        .apply(
+            &from(scope),
+            &shown,
+            &[change(
+                number,
+                "When replying to this person, write in Vietnamese.",
+            )],
+        )
+        .await
+        .unwrap();
+    assert!(changed[0].about_you);
+    let rewritten = lessons
+        .rewrite(scope, &changed[0].id, "Always answer me in Vietnamese.")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(rewritten.about_you);
+    assert_eq!(
+        marks(&lessons.active(scope).await.unwrap()),
+        [
+            ("Always answer me in Vietnamese.".to_owned(), true),
+            ("Use bullets.".to_owned(), false),
+        ]
+    );
+}
+
+/// Tell all my agents: the sentence goes on its own line at the end of About you, the name and
+/// the rest kept, and the lesson leaves the agent's list but still shows on the work it came from.
+/// Undo puts both back.
+#[tokio::test]
+async fn telling_all_agents_moves_a_lesson_to_about_you_and_undo_puts_both_back() {
+    let lessons = store().await;
+    let scope = "agent:writer";
+    let you = mai(Some("I teach English."));
+    let before = you.get();
+    let made = lessons
+        .apply(&from(scope), &[], &[about(VIETNAMESE)])
+        .await
+        .unwrap()
+        .remove(0);
+    let told = lessons.tell_all(scope, &made.id, &you).await.unwrap();
+    assert!(told.changed);
+    assert_eq!(told.lesson.state, LessonState::Dropped);
+    assert_eq!(told.lesson.dropped_by.as_deref(), Some(ABOUT_YOU));
+    let now = you.get();
+    assert_eq!(
+        now.about.as_deref(),
+        Some("I teach English.\nWhen replying to this person, always write in Vietnamese.")
+    );
+    assert_eq!((now.name.as_deref(), now.skipped), (Some("Mai"), false));
+    assert_eq!(told.you, now);
+    assert!(lessons.active(scope).await.unwrap().is_empty());
+    let on_work = lessons.learned_from(&["run-1".to_owned()]).await.unwrap();
+    assert_eq!(on_work["run-1"][0].id, made.id);
+    assert_eq!(on_work["run-1"][0].dropped_by.as_deref(), Some(ABOUT_YOU));
+    assert!(matches!(
+        lessons.tell_all(scope, &made.id, &you).await,
+        Err(TellError::NotKept)
+    ));
+
+    let back = lessons.untell(scope, &made.id, &you).await.unwrap();
+    assert!(back.changed);
+    assert_eq!(back.lesson.state, LessonState::Active);
+    assert_eq!(back.lesson.dropped_by, None);
+    assert_eq!(you.get(), before);
+    assert_eq!(lessons.active(scope).await.unwrap()[0].id, made.id);
+    assert!(matches!(
+        lessons.untell(scope, &made.id, &you).await,
+        Err(TellError::NotKept)
+    ));
+    // The plain Undo is for a kept lesson, and leaves About you alone.
+    lessons.undo(scope, &made.id).await.unwrap().unwrap();
+    assert!(matches!(
+        lessons.untell(scope, &made.id, &you).await,
+        Err(TellError::NotKept)
+    ));
+    assert_eq!(you.get(), before);
+}
+
+/// With nothing in About you, the sentence is all of it, and Undo leaves nothing again, though the
+/// person's Not now stays.
+#[tokio::test]
+async fn an_empty_about_you_is_the_sentence_alone_and_undo_empties_it_again() {
+    let lessons = store().await;
+    let scope = "agent:writer";
+    let you = crate::you::You::in_memory(crate::you::AboutYou {
+        skipped: true,
+        ..crate::you::AboutYou::default()
+    });
+    let made = lessons
+        .apply(&from(scope), &[], &[about(VIETNAMESE)])
+        .await
+        .unwrap()
+        .remove(0);
+    lessons.tell_all(scope, &made.id, &you).await.unwrap();
+    assert_eq!(you.get().about.as_deref(), Some(VIETNAMESE));
+    lessons.untell(scope, &made.id, &you).await.unwrap();
+    assert_eq!(
+        you.get(),
+        crate::you::AboutYou {
+            skipped: true,
+            ..crate::you::AboutYou::default()
+        }
+    );
+}
+
+/// Undo takes out only the line Tell all my agents added: not one About you already said, not one
+/// the person wrote after it, and nothing once the person has taken it out themselves.
+#[tokio::test]
+async fn undo_takes_out_only_the_line_it_added() {
+    let lessons = store().await;
+    let scope = "agent:writer";
+    let lesson = |text: &'static str| {
+        let lessons = lessons.clone();
+        async move {
+            lessons
+                .apply(&from(scope), &[], &[about(text)])
+                .await
+                .unwrap()
+                .remove(0)
+        }
+    };
+
+    // About you already says it, in other case and spacing: nothing added, nothing taken out.
+    let already = "I teach English.\nwhen replying to this person,  always write in VIETNAMESE";
+    let you = mai(Some(already));
+    let made = lesson(VIETNAMESE).await;
+    let told = lessons.tell_all(scope, &made.id, &you).await.unwrap();
+    assert!(!told.changed);
+    assert_eq!(told.lesson.dropped_by.as_deref(), Some(ABOUT_YOU));
+    assert!(lessons.active(scope).await.unwrap().is_empty());
+    let back = lessons.untell(scope, &made.id, &you).await.unwrap();
+    assert!(!back.changed);
+    assert_eq!(back.lesson.state, LessonState::Active);
+    assert_eq!(you.get().about.as_deref(), Some(already));
+    lessons.undo(scope, &made.id).await.unwrap();
+
+    // The person wrote more after it: their line stays.
+    let you = mai(Some("I teach English."));
+    let made = lesson(VIETNAMESE).await;
+    lessons.tell_all(scope, &made.id, &you).await.unwrap();
+    let mut edited = you.get();
+    edited.about = Some(format!(
+        "{}\nI live in Da Nang.",
+        edited.about.unwrap_or_default()
+    ));
+    let edited = edited;
+    you.change(|_| Some(edited)).unwrap();
+    lessons.untell(scope, &made.id, &you).await.unwrap();
+    assert_eq!(
+        you.get().about.as_deref(),
+        Some("I teach English.\nI live in Da Nang.")
+    );
+    lessons.undo(scope, &made.id).await.unwrap();
+
+    // The person took it out themselves: the lesson comes back, About you is left as they left it.
+    let you = mai(Some("I teach English."));
+    let made = lesson(VIETNAMESE).await;
+    lessons.tell_all(scope, &made.id, &you).await.unwrap();
+    let mine = crate::you::AboutYou {
+        about: Some("I teach maths now.".to_owned()),
+        ..you.get()
+    };
+    you.change(|_| Some(mine)).unwrap();
+    let back = lessons.untell(scope, &made.id, &you).await.unwrap();
+    assert!(!back.changed);
+    assert_eq!(back.lesson.state, LessonState::Active);
+    assert_eq!(you.get().about.as_deref(), Some("I teach maths now."));
+}
+
+/// Only a lesson the learner found is about the person goes to About you, only while it is kept,
+/// and only when About you has room. Otherwise nothing changes.
+#[tokio::test]
+async fn only_a_kept_lesson_about_the_person_goes_to_about_you_and_only_with_room() {
+    let lessons = store().await;
+    let scope = "agent:writer";
+    let you = mai(Some("I teach English."));
+    let before = you.get();
+    let made = lessons
+        .apply(
+            &from(scope),
+            &[],
+            &[
+                add("When writing a digest, use three bullets."),
+                about(VIETNAMESE),
+            ],
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        lessons.tell_all(scope, &made[0].id, &you).await,
+        Err(TellError::NotAboutYou)
+    ));
+    assert!(matches!(
+        lessons.tell_all("agent:other", &made[1].id, &you).await,
+        Err(TellError::NotKept)
+    ));
+    let full = mai(Some(&"x".repeat(crate::you::MAX_ABOUT_CHARS - 10)));
+    let full_before = full.get();
+    assert!(matches!(
+        lessons.tell_all(scope, &made[1].id, &full).await,
+        Err(TellError::Full)
+    ));
+    assert_eq!(full.get(), full_before);
+    assert_eq!(you.get(), before);
+    assert_eq!(lessons.active(scope).await.unwrap().len(), 2);
+    assert!(
+        lessons
+            .active(scope)
+            .await
+            .unwrap()
+            .iter()
+            .all(|lesson| lesson.state == LessonState::Active)
+    );
+}
+
+/// Undo back into a full list: the lesson it brings back stays, and the least backed other one
+/// makes room, as when a lesson is learned.
+#[tokio::test]
+async fn undo_into_a_full_list_makes_room_for_the_lesson_it_brings_back() {
+    let lessons = store().await;
+    let scope = "agent:writer";
+    let you = mai(None);
+    let told = lessons
+        .apply(&from(scope), &[], &[about(VIETNAMESE)])
+        .await
+        .unwrap()
+        .remove(0);
+    lessons.tell_all(scope, &told.id, &you).await.unwrap();
+    for number in 0..MAX_LESSONS {
+        lessons
+            .apply(
+                &from(scope),
+                &[],
+                &[add(&format!("Lesson number {number}."))],
+            )
+            .await
+            .unwrap();
+    }
+    let full = lessons.active(scope).await.unwrap();
+    lessons.give(&full[1..], "liked", "writer").await.unwrap();
+    lessons.back("liked", true).await.unwrap();
+    lessons.untell(scope, &told.id, &you).await.unwrap();
+    let now = lessons.active(scope).await.unwrap();
+    assert_eq!(now.len(), MAX_LESSONS);
+    assert!(now.iter().any(|lesson| lesson.id == told.id));
+    let made_room = lessons.get(scope, &full[0].id).await.unwrap().unwrap();
+    assert_eq!(made_room.dropped_by.as_deref(), Some("room"));
 }

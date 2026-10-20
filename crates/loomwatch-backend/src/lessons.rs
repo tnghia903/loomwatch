@@ -26,6 +26,9 @@
 //!   a lesson never changes what the agent may do: tools, switches and checks stay the person's.
 //! - **Seen and undone.** Every lesson shows where it came from; Undo takes it back, and a lesson
 //!   that changed another brings the old one back.
+//! - **About you is the person's.** A lesson about the person rather than one job ("always write
+//!   in Vietnamese") is marked so, and the person can tell all their agents: it moves to About you
+//!   (ADR 0074), which every agent reads. Only their click writes About you, and Undo moves it back.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
@@ -135,6 +138,9 @@ pub struct Lesson {
     pub agent_id: String,
     pub text: String,
     pub source: LessonSource,
+    /// The learner found it is about the person, not one kind of work: Tell all my agents can move
+    /// it to About you.
+    pub about_you: bool,
     /// What it was learned from: the person's words, or the check's item and finding, cut.
     pub feedback: String,
     /// The piece of work the feedback was about.
@@ -143,7 +149,7 @@ pub struct Lesson {
     /// The lesson this one changed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
-    /// `you`, `learning` or `room`, for a dropped lesson.
+    /// `you`, `learning`, `room` or [`ABOUT_YOU`], for a dropped lesson.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dropped_by: Option<String>,
     /// Pieces of work it was given in.
@@ -356,18 +362,29 @@ impl std::fmt::Debug for Lessons {
     }
 }
 
-const COLUMNS: &str = "l.id, l.scope, l.agent_id, l.text, l.source, l.feedback, l.run_id, \
-     l.state, l.replaces, l.dropped_by, l.missed, l.created_at, l.updated_at, \
+const COLUMNS: &str = "l.id, l.scope, l.agent_id, l.text, l.source, l.about_you, l.feedback, \
+     l.run_id, l.state, l.replaces, l.dropped_by, l.missed, l.created_at, l.updated_at, \
      (SELECT COUNT(*) FROM agent_lesson_uses AS u WHERE u.lesson_id = l.id) AS given, \
      (SELECT COUNT(*) FROM agent_lesson_uses AS u WHERE u.lesson_id = l.id AND u.backed = 1) \
      AS backed";
 
-/// One edit the learner asked for, against the numbered list it was shown.
+/// Who dropped a lesson that Tell all my agents moved to About you.
+pub const ABOUT_YOU: &str = "about_you";
+
+/// One edit the learner asked for, against the numbered list it was shown. `about_you` when it
+/// found the lesson is about the person rather than the work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edit {
-    Add(String),
+    Add {
+        text: String,
+        about_you: bool,
+    },
     /// Lesson `number` (1-based) now reads `text`.
-    Change(usize, String),
+    Change {
+        number: usize,
+        text: String,
+        about_you: bool,
+    },
     Drop(usize),
     /// The feedback shows the agent did not follow lesson `number`.
     Missed(usize),
@@ -385,6 +402,49 @@ pub struct LearnedFrom {
 
 /// What a store call failed on.
 pub type StoreError = sqlx::Error;
+
+/// What Tell all my agents, or its Undo, did.
+#[derive(Debug, Clone)]
+pub struct Told {
+    /// The lesson: dropped from the agent's list by [`ABOUT_YOU`], or back in it after Undo.
+    pub lesson: Lesson,
+    /// About you as it is now.
+    pub you: crate::you::AboutYou,
+    /// About you changed: its sentence went in, or after Undo came out. Not when About you already
+    /// said it, or the person had taken it out themselves.
+    pub changed: bool,
+}
+
+/// Why Tell all my agents, or its Undo, changed nothing.
+#[derive(Debug)]
+pub enum TellError {
+    /// No such lesson in `scope`, or not where this needs it: kept, for Tell all my agents; moved to
+    /// About you, for its Undo.
+    NotKept,
+    /// The learner found the lesson is about the agent's work, not about the person.
+    NotAboutYou,
+    /// About you has no room for the sentence.
+    Full,
+    /// About you could not be saved.
+    Unsaved(String),
+    Store(StoreError),
+}
+
+impl From<StoreError> for TellError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl From<crate::you::SetError> for TellError {
+    fn from(error: crate::you::SetError) -> Self {
+        match error {
+            // Only its About you grows: the name was kept as it is.
+            crate::you::SetError::Invalid(_) => Self::Full,
+            crate::you::SetError::Unsaved(error) => Self::Unsaved(error),
+        }
+    }
+}
 
 impl Lessons {
     #[must_use]
@@ -425,8 +485,8 @@ impl Lessons {
         Ok(row.as_ref().map(decode))
     }
 
-    /// The lessons learned from feedback on these pieces of work and still kept, by run: what the
-    /// chat shows on each.
+    /// The lessons learned from feedback on these pieces of work and still kept, or moved to About
+    /// you, by run: what the chat shows on each.
     ///
     /// # Errors
     ///
@@ -441,10 +501,12 @@ impl Lessons {
         }
         let rows = sqlx::query(&format!(
             "SELECT {COLUMNS} FROM agent_lessons AS l
-             WHERE l.run_id IN (SELECT value FROM json_each($1)) AND l.state = 'active'
+             WHERE l.run_id IN (SELECT value FROM json_each($1))
+               AND (l.state = 'active' OR (l.state = 'dropped' AND l.dropped_by = $2))
              ORDER BY l.created_at, l.id"
         ))
         .bind(crate::db::json_list(run_ids))
+        .bind(ABOUT_YOU)
         .fetch_all(self.db.reader())
         .await?;
         for lesson in rows.iter().map(decode) {
@@ -532,7 +594,7 @@ impl Lessons {
         let mut made = Vec::new();
         for edit in edits {
             match edit {
-                Edit::Add(text) => {
+                Edit::Add { text, about_you } => {
                     if let Some(same) = shown.iter().find(|lesson| {
                         active_ids.contains(&lesson.id) && same_words(&lesson.text, text)
                     }) {
@@ -543,15 +605,21 @@ impl Lessons {
                         }
                         continue;
                     }
-                    made.push(insert(&mut tx, from, text, None, &now).await?);
+                    made.push(insert(&mut tx, from, text, *about_you, None, &now).await?);
                 }
-                Edit::Change(number, text) => {
+                Edit::Change {
+                    number,
+                    text,
+                    about_you,
+                } => {
                     let Some(old) = still(*number) else { continue };
                     if same_words(&old.text, text) {
                         continue;
                     }
                     set_state(&mut tx, &old.id, LessonState::Replaced, None, &now).await?;
-                    made.push(insert(&mut tx, from, text, Some(&old.id), &now).await?);
+                    // A lesson about the person stays about them, however it is put now.
+                    let about_you = *about_you || old.about_you;
+                    made.push(insert(&mut tx, from, text, about_you, Some(&old.id), &now).await?);
                 }
                 Edit::Drop(number) => {
                     let Some(old) = still(*number) else { continue };
@@ -570,7 +638,8 @@ impl Lessons {
                 }
             }
         }
-        make_room(&mut tx, &from.scope, &made, &now).await?;
+        let fresh: Vec<&str> = made.iter().map(|lesson| lesson.id.as_str()).collect();
+        make_room(&mut tx, &from.scope, &fresh, &now).await?;
         tx.commit().await?;
         let mut kept = Vec::new();
         for lesson in made {
@@ -645,16 +714,189 @@ impl Lessons {
             feedback: old.feedback.clone(),
             run_id: old.run_id.clone(),
         };
-        let made = insert(&mut tx, &from, text, Some(&old.id), &now).await?;
+        let made = insert(&mut tx, &from, text, old.about_you, Some(&old.id), &now).await?;
         tx.commit().await?;
         self.get(scope, &made.id).await
     }
+
+    /// Tell all my agents: a lesson about the person, not one job, goes into About you (ADR 0074),
+    /// which every agent reads, and leaves this agent's list, dropped by [`ABOUT_YOU`]. Its
+    /// sentence goes on a line of its own at the end, unless a line already says it.
+    ///
+    /// Only ever from the person's click (the `/api/lessons/tell-all` route): learning marks a
+    /// lesson as about the person, and never writes About you.
+    ///
+    /// # Errors
+    ///
+    /// [`TellError::NotKept`] when there is no such active lesson in `scope`,
+    /// [`TellError::NotAboutYou`] when it is about the agent's work, [`TellError::Full`] when About
+    /// you has no room for it, and when About you or the database fails. Nothing changes then.
+    pub async fn tell_all(
+        &self,
+        scope: &str,
+        id: &str,
+        you: &crate::you::You,
+    ) -> Result<Told, TellError> {
+        let mut tx = self.db.writer().begin_with("BEGIN IMMEDIATE").await?;
+        let found = sqlx::query(
+            "SELECT text, about_you FROM agent_lessons
+             WHERE scope = $1 AND id = $2 AND state = 'active'",
+        )
+        .bind(scope)
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(found) = found else {
+            tx.rollback().await?;
+            return Err(TellError::NotKept);
+        };
+        if !found.get::<bool, _>("about_you") {
+            tx.rollback().await?;
+            return Err(TellError::NotAboutYou);
+        }
+        let text: String = found.get("text");
+        let now = crate::operator::now_rfc3339();
+        set_state(&mut tx, id, LessonState::Dropped, Some(ABOUT_YOU), &now).await?;
+        // About you last, so a database failure before it leaves About you as it was.
+        let line = text.clone();
+        let (you_now, added) = change_about_you(you, move |about| with_line(about, &line)).await?;
+        let kept = sqlx::query("UPDATE agent_lessons SET added_to_about_you = $2 WHERE id = $1")
+            .bind(id)
+            .bind(added)
+            .execute(&mut *tx)
+            .await;
+        if let Err(error) = match kept {
+            Ok(_) => tx.commit().await,
+            Err(error) => Err(error),
+        } {
+            if added {
+                let _ = change_about_you(you, move |about| without_line(about, &text)).await;
+            }
+            return Err(error.into());
+        }
+        let lesson = self.get(scope, id).await?.ok_or(TellError::NotKept)?;
+        Ok(Told {
+            lesson,
+            you: you_now,
+            changed: added,
+        })
+    }
+
+    /// Undo Tell all my agents: the lesson is back in the agent's list, and the line it added to
+    /// About you comes out again. A line About you said before, or one the person has taken out
+    /// or changed since, is left as it is. Back in a full list, the least backed other lesson
+    /// makes room, as when a lesson is learned.
+    ///
+    /// # Errors
+    ///
+    /// [`TellError::NotKept`] when no lesson in `scope` was moved to About you by that id, and when
+    /// About you or the database fails. Nothing changes then.
+    pub async fn untell(
+        &self,
+        scope: &str,
+        id: &str,
+        you: &crate::you::You,
+    ) -> Result<Told, TellError> {
+        let mut tx = self.db.writer().begin_with("BEGIN IMMEDIATE").await?;
+        let found = sqlx::query(
+            "SELECT text, added_to_about_you FROM agent_lessons
+             WHERE scope = $1 AND id = $2 AND state = 'dropped' AND dropped_by = $3",
+        )
+        .bind(scope)
+        .bind(id)
+        .bind(ABOUT_YOU)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(found) = found else {
+            tx.rollback().await?;
+            return Err(TellError::NotKept);
+        };
+        let text: String = found.get("text");
+        let now = crate::operator::now_rfc3339();
+        sqlx::query(
+            "UPDATE agent_lessons
+             SET state = 'active', dropped_by = NULL, added_to_about_you = 0, updated_at = $2
+             WHERE id = $1",
+        )
+        .bind(id)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        make_room(&mut tx, scope, &[id], &now).await?;
+        let (you_now, removed) = if found.get::<bool, _>("added_to_about_you") {
+            let line = text.clone();
+            change_about_you(you, move |about| without_line(about, &line)).await?
+        } else {
+            (you.get(), false)
+        };
+        if let Err(error) = tx.commit().await {
+            if removed {
+                let _ = change_about_you(you, move |about| with_line(about, &text)).await;
+            }
+            return Err(error.into());
+        }
+        let lesson = self.get(scope, id).await?.ok_or(TellError::NotKept)?;
+        Ok(Told {
+            lesson,
+            you: you_now,
+            changed: removed,
+        })
+    }
+}
+
+/// [`crate::you::You::change`], off the async threads: it writes a file.
+async fn change_about_you(
+    you: &crate::you::You,
+    change: impl FnOnce(&crate::you::AboutYou) -> Option<crate::you::AboutYou> + Send + 'static,
+) -> Result<(crate::you::AboutYou, bool), TellError> {
+    let you = you.clone();
+    tokio::task::spawn_blocking(move || you.change(change))
+        .await
+        .map_err(|error| TellError::Unsaved(error.to_string()))?
+        .map_err(TellError::from)
+}
+
+/// About you with `line` at its end, on a line of its own, or `None` when a line of it already
+/// says that.
+fn with_line(you: &crate::you::AboutYou, line: &str) -> Option<crate::you::AboutYou> {
+    let about = you.about.as_deref().unwrap_or_default();
+    if about.lines().any(|kept| same_words(kept, line)) {
+        return None;
+    }
+    let about = if about.trim().is_empty() {
+        line.to_owned()
+    } else {
+        format!("{}\n{line}", about.trim_end())
+    };
+    Some(crate::you::AboutYou {
+        about: Some(about),
+        ..you.clone()
+    })
+}
+
+/// About you without its last line that says `line`, or `None` when no line does: the person took
+/// it out, or put it another way, themselves.
+fn without_line(you: &crate::you::AboutYou, line: &str) -> Option<crate::you::AboutYou> {
+    let lines: Vec<&str> = you.about.as_deref()?.lines().collect();
+    let at = lines.iter().rposition(|kept| same_words(kept, line))?;
+    let rest = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != at)
+        .map(|(_, kept)| *kept)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(crate::you::AboutYou {
+        about: Some(rest).filter(|rest| !rest.trim().is_empty()),
+        ..you.clone()
+    })
 }
 
 async fn insert(
     tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
     from: &LearnedFrom,
     text: &str,
+    about_you: bool,
     replaces: Option<&str>,
     now: &str,
 ) -> Result<Lesson, StoreError> {
@@ -662,15 +904,16 @@ async fn insert(
     let feedback = cut_end(from.feedback.trim(), FEEDBACK_CHARS);
     sqlx::query(
         "INSERT INTO agent_lessons
-         (id, scope, agent_id, text, source, feedback, run_id, state, replaces, dropped_by, missed,
-          created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NULL, 0, $9, $9)",
+         (id, scope, agent_id, text, source, about_you, feedback, run_id, state, replaces,
+          dropped_by, missed, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, NULL, 0, $10, $10)",
     )
     .bind(&id)
     .bind(&from.scope)
     .bind(&from.agent_id)
     .bind(one_line(text))
     .bind(from.source.as_str())
+    .bind(about_you)
     .bind(&feedback)
     .bind(&from.run_id)
     .bind(replaces)
@@ -683,6 +926,7 @@ async fn insert(
         agent_id: from.agent_id.clone(),
         text: one_line(text),
         source: from.source,
+        about_you,
         feedback,
         run_id: from.run_id.clone(),
         state: LessonState::Active,
@@ -729,11 +973,11 @@ async fn missed(
 }
 
 /// Past [`MAX_LESSONS`], drop the least backed of the older lessons, oldest first among equals.
-/// Never one just made: the person is about to see it.
+/// Never one just made or brought back (`fresh`): the person is about to see it.
 async fn make_room(
     tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
     scope: &str,
-    made: &[Lesson],
+    fresh: &[&str],
     now: &str,
 ) -> Result<(), StoreError> {
     let rows = sqlx::query(
@@ -748,11 +992,10 @@ async fn make_room(
     .fetch_all(&mut **tx)
     .await?;
     let over = rows.len().saturating_sub(MAX_LESSONS);
-    let fresh = |id: &str| made.iter().any(|lesson| lesson.id == id);
     for row in rows
         .iter()
         .map(|row| row.get::<String, _>("id"))
-        .filter(|id| !fresh(id))
+        .filter(|id| !fresh.contains(&id.as_str()))
         .take(over)
     {
         set_state(tx, &row, LessonState::Dropped, Some("room"), now).await?;
@@ -767,6 +1010,7 @@ fn decode(row: &sqlx::sqlite::SqliteRow) -> Lesson {
         agent_id: row.get("agent_id"),
         text: row.get("text"),
         source: LessonSource::parse(&row.get::<String, _>("source")),
+        about_you: row.get("about_you"),
         feedback: row.get("feedback"),
         run_id: row.get("run_id"),
         state: LessonState::parse(&row.get::<String, _>("state")),
@@ -953,12 +1197,16 @@ fn ask_what_to_change(text: &mut String, agent: &str) {
          change it only if it was unclear.\n\
          - If the feedback goes against one of its lessons, change or drop that lesson rather than \
          adding another.\n\
+         - Add \"aboutYou\": true to an add or change only when the lesson is about the person, \
+         not the work: something every agent working for them should do whatever the job, such as \
+         the language to write in or the units they use. They can then give it to all their \
+         agents.\n\
          - At most {EDITS_PER_FEEDBACK} adds, changes and drops in all. No edits at all is a good \
          answer.\n\n\
          Reply with JSON only, in this shape:\n\
-         {{\"edits\": [{{\"do\": \"add\", \"lesson\": \"...\"}}, {{\"do\": \"change\", \"number\": 2, \
-         \"lesson\": \"...\"}}, {{\"do\": \"drop\", \"number\": 3}}, {{\"do\": \"missed\", \
-         \"number\": 1}}]}}\n\
+         {{\"edits\": [{{\"do\": \"add\", \"lesson\": \"...\"}}, {{\"do\": \"add\", \"lesson\": \
+         \"...\", \"aboutYou\": true}}, {{\"do\": \"change\", \"number\": 2, \"lesson\": \"...\"}}, \
+         {{\"do\": \"drop\", \"number\": 3}}, {{\"do\": \"missed\", \"number\": 1}}]}}\n\
          or {{\"edits\": []}}"
     );
 }
@@ -998,11 +1246,16 @@ struct ReplyEdit {
     number: Option<usize>,
     #[serde(default)]
     lesson: Option<String>,
+    /// Only `true` counts: anything else, or nothing, is a lesson about the work. Read loosely,
+    /// so a stray value costs the edit its mark, never the whole reply.
+    #[serde(default, rename = "aboutYou", alias = "about_you")]
+    about_you: Option<serde_json::Value>,
 }
 
 /// The learner's edits, checked: each add or change one sentence within [`LESSON_CHARS`], each
 /// number on the list it was shown, at most [`EDITS_PER_FEEDBACK`] of them. An edit that breaks a
-/// rule is left out rather than cut to fit: half a lesson is worse than none.
+/// rule is left out rather than cut to fit: half a lesson is worse than none. An add or change is
+/// about the person only when it says `"aboutYou": true`.
 ///
 /// # Errors
 ///
@@ -1027,11 +1280,16 @@ pub fn parse_reply(reply: &str, shown: usize) -> Result<Vec<Edit>, String> {
             .filter(|lesson| !lesson.is_empty() && lesson.chars().count() <= LESSON_CHARS)
     };
     for edit in parsed.edits {
+        let about_you = matches!(edit.about_you, Some(serde_json::Value::Bool(true)));
         let made = match edit.action.trim() {
-            "add" => sentence(edit.lesson).map(Edit::Add),
+            "add" => sentence(edit.lesson).map(|text| Edit::Add { text, about_you }),
             "change" => on_list(edit.number)
                 .zip(sentence(edit.lesson))
-                .map(|(number, lesson)| Edit::Change(number, lesson)),
+                .map(|(number, text)| Edit::Change {
+                    number,
+                    text,
+                    about_you,
+                }),
             "drop" => on_list(edit.number).map(Edit::Drop),
             "missed" => on_list(edit.number).map(Edit::Missed),
             _ => None,
@@ -1132,7 +1390,7 @@ impl Learner {
         let mut edits = parse_reply(&reply, shown.len())?;
         if request.from.source == LessonSource::Liked {
             // What worked adds one lesson at most; it never changes, drops or marks another.
-            edits.retain(|edit| matches!(edit, Edit::Add(_)));
+            edits.retain(|edit| matches!(edit, Edit::Add { .. }));
             edits.truncate(1);
         }
         if edits.is_empty() {
@@ -1172,11 +1430,13 @@ impl Learner {
     }
 }
 
-/// The lessons routes' state: where team files are, and the registry whose database holds them.
+/// The lessons routes' state: where team files are, the registry whose database holds them, and
+/// About you, for Tell all my agents.
 #[derive(Clone)]
 struct LessonsState {
     teams_root: PathBuf,
     registry: crate::runs::RunRegistry,
+    you: crate::you::You,
 }
 
 /// Whose lessons a request is about: an agent in a team file, or one of My agents by its id.
@@ -1203,17 +1463,29 @@ struct LessonEdit {
     text: Option<String>,
 }
 
-/// The lessons' routes (ADR 0078). Loopback-only, like the chat's.
-pub fn router(teams_root: PathBuf, registry: crate::runs::RunRegistry) -> axum::Router {
+/// The lessons' routes (ADR 0078). Loopback-only, like the chat's. `you` is the About you every
+/// session reads, which Tell all my agents adds to.
+pub fn router(
+    teams_root: PathBuf,
+    registry: crate::runs::RunRegistry,
+    you: crate::you::You,
+) -> axum::Router {
     use axum::routing::{get, post};
     let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
+    // These change About you, so, like its own page's Save, only from LoomWatch's page.
+    let about_you = axum::Router::new()
+        .route("/api/lessons/tell-all", post(tell_all))
+        .route("/api/lessons/tell-all/undo", post(untell))
+        .route_layer(axum::middleware::from_fn(crate::you::from_loomwatch));
     axum::Router::new()
         .route("/api/lessons", get(list).put(rewrite_lesson))
         .route("/api/lessons/undo", post(undo_lesson))
+        .merge(about_you)
         .route_layer(axum::middleware::from_fn(crate::watch_api::local_evidence))
         .with_state(LessonsState {
             teams_root,
             registry,
+            you,
         })
 }
 
@@ -1344,6 +1616,81 @@ async fn rewrite_lesson(
         .map_err(|error| store_error(&error))?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "That lesson is not kept any more."))?;
     Ok(axum::Json(serde_json::json!({"lesson": lesson})).into_response())
+}
+
+/// What the person is told when Tell all my agents, or its Undo, changed nothing. `not_kept` says
+/// it for the lesson not being where that needed it.
+fn tell_error(error: TellError, not_kept: &str) -> crate::api::ApiError {
+    use axum::http::StatusCode;
+    match error {
+        TellError::NotKept => api_error(StatusCode::NOT_FOUND, not_kept),
+        TellError::NotAboutYou => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "That lesson is about this agent's work, so it stays with this agent.",
+        ),
+        TellError::Full => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "About you is full. Make room on the About you page, then try again.",
+        ),
+        TellError::Unsaved(error) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("About you could not be saved: {error}"),
+        ),
+        TellError::Store(error) => store_error(&error),
+    }
+}
+
+/// `POST /api/lessons/tell-all {teamPath, agent | savedAgent, id}`: Tell all my agents. A lesson
+/// about the person goes into About you, which every agent reads, and leaves the agent's list. The
+/// person's click, from `LoomWatch`'s own page: nothing else writes About you.
+async fn tell_all(
+    axum::extract::State(state): axum::extract::State<LessonsState>,
+    axum::Json(edit): axum::Json<LessonEdit>,
+) -> ApiResult {
+    use axum::response::IntoResponse;
+    let (scope, _) = scope_for(&state, &edit.whose)?;
+    let store = store(&state)?;
+    let told = store
+        .tell_all(&scope, &edit.id, &state.you)
+        .await
+        .map_err(|error| tell_error(error, "That lesson is not kept any more."))?;
+    let lessons = store
+        .active(&scope)
+        .await
+        .map_err(|error| store_error(&error))?;
+    Ok(axum::Json(serde_json::json!({
+        "lesson": told.lesson,
+        "lessons": lessons,
+        "you": told.you,
+        "added": told.changed,
+    }))
+    .into_response())
+}
+
+/// `POST /api/lessons/tell-all/undo {teamPath, agent | savedAgent, id}`: Undo Tell all my agents.
+/// The lesson is back in the agent's list, and the line it added comes out of About you.
+async fn untell(
+    axum::extract::State(state): axum::extract::State<LessonsState>,
+    axum::Json(edit): axum::Json<LessonEdit>,
+) -> ApiResult {
+    use axum::response::IntoResponse;
+    let (scope, _) = scope_for(&state, &edit.whose)?;
+    let store = store(&state)?;
+    let told = store
+        .untell(&scope, &edit.id, &state.you)
+        .await
+        .map_err(|error| tell_error(error, "That is undone already."))?;
+    let lessons = store
+        .active(&scope)
+        .await
+        .map_err(|error| store_error(&error))?;
+    Ok(axum::Json(serde_json::json!({
+        "lesson": told.lesson,
+        "lessons": lessons,
+        "you": told.you,
+        "removed": told.changed,
+    }))
+    .into_response())
 }
 
 #[cfg(test)]
