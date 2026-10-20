@@ -49,7 +49,8 @@
 @media(max-width:1100px) { .delivery-stages { gap:32px; } .prototype-handoff.delivery-handoff-arrow { top:-28px; left:50%; transform:translateX(-50%); } .prototype-handoff span,.prototype-handoff small { display:none; } }
 /* The prototype's vocabulary, derived from the semantic tokens so both themes come from one source
    (these were obsidian literals, which left dark-ink text on dark cards in the light theme). */
-.lw-shell { --surface:var(--color-panel); --surface-raised:var(--color-panel-solid); --surface-hover:color-mix(in srgb, var(--color-ink) 6%, var(--color-panel-solid)); --graph-bg:var(--color-ground); --line:var(--color-hairline); --line-soft:var(--color-hairline); --line-strong:var(--color-ink-3); --text:var(--color-ink); --muted:var(--color-ink-2); --quiet:var(--color-ink-3); --gold:var(--color-accent); --gold-dim:color-mix(in srgb, var(--color-accent) 45%, transparent); --gold-tint:var(--color-accent-tint); --success:var(--color-ok); }
+/* The ☰ menu also stands outside a shell (on Home, and in an agent's page's narrow row), so it takes the same names itself. */
+.lw-shell, .prototype-workspace-menu { --surface:var(--color-panel); --surface-raised:var(--color-panel-solid); --surface-hover:color-mix(in srgb, var(--color-ink) 6%, var(--color-panel-solid)); --graph-bg:var(--color-ground); --line:var(--color-hairline); --line-soft:var(--color-hairline); --line-strong:var(--color-ink-3); --text:var(--color-ink); --muted:var(--color-ink-2); --quiet:var(--color-ink-3); --gold:var(--color-accent); --gold-dim:color-mix(in srgb, var(--color-accent) 45%, transparent); --gold-tint:var(--color-accent-tint); --success:var(--color-ok); }
 .lw-shell .eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
 .lw-shell .icon-button { display:grid; place-items:center; background:transparent; border:0; color:var(--muted); padding:4px; cursor:pointer; }
 .build-workspace .node-palette { position:absolute; top:179px; bottom:0; left:0; width:var(--lw-palette-w, 210px); border-radius:0; }
@@ -70,9 +71,12 @@
 .lw-shell .workspace-chrome { background:var(--color-ground); }
 .prototype-workspace-menu { position:absolute; right:30px; top:16px; display:flex; align-items:center; gap:24px; pointer-events:auto; font-size:11px; color:var(--quiet); }
 .prototype-workspace-menu>button { display:grid; place-items:center; width:30px; height:30px; border:1px solid var(--line); border-radius:50%; background:var(--surface-raised); color:var(--muted); font-size:11px; }
-.prototype-workspace-menu>div { position:absolute; right:0; top:39px; width:190px; padding:7px; border:1px solid var(--line); border-radius:7px; background:var(--surface); box-shadow:0 12px 35px #0006; }
+/* Open, it lies over the page under it (Home, an agent's page's narrow row), as the needs-you tray does. */
+.prototype-workspace-menu>div { position:absolute; z-index:80; right:0; top:39px; width:190px; padding:7px; border:1px solid var(--line); border-radius:7px; background:var(--surface); box-shadow:0 12px 35px #0006; }
 .prototype-workspace-menu>div button { display:block; width:100%; padding:10px; text-align:left; border:0; background:transparent; color:var(--text); font-size:12px; }
 .prototype-workspace-menu>div button:hover { background:var(--surface-hover); }
+/* Where it shows on a phone (Home, an agent's page), a finger's worth: the button and each item 44 px. */
+@media(max-width:767px) { .prototype-workspace-menu>button { width:44px; height:44px; } .prototype-workspace-menu>div button { min-height:44px; } }
 .lw-shell .workspace-view-tabs button { display:flex; justify-content:center; align-items:center; gap:8px; }
 /* The team chip lives in the header's first column, after the brand, and can never be wider than
    that column. Pinned at `left:180px; width:330px` it reached under the centred Run tab whenever

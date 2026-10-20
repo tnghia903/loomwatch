@@ -21,6 +21,9 @@
 .home-brand { display: inline-flex; align-items: center; gap: 10px; }
 .home-brand .fr-mark { animation: none; }
 .home-top-acts { display: inline-flex; gap: var(--sp-2); }
+/* The menu stands in the row, and stays on a phone, where it is the only way to Skills, Quests,
+   Feedback and the theme. */
+.home-top-acts .prototype-workspace-menu { display: flex; position: relative; right: auto; top: auto; }
 
 .home-main {
   position: relative; flex: 1; width: min(1040px, 100%); margin: 0 auto;

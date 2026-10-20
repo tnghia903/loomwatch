@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
 
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
+import { FEEDBACK_EVENT } from '../../lib/feedback/report'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { resetFirstRunForTests } from '../../lib/firstrun/store'
 import { readTourState, resetTourForTests, startTour } from '../../lib/tour/store'
@@ -234,6 +235,38 @@ describe('Home', () => {
     expect(screen.queryByRole('region', { name: 'First, choose how your agents’ models are paid' })).toBeNull()
     expect(screen.getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/connections')
     expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/usage')
+  })
+
+  // Home wears the header a team's and an agent's page have, the bell beside the menu. Skills,
+  // Quests, the theme and feedback are in the menu rather than in buttons of their own.
+  it('has the menu a team’s page has, with Skills, Quests, the theme and feedback in it', async () => {
+    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+    const sent = vi.fn()
+    window.addEventListener(FEEDBACK_EVENT, sent)
+    render(<Home onPalette={vi.fn()} topActions={<button type="button">1 needs you</button>} />)
+    const header = screen.getByRole('banner')
+    expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Open the command palette', '1 needs you', 'Menu'])
+    expect(within(header).queryAllByRole('link')).toEqual([])
+    const menu = within(header).getByRole('button', { name: 'Menu' })
+    fireEvent.click(menu)
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'My agents…', 'About you…', 'Connections…', 'Usage…', 'Skills…', 'Quests…', expect.stringMatching(/^Switch to (light|dark) theme$/), 'Getting started guide', 'Send feedback…',
+    ])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Skills…' }))
+    expect(assign).toHaveBeenLastCalledWith('/skills')
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.click(menu)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Quests…' }))
+    expect(assign).toHaveBeenLastCalledWith('/quests')
+    const before = document.documentElement.dataset.theme
+    fireEvent.click(menu)
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Switch to (light|dark) theme$/ }))
+    expect(document.documentElement.dataset.theme).not.toBe(before)
+    fireEvent.click(menu)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send feedback…' }))
+    expect(sent.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([{ screen: 'home' }])
+    window.removeEventListener(FEEDBACK_EVENT, sent)
+    localStorage.removeItem('loomwatch:theme')
   })
 
   it('says when the account has no credits yet, or OpenRouter refused the key', async () => {

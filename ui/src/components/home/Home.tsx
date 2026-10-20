@@ -1,7 +1,6 @@
-import { ArrowRight, MessageSquareWarning, Moon, Plus, Search, Sun, UserRoundPlus, Users } from 'lucide-react'
+import { ArrowRight, Plus, Search, UserRoundPlus, Users } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { openFeedback } from '../../lib/feedback/report'
 import { relativeTime } from '../../lib/format'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
@@ -21,12 +20,11 @@ import { TeamFabric } from './TeamFabric'
 import { Sources } from '../connections/Sources'
 import { UsageNotices } from '../usage/UsageNotices'
 import { UpdateBadge } from '../updates/Updates'
-import { QuestsLink } from '../quests/QuestsLink'
-import { SkillsLink } from '../skills/SkillsLink'
 import { DeleteTeamDialog } from './DeleteTeamDialog'
 import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
 import { YourAgentsShelf } from './YourAgentsShelf'
+import { WorkspaceMenu } from '../workspace/WorkspaceMenu'
 import { keys } from '../../lib/platform'
 import { dollars } from '../../lib/runs/spend'
 
@@ -160,13 +158,16 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
       <header className="home-top">
         <span className="home-brand"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></span>
         <span className="home-top-acts">
-          {topActions}
-          <UpdateBadge />
-          <SkillsLink />
-          <QuestsLink />
-          <button type="button" className="home-feedback" onClick={() => openFeedback({ screen: 'home' })} aria-label="Send feedback" title="Report a problem or share an idea"><MessageSquareWarning size={15} aria-hidden="true" /><span className="home-feedback-label">Feedback</span></button>
           <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title={`Commands (${keys('⌘K')})`}><Search size={15} aria-hidden="true" /></button>
-          <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={`Theme (${keys('⌘⇧L')})`}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
+          <UpdateBadge />
+          {/* The bell beside the menu, as on a team's and an agent's page. Skills, Quests and the
+              theme, which a team's screen reaches from its palette and view bar, are in the menu. */}
+          {topActions}
+          <WorkspaceMenu screen="home" more={[
+            { label: 'Skills…', run: () => window.location.assign('/skills') },
+            { label: 'Quests…', run: () => window.location.assign('/quests') },
+            { label: resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', run: toggle },
+          ]} />
         </span>
       </header>
 

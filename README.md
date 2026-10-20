@@ -746,8 +746,8 @@ costs. After its first answer it offers **Tell my agents about me**: your name, 
 language and length you want. Then it answers again, made for you. **Keep this agent** adds it to My
 agents, and **Just look around** goes to Home instead.
 
-For a tour of the rest, open **New here? Take the 3-minute guide** on Home or in a team's menu, or
-press <kbd>⌘</kbd><kbd>K</kbd> and choose **Getting started guide**. It walks you through building
+For a tour of the rest, click **New here? Take the 3-minute guide** on Home, or choose **Getting
+started guide** from the ☰ menu or <kbd>⌘</kbd><kbd>K</kbd>. It walks you through building
 an agent, trying it on its own, putting it in a team and running it.
 
 To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The
