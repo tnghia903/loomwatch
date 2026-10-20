@@ -120,7 +120,7 @@ import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
 import { SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
-import { savedJobPreset, toolAllowOf, useSavedJobs, versionOf, type SavedJob } from '../lib/library/jobs'
+import { savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
 import { fieldsForVersion, linkState } from '../lib/library/link'
 import { teamAgentEdit } from '../lib/library/teamDraft'
 import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
@@ -2730,7 +2730,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                 const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
                 if (!agent || !editable) return
                 doc.applyAgentFields(agentId, fieldsForVersion(job, agent, previous))
-                setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
+                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
               }}
               onUnlink={(agentId) => {
                 if (!editable) return
@@ -2811,7 +2811,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               onApply: (job, previous) => {
                 if (!editable) return
                 doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent, previous))
-                setStatusAnnouncement(`${job.name} is now v${versionOf(job)} in this team. Save the team to keep it.`)
+                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
               },
               onUnlink: () => {
                 if (!editable) return

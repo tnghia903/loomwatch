@@ -2,7 +2,7 @@ import { ArrowRight, Plus, UserRound } from 'lucide-react'
 
 import { figureFor } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
-import { useSavedJobs, versionOf } from '../../lib/library/jobs'
+import { useSavedJobs } from '../../lib/library/jobs'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import { KnowYou } from '../you/KnowYou'
 
@@ -36,7 +36,7 @@ export function YourAgentsShelf() {
           {jobs.slice(0, SHOWN).map((job) => (
             // Coming back from Home is coming back to use the agent, so it opens on its chat (a newcomer
             // test went to Build and had to look for Chat); Build is the tab beside it.
-            <li key={job.id}><a className="home-agent-chip" href={`/agents/${encodeURIComponent(job.id)}?view=chat`}><FigureStill className="home-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{job.name}</b><span>v{versionOf(job)}</span></a></li>
+            <li key={job.id}><a className="home-agent-chip" href={`/agents/${encodeURIComponent(job.id)}?view=chat`}><FigureStill className="home-agent-figure" figure={figureFor(job.id, job.figure)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{job.name}</b></a></li>
           ))}
           {teamAgents.map((agent) => (
             // It lives in its team's file, so it opens there, on the team's Agents tab, wearing the

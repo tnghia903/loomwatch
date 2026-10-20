@@ -36,7 +36,6 @@
 .agent-badge-who strong { font: 600 15px/1.25 var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
 .agent-badge-does { font-size: 13px; color: var(--color-ink-2); }
 .agent-badge-app { color: var(--color-ink-3); overflow-wrap: anywhere; }
-.agent-badge-version { flex: none; font: 600 11px/1 var(--font-mono); color: var(--color-accent); background: var(--color-accent-tint); padding: 4px 7px; border-radius: var(--r-full); }
 .agent-badge-row { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: var(--sp-2); align-items: baseline; font-size: 12.5px; color: var(--color-ink-2); }
 .agent-badge.compact .agent-badge-row { grid-template-columns: 64px minmax(0, 1fr); }
 .agent-badge-label { font: 600 10.5px/1.4 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--color-ink-3); }
@@ -68,7 +67,6 @@
 .agent-view-tabs button[aria-pressed='true'] { color: var(--color-accent); font-weight: 600; }
 .agent-view-tabs button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .agent-builder-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); max-width: 560px; }
-.agent-note { width: 280px; max-width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); font: inherit; font-size: 13px; }
 .agent-save-state { flex-basis: 100%; text-align: right; min-height: 16px; color: var(--color-ink-3); }
 .agent-save-error { color: var(--color-alert); }
 /* Under the bench (its chat is a tab): the ID card, where it is used and its versions on the left,
@@ -85,7 +83,7 @@
 /* Our own chevron, inset as far from the edge as the text is, so the box reads balanced. */
 .agent-field select { appearance: none; -webkit-appearance: none; padding-right: 36px; background-image: var(--select-chevron); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px; cursor: pointer; }
 .agent-field select:disabled { cursor: default; opacity: .6; }
-.agent-field input:focus, .agent-field select:focus, .agent-instructions:focus, .agent-note:focus { outline: 2px solid var(--color-accent); outline-offset: -1px; border-color: transparent; }
+.agent-field input:focus, .agent-field select:focus, .agent-instructions:focus { outline: 2px solid var(--color-accent); outline-offset: -1px; border-color: transparent; }
 .agent-field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
 .agent-section .agent-permissions { display: flex; flex-direction: column; gap: var(--sp-2); }
 .agent-remove { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); justify-content: flex-end; }
@@ -105,15 +103,12 @@
 .agent-bench-error { margin: 0; color: var(--color-alert); font-size: 13px; }
 
 /* used in, versions */
-.agent-uses, .agent-versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.agent-uses { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .agent-uses li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); font-size: 13.5px; }
 .agent-uses a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-ink); text-decoration: none; font-weight: 500; }
 .agent-uses a:hover { color: var(--color-accent); }
 .agent-use-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
 .agent-use-version.behind { color: var(--color-accent); }
-.agent-versions li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: baseline; font-size: 13px; color: var(--color-ink-2); }
-.agent-versions b { font: 600 12px var(--font-mono); color: var(--color-ink); }
-.agent-versions time { font-size: 12px; color: var(--color-ink-3); white-space: nowrap; }
 
 /* ---------- Home's row of agents ---------- */
 .home-agents-all { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
@@ -132,7 +127,6 @@
 .linked-agent { display: flex; flex-direction: column; gap: 8px; padding: var(--sp-3); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline)); border-radius: var(--r-md); background: var(--color-accent-tint); }
 .linked-agent p { margin: 0; }
 .linked-agent-line { font-size: 13.5px; color: var(--color-ink); }
-.linked-agent-version { font: 600 11px/1 var(--font-mono); color: var(--color-accent); margin-left: 4px; }
 .linked-agent-update, .linked-agent-changed { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
 .linked-agent-changed p { color: var(--color-alert); }
 .linked-agent-acts { display: flex; flex-wrap: wrap; gap: 6px; }

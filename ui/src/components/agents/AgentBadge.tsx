@@ -20,8 +20,7 @@ export interface AgentBadgeProps {
   modelName?: string
   /** Its thinking effort's name, when it has one other than the model's default. */
   effortName?: string
-  version?: number | null
-  /** Teams that use it, and how many of those run on a schedule. */
+  /** Teams that use it, how many of those run on a schedule, and how many have an update ready. */
   usedIn?: { teams: number; scheduled: number; behind: number }
   compact?: boolean
 }
@@ -31,7 +30,7 @@ export interface AgentBadgeProps {
  * right now — what it carries, and where it is used. It is the staff badge of the design notes:
  * an access card with an "after hours" rule, because a scheduled team has nobody to answer.
  */
-export function AgentBadge({ markId, figure, draft, modelName, effortName, version, usedIn, compact = false }: AgentBadgeProps) {
+export function AgentBadge({ markId, figure, draft, modelName, effortName, usedIn, compact = false }: AgentBadgeProps) {
   const scheduled = (usedIn?.scheduled ?? 0) > 0
   const asks = ALLOW_SWITCHES.filter(({ key }) => !draft.allow[key])
   const name = draft.name.trim() || 'New agent'
@@ -46,7 +45,6 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, versi
           {draft.does.trim() && <span className="agent-badge-does">{draft.does.trim()}</span>}
           <span className="agent-badge-app t-mono-sm">{modelName || modelNameFromId(draft.model)}{effortName ? ` · ${effortName.toLowerCase()} effort` : ''}</span>
         </div>
-        {version != null && <span className="agent-badge-version" title={`Version ${version}`}>v{version}</span>}
       </div>
       <div className="agent-badge-row">
         <span className="agent-badge-label">Access</span>
@@ -77,7 +75,7 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, versi
       {usedIn && (
         <div className="agent-badge-row">
           <span className="agent-badge-label">Used in</span>
-          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}{usedIn.behind > 0 ? <em className="agent-badge-behind"> · {usedIn.behind} on an older version</em> : null}</span>
+          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}{usedIn.behind > 0 ? <em className="agent-badge-behind"> · {usedIn.behind} not updated yet</em> : null}</span>
         </div>
       )}
     </div>

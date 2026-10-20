@@ -78,8 +78,8 @@ and asks.
 
 **Build an agent** once: its job, the model it thinks with, its skills, and the keys it may use
 without asking, such as the web or running commands. Pick it a face, **try it on its own**
-with a real request, and save it to **My agents**. Change its job later and it becomes the next
-version; a team keeps the version it was given until you choose **Update**.
+with a real request, and save it to **My agents**. Change its job later and each team keeps the
+copy it was given until you choose **Update** in that team.
 
 </td>
 </tr>
@@ -160,7 +160,7 @@ you decide**, and the finished answer comes with the evidence to check before yo
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
 | Each AI app keeps its own skills and folders. | Skills and the folders and files you choose are delivered to the agents that need them. Take one off and it is turned off for that agent. |
-| You set the same agent up again in every project. | Build it once in My agents, try it on its own, and add it to any team. Teams keep their version until you choose Update. |
+| You set the same agent up again in every project. | Build it once in My agents, try it on its own, and add it to any team. Each team keeps its copy until you choose Update. |
 | Doing the job again means retyping the prompt. | One chat per team that remembers the conversation, **@** an agent to redo one step, and daily schedules. |
 
 ## How a run works
@@ -219,8 +219,8 @@ with a lead that hands out work and asks its teammates questions as it goes.
 ### 🧑‍🔧 My agents
 
 Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
-**Chat** tab, then add it to any team. A new job makes a new version, and teams keep theirs until
-you choose **Update**. Tell them about you once, in **About you**, and every agent fits its answers
+**Chat** tab, then add it to any team. Change it later and each team keeps the copy it has until
+you choose **Update** there. Tell them about you once, in **About you**, and every agent fits its answers
 to you. Your agents stand down the side of each agent's page, and your teams down the side of each
 team's: one click moves to another, and each glows while it works or waits for you.
 
@@ -783,8 +783,8 @@ with what should change; under its new version, **Continue with the team** runs 
    uses a key it wasn't given. **Save to My agents** when it does the job.
 3. Click **New team**, give it a name and choose the agents it starts with. A team always starts
    with at least one:
-   - **My agents** — tick the agents you built; each joins as the version you saved (recommended
-     once you have one).
+   - **My agents** — tick the agents you built; each joins as you last saved it (recommended once
+     you have one).
    - **One assistant** — a single agent that does the whole task (recommended to begin with).
    - **Researcher and writer** — one agent gathers facts, a second writes the result.
    - **Research, write and check** — a third agent, on another company's model, checks the finished
@@ -1149,11 +1149,13 @@ delete its folder from `.trash`.
 Build an agent in **My agents** (**Build an agent** on Home). It appears under **My agents** in
 every team's add panel, with its instructions, model, skills and what it may do without asking.
 
-Placing it copies that version into the team, so a team runs exactly what it was approved with.
-Saving a change to what a team copies, such as its job, makes the next version and keeps the
-earlier ones; a new face keeps the version. The agent's panel in a team says when a newer version
-is ready and offers **Update to v…**, **Edit in My agents**, or **Make it this team's own** to
-change it there alone. The builder lists the teams that use the agent and the version each one has.
+Placing it copies the agent into the team, so a team runs exactly what it was approved with.
+Saving a change to what a team copies, such as its job, leaves the teams' copies as they are; a
+new face changes nothing in them. The agent's panel in a team says **Changed in My agents** when
+there is something new, and offers **Update**, **Edit in My agents**, or **Make it this team's
+own** to change it there alone. The builder lists the teams that use the agent and which of them
+have an update ready. LoomWatch keeps the earlier copies on disk to know which, and shows no
+version numbers.
 Removing an agent from My agents leaves the teams' copies alone. An agent is one small file, so
 you can share it by copying it into another teams folder's `.jobs`.
 

@@ -139,7 +139,7 @@ function AgentsList() {
     <>
       <section className="home-hero agents-hero">
         <h1 className="t-display">My agents</h1>
-        <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the version it was given until you update it there.</p>
+        <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the copy it was given until you update it there.</p>
         <KnowYou />
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
@@ -162,7 +162,7 @@ function AgentsList() {
             {jobs.map((job) => (
               <li key={job.id}>
                 <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} version={versionOf(job)} usedIn={usage.get(job.id)} />
+                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} />
                 </button>
               </li>
             ))}

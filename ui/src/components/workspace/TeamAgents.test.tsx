@@ -249,6 +249,14 @@ describe('a team’s agents, the first of its views', () => {
     expect(capabilities?.filter((capability) => capability.kind !== 'knowledge').map((capability) => capability.name)).toEqual(['algorithmic-art', 'github', 'notion'])
   })
 
+  // Versions stay behind the scenes: the strip says an update is ready, never which number.
+  it('says an agent from My agents has an update ready, with no version number', () => {
+    renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader', version: 1 } }], selected: 'scope', savedJobs: [{ ...reader, version: 2 }] })
+    const strip = screen.getByRole('navigation', { name: 'Digest’s agents' })
+    expect(within(strip).getByText('From My agents · update ready')).toBeInTheDocument()
+    expect(strip.textContent).not.toMatch(/\bv\d/)
+  })
+
   it('chats with an agent placed from My agents with what this team gives it to read', async () => {
     const versioned = { ...reader, model: 'anthropic/claude-sonnet-5.5' }
     const written = benchDaemon([versioned])

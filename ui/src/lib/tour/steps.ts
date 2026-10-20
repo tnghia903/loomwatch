@@ -179,7 +179,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
         }
       : {
           title: 'Save it to My agents',
-          body: 'Press Save to My agents. Every team you add it to keeps the version it was given, until you update it there.',
+          body: 'Press Save to My agents. Every team you add it to keeps the copy it was given, until you update it there.',
           target: ['[data-tour="save-agent"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
@@ -213,7 +213,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-picker"]')
       ? {
           title: 'Add your agent',
-          body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as the version you saved. More agents join the same way.',
+          body: 'A team starts on Agents. Press Add beside the agent you built, and it joins the team as you saved it. More agents join the same way.',
           target: ['[data-tour="agent-picker"]'],
           sides: ['bottom', 'right', 'left'],
           advance: 'action',

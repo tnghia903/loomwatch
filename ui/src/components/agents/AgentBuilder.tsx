@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
-import { ArrowLeft, ExternalLink, History, MessagesSquare, Trash2, Wrench } from 'lucide-react'
+import { ArrowLeft, ExternalLink, MessagesSquare, Trash2, Wrench } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
 import { effortWord, modelEfforts, placeEffort } from '../../lib/ai/efforts'
@@ -7,10 +7,10 @@ import { modelNameFromId } from '../../lib/ai/modelIds'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { useModels } from '../../lib/ai/useModels'
 import type { DetectedCapability } from '../../lib/library/client'
-import { BLANK_DRAFT, blankDraft, draftChanged, draftFromJob, draftFromPreset, makesNewVersion, specFromDraft, type AgentDraft } from '../../lib/library/draft'
+import { BLANK_DRAFT, blankDraft, draftChanged, draftFromJob, draftFromPreset, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
-import { fetchJobVersions, JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobSpec, type JobVersion, type SavedJob } from '../../lib/library/jobs'
+import { JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobSpec, type SavedJob } from '../../lib/library/jobs'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import type { TeamKnowledge } from '../../lib/library/teamDraft'
 import { useAgentUses } from '../../lib/library/uses'
@@ -49,7 +49,8 @@ export interface AgentBuilderProps {
   leaveRef?: MutableRefObject<LeaveGuard | null>
 }
 
-type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
+/** `bumped`: the save changed what teams copy, so the teams that use it have an update ready. */
+type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; bumped: boolean } | { kind: 'error'; message: string }
 
 /**
  * One of Your agents, on its own page with two tabs, as a team has its own: Build and Chat.
@@ -72,7 +73,6 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
   const [base, setBase] = useState<AgentDraft | null>(null)
   const [draft, setDraft] = useState<AgentDraft>(BLANK_DRAFT)
-  const [note, setNote] = useState('')
   const [save, setSave] = useState<SaveState>({ kind: 'idle' })
   const [removing, setRemoving] = useState(false)
   const roleField = useRef<HTMLTextAreaElement>(null)
@@ -117,17 +117,11 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
   const { uses } = useAgentUses()
   const mine = (uses ?? []).filter((use) => saved && use.agent === saved.id)
+  // Versions are kept behind the scenes, so a team knows when it has an older copy to update;
+  // nobody reads a number.
   const version = saved ? versionOf(saved) : null
-  const [versions, setVersions] = useState<JobVersion[] | null>(null)
-  useEffect(() => {
-    if (!saved) return
-    let cancelled = false
-    fetchJobVersions(saved.id).then((found) => { if (!cancelled) setVersions(found) }, () => { if (!cancelled) setVersions([]) })
-    return () => { cancelled = true }
-  }, [saved, version])
 
   const changed = base ? draftChanged(draft, base) : true
-  const bumps = base ? makesNewVersion(draft, base) : true
   const problem = !draft.name.trim() ? 'Give it a name.' : !draft.instructions.trim() ? 'Write its instructions.' : null
   useEffect(() => {
     if (!changed || !base) return
@@ -142,15 +136,14 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     if (problem) return false
     setSave({ kind: 'saving' })
     try {
-      const spec = specFromDraft(draft, bumps ? note : '')
+      const spec = specFromDraft(draft, '')
       const result: SavedJob = saved
         ? await saveJob(saved.id, spec, { replace: true, expectedVersion: versionOf(saved) })
         : await saveJob(jobIdFor(draft.name), spec)
       const next = draftFromJob(result)
       setBase(next)
       setDraft(next)
-      setNote('')
-      setSave({ kind: 'saved', version: versionOf(result), bumped: Boolean(saved) && versionOf(result) > versionOf(saved!) })
+      setSave({ kind: 'saved', bumped: Boolean(saved) && versionOf(result) > versionOf(saved!) })
       inTeam?.onSaved(result, base ? { reads: base.reads } : null)
       if (!saved) {
         setStartedFor(result.id)
@@ -194,28 +187,27 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const cameFromUse = cameFrom ? mine.find((use) => use.teamPath === cameFrom || cameFrom.endsWith(`/${use.teamPath}`)) ?? null : null
   const scheduledUses = mine.filter((use) => use.scheduled).length
   const behindUses = version ? mine.filter((use) => use.version < version).length : 0
-  const saveLabel = !saved ? 'Save to My agents' : bumps ? `Save as v${(version ?? 1) + 1}` : 'Save'
+  const saveLabel = !saved ? 'Save to My agents' : 'Save'
   const markId = saved?.id ?? (draft.name || 'new')
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
-  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} version={saved && !changed ? version : null} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
+  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
 
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
       <AgentHead
-        above={inTeam ? <span className="agent-backs t-meta">From My agents. Saving makes its next version, and moves {inTeam.name} to it.</span> : <span className="agent-backs">
+        above={inTeam ? <span className="agent-backs t-meta">From My agents. Saving here saves it there, and {inTeam.name} uses it at once.</span> : <span className="agent-backs">
           <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
-          {/* Back to the team's agents: that is where an agent is added, or moved to a new version. */}
-          {cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ` to update it to v${save.version}` : ''}</a>}
+          {/* Back to the team's agents: that is where an agent is added, or updated. */}
+          {cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ' to update it' : ''}</a>}
         </span>}
         name={draft.name.trim() || 'New agent'}
-        status={<span className="agent-builder-version">{saved ? `v${version}${saved.savedAt ? ` · saved ${relativeTime(new Date(saved.savedAt))}` : ''}` : 'Not saved yet'}</span>}
+        status={<span className="agent-builder-version">{saved ? (saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved') : 'Not saved yet'}</span>}
         view={view} onView={showView} tour={!inTeam}
       >
         <div className="agent-builder-save">
-          {saved && changed && bumps && <input className="agent-note" value={note} maxLength={200} onChange={(event) => setNote(event.target.value)} placeholder="What changed? Teams see this when they update" aria-label="What changed in this version" />}
           <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
           <span className="agent-save-state t-meta" role="status">
-            {save.kind === 'saved' ? (save.bumped ? (inTeam ? `Saved as v${save.version}, and ${inTeam.name} now uses it. Save the team to keep that.` : `Saved as v${save.version}. Teams keep their version until they update.`) : `Saved${save.version ? ` · v${save.version}` : ''}.`)
+            {save.kind === 'saved' ? (save.bumped ? (inTeam ? `Saved, and ${inTeam.name} now uses it. Save the team to keep that.` : 'Saved. Teams that use it get this when you choose Update in them.') : 'Saved.')
               : save.kind === 'error' ? <span className="agent-save-error">{save.message}</span>
               : changed && base ? 'Unsaved changes' : problem ?? ''}
           </span>
@@ -245,20 +237,11 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
                     {mine.map((use) => (
                       <li key={`${use.teamPath}#${use.agentId}`}>
                         <a href={`/?path=${encodeURIComponent(use.teamPath)}`}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
-                        <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>v{use.version}{version && use.version < version ? ` · v${version} is ready` : ''}</span>
+                        <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>{version && use.version < version ? 'Update ready there' : 'Up to date'}</span>
                         {use.scheduled && <span className="t-meta">on a schedule</span>}
                       </li>
                     ))}
                   </ul>}
-              </section>
-            )}
-
-            {saved && versions && versions.length > 0 && (
-              <section className="agent-section" aria-label="Versions">
-                <div className="agent-section-head"><History size={13} aria-hidden="true" />Versions</div>
-                <ol className="agent-versions">
-                  {versions.map((entry) => <li key={entry.version}><b>v{entry.version}</b><span>{entry.note || (entry.version === 1 ? 'First version' : 'No note')}</span>{entry.savedAt && <time dateTime={entry.savedAt}>{relativeTime(new Date(entry.savedAt))}</time>}</li>)}
-                </ol>
               </section>
             )}
 

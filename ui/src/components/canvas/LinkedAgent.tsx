@@ -24,8 +24,9 @@ export interface LinkedAgentProps {
 const list = (items: readonly string[]) => items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 
 /**
- * FROM YOUR AGENTS: the agent panel's side of the versioned link. Which agent and version this
- * team copies, a newer version when one is ready, and what this team changed since its version.
+ * FROM YOUR AGENTS: the agent panel's side of the versioned link. Which agent this team copies,
+ * an update when the agent changed in My agents, and what this team changed in its copy. Versions
+ * stay behind the scenes: nobody reads a number.
  * The panel keeps the copied fields read-only while the link stands; editing happens in Your
  * agents, or here after "Make it this team's own".
  */
@@ -48,18 +49,18 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
   return (
     <section className="build-context linked-agent" aria-label="From My agents">
       <div className={headClassName}>From My agents</div>
-      <p className="linked-agent-line"><b>{name}</b> <span className="linked-agent-version">v{link.version}</span>{link.job && !link.behind && changed.length === 0 && <span className="t-meta"> · up to date</span>}</p>
-      {!link.job && <p className="t-meta">It is no longer in My agents. This team keeps its copy of v{link.version}.</p>}
+      <p className="linked-agent-line"><b>{name}</b>{link.job && !link.behind && changed.length === 0 && <span className="t-meta"> · up to date</span>}</p>
+      {!link.job && <p className="t-meta">It is no longer in My agents. This team keeps its copy.</p>}
       {link.behind && link.latest !== null && (
         <div className="linked-agent-update">
-          <p><b>v{link.latest} is ready.</b>{notes.length > 0 ? ` ${notes.join(' · ')}` : ''}</p>
-          <button type="button" className="btn btn-primary" disabled={readOnly} onClick={() => link.job && onApply(link.job, pinned?.spec ?? null)}><ArrowUpCircle size={13} aria-hidden="true" />Update to v{link.latest}</button>
+          <p><b>Changed in My agents.</b>{notes.length > 0 ? ` ${notes.join(' · ')}` : ''}</p>
+          <button type="button" className="btn btn-primary" disabled={readOnly} onClick={() => link.job && onApply(link.job, pinned?.spec ?? null)}><ArrowUpCircle size={13} aria-hidden="true" />Update</button>
         </div>
       )}
       {changed.length > 0 && (
         <div className="linked-agent-changed" role="status">
-          <p>This team changed its {list(changed)} since v{link.version}.</p>
-          {putBack && <button type="button" className="btn" disabled={readOnly} onClick={putBack}>Put back v{link.version}</button>}
+          <p>This team changed its {list(changed)} from the copy it was given.</p>
+          {putBack && <button type="button" className="btn" disabled={readOnly} onClick={putBack}>Put it back</button>}
         </div>
       )}
       <div className="linked-agent-acts">
