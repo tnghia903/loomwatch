@@ -139,6 +139,7 @@ import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
 import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-file/sendBack'
+import { filesTouched } from '../lib/files/fileRefs'
 import type { AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
 import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
@@ -450,6 +451,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const projection = session.projection
   const runView = activeRunId !== null
   const observedConnected = useMemo(() => connectedServersByAgent(projection.agents), [projection.agents])
+  // What the run's agents read or wrote: the answer names files from an agent's own folder.
+  const touchedFiles = useMemo(() => filesTouched(projection.evidence), [projection.evidence])
   const routine = useMemo(() => scheduleForPath(schedules.entries, doc.path), [schedules.entries, doc.path])
   // The registry knows the canonical responder for its own runs; history falls back to the document.
   const responderId = record?.responder ?? responderFromDoc
@@ -2607,7 +2610,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} onShowAsked={showAsked} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>
-                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} />
+                    <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} />
                   </FileOriginContext.Provider>
                 ) : session.loading ? (
                   // The record is shown once it is read whole, so it opens as it ended rather than replaying.
