@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { useLayoutEffect, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { NeedsYouTray } from './NeedsYouTray'
@@ -294,5 +295,168 @@ describe('the bell’s ring', () => {
     const reduced = sheets.flatMap((css) => [...uncommented(css).matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*([^{}]+)\{([^{}]*)\}/g)])
       .filter(([, selectors]) => selectors.split(',').some((one) => one.trim() === '*'))
     expect(reduced.map(([, , body]) => body).join(';')).toMatch(/animation-iteration-count:\s*1 !important/)
+  })
+})
+
+// One gold fill per screen with the tray open too: its active ticket's fill is the screen's, and the
+// page's own (Run team, Save, Home's Build an agent, the schedule's chosen tab) steps back to a
+// ring until it closes. jsdom paints nothing, so this runs the cascade itself: every
+// rule of the app's stylesheets, in index.css's order, matched with the element's own `matches`.
+const ordered = [...readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8').matchAll(/@import '\.\/styles\/([\w-]+\.css)'/g)]
+  .flatMap(([, name]) => parsed(readFileSync(resolve(styles, name), 'utf8')))
+// Split at the commas outside brackets: `:not(a, b)` is one selector.
+const topLevel = (list: string) => {
+  const parts = ['']
+  let depth = 0
+  for (const char of list) {
+    depth += char === '(' ? 1 : char === ')' ? -1 : 0
+    if (char === ',' && depth === 0) parts.push('')
+    else parts[parts.length - 1] += char
+  }
+  return parts.map((one) => one.trim()).filter(Boolean)
+}
+// Selectors Level 4: `:where()` counts nothing; `:not()`, `:is()` and `:has()` count their most specific argument.
+const specificity = (selector: string): number => {
+  let rest = selector
+  let inner = 0
+  for (let call = /:(where|not|is|has)\(/.exec(rest); call; call = /:(where|not|is|has)\(/.exec(rest)) {
+    let at = call.index + call[0].length
+    for (let depth = 1; depth > 0 && at < rest.length; at += 1) depth += rest[at] === '(' ? 1 : rest[at] === ')' ? -1 : 0
+    if (call[1] !== 'where') inner += Math.max(...topLevel(rest.slice(call.index + call[0].length, at - 1)).map(specificity))
+    rest = `${rest.slice(0, call.index)} ${rest.slice(at)}`
+  }
+  rest = rest.replace(/\([^()]*\)/g, ' ')
+  const classes = rest.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):[\w-]+/g) ?? []
+  const types = [...rest.replace(/\[[^\]]*\]|[.#:][\w-]+/g, ' ').match(/[a-z][\w-]*/gi) ?? [], ...rest.match(/::[\w-]+/g) ?? []]
+  return inner + (rest.match(/#[\w-]+/g) ?? []).length * 10_000 + classes.length * 100 + types.length
+}
+// `:hover` stands in as an attribute, so a test can hover without a pointer.
+const cascaded = (element: Element, property: string) => {
+  let won: { weight: number; value: string } | null = null
+  for (const [, selectors, body] of ordered) {
+    const values = [...body.matchAll(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`, 'g'))].map(([, value]) => value.trim())
+    if (values.length === 0) continue
+    for (const selector of topLevel(selectors)) {
+      let matches = false
+      try { matches = element.matches(selector.replace(/:hover\b/g, '[data-hovered]')) } catch { /* @keyframes steps, ::before */ }
+      const weight = specificity(selector)
+      if (matches && (!won || weight >= won.weight)) won = { weight, value: values.at(-1)! }
+    }
+  }
+  return (won as { value: string } | null)?.value ?? null
+}
+const background = (element: Element) => cascaded(element, 'background') ?? cascaded(element, 'background-color')
+const gold = ['var(--color-accent-fill)', 'var(--gold)']
+
+describe('the open tray beside the page’s own gold fill', () => {
+  afterEach(() => { delete document.documentElement.dataset.theme })
+  const layout = (tray: ReactNode) => (
+    <div className="lw-shell">
+      <button type="button" className="btn btn-primary">Run team</button>
+      <button type="button" className="btn btn-primary" disabled>Save</button>
+      <div className="schedule-tabs" role="tablist"><button type="button" className="active">Every day</button></div>
+      {tray}
+    </div>
+  )
+  const page = (tray: ReactNode) => render(layout(tray))
+  const filled = () => [...document.querySelectorAll('button')].filter((button) => gold.includes(background(button) ?? '')).map((button) => button.textContent)
+
+  for (const theme of ['light', 'dark']) {
+    it(`steps the page’s fills back to a ring while the tray shows its own, in ${theme}`, () => {
+      document.documentElement.dataset.theme = theme
+      page(<NeedsYouTray tickets={[review('page-a'), review('page-b')]} working={0} onAnswer={vi.fn()} onDismiss={vi.fn()} />)
+      expect(ordered.length).toBeGreaterThan(everyRule.length / 2)
+      const run = screen.getByRole('button', { name: 'Run team' })
+      expect(filled()).toEqual(['Run team', 'Every day'])
+      fireEvent.click(screen.getByRole('button', { name: /2 need you/ }))
+      expect(filled()).toEqual(['Looks goodA'])
+      expect(background(run)).toBe('transparent')
+      expect(cascaded(run, 'color')).toBe('var(--color-ink)')
+      expect(cascaded(run, 'border-color')).toBe('var(--color-accent)')
+      const tab = screen.getByRole('button', { name: 'Every day' })
+      expect(background(tab)).toBe('transparent')
+      expect(cascaded(tab, 'color')).toBe('var(--color-ink)')
+      expect(cascaded(tab, 'box-shadow')).toBe('inset 0 0 0 1px var(--color-accent)')
+      // The tab row clips to its rounded corner inside a 1 px border; the ring follows that corner.
+      expect(cascaded(tab.parentElement!, 'border-radius')).toBe('var(--r-sm)')
+      expect(cascaded(tab, 'border-radius')).toBe('calc(var(--r-sm) - 1px)')
+      // A button that can't be pressed keeps its grey: a gold ring would read as one that can.
+      expect(background(screen.getByRole('button', { name: 'Save' }))).toBe('var(--color-hairline)')
+      // Hovered, the ring takes the tint every other button does; the tray's fill stays gold.
+      run.setAttribute('data-hovered', '')
+      expect(background(run)).toBe('var(--color-accent-tint)')
+      expect(cascaded(run, 'filter')).toBe('none')
+      const [main] = screen.getAllByRole('button', { name: /^Looks good/ })
+      main.setAttribute('data-hovered', '')
+      expect(gold).toContain(background(main))
+      run.removeAttribute('data-hovered')
+      // J moves the fill to the next ticket; the page stays a ring.
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'j' })
+      expect(filled()).toEqual(['Looks goodA'])
+      expect(screen.getAllByRole('button', { name: /^Looks good/ })[1]).toHaveClass('btn-primary')
+      // A press outside closes the tray first, so the page gets its fill back before the click lands.
+      fireEvent.mouseDown(run)
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(filled()).toEqual(['Run team', 'Every day'])
+    })
+  }
+
+  it('leaves the page its fill while the tray has none: nothing waiting, a stopped run, a ticket answered on this screen', () => {
+    const stopped: Ticket = { ...ticket, id: 'page-s:failed', kind: 'failed', runId: 'page-s', text: 'It stopped.', context: null, requestId: undefined }
+    const tray = (tickets: Ticket[], onScreenRunId: string | null = null) => <NeedsYouTray tickets={tickets} working={0} onAnswer={vi.fn()} onPermission={vi.fn(() => Promise.resolve())} onDismiss={vi.fn()} onScreenRunId={onScreenRunId} />
+    const { rerender } = page(tray([]))
+    fireEvent.click(screen.getByRole('button', { name: /All clear/ }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(filled()).toEqual(['Run team', 'Every day'])
+    rerender(layout(tray([stopped])))
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument()
+    expect(filled()).toEqual(['Run team', 'Every day'])
+    // The ticket on screen says "answer it below", and below is the page's own fill.
+    rerender(layout(tray([ticket], ticket.runId)))
+    expect(screen.getByText('On this screen: answer it below.')).toBeInTheDocument()
+    expect(filled()).toEqual(['Run team', 'Every day'])
+    // A ticket with an answer here takes the fill, and the page's steps back.
+    rerender(layout(tray([ticket])))
+    expect(filled()).toEqual(['AllowA'])
+  })
+
+  // ⌘N opens Create a team over the tray, and Tab walks out of it onto the page: focus leaving the
+  // tray closes it, so the dialog's or the page's own main button is filled again before it's pressed.
+  it('gives the page its fill back when focus leaves the tray, and keeps it open while focus moves inside', () => {
+    page(<NeedsYouTray tickets={[review('page-f'), review('page-g')]} working={0} onAnswer={vi.fn()} onDismiss={vi.fn()} />)
+    const bell = screen.getByRole('button', { name: /2 need you/ })
+    fireEvent.click(bell)
+    act(() => screen.getAllByRole('button', { name: /^Add a note/ })[1].focus())
+    act(() => bell.focus())
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(filled()).toEqual(['Looks goodA'])
+    act(() => screen.getByRole('button', { name: 'Run team' }).focus())
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(filled()).toEqual(['Run team', 'Every day'])
+  })
+
+  // A poll, not a click, can bring the first ticket into the open tray, and React paints before a
+  // plain effect runs: the mark has to be there by the time anything after the tray lays out.
+  it('marks the page before it paints when a ticket arrives in the open tray', () => {
+    const seen: boolean[] = []
+    function LaidOut() { useLayoutEffect(() => { seen.push('needsYouFill' in document.documentElement.dataset) }); return null }
+    const tray = (tickets: Ticket[]) => <><NeedsYouTray tickets={tickets} working={0} onAnswer={vi.fn()} onDismiss={vi.fn()} /><LaidOut /></>
+    const { rerender } = render(tray([]))
+    fireEvent.click(screen.getByRole('button', { name: /All clear/ }))
+    expect(seen.at(-1)).toBe(false)
+    rerender(tray([review('page-p')]))
+    expect(seen.at(-1)).toBe(true)
+  })
+
+  it('gives the page its fill back when the tray goes away open', () => {
+    const { unmount } = render(<NeedsYouTray tickets={[review('page-u')]} working={0} onAnswer={vi.fn()} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+    const outside = document.createElement('button')
+    outside.className = 'btn btn-primary'
+    document.body.append(outside)
+    expect(gold).not.toContain(background(outside))
+    unmount()
+    expect(gold).toContain(background(outside))
+    outside.remove()
   })
 })

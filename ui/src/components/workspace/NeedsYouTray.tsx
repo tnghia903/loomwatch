@@ -1,5 +1,5 @@
 import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
 import { historyRunUrl } from '../../lib/runs/history'
@@ -83,12 +83,25 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
 
   useEffect(() => {
     if (!open) return
-    const outside = (event: MouseEvent) => {
+    // A press or focus outside closes it, so a dialog opened from the keyboard, or a page button
+    // reached with Tab, has its own gold fill back before anything is pressed.
+    const outside = (event: Event) => {
       if (!panel.current?.contains(event.target as Node) && !bell.current?.contains(event.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', outside)
-    return () => document.removeEventListener('mousedown', outside)
+    document.addEventListener('focusin', outside)
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('focusin', outside) }
   }, [open])
+  // While the tray shows its fill, the page's own fills step back to a ring (loom.css), so the open
+  // tray is the screen's one gold fill. A ticket answered on this screen, a stopped run or an empty
+  // tray has none, and the page keeps its own. Before paint, so the page's fill starts stepping back
+  // in the frame the tray's first shows.
+  useLayoutEffect(() => {
+    if (!open || !panel.current?.querySelector('.btn-primary')) return
+    const root = document.documentElement
+    root.dataset.needsYouFill = ''
+    return () => { delete root.dataset.needsYouFill }
+  })
   useEffect(() => {
     if (!open) return
     // J and K move focus to the ticket; Tab into one of its buttons leaves focus on that button.
