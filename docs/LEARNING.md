@@ -261,9 +261,12 @@ A smaller check of the later additions, the same way:
   summary in another team then did the same with learning on, but opened with "Summary:" with it
   off. A poem stayed a poem in both. The first try failed because the learner skipped what the
   request had asked for; Love it now counts that too (section 3).
-- **Learning from the steps is not shown live yet.** Learning from the steps is covered by tests.
-  In its live case the model found the approved price list on its own even with learning off, and
-  the learning-on runs could not run: the test key was refused part-way.
+- **Learning from the steps is built and tested, but not shown to help yet.** In three live
+  cases (a draft price list beside an approved one, a later price change in "team updates", and a
+  newer file in `drafts/` beside `final/`), Sonnet 5.5 read every file and gave the right price
+  even with learning off. With no mistake there was no feedback, so there was nothing to learn.
+  Expect it to matter on harder, repeated work and on smaller models; it costs nothing when there
+  is no feedback.
 
 ## 10. What is not built yet
 
