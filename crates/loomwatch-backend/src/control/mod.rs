@@ -420,6 +420,7 @@ pub(crate) fn ask_spec(workspace: PathBuf) -> ProcessSpec {
         tools: Vec::new(),
         permissions: None,
         asker: None,
+        lessons: Vec::new(),
     }
 }
 

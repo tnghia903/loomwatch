@@ -172,6 +172,12 @@ depend on the document as a whole:
   checks its result against them before it replies, fixes what it can, and lists any it could not
   meet under `## Not met`. A later stage and any check step read it with the work. No second turn
   is taken on the agent's own say-so: a check step with `sendBack` is what sends work back.
+- Optional `Agent.learns: false` stops an agent learning from the operator's feedback on its work
+  (ADR 0078, [How agents learn](LEARNING.md)). It is on when absent: the operator's words about a
+  finished answer, and a check step's item that was not met and then met after the send-back,
+  become short lessons in the agent's standing instructions, each shown in the chat with Undo.
+  With `false` it learns nothing new and is given none of its lessons. `from: {agent}` is also read
+  now: one of My agents keeps one list of lessons in every team that places it.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
   operator, not the answer's reader:
   - `## Not met`: the `doneWhen` items it could not meet.
@@ -412,7 +418,9 @@ one.
 Knowledge without a `path` fails the run and says to add it again: a name alone points at nothing.
 
 A **folder** is linked where it is: the agent gets its top-level listing and README, plus a read
-grant for the folder, so each run sees what is in it then. A **file** added in
+grant for the folder, so each run sees what is in it then. The prompt names the folder by its full
+path. A read by a name inside it, as its listing shows (`drafts/prices.md`), finds the file there
+when the agent's own folder has nothing by that name. A **file** added in
 the panel is copied beside the team file under `<team>.files/`, and a relative `path` resolves
 against the team file's folder (`~/` against your home folder). The agent gets the file's text,
 up to 12,000 characters, and a read grant for that one file. The text of a PDF, Word (`.docx`),

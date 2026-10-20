@@ -177,6 +177,7 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
       />
       <ByHand
         draft={draft} set={(key, value) => onEdit(agent.id, key, value)} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={record} hideDoes readOnly={!editable} teamOwn={{ teamPath }} onShowWorkflow={onShowWorkflow} suggestFor={{ agent, team }} following={following}
+        learned={teamPath ? { teamPath, agent: agent.id } : null}
         chat={view === 'chat' ? <AgentChat draft={chatDraft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? onEdit(agent.id, 'allow', { ...draft.allow, [what]: true }) : onEdit(agent.id, 'toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={knowledge} file={benchFile.chat} /> : undefined}
         onBuild={() => setView('build')}
         cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}

@@ -265,6 +265,21 @@
 .byhand-block-where { font-size: 12px; color: var(--color-ink-3); white-space: nowrap; }
 .byhand-block-says { margin: 0 0 var(--sp-1); font-size: 13.5px; line-height: 1.45; color: var(--color-ink-2); overflow-wrap: anywhere; }
 .byhand-block > .t-meta { margin: 0; color: var(--color-ink-3); }
+/* What the agent learned from your feedback (ADR 0078): a lesson a line, where it came from under it. */
+.learned-list { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.learned-item { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.learned-mark { flex: none; margin-top: 3px; color: var(--color-ink-3); }
+.learned-body { flex: 1; min-width: 0; }
+.learned-text { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--color-ink); overflow-wrap: anywhere; }
+.learned-from { margin: 2px 0 0; font-size: 12px; color: var(--color-ink-3); }
+.learned-forget { flex: none; }
+.learned-tell { margin-top: 2px; font-size: 12px; }
+.learned-ask { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: var(--color-ink-2); }
+/* A lesson Tell all my agents moved to About you, under the list until this agent closes. */
+.learned-moved { display: flex; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-2) 0 0; font-size: 13px; line-height: 1.45; color: var(--color-ink-2); }
+.learned-moved-words { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.learned-moved-words b { font-weight: 600; color: var(--color-ink); }
+.learned-moved .link { flex: none; font-size: 12px; }
 /* Picked on the bench: the block glows once, so the eye finds where it went. */
 .byhand-block-flash { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; box-shadow: 0 0 0 2px var(--color-accent); opacity: 0; animation: byhand-flash .9s ease-out; }
 @keyframes byhand-flash { 0% { opacity: 1; } 100% { opacity: 0; } }

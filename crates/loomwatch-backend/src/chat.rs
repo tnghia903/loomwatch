@@ -1605,11 +1605,17 @@ enum Item {
         notes: Vec<ChatMessage>,
         /// How the operator reacted to what the agents said in it.
         reactions: Vec<Reaction>,
+        /// What the agents learned from feedback on it and still keep (ADR 0078).
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        lessons: Vec<crate::lessons::Lesson>,
     },
     /// A team note, and how the operator reacted to it and to the agents' answers to it.
     Note {
         message: ChatMessage,
         reactions: Vec<Reaction>,
+        /// What the agents learned from feedback on their answers to it (ADR 0078).
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        lessons: Vec<crate::lessons::Lesson>,
     },
 }
 
@@ -1679,11 +1685,13 @@ async fn chat_page(
                 request: requests.into_iter().next(),
                 notes,
                 reactions: Vec::new(),
+                lessons: Vec::new(),
             }
         })
         .chain(notes.into_iter().map(|message| Item::Note {
             message,
             reactions: Vec::new(),
+            lessons: Vec::new(),
         }))
         .collect();
     items.sort_by(|left, right| right.at().cmp(left.at()));
@@ -1709,12 +1717,14 @@ async fn chat_page(
             Item::Note {
                 message,
                 reactions: on,
+                ..
             } => (&message.id, on),
         };
         if let Some(found) = reactions.remove(anchor) {
             *on = found;
         }
     }
+    with_lessons(&state, &shown, &mut items).await?;
     Ok(Json(json!({
         "teamKey": team_ref.key,
         "teamPath": relative,
@@ -1722,6 +1732,34 @@ async fn chat_page(
         "more": more,
     }))
     .into_response())
+}
+
+/// Each piece of work, and each team note the agents answered, with what they learned from
+/// feedback on it (ADR 0078).
+async fn with_lessons(
+    state: &ChatState,
+    shown: &[String],
+    items: &mut [Item],
+) -> Result<(), ApiError> {
+    let Some(store) = state.registry.lessons() else {
+        return Ok(());
+    };
+    let mut learned = store
+        .learned_from(shown)
+        .await
+        .map_err(|error| database(&error))?;
+    for item in items {
+        let (anchor, lessons) = match item {
+            Item::Work { run, lessons, .. } => (&run.run_id, lessons),
+            Item::Note {
+                message, lessons, ..
+            } => (&message.id, lessons),
+        };
+        if let Some(found) = learned.remove(anchor) {
+            *lessons = found;
+        }
+    }
+    Ok(())
 }
 
 /// Who a message is addressed to, as the message box showed it before it was sent.
@@ -1852,6 +1890,7 @@ fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
 }
 
 /// `POST /api/chat/messages`: route one message by the rule, and do what the route says.
+#[allow(clippy::too_many_lines)]
 async fn send_message(
     State(state): State<ChatState>,
     body: Result<Json<SendMessage>, JsonRejection>,
@@ -1889,6 +1928,10 @@ async fn send_message(
         answers: None,
     };
     let mut decided = decide(request.to.as_ref(), &live);
+    learn_from_words(
+        &state, &store, &team, &relative, &request, &message, &decided,
+    )
+    .await;
     if let Decided::Note { run_id, agent } = &decided {
         let note = QueuedNote {
             id: message.id.clone(),
@@ -1961,6 +2004,254 @@ async fn send_message(
             started(&state.registry, &store, message, outcome).await
         }
     }
+}
+
+/// Something in the chat that finished with an answer, which the person's next words can be about:
+/// a piece of work and its answer, or what the agents answered a team note themselves (ADR 0076).
+struct Answered {
+    /// The run, or the team note, the chat shows what was learned from it on.
+    anchor: String,
+    /// What it was asked.
+    request: String,
+    /// Who answered what: a run's responder and its answer, or each agent's answer to the note.
+    said: Vec<(String, String)>,
+    created_at: String,
+}
+
+impl Answered {
+    fn run(state: &ChatState, stored: RunRecord) -> Option<Self> {
+        let run = state.registry.get(&stored.run_id).unwrap_or(stored);
+        let answer = run
+            .reply
+            .as_deref()
+            .filter(|answer| run.status == RunStatus::Succeeded && !answer.trim().is_empty())?
+            .to_owned();
+        Some(Self {
+            anchor: run.run_id,
+            request: run.prompt,
+            said: vec![(run.responder, answer)],
+            created_at: run.created_at,
+        })
+    }
+
+    fn note(note: ChatMessage) -> Option<Self> {
+        let answers = note.answers?;
+        if !answers.waiting.is_empty() || answers.said.is_empty() {
+            return None;
+        }
+        Some(Self {
+            anchor: note.id,
+            request: note.text,
+            said: answers
+                .said
+                .into_iter()
+                .map(|said| (said.from, said.text))
+                .collect(),
+            created_at: note.created_at,
+        })
+    }
+
+    /// What the words are about: the work a reply names, else the newest that was answered.
+    async fn newest(
+        state: &ChatState,
+        store: &ChatStore,
+        team: &TeamRef,
+        reply_to: Option<&ReplyTo>,
+    ) -> Option<Self> {
+        if let Some(run_id) = reply_to.and_then(|reply| reply.run_id.as_deref()) {
+            let stored = store.run(team, run_id).await.ok().flatten()?;
+            return Self::run(state, stored);
+        }
+        let run = store
+            .runs(team, None, None, 1)
+            .await
+            .ok()
+            .and_then(|runs| runs.into_iter().next())
+            .and_then(|stored| Self::run(state, stored));
+        // Your own notes come between: the newest note the agents answered is what counts.
+        let note = store
+            .team_notes(team, None, None, NOTES_LOOKED_BACK)
+            .await
+            .ok()
+            .and_then(|notes| notes.into_iter().find_map(Self::note));
+        match (run, note) {
+            (Some(run), Some(note)) => Some(if note.created_at > run.created_at {
+                note
+            } else {
+                run
+            }),
+            (run, note) => run.or(note),
+        }
+    }
+}
+
+/// How many of the newest team notes the person's words are looked back over for one the agents
+/// answered: past a few of the person's own notes, the answer is not what they are talking about.
+const NOTES_LOOKED_BACK: i64 = 5;
+
+/// The face that says an answer was exactly what the person wanted (`FACES`).
+const LOVE: &str = "love";
+
+/// Love it on an answer, or on an agent's own answer to a team note, asks what made it right, so
+/// the agent keeps doing it on work like this (ADR 0078). Only when the face becomes Love it: Love
+/// it again on an answer already loved asks nothing.
+async fn learn_from_love(
+    state: &ChatState,
+    store: &ChatStore,
+    team: &TeamConfig,
+    team_ref: &TeamRef,
+    anchor: &str,
+    said: Said<'_>,
+) {
+    let Some(learner) = state.registry.learner(&state.teams_root) else {
+        return;
+    };
+    let (answered, agent_id) = match said {
+        Said::Answer => {
+            let Some(stored) = store.run(team_ref, anchor).await.ok().flatten() else {
+                return;
+            };
+            let Some(answered) = Answered::run(state, stored) else {
+                return;
+            };
+            let responder = answered.said.first().map(|(id, _)| id.clone());
+            (answered, responder)
+        }
+        Said::Reply(agent) => {
+            let Some(note) = store.team_note(team_ref, anchor).await.ok().flatten() else {
+                return;
+            };
+            let Some(answered) = Answered::note(note) else {
+                return;
+            };
+            (answered, Some(agent.to_owned()))
+        }
+        _ => return,
+    };
+    let Some(agent) = agent_id.and_then(|id| {
+        team.agents
+            .iter()
+            .find(|agent| agent.id == id && !agent.is_operator())
+    }) else {
+        return;
+    };
+    if !agent.learns || agent.model.starts_with(crate::agent::OFFLINE_MODEL) {
+        return;
+    }
+    let Some(work) = answered
+        .said
+        .iter()
+        .find(|(id, _)| *id == agent.id)
+        .map(|(_, said)| said.clone())
+    else {
+        return;
+    };
+    let resolved = state.teams_root.join(&team_ref.path);
+    learner.spawn(crate::lessons::LearnRequest {
+        from: crate::lessons::LearnedFrom {
+            scope: crate::lessons::scope_of(team, &resolved, agent),
+            agent_id: agent.id.clone(),
+            source: crate::lessons::LessonSource::Liked,
+            feedback: "You marked this answer Love it.".to_owned(),
+            run_id: Some(answered.anchor),
+        },
+        learning: crate::lessons::Learning {
+            agent: display(&agent.name, &agent.id),
+            instructions: agent.role.clone(),
+            done_when: agent.done_when.clone(),
+            request: task_text(&answered.request, team).to_owned(),
+            work,
+            ..crate::lessons::Learning::default()
+        },
+    });
+}
+
+/// The person's words after something finished with an answer, as feedback the agent that answered
+/// learns from (ADR 0078), in the background.
+///
+/// What they are about is the work a reply names, else the newest answered thing in the chat: a
+/// piece of work, or a team note the agents answered themselves. The agent is the one replied to,
+/// else the one the message is for, else the one who answered. Whether the words are about the
+/// answer at all is the learner's to say: most messages are a new request, and it learns nothing
+/// from those. A message longer than [`crate::lessons::MAX_FEEDBACK_CHARS`] spells out a new job and
+/// is not read; and a note to an agent still at work is direction for the work in hand, which it
+/// already has.
+async fn learn_from_words(
+    state: &ChatState,
+    store: &ChatStore,
+    team: &TeamConfig,
+    relative: &str,
+    request: &SendMessage,
+    message: &ChatMessage,
+    decided: &Decided,
+) {
+    let text = message.text.as_str();
+    let (to, reply_to) = (request.to.as_ref(), message.reply_to.as_ref());
+    if matches!(decided, Decided::Note { .. })
+        || text.chars().count() > crate::lessons::MAX_FEEDBACK_CHARS
+    {
+        return;
+    }
+    let Some(learner) = state.registry.learner(&state.teams_root) else {
+        return;
+    };
+    let team_ref = TeamRef {
+        key: team.chat_key(relative),
+        path: relative.to_owned(),
+    };
+    let Some(answered) = Answered::newest(state, store, &team_ref, reply_to).await else {
+        return;
+    };
+    let harness = |id: &str| {
+        team.agents
+            .iter()
+            .find(|agent| agent.id == id && !agent.is_operator())
+    };
+    let named = reply_to
+        .map(|reply| reply.from.as_str())
+        .or(match to {
+            Some(Target::Agent { agent }) => Some(agent.as_str()),
+            _ => None,
+        })
+        .and_then(harness);
+    let Some(agent) = named.or_else(|| answered.said.iter().find_map(|(id, _)| harness(id))) else {
+        return;
+    };
+    // The offline demo runs on no model, and its feedback is a walkthrough's.
+    if !agent.learns || agent.model.starts_with(crate::agent::OFFLINE_MODEL) {
+        return;
+    }
+    // Replying to something else the agent said makes that the work the words are about.
+    let work = match reply_to {
+        Some(reply) if reply.kind != ReplyKind::Answer => reply.text.clone(),
+        _ => answered
+            .said
+            .iter()
+            .find(|(id, _)| *id == agent.id)
+            .or_else(|| answered.said.first())
+            .map(|(_, said)| said.clone())
+            .unwrap_or_default(),
+    };
+    let resolved = state.teams_root.join(relative);
+    learner.spawn(crate::lessons::LearnRequest {
+        from: crate::lessons::LearnedFrom {
+            scope: crate::lessons::scope_of(team, &resolved, agent),
+            agent_id: agent.id.clone(),
+            source: crate::lessons::LessonSource::You,
+            feedback: text.to_owned(),
+            run_id: Some(answered.anchor),
+        },
+        learning: crate::lessons::Learning {
+            agent: display(&agent.name, &agent.id),
+            instructions: agent.role.clone(),
+            done_when: agent.done_when.clone(),
+            request: task_text(&answered.request, team).to_owned(),
+            work,
+            said: text.to_owned(),
+            missed_items: Vec::new(),
+            steps: Vec::new(),
+        },
+    });
 }
 
 /// A message that was going to start the workflow but needs none is answered by the agents
@@ -2067,6 +2358,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
     let mut replies = tokio::task::JoinSet::new();
     for id in answers.waiting.clone() {
         let answering = answering.clone();
+        let team_path = message.team_path.clone();
         let own = remembered
             .get(&id)
             .zip(newest_work.as_ref())
@@ -2083,6 +2375,19 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
                 speaker,
                 whole_team: answering.whole_team,
             };
+            let lessons = match &answering.archive {
+                Some(archive) => crate::lessons::kept(
+                    archive,
+                    &answering.team,
+                    &answering.teams_root.join(&team_path),
+                    speaker,
+                )
+                .await
+                .into_iter()
+                .map(|lesson| lesson.text)
+                .collect(),
+                None => Vec::new(),
+            };
             let said = crate::intent::reply(
                 answering.archive.as_ref(),
                 &answering.teams_root,
@@ -2090,6 +2395,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
                 &answering.task,
                 &answering.context,
                 own.as_ref(),
+                &lessons,
             )
             .await;
             (id, said)
@@ -2422,6 +2728,16 @@ async fn react(
         request.about.unwrap_or_default(),
     )
     .await?;
+    let was_loved = store
+        .reactions(std::slice::from_ref(&request.anchor))
+        .await
+        .map_err(|error| database(&error))?
+        .remove(&request.anchor)
+        .is_some_and(|faces| {
+            faces
+                .iter()
+                .any(|face| face.target == target && face.face == LOVE)
+        });
     store
         .react(
             &team_ref,
@@ -2432,6 +2748,22 @@ async fn react(
         )
         .await
         .map_err(|error| database(&error))?;
+    if request.face.as_deref() == Some(LOVE) && !was_loved {
+        learn_from_love(&state, &store, &team, &team_ref, &request.anchor, said).await;
+    }
+    // Good or Love it on an answer backs the lessons its work was given (ADR 0078); any other face,
+    // or none, takes that back. A face on anything else says nothing about the lessons.
+    if said == Said::Answer
+        && let Some(lessons) = state.registry.lessons()
+    {
+        let backed = matches!(request.face.as_deref(), Some("glad" | "love"));
+        if let Err(error) = lessons.back(&request.anchor, backed).await {
+            eprintln!(
+                "loomwatchd: could not back the lessons of {}: {error}",
+                request.anchor
+            );
+        }
+    }
     let reactions = store
         .reactions(std::slice::from_ref(&request.anchor))
         .await
@@ -4429,5 +4761,428 @@ mod tests {
             assert!(section.contains(line), "missing {line:?} in\n{section}");
         }
         assert!(!section.contains("“Seen”"), "{section}");
+    }
+
+    /// A learner on a stand-in model (ADR 0078): it keeps every prompt it is sent and, for words
+    /// that say "Too long", adds a lesson; for "In Vietnamese", a lesson about the person; for
+    /// anything else it learns nothing.
+    fn learner(rig: &Rig) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        rig.registry
+            .set_learner_model(crate::engine::demo_model(crate::agent::Demo::responder(
+                move |request| {
+                    let prompt = request.prompt().to_owned();
+                    let edits = if prompt.contains("> Too long") {
+                        r#"{"edits": [{"do": "add", "lesson": "When writing the digest, use three bullets."}]}"#
+                    } else if prompt.contains("> In Vietnamese") {
+                        r#"{"edits": [{"do": "add", "lesson": "When replying to this person, always write in Vietnamese.", "aboutYou": true}]}"#
+                    } else {
+                        r#"{"edits": []}"#
+                    };
+                    seen.lock().unwrap().push(prompt);
+                    Some(crate::agent::Completion::text(edits))
+                },
+            )));
+        asked
+    }
+
+    async fn learned(rig: &Rig, scope: &str, count: usize) -> Vec<crate::lessons::Lesson> {
+        let lessons = rig.registry.lessons().unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let kept = lessons.active(scope).await.unwrap();
+                if kept.len() == count {
+                    return kept;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{scope} never kept {count} lessons"))
+    }
+
+    /// ADR 0078: the person's words after an answer teach the agent that wrote it. The chat shows
+    /// the lesson on that work; the agent's next work is given it; Good on that answer backs it;
+    /// and Undo takes it back.
+    #[tokio::test]
+    async fn words_after_an_answer_teach_the_agent_that_wrote_it() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let asked = learner(&rig);
+        let work = finished_work(&rig, "today's digest").await;
+        assert!(
+            asked.lock().unwrap().is_empty(),
+            "nothing had finished before the first request"
+        );
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Too long. Three bullets, please.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert_eq!(kept[0].text, "When writing the digest, use three bullets.");
+        assert_eq!(kept[0].feedback, "Too long. Three bullets, please.");
+        assert_eq!(kept[0].run_id.as_deref(), Some(work.run_id.as_str()));
+        {
+            let asked = asked.lock().unwrap();
+            assert!(
+                asked[0].starts_with("Writer is an agent in a LoomWatch team."),
+                "{}",
+                asked[0]
+            );
+            assert!(asked[0].contains("It was asked:\n> today's digest"));
+            assert!(asked[0].contains("It answered:\n> writer work 1"));
+            assert!(asked[0].contains(
+                "Then the person wrote this about the work:\n> Too long. Three bullets, please."
+            ));
+        }
+        // The chat shows it on the work it came from.
+        let chat = page(&rig.app).await;
+        let on_work = chat["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["run"]["runId"] == work.run_id.as_str())
+            .unwrap();
+        assert_eq!(
+            on_work["lessons"][0]["text"],
+            "When writing the digest, use three bullets."
+        );
+        // The next work gives it to Writer, not to Researcher, and Good on its answer backs it.
+        let next = finished_work(&rig, "tomorrow's digest").await;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while asked.lock().unwrap().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the request after the first answer is read too, and teaches nothing");
+        let (status, _) = post(
+            &rig.app,
+            "/api/chat/reactions",
+            reaction(&next.run_id, "answer", &json!("glad"), &Value::Null),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert_eq!((kept[0].given, kept[0].backed, kept[0].missed), (1, 1, 0));
+        assert!(
+            learned(&rig, "team:news-desk#researcher", 0)
+                .await
+                .is_empty()
+        );
+        // Undo, from the agent's list.
+        let lessons = crate::lessons::router(
+            dir.0.clone(),
+            rig.registry.clone(),
+            crate::you::You::in_memory(crate::you::AboutYou::default()),
+        );
+        let listed = page_at(&lessons, "/api/lessons?teamPath=news.yaml&agent=writer").await;
+        assert_eq!(listed["learns"], true);
+        assert_eq!(listed["lessons"][0]["id"], kept[0].id.as_str());
+        let (status, undone) = post(
+            &lessons,
+            "/api/lessons/undo",
+            json!({"teamPath": "news.yaml", "agent": "writer", "id": kept[0].id}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{undone}");
+        assert_eq!(undone["lessons"], json!([]));
+        assert!(
+            page(&rig.app).await["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item.get("lessons").is_none())
+        );
+    }
+
+    /// A reply to what one agent said teaches that agent, with what it said as the work; a
+    /// message too long to be feedback, and a note to an agent still at work, teach nothing.
+    #[tokio::test]
+    async fn a_reply_teaches_the_agent_it_answers_and_some_words_teach_nothing() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let asked = learner(&rig);
+        let work = finished_work(&rig, "today's digest").await;
+        let reply = json!({
+            "runId": work.run_id, "messageId": "talk:1", "from": "researcher", "to": "writer",
+            "kind": "handover", "text": "researcher handover",
+        });
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Too long a list.", "to": null, "replyTo": reply}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#researcher", 1).await;
+        assert_eq!(kept[0].agent_id, "researcher");
+        assert!(asked.lock().unwrap()[0].contains("It answered:\n> researcher handover"));
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "x".repeat(crate::lessons::MAX_FEEDBACK_CHARS + 1), "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            asked.lock().unwrap().len(),
+            1,
+            "a message that long is a new job"
+        );
+    }
+
+    /// A short question the agents answered themselves (ADR 0076) is finished work too: words
+    /// after their answer teach the agent that gave it, and the chat shows the lesson on the note.
+    #[tokio::test]
+    async fn words_after_an_agents_own_answer_to_a_note_teach_it() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let asked = learner(&rig);
+        let store = rig.registry.chat_store().unwrap();
+        let answered = ChatMessage {
+            id: "note-1".to_owned(),
+            team_key: "news-desk".to_owned(),
+            team_path: "news.yaml".to_owned(),
+            text: "@writer What happened in tech this week?".to_owned(),
+            created_at: now(),
+            route: Route::TeamNote,
+            run_id: None,
+            agent_id: Some("writer".to_owned()),
+            delivered_at: None,
+            now: false,
+            reply_to: None,
+            answers: Some(NoteAnswers {
+                waiting: Vec::new(),
+                said: vec![NoteAnswer {
+                    from: "writer".to_owned(),
+                    text: "A very long list of everything that happened.".to_owned(),
+                    at: now(),
+                }],
+            }),
+        };
+        store.insert(&answered).await.unwrap();
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Too long. Three bullets next time.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert_eq!(kept[0].run_id.as_deref(), Some("note-1"));
+        let asked = asked.lock().unwrap()[0].clone();
+        assert!(
+            asked.contains("It was asked:\n> What happened in tech this week?"),
+            "{asked}"
+        );
+        assert!(asked.contains("It answered:\n> A very long list of everything that happened."));
+        let chat = page(&rig.app).await;
+        let note = chat["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["message"]["id"] == "note-1")
+            .unwrap();
+        assert_eq!(
+            note["lessons"][0]["text"],
+            "When writing the digest, use three bullets."
+        );
+    }
+
+    /// Love it on an answer asks what made it right (ADR 0078), and the lesson is kept as liked.
+    /// Taking the face off and putting it back on is still one answer loved once; Good asks nothing.
+    #[tokio::test]
+    async fn love_on_an_answer_teaches_what_to_keep_doing() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        rig.registry
+            .set_learner_model(crate::engine::demo_model(crate::agent::Demo::responder(
+                move |request| {
+                    seen.lock().unwrap().push(request.prompt().to_owned());
+                    Some(crate::agent::Completion::text(
+                        r#"{"edits": [{"do": "add", "lesson": "When writing the digest, open with a one-line summary."}]}"#,
+                    ))
+                },
+            )));
+        let work = finished_work(&rig, "today's digest").await;
+        let face = |face: &str| reaction(&work.run_id, "answer", &json!(face), &Value::Null);
+        post(&rig.app, "/api/chat/reactions", face("glad")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            asked.lock().unwrap().is_empty(),
+            "Good backs lessons, it doesn't make one"
+        );
+        let (status, _) = post(&rig.app, "/api/chat/reactions", face("love")).await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert_eq!(kept[0].source, crate::lessons::LessonSource::Liked);
+        assert_eq!(kept[0].feedback, "You marked this answer Love it.");
+        assert_eq!(kept[0].run_id.as_deref(), Some(work.run_id.as_str()));
+        {
+            let asked = asked.lock().unwrap();
+            assert_eq!(asked.len(), 1);
+            assert!(
+                asked[0].contains("It answered:\n> writer work 1"),
+                "{}",
+                asked[0]
+            );
+            assert!(asked[0].contains("Then the person marked the answer Love it"));
+        }
+        // Off and on again: no second learning.
+        post(
+            &rig.app,
+            "/api/chat/reactions",
+            reaction(&work.run_id, "answer", &Value::Null, &Value::Null),
+        )
+        .await;
+        post(&rig.app, "/api/chat/reactions", face("love")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let calls = asked.lock().unwrap().len();
+        assert_eq!(calls, 2, "taken off, a face is a new Love it the next time");
+        post(&rig.app, "/api/chat/reactions", face("love")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            asked.lock().unwrap().len(),
+            calls,
+            "Love it again on a loved answer asks nothing"
+        );
+    }
+
+    /// A POST as `LoomWatch`'s own page sends it, with `X-LoomWatch-Request`.
+    async fn post_from_page(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("host", "localhost")
+                    .header("x-loomwatch-request", "1")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// Tell all my agents (ADR 0078): a lesson about the person shows on the work it came from,
+    /// marked so, and goes to About you only when the person says so on `LoomWatch`'s page. Then
+    /// the chat shows it moved, the agent's list no longer has it, and Undo puts both back.
+    #[tokio::test]
+    async fn a_lesson_about_you_goes_to_about_you_only_on_your_click_and_undo_puts_it_back() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        learner(&rig);
+        let you = crate::you::You::in_memory(crate::you::AboutYou {
+            name: Some("Mai".to_owned()),
+            about: Some("I teach English.".to_owned()),
+            skipped: false,
+        });
+        let before = you.get();
+        let lessons = crate::lessons::router(dir.0.clone(), rig.registry.clone(), you.clone());
+        let work = finished_work(&rig, "today's digest").await;
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "In Vietnamese, please.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert!(kept[0].about_you);
+        let on_work = |chat: &Value| {
+            chat["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["run"]["runId"] == work.run_id.as_str())
+                .unwrap()["lessons"][0]
+                .clone()
+        };
+        let shown = on_work(&page(&rig.app).await);
+        assert_eq!(shown["aboutYou"], true);
+        assert_eq!(shown["state"], "active");
+        // Learning marked it, and told nobody.
+        assert_eq!(you.get(), before);
+
+        let whose = json!({"teamPath": "news.yaml", "agent": "writer", "id": kept[0].id});
+        // Not from LoomWatch's own page: refused, and nothing changes.
+        let (status, _) = post(&lessons, "/api/lessons/tell-all", whose.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(you.get(), before);
+        assert_eq!(
+            learned(&rig, "team:news-desk#writer", 1).await[0].id,
+            kept[0].id
+        );
+
+        let (status, told) = post_from_page(&lessons, "/api/lessons/tell-all", whose.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{told}");
+        let with_it = "I teach English.\nWhen replying to this person, always write in Vietnamese.";
+        assert_eq!(told["added"], true);
+        assert_eq!(told["you"]["about"], with_it);
+        assert_eq!(told["lessons"], json!([]));
+        assert_eq!(you.get().about.as_deref(), Some(with_it));
+        assert_eq!(you.get().name.as_deref(), Some("Mai"));
+        let listed = page_at(&lessons, "/api/lessons?teamPath=news.yaml&agent=writer").await;
+        assert_eq!(listed["lessons"], json!([]));
+        let shown = on_work(&page(&rig.app).await);
+        assert_eq!(shown["state"], "dropped");
+        assert_eq!(shown["droppedBy"], "about_you");
+
+        let (status, _) = post(&lessons, "/api/lessons/tell-all/undo", whose.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(you.get().about.as_deref(), Some(with_it));
+        let (status, back) =
+            post_from_page(&lessons, "/api/lessons/tell-all/undo", whose.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{back}");
+        assert_eq!(back["removed"], true);
+        assert_eq!(back["lessons"][0]["id"], kept[0].id.as_str());
+        assert_eq!(you.get(), before);
+        assert_eq!(on_work(&page(&rig.app).await)["state"], "active");
+        let (status, again) = post_from_page(&lessons, "/api/lessons/tell-all/undo", whose).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(again["error"], "That is undone already.");
+
+        // A lesson about the work stays with the agent.
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Too long. Three bullets, please.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let both = learned(&rig, "team:news-desk#writer", 2).await;
+        let work_lesson = both.iter().find(|lesson| !lesson.about_you).unwrap();
+        let (status, refused) = post_from_page(
+            &lessons,
+            "/api/lessons/tell-all",
+            json!({"teamPath": "news.yaml", "agent": "writer", "id": work_lesson.id}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            refused["error"],
+            "That lesson is about this agent's work, so it stays with this agent."
+        );
+        assert_eq!(you.get(), before);
     }
 }

@@ -13,6 +13,7 @@ import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
 import { useTeamChat, type PendingMessage } from '../../lib/chat/useTeamChat'
 import { DaemonUnreachableError } from '../../lib/daemonFetch'
+import { inAboutYou, tellAllAgents, undoLesson, undoTellAllAgents, type Lesson } from '../../lib/lessons/client'
 import { failedAgent } from '../../lib/runs/errors'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
@@ -27,6 +28,7 @@ import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
+import { Learned } from './Learned'
 import { ReplyQuote } from './ReplyQuote'
 import { WorkPiece, type TeamView } from './WorkPiece'
 
@@ -103,6 +105,18 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  */
 export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
+  // Something an agent learned from your feedback, taken back (ADR 0078): the chat reads again.
+  // One that Tell all my agents moved to About you moves back to its agent.
+  const undoLearned = useCallback(async (lesson: Lesson) => {
+    const of = { teamPath, agent: lesson.agentId }
+    await (inAboutYou(lesson) ? undoTellAllAgents(of, lesson.id) : undoLesson(of, lesson.id))
+    chat.refresh()
+  }, [teamPath, chat])
+  // A lesson about you, moved to About you for every agent once you said yes.
+  const tellAllLearned = useCallback(async (lesson: Lesson) => {
+    await tellAllAgents({ teamPath, agent: lesson.agentId }, lesson.id)
+    chat.refresh()
+  }, [teamPath, chat])
   // Run team means start the team. Without an @, what is written is a note that starts nothing,
   // which is not what someone who pressed Run team expects, so the box it opens starts with @team.
   // Run team is on the workflow, where the chat is not open, so the chat always opens fresh for it.
@@ -600,8 +614,8 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onTyping={onTyping} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
-                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} />
-                  : <TeamNote message={item.message} reactions={item.reactions} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} />}
+                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
+                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
             )
           })}
@@ -748,7 +762,7 @@ function useChatSearch(teamPath: string) {
  * ones still writing typing, in place of the work it would have started. You can react to the note
  * and to each answer, as to anything said in the chat; the faces are kept on the note.
  */
-function TeamNote({ message, reactions, name, hue, onShowReplied, onStart, onReact }: { message: ChatMessage; reactions?: readonly Reaction[]; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void> }) {
+function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void> }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
   const answers = message.answers
@@ -789,6 +803,7 @@ function TeamNote({ message, reactions, name, hue, onShowReplied, onStart, onRea
             </div>
           </li>
         ))}
+        {lessons && lessons.length > 0 && <li className="tc-said-learned"><Learned lessons={lessons} name={name} onUndo={onUndoLesson} onTellAll={onTellAllLesson} /></li>}
         {waiting.length === 0 && (
           <li className="tc-said-acts">
             <span>No work started</span>

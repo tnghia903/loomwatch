@@ -652,6 +652,8 @@ mod tests {
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
+            from_agent: None,
+            learns: true,
         }
     }
 

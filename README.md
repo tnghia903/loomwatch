@@ -1215,6 +1215,7 @@ it came from.
 
 - [Team configuration](docs/TEAM_CONFIG.md) — roles, models, working directories, and workflow rules.
 - [Team memory](docs/TEAM_MEMORY.md) — Brief, Notebook, inheritance, and checkpoints.
+- [How agents learn](docs/LEARNING.md) — what an agent learns from your feedback on its work, how it shows, and how to undo it.
 - [Watch and replay](docs/WATCH.md) — inspecting runs, routines, and the local API.
 - [Quests and the wardrobe](docs/QUESTS.md) — practices for building good agents, noticed in your own runs and rewarded with figures and accessories.
 - [Architecture](docs/ARCHITECTURE.md) — technical details for developers.

@@ -532,6 +532,15 @@ impl ComposedPrompt {
                     }
                     None => "\nRead further files in it when they help the task, where your permissions allow.",
                 });
+                // Its listing names files inside it, and the agent's paths start in its own work
+                // folder, which is elsewhere.
+                if let Some(folder) = knowledge.folders.first() {
+                    let _ = write!(
+                        text,
+                        "\nIts files are named below as they are inside it. Read one by its full path, starting {}.",
+                        Path::new(folder).join("").display()
+                    );
+                }
             }
             // ADR 0050: a Notion page, read through the operator's connection, which the agent
             // does not have; its address alone would send the agent to a sign-in page.
@@ -3717,6 +3726,8 @@ mod tests {
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
+            from_agent: None,
+            learns: true,
         }
     }
 

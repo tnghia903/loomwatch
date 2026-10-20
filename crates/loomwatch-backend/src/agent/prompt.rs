@@ -69,12 +69,14 @@ pub(crate) struct Abilities {
 }
 
 /// The built-in instructions, then what the person told their agents about themselves (ADR 0074),
-/// `skills` (the rendered `## Skills` section, or nothing), the person's own project notes and
-/// `extra`. With nothing told, the instructions are exactly what they were before ADR 0074.
+/// what this agent has learned from their feedback (ADR 0078), `skills` (the rendered `## Skills`
+/// section, or nothing), the person's own project notes and `extra`. With nothing told and nothing
+/// learned, the instructions are exactly what they were before ADR 0074.
 pub(crate) fn system_prompt(
     cwd: &Path,
     abilities: Abilities,
     person: Option<&AboutYou>,
+    lessons: &[String],
     skills: &str,
     notes: Option<&str>,
     extra: Option<&str>,
@@ -166,6 +168,7 @@ pub(crate) fn system_prompt(
     if let Some(about) = person.and_then(|person| person.about.as_deref()) {
         person_section(&mut prompt, name, about);
     }
+    prompt.push_str(&crate::lessons::section(lessons, name));
     if !skills.is_empty() {
         prompt.push('\n');
         prompt.push_str(skills);
@@ -231,6 +234,7 @@ mod tests {
             Path::new("/w"),
             none,
             None,
+            &[],
             "",
             None,
             Some("You are Ask LoomWatch."),
@@ -248,6 +252,7 @@ mod tests {
             Path::new("/w"),
             all,
             None,
+            &[],
             "",
             Some("Cite every source."),
             None,
@@ -278,7 +283,15 @@ mod tests {
     /// 0074, so a person who skips it changes nothing, cached or not.
     #[test]
     fn with_nothing_told_the_instructions_are_unchanged() {
-        let before = system_prompt(Path::new("/w"), working(), None, "## Skills\n", None, None);
+        let before = system_prompt(
+            Path::new("/w"),
+            working(),
+            None,
+            &[],
+            "## Skills\n",
+            None,
+            None,
+        );
         assert!(before.starts_with(
             "You are an agent in LoomWatch, working on a task for the person who runs this team. \
              The task, your role and what counts as done come in the person's message.\n\n\
@@ -293,6 +306,7 @@ mod tests {
                 Path::new("/w"),
                 working(),
                 Some(&skipped),
+                &[],
                 "## Skills\n",
                 None,
                 None
@@ -315,6 +329,7 @@ mod tests {
             Path::new("/w"),
             working(),
             Some(&mai),
+            &[],
             "## Skills\nresearch\n",
             Some("Cite every source."),
             None,
@@ -340,20 +355,63 @@ mod tests {
         assert!(at("## Skills") < at("## Project notes"));
     }
 
+    /// ADR 0078: what the agent learned from the person's feedback, after who they are and before
+    /// the skills, in their name; and nothing at all when it has learned nothing.
+    #[test]
+    fn what_the_agent_learned_comes_after_the_person_and_before_its_skills() {
+        let mai = AboutYou {
+            name: Some("Mai".into()),
+            about: Some("I teach.".into()),
+            skipped: false,
+        };
+        let prompt = system_prompt(
+            Path::new("/w"),
+            working(),
+            Some(&mai),
+            &["When writing the digest, use three bullets.".to_owned()],
+            "## Skills\nresearch\n",
+            None,
+            None,
+        );
+        let at = |text: &str| prompt.find(text).expect(text);
+        assert!(at("## The person you work for") < at("## What you have learned"));
+        assert!(at("## What you have learned") < at("## Skills"));
+        assert!(prompt.contains("From Mai's feedback on your earlier work."));
+        assert!(prompt.contains("\n- When writing the digest, use three bullets.\n"));
+        let unlearned = system_prompt(Path::new("/w"), working(), Some(&mai), &[], "", None, None);
+        assert!(!unlearned.contains("What you have learned"));
+    }
+
     #[test]
     fn a_name_alone_is_said_once_and_an_about_alone_needs_no_name() {
         let named = AboutYou {
             name: Some("Mai".into()),
             ..AboutYou::default()
         };
-        let prompt = system_prompt(Path::new("/w"), working(), Some(&named), "", None, None);
+        let prompt = system_prompt(
+            Path::new("/w"),
+            working(),
+            Some(&named),
+            &[],
+            "",
+            None,
+            None,
+        );
         assert!(prompt.contains("working on a task for Mai, the person who runs this team."));
         assert!(!prompt.contains("The person you work for"));
         let unnamed = AboutYou {
             about: Some("Keep it short.".into()),
             ..AboutYou::default()
         };
-        let prompt = system_prompt(Path::new("/w"), working(), Some(&unnamed), "", None, None);
+        let prompt = system_prompt(
+            Path::new("/w"),
+            working(),
+            Some(&unnamed),
+            &[],
+            "",
+            None,
+            None,
+        );
         assert!(prompt.contains("working on a task for the person who runs this team."));
         assert!(prompt.contains("About them, in their words:\n> Keep it short.\n"));
         assert!(!prompt.contains("Name:"));

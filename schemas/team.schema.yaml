@@ -775,7 +775,8 @@ $defs:
           The agent in "Your agents" this one was placed from (`<teams root>/.jobs/<agent>.yaml`),
           and the version it copies. The fields above are that version's, so the team runs exactly
           what it was approved with: editing the agent there makes a new version, which reaches
-          this team only when the operator chooses Update here. The daemon does not read it.
+          this team only when the operator chooses Update here. The daemon reads only `agent`: it
+          names whose lessons the agent reads and adds to, the same in every team (ADR 0078).
           Removing it makes the agent this team's own.
         type: object
         additionalProperties: false
@@ -788,6 +789,15 @@ $defs:
           version:
             type: integer
             minimum: 1
+      learns:
+        description: >-
+          Whether the agent learns from the person's feedback on its work (ADR 0078): their words
+          about a finished answer, and a check that found a Done when item not met and then met
+          after the send-back. What it learns is a short list of one-sentence lessons in its
+          standing instructions, each shown with where it came from and undone with one click.
+          `false` turns that off: it learns nothing new and is given none of its lessons. On when
+          absent. Not for an operator node.
+        type: boolean
       status:
         description: Runtime-only status; team-file writers omit it and readers ignore it.
         type: string

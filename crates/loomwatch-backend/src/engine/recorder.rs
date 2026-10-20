@@ -151,11 +151,24 @@ pub(crate) fn new_event_id() -> String {
 /// belongs to and is authoritative when both sides carry one; without it, tool, plan and
 /// permission activity is the boundary.
 ///
+/// A message the harness marks as commentary ([`commentary`]) asked for tool calls, so its words
+/// were said on the way ("Paths are relative to the work folder; I'll use the full paths."), not
+/// the answer. So were the words before a web search the provider ran part way through a message:
+/// the harness records each side of the search as a message of its own, and marks the one before
+/// it. The reply leaves those out, unless they are all the agent said.
+///
 /// `ui/src/lib/watch/replyText.ts` applies the same rule to the archive. The two must agree, or a
 /// saved reply stops matching the archived turn it came from.
 #[derive(Debug, Default)]
 pub(crate) struct ReplyText {
+    /// Everything the agent said.
     text: String,
+    /// The finished messages not said on the way, a paragraph apart.
+    answer: String,
+    /// The message being written, until the next one shows it wasn't said on the way.
+    current: String,
+    /// A message was said on the way, so the reply is [`Self::answer`].
+    set_aside: bool,
     message_id: Option<String>,
     boundary: bool,
 }
@@ -174,8 +187,11 @@ impl ReplyText {
             for _ in have..2 {
                 self.text.push('\n');
             }
+            let finished = std::mem::take(&mut self.current);
+            paragraph(&mut self.answer, &finished);
         }
         self.text.push_str(chunk);
+        self.current.push_str(chunk);
         self.message_id = message_id.map(str::to_owned);
         self.boundary = false;
     }
@@ -183,6 +199,14 @@ impl ReplyText {
     /// The agent did something other than talk, so whatever it says next is a new message.
     pub(crate) fn note_activity(&mut self) {
         self.boundary = true;
+    }
+
+    /// The message `message_id` asked for tool calls: its words were said on the way.
+    pub(crate) fn set_aside(&mut self, message_id: &str) {
+        if self.message_id.as_deref() == Some(message_id) {
+            self.current.clear();
+            self.set_aside = true;
+        }
     }
 
     /// A turn ended: the next chunk starts a new message even if it reuses the id.
@@ -195,15 +219,52 @@ impl ReplyText {
         *self = Self::default();
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    /// Everything the agent said, the words on the way included.
+    pub(crate) fn said(&self) -> &str {
         &self.text
     }
 
-    pub(crate) fn take(&mut self) -> String {
-        let text = std::mem::take(&mut self.text);
-        self.clear();
-        text
+    /// The reply: what the agent said but its words on the way, or those too when they are all.
+    pub(crate) fn reply(&self) -> String {
+        if !self.set_aside {
+            return self.text.clone();
+        }
+        let mut answer = self.answer.clone();
+        paragraph(&mut answer, &self.current);
+        if answer.trim().is_empty() {
+            self.text.clone()
+        } else {
+            answer
+        }
     }
+
+    pub(crate) fn take(&mut self) -> String {
+        let reply = self.reply();
+        self.clear();
+        reply
+    }
+}
+
+/// The message a `commentary` note names: one the agent wrote alongside tool calls
+/// (`agent::events::commentary`), as it arrives and as it is archived.
+pub(crate) fn commentary(update: &Value) -> Option<&str> {
+    (update["sessionUpdate"] == "agent_message_phase" && update["phase"] == "commentary")
+        .then(|| update["messageId"].as_str())
+        .flatten()
+}
+
+/// `next` after `text`, a paragraph apart.
+fn paragraph(text: &mut String, next: &str) {
+    if next.is_empty() {
+        return;
+    }
+    if !text.is_empty() {
+        let have = trailing_newlines(text) + leading_newlines(next);
+        for _ in have..2 {
+            text.push('\n');
+        }
+    }
+    text.push_str(next);
 }
 
 fn trailing_newlines(text: &str) -> usize {
@@ -323,7 +384,7 @@ impl Recorder {
         if !self.delivered_skills.iter().any(|skill| skill.translated) {
             return Ok(());
         }
-        let Some(text) = crate::skill_routing::self_report(self.reply.as_str()) else {
+        let Some(text) = crate::skill_routing::self_report(self.reply.said()) else {
             return Ok(());
         };
         self.append(
@@ -428,6 +489,12 @@ impl Recorder {
                 ),
             },
             Some("plan" | "plan_update" | "plan_removed") => (EventKind::Plan, update.clone()),
+            Some("agent_message_phase") => {
+                if let Some(message_id) = commentary(update) {
+                    self.reply.set_aside(message_id);
+                }
+                (EventKind::SessionMeta, update.clone())
+            }
             Some("usage_update") => (EventKind::Usage, update.clone()),
             Some(_) | None => (EventKind::SessionMeta, update.clone()),
         };
@@ -606,6 +673,88 @@ mod tests {
         assert_eq!(
             reply.take(),
             "Reading the template…\n\nDraft builds.\n\nDone."
+        );
+    }
+
+    /// A message marked as said on the way to a tool call is left out of the reply, and the
+    /// messages around it keep their paragraphs. A reply with nothing else keeps everything, and
+    /// a mark for a message that isn't the latest changes nothing.
+    #[test]
+    fn words_said_on_the_way_to_a_tool_are_left_out_of_the_reply() {
+        let mut reply = ReplyText::default();
+        reply.push("Paths are relative to the work folder; ", Some("m1"));
+        reply.push("I'll use the full paths.", Some("m1"));
+        reply.set_aside("m1");
+        reply.note_activity();
+        reply.push("Basic costs ", Some("m2"));
+        reply.push("139,000 VND.", Some("m2"));
+        reply.set_aside("m1");
+        reply.push("Team costs 349,000 VND.", Some("m3"));
+        assert_eq!(
+            reply.said(),
+            "Paths are relative to the work folder; I'll use the full paths.\n\nBasic costs \
+             139,000 VND.\n\nTeam costs 349,000 VND."
+        );
+        assert_eq!(
+            reply.take(),
+            "Basic costs 139,000 VND.\n\nTeam costs 349,000 VND."
+        );
+
+        reply.push("I'll read the notes first.", Some("m1"));
+        reply.set_aside("m1");
+        reply.push("Now the prices.", Some("m2"));
+        reply.set_aside("m2");
+        assert_eq!(
+            reply.take(),
+            "I'll read the notes first.\n\nNow the prices.",
+            "words on the way are better than no reply"
+        );
+    }
+
+    /// The harness's mark is archived with the run, every word stays in the record, and only the
+    /// reply leaves out what was said on the way.
+    #[tokio::test]
+    async fn a_marked_message_stays_in_the_record_and_out_of_the_reply() {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let mut recorder = Recorder::with_log(
+            EventLog::new(archive.clone(), "marked".to_owned()),
+            "marked".to_owned(),
+            "writer",
+        );
+        let frame = |update: Value| {
+            json!({"jsonrpc": "2.0", "method": "session/update",
+                   "params": {"sessionId": "marked", "update": update}})
+        };
+        let chunk = |text: &str, id: &str| {
+            json!({"sessionUpdate": "agent_message_chunk", "messageId": id,
+                   "content": {"type": "text", "text": text}})
+        };
+        for update in [
+            chunk("Paths are probably absolute.", "marked-1"),
+            json!({"sessionUpdate": "agent_message_phase", "messageId": "marked-1",
+                   "phase": "commentary"}),
+            json!({"sessionUpdate": "tool_call", "toolCallId": "r", "title": "Read prices.md",
+                   "kind": "read", "status": "in_progress", "rawInput": {}, "locations": []}),
+            chunk("Basic costs 139,000 VND.", "marked-2"),
+        ] {
+            recorder.record_frame(&frame(update)).await.unwrap();
+        }
+        assert_eq!(recorder.reply.take(), "Basic costs 139,000 VND.");
+        let events = archive.load_verified_session("marked").await.unwrap();
+        let kinds: Vec<_> = events.iter().map(|event| event.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                EventKind::Message,
+                EventKind::SessionMeta,
+                EventKind::ToolCall,
+                EventKind::Message
+            ]
+        );
+        assert_eq!(commentary(&events[1].payload), Some("marked-1"));
+        assert_eq!(
+            events[0].payload["content"]["text"],
+            "Paths are probably absolute."
         );
     }
 

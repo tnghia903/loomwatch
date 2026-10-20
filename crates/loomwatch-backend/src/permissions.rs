@@ -39,6 +39,8 @@ pub struct PermissionPolicy {
     /// Folders and files the operator connected as knowledge, and `LoomWatch`'s folder of copies
     /// for this agent, resolved.
     readable: Vec<PathBuf>,
+    /// The folders among them the operator connected, as the agent's prompt names them.
+    connected: Vec<PathBuf>,
     /// MCP servers `LoomWatch` handed this session: the Team Bus and every connected tool.
     servers: Vec<String>,
     /// What the operator turned off for this agent that `LoomWatch` does not also give it
@@ -70,6 +72,7 @@ impl PermissionPolicy {
             allow,
             folder: resolve(folder),
             readable: readable.into_iter().map(|path| resolve(&path)).collect(),
+            connected: Vec::new(),
             servers: servers.into_iter().collect(),
             turned_off: Vec::new(),
             state_dir: installed.map(|ai| resolve(&ai.state_dir())),
@@ -113,8 +116,13 @@ impl PermissionPolicy {
             .flat_map(|knowledge| knowledge.folders.iter().chain(&knowledge.files))
             .map(PathBuf::from)
             .chain(delivery.copies.clone());
-        Self::new(allow, folder, readable, [RESERVED_SERVER.to_owned()])
-            .always_allowing(&delivery.tools)
+        let mut policy = Self::new(allow, folder, readable, [RESERVED_SERVER.to_owned()])
+            .always_allowing(&delivery.tools);
+        policy.connected = (delivery.knowledge.iter())
+            .flat_map(|knowledge| &knowledge.folders)
+            .map(PathBuf::from)
+            .collect();
+        policy
     }
 
     /// The policy for one of a run's agents: [`Self::for_agent`] with what the operator turned off
@@ -125,6 +133,13 @@ impl PermissionPolicy {
             .turning_off(&agent.turned_off, &agent.capabilities);
         policy.web_limits = agent.spend.web.limits();
         policy
+    }
+
+    /// The folders the operator connected as knowledge, where the agent's reads by a name inside one
+    /// find the file (`agent::tools::resolve_reading`).
+    #[must_use]
+    pub fn connected_folders(&self) -> &[PathBuf] {
+        &self.connected
     }
 
     /// How much web reading one model call may do.

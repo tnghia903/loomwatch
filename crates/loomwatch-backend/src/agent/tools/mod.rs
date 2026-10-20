@@ -97,6 +97,8 @@ pub(crate) struct Pictures {
 /// What a tool runs with.
 pub(crate) struct Context<'a> {
     pub cwd: &'a Path,
+    /// The folders the operator connected as knowledge ([`resolve_reading`]).
+    pub connected: &'a [PathBuf],
     pub cancel: &'a Cancel,
     pub command: &'a CommandSettings,
     pub pictures: Pictures,
@@ -268,11 +270,18 @@ impl Builtin {
         }
     }
 
-    /// What the call will do, or why it can't be done as asked.
-    pub(crate) fn prepare(self, input: &Value, cwd: &Path) -> Result<Prepared, String> {
+    /// What the call will do, or why it can't be done as asked. A reading tool also looks in the
+    /// `connected` folders ([`resolve_reading`]).
+    pub(crate) fn prepare(
+        self,
+        input: &Value,
+        cwd: &Path,
+        connected: &[PathBuf],
+    ) -> Result<Prepared, String> {
+        let connected = if self.only_reads() { connected } else { &[] };
         let path = |key: &str| -> Result<PathBuf, String> {
             let given = input.get(key).and_then(Value::as_str).unwrap_or(".");
-            Ok(resolve(cwd, given))
+            Ok(resolve_reading(cwd, connected, given))
         };
         let needs = |kind: ToolKind, title: String, locations: Vec<PathBuf>| Prepared {
             title,
@@ -290,7 +299,7 @@ impl Builtin {
                 )
             }
             Self::ReadFile => {
-                let file = required_path(input, cwd)?;
+                let file = required_path(input, cwd, connected)?;
                 needs(
                     ToolKind::Read,
                     format!("Read {}", shown(cwd, &file)),
@@ -307,7 +316,7 @@ impl Builtin {
                 )
             }
             Self::WriteFile => {
-                let file = required_path(input, cwd)?;
+                let file = required_path(input, cwd, connected)?;
                 required_str(input, "content")?;
                 needs(
                     ToolKind::Edit,
@@ -316,7 +325,7 @@ impl Builtin {
                 )
             }
             Self::EditFile => {
-                let file = required_path(input, cwd)?;
+                let file = required_path(input, cwd, connected)?;
                 required_str(input, "old_text")?;
                 required_str(input, "new_text")?;
                 needs(
@@ -359,10 +368,13 @@ impl Builtin {
             | Self::EditFile => {
                 let input = input.clone();
                 let cwd = context.cwd.to_path_buf();
+                let connected = context.connected.to_vec();
                 let pictures = context.pictures;
-                tokio::task::spawn_blocking(move || files::run(self, &input, &cwd, pictures))
-                    .await
-                    .unwrap_or_else(|error| Output::failed(format!("The tool stopped: {error}")))
+                tokio::task::spawn_blocking(move || {
+                    files::run(self, &input, &cwd, &connected, pictures)
+                })
+                .await
+                .unwrap_or_else(|error| Output::failed(format!("The tool stopped: {error}")))
             }
             Self::RunCommand => Box::pin(command::run(input, context)).await,
             Self::UpdatePlan | Self::ReadToolOutput => {
@@ -379,12 +391,12 @@ fn required_str<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("`{key}` is required and must be text."))
 }
 
-fn required_path(input: &Value, cwd: &Path) -> Result<PathBuf, String> {
+fn required_path(input: &Value, cwd: &Path, connected: &[PathBuf]) -> Result<PathBuf, String> {
     let given = required_str(input, "path")?;
     if given.trim().is_empty() {
         return Err("`path` is empty.".to_owned());
     }
-    Ok(resolve(cwd, given))
+    Ok(resolve_reading(cwd, connected, given))
 }
 
 /// `given` as an absolute path: relative to `cwd`, with `.` and `..` worked out on the text alone,
@@ -418,6 +430,38 @@ pub(crate) fn resolve(cwd: &Path, given: &str) -> PathBuf {
         }
     }
     out
+}
+
+/// Where a reading tool finds `given`: [`resolve`]d against the work folder, unless nothing is
+/// there and exactly one of the `connected` folders holds it. The agent is shown a connected
+/// folder's files by their names inside it (`drafts/prices.md`), and the folder by the name the
+/// team file gives it (`notes/drafts/prices.md`), so a read by either name finds the file.
+pub(crate) fn resolve_reading(cwd: &Path, connected: &[PathBuf], given: &str) -> PathBuf {
+    let path = resolve(cwd, given);
+    if path.exists() {
+        return path;
+    }
+    let relative = Path::new(given.trim());
+    let mut found: Vec<PathBuf> = connected
+        .iter()
+        .flat_map(|folder| {
+            let by_name = folder
+                .file_name()
+                .filter(|name| relative.starts_with(name))
+                .and(folder.parent())
+                .map(|parent| resolve(parent, given));
+            [Some(resolve(folder, given)), by_name]
+                .into_iter()
+                .flatten()
+                .filter(move |inside| inside.starts_with(folder) && inside.exists())
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    match found.as_slice() {
+        [only] => only.clone(),
+        _ => path,
+    }
 }
 
 /// A path the way the operator's card shows it: relative to the work folder when inside it.
@@ -493,6 +537,68 @@ mod tests {
         );
     }
 
+    /// The agent is shown a connected folder's files by their names inside it, and the folder by
+    /// the name the team file gives it. A read by either name finds the file; the work folder's
+    /// own file comes first; a name two folders hold is neither's; and a write never lands in a
+    /// connected folder by a guess.
+    #[test]
+    fn a_read_by_a_name_inside_a_connected_folder_finds_the_file() {
+        let root =
+            std::env::temp_dir().join(format!("loomwatch-connected-{}", uuid::Uuid::new_v4()));
+        let (work, notes) = (root.join("work"), root.join("notes"));
+        let menus = root.join("shared").join("menus");
+        for (file, text) in [
+            (work.join("README.md"), "the work folder's"),
+            (notes.join("README.md"), "the notes'"),
+            (notes.join("drafts/prices.md"), "Basic: 139,000 VND"),
+            (menus.join("drafts/menu.md"), "Pho"),
+            (root.join("shared/secret.md"), "not connected"),
+        ] {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, text).unwrap();
+        }
+        let connected = [notes.clone(), menus.clone()];
+        let read = |given: &str| resolve_reading(&work, &connected, given);
+        // Joined part by part, so Windows names it with `\` throughout, as the tools do.
+        let prices = notes.join("drafts").join("prices.md");
+        assert_eq!(read("drafts/prices.md"), prices);
+        assert_eq!(read("./drafts/prices.md"), prices);
+        assert_eq!(
+            read("notes/drafts/prices.md"),
+            prices,
+            "by the folder's name"
+        );
+        assert_eq!(read("drafts/menu.md"), menus.join("drafts/menu.md"));
+        assert_eq!(read("drafts"), work.join("drafts"), "both folders hold one");
+        assert_eq!(read("README.md"), work.join("README.md"));
+        assert_eq!(read("missing.md"), work.join("missing.md"));
+        assert_eq!(read("../drafts/prices.md"), root.join("drafts/prices.md"));
+        assert_eq!(
+            read("../secret.md"),
+            root.join("secret.md"),
+            "never out of one"
+        );
+        assert_eq!(
+            resolve_reading(&work, &[], "drafts/prices.md"),
+            work.join("drafts/prices.md")
+        );
+
+        let reading = Builtin::ReadFile
+            .prepare(&json!({"path": "drafts/prices.md"}), &work, &connected)
+            .unwrap();
+        assert_eq!(reading.locations, std::slice::from_ref(&prices));
+        assert_eq!(reading.title, format!("Read {}", prices.display()));
+        let writing = Builtin::WriteFile
+            .prepare(
+                &json!({"path": "drafts/prices.md", "content": "x"}),
+                &work,
+                &connected,
+            )
+            .unwrap();
+        assert_eq!(writing.locations, [work.join("drafts/prices.md")]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_call_says_what_it_will_touch_before_it_runs() {
         let cwd = Path::new("/work");
@@ -500,19 +606,20 @@ mod tests {
             .prepare(
                 &json!({"path": "a.md", "old_text": "x", "new_text": "y"}),
                 cwd,
+                &[],
             )
             .unwrap();
         assert_eq!(prepared.kind, ToolKind::Edit);
         assert_eq!(prepared.locations, [PathBuf::from("/work/a.md")]);
         assert_eq!(prepared.title, "Edit a.md");
-        assert!(Builtin::ReadFile.prepare(&json!({}), cwd).is_err());
+        assert!(Builtin::ReadFile.prepare(&json!({}), cwd, &[]).is_err());
         let command = Builtin::RunCommand
-            .prepare(&json!({"command": "python3 make.py\necho done"}), cwd)
+            .prepare(&json!({"command": "python3 make.py\necho done"}), cwd, &[])
             .unwrap();
         assert_eq!(command.title, "Run: python3 make.py…");
         assert!(
             !Builtin::UpdatePlan
-                .prepare(&json!({"steps": []}), cwd)
+                .prepare(&json!({"steps": []}), cwd, &[])
                 .unwrap()
                 .needs_permission
         );

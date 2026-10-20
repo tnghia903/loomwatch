@@ -208,7 +208,7 @@ export function useTeamChat(teamPath: string | null) {
       const key = `run:${run.runId}`
       const existing = previous.byKey.get(key)
       const byKey = new Map(previous.byKey)
-      byKey.set(key, { kind: 'work', run, request: existing?.kind === 'work' ? existing.request : null, notes: existing?.kind === 'work' ? existing.notes : [], reactions: existing?.kind === 'work' ? existing.reactions : undefined })
+      byKey.set(key, { kind: 'work', run, request: existing?.kind === 'work' ? existing.request : null, notes: existing?.kind === 'work' ? existing.notes : [], reactions: existing?.kind === 'work' ? existing.reactions : undefined, lessons: existing?.kind === 'work' ? existing.lessons : undefined })
       return { ...previous, byKey }
     })
   }, [teamPath])

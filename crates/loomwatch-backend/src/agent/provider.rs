@@ -12,7 +12,7 @@ use super::anthropic::Anthropic;
 use super::chatgpt::ChatGptPlan;
 use super::demo::Demo;
 use super::error::CallError;
-use super::openrouter::OpenRouter;
+use super::openrouter::{OpenRouter, through_messages};
 use crate::ai::Source;
 
 /// One message of the conversation, in the agent's own order. It is append-only: a model that
@@ -36,8 +36,9 @@ pub enum Message {
         reasoning_details: Vec<Value>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
-        /// The message as a provider other than `OpenRouter` wrote it, sent back to that provider
-        /// unchanged: Claude refuses a history whose signed thinking was rewritten.
+        /// The message in the shape its provider wrote it (Anthropic's content blocks, the
+        /// Responses API's items), sent back to that provider unchanged: Claude refuses a history
+        /// whose signed thinking was rewritten. Chat completions has none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         native: Option<Native>,
     },
@@ -70,8 +71,9 @@ impl Picture {
     }
 }
 
-/// A message in the shape one provider writes it: Anthropic's content blocks or the Responses API's
-/// output items. Only that provider reads it back; any other ignores it.
+/// A message in the shape one provider writes it: Anthropic's content blocks (from Anthropic, or
+/// from `OpenRouter`'s `/messages`) or the Responses API's output items. Only the source that wrote
+/// it reads it back; any other ignores it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Native {
     pub source: Source,
@@ -255,6 +257,9 @@ pub struct Completion {
     pub usage: Usage,
     /// Searches and fetches the provider ran on the model's behalf, for the record.
     pub server_tool_calls: Vec<Value>,
+    /// Where the message's last part begins in `content` ([`Parts`]): what comes before it was
+    /// said on the way to a search the provider ran. Zero when nothing was.
+    pub answer_from: usize,
     /// The message as the provider wrote it, when it is not `OpenRouter`: see [`Native`].
     pub native: Option<Native>,
 }
@@ -270,7 +275,24 @@ impl Completion {
             finish: Finish::Stop,
             usage: Usage::default(),
             server_tool_calls: Vec::new(),
+            answer_from: 0,
             native: None,
+        }
+    }
+
+    /// A reply whose provider ran a search between each of `parts`, for the demo and tests.
+    #[must_use]
+    pub fn searched(parts: &[&str]) -> Self {
+        let mut written = Written::default();
+        for (place, part) in parts.iter().enumerate() {
+            if place > 0 {
+                written.tool();
+            }
+            written.text(part);
+        }
+        Self {
+            answer_from: written.answer_from,
+            ..Self::text(&written.content)
         }
     }
 
@@ -289,6 +311,81 @@ impl Completion {
 pub(crate) trait DeltaSink: Send + Sync {
     fn text<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<(), CallError>>;
     fn reasoning<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<(), CallError>>;
+    /// The provider began a tool it runs itself (a web search, a page read): what the model
+    /// writes next comes after its result ([`Parts`]).
+    fn server_tool(&self);
+}
+
+/// Where the tools a provider runs itself split one model message. A model that searches the web
+/// part way through a message writes on either side of the search ("Let me check the prices.",
+/// then the answer), and the provider sends both as one message. The words after a search are a
+/// part of their own, and the words before it were said on the way to it, as words written
+/// alongside a tool call are. A search with nothing said before it, or nothing after, splits
+/// nothing.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Parts {
+    /// Which part the latest words belong to, from 0.
+    current: usize,
+    /// The message has said something.
+    said: bool,
+    /// The provider began a tool since the latest words.
+    after_tool: bool,
+}
+
+impl Parts {
+    pub(crate) fn tool(&mut self) {
+        self.after_tool = true;
+    }
+
+    /// Takes the model's next `piece` of words, and says whether it begins a new part.
+    pub(crate) fn begins(&mut self, piece: &str) -> bool {
+        if piece.trim().is_empty() {
+            return false;
+        }
+        let begins = self.said && self.after_tool;
+        self.said = true;
+        self.after_tool = false;
+        self.current += usize::from(begins);
+        begins
+    }
+
+    pub(crate) const fn current(self) -> usize {
+        self.current
+    }
+}
+
+/// One model message's words as a provider puts them together, its [`Parts`] a paragraph apart.
+#[derive(Debug, Default)]
+pub(crate) struct Written {
+    pub(crate) content: String,
+    /// Where the last part begins in `content`.
+    pub(crate) answer_from: usize,
+    parts: Parts,
+}
+
+impl Written {
+    pub(crate) fn text(&mut self, piece: &str) {
+        if self.parts.begins(piece) {
+            let have = trailing_newlines(&self.content) + leading_newlines(piece);
+            for _ in have..2 {
+                self.content.push('\n');
+            }
+            self.answer_from = self.content.len();
+        }
+        self.content.push_str(piece);
+    }
+
+    pub(crate) fn tool(&mut self) {
+        self.parts.tool();
+    }
+}
+
+fn trailing_newlines(text: &str) -> usize {
+    text.bytes().rev().take_while(|byte| *byte == b'\n').count()
+}
+
+fn leading_newlines(text: &str) -> usize {
+    text.bytes().take_while(|byte| *byte == b'\n').count()
 }
 
 /// The model providers `LoomWatch` can run an agent on.
@@ -331,10 +428,14 @@ impl Provider {
 
     /// Whether a summary keeps the session's tools, asking the model not to call them
     /// ([`ChatRequest::tools_off`]), rather than going without: true where the conversation is signed
-    /// and must not change under it.
+    /// and must not change under it, as it is for a Claude on `OpenRouter`'s `/messages`.
     #[must_use]
-    pub fn keeps_tools_for_summaries(&self) -> bool {
-        !matches!(self, Self::OpenRouter(_) | Self::Demo(_))
+    pub fn keeps_tools_for_summaries(&self, model: &str) -> bool {
+        match self {
+            Self::OpenRouter(_) => through_messages(model),
+            Self::Demo(_) => false,
+            Self::Anthropic(_) | Self::ChatGpt(_) => true,
+        }
     }
 }
 
@@ -359,5 +460,43 @@ impl Cancel {
         if receiver.wait_for(|cancelled| *cancelled).await.is_err() {
             std::future::pending::<()>().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Parts, Written};
+
+    /// The words after a search the provider ran are a paragraph of their own and where the
+    /// answer begins. Blank words don't begin a part, and a search with nothing said before it
+    /// splits nothing.
+    #[test]
+    fn a_search_splits_a_message_only_between_words() {
+        let mut written = Written::default();
+        written.text("Let me check.");
+        written.tool();
+        written.text("\n");
+        written.tool();
+        written.text("Basic costs 139,000 VND.");
+        assert_eq!(written.content, "Let me check.\n\nBasic costs 139,000 VND.");
+        assert_eq!(
+            &written.content[written.answer_from..],
+            "Basic costs 139,000 VND."
+        );
+
+        let mut written = Written::default();
+        written.tool();
+        written.text("Basic costs 139,000 VND.");
+        written.tool();
+        assert_eq!(written.content, "Basic costs 139,000 VND.");
+        assert_eq!(written.answer_from, 0);
+
+        let mut parts = Parts::default();
+        assert!(!parts.begins("Let me check."));
+        parts.tool();
+        assert!(!parts.begins("  \n"));
+        assert!(parts.begins("Basic"));
+        assert!(!parts.begins(" costs"));
+        assert_eq!(parts.current(), 1);
     }
 }

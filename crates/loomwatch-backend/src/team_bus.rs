@@ -2076,6 +2076,14 @@ impl TeamBus {
                 Some(event_log.session_id()),
                 agent,
             ),
+            lessons: crate::lessons::supply(
+                &self.state.archive,
+                &self.state.team,
+                &self.state.team_path,
+                agent,
+                Some(event_log.session_id()),
+            )
+            .await,
         };
         let mut packet = self.state.memory.packet_for(agent)?;
         // A delegated helper's lineage is the server-owned `delegation_path` on its caller's
@@ -3238,6 +3246,7 @@ mod tests {
             tools: Vec::new(),
             permissions: None,
             asker: None,
+            lessons: Vec::new(),
         }
     }
 
@@ -3259,6 +3268,8 @@ mod tests {
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
+            from_agent: None,
+            learns: true,
         }
     }
 

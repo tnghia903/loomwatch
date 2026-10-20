@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use uuid::Uuid;
 
 pub(crate) use bridge::tool_spec;
-pub(crate) use recorder::{EventLog, Recorder, ReplyText, new_event_id};
+pub(crate) use recorder::{EventLog, Recorder, ReplyText, commentary, new_event_id};
 
 use crate::agent::{
     AgentError, Anthropic, ChatGptPlan, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter,
@@ -52,6 +52,9 @@ pub struct ProcessSpec {
     pub permissions: Option<crate::permissions::PermissionPolicy>,
     /// Who a request the policy declines is put to: the operator of the run this agent belongs to.
     pub asker: Option<crate::permissions::PermissionAsker>,
+    /// What the agent learned from the person's feedback (ADR 0078), read when its run started, so
+    /// every session it opens in the run, a reopened one too, is given the same lessons.
+    pub lessons: Vec<String>,
 }
 
 /// What a session needs from the run that opens it.
@@ -1012,9 +1015,11 @@ impl AgentRun {
         if self.knows_the_person {
             config.person = crate::you::told_in(&self.spec.cwd);
         }
+        config.lessons.clone_from(&self.spec.lessons);
         if let Some(policy) = &self.spec.permissions {
             config.turned_off = policy.turned_off_skills();
             config.web = policy.web_limits();
+            config.knowledge = policy.connected_folders().to_vec();
         }
         if let Some(bus) = bus {
             config.time_zone = bus.time_zone();
@@ -1185,6 +1190,7 @@ mod tests {
             tools: Vec::new(),
             permissions: None,
             asker: None,
+            lessons: Vec::new(),
         }
     }
 

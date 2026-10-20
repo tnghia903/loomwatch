@@ -22,6 +22,7 @@ pub mod engine;
 mod files;
 mod intent;
 mod jobs;
+pub mod lessons;
 pub mod marketplace;
 pub mod memory;
 pub mod notebook_api;
@@ -197,6 +198,9 @@ pub struct RunLineage {
     /// Whether [`Self::previous_output`] is the `only` agent's own last output, rendered as
     /// `## Your previous output`, rather than the answer of a followed run.
     pub own_output: bool,
+    /// Where a check step's missed-then-met items are learned from (ADR 0078). `None` on the CLI
+    /// path and in a daemon with no model settings.
+    pub learner: Option<lessons::Learner>,
 }
 
 /// A message from the team's work that the operator's message replies to (ADR 0051), as an agent
@@ -513,7 +517,15 @@ async fn run_team_mode(
         event_log.as_ref().map(EventLog::session_id),
         agent,
     );
-    let spec = agent_process_spec(agent, cwd, &composed.delivery, asker);
+    let mut spec = agent_process_spec(agent, cwd, &composed.delivery, asker);
+    spec.lessons = lessons::supply(
+        &archive,
+        team,
+        team_path,
+        agent,
+        event_log.as_ref().map(EventLog::session_id),
+    )
+    .await;
 
     let process = AgentRun::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
@@ -779,6 +791,14 @@ async fn run_pipeline_nodes(
             shared_log.as_ref().map(EventLog::session_id),
             agent,
         );
+        spec.lessons = lessons::supply(
+            archive,
+            team,
+            team_path,
+            agent,
+            shared_log.as_ref().map(EventLog::session_id),
+        )
+        .await;
         let mut node_prompt = stage_task(
             team,
             agent_id,
@@ -923,6 +943,18 @@ async fn run_pipeline_nodes(
                 &mut handovers,
             ))
             .await?;
+            learn_from_checks(
+                lineage.learner.as_ref(),
+                team,
+                team_path,
+                checked,
+                &outcome,
+                CheckedWork {
+                    request: prompt,
+                    work: replies.get(checked).map_or("", String::as_str),
+                    run_id: shared_log.as_ref().map(EventLog::session_id),
+                },
+            );
             reply = outcome.reply;
             checked_items = Some(outcome.items);
             // Approved as it was at the check step's stop: what the operator wrote is direction
@@ -2169,6 +2201,7 @@ fn agent_process_spec(
         tools: delivery.tools.clone(),
         permissions: Some(permissions),
         asker,
+        lessons: Vec::new(),
     }
 }
 
@@ -2224,6 +2257,7 @@ fn node_process_spec(
             tools: delivery.tools.clone(),
             permissions: Some(permissions),
             asker: None,
+            lessons: Vec::new(),
         },
         skills,
         delivery,
@@ -3615,6 +3649,83 @@ fn checked_work_handover(
     Some(text)
 }
 
+/// The work a check step checked, for what the checked agent learns from it.
+#[derive(Clone, Copy)]
+struct CheckedWork<'a> {
+    request: &'a str,
+    work: &'a str,
+    run_id: Option<&'a str>,
+}
+
+/// A Done when item the check step found not met the first time and met after the work went back
+/// teaches the checked agent to meet it the first time (ADR 0078): a round, and its tokens, it need
+/// not take again. Items it never met teach nothing: what could not be fixed is often a missing
+/// input or a wrong finding, and a lesson from it would be a guess. In the background; the run does
+/// not wait for it.
+fn learn_from_checks(
+    learner: Option<&lessons::Learner>,
+    team: &TeamConfig,
+    team_path: &Path,
+    checked: &str,
+    outcome: &Checked,
+    work: CheckedWork<'_>,
+) {
+    let Some(learner) = learner else {
+        return;
+    };
+    let Some(agent) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id == checked && agent.learns && !agent.is_operator())
+    else {
+        return;
+    };
+    let fixed: Vec<String> = outcome
+        .first
+        .iter()
+        .filter(|first| first.verdict == "not_met")
+        .filter(|first| {
+            outcome
+                .items
+                .iter()
+                .any(|now| now.item == first.item && now.verdict == "met")
+        })
+        .map(|first| {
+            if first.evidence.trim().is_empty() {
+                first.item.clone()
+            } else {
+                format!(
+                    "{} (the check found: {})",
+                    first.item,
+                    first.evidence.trim()
+                )
+            }
+        })
+        .collect();
+    if fixed.is_empty() {
+        return;
+    }
+    learner.spawn(lessons::LearnRequest {
+        from: lessons::LearnedFrom {
+            scope: lessons::scope_of(team, team_path, agent),
+            agent_id: agent.id.clone(),
+            source: lessons::LessonSource::Check,
+            feedback: fixed.join("\n"),
+            run_id: work.run_id.map(str::to_owned),
+        },
+        learning: lessons::Learning {
+            agent: display_name(team, &agent.id),
+            instructions: agent.role.clone(),
+            done_when: agent.done_when.clone(),
+            request: work.request.to_owned(),
+            work: work.work.to_owned(),
+            said: String::new(),
+            missed_items: fixed,
+            steps: Vec::new(),
+        },
+    });
+}
+
 /// What a check step needs to record its checks, send the work back, and stop to ask.
 struct CheckStep<'a> {
     team: &'a TeamConfig,
@@ -3711,6 +3822,8 @@ struct Checks {
     reply: String,
     /// Its latest verdict on every item.
     items: Vec<CheckItem>,
+    /// Its first verdict on every item, before any send-back.
+    first: Vec<CheckItem>,
     /// Which check this is: 1 for the first, one more after each time the work went back.
     round: u32,
     /// How many times the work has gone back.
@@ -3730,6 +3843,8 @@ struct SendBackTurn<'a> {
 struct Checked {
     reply: String,
     items: Vec<CheckItem>,
+    /// Its verdict on every item the first time it checked, before any send-back.
+    first: Vec<CheckItem>,
     /// What the operator wrote when the check step stopped to ask and they approved the work as it
     /// was: direction for the stages after it, as a review stop's answer is.
     approval: Option<String>,
@@ -3756,6 +3871,7 @@ impl Checks {
         Checked {
             reply: self.reply,
             items: self.items,
+            first: self.first,
             approval,
         }
     }
@@ -3866,6 +3982,7 @@ async fn run_checks(
     step.record(1, &items, readable).await?;
     let mut checks = Checks {
         reply,
+        first: items.clone(),
         items,
         round: 1,
         sent: 0,
@@ -8705,6 +8822,7 @@ mod tests {
         let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
         let lineage = RunLineage {
             operator: None,
+            learner: None,
             conversation: None,
             reply: None,
             only: None,
@@ -8873,6 +8991,7 @@ mod tests {
             &Arc::new(memory::TeamMemory::default()),
             &RunLineage {
                 operator: None,
+                learner: None,
                 conversation: None,
                 reply: None,
                 only: None,
@@ -8949,6 +9068,8 @@ mod tests {
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
+            from_agent: None,
+            learns: true,
         }
     }
 
@@ -8977,6 +9098,8 @@ mod tests {
             checks: None,
             send_back: None,
             spend: crate::spend::SpendConfig::default(),
+            from_agent: None,
+            learns: true,
         }
     }
 
@@ -10128,6 +10251,228 @@ mod tests {
         assert_eq!(
             check_stops(&events),
             [(3, 2, "all_met".to_owned(), "answer".to_owned())]
+        );
+        Ok(())
+    }
+
+    /// A stand-in model that answers every request with `answer`, keeping each system prompt it was
+    /// sent, and the name a team file gives it.
+    fn keeping_instructions(answer: &'static str) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        let kept = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = kept.clone();
+        let model = crate::engine::demo_model(crate::agent::Demo::responder(move |request| {
+            if let Some(crate::agent::Message::System { content }) = request.messages.first() {
+                seen.lock().unwrap().push(content.clone());
+            }
+            Some(crate::agent::Completion::text(answer))
+        }));
+        (model, kept)
+    }
+
+    /// ADR 0078: a check that found Done when items not met, and met them after the send-back,
+    /// teaches the writer. The learner is told which items, with what the check found the first
+    /// time; and the writer's next run is given the lesson in its instructions.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn a_check_missed_then_met_teaches_the_writer_for_its_next_run() -> Result<()> {
+        use crate::test_support::{stand_in, turn};
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let (writer, _) = stand_in(vec![
+            turn(&[], "draft one"),
+            turn(&["## Sent back by Checker"], "draft two"),
+        ]);
+        let (checker, _) = stand_in(vec![
+            turn(
+                &["draft one"],
+                &loop_block(
+                    "",
+                    &[
+                        (1, "Not met", LOOP_A, "cites the 2023 one"),
+                        (2, "Met", LOOP_B, "150 words"),
+                        (3, "Met", CONTRADICTION_ITEM, "traced"),
+                    ],
+                ),
+            ),
+            turn(
+                &["draft two"],
+                &loop_block("", &[(1, "Met", LOOP_A, "cites the 2025 report")]),
+            ),
+        ]);
+        let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        let learner_model = crate::engine::demo_model(crate::agent::Demo::responder(
+            move |request| {
+                seen.lock().unwrap().push(request.prompt().to_owned());
+                Some(crate::agent::Completion::text(
+                    r#"{"edits": [{"do": "add", "lesson": "When citing a report, cite its newest edition."}]}"#,
+                ))
+            },
+        ));
+        let learner = lessons::Learner {
+            lessons: archive.lessons(),
+            archive: archive.clone(),
+            teams_root: std::env::temp_dir()
+                .join(format!("loomwatch-learn-{}", uuid::Uuid::new_v4())),
+            model: learner_model,
+        };
+        let team = loop_team(
+            "learns-from-checks",
+            &writer,
+            &checker,
+            rounds(2, config::WhenStillNotMet::Answer),
+            None,
+        );
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        let run =
+            |team: Arc<TeamConfig>, run_id: &'static str, learner: Option<lessons::Learner>| {
+                let archive = archive.clone();
+                let team_path = team_path.clone();
+                async move {
+                    run_pipeline_mode(
+                        &team,
+                        &team_path,
+                        archive.clone(),
+                        "write it",
+                        Duration::from_secs(5),
+                        Some(EventLog::new(archive.clone(), run_id.to_owned())),
+                        &Arc::new(memory::TeamMemory::default()),
+                        &RunLineage {
+                            learner,
+                            ..RunLineage::default()
+                        },
+                    )
+                    .await
+                }
+            };
+        let outcome = run(team.clone(), "first-run", Some(learner)).await?;
+        assert_eq!(outcome.reply, "draft two");
+        let scope = "team:learns-from-checks#writer";
+        let mut kept = Vec::new();
+        for _ in 0..200 {
+            kept = archive.lessons().active(scope).await?;
+            if !kept.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(kept.len(), 1, "the writer learned once");
+        assert_eq!(
+            kept[0].text,
+            "When citing a report, cite its newest edition."
+        );
+        assert_eq!(kept[0].source, lessons::LessonSource::Check);
+        assert_eq!(kept[0].run_id.as_deref(), Some("first-run"));
+        assert_eq!(
+            kept[0].feedback,
+            format!("{LOOP_A} (the check found: cites the 2023 one)")
+        );
+        {
+            let asked = asked.lock().unwrap();
+            assert_eq!(asked.len(), 1);
+            // Only what was missed and then met: the item met the first time is not a lesson.
+            assert!(
+                asked[0].contains(&format!("- {LOOP_A} (the check found: cites the 2023 one)"))
+            );
+            assert!(!asked[0].contains(&format!("- {LOOP_B} (the check found")));
+            assert!(asked[0].contains("It answered:\n> draft two"));
+        }
+        // The next run: the writer is given its lesson, and the run records that it was.
+        let (writer, instructions) = keeping_instructions("draft three");
+        let (checker, _) = stand_in(vec![turn(
+            &["draft three"],
+            &loop_block(
+                "",
+                &[
+                    (1, "Met", LOOP_A, "cites the 2025 report"),
+                    (2, "Met", LOOP_B, "150 words"),
+                    (3, "Met", CONTRADICTION_ITEM, "traced"),
+                ],
+            ),
+        )]);
+        let team = loop_team(
+            "learns-from-checks",
+            &writer,
+            &checker,
+            rounds(2, config::WhenStillNotMet::Answer),
+            None,
+        );
+        run(team, "second-run", None).await?;
+        let first = instructions.lock().unwrap()[0].clone();
+        assert!(
+            first.contains(
+                "## What you have learned\nFrom the person's feedback on your earlier work."
+            ) && first.contains("\n- When citing a report, cite its newest edition.\n"),
+            "{first}"
+        );
+        assert_eq!(archive.lessons().active(scope).await?[0].given, 1);
+        Ok(())
+    }
+
+    /// An agent that learns nothing is given nothing: `learns: false` turns its lessons off too.
+    #[tokio::test]
+    async fn an_agent_that_does_not_learn_is_given_no_lessons() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let archive = EventArchive::new(pool);
+        let (model, instructions) = keeping_instructions("done");
+        let mut lead = named("lead", "Lead", &model);
+        let team_of = |lead: AgentConfig| {
+            Arc::new(TeamConfig {
+                schema_version: 1,
+                id: "learning-lead".into(),
+                name: "Learning lead".into(),
+                entrypoint: "lead".into(),
+                responder: None,
+                schedule: None,
+                deliver: None,
+                conversation: ConversationConfig::default(),
+                permissions: crate::config::TeamPermissions::default(),
+                spend: crate::spend::SpendConfig::default(),
+                memory: None,
+                guards: GuardsConfig::default(),
+                agents: vec![lead],
+                edges: Vec::new(),
+            })
+        };
+        let team_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("team.yaml");
+        archive
+            .lessons()
+            .apply(
+                &lessons::LearnedFrom {
+                    scope: "team:learning-lead#lead".to_owned(),
+                    agent_id: "lead".to_owned(),
+                    source: lessons::LessonSource::You,
+                    feedback: "Shorter.".to_owned(),
+                    run_id: None,
+                },
+                &[],
+                &[lessons::Edit::Add {
+                    text: "Keep answers short.".to_owned(),
+                    about_you: false,
+                }],
+            )
+            .await?;
+        for (learns, run_id) in [(true, "learning-run"), (false, "quiet-run")] {
+            lead.learns = learns;
+            run_team_mode(
+                &team_of(lead.clone()),
+                &team_path,
+                archive.clone(),
+                "go",
+                Duration::from_secs(5),
+                Some(EventLog::new(archive.clone(), run_id.to_owned())),
+                &Arc::new(memory::TeamMemory::default()),
+                &RunLineage::default(),
+            )
+            .await?;
+        }
+        let instructions = instructions.lock().unwrap();
+        assert!(instructions[0].contains("- Keep answers short.\n"));
+        assert!(
+            !instructions
+                .last()
+                .unwrap()
+                .contains("What you have learned")
         );
         Ok(())
     }

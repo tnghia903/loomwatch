@@ -1,11 +1,11 @@
 """A stand-in for OpenRouter on 127.0.0.1, for end-to-end checks of LoomWatch with no real key.
 
-It answers the four things LoomWatch asks OpenRouter: the key check (GET /api/v1/key), the model
-list (GET /api/v1/models), streamed chat completions (POST /api/v1/chat/completions) and the
-reading of an agent's setup for a model suggestion (POST /api/alpha/decisions, which the real
-OpenRouter answers with TypeSafe's Jev; here a few keywords stand in, so a trial shows the flow, not
-how well Jev reads). Chat replies are scripted from what the request says, so a run exercises real
-tool calls:
+It answers the five things LoomWatch asks OpenRouter: the key check (GET /api/v1/key), the model
+list (GET /api/v1/models), streamed chat completions (POST /api/v1/chat/completions), streamed
+Anthropic-shaped Messages calls for a Claude (POST /api/v1/messages) and the reading of an agent's
+setup for a model suggestion (POST /api/alpha/decisions, which the real OpenRouter answers with
+TypeSafe's Jev; here a few keywords stand in, so a trial shows the flow, not how well Jev reads).
+Replies are scripted from what the request says, so a run exercises real tool calls:
 
 - "MOCK-RUN: <command>" in the task  -> a run_command call, then a summary
 - "MOCK-WRITE: <path>" in the task    -> a write_file call, then a summary
@@ -13,6 +13,10 @@ tool calls:
 - "MOCK-TOOL: <call> <json>" in the task -> a call of any offered tool whose name is <call> or ends
   in "__<call>" (a connected tool's, such as deepwiki__ask_question), then a summary
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
+- the learner (ADR 0078)              -> a lesson when the person's words ask for something shorter
+                                         or in bullets, one about the person ("aboutYou") when they
+                                         ask for Vietnamese, else no edits; an agent whose
+                                         instructions hold the bullets lesson answers in three bullets
 - a Research lead (its role says so)  -> two dispatch calls at once, then ask the Writer
 - a Researcher / a Writer             -> findings / a cited report
 - anything else                       -> a short text reply
@@ -28,6 +32,7 @@ $MOCK_OPENROUTER_LOG (default: the system's temporary folder). Nothing is writte
 Usage: python3 scripts/mock-openrouter.py [port]   (default 4100)
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -86,11 +91,12 @@ def text_of(content):
 
 
 def tool_names(body):
+    """The tools a request offers, in chat completions' shape or Anthropic's."""
     names = []
     for tool in body.get("tools") or []:
-        function = tool.get("function") or {}
-        if function.get("name"):
-            names.append(function["name"])
+        name = (tool.get("function") or {}).get("name") or tool.get("name")
+        if name:
+            names.append(name)
     return names
 
 
@@ -135,6 +141,19 @@ def plan(body):
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
         return ("text", f"Done. The tool answered: {said[:300]}")
 
+    # The learner (ADR 0078): one turn, JSON only. It learns only from the person's words.
+    if "You keep the lessons a LoomWatch agent learns" in system:
+        said = latest.split("Then the person wrote this about the work:", 1)[-1].split("\n\n", 1)[0].lower()
+        if "Then the person wrote" in latest and "vietnamese" in said:
+            return ("text", json.dumps({"edits": [{"do": "add", "lesson": "When replying to this person, always write in Vietnamese.", "aboutYou": True}]}))
+        if "Then the person wrote" in latest and any(word in said for word in ("too long", "shorter", "bullet")):
+            if "1. When answering, keep it to three short bullets." in latest:
+                return ("text", json.dumps({"edits": [{"do": "missed", "number": 1}]}))
+            return ("text", json.dumps({"edits": [{"do": "add", "lesson": "When answering, keep it to three short bullets."}]}))
+        return ("text", json.dumps({"edits": []}))
+    if "## What you have learned" in system and "keep it to three short bullets" in system:
+        return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
+
     task = latest.rsplit("## Task", 1)[-1]
     if "MOCK-RUN:" in task:
         command = task.rsplit("MOCK-RUN:", 1)[1].strip().splitlines()[0]
@@ -176,6 +195,90 @@ def plan(body):
     if "you are the team’s writer" in lower_system:
         return ("text", "# What makes a good onboarding guide\n\nShort guides get finished more often [1]. Screenshots help newcomers follow along [2].\n\n## Sources\n1. Example A — https://example.com/a — 2026-09-01\n2. Example B — https://example.com/b — 2026-08-15")
     return ("text", f"Mock reply: {latest.strip()[:160]}")
+
+
+# ------------------------------------------------------------------------- Anthropic's Messages shape
+# OpenRouter answers a Claude through /api/v1/messages in Anthropic's shape; scripts/mock-vendors.py's
+# stand-in for Anthropic streams the same events.
+
+
+def signature(thinking):
+    """The signature a thinking block is sent with; a replay must bring it back unchanged."""
+    return "mock-sig-" + hashlib.sha256(thinking.encode()).hexdigest()[:24]
+
+
+def words(text):
+    pieces = text.split(" ")
+    step = max(1, len(pieces) // 4)
+    for start in range(0, len(pieces), step):
+        piece = " ".join(pieces[start:start + step])
+        yield piece + (" " if start + step < len(pieces) else "")
+
+
+def claude_conversation(body):
+    """The Messages body as the chat-completions shape the scripted replies read."""
+    system = body.get("system")
+    if isinstance(system, list):
+        system = "".join(block.get("text", "") for block in system if isinstance(block, dict))
+    conversation = [{"role": "system", "content": system or ""}]
+    for message in body.get("messages") or []:
+        content = message.get("content")
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else (content or [])
+        if message.get("role") == "assistant":
+            calls = [{"id": b.get("id"), "function": {"name": b.get("name")}} for b in blocks if b.get("type") == "tool_use"]
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            conversation.append({"role": "assistant", "content": text, "tool_calls": calls})
+            continue
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        if text:
+            conversation.append({"role": "user", "content": text})
+        for block in blocks:
+            if block.get("type") == "tool_result":
+                result = block.get("content")
+                if isinstance(result, list):
+                    result = "".join(part.get("text", "") for part in result if isinstance(part, dict))
+                conversation.append({"role": "tool", "tool_call_id": block.get("tool_use_id"), "content": result or ""})
+    return conversation
+
+
+def claude_events(body, kind, value, number, usage):
+    """Anthropic's stream for a scripted answer, as (event name, payload) pairs. `usage` is what the
+    closing message_delta reports."""
+    prompt = 900 + 40 * len(body.get("messages") or [])
+    yield "message_start", {"type": "message_start", "message": {
+        "id": f"msg_{number}", "type": "message", "role": "assistant", "model": body.get("model"), "content": [],
+        "stop_reason": None, "usage": {"input_tokens": prompt - 600, "cache_read_input_tokens": 600,
+                                       "cache_creation_input_tokens": 0, "output_tokens": 1}}}
+    yield "ping", {"type": "ping"}
+    index = 0
+    if (body.get("thinking") or {}).get("type") == "adaptive":
+        thought = f"Working out step {number}."
+        yield "content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}
+        yield "content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": thought}}
+        yield "content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": signature(thought)}}
+        yield "content_block_stop", {"type": "content_block_stop", "index": 0}
+        index = 1
+    if kind == "text":
+        yield "content_block_start", {"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}}
+        for piece in words(value):
+            yield "content_block_delta", {"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": piece}}
+            time.sleep(0.05)
+        yield "content_block_stop", {"type": "content_block_stop", "index": index}
+        stop = "end_turn"
+    else:
+        for offset, (name, args) in enumerate(value):
+            at = index + offset
+            arguments = json.dumps(args)
+            half = len(arguments) // 2
+            yield "content_block_start", {"type": "content_block_start", "index": at, "content_block": {
+                "type": "tool_use", "id": f"toolu_{number}_{offset}", "name": name, "input": {}}}
+            yield "content_block_delta", {"type": "content_block_delta", "index": at, "delta": {"type": "input_json_delta", "partial_json": arguments[:half]}}
+            time.sleep(0.03)
+            yield "content_block_delta", {"type": "content_block_delta", "index": at, "delta": {"type": "input_json_delta", "partial_json": arguments[half:]}}
+            yield "content_block_stop", {"type": "content_block_stop", "index": at}
+        stop = "tool_use"
+    yield "message_delta", {"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None}, "usage": usage}
+    yield "message_stop", {"type": "message_stop"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -234,6 +337,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "answers": {"job": read_setup(state)},
                                         "usage": {"input_tokens": tokens, "output_tokens": 0,
                                                   "cost": round(tokens * 0.000000042, 9)}})
+        if self.path.startswith("/api/v1/messages"):
+            return self.messages(body, number, entry)
         if not self.path.startswith("/api/v1/chat/completions"):
             return self.send_json(404, {"error": {"code": 404, "message": "not found"}})
         if not self.authorised():
@@ -287,6 +392,43 @@ class Handler(BaseHTTPRequestHandler):
                "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": 120,
                          "prompt_tokens_details": {"cached_tokens": 600},
                          "cost": round(prompt_tokens * 0.000002 + 120 * 0.00001, 6)}})
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+    def messages(self, body, number, entry):
+        """A Claude's call, in Anthropic's shape, as OpenRouter's /api/v1/messages answers it."""
+        conversation = claude_conversation(body)
+        entry = {**entry, "messages": len(body.get("messages") or []), "thinking": body.get("thinking"),
+                 "effort": (body.get("output_config") or {}).get("effort"), "tool_choice": body.get("tool_choice"),
+                 "latest_user": next((m["content"] for m in reversed(conversation) if m["role"] == "user"), "")[:200],
+                 "system_head": conversation[0]["content"][:120]}
+        if not self.authorised():
+            log({**entry, "answer": "401"})
+            return self.send_json(401, {"error": {"code": 401, "message": "No auth credentials found"}})
+        users = [m["content"] for m in conversation if m["role"] == "user"]
+        if "MOCK-FAIL-402" in (users[-1] if users else "").rsplit("## Task", 1)[-1]:
+            log({**entry, "answer": "402"})
+            return self.send_json(402, {"error": {"code": 402, "message": "Insufficient credits"}})
+        with LOCK:
+            with open(os.path.join(HERE, "last_request.json"), "w") as handle:
+                json.dump(body, handle, indent=1)
+        tools = [{"function": {"name": name}} for name in tool_names(body)]
+        kind, value = plan({"messages": conversation, "tools": tools})
+        if (body.get("tool_choice") or {}).get("type") == "none" and kind == "calls":
+            kind, value = "text", "Here is where the work stands: nothing more to call."
+        log({**entry, "answer": kind, "detail": value if kind == "calls" else value[:120]})
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        prompt = 900 + 40 * len(body.get("messages") or [])
+        usage = {"input_tokens": prompt - 600, "cache_read_input_tokens": 600, "output_tokens": 120,
+                 "cost": round(prompt * 0.000002 + 120 * 0.00001, 6)}
+        for name, payload in claude_events(body, kind, value, number, usage):
+            self.wfile.write(f"event: {name}\n".encode() + b"data: " + json.dumps(payload).encode() + b"\n\n")
+            self.wfile.flush()
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
 

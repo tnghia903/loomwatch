@@ -32,6 +32,8 @@ import { AnswerTools } from './AnswerTools'
 import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
 import { Appearing, Swap } from './Appearing'
+import type { Lesson } from '../../lib/lessons/client'
+import { Learned } from './Learned'
 import { Reactions } from './Reactions'
 import { Spool } from './Spool'
 import { ReplyQuote } from './ReplyQuote'
@@ -98,6 +100,10 @@ interface WorkPieceProps {
   onShowReplied?: (reply: ReplyTo) => (() => void) | undefined
   /** Put your face on something said in this piece, or take it off. Absent, only the agents' faces show. */
   onReact?: (runId: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>
+  /** Take back something an agent learned from your feedback on this work (ADR 0078). */
+  onUndoLesson?: (lesson: Lesson) => Promise<void>
+  /** Move a lesson about you to About you, for every agent, once you said yes. */
+  onTellAllLesson?: (lesson: Lesson) => Promise<void>
 }
 
 /**
@@ -106,7 +112,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onTyping, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onTyping, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -451,6 +457,7 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
         />
       </Outcome>
       </FileOriginContext.Provider>
+      {item.lessons && <Learned lessons={item.lessons} name={name} onUndo={onUndoLesson} onTellAll={onTellAllLesson} />}
 
       {canContinue(record, team) && !continuedFrom && (
         <Appearing className="tc-continue">
