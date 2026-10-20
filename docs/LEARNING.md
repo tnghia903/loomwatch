@@ -12,7 +12,10 @@ research do it.
 
 - You say something about a finished answer: "Too long. Three bullets next time." LoomWatch then
   asks its own model, once and in the background, what the agent should do differently on work
-  like this.
+  like this. It reads what the agent was asked, what it answered, how it went about it (the steps
+  from the run's record), and your words.
+- You mark an answer **Love it**. The same model is asked what made that answer right, so the
+  agent keeps doing it.
 - The answer is a **lesson**: one sentence saying when it applies and what to do. For example:
   "When answering, keep it to three short bullets."
 - The chat shows the lesson under the work it came from, with **Undo**:
@@ -28,12 +31,21 @@ and its checks stay exactly as you set them.
 ## 2. What counts as feedback
 
 The research is clear on one point: an agent improves from experience only when the signal comes
-from outside it (section 8). So LoomWatch learns from two sources and nothing else.
+from outside it (section 8). So LoomWatch learns from these and nothing else. Each is about the
+agent's own work: what it was asked, what it answered, and how it went about it.
 
 | Source | When | What the learner is told |
 |---|---|---|
 | **Your words** | Any message you send after something finished with an answer: a piece of work, or a short question the agents answered themselves. It can be a reply, a follow-up such as "@team redo it shorter", or a plain note. A reply to one agent's message teaches that agent, and so does a message to one agent. Otherwise the agent who answered learns. | The request, the answer (or the message you replied to) and your words. |
+| **Your words at a review stop** | Send back with a reason, or Approve with words. The stage whose work the stop reviewed learns. An answer to an agent's question teaches nothing. | The request, the work the stop reviewed, and your words. |
+| **Love it** | You put Love it on an answer, or on an agent's own answer to a note. It counts once per answer; Good only backs lessons (section 6). | The request and the answer, and that you loved it. |
 | **The check step** | A check step found a Done when item **not met** on its first round, and the item was **met** after the work was sent back. | Each such item, with what the check found the first time. |
+
+With each of these, the learner also reads **how the agent went about the work**, from the run's
+record. It sees each tool the agent used, how the call ended (a failure with its first line), and
+each permission you refused it. So "those prices are from a blog" can become a how-to, such as
+"When looking up prices, read the official sites first", not only a rule about the answer. What a
+tool gave back is left out, so a page's words never reach the learner this way.
 
 Never learned from:
 
@@ -44,14 +56,21 @@ Never learned from:
 - A note to an agent still at work. That is direction for the work in hand, and it already has it.
 - A check item that was never met. What can't be fixed is often a missing input or a wrong
   finding, so a lesson from it would be a guess.
-- Reactions on their own. A face carries no words to learn from. Good or Love it **backs** the
-  lessons that work was given (section 6).
+- A face other than Love it. Good **backs** the lessons that work was given (section 6), and the
+  others carry no words to learn from.
 
 ## 3. What a lesson is
 
 One sentence, at most 200 characters, in the language of your feedback. It says when it applies
 and what to do: "When <kind of work>, <do this>." The "when" is left out only if the lesson fits
-all of the agent's work.
+all of the agent's work. A lesson can be about the answer ("use a table") or about how to get there
+("read the official price list first", "check each source's date before citing it").
+
+After **Love it**, the learner is asked for the one particular choice that made the answer right:
+its shape, length or order, what it put in or left out, where it looked. It doesn't name a
+general virtue such as "clear" or "helpful". Love it means keep to it, so a shape the request
+asked for counts too, for work of that kind. It makes at most one lesson and never changes or
+drops another, and it often says nothing: an answer can simply be done well.
 
 The learner is told to learn **nothing** when the feedback is only about this one piece of work:
 a fact, a name or a date to fix, or a one-off change. Redoing the work fixes those. Nothing at all
@@ -67,8 +86,13 @@ is the usual answer. It is also told not to learn:
 1. The feedback arrives. The work you asked for starts at once, with your words already in its
    conversation. Learning does not hold anything up.
 2. In the background, LoomWatch's own model (the fast tier) takes one turn with no tools. It is
-   shown the agent's name, its instructions and Done when, the request, the work, the feedback,
-   and the agent's current lessons as a numbered list.
+   shown:
+   - the agent's name, its instructions and Done when;
+   - the request and the work;
+   - how the agent went about it: at most 30 steps from the run's record, the first and the last
+     kept;
+   - the feedback;
+   - the agent's current lessons, as a numbered list.
 3. It answers with JSON: at most **two** edits among `add`, `change` and `drop`, plus `missed`
    marks for any lesson the feedback shows the agent did not follow. `{"edits": []}` means
    nothing.
@@ -230,6 +254,16 @@ the correction, so only a lesson could carry it there.
 - The check used one run per case, one model, and corrections about form and preference. It shows
   that a correction reaches new work and doesn't override a clear request. It does not grade answer
   quality in general. The details are in ADR 0078.
+
+A smaller check of the later additions, the same way:
+
+- **Love it carried over.** The loved answer opened with a "TL;DR:" line and three bullets. A new
+  summary in another team then did the same with learning on, but opened with "Summary:" with it
+  off. A poem stayed a poem in both. The first try failed because the learner skipped what the
+  request had asked for; Love it now counts that too (section 3).
+- **Learning from the steps is not shown live yet.** Learning from the steps is covered by tests.
+  In its live case the model found the approved price list on its own even with learning off, and
+  the learning-on runs could not run: the test key was refused part-way.
 
 ## 10. What is not built yet
 

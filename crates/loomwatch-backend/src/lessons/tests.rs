@@ -630,6 +630,13 @@ fn a_loved_answer_asks_what_to_keep_doing() {
         prompt.contains("Say what about this answer Writer should keep doing on work like this.")
     );
     assert!(prompt.contains("Not a general virtue such as clear, accurate or helpful."));
+    // Love it means keep to it: a shape the request asked for is kept for work like it.
+    assert!(prompt.contains("Love it means keep to it"));
+    assert!(
+        prompt.contains(
+            "Write its when about the kind of work, not about being asked for that shape."
+        )
+    );
     assert!(prompt.contains("At most one lesson. No edits at all is a good answer."));
     assert!(prompt.contains("Writer's lessons so far:\n1. Use bullets.\n"));
     assert!(!prompt.contains("missed") && !prompt.contains("Then the person wrote"));
