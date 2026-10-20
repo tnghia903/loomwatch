@@ -1,4 +1,5 @@
 import type { Evidence, RunProjection } from '../watch/events'
+import { nameWithHelpers } from '../chat/helpers'
 import { baseName } from '../files/paths'
 import { commandName, commandOf } from './commands'
 import { failuresOf, mendOf, skillName, workCount, type MendHow, type WorkCount } from './reads'
@@ -166,6 +167,17 @@ export function mendNote(how: MendHow, afterMs: number): string {
   }
 }
 
+/** A call held for your answer to its permission request (ADR 0040): named as it would be once it runs. */
+function heldSentence(agent: string, item: Evidence): string {
+  const named = item.kind === 'command' ? commandName(commandOf(item)) : null
+  const what = named ?? shortName(item.name)
+  if (!what) return `${agent} is waiting for your permission.`
+  // Allowing a file's name or a search's words says nothing: say what would be allowed.
+  if (item.kind === 'file') return `${agent} is waiting for you to allow changes to “${what}”.`
+  if (item.kind === 'search') return `${agent} is waiting for you to allow a search for “${what}”.`
+  return `${agent} is waiting for you to allow “${what}”.`
+}
+
 function stitchSentence(agent: string, item: Evidence): string {
   return describeEvidence(agent, item)
 }
@@ -180,8 +192,10 @@ export function weave(projection: RunProjection, order: readonly WeftAgent[], no
   const live = !['succeeded', 'partial', 'failed', 'cancelled'].includes(projection.phase)
   const byId = new Map(projection.agents.map((agent) => [agent.id, agent]))
   const name = new Map(order.map((agent) => [agent.id, agent.name]))
-  // Helpers the run produced but the team file does not list (recruited in team mode) still get a lane.
-  const laneOrder: WeftAgent[] = [...order, ...projection.agents.filter((agent) => !name.has(agent.id)).map((agent) => ({ id: agent.id, name: agent.id, operator: false }))]
+  // Agents the run produced but the team file does not list still get a lane: a helper one brought in
+  // (ADR 0079) by its name in the chat, "Ada’s helper 2", and one recruited in team mode by its id.
+  const label = (id: string) => nameWithHelpers(name, id) ?? id
+  const laneOrder: WeftAgent[] = [...order, ...projection.agents.filter((agent) => !name.has(agent.id)).map((agent) => ({ id: agent.id, name: label(agent.id), operator: false }))]
   const lastEvent = Math.max(0, ...projection.agents.map((agent) => ms(agent.lastTs) - t0).filter(Number.isFinite), ...projection.evidence.map((item) => item.offsetMs))
   const duration = Number.isFinite(t0) ? Math.max(1000, live ? Math.max(lastEvent, now - t0) : lastEvent) : Math.max(1000, lastEvent)
 
@@ -194,16 +208,21 @@ export function weave(projection: RunProjection, order: readonly WeftAgent[], no
     return { id: agent.id, name: agent.name, operator: agent.operator, start, end, live: running && live, status, taskState: agent.taskState ?? projected?.taskState, openCalls: projected?.openCalls ?? 0 }
   })
 
-  const label = (id: string) => name.get(id) ?? id
   // Each agent's calls, as the receipt is given them, so a failure is judged the same way in both.
   const callsOf = new Map<string, Evidence[]>()
   for (const item of projection.evidence) callsOf.set(item.agentId, [...(callsOf.get(item.agentId) ?? []), item])
+  // An agent paused on a permission request it put to you: its latest open call is the one it asked
+  // about, and it hasn't run.
+  const held = new Set(projection.agents
+    .filter((agent) => agent.status === 'running' && agent.taskState === 'WAITING')
+    .map((agent) => (callsOf.get(agent.id) ?? []).findLast((item) => item.kind !== 'plan' && (item.status === 'pending' || item.status === 'running'))?.id)
+    .filter((id): id is string => Boolean(id)))
   const stitches: WeftStitch[] = projection.evidence
     .filter((item) => item.kind !== 'plan')
     .map((item) => {
       const failed = item.status === 'failed' || item.status === 'rejected'
       const mend = failed && item.kind !== 'permission' ? mendOf(item, callsOf.get(item.agentId) ?? []) : null
-      const sentence = stitchSentence(label(item.agentId), item.target ? { ...item, target: label(item.target) } : item)
+      const sentence = held.has(item.id) ? heldSentence(label(item.agentId), item) : stitchSentence(label(item.agentId), item.target ? { ...item, target: label(item.target) } : item)
       return {
         at: item.offsetMs,
         laneId: item.agentId,
@@ -213,7 +232,8 @@ export function weave(projection: RunProjection, order: readonly WeftAgent[], no
         bad: failed && !mend,
         mended: mend ? { evidenceId: mend.by.id, at: mend.by.offsetMs, how: mend.how } : null,
         sentence: mend ? `${sentence.replace(/\.$/, '')}, ${MENDED[mend.how]}.` : sentence,
-        code: `${item.kind} · ${item.relation} · #${item.seq}`,
+        // A held call hasn't done what its relation says ("ran command"): it waits on you.
+        code: `${item.kind} · ${held.has(item.id) ? 'waiting for you' : item.relation} · #${item.seq}`,
       }
     })
     .sort((a, b) => a.at - b.at)

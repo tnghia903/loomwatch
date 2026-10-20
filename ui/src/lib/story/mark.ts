@@ -53,6 +53,8 @@ export function markState(runtime: { status: AgentStatus; taskState?: TaskState 
   switch (runtime.status) {
     case 'starting': return 'starting'
     case 'running':
+      // Paused on a permission request it put to you (ADR 0040): waiting for you, not at work.
+      if (runtime.taskState === 'WAITING') return 'waiting'
       return runtime.taskState === 'THINKING' ? 'thinking' : runtime.taskState === 'STREAMING' ? 'writing' : 'working'
     case 'waiting': return 'waiting'
     case 'succeeded': return 'done'

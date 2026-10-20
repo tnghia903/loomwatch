@@ -66,6 +66,8 @@ const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
 }
 
 
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
+
 /** Run phases as an operator would say them; the raw phase ids are daemon vocabulary. */
 const PHASE_WORDS: Partial<Record<string, string>> = {
   queued: 'Queued', starting: 'Starting', running: 'Running', succeeded: 'Finished',
@@ -282,7 +284,7 @@ export function DeliveryLane({
               </h2>
               <span>
                 {pipeline && linearPipeline
-                  ? `${agents.length} stages · 1 deliverable`
+                  ? `${plural(agents.length, 'stage')} · 1 deliverable`
                   : 'Select an agent to see its work'}
               </span>
             </div>
@@ -297,7 +299,9 @@ export function DeliveryLane({
                   evidenceByAgent.get(node.id) ?? [],
                   snapshots.get(node.id),
                 ).filter((item) => item.required)
-                const working = live && (runtime?.status === 'starting' || runtime?.status === 'running')
+                // Waiting on you (a permission it asked for) looks like waiting, not work: gold, still.
+                const waiting = live && runtime?.status === 'running' && markState(runtime) === 'waiting'
+                const working = live && (runtime?.status === 'starting' || runtime?.status === 'running') && !waiting
                 return (
                   <div
                     className="delivery-stage-wrap"
@@ -325,7 +329,7 @@ export function DeliveryLane({
                           <small>{agent.role || 'Team agent'}</small>
                         </span>
                         <span
-                          className={`delivery-status status-${runtime?.status ?? 'idle'}`}
+                          className={`delivery-status status-${waiting ? 'waiting' : runtime?.status ?? 'idle'}`}
                         >
                           {planned
                             ? 'Ready'
@@ -335,7 +339,7 @@ export function DeliveryLane({
                       <div className="delivery-agent-facts">
                         <div><span>{agent.kind === 'operator' ? 'Done by' : 'Model'}</span><strong><Code2 size={15} />{agent.kind === 'operator' ? 'You' : model}</strong></div>
                         <div><span>{planned ? 'Produces' : 'Contribution'}</span><strong>{node.id === output.producer ? 'Team output' : pipeline ? 'Stage handoff' : 'Agent response'}</strong></div>
-                        {(evidenceByAgent.get(node.id) ?? []).some(item => item.kind === 'source') && <div><span>Sources</span><button className="delivery-link" onClick={() => setSourceAgent(node.id)}><FileText size={14} />{(evidenceByAgent.get(node.id) ?? []).filter(item => item.kind === 'source').length} sources <ArrowRight size={12} /></button></div>}
+                        {(evidenceByAgent.get(node.id) ?? []).some(item => item.kind === 'source') && <div><span>Sources</span><button className="delivery-link" onClick={() => setSourceAgent(node.id)}><FileText size={14} />{plural((evidenceByAgent.get(node.id) ?? []).filter(item => item.kind === 'source').length, 'source')} <ArrowRight size={12} /></button></div>}
                       </div>
                       <div className="delivery-stage-meta">
                         <span>

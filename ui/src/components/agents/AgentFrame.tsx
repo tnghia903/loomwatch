@@ -22,7 +22,7 @@ export interface AgentFrameProps {
 
 export interface AgentBarSlots { chip: HTMLElement | null; tabs: HTMLElement | null }
 
-/** Where the team header hides its name chip and menu (prototype-workspace.css, prototype-parity.css). */
+/** Where the team header hides its name chip and moves its menu under the header (prototype-workspace.css, loom.css). */
 const NARROW = '(max-width: 767px)'
 const subscribeNarrow = (changed: () => void) => {
   const query = window.matchMedia?.(NARROW)
@@ -44,8 +44,9 @@ export function AgentFrame({ mark, tray, rail, chip, onSlots, children }: AgentF
   const chipSlot = useRef<HTMLDivElement>(null)
   const narrowChipSlot = useRef<HTMLDivElement>(null)
   const tabsSlot = useRef<HTMLDivElement>(null)
-  // A narrow window has no room for the name chip or the menu in the header, and a team's page
-  // hides them there. An agent's Save lives in its chip, so here they move to a row under it.
+  // A narrow window has no room for the name chip or the menu in the header: a team's page hides
+  // its chip and drops its menu under the header. An agent's Save lives in its chip, so here both
+  // move to a row under it.
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false)
   useLayoutEffect(() => { onSlots({ chip: narrow ? narrowChipSlot.current : chipSlot.current, tabs: tabsSlot.current }) }, [onSlots, narrow])
   const more = [

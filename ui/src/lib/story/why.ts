@@ -13,6 +13,7 @@
  */
 
 import { baseName } from '../files/paths'
+import { thisComputer } from '../platform'
 import type { EvidenceKind } from '../watch/events'
 
 export interface Why {
@@ -60,6 +61,8 @@ function httpError(output: string): { status: number; url?: string } | null {
 
 /** A path a message named, as its file's name. */
 const named = (path: string | undefined) => (path ? baseName(path.trim().replace(/[.:]$/, '')) : null)
+/** "This Mac", or "This PC" on Windows, to start a sentence with. */
+const ThisComputer = () => { const said = thisComputer(); return `${said[0].toUpperCase()}${said.slice(1)}` }
 
 /** Why the call that left this output failed. `kind` picks the words when nothing says. */
 export function whyItFailed(output: string, kind: EvidenceKind): Why {
@@ -88,7 +91,7 @@ export function whyItFailed(output: string, kind: EvidenceKind): Why {
   const host = /Could not resolve host:? (\S+)/.exec(text)?.[1]
   // Case matters: "ModuleNotFoundError" holds "eNotFound".
   if (host || /nodename nor servname|Name or service not known|Temporary failure in name resolution|getaddrinfo|\bENOTFOUND\b|Network is unreachable|No route to host/.test(text)) {
-    return known(host ? `It couldn’t find ${host}. The address may be wrong, or this Mac is offline.` : 'It couldn’t reach the website. The address may be wrong, or this Mac is offline.')
+    return known(host ? `It couldn’t find ${host}. The address may be wrong, or ${thisComputer()} is offline.` : `It couldn’t reach the website. The address may be wrong, or ${thisComputer()} is offline.`)
   }
   if (/Connection refused|ECONNREFUSED/.test(text)) return known('Nothing answered at that address.')
 
@@ -98,8 +101,8 @@ export function whyItFailed(output: string, kind: EvidenceKind): Why {
   const jsAddOn = /Cannot find (?:module|package) '([^']+)'/.exec(text)?.[1]
   if (jsAddOn && !/^[./]/.test(jsAddOn)) return known(`A JavaScript add-on it needs, ${jsAddOn}, isn’t installed.`)
   const program = /command not found: (\S+)/.exec(text)?.[1] ?? /(?:^|\n)(?:\S+: )?(?:line \d+: )?([\w.+-]+): command not found/.exec(text)?.[1] ?? /env: ['‘]?([\w.+-]+)['’]?: No such file or directory/.exec(text)?.[1]
-  if (program) return known(`This Mac doesn’t have the program ${program}.`)
-  if (/No space left on device|ENOSPC/.test(text)) return known('This Mac is out of disk space.')
+  if (program) return known(`${ThisComputer()} doesn’t have the program ${program}.`)
+  if (/No space left on device|ENOSPC/.test(text)) return known(`${ThisComputer()} is out of disk space.`)
 
   // LoomWatch's own file tools, in their own words.
   if (/can't see pictures/.test(text)) return known('Its AI model can’t see pictures.')
@@ -126,7 +129,7 @@ export function whyItFailed(output: string, kind: EvidenceKind): Why {
   const absent = /No such file or directory: '([^']+)'/.exec(text)?.[1] ?? /(?:can't open file|cannot access|cannot open|open) '([^']+)'.*No such file/.exec(text)?.[1]
   if (absent) return known(`There’s no file called ${named(absent)}.`)
   if (/No such file or directory|ENOENT|FileNotFoundError/.test(text)) return known('A file or folder it needed isn’t there.')
-  if (/EPERM|EACCES|Operation not permitted|Permission denied|PermissionError/.test(text)) return known('This Mac didn’t let it change files there.')
+  if (/EPERM|EACCES|Operation not permitted|Permission denied|PermissionError/.test(text)) return known(`${ThisComputer()} didn’t let it change files there.`)
 
   // The program itself.
   if (/SyntaxError|IndentationError|TabError|Unexpected token|ParseError/.test(text)) return known('The program it wrote had a mistake in it.')

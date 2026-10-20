@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { sourceMaker } from '../../lib/ai/makers'
 import type { ModelSource } from '../../lib/ai/modelIds'
 import { CHATGPT_USAGE_PAGE, CLAUDE_BILLING_PAGE, SOURCE_INFO } from '../../lib/ai/sources'
+import { nameWithHelpers } from '../../lib/chat/helpers'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
-import { type ClaudePlan, type SourceUsage, type UsageReport, cycleStart, fetchUsage, keepClaudePlan, readClaudePlan, spentSince, tokensOf } from '../../lib/usage/client'
+import { type AgentUsage, type ClaudePlan, type SourceUsage, type UsageReport, cycleStart, fetchUsage, keepClaudePlan, readClaudePlan, spentSince, tokensOf } from '../../lib/usage/client'
 import { formatCost, formatTokens } from '../../lib/watch/usage'
 import { MakerMark } from '../models/MakerMark'
 import { SourceChip } from '../models/ModelPicker'
@@ -189,7 +190,33 @@ function OpenRouterCard({ entry, days, spentThisMonth, limitRemaining, freeTier 
   </>
 }
 
+/**
+ * What LoomWatch does with a model on its own, for no team: it reads each chat message before the
+ * team starts on it (the daemon's `intent::READER_ID`), and learns a lesson from your feedback
+ * (`lessons::LEARNER_ID`). Neither belongs to a team's run, so neither has a team's name.
+ */
+const OWN_WORK: Readonly<Record<string, string>> = { reader: 'Working out what your messages need', learner: 'Learning from your feedback' }
+
+/** A row's team and agent in plain words: an agent's helper after its agent, LoomWatch's own work by what it does. */
+function rowNames(agent: AgentUsage, names: ReadonlyMap<string, ReadonlyMap<string, string>>): { team: string; agent: string } {
+  if (agent.ask) return { team: 'Ask LoomWatch', agent: 'Ask' }
+  const own = agent.team ? undefined : OWN_WORK[agent.agentId]
+  if (own) return { team: 'LoomWatch', agent: own }
+  return { team: agent.team ?? 'A team', agent: agent.agentName ?? nameWithHelpers(names.get(agent.team ?? '') ?? new Map(), agent.agentId) ?? agent.agentId }
+}
+
 function WhereItWent({ report }: { report: UsageReport }) {
+  // Each team's agents by name, so a helper, which the run names by its agent's id, reads after it.
+  const names = useMemo(() => {
+    const byTeam = new Map<string, Map<string, string>>()
+    for (const agent of report.agents) {
+      if (!agent.agentName) continue
+      const team = byTeam.get(agent.team ?? '') ?? new Map<string, string>()
+      team.set(agent.agentId, agent.agentName)
+      byTeam.set(agent.team ?? '', team)
+    }
+    return byTeam
+  }, [report.agents])
   if (report.agents.length === 0) return null
   return (
     <section className="e1 lw-settings-section" aria-labelledby="usage-where">
@@ -198,16 +225,19 @@ function WhereItWent({ report }: { report: UsageReport }) {
         <table className="usage-table t-meta">
           <thead><tr><th scope="col">Team</th><th scope="col">Agent</th><th scope="col">Paid by</th><th scope="col">Runs</th><th scope="col">Tokens</th><th scope="col">Cost</th></tr></thead>
           <tbody>
-            {report.agents.map((agent) => (
-              <tr key={`${agent.team ?? ''}:${agent.agentId}:${agent.source}`}>
-                <td>{agent.ask ? 'Ask LoomWatch' : agent.team ?? 'A team'}</td>
-                <td>{agent.ask ? 'Ask' : agent.agentName ?? agent.agentId}</td>
-                <td><SourceChip source={agent.source} /></td>
-                <td>{agent.runs}</td>
-                <td>{formatTokens(tokensOf(agent))}</td>
-                <td>{agent.source === 'chatgpt' ? 'Plan' : money(agent.costUsd, agent.costEstimated)}</td>
-              </tr>
-            ))}
+            {report.agents.map((agent) => {
+              const named = rowNames(agent, names)
+              return (
+                <tr key={`${agent.team ?? ''}:${agent.agentId}:${agent.source}`}>
+                  <td>{named.team}</td>
+                  <td>{named.agent}</td>
+                  <td><SourceChip source={agent.source} /></td>
+                  <td>{agent.runs}</td>
+                  <td>{formatTokens(tokensOf(agent))}</td>
+                  <td>{agent.source === 'chatgpt' ? 'Plan' : money(agent.costUsd, agent.costEstimated)}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

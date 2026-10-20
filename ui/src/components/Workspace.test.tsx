@@ -6,7 +6,7 @@ import { forgetModels } from '../lib/ai/useModels'
 import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { keys } from '../lib/platform'
-import { background, cascaded, goldFilled, heightOf, isGoldFill } from '../test/cascade'
+import { background, cascaded, DESKTOP, goldFilled, heightOf, isGoldFill, PHONE } from '../test/cascade'
 import { Workspace } from './Workspace'
 
 // The Run button shows its key as this computer writes it: ↵ on a Mac, Enter elsewhere.
@@ -914,6 +914,23 @@ describe('Workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close schedule' }))
     expect(goldFilled()).toEqual(['Run team'])
     Object.assign(documentState, { teamSchedule: null })
+  })
+
+  // The menu is the only way from a team to Team memory, About you, Connections, Usage and the guide.
+  // A phone hid it, so a team opened on a phone had no way to any of them.
+  it('keeps the team menu on a phone, beside Ask and the bell rather than under them', async () => {
+    renderWorkspace()
+    const toggle = screen.getByRole('button', { name: 'Menu' })
+    const menu = toggle.parentElement!
+    const anchor = document.querySelector('.workspace-chrome > .needs-you-anchor')!
+    for (const viewport of [DESKTOP, PHONE]) expect(cascaded(menu, 'display', viewport)).toBe('flex')
+    // On a phone both stand in the row under the header, side by side: the menu at the end, with the
+    // bell's 30 px look, and Ask and the bell to its left.
+    expect(cascaded(menu, 'right', PHONE)).toBe('19px')
+    expect(heightOf(toggle, PHONE)).toBe(30)
+    expect(cascaded(anchor, 'right', PHONE)).toBe('64px')
+    fireEvent.click(toggle)
+    for (const item of ['Team memory', 'About you…', 'Connections…', 'Usage…']) expect(screen.getByRole('menuitem', { name: item })).toBeInTheDocument()
   })
 
   // A team with unsaved changes: Run team saves before it starts, so it keeps the one gold fill and

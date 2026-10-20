@@ -843,7 +843,9 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
 .pop-inline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--color-ink-2); }
 .pop-inline .btn { height: 24px; }
 .lw-palette { width: min(560px, calc(100vw - 32px)); left: 50%; top: 22%; transform: translateX(-50%); }
-.lw-scrim { position: absolute; inset: 0; z-index: 99; }
+/* Fixed, so a dialog sits in the window wherever its page is scrolled (Home scrolls inside itself), and
+   its scrim covers the rail too, so nothing beside a dialog stays clickable. */
+.lw-scrim { position: fixed; inset: 0; z-index: 99; }
 .lw-scrim.dim { background: color-mix(in srgb, var(--color-ground) 45%, transparent); }
 .prob-group { padding: var(--sp-2); }
 .prob-head { padding: var(--sp-2) var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }

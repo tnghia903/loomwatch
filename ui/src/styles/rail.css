@@ -108,8 +108,6 @@
 /* A team's page and an agent's (AgentFrame) alike: the rail runs the height of the window, its find
    button in the header's row, and the page beside it. */
 .lw-railed { --lw-rail-w: 72px; display: flex; width: 100%; height: 100%; }
-/* A dialog's scrim covers the rail too, so nothing beside a dialog stays clickable. */
-.lw-railed .lw-scrim { position: fixed; }
 .lw-railed > .lw-shell { flex: 1; min-width: 0; }
 /* An agent's page: the team header's own parts in a 64 px bar, then the page, which scrolls. */
 .agent-frame-root { position: absolute; inset: 0; background: var(--color-ground); color: var(--color-ink); }

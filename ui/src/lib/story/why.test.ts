@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { whyItFailed } from './why'
 
@@ -32,6 +32,11 @@ npm error You can rerun the command with \`--loglevel=verbose\` to see the logs 
   declined: 'The person declined this. Carry on without it, or say what you need and why.',
 }
 
+// What a failure says names the computer it ran on (lib/platform.ts), and jsdom's browser reports
+// the platform the tests run on: these are read on a Mac unless a test says otherwise.
+beforeEach(() => { vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh)' }) })
+afterEach(() => { vi.unstubAllGlobals() })
+
 describe('whyItFailed, on outputs recorded runs left', () => {
   it('says a website refused, with the status beside it', () => {
     expect(whyItFailed(RECORDED.urllib403, 'command')).toEqual({ text: 'The website said no.', code: '403', known: true })
@@ -55,6 +60,17 @@ describe('whyItFailed, on outputs recorded runs left', () => {
 
   it('says you said no', () => {
     expect(whyItFailed(RECORDED.declined, 'command').text).toBe('You said no.')
+  })
+})
+
+describe('whyItFailed, on the computer it ran on', () => {
+  // LoomWatch runs on Windows too: there the computer is "this PC", as everywhere else the app says.
+  it('says this PC on Windows, never this Mac', () => {
+    vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
+    expect(whyItFailed('curl: (6) Could not resolve host: exmaple.com', 'command').text).toBe('It couldn’t find exmaple.com. The address may be wrong, or this PC is offline.')
+    expect(whyItFailed('zsh:1: command not found: pdftotext', 'command').text).toBe('This PC doesn’t have the program pdftotext.')
+    expect(whyItFailed('OSError: [Errno 28] No space left on device', 'command').text).toBe('This PC is out of disk space.')
+    expect(whyItFailed('PermissionError: [Errno 13] Permission denied', 'command').text).toBe('This PC didn’t let it change files there.')
   })
 })
 

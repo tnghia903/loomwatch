@@ -21,7 +21,7 @@
 .delivery-filters>div[role=group] { flex:1; }
 .delivery-filters button { border-radius:0; }
 .delivery-filters button[aria-pressed=true] { background:transparent; border-bottom:2px solid var(--gold); }
-@media(max-width:767px) { .prototype-workspace-menu { display:none; } .delivery-heading h1 { font-size:24px; } .delivery-response { padding:24px; } .build-workspace .node-inspector { position:fixed; top:auto; right:14px; bottom:14px; width:min(270px,calc(100vw - 28px)); max-height:60vh; } }
+@media(max-width:767px) { .delivery-heading h1 { font-size:24px; } .delivery-response { padding:24px; } .build-workspace .node-inspector { position:fixed; top:auto; right:14px; bottom:14px; width:min(270px,calc(100vw - 28px)); max-height:60vh; } }
 .delivery-response h1,.delivery-response h2,.delivery-response h3 { font-family:var(--font-serif); font-weight:400; }
 .delivery-response h1 { font-size:36px; }
 .delivery-response { font-size:16px; padding:34px 36px; }
@@ -75,7 +75,7 @@
 .prototype-workspace-menu>div { position:absolute; z-index:80; right:0; top:39px; width:190px; padding:7px; border:1px solid var(--line); border-radius:7px; background:var(--surface); box-shadow:0 12px 35px #0006; }
 .prototype-workspace-menu>div button { display:block; width:100%; padding:10px; text-align:left; border:0; background:transparent; color:var(--text); font-size:12px; }
 .prototype-workspace-menu>div button:hover { background:var(--surface-hover); }
-/* Where it shows on a phone (Home, an agent's page), a finger's worth: the button and each item 44 px. */
+/* On a phone (Home, an agent's page, a team's page), a finger's worth: the button and each item 44 px. */
 @media(max-width:767px) { .prototype-workspace-menu>button { width:44px; height:44px; } .prototype-workspace-menu>div button { min-height:44px; } }
 .lw-shell .workspace-view-tabs button { display:flex; justify-content:center; align-items:center; gap:8px; }
 /* The team chip lives in the header's first column, after the brand, and can never be wider than
@@ -183,7 +183,6 @@
 .prototype-handover-dialog .lw-activity { position:static!important; width:100%!important; max-height:80vh!important; margin:0; border:0; box-shadow:none; transform:none; }
 
 @media(max-width:767px) {
- .lw-shell .prototype-workspace-menu { display:none; }
  .build-workspace .build-workspace-heading { height:158px; min-height:158px; align-content:flex-start; gap:12px; }
  .build-workspace .build-workspace-heading p { line-height:1.5; margin-top:10px; }
  .build-workspace .build-workspace-actions { width:100%; justify-content:flex-end; }

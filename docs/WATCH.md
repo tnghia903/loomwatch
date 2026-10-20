@@ -275,7 +275,8 @@ Response (`202 Accepted`):
   with the command that ran as `edited`, `answered` with your words as `answer`, `timed_out`, or
   `not_asked` in a routine's run) between the request and the answer the agent gets. The team chat
   shows each asked request as the agent's message to you, answered there, and keeps how it was
-  settled in the conversation.
+  settled in the conversation. While a request waits, Details says the agent is waiting for you,
+  and its timeline names what it asked to do: the call is open in the record, but has not run.
 
 ## Routines
 
@@ -422,7 +423,10 @@ another site cannot set one.
 the last days: by source (with the last five hours and seven days), by day and by agent, from the
 `model_calls` table every recorded call fills. Neither OpenAI nor Anthropic tells an app what is
 left of a plan or credit, so the Usage page shows LoomWatch's own count and links to each company
-for the rest.
+for the rest. Its table names a helper after its agent ("Writer's helper 2"). Calls LoomWatch makes
+outside a team's run show as LoomWatch: "Working out what your messages need" (`reader`, which
+reads each chat message before the team starts on it) and "Learning from your feedback"
+(`learner`).
 
 `model` is `chatgpt:<slug>` on the ChatGPT plan, `anthropic:<id>` on the Claude credit, or an
 OpenRouter id such as `anthropic/claude-opus-5.5`, and `thinkingEffort` its reasoning effort (an

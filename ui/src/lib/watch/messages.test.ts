@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { projectRun, type RunEvent } from './events'
+import { projectRun, type RunEvent, type TaskState } from './events'
 import { reachedLine } from './messages'
 import { permissionAsks } from '../runs/permissionRequests'
+import { markLabel, markState } from '../story/mark'
+import { momentAt, weave } from '../story/weft'
+import type { AgentStatus } from '../team-file/types'
 
 const T0 = Date.parse('2026-10-05T09:00:00Z')
 let seq = 0
@@ -236,6 +239,32 @@ describe('messages between agents', () => {
     expect(messages[2]).toMatchObject({ kind: 'permission', text: 'Bash: rm -rf build', state: 'pending', reply: null, permission: { requestId: 'p3', outcome: null, settled: null } })
     // Before the answer, the first one waits on you.
     expect(projectRun(events, 1).messages[0]).toMatchObject({ state: 'pending', reply: null, permission: { outcome: null } })
+  })
+
+  // While a request waits, the record holds the agent's call (still open) and LoomWatch's note that it
+  // asked you; the app's own permission event comes only with the answer. Details used to read the
+  // open call alone, and said "Builder is running “rm”" and "Using a tool" while nothing ran.
+  it('says an agent is waiting for you while its request is open, not running what it asked to', () => {
+    seq = 0
+    const events = [
+      event(0, 'builder', 'tool_call', { callId: 'c1', title: 'Run: rm -rf build', toolKind: 'execute', status: 'in_progress', rawInput: { command: 'rm -rf build' } }),
+      event(0, 'builder', 'session_meta', { phase: 'awaiting_permission', requestId: 'p1', title: 'Run: rm -rf build', kind: 'execute', switch: 'commands', detail: 'rm -rf build' }, loomwatch('awaiting_permission')),
+      event(9, 'builder', 'session_meta', { phase: 'permission_answered', requestId: 'p1', title: 'Run: rm -rf build', kind: 'execute', outcome: 'allow_once', allowed: true }, loomwatch('permission_answered')),
+    ]
+    const order = [{ id: 'builder', name: 'Builder', operator: false }]
+    const waiting = projectRun(events, 1)
+    const builder = waiting.agents.find((agent) => agent.id === 'builder')!
+    expect(builder.status).toBe('running')
+    expect(markLabel(markState(builder), builder.openCalls)).toBe('Waiting for you')
+    const weft = weave(waiting, order, T0 + 5_000)
+    expect(markLabel(markState({ status: weft.lanes[0].status as AgentStatus, taskState: weft.lanes[0].taskState as TaskState }))).toBe('Waiting for you')
+    expect(momentAt(weft, weft.duration).sentence).toBe('Builder is waiting for you to allow “rm -rf build”.')
+
+    // Answered, it is at work again: the command runs.
+    const answered = projectRun(events)
+    const again = answered.agents.find((agent) => agent.id === 'builder')!
+    expect(markState(again)).not.toBe('waiting')
+    expect(momentAt(weave(answered, order, T0 + 10_000), 9_500).sentence).toBe('Builder is running “rm -rf build”.')
   })
 
   it('names the connected tool a call asked to use (ADR 0069)', () => {

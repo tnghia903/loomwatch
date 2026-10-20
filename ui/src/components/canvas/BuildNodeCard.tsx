@@ -56,7 +56,8 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   // Semantic zoom: the extra Story and Trace content exists only at that depth, so nothing hidden
   // is ever announced twice (lib/story/depth.ts).
   const depth = useStore((store) => depthForZoom(store.transform[2]))
-  const status: AgentStatus = data.waiting ? 'waiting' : runtime?.status ?? agent.status ?? 'idle'
+  // Paused on a permission request it put to you (ADR 0040) is waiting, as a review stop is.
+  const status: AgentStatus = data.waiting || (runtime?.status === 'running' && runtime.taskState === 'WAITING') ? 'waiting' : runtime?.status ?? agent.status ?? 'idle'
 
   // A review stop is a person, not a process: no harness, no model — a question and
   // the way to answer it (docs/TEAM_MEMORY.md "operator as a node").

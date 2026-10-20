@@ -103,7 +103,7 @@ export function WeftBar({ projection, order, relay, onInspectEvidence, messageFo
             <div key={lane.id} className="weft-lane" style={{ top: index * ROW }}>
               <i className="weft-warp" />
               {lane.start !== null && lane.end !== null && (
-                <i className={`weft-thread ${lane.operator ? 'you' : ''} ${lane.live ? 'live' : ''} ${lane.status === 'failed' ? 'bad' : ''}`} title={lane.operator ? 'The team waited for your decision' : undefined} style={{ left: pct(lane.start), width: `max(4px, ${pct(lane.end - lane.start)})` }} />
+                <i className={`weft-thread ${lane.operator ? 'you' : ''} ${lane.live ? 'live' : ''} ${lane.live && laneState(lane) === 'waiting' ? 'waiting' : ''} ${lane.status === 'failed' ? 'bad' : ''}`} title={lane.operator ? 'The team waited for your decision' : undefined} style={{ left: pct(lane.start), width: `max(4px, ${pct(lane.end - lane.start)})` }} />
               )}
             </div>
           ))}

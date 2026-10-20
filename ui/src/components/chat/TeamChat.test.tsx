@@ -455,6 +455,24 @@ describe('who is on the team', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Allow for the whole team' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/permissions', body: { requestId: 'p1', decision: 'allow_team' } }))
   })
+
+  // Answered on its message, a request is over at once; the run's record, polled each second, still
+  // lists it for a moment. That moment used to pop up a second card asking the same thing again,
+  // saying the agent was paused while it was already back at work.
+  it('asks nothing again once a request is answered on its message, while the record catches up', async () => {
+    const asked = { id: 'p1', agent: 'researcher', name: 'Researcher', title: 'Run: ls -la', kind: 'execute', switch: 'commands' as const, since: '2026-10-06T02:01:00.000Z', expiresAt: new Date(Date.now() + 9 * 60000).toISOString() }
+    said.messages = [{
+      id: 'permission:p1', kind: 'permission', from: 'researcher', to: 'operator', handedBy: null, text: 'Run: ls -la', context: null, eventId: 'e1', evidenceId: null,
+      seq: 3, ts: new Date().toISOString(), offsetMs: 0, state: 'answered', error: null, carried: false,
+      reply: { from: 'operator', text: 'ls', seq: 4, ts: new Date().toISOString(), offsetMs: 0, eventId: 'e2', source: null, sentBackTo: null },
+      permission: { requestId: 'p1', switch: 'commands', detail: 'ls -la', outcome: 'edited', written: 'ls', settled: { eventId: 'e2', seq: 4, ts: new Date().toISOString(), offsetMs: 0 } },
+    }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], permissionRequests: [asked] }), request: message({}), notes: [] }]
+    renderChat()
+    await screen.findByText(/You changed it, then allowed it/)
+    expect(screen.queryByRole('region', { name: 'Waiting for your permission' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()
+  })
 })
 
 describe('who has the work', () => {

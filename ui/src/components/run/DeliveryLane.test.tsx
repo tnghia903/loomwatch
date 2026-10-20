@@ -19,8 +19,9 @@ vi.mock('@xyflow/react', () => ({
   MarkerType: { ArrowClosed: 'arrowclosed' },
   ReactFlow: ({ nodes, nodeTypes }: { nodes: Array<{ id: string; type: string; data: unknown }>; nodeTypes: Record<string, ComponentType<{ data: unknown }>> }) => <>{nodes.map(node => createElement(nodeTypes[node.type], { key: node.id, data: node.data }))}</>,
 }))
-import { projectRun } from '../../lib/watch/events'
+import { type Evidence, projectRun } from '../../lib/watch/events'
 import type { AgentRuntime } from '../../lib/runs/graph'
+import { cascaded } from '../../test/cascade'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
   const actions = {
     renameAgent: vi.fn(),
@@ -106,6 +107,14 @@ describe('Delivery Lane', () => {
     expect(screen.queryByText('2m 53s', { selector: '.delivery-took' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Full trace' })).toBeInTheDocument()
   })
+  it('counts one stage and one source as one, not "1 stages" and "1 sources"', () => {
+    const source = { id: 'e1', agentId: 'designer', kind: 'source', relation: 'consulted source', name: 'https://example.com/a', status: 'succeeded' } as unknown as Evidence
+    setup({ evidenceByAgent: new Map([['designer', [source]]]) })
+    expect(screen.getByText('1 stage · 1 deliverable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1 source' })).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent(/1 stages|1 sources/)
+  })
+
   it('says how a run is going in its heading until the receipt is printed', () => {
     setup({ phase: 'running', mode: 'live' })
     expect(screen.queryByRole('region', { name: 'Run receipt' })).toBeNull()
@@ -260,6 +269,19 @@ describe('Delivery Lane', () => {
       expect(stage('writer')).toHaveClass('working')
       expect(stage('researcher')).not.toHaveClass('working')
       expect(handoffInto('writer')).toHaveClass('passing')
+    })
+
+    // Waiting on your answer to a permission it asked for, the agent is not at work: its card says so
+    // in gold and holds still, as the figure glows, rather than glowing blue with "Waiting for you".
+    it('waits in gold, not at work, while its permission request is open', () => {
+      const asking = agents('running')
+      asking[1].data = { ...asking[1].data, runtime: { ...(asking[1].data.runtime as AgentRuntime), taskState: 'WAITING' } }
+      setup({ mode: 'live', phase: 'running', agents: asking })
+      expect(stage('writer')).not.toHaveClass('working')
+      expect(handoffInto('writer')).not.toHaveClass('passing')
+      const status = within(stage('writer')).getByText('Waiting for you')
+      expect(status).toHaveClass('status-waiting')
+      expect(cascaded(status, 'color')).toBe('var(--color-accent)')
     })
 
     it('settles once the stage finishes', () => {

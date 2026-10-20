@@ -1,3 +1,4 @@
+import { helperOf, nameWithHelpers } from '../chat/helpers'
 import { outwardCalls } from '../library/observed'
 import type { RunSpend } from '../runs/client'
 import type { AgentRuntime } from '../runs/graph'
@@ -195,7 +196,8 @@ export function receiptTokens(summary: TokenSummary | null | undefined, names: R
     cached: summary.cacheShare === null ? null : `${Math.round(summary.cacheShare * 100)}% cached`,
     // Beside each agent's tokens, what its calls cost, when every one of them said.
     agents: summary.agents.filter((agent) => agent.total > 0).map((agent) => {
-      const row = tokenRow(names.get(agent.agentId) ?? agent.agentId, agent)
+      // A helper's turns are its own (ADR 0079): named after its agent, as the chat names it.
+      const row = tokenRow(nameWithHelpers(names, agent.agentId) ?? agent.agentId, agent)
       const cost = costWords({ ...agent, costComplete: true })
       return cost === null ? row : { ...row, value: `${row.value} · ${cost}` }
     }),
@@ -294,13 +296,15 @@ export function buildReceipt(input: ReceiptInput): Receipt {
   }
   if (anyRefused) checks.push({ tone: 'warn', text: 'What an agent isn’t allowed to do waits for your answer during a run. Requests you denied, or that nobody answered in time, were declined. Change what each agent may do on its workbench, in Agents.', aside: true })
   if (terminal && !input.answered) checks.push({ tone: 'bad', text: 'The run ended without an answer' })
-  const money = spendNote({ spend: input.spend }, (id) => input.agents.find((agent) => agent.id === id)?.name ?? id)
+  const money = spendNote({ spend: input.spend }, (id) => nameWithHelpers(new Map(input.agents.map((agent) => [agent.id, agent.name])), id) ?? id)
   if (money) checks.push({ tone: input.spend?.stopped ? 'warn' : 'ok', text: money, aside: true })
   const gaps = Object.entries(input.projection.coverage).filter(([, value]) => value.level !== 'complete' && value.reason !== 'none_recorded')
   if (gaps.length) checks.push({ tone: 'warn', text: `Not everything was recorded: ${gaps.map(([key]) => key).join(', ')}` })
 
   const apps = [...new Set(input.agents.filter((agent) => !agent.operator).map((agent) => input.harnessLabels.get(agent.id)).filter(Boolean))]
-  const helpers = input.agents.filter((agent) => !agent.operator)
+  const workers = input.agents.filter((agent) => !agent.operator)
+  // The copies an agent brought in for parts of the work (ADR 0079), which the team file doesn't list.
+  const helpers = input.projection.agents.filter((agent) => helperOf(agent.id)).length
   const operator = input.agents.some((agent) => agent.operator)
   return {
     run: `Run ${input.attempt}`,
@@ -308,7 +312,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
     endedAt: input.projection.updatedAt ?? input.projection.startedAt,
     asked: input.prompt.trim() || 'No request was recorded',
     took: input.elapsed,
-    team: `${plural(helpers.length, 'helper')}${operator ? ' + your review' : ''}`,
+    team: `${plural(workers.length, 'agent')}${helpers ? ` + ${plural(helpers, 'helper')}` : ''}${operator ? ' + your review' : ''}`,
     ranOn: apps.length ? apps.join(', ') : 'Not recorded',
     tokens: receiptTokens(input.projection.tokens, new Map(input.agents.map((agent) => [agent.id, agent.name]))),
     lines,
