@@ -189,7 +189,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
           </ol>
         </section>
 
-        {keyCard && <div className="home-key" data-tour="key"><Sources title="First, choose how your agents’ models are paid" /></div>}
+        {keyCard && <div className="home-key" data-tour="key"><Sources title="First, choose how your agents’ models are paid" fill={false} /></div>}
 
         <UsageNotices />
 

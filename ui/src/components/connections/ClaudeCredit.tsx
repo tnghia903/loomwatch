@@ -16,9 +16,10 @@ const CONSOLE_KEYS = 'https://platform.claude.com/settings/keys'
  * Claude Console organization to the plan, make an API key there and paste it here. LoomWatch checks
  * it with Anthropic first, then keeps it in this Mac's Keychain or Windows Credential Manager.
  * Anthropic doesn't let apps use a Claude sign-in, so a key is the only way. `onConnected` hears when
- * a key is kept, as the first run waits to.
+ * a key is kept, as the first run waits to. `fill={false}` makes Save key a gold ring, where another
+ * button is the screen's one gold fill.
  */
-export function ClaudeCredit({ variant = 'section', onConnected }: { variant?: 'section' | 'card'; onConnected?: () => void }) {
+export function ClaudeCredit({ variant = 'section', onConnected, fill = true }: { variant?: 'section' | 'card'; onConnected?: () => void; fill?: boolean }) {
   const ai = useAiStatus()
   const status: ClaudeStatus | null = ai?.anthropic ?? null
   const [key, setKey] = useState('')
@@ -84,7 +85,7 @@ export function ClaudeCredit({ variant = 'section', onConnected }: { variant?: '
           <label className="t-meta" htmlFor={inputId}>Claude API key</label>
           <input id={inputId} type="password" autoComplete="off" spellCheck={false} value={key} maxLength={512} placeholder="sk-ant-api…" onChange={(event) => setKey(event.target.value)} className="input mono" />
           <span className="hint t-meta">LoomWatch checks it with Anthropic first, then keeps it in {keyStore()}. It is never shown again, and agents never see it.</span>
-          <button disabled={busy || !key.trim()} className="btn btn-primary lw-settings-start">{busy ? 'Checking the key…' : 'Save key'}</button>
+          <button disabled={busy || !key.trim()} className={`btn ${fill ? 'btn-primary' : 'btn-ring'} lw-settings-start`}>{busy ? 'Checking the key…' : 'Save key'}</button>
         </form>
       </>}
     </section>

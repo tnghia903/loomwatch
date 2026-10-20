@@ -140,6 +140,9 @@ code, kbd, pre { font-family: var(--font-mono); }
 /* The arrow follows the team name, not the chip's far edge: in a wide chip it read as unrelated. */
 .lw-chip .chev { margin-left: calc(var(--sp-1) - var(--sp-3)); color: var(--color-ink-3); flex: none; display: grid; }
 .lw-chip .chip-action { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+/* An agent's Save fills gold here, and a gold fill is never under 32 px (DESIGN_LANGUAGE §4); a
+   team's Save, a ring, matches it. */
+.lw-chip .chip-action .btn { min-height: 32px; }
 .dot { width: 12px; height: 12px; flex: none; display: inline-grid; }
 .lw-chip .ledger {
   position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
@@ -167,6 +170,10 @@ a.btn { text-decoration: none; }
 .btn-primary { background: var(--color-accent-fill); border-color: transparent; color: var(--color-accent-on-fill); font-weight: 600; }
 .btn-primary:hover { background: var(--color-accent-fill); filter: brightness(1.06); color: var(--color-accent-on-fill); }
 .btn-primary:disabled, .btn:disabled { background: var(--color-hairline); color: var(--color-ink-3); border-color: transparent; cursor: not-allowed; filter: none; }
+/* The gold ring: a main action that steps back beside the screen's one fill. Ink words at the
+   fill's weight, no fill, a 1 px gold edge; it hovers to the tint like any button, and a disabled
+   one keeps its grey (`.btn:disabled` outranks it). */
+.btn-ring { color: var(--color-ink); border-color: var(--color-accent); font-weight: 600; }
 .btn-lg { height: 44px; padding: 0 var(--sp-7); border-radius: var(--r-md); font-size: 15px; }
 .btn-danger:hover { background: color-mix(in srgb, var(--color-alert) 12%, transparent); color: var(--color-alert); }
 .link { background: none; border: 0; padding: 0; color: var(--color-accent); font: 500 13px/18px var(--font-sans); cursor: pointer; text-underline-offset: 3px; }
@@ -299,7 +306,10 @@ kbd.key {
 .schedule-tabs button { border: 0; border-right: 1px solid var(--color-hairline); background: transparent; color: var(--color-ink-2); }
 .schedule-tabs button:last-child { border-right: 0; }
 .schedule-tabs button:hover { background: var(--color-accent-tint); color: var(--color-ink); }
-.schedule-tabs button.active { background: var(--color-accent-fill); color: var(--color-accent-on-fill); font-weight: 600; }
+/* A selection is a ring (DESIGN_LANGUAGE §5), so Save schedule stays the panel's one fill. The tab
+   has no border, so the ring is drawn inside, rounded to the row's inner corner so the row's clip
+   doesn't cut it on the first or last tab. */
+.schedule-tabs button.active { color: var(--color-ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--color-accent); border-radius: calc(var(--r-sm) - 1px); }
 /* Two columns need ~420 px; the right panel is 360 px, so Time and Timezone stack there
    rather than clipping an IANA zone name to "Asi". */
 .schedule-grid { display: grid; grid-template-columns: 1fr 1.12fr; gap: var(--sp-4); }

@@ -4,6 +4,7 @@ import { parse } from 'yaml'
 
 import type { SavedJob } from '../../lib/library/jobs'
 import type { AgentConfig } from '../../lib/team-file/types'
+import { goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import type { AgentFigureProps } from '../agents/AgentFigure'
 import { TeamAgents, type TeamAgentsProps } from './TeamAgents'
 
@@ -282,6 +283,24 @@ describe('a team’s agents, the first of its views', () => {
     // It has its Chat here too: the one it has in Your agents.
     expect(within(screen.getByRole('navigation', { name: 'Agent view' })).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.queryByRole('region', { name: 'Try it' })).toBeNull()
+  })
+
+  // One gold fill per screen (DESIGN_LANGUAGE §8): on the bench of an agent placed from My agents,
+  // Save, at least 32 px; its keys are offered with plain buttons.
+  it('fills only Save, at least 32 px, on the bench of an agent placed from My agents', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).endsWith('/api/jobs')
+      ? Promise.resolve(new Response(JSON.stringify({ jobs: [reader], problems: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      : Promise.reject(new Error('no daemon')))))
+    renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader', version: 1 } }], selected: 'scope', savedJobs: [reader] })
+    fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }), { target: { value: 'Check every story twice.' } })
+    const save = await screen.findByRole('button', { name: 'Save' })
+    expect(save.closest('.agent-builder-save')).not.toBeNull()
+    expect(goldFilled()).toEqual(['Save'])
+    expect(heightOf(save)).toBe(32)
+    expect(heightOf(save, PHONE)).toBe(44)
+    const offers = screen.getAllByRole('button', { name: 'Hand it over' })
+    expect(offers.length).toBeGreaterThan(1)
+    for (const offer of offers) expect(isGoldFill(offer)).toBe(false)
   })
 
   it('lists what an agent from My agents reads in every team apart from what this team gives it', async () => {

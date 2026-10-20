@@ -428,7 +428,8 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
                 <li key={key} className={on ? 'on' : ''}>
                   <KeyRound size={15} aria-hidden="true" />
                   <span><b>{word}</b> · {info.label.toLowerCase()}<em>{on ? info.on : 'It asks you first. On a schedule nobody is there to answer, so it is declined.'}</em></span>
-                  <button type="button" className={`btn${on ? '' : ' btn-primary'}`} onClick={() => giveKey(key, !on)}>{on ? 'Take it back' : 'Hand it over'}</button>
+                  {/* A key is offered, not the page's main action: Save is its one gold fill. */}
+                  <button type="button" className="btn" onClick={() => giveKey(key, !on)}>{on ? 'Take it back' : 'Hand it over'}</button>
                 </li>
               )
             })}

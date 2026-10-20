@@ -1,5 +1,5 @@
 import { AlertCircle, ChevronDown, Clock3, Globe2, Save, X } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useState, type ReactNode } from 'react'
 
 import { cronFor, normalizeSchedule, scheduleParts, unsupportedScheduleKeys, type ScheduleFrequency } from '../../lib/team-file/schedule'
 import type { ScheduleConfig } from '../../lib/team-file/types'
@@ -28,9 +28,12 @@ export interface SchedulePanelProps {
   /** How the saved routine is doing, as the daemon reports it, with a way to run it now. Absent
    * until the team file on disk has a schedule the daemon has picked up. */
   status?: ReactNode
+  /** Hears whether Save schedule has something to save and can: while it does, Save schedule is
+   *  the screen's one gold fill and Run team steps back to a ring. */
+  onPending?: (pending: boolean) => void
 }
 
-export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onClose, onRemove, isNew = false, status }: SchedulePanelProps) {
+export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile, savedInEditor, onSave, onSaveFile, onClose, onRemove, isNew = false, status, onPending }: SchedulePanelProps) {
   const initial = scheduleParts(schedule.cron)
   const [frequency, setFrequency] = useState<ScheduleFrequency>(initial.frequency)
   const [time, setTime] = useState(initial.time)
@@ -57,6 +60,12 @@ export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile
   const cron = cronFor(frequency, time, manual)
   const dropped = unsupportedScheduleKeys(schedule)
   const edit = <T,>(set: (value: T) => void) => (value: T) => { setDirtyDraft(true); set(value) }
+  // Gold means the action at hand: a schedule not added yet, a change in this editor, or a fix
+  // still to make, once it can be saved. An unchanged schedule's Save schedule would do nothing, and
+  // one without a task can't be pressed, so then Run team keeps the screen's fill.
+  const pending = !readOnly && Boolean(cron.trim() && prompt.trim()) && (isNew || dirtyDraft || problems.length > 0 || dropped.length > 0)
+  // Before paint, so Run team never shows the wrong one of fill and ring for a frame.
+  useLayoutEffect(() => { onPending?.(pending) }, [onPending, pending])
 
   const save = (event: React.FormEvent) => {
     event.preventDefault()
@@ -115,7 +124,7 @@ export function SchedulePanel({ schedule, problems, readOnly, dirty, canSaveFile
 
         {dropped.length > 0 && <small className="t-meta schedule-note">Saving removes {dropped.join(', ')} — {dropped.length === 1 ? 'a setting' : 'settings'} this team file's format does not allow.</small>}
 
-        <button type="submit" className="btn btn-primary schedule-save" disabled={readOnly || !cron.trim() || !prompt.trim()}><Clock3 size={16} aria-hidden="true" /> Save schedule</button>
+        <button type="submit" className={`btn${pending ? ' btn-primary' : ''} schedule-save`} disabled={readOnly || !cron.trim() || !prompt.trim()}><Clock3 size={16} aria-hidden="true" /> Save schedule</button>
 
         <div className="schedule-stage t-meta" role="status">
           {problems.length > 0

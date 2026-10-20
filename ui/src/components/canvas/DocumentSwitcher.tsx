@@ -72,7 +72,9 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   // Saved, as an agent's chip says it; the file's name and folder are in the menu.
   let l2 = 'Saved'
   let action: React.ReactNode = null
-  const primarySave = <button type="button" className="btn btn-primary" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>{keys('⌘S')}</kbd></button>
+  // A gold ring, not the fill: the view's own action keeps the screen's one fill (Run team, which
+  // saves first, Approve or Save schedule), and unsaved work is gold's "unfinished" edge (§5).
+  const save = <button type="button" className="btn btn-ring" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>{keys('⌘S')}</kbd></button>
   const review = <button type="button" className="btn" onClick={() => { onProblemsOpenChange(!problemsOpen); setSwitcherOpen(false) }} aria-expanded={problemsOpen} aria-controls="problems-pop">Review</button>
 
   // The first line is always the team, so the operator never loses track of what is open; the
@@ -85,8 +87,8 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   else if (saveState === 'conflict') { state = 'failed'; l2 = 'Changed outside LoomWatch'; action = null }
   else if (!isValid && errors.length > 0) { state = 'invalid'; l2 = scheduleErrors.length === errors.length ? 'Schedule needs attention' : `${errors.length} problem${errors.length === 1 ? '' : 's'} to fix`; action = review }
   else if (!isValid && incomplete.length > 0) { state = 'incomplete'; l2 = `${incomplete.length} thing${incomplete.length === 1 ? '' : 's'} to finish`; action = review }
-  else if (saveState === 'new') { state = 'new'; l2 = 'Not saved yet'; action = primarySave }
-  else if (saveState === 'dirty') { state = 'dirty'; l2 = 'Unsaved changes'; action = primarySave }
+  else if (saveState === 'new') { state = 'new'; l2 = 'Not saved yet'; action = save }
+  else if (saveState === 'dirty') { state = 'dirty'; l2 = 'Unsaved changes'; action = save }
   else if (editingDisabled) { l2 = 'Editing needs a wider window' }
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''

@@ -24,6 +24,9 @@ interface BuildHeadingProps {
   onRun: () => void
   /** Start a schedule for a team that has none. Once it has one, its card on the canvas opens it. */
   onSchedule?: () => void
+  /** The open schedule panel has something to save: its Save schedule is the screen's one gold
+   *  fill, so Run team is a ring. */
+  scheduling?: boolean
   /** An Ask LoomWatch proposal is on the canvas: the heading becomes its Apply or Discard. */
   proposal?: BuildProposal | null
   /** The team checkup (lib/team-file/checkup.ts), once the team is otherwise ready to run. */
@@ -58,7 +61,7 @@ export interface BuildProposal {
 }
 
 /** Build's heading. It says what to do next, not what the screen is called. */
-export function BuildHeading({ agentCount, isValid, checking, saveState, appProblem = null, undelivered = 0, onDeliver, onRun, onSchedule, proposal = null, checkup = null, usage = null }: BuildHeadingProps) {
+export function BuildHeading({ agentCount, isValid, checking, saveState, appProblem = null, undelivered = 0, onDeliver, onRun, onSchedule, scheduling = false, proposal = null, checkup = null, usage = null }: BuildHeadingProps) {
   const [checkupOpen, setCheckupOpen] = useState(false)
   if (proposal) {
     return (
@@ -111,7 +114,7 @@ export function BuildHeading({ agentCount, isValid, checking, saveState, appProb
       {/* Saving is the team chip's at the top, on every screen (ADR 0043). */}
       <div className="build-workspace-actions">
         {onSchedule && agentCount > 0 && <button className="btn" title="Run this team on its own, at a time you choose" onClick={onSchedule}><Clock3 size={15} aria-hidden="true" />Schedule</button>}
-        <button className="btn btn-primary" data-tour="run-team" onClick={onRun}><Play size={15} />Run team</button>
+        <button className={`btn ${scheduling ? 'btn-ring' : 'btn-primary'}`} data-tour="run-team" onClick={onRun}><Play size={15} />Run team</button>
       </div>
     </header>
   )

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SavedJob } from '../../lib/library/jobs'
 import { forgetYou } from '../../lib/you/client'
+import { goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import type { AgentFigureProps } from './AgentFigure'
 import { AgentsPage } from './AgentsPage'
 
@@ -125,5 +126,22 @@ describe('An agent’s page in the team page’s frame', () => {
     page()
     expect(screen.getByRole('link', { name: 'Your teams' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'My agents' })).not.toBeInTheDocument()
+  })
+})
+
+// One gold fill per screen (DESIGN_LANGUAGE §8): on an agent's page it is Save, at least 32 px, and
+// each key is offered with a plain button. Three gold Hand it over buttons once stood beside Save.
+describe('the gold on an agent’s page', () => {
+  it('fills only Save, at least 32 px, while its keys are offered with plain buttons', async () => {
+    window.history.replaceState({}, '', '/agents/writer')
+    page()
+    fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Write a short draft with a title.' } })
+    const offers = screen.getAllByRole('button', { name: 'Hand it over' })
+    expect(offers.length).toBeGreaterThan(1)
+    for (const offer of offers) expect(isGoldFill(offer)).toBe(false)
+    expect(goldFilled()).toEqual(['Save'])
+    const save = screen.getByRole('button', { name: 'Save' })
+    expect(heightOf(save)).toBe(32)
+    expect(heightOf(save, PHONE)).toBe(44)
   })
 })

@@ -6,6 +6,7 @@ import { forgetModels } from '../lib/ai/useModels'
 import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { keys } from '../lib/platform'
+import { background, cascaded, goldFilled, heightOf, isGoldFill } from '../test/cascade'
 import { Workspace } from './Workspace'
 
 // The Run button shows its key as this computer writes it: ↵ on a Mac, Enter elsewhere.
@@ -868,6 +869,65 @@ describe('Workspace', () => {
     fireEvent.change(screen.getByLabelText('Scheduled task'), { target: { value: 'Prepare the morning digest.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save schedule' }))
     expect(documentState.updateTeamSchedule).toHaveBeenCalledWith(expect.objectContaining({ cron: '0 8 * * 1-5', prompt: 'Prepare the morning digest.' }))
+  })
+
+  // One gold fill per screen (DESIGN_LANGUAGE §8): once the schedule can be saved, Save schedule is
+  // the fill; Run team steps back to a ring and the chosen frequency is a ring, as a selection is (§5).
+  it('keeps one gold fill while the schedule is open: Save schedule, with Run team and the chosen frequency as rings', async () => {
+    renderWorkspace()
+    const run = screen.getByRole('button', { name: 'Run team' })
+    expect(goldFilled()).toEqual(['Run team'])
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }))
+    // No task yet, so Save schedule can't be pressed: Run team keeps the fill.
+    expect(screen.getByRole('button', { name: 'Save schedule' })).toBeDisabled()
+    expect(goldFilled()).toEqual(['Run team'])
+    fireEvent.change(screen.getByLabelText('Scheduled task'), { target: { value: 'Prepare the morning digest.' } })
+    expect(goldFilled()).toEqual(['Save schedule'])
+    expect(run).toHaveClass('btn-ring')
+    expect(background(run)).toBe('transparent')
+    expect(cascaded(run, 'color')).toBe('var(--color-ink)')
+    expect(cascaded(run, 'border-color')).toBe('var(--color-accent)')
+    // At the fill's weight, as the tray's stepped-back ring is: two rings side by side match.
+    expect(cascaded(run, 'font-weight')).toBe('600')
+    const chosen = screen.getByRole('tab', { selected: true })
+    expect(isGoldFill(chosen)).toBe(false)
+    expect(cascaded(chosen, 'color')).toBe('var(--color-ink)')
+    expect(cascaded(chosen, 'box-shadow')).toBe('inset 0 0 0 1px var(--color-accent)')
+    // The row clips to its rounded corner inside a 1 px border; the ring follows that corner.
+    expect(cascaded(chosen.parentElement!, 'border-radius')).toBe('var(--r-sm)')
+    expect(cascaded(chosen, 'border-radius')).toBe('calc(var(--r-sm) - 1px)')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(goldFilled()).toEqual(['Run team'])
+  })
+
+  // Gold means the action at hand: an unchanged schedule's Save schedule would do nothing, so on
+  // reopening one Run team keeps the fill, until the schedule is changed.
+  it('keeps Run team the one fill on reopening an unchanged schedule, until it is changed', async () => {
+    Object.assign(documentState, { teamSchedule: { cron: '0 8 * * *', timezone: 'Asia/Singapore', prompt: 'Prepare the daily digest.' } })
+    renderWorkspace()
+    fireEvent.click(screen.getByRole('button', { name: /Schedule trigger.*Daily/ }))
+    expect(screen.getByRole('form', { name: 'Edit schedule' })).toHaveTextContent('This schedule matches the team file on disk.')
+    expect(screen.getByRole('button', { name: 'Save schedule' })).toBeEnabled()
+    expect(goldFilled()).toEqual(['Run team'])
+    fireEvent.change(screen.getByLabelText('Scheduled task'), { target: { value: 'Prepare the evening digest.' } })
+    expect(goldFilled()).toEqual(['Save schedule'])
+    fireEvent.click(screen.getByRole('button', { name: 'Close schedule' }))
+    expect(goldFilled()).toEqual(['Run team'])
+    Object.assign(documentState, { teamSchedule: null })
+  })
+
+  // A team with unsaved changes: Run team saves before it starts, so it keeps the one gold fill and
+  // the name chip's Save is a gold ring, 32 px like the chip's other buttons.
+  it('keeps Run team the one fill on a team with unsaved changes, with Save as a ring', async () => {
+    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
+    renderWorkspace()
+    const save = screen.getAllByRole('button', { name: /^Save/ }).find((button) => button.closest('.lw-chip'))!
+    expect(save).toBeEnabled()
+    expect(goldFilled()).toEqual(['Run team'])
+    expect(save).toHaveClass('btn-ring')
+    expect(cascaded(save, 'border-color')).toBe('var(--color-accent)')
+    expect(heightOf(save)).toBe(32)
+    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean' })
   })
 
   it('drops an unsaved schedule when its editor closes', async () => {

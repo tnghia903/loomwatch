@@ -74,6 +74,8 @@
 .agent-view-tabs button[aria-pressed='true'] { color: var(--color-accent); font-weight: 600; }
 .agent-view-tabs button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .agent-builder-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); max-width: 560px; }
+/* Save is the page's one gold fill, and a gold fill is never under 32 px (DESIGN_LANGUAGE §4). */
+.agent-builder-save .btn { min-height: 32px; }
 .agent-save-state { flex-basis: 100%; text-align: right; min-height: 16px; color: var(--color-ink-3); }
 .agent-save-error { color: var(--color-alert); }
 /* Under the bench (its chat is a tab): the ID card, where it is used and its versions on the left,

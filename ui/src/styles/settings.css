@@ -258,7 +258,8 @@
 .lw-source-cost { margin: 0; color: var(--color-ink-2); }
 .lw-source-card .lw-settings-row { padding: var(--sp-3); }
 .lw-chatgpt-continue { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--sp-2); }
-.lw-chatgpt-continue .maker-mark { color: inherit; }
+/* Inside the button the mark needs no tile of its own: a tile in a 28 px button touches its edge. */
+.lw-chatgpt-continue .maker-mark { color: inherit; width: 20px; height: 20px; background: none; box-shadow: none; }
 .lw-chatgpt-continue[aria-disabled="true"] { opacity: .6; }
 .lw-chatgpt-welcome { gap: var(--sp-2); }
 

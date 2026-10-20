@@ -33,9 +33,10 @@ function said(status: KeyStatus): string {
  * only what OpenRouter says about it.
  *
  * `variant="card"` is the short form Home shows when no key is set yet; `variant="source"` is the
- * same card beside the ChatGPT and Claude ones, headed like them (ADR 0073).
+ * same card beside the ChatGPT and Claude ones, headed like them (ADR 0073). `fill={false}` makes
+ * Save key a gold ring, where another button is the screen's one gold fill.
  */
-export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'section' | 'card' | 'source'; onChange?: (status: KeyStatus) => void }) {
+export function OpenRouterKey({ variant = 'section', onChange, fill = true }: { variant?: 'section' | 'card' | 'source'; onChange?: (status: KeyStatus) => void; fill?: boolean }) {
   const [status, setStatus] = useState<KeyStatus | null>(null)
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
@@ -116,7 +117,7 @@ export function OpenRouterKey({ variant = 'section', onChange }: { variant?: 'se
           <label className="t-meta" htmlFor={inputId}>OpenRouter key</label>
           <input id={inputId} type="password" autoComplete="off" spellCheck={false} value={key} maxLength={512} placeholder="sk-or-…" onChange={(event) => setKey(event.target.value)} className="input mono" />
           <span className="hint t-meta">LoomWatch checks it with OpenRouter first, then keeps it in {keyStore()}. It is never shown again, and agents never see it.</span>
-          <button disabled={busy || !key.trim()} className="btn btn-primary lw-settings-start">{busy ? 'Checking the key…' : 'Save key'}</button>
+          <button disabled={busy || !key.trim()} className={`btn ${fill ? 'btn-primary' : 'btn-ring'} lw-settings-start`}>{busy ? 'Checking the key…' : 'Save key'}</button>
         </form>
       </>}
     </section>

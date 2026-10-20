@@ -11,6 +11,7 @@ import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { resetFirstRunForTests } from '../../lib/firstrun/store'
 import { readTourState, resetTourForTests, startTour } from '../../lib/tour/store'
 import { forgetYou } from '../../lib/you/client'
+import { cascaded, goldFilled, isGoldFill } from '../../test/cascade'
 import type { TeamDocument } from '../../lib/team-file/types'
 import { Home } from './Home'
 
@@ -196,6 +197,34 @@ describe('Home', () => {
     // The OpenRouter card asks for the key's state itself, so its field comes once that answer does.
     expect(await screen.findByLabelText('OpenRouter key')).toHaveAttribute('type', 'password')
     expect(screen.getByLabelText('Claude API key')).toHaveAttribute('type', 'password')
+  })
+
+  // One gold fill per screen (DESIGN_LANGUAGE §8): Build an agent. Until a way to pay is connected,
+  // the three cards' buttons are gold rings, with the same weight (ADR 0073), even with a key typed.
+  it('fills only Build an agent while the ways to pay wait, their buttons as rings', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/ai') return respond({ openrouter: { connected: false }, anthropic: { connected: false }, chatgpt: { available: true, connected: false, planUse: false } })
+      if (url === '/api/ai/chatgpt/sign-in') return respond({ url: 'https://auth.openai.com/oauth/authorize?state=s' })
+      return respond({ root: '/teams', files: [], teams: [] })
+    })
+    renderHome()
+    const go = await screen.findByRole('link', { name: /Continue with ChatGPT/ })
+    fireEvent.change(await screen.findByLabelText('OpenRouter key'), { target: { value: 'sk-or-v1-typed' } })
+    fireEvent.change(screen.getByLabelText('Claude API key'), { target: { value: 'sk-ant-api03-typed' } })
+    const saves = screen.getAllByRole('button', { name: 'Save key' })
+    expect(saves).toHaveLength(2)
+    for (const save of saves) expect(save).toBeEnabled()
+    expect(goldFilled()).toEqual(['Build an agent'])
+    for (const ring of [go, ...saves]) {
+      expect(isGoldFill(ring)).toBe(false)
+      expect(cascaded(ring, 'border-color')).toBe('var(--color-accent)')
+      expect(cascaded(ring, 'color')).toBe('var(--color-ink)')
+    }
+    // The maker's mark sits in the button without its own tile, which touched the ring's edge.
+    const mark = go.querySelector('.maker-mark')!
+    expect(cascaded(mark, ['background', 'background-color'])).toBe('none')
+    expect(cascaded(mark, 'box-shadow')).toBe('none')
+    expect(cascaded(mark, 'height')).toBe('20px')
   })
 
   it('keeps the cards away once a way to pay is connected, and says what agents can run on', async () => {

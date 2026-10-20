@@ -8,6 +8,7 @@ import type { Lesson } from '../../lib/lessons/client'
 import type { RunRecord } from '../../lib/runs/client'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { TeamMessage } from '../../lib/watch/messages'
+import { cascaded, goldFilled, heightOf, isGoldFill, PHONE } from '../../test/cascade'
 import { ChatComposer } from './ChatComposer'
 import { TeamChat } from './TeamChat'
 import type { TeamView } from './WorkPiece'
@@ -734,6 +735,37 @@ describe('a piece of work', () => {
     expect(screen.getByText('To send it back, write what to change in the box below.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/runs/run-1/answers', body: { node: 'review', text: 'Approved. Continue as planned.' } }))
+  })
+
+  // One gold fill per screen (DESIGN_LANGUAGE §8): with two pieces waiting for your review, the
+  // newer one's Approve is the fill, the older one's a gold ring; each 32 px. When the newer one asks
+  // a question instead, the box below answers it, so the older Approve is a ring too.
+  it('fills only the newest waiting piece’s Approve, at least 32 px, and rings an older one’s', async () => {
+    const waitingOn = { node: 'review', name: 'Your review', kind: 'review_stop' as const, since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: 'Three stories', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true }
+    const older = run({ runId: 'run-old', sessionId: 'run-old', prompt: 'Moon facts', status: 'running', reply: null, finishedAt: null, createdAt: '2026-10-06T02:00:00.000Z', waitingOn })
+    const newer = run({ runId: 'run-new', sessionId: 'run-new', prompt: 'Mars facts', status: 'running', reply: null, finishedAt: null, createdAt: '2026-10-06T02:03:00.000Z', waitingOn: { ...waitingOn, since: '2026-10-06T02:04:00.000Z' } })
+    page = [
+      { kind: 'work', run: older, request: message({ id: 'm-old', runId: 'run-old', text: '@team Moon facts' }), notes: [] },
+      { kind: 'work', run: newer, request: message({ id: 'm-new', runId: 'run-new', text: '@team Mars facts', createdAt: '2026-10-06T02:03:00.000Z' }), notes: [] },
+    ]
+    renderChat()
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(2))
+    const [first, second] = screen.getAllByRole('button', { name: 'Approve' })
+    expect(first.closest('[data-run]')).toHaveAttribute('data-run', 'run-old')
+    expect(goldFilled()).toEqual(['Approve'])
+    expect(isGoldFill(second)).toBe(true)
+    expect(isGoldFill(first)).toBe(false)
+    expect(cascaded(first, 'border-color')).toBe('var(--color-accent)')
+    expect(cascaded(first, 'color')).toBe('var(--color-ink)')
+    for (const approve of [first, second]) expect(heightOf(approve)).toBe(32)
+    expect(heightOf(second, PHONE)).toBe(44)
+
+    cleanup()
+    page[1] = { ...page[1], run: { ...newer, waitingOn: { ...newer.waitingOn!, kind: 'question', node: 'writer', name: 'Writer', question: 'Short or long?', handoverFrom: null } } } as ChatItem
+    renderChat()
+    expect(await screen.findByText(/Answer in the box below/)).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(1)
+    expect(goldFilled()).toEqual([])
   })
 
   // ADR 0062, `whenStillNotMet: ask`: the check step's stop leads with what is still not met, and

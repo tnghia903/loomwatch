@@ -8,7 +8,13 @@ import { OpenRouterKey } from './OpenRouterKey'
  * model in the picker says which of them pays for it. The ChatGPT card is left out of a copy of
  * LoomWatch that doesn't offer it.
  */
-export function Sources({ title = 'How your agents’ models are paid', intro = true }: { title?: string; intro?: boolean }) {
+export function Sources({ title = 'How your agents’ models are paid', intro = true, fill = true }: {
+  title?: string
+  intro?: boolean
+  /** False where another button is the screen's one gold fill (Home's Build an agent): each card's
+   *  start button is then a gold ring, so the three still have the same weight. */
+  fill?: boolean
+}) {
   return (
     <section className="lw-sources" aria-labelledby="lw-sources-title">
       <div className="lw-sources-head">
@@ -16,9 +22,9 @@ export function Sources({ title = 'How your agents’ models are paid', intro = 
         {intro && <p className="t-body">Connect one or more. Each costs differently, and every model you pick says which one pays for it.</p>}
       </div>
       <div className="lw-sources-grid">
-        <ChatGptPlan variant="card" />
-        <ClaudeCredit variant="card" />
-        <OpenRouterKey variant="source" />
+        <ChatGptPlan variant="card" fill={fill} />
+        <ClaudeCredit variant="card" fill={fill} />
+        <OpenRouterKey variant="source" fill={fill} />
       </div>
     </section>
   )
