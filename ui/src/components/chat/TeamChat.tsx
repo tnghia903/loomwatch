@@ -28,6 +28,7 @@ import { BatonPill } from './BatonPill'
 import { Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
+import { Learned } from './Learned'
 import { ReplyQuote } from './ReplyQuote'
 import { WorkPiece, type TeamView } from './WorkPiece'
 
@@ -607,7 +608,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onTyping={onTyping} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} />
-                  : <TeamNote message={item.message} reactions={item.reactions} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} />}
+                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} />}
               </Fragment>
             )
           })}
@@ -754,7 +755,7 @@ function useChatSearch(teamPath: string) {
  * ones still writing typing, in place of the work it would have started. You can react to the note
  * and to each answer, as to anything said in the chat; the faces are kept on the note.
  */
-function TeamNote({ message, reactions, name, hue, onShowReplied, onStart, onReact }: { message: ChatMessage; reactions?: readonly Reaction[]; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void> }) {
+function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onStart, onReact, onUndoLesson }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void> }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
   const answers = message.answers
@@ -795,6 +796,7 @@ function TeamNote({ message, reactions, name, hue, onShowReplied, onStart, onRea
             </div>
           </li>
         ))}
+        {lessons && lessons.length > 0 && <li className="tc-said-learned"><Learned lessons={lessons} name={name} onUndo={onUndoLesson} /></li>}
         {waiting.length === 0 && (
           <li className="tc-said-acts">
             <span>No work started</span>

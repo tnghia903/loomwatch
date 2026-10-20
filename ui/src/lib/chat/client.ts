@@ -104,7 +104,7 @@ export type ChatItem =
    */
   | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[]; lessons?: Lesson[] }
   /** A team note: it started nothing, and the next work reads it. With your reactions to it and to its replies. */
-  | { kind: 'note'; message: ChatMessage; reactions?: Reaction[] }
+  | { kind: 'note'; message: ChatMessage; reactions?: Reaction[]; lessons?: Lesson[] }
 
 export interface ChatPage {
   teamKey: string

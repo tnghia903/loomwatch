@@ -1613,6 +1613,9 @@ enum Item {
     Note {
         message: ChatMessage,
         reactions: Vec<Reaction>,
+        /// What the agents learned from feedback on their answers to it (ADR 0078).
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        lessons: Vec<crate::lessons::Lesson>,
     },
 }
 
@@ -1688,6 +1691,7 @@ async fn chat_page(
         .chain(notes.into_iter().map(|message| Item::Note {
             message,
             reactions: Vec::new(),
+            lessons: Vec::new(),
         }))
         .collect();
     items.sort_by(|left, right| right.at().cmp(left.at()));
@@ -1713,6 +1717,7 @@ async fn chat_page(
             Item::Note {
                 message,
                 reactions: on,
+                ..
             } => (&message.id, on),
         };
         if let Some(found) = reactions.remove(anchor) {
@@ -1729,7 +1734,8 @@ async fn chat_page(
     .into_response())
 }
 
-/// Each piece of work with what the agents learned from feedback on it (ADR 0078).
+/// Each piece of work, and each team note the agents answered, with what they learned from
+/// feedback on it (ADR 0078).
 async fn with_lessons(
     state: &ChatState,
     shown: &[String],
@@ -1743,9 +1749,13 @@ async fn with_lessons(
         .await
         .map_err(|error| database(&error))?;
     for item in items {
-        if let Item::Work { run, lessons, .. } = item
-            && let Some(found) = learned.remove(&run.run_id)
-        {
+        let (anchor, lessons) = match item {
+            Item::Work { run, lessons, .. } => (&run.run_id, lessons),
+            Item::Note {
+                message, lessons, ..
+            } => (&message.id, lessons),
+        };
+        if let Some(found) = learned.remove(anchor) {
             *lessons = found;
         }
     }
@@ -1996,15 +2006,99 @@ async fn send_message(
     }
 }
 
-/// The person's words after a piece of finished work, as feedback the agent that did it learns
-/// from (ADR 0078), in the background.
+/// Something in the chat that finished with an answer, which the person's next words can be about:
+/// a piece of work and its answer, or what the agents answered a team note themselves (ADR 0076).
+struct Answered {
+    /// The run, or the team note, the chat shows what was learned from it on.
+    anchor: String,
+    /// What it was asked.
+    request: String,
+    /// Who answered what: a run's responder and its answer, or each agent's answer to the note.
+    said: Vec<(String, String)>,
+    created_at: String,
+}
+
+impl Answered {
+    fn run(state: &ChatState, stored: RunRecord) -> Option<Self> {
+        let run = state.registry.get(&stored.run_id).unwrap_or(stored);
+        let answer = run
+            .reply
+            .as_deref()
+            .filter(|answer| run.status == RunStatus::Succeeded && !answer.trim().is_empty())?
+            .to_owned();
+        Some(Self {
+            anchor: run.run_id,
+            request: run.prompt,
+            said: vec![(run.responder, answer)],
+            created_at: run.created_at,
+        })
+    }
+
+    fn note(note: ChatMessage) -> Option<Self> {
+        let answers = note.answers?;
+        if !answers.waiting.is_empty() || answers.said.is_empty() {
+            return None;
+        }
+        Some(Self {
+            anchor: note.id,
+            request: note.text,
+            said: answers
+                .said
+                .into_iter()
+                .map(|said| (said.from, said.text))
+                .collect(),
+            created_at: note.created_at,
+        })
+    }
+
+    /// What the words are about: the work a reply names, else the newest that was answered.
+    async fn newest(
+        state: &ChatState,
+        store: &ChatStore,
+        team: &TeamRef,
+        reply_to: Option<&ReplyTo>,
+    ) -> Option<Self> {
+        if let Some(run_id) = reply_to.and_then(|reply| reply.run_id.as_deref()) {
+            let stored = store.run(team, run_id).await.ok().flatten()?;
+            return Self::run(state, stored);
+        }
+        let run = store
+            .runs(team, None, None, 1)
+            .await
+            .ok()
+            .and_then(|runs| runs.into_iter().next())
+            .and_then(|stored| Self::run(state, stored));
+        // Your own notes come between: the newest note the agents answered is what counts.
+        let note = store
+            .team_notes(team, None, None, NOTES_LOOKED_BACK)
+            .await
+            .ok()
+            .and_then(|notes| notes.into_iter().find_map(Self::note));
+        match (run, note) {
+            (Some(run), Some(note)) => Some(if note.created_at > run.created_at {
+                note
+            } else {
+                run
+            }),
+            (run, note) => run.or(note),
+        }
+    }
+}
+
+/// How many of the newest team notes the person's words are looked back over for one the agents
+/// answered: past a few of the person's own notes, the answer is not what they are talking about.
+const NOTES_LOOKED_BACK: i64 = 5;
+
+/// The person's words after something finished with an answer, as feedback the agent that answered
+/// learns from (ADR 0078), in the background.
 ///
-/// The work is the one the message replies to, else the team's newest; it must have finished with
-/// an answer. The agent is the one replied to, else the one the message is for, else the one whose
-/// answer it was. Whether the words are about the work at all is the learner's to say: most
-/// messages are a new request, and it learns nothing from those. A message longer than
-/// [`crate::lessons::MAX_FEEDBACK_CHARS`] spells out a new job and is not read; and a note to an
-/// agent still at work is direction for the work in hand, which it already has.
+/// What they are about is the work a reply names, else the newest answered thing in the chat: a
+/// piece of work, or a team note the agents answered themselves. The agent is the one replied to,
+/// else the one the message is for, else the one who answered. Whether the words are about the
+/// answer at all is the learner's to say: most messages are a new request, and it learns nothing
+/// from those. A message longer than [`crate::lessons::MAX_FEEDBACK_CHARS`] spells out a new job and
+/// is not read; and a note to an agent still at work is direction for the work in hand, which it
+/// already has.
 async fn learn_from_words(
     state: &ChatState,
     store: &ChatStore,
@@ -2028,23 +2122,7 @@ async fn learn_from_words(
         key: team.chat_key(relative),
         path: relative.to_owned(),
     };
-    let stored = match reply_to.and_then(|reply| reply.run_id.as_deref()) {
-        Some(run_id) => store.run(&team_ref, run_id).await.ok().flatten(),
-        None => store
-            .runs(&team_ref, None, None, 1)
-            .await
-            .ok()
-            .and_then(|runs| runs.into_iter().next()),
-    };
-    let Some(run) = stored.map(|stored| state.registry.get(&stored.run_id).unwrap_or(stored))
-    else {
-        return;
-    };
-    let Some(answer) = run
-        .reply
-        .as_deref()
-        .filter(|answer| run.status == RunStatus::Succeeded && !answer.trim().is_empty())
-    else {
+    let Some(answered) = Answered::newest(state, store, &team_ref, reply_to).await else {
         return;
     };
     let harness = |id: &str| {
@@ -2059,7 +2137,7 @@ async fn learn_from_words(
             _ => None,
         })
         .and_then(harness);
-    let Some(agent) = named.or_else(|| harness(&run.responder)) else {
+    let Some(agent) = named.or_else(|| answered.said.iter().find_map(|(id, _)| harness(id))) else {
         return;
     };
     // The offline demo runs on no model, and its feedback is a walkthrough's.
@@ -2069,7 +2147,13 @@ async fn learn_from_words(
     // Replying to something else the agent said makes that the work the words are about.
     let work = match reply_to {
         Some(reply) if reply.kind != ReplyKind::Answer => reply.text.clone(),
-        _ => answer.to_owned(),
+        _ => answered
+            .said
+            .iter()
+            .find(|(id, _)| *id == agent.id)
+            .or_else(|| answered.said.first())
+            .map(|(_, said)| said.clone())
+            .unwrap_or_default(),
     };
     let resolved = state.teams_root.join(relative);
     learner.spawn(crate::lessons::LearnRequest {
@@ -2078,13 +2162,13 @@ async fn learn_from_words(
             agent_id: agent.id.clone(),
             source: crate::lessons::LessonSource::You,
             feedback: text.to_owned(),
-            run_id: Some(run.run_id.clone()),
+            run_id: Some(answered.anchor),
         },
         learning: crate::lessons::Learning {
             agent: display(&agent.name, &agent.id),
             instructions: agent.role.clone(),
             done_when: agent.done_when.clone(),
-            request: run.prompt.clone(),
+            request: task_text(&answered.request, team).to_owned(),
             work,
             said: text.to_owned(),
             missed_items: Vec::new(),
@@ -4753,6 +4837,65 @@ mod tests {
             asked.lock().unwrap().len(),
             1,
             "a message that long is a new job"
+        );
+    }
+
+    /// A short question the agents answered themselves (ADR 0076) is finished work too: words
+    /// after their answer teach the agent that gave it, and the chat shows the lesson on the note.
+    #[tokio::test]
+    async fn words_after_an_agents_own_answer_to_a_note_teach_it() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let asked = learner(&rig);
+        let store = rig.registry.chat_store().unwrap();
+        let answered = ChatMessage {
+            id: "note-1".to_owned(),
+            team_key: "news-desk".to_owned(),
+            team_path: "news.yaml".to_owned(),
+            text: "@writer What happened in tech this week?".to_owned(),
+            created_at: now(),
+            route: Route::TeamNote,
+            run_id: None,
+            agent_id: Some("writer".to_owned()),
+            delivered_at: None,
+            now: false,
+            reply_to: None,
+            answers: Some(NoteAnswers {
+                waiting: Vec::new(),
+                said: vec![NoteAnswer {
+                    from: "writer".to_owned(),
+                    text: "A very long list of everything that happened.".to_owned(),
+                    at: now(),
+                }],
+            }),
+        };
+        store.insert(&answered).await.unwrap();
+        let (status, _) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "Too long. Three bullets next time.", "to": null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let kept = learned(&rig, "team:news-desk#writer", 1).await;
+        assert_eq!(kept[0].run_id.as_deref(), Some("note-1"));
+        let asked = asked.lock().unwrap()[0].clone();
+        assert!(
+            asked.contains("It was asked:\n> What happened in tech this week?"),
+            "{asked}"
+        );
+        assert!(asked.contains("It answered:\n> A very long list of everything that happened."));
+        let chat = page(&rig.app).await;
+        let note = chat["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["message"]["id"] == "note-1")
+            .unwrap();
+        assert_eq!(
+            note["lessons"][0]["text"],
+            "When writing the digest, use three bullets."
         );
     }
 }

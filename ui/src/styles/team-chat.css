@@ -392,6 +392,7 @@
 .tc-learned-words { min-width: 0; overflow-wrap: anywhere; }
 .tc-learned-words b { font-weight: 600; color: var(--color-ink); }
 .tc-learned-undo { flex: none; font-size: 12px; }
+.tc-said-learned { list-style: none; }
 .tc-continue .btn { display: inline-flex; align-items: center; gap: 6px; }
 
 .tc-note .chat-bubble, .tc-team-note .chat-bubble { border-style: dashed; background: transparent; }
