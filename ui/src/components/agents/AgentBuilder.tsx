@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, ExternalLink, MessagesSquare, Trash2, Wrench } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
@@ -17,7 +18,10 @@ import { useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LeaveGuard } from '../rail/CrewRail'
+import type { ChipState } from '../ui/glyphs'
 import { SegmentThumb } from '../ui/SegmentThumb'
+import { AgentChip } from './AgentChip'
+import type { AgentBarSlots } from './AgentFrame'
 import { AgentBadge } from './AgentBadge'
 import { useBenchFile } from '../../lib/files/useBenchFile'
 import { AgentAnswer, AgentChat, AgentFile } from './AgentChat'
@@ -47,6 +51,12 @@ export interface AgentBuilderProps {
   inTeam?: { name: string; onSaved: (job: SavedJob, previous: Pick<JobSpec, 'reads'> | null) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
   /** Kept up to date with what moving to another agent would lose (the rail asks it first). */
   leaveRef?: MutableRefObject<LeaveGuard | null>
+  /**
+   * On its own page in My agents: the places in the page's header (AgentFrame) for its name chip
+   * and its tabs, as a team's page has them. Absent inside a team, where the agent keeps its own
+   * head under the team's.
+   */
+  bar?: AgentBarSlots
 }
 
 /** `bumped`: the save changed what teams copy, so the teams that use it have an update ready. */
@@ -64,7 +74,7 @@ type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; bumped
  * Inside a team (`inTeam`) it has the same two tabs, and its Chat is the one it has in Your agents:
  * talking to one agent on its own is a different thing from giving the team work in the team's chat.
  */
-export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam, leaveRef }: AgentBuilderProps) {
+export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam, leaveRef, bar }: AgentBuilderProps) {
   // Inside a team the address is the team's, so the page keeps which tab is open.
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
@@ -175,6 +185,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   }
 
   if (id && !saved) {
+    const missing = <p className="home-empty">{!loaded ? 'Loading…' : available ? `There is no agent “${id}” in My agents.` : 'This LoomWatch server is older than My agents. Restart it to use them.'}</p>
+    if (bar) return <div className="agent-builder">{bar.chip && createPortal(<AgentChip name={id} state="clean" detail={!loaded ? 'Loading…' : 'Not in My agents'} />, bar.chip)}{missing}</div>
     return <div className="agent-builder"><a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a><p className="home-empty">{!loaded ? 'Loading…' : available ? `There is no agent “${id}” in My agents.` : 'This LoomWatch server is older than My agents. Restart it to use them.'}</p></div>
   }
 
@@ -192,70 +204,95 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
   const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
 
+  const name = draft.name.trim() || 'New agent'
+  const saveButton = <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
+  const saveSaid = save.kind === 'saved' ? (save.bumped ? (inTeam ? `Saved, and ${inTeam.name} now uses it. Save the team to keep that.` : 'Saved. Teams that use it get this when you choose Update in them.') : 'Saved.')
+    : save.kind === 'error' ? <span className="agent-save-error">{save.message}</span> : null
+  // Back to the team's agents: that is where an agent is added, or updated.
+  const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ' to update it' : ''}</a>
+  const bench = (
+    <ByHand
+      draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+      learned={saved ? { savedAgent: saved.id } : null}
+      chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} file={benchFile.chat} /> : undefined}
+      onBuild={() => showView('build')}
+      cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={name} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={name} onClose={() => setAnswerRun(null)} /> : undefined}
+    />
+  )
+  const side = view === 'build' && (
+    <div className="agent-builder-grid">
+      <aside className="agent-builder-side">
+        {/* Who it is and where it is used, then how it looks: its figure is not part of the bench. */}
+        <div className="agent-builder-facts">
+          {badge}
+
+          {saved && (
+            <section className="agent-section" aria-label="Used in">
+              <div className="agent-section-head">Used in</div>
+              {uses === null ? <p className="t-meta">Looking through your teams…</p>
+                : mine.length === 0 ? <p className="t-meta">No team uses it yet. Open a team and add it from My agents in the add panel.</p>
+                : <ul className="agent-uses">
+                  {mine.map((use) => (
+                    <li key={`${use.teamPath}#${use.agentId}`}>
+                      <a href={`/?path=${encodeURIComponent(use.teamPath)}`}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
+                      <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>{version && use.version < version ? 'Update ready there' : 'Up to date'}</span>
+                      {use.scheduled && <span className="t-meta">on a schedule</span>}
+                    </li>
+                  ))}
+                </ul>}
+            </section>
+          )}
+
+          {/* On its own page, Remove is in its name chip's menu, as Delete team is in a team's (ADR 0043). */}
+          {saved && !bar && (
+            <div className="agent-remove">
+              {removing
+                ? <><span className="t-meta">Remove it from My agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
+                : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from My agents</button>}
+            </div>
+          )}
+        </div>
+        <FigurePicker figure={figure} onChange={(next) => set('figure', next)} />
+      </aside>
+    </div>
+  )
+
+  if (bar) {
+    // The name chip says how it is kept, as a team's does: the dot, a line under the name, and Save
+    // beside it while there is something to save.
+    const state: ChipState = save.kind === 'saving' ? 'saving' : save.kind === 'error' ? 'failed' : problem ? 'incomplete' : !saved ? 'new' : changed ? 'dirty' : save.kind === 'saved' ? 'saved' : 'clean'
+    const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
+    return (
+      <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
+        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => void doRemove() : undefined} />, bar.chip)}
+        {bar.tabs && createPortal(<AgentViewTabs view={view} onView={showView} tour inBar />, bar.tabs)}
+        <h1 className="visually-hidden">{name}</h1>
+        {/* The way back to a team, and what a save did. Always there, so a save is announced. */}
+        <div className="agent-notices">{backToTeam}<span className="agent-save-state t-meta" role="status">{saveSaid}</span></div>
+        {bench}
+        {side}
+      </div>
+    )
+  }
+
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
       <AgentHead
         above={inTeam ? <span className="agent-backs t-meta">From My agents. Saving here saves it there, and {inTeam.name} uses it at once.</span> : <span className="agent-backs">
           <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
-          {/* Back to the team's agents: that is where an agent is added, or updated. */}
-          {cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ' to update it' : ''}</a>}
+          {backToTeam}
         </span>}
-        name={draft.name.trim() || 'New agent'}
+        name={name}
         status={<span className="agent-builder-version">{saved ? (saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved') : 'Not saved yet'}</span>}
         view={view} onView={showView} tour={!inTeam}
       >
         <div className="agent-builder-save">
-          <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
-          <span className="agent-save-state t-meta" role="status">
-            {save.kind === 'saved' ? (save.bumped ? (inTeam ? `Saved, and ${inTeam.name} now uses it. Save the team to keep that.` : 'Saved. Teams that use it get this when you choose Update in them.') : 'Saved.')
-              : save.kind === 'error' ? <span className="agent-save-error">{save.message}</span>
-              : changed && base ? 'Unsaved changes' : problem ?? ''}
-          </span>
+          {saveButton}
+          <span className="agent-save-state t-meta" role="status">{saveSaid ?? (changed && base ? 'Unsaved changes' : problem ?? '')}</span>
         </div>
       </AgentHead>
-
-      <ByHand
-        draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
-        learned={saved ? { savedAgent: saved.id } : null}
-        chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} file={benchFile.chat} /> : undefined}
-        onBuild={() => showView('build')}
-        cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={draft.name.trim() || 'New agent'} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}
-      />
-
-      {view === 'build' && <div className="agent-builder-grid">
-        <aside className="agent-builder-side">
-          {/* Who it is and where it is used, then how it looks: its figure is not part of the bench. */}
-          <div className="agent-builder-facts">
-            {badge}
-
-            {saved && (
-              <section className="agent-section" aria-label="Used in">
-                <div className="agent-section-head">Used in</div>
-                {uses === null ? <p className="t-meta">Looking through your teams…</p>
-                  : mine.length === 0 ? <p className="t-meta">No team uses it yet. Open a team and add it from My agents in the add panel.</p>
-                  : <ul className="agent-uses">
-                    {mine.map((use) => (
-                      <li key={`${use.teamPath}#${use.agentId}`}>
-                        <a href={`/?path=${encodeURIComponent(use.teamPath)}`}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
-                        <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>{version && use.version < version ? 'Update ready there' : 'Up to date'}</span>
-                        {use.scheduled && <span className="t-meta">on a schedule</span>}
-                      </li>
-                    ))}
-                  </ul>}
-              </section>
-            )}
-
-            {saved && (
-              <div className="agent-remove">
-                {removing
-                  ? <><span className="t-meta">Remove it from My agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
-                  : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from My agents</button>}
-              </div>
-            )}
-          </div>
-          <FigurePicker figure={figure} onChange={(next) => set('figure', next)} />
-        </aside>
-      </div>}
+      {bench}
+      {side}
     </div>
   )
 }
@@ -285,12 +322,14 @@ export function AgentHead({ above, name, status, view, onView, tour = false, chi
  * An agent's two tabs: Build, its workbench, and Chat, where you work with it on its own. They sit
  * under its name (AgentHead); in My agents the getting-started guide points at them.
  */
-export function AgentViewTabs({ view, onView, tour = false }: { view: AgentView; onView: (view: AgentView) => void; tour?: boolean }) {
+export function AgentViewTabs({ view, onView, tour = false, inBar = false }: { view: AgentView; onView: (view: AgentView) => void; tour?: boolean; inBar?: boolean }) {
+  // In the header of its own page they are a team's tabs, the same size and place (AgentFrame).
+  const size = inBar ? 15 : 14
   return (
-    <nav className="workspace-view-tabs agent-view-tabs" aria-label="Agent view">
+    <nav className={inBar ? 'workspace-view-tabs' : 'workspace-view-tabs agent-view-tabs'} aria-label="Agent view">
       <SegmentThumb />
-      <button type="button" aria-pressed={view === 'build'} onClick={() => onView('build')} data-tour={tour ? 'agent-tab-build' : undefined}><Wrench size={14} aria-hidden="true" />Build</button>
-      <button type="button" aria-pressed={view === 'chat'} onClick={() => onView('chat')} data-tour={tour ? 'agent-tab-chat' : undefined}><MessagesSquare size={14} aria-hidden="true" />Chat</button>
+      <button type="button" aria-pressed={view === 'build'} onClick={() => onView('build')} data-tour={tour ? 'agent-tab-build' : undefined}><Wrench size={size} aria-hidden="true" />Build</button>
+      <button type="button" aria-pressed={view === 'chat'} onClick={() => onView('chat')} data-tour={tour ? 'agent-tab-chat' : undefined}><MessagesSquare size={size} aria-hidden="true" />Chat</button>
     </nav>
   )
 }

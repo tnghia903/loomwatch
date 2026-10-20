@@ -95,15 +95,18 @@
 @keyframes crew-rail-hop { 0% { translate: 0 0; } 35% { translate: 0 -7px; } 70% { translate: 0 1px; } 100% { translate: 0 0; } }
 @keyframes crew-rail-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 7px var(--glow)); } }
 
-/* My agents: the rail stands at the left of an agent's page and stays as the page scrolls. */
-.agents-railed { position: relative; flex: 1; display: flex; align-items: flex-start; min-width: 0; }
-.agents-railed > .crew-rail { position: sticky; top: 0; max-height: 100dvh; }
-.agents-railed > .agents-main { flex: 1 1 auto; width: auto; min-width: 0; max-width: 1180px; padding-left: var(--sp-5); }
-.agents-railed > .agents-main:has(.agent-builder) { max-width: 1440px; }
-
-/* A team: the rail runs the height of the window, its find button in the header's row. */
+/* A team's page and an agent's (AgentFrame) alike: the rail runs the height of the window, its find
+   button in the header's row, and the page beside it. */
 .lw-railed { display: flex; width: 100%; height: 100%; }
 .lw-railed > .lw-shell { flex: 1; min-width: 0; }
+/* An agent's page: the team header's own parts in a 64 px bar, then the page, which scrolls. */
+.agent-frame-root { position: absolute; inset: 0; background: var(--color-ground); color: var(--color-ink); }
+.agent-frame { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.lw-shell.agent-bar { flex: none; width: auto; height: 64px; overflow: visible; z-index: 40; }
+.agent-frame-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; }
+/* The places the agent on screen fills: its tabs stand where a team's do, its chip where a team's does. */
+.agent-bar .workspace-chrome > .agent-bar-tabs { display: contents; }
+.lw-shell.agent-bar .agent-bar-tabs > .workspace-view-tabs { grid-column: 2; grid-row: 1; }
 .lw-railed > .crew-rail { padding-top: 0; border-right: 1px solid var(--color-hairline); background: var(--color-ground); }
 .lw-railed > .crew-rail > .crew-rail-find { width: 100%; height: 64px; border-radius: 0; border-bottom: 1px solid var(--color-hairline); }
 
@@ -118,9 +121,6 @@
   .crew-rail .crew-team { scale: .88; }
   .crew-rail-add { width: 38px; height: 38px; }
   .crew-rail-mark::before { left: 12px; right: 12px; top: auto; bottom: -5px; width: auto; height: 3px; }
-  .agents-railed { flex-direction: column; align-items: stretch; }
-  .agents-railed > .crew-rail { max-height: none; z-index: 5; background: var(--color-ground); border-bottom: 1px solid var(--color-hairline); }
-  .agents-railed > .agents-main, .agents-railed > .agents-main:has(.agent-builder) { width: 100%; max-width: none; margin: 0; padding-left: var(--sp-4); }
   .lw-railed { flex-direction: column; }
   .lw-railed > .crew-rail { border-right: 0; border-bottom: 1px solid var(--color-hairline); }
   .lw-railed > .crew-rail > .crew-rail-find { width: 40px; height: 40px; border-radius: var(--r-md); border-bottom: 0; }

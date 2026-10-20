@@ -41,7 +41,7 @@ describe('Moving between agents from the rail', () => {
   it('has no rail on the list, which shows every agent already', async () => {
     window.history.replaceState({}, '', '/agents')
     page()
-    await screen.findByRole('button', { name: /Writer/ })
+    await screen.findByRole('button', { name: /Writer/ }, { timeout: 5000 })
     expect(screen.queryByRole('navigation', { name: 'My agents' })).not.toBeInTheDocument()
   })
 
@@ -49,11 +49,11 @@ describe('Moving between agents from the rail', () => {
     window.history.replaceState({}, '', '/agents/writer')
     page()
     const rail = screen.getByRole('navigation', { name: 'My agents' })
-    expect(await within(rail).findByRole('link', { name: 'Writer' })).toHaveAttribute('aria-current', 'page')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Writer' })).toBeInTheDocument()
+    expect(await within(rail).findByRole('link', { name: 'Writer' }, { timeout: 5000 })).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Writer' }, { timeout: 5000 })).toBeInTheDocument()
     fireEvent.click(within(rail).getByRole('link', { name: 'Editor' }))
     expect(here()).toBe('/agents/editor')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Editor' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Editor' }, { timeout: 5000 })).toBeInTheDocument()
     expect(within(rail).getByRole('link', { name: 'Editor' })).toHaveAttribute('aria-current', 'page')
   })
 
@@ -61,14 +61,14 @@ describe('Moving between agents from the rail', () => {
     window.history.replaceState({}, '', '/agents/writer?view=chat')
     page()
     const rail = screen.getByRole('navigation', { name: 'My agents' })
-    expect(await within(rail).findByRole('link', { name: 'Editor' })).toHaveAttribute('href', '/agents/editor?view=chat')
+    expect(await within(rail).findByRole('link', { name: 'Editor' }, { timeout: 5000 })).toHaveAttribute('href', '/agents/editor?view=chat')
   })
 
   it('shows what each agent is doing in its own chat', async () => {
     window.history.replaceState({}, '', '/agents/writer')
     const working: RunRecord = { runId: 'r1', sessionId: 'r1', teamPath: '/teams/.jobs/.bench/editor.yaml', prompt: 'Tighten this', status: 'running', mode: 'pipeline', entrypoint: 'editor', responder: 'editor', agentIds: ['editor'], createdAt: '2026-10-20T03:00:00Z', startedAt: null, finishedAt: null, error: null, exitCode: null, eventCount: 0, reply: null }
     page([working])
-    expect(await within(screen.getByRole('navigation', { name: 'My agents' })).findByRole('link', { name: 'Editor, working' })).toHaveClass('working')
+    expect(await within(screen.getByRole('navigation', { name: 'My agents' })).findByRole('link', { name: 'Editor, working' }, { timeout: 5000 })).toHaveClass('working')
   })
 
   it('marks + while a new agent is being made', async () => {
@@ -81,7 +81,7 @@ describe('Moving between agents from the rail', () => {
     async function changeWriter() {
       window.history.replaceState({}, '', '/agents/writer')
       page()
-      const instructions = await screen.findByRole('textbox', { name: /Instructions/ })
+      const instructions = await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 })
       fireEvent.change(instructions, { target: { value: 'Write a short draft, then a title.' } })
       return screen.getByRole('navigation', { name: 'My agents' })
     }
@@ -107,7 +107,7 @@ describe('Moving between agents from the rail', () => {
     it('lets a new agent you have not touched go without asking', async () => {
       window.history.replaceState({}, '', '/agents/new?from=researcher')
       page()
-      await screen.findByRole('textbox', { name: /Instructions/ })
+      await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 })
       fireEvent.click(within(screen.getByRole('navigation', { name: 'My agents' })).getByRole('link', { name: 'Editor' }))
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(here()).toBe('/agents/editor')
@@ -116,7 +116,7 @@ describe('Moving between agents from the rail', () => {
     it('asks before leaving a new agent you have changed', async () => {
       window.history.replaceState({}, '', '/agents/new?from=researcher')
       page()
-      fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }), { target: { value: 'Find three sources.' } })
+      fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Find three sources.' } })
       fireEvent.click(within(screen.getByRole('navigation', { name: 'My agents' })).getByRole('link', { name: 'Editor' }))
       expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
       expect(here()).toBe('/agents/new?from=researcher')

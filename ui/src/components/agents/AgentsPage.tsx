@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { Moon, Plus, Sun, UserRound } from 'lucide-react'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
@@ -19,6 +19,8 @@ import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { KnowYou } from '../you/KnowYou'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
+import { AgentChip } from './AgentChip'
+import { AgentFrame, type AgentBarSlots } from './AgentFrame'
 import { FigureStill } from './FigureStill'
 import { navigate, useAgentsRoute, type AgentsRoute } from './route'
 
@@ -29,6 +31,8 @@ export interface AgentsPageProps {
   mark?: LoomMarkState
   /** Every run the daemon knows, from the same poll: what each agent in the rail is doing. */
   records?: readonly RunRecord[]
+  /** The bell in an agent's header, as a team's has it: what waits on you. */
+  tray?: ReactNode
 }
 
 /**
@@ -39,23 +43,30 @@ export interface AgentsPageProps {
 export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
   const { resolved, toggle } = useTheme()
-  const { records = NO_RUNS, ...builder } = props
+  const { records = NO_RUNS, tray, mark, ...builder } = props
   // What leaving the agent on screen would lose, kept by its builder and read by the rail.
   const leave = useRef<LeaveGuard | null>(null)
-  const main = (
-    <main className="home-main agents-main">
-      {route.kind === 'list'
-        ? <AgentsList />
-        : route.kind === 'new' && !route.from
-          ? <AgentTemplates team={route.team} />
-          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} leaveRef={leave} {...builder} />}
-    </main>
-  )
+  // Where the agent on screen puts its name chip and tabs in the header.
+  const [slots, setSlots] = useState<AgentBarSlots>(NO_SLOTS)
+  if (route.kind !== 'list') {
+    // An agent's page, or a new one's, in a team page's frame: the rail, the header, then the page.
+    // The frame stays as you move between agents; only the agent in it changes.
+    const starting = route.kind === 'new' && !route.from
+    return (
+      <AgentFrame mark={mark} tray={tray} rail={<AgentRail route={route} records={records} leave={() => leave.current} />} chip={starting ? <AgentChip name="New agent" state="new" detail="Start from a job" /> : undefined} onSlots={setSlots}>
+        <main className="home-main agents-main">
+          {starting
+            ? <AgentTemplates team={route.team} />
+            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} leaveRef={leave} bar={slots} {...builder} />}
+        </main>
+      </AgentFrame>
+    )
+  }
   return (
     <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
-        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={props.mark} /><LoomWordmark height={19} /></a>
+        <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
           <SkillsLink />
           <QuestsLink />
@@ -63,13 +74,13 @@ export function AgentsPage(props: AgentsPageProps) {
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
       </header>
-      {/* The list shows every agent already; an agent's page has the rest of them beside it. */}
-      {route.kind === 'list' ? main : <div className="agents-railed"><AgentRail route={route} records={records} leave={() => leave.current} />{main}</div>}
+      <main className="home-main agents-main"><AgentsList /></main>
     </div>
   )
 }
 
 const NO_RUNS: readonly RunRecord[] = []
+const NO_SLOTS: AgentBarSlots = { chip: null, tabs: null }
 
 /**
  * My agents down the side of an agent's page: one click is another agent, on the same tab, so

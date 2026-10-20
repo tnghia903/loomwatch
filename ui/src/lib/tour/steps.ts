@@ -172,7 +172,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     view: () => present('[data-tour="agent-builder"][data-tour-saved]')
       ? {
           title: 'Now put it in a team',
-          body: 'It is in My agents now, ready for any team. Go to Your teams to make one.',
+          body: 'It is in My agents now, ready for any team. Click LoomWatch at the top to see your teams and make one.',
           target: ['[data-tour="your-teams"]'],
           sides: ['bottom', 'left'],
           advance: 'action',
