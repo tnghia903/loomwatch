@@ -144,10 +144,13 @@ the seven lessons were like that, for example "When replying to this person, alw
 Vietnamese." Such a lesson fits every agent you have, so it belongs in About you (ADR 0074), which
 every agent reads, rather than in one agent's list.
 
-- **The learner marks it.** It adds `"aboutYou": true` to an `add` or `change` only when every
-  agent working for you should do it, whatever the job: the language to write in, the units you
-  use. Only `true` counts; any other value leaves the lesson about the work, and the rest of the
-  reply still counts. A lesson changed later, by the learner or in your own words, stays about you.
+- **The learner marks it.** It adds `"aboutYou": true` to an `add` or `change` when it is
+  something you want from every agent, whatever the job. That is when it follows from who you are
+  (the language you read, where you live, the units and money you use), or when you asked for it on
+  everything ("always", "never", "every reply"), as with the tone you like. A lesson that fits one
+  kind of work stays about the work, even when you said "next time". Only `true` counts; any other
+  value leaves the lesson about the work, and the rest of the reply still counts. A lesson changed
+  later, by the learner or in your own words, stays about you.
 - **The chat and the builder offer one action.** The lesson's line gets **Tell all my agents**.
   Pressing it only asks: "Add to About you, so every agent does this?" with **Add** and
   **Cancel**.
@@ -307,6 +310,22 @@ A smaller check of the later additions, the same way:
   Expect it to matter on harder, repeated work and on smaller models; it costs nothing when there
   is no feedback.
 
+**Lessons about you.** The same seven corrections and four messages that were not feedback went
+through the learner alone, three times each. Four corrections were about you: Vietnamese, metric
+and VND, "Always end with a line that starts with 'Next step:'", and no emojis.
+
+| | First wording | Today's wording |
+|---|---|---|
+| Lessons about you marked | 7 of 12 | 9 of 12 |
+| Lessons about the work marked by mistake | 0 of 9 | 0 of 9 |
+| Lessons made from messages that were not feedback | 0 of 12 | 0 of 12 |
+
+- The first wording gave only the language and the units as examples, and never marked "Next
+  step:". Today's wording marks it every time.
+- "No emojis" is still left to the work: it came on a book club welcome, without "always", and the
+  learner keeps it to messages for a group. Tell all my agents is then not offered for it.
+- The two checks cost $0.16 together.
+
 ## 11. What is not built yet
 
 - A switch for learning in the agent's builder. Today it is `learns: false` in the team file, and
@@ -315,7 +334,8 @@ A smaller check of the later additions, the same way:
   agent it stands for. One of My agents has one list everywhere.
 - A lesson that keeps proving itself could be offered as an edit to the agent's instructions, for
   you to accept.
-- How well the learner marks lessons about you has not been checked on a live model yet. The
-  tests use a stand-in model.
+- The learner can still leave a lesson about you to the work, when you said it once about one
+  piece of work (section 10). It also sometimes writes a lesson about your language in that
+  language, rather than in the language of your feedback.
 - The learner is not shown About you, so it can learn what About you already says. Tell all my
   agents then adds nothing, and the lesson still leaves the agent's list.

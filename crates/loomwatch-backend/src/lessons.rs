@@ -1197,10 +1197,12 @@ fn ask_what_to_change(text: &mut String, agent: &str) {
          change it only if it was unclear.\n\
          - If the feedback goes against one of its lessons, change or drop that lesson rather than \
          adding another.\n\
-         - Add \"aboutYou\": true to an add or change only when the lesson is about the person, \
-         not the work: something every agent working for them should do whatever the job, such as \
-         the language to write in or the units they use. They can then give it to all their \
-         agents.\n\
+         - Add \"aboutYou\": true to an add or change when the lesson is about the person, not the \
+         work: something they want from every agent, whatever the job. It is, when it follows from \
+         who they are (the language they read, where they live, the units and money they use), or \
+         when they asked for it on everything (\"always\", \"never\", \"every reply\"), as with the \
+         tone they like. A lesson that fits one kind of work (\"When <kind of work>, ...\") is about \
+         the work, even when they said \"next time\". They can then give it to all their agents.\n\
          - At most {EDITS_PER_FEEDBACK} adds, changes and drops in all. No edits at all is a good \
          answer.\n\n\
          Reply with JSON only, in this shape:\n\

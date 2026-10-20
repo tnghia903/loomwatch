@@ -759,9 +759,20 @@ fn the_learner_marks_a_lesson_about_the_person_and_only_true_counts() {
     );
     let prompt = compose(&Learning::default(), LessonSource::You, &[]);
     assert!(prompt.contains(
-        "Add \"aboutYou\": true to an add or change only when the lesson is about the person, not \
-         the work"
+        "Add \"aboutYou\": true to an add or change when the lesson is about the person, not the \
+         work"
     ));
+    // The cues measured live (ADR 0078, "Live check of the mark"): with the language and the
+    // units as its only examples, the learner left "Always end with 'Next step:'" unmarked.
+    for cue in [
+        "who they are",
+        "(\"always\", \"never\", \"every reply\")",
+        "as with the tone they like",
+        "A lesson that fits one kind of work",
+        "even when they said \"next time\"",
+    ] {
+        assert!(prompt.contains(cue), "the learner is not told {cue}");
+    }
     assert!(prompt.contains("{\"do\": \"add\", \"lesson\": \"...\", \"aboutYou\": true}"));
 }
 
