@@ -289,3 +289,85 @@ export function commandRedone(failed: string, later: readonly string[]): number 
   }
   return null
 }
+
+/**
+ * The command a call ran. LoomWatch's own engine titles a command "Run: " and its first line, cut
+ * at 120 characters, so a heredoc's script and every line after the first are only in the call's
+ * input: the command is read from there when it has one. A permission request carries the call it
+ * asks about under `toolCall`.
+ */
+export function commandOf(item: { name: string; rawInput?: unknown }): string {
+  const fields = (value: unknown) => (value && typeof value === 'object' ? (value as Record<string, unknown>) : {})
+  const input = fields(item.rawInput)
+  const command = input.command ?? fields(fields(input.toolCall).rawInput).command
+  if (typeof command === 'string' && command.trim()) return command
+  return item.name.replace(/^Run:\s*/, '')
+}
+
+/** What a command did, as a sentence needs it: "fetch" "2 web pages", with the sites it reached. */
+export interface CommandPlan {
+  /** The verb as "couldn’t …", "… -ed" and "is …ing" need it. */
+  verb: readonly [base: string, past: string, ing: string]
+  /** What it was done to: "2 web pages", "build.py", "a short Python program", "“git push”". */
+  object: string
+  /** What it reached for, when the sentence doesn't name it: the sites it fetched, the add-ons it installed. */
+  targets: { label: 'Sites' | 'Add-ons'; items: string[] } | null
+}
+
+const RUN = ['run', 'ran', 'running'] as const
+/** Programs that fetch a page, and the code that does it from inside a script. */
+const FETCHERS = new Set(['curl', 'wget', 'http', 'https', 'xh'])
+const FETCH_CODE = /urlopen|urlretrieve|requests\.(?:get|post|head)\(|httpx\.|\bfetch\(|aiohttp|https?\.get\(|Invoke-WebRequest|Invoke-RestMethod/
+const URLS = /https?:\/\/[^\s'"`)<>\]}]+/g
+/** Package managers, by the words that install with them. */
+const INSTALLERS: Record<string, string[]> = { pip: ['install'], pip3: ['install'], npm: ['install', 'i', 'add', 'ci'], pnpm: ['add', 'install', 'i'], yarn: ['add'], bun: ['add', 'install', 'i'], brew: ['install'], gem: ['install'], cargo: ['install'], uv: ['add'], apt: ['install'], 'apt-get': ['install'] }
+/** Programs that run a script, by the language people would name. */
+const LANGUAGES: Record<string, string> = { python: 'Python', python3: 'Python', node: 'JavaScript', deno: 'JavaScript', bash: 'shell', sh: 'shell', zsh: 'shell', ruby: 'Ruby', perl: 'Perl', php: 'PHP', Rscript: 'R', osascript: 'AppleScript', swift: 'Swift' }
+
+// `globalThis`: this module's own `URL` is the pattern above.
+const siteOf = (url: string) => { try { return new globalThis.URL(url).hostname.replace(/^www\./, '') } catch { return null } }
+
+/** The add-ons an install names: its words that are not flags, files or folders, without their versions. */
+function packagesOf(words: string[]): string[] {
+  return [...new Set(words
+    .filter((word) => !/^[-./~]/.test(word) && !/\.(?:txt|toml|cfg|json|lock|ya?ml)$/.test(word))
+    .map((word) => word.replace(/(?<=.)[@=<>~^!].*$/, ''))
+    .filter((word) => /^@?[\w.-]+(?:\/[\w.-]+)?$/.test(word)))]
+}
+
+/**
+ * A shell command read as what it did, for someone who reads no shell: it fetched web pages,
+ * installed add-ons, ran a script or a short program. Anything else is named as `commandName`
+ * names it.
+ */
+export function commandPlan(text: string): CommandPlan {
+  const runs = commandRuns(text) ?? []
+  // A page is fetched by a program that fetches, or by a script's own code: urllib, requests, fetch.
+  const urls = [...new Set((text.match(URLS) ?? []).map((url) => url.replace(/[.,;:]+$/, '')))]
+  if (urls.length > 0 && (runs.some((run) => FETCHERS.has(programOf(run))) || FETCH_CODE.test(text))) {
+    const sites = [...new Set(urls.map(siteOf).filter((name): name is string => name !== null))]
+    return { verb: ['fetch', 'fetched', 'fetching'], object: urls.length === 1 ? 'a web page' : `${urls.length} web pages`, targets: sites.length > 0 ? { label: 'Sites', items: sites } : null }
+  }
+  const run = runs.length > 0 ? mainRuns(runs)[0] : null
+  if (run) {
+    const program = programOf(run)
+    let words = run.words.slice(1)
+    // `python3 -m pip install x` and `uv pip install x` install as pip does.
+    if (LANGUAGES[program] === 'Python' && words[0] === '-m' && /^pip3?$/.test(words[1] ?? '')) words = words.slice(2)
+    else if (program === 'uv' && words[0] === 'pip') words = words.slice(1)
+    const pip = LANGUAGES[program] === 'Python' || program === 'uv'
+    if ((INSTALLERS[program] ?? []).includes(words[0] ?? '') || (pip && words[0] === 'install')) {
+      const packages = packagesOf(words.slice(1))
+      return { verb: ['install', 'installed', 'installing'], object: packages.length === 1 ? 'an add-on' : 'add-ons', targets: packages.length > 0 ? { label: 'Add-ons', items: packages } : null }
+    }
+    const language = LANGUAGES[program]
+    const short = { verb: RUN, object: `a short ${language} program`, targets: null }
+    if (language && words.some((word) => ['-c', '-e', '-'].includes(word))) return short
+    const script = language ? words.find((word) => !word.startsWith('-')) : undefined
+    if (script && (PATH.test(script) || /\.\w{1,5}$/.test(script))) return { verb: RUN, object: baseName(script), targets: null }
+    if (language && run.input) return short
+    if (PATH.test(run.words[0]) && /\.\w{1,5}$/.test(run.words[0])) return { verb: RUN, object: baseName(run.words[0]), targets: null }
+  }
+  const named = commandName(text)
+  return { verb: RUN, object: named ? `“${named}”` : 'a command', targets: null }
+}

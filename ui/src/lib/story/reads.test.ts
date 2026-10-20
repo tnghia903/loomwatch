@@ -305,3 +305,17 @@ describe('counting things, not calls', () => {
     expect(readPhrase({ files: 0, pages: 0, notes: 0 })).toBe('')
   })
 })
+
+describe('mendOf, for a command LoomWatch’s own engine ran', () => {
+  // Its title is "Run: " and the first line, cut short; the whole command is in the input.
+  const run = (callId: string, command: string, failed: boolean): Step[] => [
+    ['coby', 'tool_call', { callId, title: `Run: ${command.split('\n')[0]}${command.includes('\n') ? '…' : ''}`, toolKind: 'execute', status: 'in_progress', rawInput: { command } }],
+    ['coby', 'tool_update', { callId, status: failed ? 'failed' : 'completed', content: [{ type: 'content', content: { type: 'text', text: failed ? 'SyntaxError: invalid syntax' : 'done' } }] }],
+  ]
+
+  it('counts the command run again as put right, and names it by its program', () => {
+    const items = projectRun(record([...run('first', 'cd /tmp/build && python3 build.py', true), ...run('again', 'cd /tmp/build && python3 build.py', false)])).evidence
+    expect(mendOf(items[0], items)).toEqual({ by: items[1], how: 'ran again' })
+    expect(describeEvidence('Coby', items[0])).toBe('Coby’s command “python3 build.py” failed.')
+  })
+})
