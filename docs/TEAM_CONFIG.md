@@ -525,7 +525,9 @@ Every agent in a run works with LoomWatch's own tools:
   and `DATABASE_URL` and `PGPASSWORD`. On a Mac a command also runs in a sandbox: it can change
   files only in the agent's folder and temporary folders, and it can reach the network only when the
   agent is allowed the web. Windows and Linux have no such sandbox: there a command can change any
-  file you can, so asking before each one is the only check.
+  file you can, so asking before each one is the only check. For an agent allowed the web, a Python
+  script's page requests go out as `LoomWatch/<version> (+https://loomwatch.github.io/)` rather
+  than Python's own name, which some sites refuse; a name the script sets itself still wins.
 - **The web**, only for an agent with `allow.web: true`: OpenRouter's web search and page fetch.
   OpenRouter runs them, and the run shows each search and each page read. An agent without the
   switch has no web tools.
