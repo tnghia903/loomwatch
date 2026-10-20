@@ -12,7 +12,7 @@ use super::anthropic::Anthropic;
 use super::chatgpt::ChatGptPlan;
 use super::demo::Demo;
 use super::error::CallError;
-use super::openrouter::OpenRouter;
+use super::openrouter::{OpenRouter, through_messages};
 use crate::ai::Source;
 
 /// One message of the conversation, in the agent's own order. It is append-only: a model that
@@ -36,8 +36,9 @@ pub enum Message {
         reasoning_details: Vec<Value>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
-        /// The message as a provider other than `OpenRouter` wrote it, sent back to that provider
-        /// unchanged: Claude refuses a history whose signed thinking was rewritten.
+        /// The message in the shape its provider wrote it (Anthropic's content blocks, the
+        /// Responses API's items), sent back to that provider unchanged: Claude refuses a history
+        /// whose signed thinking was rewritten. Chat completions has none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         native: Option<Native>,
     },
@@ -70,8 +71,9 @@ impl Picture {
     }
 }
 
-/// A message in the shape one provider writes it: Anthropic's content blocks or the Responses API's
-/// output items. Only that provider reads it back; any other ignores it.
+/// A message in the shape one provider writes it: Anthropic's content blocks (from Anthropic, or
+/// from `OpenRouter`'s `/messages`) or the Responses API's output items. Only the source that wrote
+/// it reads it back; any other ignores it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Native {
     pub source: Source,
@@ -426,10 +428,14 @@ impl Provider {
 
     /// Whether a summary keeps the session's tools, asking the model not to call them
     /// ([`ChatRequest::tools_off`]), rather than going without: true where the conversation is signed
-    /// and must not change under it.
+    /// and must not change under it, as it is for a Claude on `OpenRouter`'s `/messages`.
     #[must_use]
-    pub fn keeps_tools_for_summaries(&self) -> bool {
-        !matches!(self, Self::OpenRouter(_) | Self::Demo(_))
+    pub fn keeps_tools_for_summaries(&self, model: &str) -> bool {
+        match self {
+            Self::OpenRouter(_) => through_messages(model),
+            Self::Demo(_) => false,
+            Self::Anthropic(_) | Self::ChatGpt(_) => true,
+        }
     }
 }
 

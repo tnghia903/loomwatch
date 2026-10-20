@@ -772,7 +772,7 @@ impl Session {
         self.message_part = 0;
         let message_id = self.message_id();
         let bare = call == Call::BareSummary;
-        let offered = !bare || self.provider.keeps_tools_for_summaries();
+        let offered = !bare || self.provider.keeps_tools_for_summaries(&self.config.model);
         let tools = if offered {
             self.tool_specs()
         } else {

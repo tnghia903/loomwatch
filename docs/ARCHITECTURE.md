@@ -29,7 +29,10 @@ instructions and tools.
   to. The summary call offers the same tools, so it reads the conversation from the cache too.
   Each call carries the session's id, which keeps its calls on one OpenRouter route.
 - **A provider** answers each model call. **OpenRouter** (`agent/openrouter.rs`) makes one
-  streamed `POST /chat/completions` per call. The offline **Demo** (`agent/demo.rs`) answers
+  streamed `POST /chat/completions` per call. A Claude from 4.6 on goes to OpenRouter's
+  Anthropic-shaped `POST /messages` instead, through `agent/anthropic.rs`: there Claude's own web
+  search is a block of its own between the words around it, where chat completions marks nothing.
+  The offline **Demo** (`agent/demo.rs`) answers
   without a model. It runs the offline demo team (`model: fake/offline`), which needs no key and
   no internet, and the tests.
 - **Built-in tools** (`agent/tools/`) are `list_files`, `read_file`, `search_files`,
