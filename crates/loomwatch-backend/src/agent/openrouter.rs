@@ -16,6 +16,11 @@
 //! Requests are retried only before anything has streamed: once text has reached the operator, a
 //! retry would write it twice. That covers a busy model reported inside the stream, as `OpenRouter`
 //! does once it has answered `200`, as long as it comes before the model's first word.
+//!
+//! A Claude that thinks adaptively goes to `OpenRouter`'s Anthropic-shaped `/messages` instead,
+//! through [`Anthropic`] ([`through_messages`]). Chat completions marks nowhere that a Claude ran
+//! its own web search, so the words it wrote before the search would run into its answer; in
+//! `/messages` the search is a block of its own between them.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, PoisonError};
@@ -25,12 +30,14 @@ use reqwest::{Client, StatusCode};
 use serde_json::{Map, Value, json};
 
 use super::ApiKey;
+use super::anthropic::Anthropic;
 use super::error::{AgentError, CallError, redact};
 use super::provider::{
     Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, ServerTools, ToolCall, Usage,
+    Written,
 };
 use super::sse::SseDecoder;
-use crate::ai::Source;
+use crate::ai::{ModelRef, Source};
 
 /// Where `OpenRouter`'s API lives.
 pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
@@ -103,6 +110,33 @@ pub struct OpenRouter {
     /// Models whose provider refused the web limits, so they get the web tools without them for as
     /// long as the daemon runs, and don't pay for a refused call each time.
     unlimited: Mutex<HashSet<String>>,
+    /// The same key on `OpenRouter`'s `/messages`, for the models [`through_messages`] names.
+    claude: Anthropic,
+}
+
+/// Whether `model` goes to `OpenRouter`'s Anthropic-shaped `/messages` rather than chat
+/// completions: a Claude that thinks adaptively (4.6 and later), as [`Anthropic`] asks every
+/// model to. An older Claude, a variant (`:batch`) and an alias (`~anthropic/…`) stay on chat
+/// completions, as does every other maker's model.
+#[must_use]
+pub(crate) fn through_messages(model: &str) -> bool {
+    let model = ModelRef::parse(model);
+    if model.source != Source::OpenRouter {
+        return false;
+    }
+    let Some(name) = model.id.strip_prefix("anthropic/claude-") else {
+        return false;
+    };
+    // `claude-sonnet-5.5`; the old names put the version first (`claude-3.7-sonnet`).
+    let Some((_, version)) = name.rsplit_once('-').filter(|_| !name.contains(':')) else {
+        return false;
+    };
+    let mut numbers = version.split('.').map(str::parse::<u32>);
+    match (numbers.next(), numbers.next(), numbers.next()) {
+        (Some(Ok(major)), None, None) => major >= 5,
+        (Some(Ok(major)), Some(Ok(minor)), None) => (major, minor) >= (4, 6),
+        _ => false,
+    }
 }
 
 impl OpenRouter {
@@ -133,12 +167,14 @@ impl OpenRouter {
             .redirect(reqwest::redirect::Policy::none())
             .https_only(!local)
             .build()?;
+        let claude = Anthropic::through_openrouter(key.clone(), &base)?;
         Ok(Self {
             client,
             base,
             key,
             backoff: Duration::from_secs(1),
             unlimited: Mutex::default(),
+            claude,
         })
     }
 
@@ -146,6 +182,7 @@ impl OpenRouter {
     #[cfg(test)]
     pub(crate) fn with_backoff(mut self, backoff: Duration) -> Self {
         self.backoff = backoff;
+        self.claude = self.claude.with_backoff(backoff);
         self
     }
 
@@ -155,6 +192,10 @@ impl OpenRouter {
         deltas: &dyn DeltaSink,
         cancel: &Cancel,
     ) -> Result<Completion, CallError> {
+        if through_messages(request.model) {
+            // Boxed: a provider's call is a large future, and Windows builds count it larger still.
+            return Box::pin(self.claude.complete(request, deltas, cancel)).await;
+        }
         let mut limited = request.server_tools.any() && !self.refuses_limits(request.model);
         let mut body = body(request, limited);
         let mut attempt = 0;
@@ -262,12 +303,54 @@ fn retryable(status: StatusCode) -> bool {
 
 /// Whether a refusal was the provider saying it can't take the web limits: a bad request that
 /// names one of them.
-fn refused_the_limits(status: StatusCode, said: &str) -> bool {
+pub(super) fn refused_the_limits(status: StatusCode, said: &str) -> bool {
     let lower = said.to_lowercase();
     matches!(
         status,
         StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
     ) && LIMIT_FIELDS.iter().any(|field| lower.contains(field))
+}
+
+/// `OpenRouter`'s web tools for an agent allowed the web, the same in chat completions and
+/// `/messages`. `limited` holds them to the request's limits: a page longer than the limit is cut
+/// rather than filling the conversation, and a figure the team leaves out is left to `OpenRouter`.
+pub(super) fn web_tools(server_tools: ServerTools, limited: bool) -> Vec<Value> {
+    let ServerTools {
+        web_search,
+        web_fetch,
+        limits,
+    } = server_tools;
+    let server_tool = |kind: &str, parameters: Map<String, Value>| {
+        if limited && !parameters.is_empty() {
+            json!({"type": kind, "parameters": parameters})
+        } else {
+            json!({"type": kind})
+        }
+    };
+    let uses = |count: Option<u32>| {
+        count
+            .map(|count| Map::from_iter([("max_uses".to_owned(), json!(count))]))
+            .unwrap_or_default()
+    };
+    let mut tools = Vec::new();
+    if web_search {
+        tools.push(server_tool("openrouter:web_search", uses(limits.searches)));
+    }
+    if web_fetch {
+        let mut parameters = uses(limits.pages);
+        parameters.insert("max_content_tokens".into(), json!(limits.page_tokens));
+        tools.push(server_tool("openrouter:web_fetch", parameters));
+    }
+    tools
+}
+
+/// The steps one call's server tools may take together (`max_tool_calls`), when the team sets
+/// it: `max_uses` binds only some search engines, and this binds them all.
+pub(super) fn web_steps(server_tools: ServerTools, limited: bool) -> Option<u32> {
+    server_tools
+        .limits
+        .steps
+        .filter(|_| limited && server_tools.any())
 }
 
 /// The request body. `limited` holds the web tools to the request's limits.
@@ -286,33 +369,7 @@ fn body(request: &ChatRequest<'_>, limited: bool) -> Value {
             })
         })
         .collect();
-    let ServerTools {
-        web_search,
-        web_fetch,
-        limits,
-    } = request.server_tools;
-    // A page longer than the limit is cut rather than filling the conversation. A figure the team
-    // leaves out is left to `OpenRouter`.
-    let server_tool = |kind: &str, parameters: Map<String, Value>| {
-        if limited && !parameters.is_empty() {
-            json!({"type": kind, "parameters": parameters})
-        } else {
-            json!({"type": kind})
-        }
-    };
-    let uses = |count: Option<u32>| {
-        count
-            .map(|count| Map::from_iter([("max_uses".to_owned(), json!(count))]))
-            .unwrap_or_default()
-    };
-    if web_search {
-        tools.push(server_tool("openrouter:web_search", uses(limits.searches)));
-    }
-    if web_fetch {
-        let mut parameters = uses(limits.pages);
-        parameters.insert("max_content_tokens".into(), json!(limits.page_tokens));
-        tools.push(server_tool("openrouter:web_fetch", parameters));
-    }
+    tools.extend(web_tools(request.server_tools, limited));
     let mut body = Map::new();
     body.insert("model".into(), json!(request.model));
     body.insert(
@@ -326,12 +383,7 @@ fn body(request: &ChatRequest<'_>, limited: bool) -> Value {
         body.insert("tools".into(), Value::Array(tools));
         body.insert("parallel_tool_calls".into(), json!(true));
     }
-    // The steps one call's server tools may take together, when the team sets it: `max_uses`
-    // binds only some search engines, and this binds them all.
-    if let Some(steps) = limits
-        .steps
-        .filter(|_| limited && (web_search || web_fetch))
-    {
+    if let Some(steps) = web_steps(request.server_tools, limited) {
         body.insert("max_tool_calls".into(), json!(steps));
     }
     // `OpenRouter` has no `ultra`, so it goes as its highest, `max`.
@@ -427,7 +479,7 @@ fn wire_message(message: &Message) -> Value {
 /// The message a stream assembles, piece by piece.
 #[derive(Default)]
 struct Assembled {
-    content: String,
+    written: Written,
     reasoning_details: Vec<Value>,
     calls: Vec<PartialCall>,
     finish: Option<Finish>,
@@ -502,7 +554,7 @@ async fn read_stream(
             return Ok(Streamed::Refused { status, said });
         }
     }
-    if message.finish.is_none() && message.content.is_empty() && message.calls.is_empty() {
+    if message.finish.is_none() && message.written.content.is_empty() && message.calls.is_empty() {
         return Err(AgentError::Stalled(Source::OpenRouter).into());
     }
     Ok(Streamed::Whole(finish(message)))
@@ -544,7 +596,7 @@ async fn take_event(
         if let Some(text) = delta.get("content").and_then(Value::as_str)
             && !text.is_empty()
         {
-            message.content.push_str(text);
+            message.written.text(text);
             message.streamed = true;
             deltas.text(text).await?;
         }
@@ -556,7 +608,15 @@ async fn take_event(
         }
         if let Some(details) = delta.get("reasoning_details").and_then(Value::as_array) {
             for detail in details {
-                merge_reasoning(&mut message.reasoning_details, detail);
+                let began = merge_reasoning(&mut message.reasoning_details, detail);
+                // A search `OpenRouter` runs itself began. Words in the same chunk came before it.
+                if began
+                    && detail.get("type").and_then(Value::as_str)
+                        == Some("reasoning.server_tool_call")
+                {
+                    message.written.tool();
+                    deltas.server_tool();
+                }
             }
         }
         if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
@@ -583,9 +643,10 @@ async fn take_event(
     Ok(())
 }
 
-/// Adds one streamed reasoning piece. Pieces of one block share an `index` and a `type`: their
-/// text joins up, and whatever else they carry (a signature, an id) is the block's final word.
-fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) {
+/// Adds one streamed reasoning piece, and says whether it began a block. Pieces of one block share
+/// an `index` and a `type`: their text joins up, and whatever else they carry (a signature, an id)
+/// is the block's final word.
+fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) -> bool {
     let index = piece.get("index");
     let kind = piece.get("type");
     let existing = index.and_then(|index| {
@@ -595,10 +656,10 @@ fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) {
     });
     let (Some(existing), Some(piece)) = (existing, piece.as_object()) else {
         details.push(piece.clone());
-        return;
+        return true;
     };
     let Some(existing) = existing.as_object_mut() else {
-        return;
+        return false;
     };
     for (key, value) in piece {
         match (key.as_str(), existing.get_mut(key), value) {
@@ -610,6 +671,7 @@ fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) {
             }
         }
     }
+    false
 }
 
 /// Adds one streamed tool-call piece. The first piece of a call carries its id and name; later
@@ -697,12 +759,13 @@ fn finish(message: Assembled) -> Completion {
     usage.web_searches = usage.web_searches.max(ran("web_search"));
     usage.web_fetches = usage.web_fetches.max(ran("web_fetch"));
     Completion {
-        content: message.content,
+        content: message.written.content,
         reasoning_details: message.reasoning_details,
         tool_calls,
         finish,
         usage,
         server_tool_calls,
+        answer_from: message.written.answer_from,
         native: None,
     }
 }
@@ -712,7 +775,7 @@ fn read_usage(usage: &Value) -> Usage {
     let prompt = number("/prompt_tokens");
     let cached_read = number("/prompt_tokens_details/cached_tokens");
     let cached_write = number("/prompt_tokens_details/cache_write_tokens");
-    let web = read_web_use(usage);
+    let web = web_use(usage);
     Usage {
         input_tokens: prompt.saturating_sub(cached_read + cached_write),
         cached_read_tokens: cached_read,
@@ -727,9 +790,9 @@ fn read_usage(usage: &Value) -> Usage {
 }
 
 /// Searches and page reads, from the counts a usage carries.
-struct WebUse {
-    searches: u64,
-    fetches: u64,
+pub(super) struct WebUse {
+    pub(super) searches: u64,
+    pub(super) fetches: u64,
 }
 
 /// The usage's web counts. Chat Completions sends them as `server_tool_use_details`; the
@@ -743,7 +806,7 @@ struct WebUse {
 ///   them, and the only count a page it fetched gets. The web tools are the only server tools
 ///   `LoomWatch` offers, so what is left after the searches was a page read. That is exact when
 ///   `OpenRouter` ran the searches too, and a floor when the provider searched on its own.
-fn read_web_use(usage: &Value) -> WebUse {
+pub(super) fn web_use(usage: &Value) -> WebUse {
     let largest = |field: &str| {
         ["server_tool_use", "server_tool_use_details"]
             .iter()
@@ -780,7 +843,7 @@ async fn read_error_body(mut response: reqwest::Response) -> String {
 }
 
 /// What a refused request means for the operator.
-fn status_error(status: StatusCode, said: &str, model: &str) -> AgentError {
+pub(super) fn status_error(status: StatusCode, said: &str, model: &str) -> AgentError {
     let said = redact(said);
     let lower = said.to_lowercase();
     match status {
@@ -872,6 +935,37 @@ mod tests {
         );
         let without = wire_messages(&history[1..]);
         assert_eq!(without.len(), 2, "no pictures, no extra message");
+    }
+
+    /// A Claude from 4.6 on goes to `/messages`, written as a team file writes it; an older Claude,
+    /// a variant, an alias, a Claude on another source and every other maker's model stay where
+    /// they were.
+    #[test]
+    fn a_claude_that_thinks_adaptively_goes_through_messages() {
+        for model in [
+            "anthropic/claude-haiku-5.5",
+            "anthropic/claude-sonnet-4.6",
+            "anthropic/claude-opus-4.8",
+            "anthropic/claude-fable-5",
+            "anthropic/claude-opus-5.5[high]",
+            "sonnet",
+        ] {
+            assert!(through_messages(model), "{model}");
+        }
+        for model in [
+            "anthropic/claude-sonnet-4.5",
+            "anthropic/claude-opus-4.1",
+            "anthropic/claude-opus-4",
+            "anthropic/claude-3.7-sonnet",
+            "anthropic/claude-haiku-5.5:batch",
+            "~anthropic/claude-haiku-latest",
+            "anthropic:claude-opus-5-5",
+            "chatgpt:gpt-6.1-sol",
+            "z-ai/glm-5.3",
+            "openai/gpt-5-mini",
+        ] {
+            assert!(!through_messages(model), "{model}");
+        }
     }
 
     /// A stand-in on this computer is taken, with or without a trailing slash; anything that would

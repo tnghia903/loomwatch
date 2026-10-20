@@ -418,7 +418,9 @@ one.
 Knowledge without a `path` fails the run and says to add it again: a name alone points at nothing.
 
 A **folder** is linked where it is: the agent gets its top-level listing and README, plus a read
-grant for the folder, so each run sees what is in it then. A **file** added in
+grant for the folder, so each run sees what is in it then. The prompt names the folder by its full
+path. A read by a name inside it, as its listing shows (`drafts/prices.md`), finds the file there
+when the agent's own folder has nothing by that name. A **file** added in
 the panel is copied beside the team file under `<team>.files/`, and a relative `path` resolves
 against the team file's folder (`~/` against your home folder). The agent gets the file's text,
 up to 12,000 characters, and a read grant for that one file. The text of a PDF, Word (`.docx`),

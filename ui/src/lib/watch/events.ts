@@ -1,6 +1,6 @@
 import type { AgentStatus } from '../team-file/types'
 import { Correspondence, OPERATOR_ID, type TeamMessage } from './messages'
-import { ACTIVITY_KINDS, ReplyText } from './replyText'
+import { ACTIVITY_KINDS, ReplyText, commentaryOf } from './replyText'
 import { summarizeUsage, turnUsage, type TokenSummary } from './usage'
 import { answerNotes, checkRounds, type AnswerNotes, type CheckRound } from '../story/checks'
 
@@ -813,6 +813,9 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
         const threadStatus = codexThreadStatus(event)
         if (threadStatus === 'systemError') appErrors.set(agent.id, '')
         else if (threadStatus) appErrors.delete(agent.id)
+        // Words written alongside tool calls were said on the way, not the reply.
+        const onTheWay = commentaryOf(event.kind, p)
+        if (onTheWay !== null) agent.turnText.setAside(onTheWay)
         if (p.phase === 'turn_purpose') {
           if (p.purpose === 'checkpoint' || p.purpose === 'handover') auxiliaryTurns.set(agent.id, p.purpose)
           else auxiliaryTurns.delete(agent.id)

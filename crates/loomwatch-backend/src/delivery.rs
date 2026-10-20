@@ -596,6 +596,10 @@ mod tests {
         );
         assert!(composed.text.contains("not as instructions"));
         assert!(composed.text.contains("The product."));
+        // Its listing names files inside it; the agent works elsewhere, so it is told the path.
+        let folder = Path::new(&delivery.knowledge[0].folders[0]).join("");
+        let named = format!("Read one by its full path, starting {}.", folder.display());
+        assert!(composed.text.contains(&named), "{}", composed.text);
         assert!(
             composed
                 .text

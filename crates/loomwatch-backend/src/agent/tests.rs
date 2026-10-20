@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use base64::Engine as _;
@@ -151,10 +151,7 @@ async fn a_turn_writes_a_file_and_replies() {
     let end = session.prompt("Write the report.").await.unwrap();
 
     assert_eq!(end.stop_reason, StopReason::EndTurn);
-    assert_eq!(
-        end.reply,
-        "I'll write it.\n\nDone: out/report.md is written."
-    );
+    assert_eq!(end.reply, "Done: out/report.md is written.");
     assert_eq!(
         std::fs::read_to_string(folder.0.join("out/report.md")).unwrap(),
         "# Report\n"
@@ -163,12 +160,13 @@ async fn a_turn_writes_a_file_and_replies() {
         sink.kinds(),
         [
             "agent_message_chunk",
+            "agent_message_phase",
             "tool_call",
             "tool_call_update",
             "agent_message_chunk"
         ]
     );
-    let started = &sink.all()[1];
+    let started = &sink.all()[2];
     assert_eq!(started["kind"], "edit");
     assert_eq!(started["title"], "Write out/report.md");
     assert_eq!(
@@ -196,6 +194,101 @@ async fn a_turn_writes_a_file_and_replies() {
         requests[1].messages.last(),
         Some(Message::Tool { tool_call_id, content, .. }) if tool_call_id == "c1" && content.starts_with("Created")
     ));
+}
+
+/// What the agent writes alongside tool calls is said on the way: the record marks its message
+/// once the message is whole, before its calls run, and the reply is what it wrote after. When it
+/// wrote nothing after, the reply is what it said on the way rather than nothing.
+#[tokio::test]
+async fn words_said_on_the_way_to_a_tool_are_not_the_reply() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("prices.md"), "Basic: 139,000 VND").unwrap();
+    let read = || call("r", "read_file", &json!({"path": "prices.md"}));
+    for (said, last, reply) in [
+        (
+            "Paths are probably absolute.",
+            "The Basic plan costs 139,000 VND.",
+            "The Basic plan costs 139,000 VND.",
+        ),
+        (
+            "Paths are probably absolute.",
+            "",
+            "Paths are probably absolute.",
+        ),
+        ("", "139,000 VND.", "139,000 VND."),
+    ] {
+        let demo = Demo::scripted(vec![
+            Completion::calls(said, vec![read()]),
+            Completion::text(last),
+        ]);
+        let sink = Arc::new(Recorded::default());
+        let mut session = session(
+            &folder,
+            Provider::Demo(demo),
+            sink.clone(),
+            Arc::new(AllowAll),
+        );
+        let end = session.prompt("What does Basic cost?").await.unwrap();
+        assert_eq!(end.reply, reply);
+
+        let updates = sink.all();
+        let marks: Vec<usize> = (0..updates.len())
+            .filter(|at| updates[*at]["sessionUpdate"] == "agent_message_phase")
+            .collect();
+        if said.is_empty() {
+            assert!(
+                marks.is_empty(),
+                "a call with no words says nothing on the way"
+            );
+            continue;
+        }
+        let [mark] = marks[..] else {
+            panic!("one message asked for a tool: {updates:#?}");
+        };
+        assert_eq!(updates[mark]["phase"], "commentary");
+        assert_eq!(updates[0]["sessionUpdate"], "agent_message_chunk");
+        assert_eq!(updates[mark]["messageId"], updates[0]["messageId"]);
+        assert_eq!(updates[mark + 1]["sessionUpdate"], "tool_call");
+    }
+}
+
+/// A folder the operator connected is read by the names its listing shows inside it, though the
+/// agent works in a folder of its own, and the operator's policy is asked about that file.
+#[tokio::test]
+async fn a_connected_folder_is_read_by_the_names_it_shows() {
+    let folder = Folder::new();
+    let (work, notes) = (folder.0.join("work"), folder.0.join("notes"));
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(notes.join("drafts")).unwrap();
+    std::fs::write(notes.join("drafts/prices.md"), "Basic: 139,000 VND").unwrap();
+    let demo = Demo::scripted(vec![
+        Completion::calls(
+            "",
+            vec![call("r", "read_file", &json!({"path": "drafts/prices.md"}))],
+        ),
+        Completion::text("139,000 VND."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", work, "m");
+    config.knowledge = vec![notes.clone()];
+    let answers = Answers::new(vec![]);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        answers.clone(),
+        Arc::new(NoHostTools),
+    );
+    session.prompt("What does Basic cost?").await.unwrap();
+
+    assert_eq!(
+        answers.asked.lock().unwrap()[0].locations,
+        [notes.join("drafts/prices.md")]
+    );
+    let answered = demo.requests()[1].messages.last().cloned();
+    assert!(
+        matches!(&answered, Some(Message::Tool { content, .. }) if content.contains("139,000")),
+        "{answered:?}"
+    );
 }
 
 #[tokio::test]
@@ -658,9 +751,12 @@ struct Stand {
     replies: Arc<Mutex<VecDeque<Reply>>>,
     bodies: Arc<Mutex<Vec<Value>>>,
     auth: Arc<Mutex<Vec<String>>>,
+    /// Where each request was posted.
+    paths: Arc<Mutex<Vec<String>>>,
 }
 
-async fn chat(State(stand): State<Stand>, headers: HeaderMap, body: String) -> Response {
+async fn chat(State(stand): State<Stand>, uri: Uri, headers: HeaderMap, body: String) -> Response {
+    stand.paths.lock().unwrap().push(uri.path().to_owned());
     stand
         .bodies
         .lock()
@@ -700,6 +796,7 @@ async fn stand(replies: Vec<Reply>) -> (Stand, String) {
     };
     let app = Router::new()
         .route("/api/v1/chat/completions", post(chat))
+        .route("/api/v1/messages", post(chat))
         .route("/v1/messages", post(chat))
         .route("/v1/responses", post(chat))
         .with_state(stand.clone());
@@ -738,6 +835,19 @@ fn openrouter(base: &str) -> Provider {
     ))
 }
 
+/// A Claude older than 4.6, which `OpenRouter` still serves through chat completions.
+const CHAT_CLAUDE: &str = "anthropic/claude-sonnet-4.5";
+
+/// A session on the stand-in for `OpenRouter`'s chat completions.
+fn on_chat(
+    folder: &Folder,
+    base: &str,
+    sink: Arc<Recorded>,
+    permissions: Arc<dyn Permissions>,
+) -> Session {
+    session_on(folder, openrouter(base), sink, permissions, CHAT_CLAUDE)
+}
+
 #[tokio::test]
 async fn openrouter_streams_tool_calls_reasoning_and_the_exact_cost() {
     let folder = Folder::new();
@@ -756,7 +866,7 @@ async fn openrouter_streams_tool_calls_reasoning_and_the_exact_cost() {
     ])
     .await;
     let sink = Arc::new(Recorded::default());
-    let mut session = session(&folder, openrouter(&base), sink.clone(), Arc::new(AllowAll));
+    let mut session = on_chat(&folder, &base, sink.clone(), Arc::new(AllowAll));
     let end = session.prompt("What does notes.md say?").await.unwrap();
 
     assert_eq!(end.reply, "It says hello.");
@@ -829,9 +939,9 @@ async fn openrouter_refusals_read_plainly_and_busy_answers_are_retried() {
         "No auth credentials found",
     )])
     .await;
-    let mut refused = session(
+    let mut refused = on_chat(
         &folder,
-        openrouter(&base),
+        &base,
         Arc::new(Recorded::default()),
         Arc::new(AllowAll),
     );
@@ -848,9 +958,9 @@ async fn openrouter_refusals_read_plainly_and_busy_answers_are_retried() {
         "Insufficient credits",
     )])
     .await;
-    let mut broke = session(
+    let mut broke = on_chat(
         &folder,
-        openrouter(&base),
+        &base,
         Arc::new(Recorded::default()),
         Arc::new(AllowAll),
     );
@@ -865,9 +975,9 @@ async fn openrouter_refusals_read_plainly_and_busy_answers_are_retried() {
         ok(&[json!({"choices": [{"index": 0, "delta": {"content": "Hello."}, "finish_reason": "stop"}]})]),
     ])
     .await;
-    let mut busy = session(
+    let mut busy = on_chat(
         &folder,
-        openrouter(&base),
+        &base,
         Arc::new(Recorded::default()),
         Arc::new(AllowAll),
     );
@@ -891,9 +1001,9 @@ async fn openrouter_retries_a_busy_model_reported_before_its_first_word() {
         ok(&[json!({"choices": [{"index": 0, "delta": {"content": "Hello."}, "finish_reason": "stop"}]})]),
     ])
     .await;
-    let mut busy = session(
+    let mut busy = on_chat(
         &folder,
-        openrouter(&base),
+        &base,
         Arc::new(Recorded::default()),
         Arc::new(AllowAll),
     );
@@ -902,9 +1012,9 @@ async fn openrouter_retries_a_busy_model_reported_before_its_first_word() {
 
     // Busy on every try: it gives up after the same four tries as any busy answer.
     let (always, base) = stand((0..6).map(|_| overloaded()).collect()).await;
-    let mut gone = session(
+    let mut gone = on_chat(
         &folder,
-        openrouter(&base),
+        &base,
         Arc::new(Recorded::default()),
         Arc::new(AllowAll),
     );
@@ -921,9 +1031,9 @@ async fn openrouter_retries_a_busy_model_reported_before_its_first_word() {
         ok(&[json!({"choices": [{"index": 0, "delta": {"content": "Hello."}, "finish_reason": "stop"}]})]),
     ])
     .await;
-    let mut midway = session(
+    let mut midway = on_chat(
         &folder,
-        openrouter(&base),
+        &base,
         Arc::new(Recorded::default()),
         Arc::new(AllowAll),
     );
@@ -940,9 +1050,9 @@ async fn a_cancelled_turn_stops_waiting_and_says_so() {
         delay: Duration::from_secs(10),
     }])
     .await;
-    let mut session = session(
+    let mut session = on_chat(
         &folder,
-        openrouter(&base),
+        &base,
         Arc::new(Recorded::default()),
         Arc::new(AllowAll),
     );
@@ -1932,7 +2042,7 @@ async fn every_call_is_recorded_with_what_it_was_for_and_used() {
     ])
     .await;
     let sink = Arc::new(Recorded::default());
-    let mut session = session(&folder, openrouter(&base), sink.clone(), Arc::new(AllowAll));
+    let mut session = on_chat(&folder, &base, sink.clone(), Arc::new(AllowAll));
     assert_eq!(
         session.prompt("Write it.").await.unwrap().reply,
         "Part one, part two."
@@ -1943,7 +2053,7 @@ async fn every_call_is_recorded_with_what_it_was_for_and_used() {
     let calls = calls_recorded(&sink);
     assert_eq!(
         calls[0],
-        json!({"kind": "work", "turn": "work", "model": "anthropic/claude-haiku-5.5",
+        json!({"kind": "work", "turn": "work", "model": CHAT_CLAUDE,
                "inputTokens": 100, "cachedReadTokens": 600, "cachedWriteTokens": 300,
                "outputTokens": 200, "reasoningTokens": 50, "costUsd": 0.01,
                "webSearches": 1, "webFetches": 0})
@@ -2056,7 +2166,7 @@ async fn a_researchers_web_use_reaches_its_usage_record() {
     let mut calls = Vec::new();
     for (model, reply) in [
         (
-            "anthropic/claude-haiku-5.5",
+            CHAT_CLAUDE,
             "Two releases landed this week (page ages shown in search results).",
         ),
         ("z-ai/glm-5.3", "The changelog lists three fixes."),
@@ -2076,7 +2186,7 @@ async fn a_researchers_web_use_reaches_its_usage_record() {
     }
     assert_eq!(
         calls[0],
-        json!({"kind": "work", "turn": "work", "model": "anthropic/claude-haiku-5.5",
+        json!({"kind": "work", "turn": "work", "model": CHAT_CLAUDE,
                "inputTokens": 2052, "cachedReadTokens": 0, "cachedWriteTokens": 22258,
                "outputTokens": 412, "reasoningTokens": 31, "costUsd": 0.0291,
                "webSearches": 3, "webFetches": 0})
@@ -2931,4 +3041,733 @@ async fn a_conversation_refused_as_too_long_takes_its_pictures_out() {
         "{shot}"
     );
     assert_eq!(requests[3].messages.len(), 2);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Words around a search the provider ran itself
+// ---------------------------------------------------------------------------------------------
+
+/// What the run's record makes of a turn, through the recorder the engine uses.
+struct OnRecord {
+    /// Each archived message chunk: its message's id and its words.
+    messages: Vec<(String, String)>,
+    /// The messages marked as said on the way, in order.
+    marked: Vec<String>,
+    /// Everything said.
+    said: String,
+    reply: String,
+}
+
+async fn as_recorded(sink: &Recorded) -> OnRecord {
+    let archive = crate::archive::EventArchive::new(crate::db::Db::temp().await);
+    let mut recorder = crate::engine::Recorder::with_log(
+        crate::engine::EventLog::new(archive.clone(), "session-1".to_owned()),
+        "session-1".to_owned(),
+        "writer",
+    );
+    for update in sink.all() {
+        let frame = json!({"jsonrpc": "2.0", "method": "session/update",
+                           "params": {"sessionId": "session-1", "update": update}});
+        recorder.record_frame(&frame).await.unwrap();
+    }
+    let events = archive.load_session("session-1").await.unwrap();
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
+    OnRecord {
+        messages: events
+            .iter()
+            .filter(|event| event.kind == crate::EventKind::Message)
+            .map(|event| {
+                (
+                    text(&event.payload["messageId"]),
+                    text(&event.payload["content"]["text"]),
+                )
+            })
+            .collect(),
+        marked: events
+            .iter()
+            .filter_map(|event| crate::engine::commentary(&event.payload))
+            .map(str::to_owned)
+            .collect(),
+        said: recorder.reply.said().to_owned(),
+        reply: recorder.reply.reply(),
+    }
+}
+
+/// The model's newest message in the conversation, as the next call sends it.
+fn last_written(session: &Session) -> String {
+    match session.snapshot().history.last() {
+        Some(Message::Assistant { content, .. }) => content.clone(),
+        other => panic!("the model's message should be last: {other:?}"),
+    }
+}
+
+/// A model that searches the web part way through a message writes on both sides of the search,
+/// and the provider sends it all as one message. What it wrote after the search is the reply.
+/// What it wrote before was said on the way: the record keeps it as a message of its own, a
+/// paragraph apart, marked so. A search with nothing said before it, or nothing after, splits
+/// nothing.
+#[tokio::test]
+async fn words_before_a_search_the_provider_ran_are_said_on_the_way() {
+    let folder = Folder::new();
+    let answer = "Basic costs 139,000 VND.";
+    for (parts, marked) in [
+        (["Let me check the prices.", answer], 1),
+        ([answer, ""], 0),
+        (["", answer], 0),
+    ] {
+        let demo = Demo::scripted(vec![Completion::searched(&parts)]);
+        let sink = Arc::new(Recorded::default());
+        let mut session = session(
+            &folder,
+            Provider::Demo(demo),
+            sink.clone(),
+            Arc::new(AllowAll),
+        );
+        let end = session.prompt("What does Basic cost?").await.unwrap();
+        assert_eq!(end.reply, answer, "{parts:?}");
+
+        let said = parts
+            .iter()
+            .filter(|part| !part.is_empty())
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let record = as_recorded(&sink).await;
+        assert_eq!(record.reply, answer, "{parts:?}");
+        assert_eq!(record.said, said);
+        assert_eq!(record.marked.len(), marked, "{parts:?}");
+        assert_eq!(last_written(&session), said);
+    }
+}
+
+/// A turn that searched and then called a tool, and searched again as it answered: the reply is
+/// only what it wrote after all of them, and the record keeps every part a paragraph apart. A
+/// message that asked for a tool is marked whole: its last part, after its search, too.
+#[tokio::test]
+async fn a_reply_after_a_tool_and_a_search_is_what_follows_both() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("prices.md"), "Basic: 139,000 VND").unwrap();
+    let demo = Demo::scripted(vec![
+        Completion {
+            tool_calls: vec![call("r", "read_file", &json!({"path": "prices.md"}))],
+            finish: Finish::ToolCalls,
+            ..Completion::searched(&["Let me look this up.", "I'll read the notes first."])
+        },
+        Completion::searched(&[
+            "Let me check that price is current.",
+            "Basic costs 139,000 VND.",
+        ]),
+    ]);
+    let sink = Arc::new(Recorded::default());
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo),
+        sink.clone(),
+        Arc::new(AllowAll),
+    );
+    let end = session.prompt("What does Basic cost?").await.unwrap();
+    assert_eq!(end.reply, "Basic costs 139,000 VND.");
+
+    let record = as_recorded(&sink).await;
+    assert_eq!(record.reply, "Basic costs 139,000 VND.");
+    assert_eq!(
+        record.said,
+        "Let me look this up.\n\nI'll read the notes first.\n\nLet me check that price is \
+         current.\n\nBasic costs 139,000 VND."
+    );
+    assert_eq!(
+        record.marked,
+        ["session-1-1", "session-1-1.1", "session-1-2"]
+    );
+}
+
+/// A reply the length limit cut off is carried on, but a search in the rest starts a paragraph of
+/// its own: the words before the search are set aside, and the session's reply agrees with the
+/// record's.
+#[tokio::test]
+async fn a_search_in_a_carried_on_reply_starts_its_own_paragraph() {
+    let folder = Folder::new();
+    let demo = Demo::scripted(vec![
+        cut_off("The quick bro"),
+        Completion::searched(&["wn fox, let me check.", "It jumps over the lazy dog."]),
+    ]);
+    let sink = Arc::new(Recorded::default());
+    let mut session = session(
+        &folder,
+        Provider::Demo(demo),
+        sink.clone(),
+        Arc::new(AllowAll),
+    );
+    let end = session.prompt("Write the sentence.").await.unwrap();
+    let reply = "The quick bro\n\nIt jumps over the lazy dog.";
+    assert_eq!(end.reply, reply);
+    assert_eq!(as_recorded(&sink).await.reply, reply);
+}
+
+fn server_tool_block(index: u64, id: &str, name: &str, input: &Value) -> [Value; 3] {
+    [
+        json!({"type": "content_block_start", "index": index,
+               "content_block": {"type": "server_tool_use", "id": id, "name": name, "input": {}}}),
+        json!({"type": "content_block_delta", "index": index,
+               "delta": {"type": "input_json_delta", "partial_json": input.to_string()}}),
+        json!({"type": "content_block_stop", "index": index}),
+    ]
+}
+
+fn result_block(index: u64, kind: &str, id: &str, content: &Value) -> [Value; 2] {
+    [
+        json!({"type": "content_block_start", "index": index,
+               "content_block": {"type": kind, "tool_use_id": id, "content": content}}),
+        json!({"type": "content_block_stop", "index": index}),
+    ]
+}
+
+/// The live run of 2026-10-20 on Claude: a search and a page read part way through one message,
+/// the answer after them in blocks its citations split. Before, the three ran together with no
+/// space ("…sources I plan to cite.Let me verify…"). Now each side of a search is a message of its
+/// own, the ones before a search are marked as said on the way as the next begins, the reply is the
+/// answer, and the conversation keeps every word a paragraph apart.
+#[tokio::test]
+async fn claude_words_around_its_own_searches_are_said_on_the_way() {
+    let folder = Folder::new();
+    let first = "The arXiv skill works. Now let me verify the primary sources I plan to cite.";
+    let second = "Let me verify the permissions-freshness claim before citing it.";
+    let answer = "# Enterprise RAG for Engineering Leads — Technical Brief\n\nPermissions are \
+                  checked at query time.";
+    let page = "https://example.com/fresh";
+    let stream: Vec<Value> = [
+        vec![message_start(50, 0)],
+        text_block(0, first).to_vec(),
+        server_tool_block(
+            1,
+            "srvtoolu_1",
+            "web_search",
+            &json!({"query": "RAG freshness"}),
+        )
+        .to_vec(),
+        result_block(
+            2,
+            "web_search_tool_result",
+            "srvtoolu_1",
+            &json!([{"type": "web_search_result", "title": "Fresh", "url": page}]),
+        )
+        .to_vec(),
+        text_block(3, second).to_vec(),
+        server_tool_block(4, "srvtoolu_2", "web_fetch", &json!({"url": page})).to_vec(),
+        result_block(
+            5,
+            "web_fetch_tool_result",
+            "srvtoolu_2",
+            &json!({"type": "web_fetch_result", "url": page}),
+        )
+        .to_vec(),
+        text_block(
+            6,
+            "# Enterprise RAG for Engineering Leads — Technical Brief\n\n",
+        )
+        .to_vec(),
+        text_block(7, "Permissions are checked at query time").to_vec(),
+        text_block(8, ".").to_vec(),
+        ended("end_turn", 300).to_vec(),
+    ]
+    .concat();
+    let (_, base) = stand(vec![events(&stream)]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    let end = session.prompt("Write the brief.").await.unwrap();
+    assert_eq!(end.reply, answer);
+
+    let said = format!("{first}\n\n{second}\n\n{answer}");
+    let record = as_recorded(&sink).await;
+    assert_eq!(record.reply, answer);
+    assert_eq!(record.said, said);
+    assert_eq!(record.marked, ["session-1-1", "session-1-1.1"]);
+    let ids: Vec<&str> = record.messages.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "session-1-1",
+            "session-1-1.1",
+            "session-1-1.2",
+            "session-1-1.2",
+            "session-1-1.2"
+        ]
+    );
+    assert_eq!(last_written(&session), said);
+    let searches: Vec<String> = sink
+        .all()
+        .iter()
+        .filter(|update| update["sessionUpdate"] == "tool_call")
+        .map(|update| update["title"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        searches,
+        [
+            "Search the web: RAG freshness",
+            "Read https://example.com/fresh"
+        ]
+    );
+}
+
+/// The same on a `ChatGPT` plan, whose search is an output item between two messages.
+#[tokio::test]
+async fn a_chatgpt_plan_search_between_messages_leaves_the_first_out_of_the_reply() {
+    let folder = Folder::new();
+    let message = |id: &str, text: &str| {
+        json!({"type": "message", "id": id, "role": "assistant", "status": "completed",
+               "content": [{"type": "output_text", "text": text, "annotations": []}]})
+    };
+    let search = json!({"type": "web_search_call", "id": "ws_1", "status": "completed",
+                        "action": {"type": "search", "query": "Basic plan price"}});
+    let stream = events(&[
+        json!({"type": "response.output_item.added", "item": {"type": "message"}}),
+        json!({"type": "response.output_text.delta", "delta": "Let me check the prices."}),
+        item_done(&message("msg_1", "Let me check the prices.")),
+        json!({"type": "response.output_item.added", "item": {"type": "web_search_call"}}),
+        item_done(&search),
+        json!({"type": "response.output_item.added", "item": {"type": "message"}}),
+        json!({"type": "response.output_text.delta", "delta": "Basic costs "}),
+        json!({"type": "response.output_text.delta", "delta": "139,000 VND."}),
+        item_done(&message("msg_2", "Basic costs 139,000 VND.")),
+        completed(100, 0, 20),
+    ]);
+    let (_, base) = stand(vec![stream]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        plan(&base, Arc::new(FixedToken::default())),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "chatgpt:gpt-6.1-sol",
+    );
+    let end = session.prompt("What does Basic cost?").await.unwrap();
+    assert_eq!(end.reply, "Basic costs 139,000 VND.");
+
+    let said = "Let me check the prices.\n\nBasic costs 139,000 VND.";
+    let record = as_recorded(&sink).await;
+    assert_eq!(record.reply, "Basic costs 139,000 VND.");
+    assert_eq!(record.said, said);
+    assert_eq!(record.marked, ["session-1-1"]);
+    assert_eq!(last_written(&session), said);
+}
+
+/// The same on `OpenRouter`'s chat completions, were its own search to arrive as a reasoning entry
+/// between the words, the shape its docs give. Not seen live: on 2026-10-20 neither its own search
+/// (for GLM) nor Claude's sent any entry there, so nothing splits on that route yet. More of a
+/// search already begun is not another search.
+#[tokio::test]
+async fn openrouter_words_before_its_own_search_are_left_out_of_the_reply() {
+    let folder = Folder::new();
+    let searching =
+        |piece: Value| json!({"choices": [{"index": 0, "delta": {"reasoning_details": [piece]}}]});
+    let (_, base) = stand(vec![ok(&[
+        json!({"choices": [{"index": 0, "delta": {"role": "assistant", "content": "Let me check the prices."}}]}),
+        searching(json!({"type": "reasoning.server_tool_call", "index": 1,
+                         "tool_name": "openrouter:web_search", "tool_call_id": "ws_1",
+                         "arguments": "{\"query\":\"Basic plan price\"}"})),
+        json!({"choices": [{"index": 0, "delta": {"content": "Basic costs "}}]}),
+        searching(json!({"type": "reasoning.server_tool_call", "index": 1,
+                         "result": "Basic: 139,000 VND"})),
+        json!({"choices": [{"index": 0, "delta": {"content": "139,000 VND."}, "finish_reason": "stop"}],
+               "usage": {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.001}}),
+    ])])
+    .await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        openrouter(&base),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "z-ai/glm-5.3",
+    );
+    let end = session.prompt("What does Basic cost?").await.unwrap();
+    assert_eq!(end.reply, "Basic costs 139,000 VND.");
+
+    let said = "Let me check the prices.\n\nBasic costs 139,000 VND.";
+    let record = as_recorded(&sink).await;
+    assert_eq!(record.reply, "Basic costs 139,000 VND.");
+    assert_eq!(record.said, said);
+    assert_eq!(record.marked, ["session-1-1"]);
+    assert_eq!(last_written(&session), said);
+}
+
+// ---------------------------------------------------------------------------------------------
+// A Claude through `OpenRouter`'s `/messages`
+// ---------------------------------------------------------------------------------------------
+
+/// `OpenRouter`'s Anthropic-shaped stream, which ends with chat completions' `[DONE]`.
+fn openrouter_events(stream: &[Value]) -> Reply {
+    let mut reply = events(stream);
+    reply.body.push_str("data: [DONE]\n\n");
+    reply
+}
+
+fn text_pieces(index: u64, pieces: &[&str]) -> Vec<Value> {
+    let mut stream = vec![json!({"type": "content_block_start", "index": index,
+                                 "content_block": {"type": "text", "text": "", "citations": []}})];
+    stream.extend(pieces.iter().map(|piece| {
+        json!({"type": "content_block_delta", "index": index,
+               "delta": {"type": "text_delta", "text": piece}})
+    }));
+    stream.push(json!({"type": "content_block_stop", "index": index}));
+    stream
+}
+
+/// A session on the stand-in for `OpenRouter`, allowed the web, on `model`.
+fn on_openrouter_web(folder: &Folder, base: &str, sink: Arc<Recorded>, model: &str) -> Session {
+    let mut config = SessionConfig::new("session-1", "writer", folder.0.clone(), model);
+    config.tools = ToolSet::all(true);
+    Session::open(
+        config,
+        openrouter(base),
+        sink,
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    )
+}
+
+/// The live run of 2026-10-20 on Claude Haiku 5.5 through `OpenRouter`, where chat completions ran
+/// "…the latest stable Rust release.The latest stable…" together. A Claude now goes to
+/// `OpenRouter`'s `/messages`, whose stream puts Claude's own search in a block of its own (this is
+/// that stream, two of its nine results kept and the signature cut). The words before the search are
+/// said on the way and the reply is the answer, its citation part way through left in one piece.
+/// The call carries `OpenRouter`'s key, its web tools and its session; the cost is `OpenRouter`'s own
+/// figure, not worked out from list prices.
+#[tokio::test]
+async fn a_claude_on_openrouter_goes_through_messages_and_its_aside_is_left_out_of_the_reply() {
+    let folder = Folder::new();
+    let id = "srvtoolu_016BQzmDxqo4BKeidQi1s1qk";
+    let found = |title: &str, url: &str| {
+        json!({"type": "web_search_result", "title": title, "url": url,
+               "encrypted_content": "EvcICioIFRgCIiQ0YzBm", "page_age": null})
+    };
+    let mut stream: Vec<Value> = [
+        vec![
+            json!({"type": "message_start", "message": {"id": "msg_011CgD1NYAToHGk3NR6Qi41x", "type": "message",
+                   "role": "assistant", "content": [], "model": "anthropic/claude-haiku-5.5", "stop_reason": null,
+                   "usage": {"input_tokens": 2877, "output_tokens": 2, "cache_creation_input_tokens": 0,
+                             "cache_read_input_tokens": 0, "server_tool_use": null},
+                   "provider": "Claude Platform on AWS"}}),
+        ],
+        text_pieces(0, &["I will", " look up the latest st", "able Rust release."]),
+        vec![
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "server_tool_use", "id": id, "name": "web_search", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": ""}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"query\": \"lat"}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "est stable Rust release\"}"}}),
+            json!({"type": "content_block_stop", "index": 1}),
+            json!({"type": "content_block_start", "index": 2, "content_block": {"type": "web_search_tool_result", "tool_use_id": id,
+                   "content": [found("Releases · rust-lang/rust · GitHub", "https://github.com/rust-lang/rust/releases"),
+                               found("Rust 1.99.1 Released: Three Regressions Fixed", "https://pbxscience.com/rust-1-99-1-released-three-regressions-fixed")],
+                   "caller": {"type": "direct"}}}),
+            json!({"type": "content_block_stop", "index": 2}),
+            json!({"type": "content_block_start", "index": 3, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+            json!({"type": "content_block_delta", "index": 3, "delta": {"type": "signature_delta", "signature": "CAQSrAcKEAgTGAI4AUIIdGhp"}}),
+            json!({"type": "content_block_stop", "index": 3}),
+        ],
+        text_pieces(4, &["The latest", " stable Rust release is ", "1.99.1, a point", " release that "]),
+    ]
+    .concat();
+    // The citation and the rest of the answer come in the same block.
+    stream.pop();
+    stream.extend([
+        json!({"type": "content_block_delta", "index": 4, "delta": {"type": "citations_delta", "citation": {
+               "type": "web_search_result_location", "url": "https://pbxscience.com/rust-1-99-1-released-three-regressions-fixed",
+               "title": "Rust 1.99.1 Released: Three Regressions Fixed",
+               "cited_text": "The Rust Release Team published Rust 1.99.1 on October 15, 2026.",
+               "encrypted_index": "Eo8BCioIFRgCIiQ0YzBm"}}}),
+        json!({"type": "content_block_delta", "index": 4, "delta": {"type": "text_delta", "text": "the Rust Release Team published on October 15, 2026."}}),
+        json!({"type": "content_block_stop", "index": 4}),
+        json!({"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+               "usage": {"input_tokens": 14543, "output_tokens": 303, "output_tokens_details": {"thinking_tokens": 158},
+                         "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                         "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+                         "cost": 0.011_605_8, "is_byok": false}}),
+        json!({"type": "message_stop"}),
+    ]);
+    let (stand, base) = stand(vec![openrouter_events(&stream)]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = on_openrouter_web(&folder, &base, sink.clone(), "anthropic/claude-haiku-5.5");
+    let end = session
+        .prompt("What is the latest stable release of Rust?")
+        .await
+        .unwrap();
+    let aside = "I will look up the latest stable Rust release.";
+    let answer = "The latest stable Rust release is 1.99.1, a point release that the Rust Release \
+                  Team published on October 15, 2026.";
+    assert_eq!(end.reply, answer);
+
+    let said = format!("{aside}\n\n{answer}");
+    let record = as_recorded(&sink).await;
+    assert_eq!(record.reply, answer);
+    assert_eq!(record.said, said);
+    assert_eq!(record.marked, ["session-1-1"]);
+    assert_eq!(last_written(&session), said);
+    let searches: Vec<Value> = sink
+        .all()
+        .into_iter()
+        .filter(|update| update["sessionUpdate"] == "tool_call")
+        .map(|update| update["title"].clone())
+        .collect();
+    assert_eq!(searches, ["Search the web: latest stable Rust release"]);
+
+    assert_eq!(*stand.paths.lock().unwrap(), ["/api/v1/messages"]);
+    assert_eq!(*stand.auth.lock().unwrap(), [format!("Bearer {KEY}")]);
+    let body = stand.bodies.lock().unwrap()[0].clone();
+    assert_eq!(body["model"], "anthropic/claude-haiku-5.5");
+    assert_eq!(body["session_id"], "session-1");
+    assert_eq!(body["cache_control"], json!({"type": "ephemeral"}));
+    assert_eq!(body["thinking"]["type"], "adaptive");
+    let tools = body["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|tool| tool["input_schema"].is_object()));
+    assert_eq!(
+        tools[tools.len() - 2..],
+        [
+            json!({"type": "openrouter:web_search"}),
+            json!({"type": "openrouter:web_fetch", "parameters": {"max_content_tokens": WebLimits::PAGE_TOKENS}}),
+        ]
+    );
+    assert!(body.get("max_tool_calls").is_none());
+
+    assert!((end.usage.cost_usd - 0.011_605_8).abs() < 1e-12);
+    assert_eq!(end.usage.paid_by, None);
+    assert!(!end.usage.cost_estimated);
+    assert_eq!(
+        calls_recorded(&sink)[0],
+        json!({"kind": "work", "turn": "work", "model": "anthropic/claude-haiku-5.5",
+               "inputTokens": 14543, "cachedReadTokens": 0, "cachedWriteTokens": 0,
+               "outputTokens": 303, "reasoningTokens": 0, "costUsd": 0.011_605_8,
+               "webSearches": 1, "webFetches": 0})
+    );
+}
+
+/// A Claude's message on `OpenRouter`'s `/messages` goes back exactly as it was written: its
+/// signed thinking, a search `OpenRouter` ran itself (which has no result block, its results
+/// coming as citations on the words before it after they ended) and its tool call. A summary keeps
+/// the tools, as the signed conversation needs.
+#[tokio::test]
+async fn a_claude_message_on_openrouter_goes_back_as_it_was_written() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "hello").unwrap();
+    let citation = json!({"type": "web_search_result_location", "url": "https://example.com/notes",
+                          "title": "Notes", "cited_text": "Notes say hello.", "encrypted_index": "Eo8B"});
+    let first: Vec<Value> = [
+        vec![
+            message_start(40, 0),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Search, then read."}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig-1"}}),
+            json!({"type": "content_block_stop", "index": 0}),
+        ],
+        text_pieces(1, &["Let me look that up."]),
+        server_tool_block(
+            2,
+            "call-f873dceb",
+            "openrouter:web_search",
+            &json!({"query": "notes"}),
+        )
+        .to_vec(),
+        vec![
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "citations_delta", "citation": citation}}),
+        ],
+        text_pieces(3, &["I'll read the notes too."]),
+        vec![
+            json!({"type": "content_block_start", "index": 4, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 4, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"notes.md\"}"}}),
+            json!({"type": "content_block_stop", "index": 4}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"},
+                   "usage": {"output_tokens": 30, "server_tool_use": {"web_search_requests": 1, "tool_calls_requested": 1, "tool_calls_executed": 1},
+                             "cost": 0.002}}),
+            json!({"type": "message_stop"}),
+        ],
+    ]
+    .concat();
+    let second: Vec<Value> = [
+        vec![message_start(60, 40)],
+        text_pieces(0, &["It says hello."]),
+        vec![
+            json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 5, "cost": 0.001}}),
+            json!({"type": "message_stop"}),
+        ],
+    ]
+    .concat();
+    let (stand, base) = stand(vec![openrouter_events(&first), openrouter_events(&second)]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = on_openrouter_web(&folder, &base, sink.clone(), "anthropic/claude-opus-5.5");
+    let end = session.prompt("What do my notes say?").await.unwrap();
+    assert_eq!(end.reply, "It says hello.");
+    assert!((end.usage.cost_usd - 0.003).abs() < 1e-12);
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(
+        bodies[1]["messages"][1],
+        json!({"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "Search, then read.", "signature": "sig-1"},
+            {"type": "text", "text": "Let me look that up.", "citations": [citation]},
+            {"type": "server_tool_use", "id": "call-f873dceb", "name": "openrouter:web_search", "input": {"query": "notes"}},
+            {"type": "text", "text": "I'll read the notes too.", "citations": []},
+            {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "notes.md"}},
+        ]})
+    );
+    assert_eq!(
+        bodies[1]["messages"][2]["content"][0]["tool_use_id"],
+        "toolu_1"
+    );
+    let record = as_recorded(&sink).await;
+    assert_eq!(record.reply, "It says hello.");
+    assert_eq!(record.marked, ["session-1-1", "session-1-1.1"]);
+
+    assert!(openrouter(&base).keeps_tools_for_summaries("anthropic/claude-opus-5.5"));
+    assert!(!openrouter(&base).keeps_tools_for_summaries(CHAT_CLAUDE));
+    assert!(!openrouter(&base).keeps_tools_for_summaries("z-ai/glm-5.3"));
+}
+
+/// On `/messages` too, the team's web limits reach `OpenRouter`, and a provider that refuses them
+/// is asked again without them, and not sent them again.
+#[tokio::test]
+async fn web_limits_reach_openrouter_messages_and_a_refusal_falls_back_without_them() {
+    let folder = Folder::new();
+    let refused = Reply {
+        status: StatusCode::BAD_REQUEST,
+        body: json!({"error": {"code": 400, "message": "max_tool_calls is not supported by this provider"}}).to_string(),
+        delay: Duration::ZERO,
+    };
+    let answer = |text: &str| {
+        openrouter_events(
+            &[
+                vec![message_start(10, 0)],
+                text_pieces(0, &[text]),
+                ended("end_turn", 3).to_vec(),
+            ]
+            .concat(),
+        )
+    };
+    let (stand, base) = stand(vec![refused, answer("Found it."), answer("Again.")]).await;
+    let provider = openrouter(&base);
+    let open = |provider: Provider| {
+        let mut config = SessionConfig::new(
+            "s",
+            "researcher",
+            folder.0.clone(),
+            "anthropic/claude-sonnet-5.5",
+        );
+        config.tools = ToolSet::all(true);
+        config.web = WebLimits {
+            page_tokens: 4_000,
+            pages: Some(3),
+            searches: Some(2),
+            steps: Some(4),
+        };
+        Session::open(
+            config,
+            provider,
+            Arc::new(Recorded::default()),
+            Arc::new(AllowAll),
+            Arc::new(NoHostTools),
+        )
+    };
+    assert_eq!(
+        open(provider.clone())
+            .prompt("Look it up.")
+            .await
+            .unwrap()
+            .reply,
+        "Found it."
+    );
+    assert_eq!(
+        open(provider).prompt("Again.").await.unwrap().reply,
+        "Again."
+    );
+    let bodies = stand.bodies.lock().unwrap().clone();
+    let web = |body: &Value| -> Vec<Value> {
+        body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| {
+                tool["type"]
+                    .as_str()
+                    .is_some_and(|kind| kind.starts_with("openrouter:"))
+            })
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        web(&bodies[0]),
+        [
+            json!({"type": "openrouter:web_search", "parameters": {"max_uses": 2}}),
+            json!({"type": "openrouter:web_fetch", "parameters": {"max_uses": 3, "max_content_tokens": 4_000}}),
+        ]
+    );
+    assert_eq!(bodies[0]["max_tool_calls"], 4);
+    for body in &bodies[1..] {
+        assert_eq!(
+            web(body),
+            [
+                json!({"type": "openrouter:web_search"}),
+                json!({"type": "openrouter:web_fetch"})
+            ]
+        );
+        assert!(body.get("max_tool_calls").is_none());
+    }
+    assert_eq!(*stand.paths.lock().unwrap(), ["/api/v1/messages"; 3]);
+}
+
+/// A refusal on `/messages` reads in `OpenRouter`'s terms, the key and credit being `OpenRouter`'s, and
+/// a busy model reported in the stream before its first word is tried again.
+#[tokio::test]
+async fn a_claude_on_openrouter_is_refused_in_openrouters_terms() {
+    let folder = Folder::new();
+    let error = |status: StatusCode, message: &str| Reply {
+        status,
+        body: json!({"error": {"code": status.as_u16(), "message": message}}).to_string(),
+        delay: Duration::ZERO,
+    };
+    let busy =
+        openrouter_events(&[json!({"error": {"code": 502, "message": "Provider returned error"}})]);
+    let answer = openrouter_events(
+        &[
+            vec![message_start(10, 0)],
+            text_pieces(0, &["Hello."]),
+            ended("end_turn", 2).to_vec(),
+        ]
+        .concat(),
+    );
+    let (stand, base) = stand(vec![
+        error(StatusCode::PAYMENT_REQUIRED, "Insufficient credits"),
+        busy,
+        answer,
+    ])
+    .await;
+    let said = on_openrouter_web(
+        &folder,
+        &base,
+        Arc::new(Recorded::default()),
+        "anthropic/claude-haiku-5.5",
+    )
+    .prompt("Hi")
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(said, AgentError::OutOfCredits(Source::OpenRouter)),
+        "{said:?}"
+    );
+    let end = on_openrouter_web(
+        &folder,
+        &base,
+        Arc::new(Recorded::default()),
+        "anthropic/claude-haiku-5.5",
+    )
+    .prompt("Hi")
+    .await
+    .unwrap();
+    assert_eq!(end.reply, "Hello.");
+    assert_eq!(*stand.paths.lock().unwrap(), ["/api/v1/messages"; 3]);
 }

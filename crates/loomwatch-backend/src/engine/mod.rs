@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use uuid::Uuid;
 
 pub(crate) use bridge::tool_spec;
-pub(crate) use recorder::{EventLog, Recorder, ReplyText, new_event_id};
+pub(crate) use recorder::{EventLog, Recorder, ReplyText, commentary, new_event_id};
 
 use crate::agent::{
     AgentError, Anthropic, ChatGptPlan, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter,
@@ -1019,6 +1019,7 @@ impl AgentRun {
         if let Some(policy) = &self.spec.permissions {
             config.turned_off = policy.turned_off_skills();
             config.web = policy.web_limits();
+            config.knowledge = policy.connected_folders().to_vec();
         }
         if let Some(bus) = bus {
             config.time_zone = bus.time_zone();

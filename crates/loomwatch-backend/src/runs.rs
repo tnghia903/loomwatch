@@ -3355,13 +3355,18 @@ async fn last_words(
             | EventKind::ToolUpdate
             | EventKind::Plan
             | EventKind::Permission => turn.note_activity(),
+            EventKind::SessionMeta => {
+                if let Some(message_id) = crate::engine::commentary(&event.payload) {
+                    turn.set_aside(message_id);
+                }
+            }
             _ => {}
         }
     }
     let said = |key: (String, String)| {
         turns
             .get(&key)
-            .map(|turn| turn.as_str().trim().to_owned())
+            .map(|turn| turn.reply().trim().to_owned())
             .filter(|text| !text.is_empty())
     };
     responder
@@ -3432,6 +3437,11 @@ async fn record_abandoned_checkpoints(
             | EventKind::Plan
             | EventKind::Permission => {
                 reply.note_activity();
+            }
+            EventKind::SessionMeta => {
+                if let Some(message_id) = crate::engine::commentary(&event.payload) {
+                    reply.set_aside(message_id);
+                }
             }
             _ => {}
         }
@@ -6768,6 +6778,141 @@ pub(crate) mod tests {
         assert_eq!(lineage.replayed_stage_results["writer"], "source material");
     }
 
+    /// The live run of 2026-10-20: an agent given a folder of notes reads a file there by the name
+    /// the folder's listing shows (`drafts/prices.md`), though it works in a folder of its own.
+    /// What it wrote on the way to the read ("Paths are probably absolute.") stays in the record
+    /// and out of the team's answer.
+    #[tokio::test]
+    async fn an_agent_reads_its_notes_by_the_names_it_is_shown_and_answers_without_its_asides() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let drafts = dir.0.join("notes").join("drafts");
+        fs::create_dir_all(&drafts).unwrap();
+        fs::write(drafts.join("prices.md"), "Basic: 159,000 VND a month").unwrap();
+        let model = demo_model(Demo::responder(|request| {
+            Some(match request.messages.last() {
+                Some(crate::agent::Message::Tool { content, .. }) => {
+                    Completion::text(if content.contains("159,000") {
+                        "Basic will cost 159,000 VND a month."
+                    } else {
+                        "The notes couldn't be read."
+                    })
+                }
+                _ => Completion::calls(
+                    "Paths are probably absolute.",
+                    vec![crate::agent::ToolCall {
+                        id: "read".into(),
+                        name: "read_file".into(),
+                        arguments: json!({"path": "drafts/prices.md"}).to_string(),
+                    }],
+                ),
+            })
+        }));
+        fs::write(
+            dir.0.join("notes.yaml"),
+            format!(
+                "schemaVersion: 1\nid: notes\nname: Notes team\nentrypoint: solo\nagents:\n  - id: solo\n    name: Solo\n    role: answer from the notes\n    model: {model}\n    capabilities:\n      - kind: knowledge\n        name: notes\n        path: notes\n"
+            ),
+        )
+        .unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let response = app
+            .oneshot(post_json(
+                "/api/runs",
+                &json!({"teamPath": "notes.yaml", "prompt": "What will Basic cost?"}),
+            ))
+            .await
+            .unwrap();
+        let started: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
+        let done = wait_for(&registry, &started.run_id, |record| {
+            record.status.is_terminal()
+        })
+        .await;
+
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("Basic will cost 159,000 VND a month.")
+        );
+        let events = archive.load_session(&done.run_id).await.unwrap();
+        let read = events
+            .iter()
+            .find(|event| event.kind == EventKind::ToolUpdate)
+            .expect("the read's result");
+        assert_eq!(read.payload["status"], "completed", "{read:?}");
+        assert!(events.iter().any(|event| {
+            event.kind == EventKind::Message
+                && event.payload["content"]["text"] == "Paths are probably absolute."
+        }));
+        assert!(
+            events
+                .iter()
+                .any(|event| crate::engine::commentary(&event.payload).is_some())
+        );
+    }
+
+    /// A live run of 2026-10-20: a model searched the web part way through its answer, and what it
+    /// wrote before the search ran into the answer with no space ("…sources I plan to cite.# Brief").
+    /// The words before the search stay in the record, a paragraph apart, and out of the answer.
+    #[tokio::test]
+    async fn words_before_a_web_search_stay_in_the_record_and_out_of_the_answer() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let model = demo_model(Demo::scripted(vec![Completion::searched(&[
+            "Now let me verify the primary sources I plan to cite.",
+            "# Brief\n\nBasic will cost 159,000 VND a month.",
+        ])]));
+        dir.write_team("brief.yaml", &model);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let response = app
+            .oneshot(post_json(
+                "/api/runs",
+                &json!({"teamPath": "brief.yaml", "prompt": "Write the brief"}),
+            ))
+            .await
+            .unwrap();
+        let started: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
+        let done = wait_for(&registry, &started.run_id, |record| {
+            record.status.is_terminal()
+        })
+        .await;
+
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("# Brief\n\nBasic will cost 159,000 VND a month.")
+        );
+        let events = archive.load_session(&done.run_id).await.unwrap();
+        let said: Vec<(&str, &str)> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Message && event.payload["role"] == "agent")
+            .filter_map(|event| {
+                Some((
+                    event.payload["messageId"].as_str()?,
+                    event.payload["content"]["text"].as_str()?,
+                ))
+            })
+            .collect();
+        let [(before, aside), (after, answer)] = said[..] else {
+            panic!("the words on each side of the search: {said:?}");
+        };
+        assert_eq!(
+            aside,
+            "Now let me verify the primary sources I plan to cite."
+        );
+        assert_eq!(answer, "# Brief\n\nBasic will cost 159,000 VND a month.");
+        assert_ne!(before, after, "a message of its own on each side");
+        let marked: Vec<&str> = events
+            .iter()
+            .filter_map(|event| crate::engine::commentary(&event.payload))
+            .collect();
+        assert_eq!(marked, [before]);
+    }
+
     #[tokio::test]
     async fn team_mode_checkpoints_without_replacing_its_answer() {
         let pool = crate::db::Db::temp().await;
@@ -6924,8 +7069,8 @@ pub(crate) mod tests {
         assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
         assert_eq!(
             done.reply.as_deref(),
-            Some("Planning.\n\nPlanning.\n\ndone"),
-            "the turn carried on to its answer"
+            Some("done"),
+            "the turn carried on to its answer, past what it said on the way"
         );
         let spend = done.spend.expect("kept on the record");
         assert_eq!(spend.limit_usd, Some(0.15));
@@ -7100,6 +7245,61 @@ pub(crate) mod tests {
             Some("## Summary\nScreenshots help newcomers."),
             "the session that wrote last, whole"
         );
+    }
+
+    /// Finishing at the spool answers with the agent's last words, not what it said on the way to
+    /// a tool call.
+    #[tokio::test]
+    async fn the_last_words_leave_out_what_was_said_on_the_way() {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let log = crate::EventLog::new(archive.clone(), "aside".into());
+        let raw = Some(
+            json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "lead"}}),
+        );
+        log.append(
+            "lead",
+            EventKind::Message,
+            json!({"role": "user", "messageId": null, "content": {"type": "text", "text": "Price it."}}),
+            Some(json!({"jsonrpc": "2.0", "method": "session/prompt", "params": {"sessionId": "lead"}})),
+        )
+        .await
+        .unwrap();
+        for (kind, payload) in [
+            (
+                EventKind::Message,
+                json!({"role": "agent", "messageId": "lead-1", "content": {"type": "text", "text": "I'll read the notes."}}),
+            ),
+            (
+                EventKind::SessionMeta,
+                json!({"sessionUpdate": "agent_message_phase", "messageId": "lead-1", "phase": "commentary"}),
+            ),
+            (
+                EventKind::ToolCall,
+                json!({"callId": "r", "title": "Read notes.md", "status": "in_progress"}),
+            ),
+            (
+                EventKind::Message,
+                json!({"role": "agent", "messageId": "lead-2", "content": {"type": "text", "text": "Basic costs 139,000 VND."}}),
+            ),
+        ] {
+            log.append("lead", kind, payload, raw.clone())
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            last_words(&archive, "aside", Some("lead")).await.as_deref(),
+            Some("Basic costs 139,000 VND.")
+        );
+        // A run that died leaves the same words as where it stood.
+        record_abandoned_checkpoints(&archive, "aside", &crate::RunLineage::default()).await;
+        let points = archive
+            .notebook()
+            .checkpoints("aside", Some("lead"))
+            .await
+            .unwrap();
+        assert_eq!(points.len(), 1, "{points:?}");
+        assert_eq!(points[0].done, "Basic costs 139,000 VND.");
     }
 
     /// A scheduled run has nobody to ask: at its spool it stops, says so, and keeps its

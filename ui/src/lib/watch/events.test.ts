@@ -390,6 +390,52 @@ describe('message boundaries', () => {
     expect(recordedReplyText(narrated(true), 'lead', 'A reply this archive never streamed')).toBe('A reply this archive never streamed')
   })
 
+  /** The live run of 2026-10-20: the harness marks a message written alongside tool calls. */
+  it('leaves out what the agent said on the way to a tool call, as the daemon does', () => {
+    const marked = [
+      event(0, 'message', { role: 'user', content: { type: 'text', text: 'What will Basic cost?' } }),
+      say(1, 'Paths are probably absolute.', 'lead-1'),
+      event(2, 'session_meta', { sessionUpdate: 'agent_message_phase', messageId: 'lead-1', phase: 'commentary' }),
+      event(3, 'tool_call', { callId: 'c1', title: 'Read prices.md', toolKind: 'read', status: 'pending' }),
+      event(4, 'tool_update', { callId: 'c1', status: 'completed' }),
+      say(5, 'Basic will cost ', 'lead-2'),
+      say(6, '159,000 VND.', 'lead-2'),
+      event(7, 'turn_end', { stopReason: 'end_turn' }),
+    ]
+    const agent = projectRun(marked).agents[0]
+    expect(agent.reply).toBe('Basic will cost 159,000 VND.')
+    expect(agent.text).toBe('Paths are probably absolute.\n\nBasic will cost 159,000 VND.')
+    expect(projectRun(marked, 5).agents[0].reply).toBe('Basic will cost ')
+    expect(recordedReplyText(marked, 'lead', 'Basic will cost 159,000 VND.')).toBe('Basic will cost 159,000 VND.')
+  })
+
+  /**
+   * The live run of 2026-10-20 on Claude, as the daemon now records it: a search part way through
+   * one message splits it, and the part before is marked as the next begins. The daemon's
+   * `claude_words_around_its_own_searches_are_said_on_the_way` makes the same record.
+   */
+  it('leaves out what the agent wrote before a web search the provider ran, as the daemon does', () => {
+    const searched = [
+      event(0, 'message', { role: 'user', content: { type: 'text', text: 'Write the brief.' } }),
+      say(1, 'The arXiv skill works. Now let me verify the primary sources I plan to cite.', 'lead-1'),
+      event(2, 'session_meta', { sessionUpdate: 'agent_message_phase', messageId: 'lead-1', phase: 'commentary' }),
+      say(3, 'Let me verify the permissions-freshness claim before citing it.', 'lead-1.1'),
+      event(4, 'session_meta', { sessionUpdate: 'agent_message_phase', messageId: 'lead-1.1', phase: 'commentary' }),
+      say(5, '# Brief\n\n', 'lead-1.2'),
+      say(6, 'Permissions are checked at query time.', 'lead-1.2'),
+      event(7, 'tool_call', { callId: 'srvtoolu_1', title: 'Search the web: RAG freshness', toolKind: 'fetch', status: 'pending' }),
+      event(8, 'tool_update', { callId: 'srvtoolu_1', status: 'completed' }),
+      event(9, 'turn_end', { stopReason: 'end_turn' }),
+    ]
+    const agent = projectRun(searched).agents[0]
+    expect(agent.reply).toBe('# Brief\n\nPermissions are checked at query time.')
+    expect(agent.text).toBe(
+      'The arXiv skill works. Now let me verify the primary sources I plan to cite.\n\n' +
+        'Let me verify the permissions-freshness claim before citing it.\n\n# Brief\n\nPermissions are checked at query time.',
+    )
+    expect(projectRun(searched, 3).agents[0].reply).toBe('Let me verify the permissions-freshness claim before citing it.')
+  })
+
   it('separates final-answer messages by the same rule', () => {
     const final = (seq: number, text: string, messageId: string) => event(seq, 'message', { role: 'agent', content: { type: 'text', text }, messageId, phase: 'final_answer' })
     const events = [

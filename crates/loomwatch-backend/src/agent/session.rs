@@ -25,7 +25,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -37,8 +37,8 @@ use super::events::{self, EventSink, ToolKind, ToolStatus};
 use super::permission::{Decision, PermissionRequest, Permissions};
 use super::prompt::{Abilities, loomwatch_brief, project_notes, system_prompt};
 use super::provider::{
-    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Picture, Provider, ServerTools,
-    ToolCall, ToolSpec, Usage, WebLimits,
+    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Parts, Picture, Provider,
+    ServerTools, ToolCall, ToolSpec, Usage, WebLimits,
 };
 use super::skills::{SkillIndex, prompt_section};
 use super::spend::{Go, Spend, Unmetered};
@@ -173,6 +173,9 @@ pub struct SessionConfig {
     pub agent_id: String,
     /// The work folder. File paths are relative to it, and commands run in it.
     pub cwd: PathBuf,
+    /// The folders the operator connected as knowledge. A read by a name the work folder doesn't
+    /// have finds the file in one of them.
+    pub knowledge: Vec<PathBuf>,
     /// An `OpenRouter` model id, such as `anthropic/claude-sonnet-5.5`.
     pub model: String,
     /// The team file's effort, if any: `low`, `medium`, `high`, `xhigh`, `max`, …
@@ -227,6 +230,7 @@ impl SessionConfig {
             session_id: session_id.to_owned(),
             agent_id: agent_id.to_owned(),
             cwd,
+            knowledge: Vec::new(),
             model: model.to_owned(),
             effort: None,
             tools: ToolSet::all(false),
@@ -358,6 +362,8 @@ pub struct Session {
     usage: Usage,
     last_prompt_tokens: u64,
     messages_written: u64,
+    /// The part of the latest message its latest words were recorded under ([`Parts`]).
+    message_part: usize,
     /// The prompt of the turn under way, which a summary keeps word for word.
     task: String,
     /// What the turn under way is for, for the usage record.
@@ -397,6 +403,7 @@ impl Session {
             usage: Usage::default(),
             last_prompt_tokens: 0,
             messages_written: 0,
+            message_part: 0,
             task: String::new(),
             turn: config.purpose.clone(),
             skills,
@@ -430,6 +437,7 @@ impl Session {
             usage: snapshot.usage,
             last_prompt_tokens: 0,
             messages_written: snapshot.messages_written,
+            message_part: 0,
             task: String::new(),
             turn: config.purpose.clone(),
             skills: SkillIndex::default(),
@@ -506,7 +514,7 @@ impl Session {
         let cancel = Cancel::new(self.cancel.subscribe());
         self.begin_turn(text);
         let mut turn = Usage::default();
-        let mut reply: Vec<String> = Vec::new();
+        let mut reply = Words::default();
         let mut calls_made = 0usize;
         // Replies the length limit cut off in a row, and whether the last one was text to carry on.
         let mut cut_offs = 0usize;
@@ -576,9 +584,20 @@ impl Session {
             self.record_server_tools(&completion.server_tool_calls)
                 .await?;
             let cut = completion.finish == Finish::Length;
-            take_reply(&mut reply, &completion.content, carrying_on, cut);
-            let wrote_nothing = completion.content.trim().is_empty();
             let calls = completion.tool_calls.clone();
+            if calls.is_empty() {
+                // What it wrote before the provider's last search was said on the way to it, and
+                // words follow the search whenever there is one.
+                let split = completion.answer_from > 0;
+                let answer = completion
+                    .content
+                    .get(completion.answer_from..)
+                    .unwrap_or(&completion.content);
+                take_reply(&mut reply.answer, answer, carrying_on && !split, cut);
+            } else {
+                take_reply(&mut reply.on_the_way, &completion.content, false, cut);
+            }
+            let wrote_nothing = completion.content.trim().is_empty();
             let finish = completion.finish;
             self.history.push(Message::Assistant {
                 content: completion.content,
@@ -605,6 +624,11 @@ impl Session {
                     Finish::Stop | Finish::ToolCalls | Finish::Length => StopReason::EndTurn,
                 };
                 return Ok(ended(reason, turn, &reply));
+            }
+            // What it wrote alongside its calls was said on the way, and the record says so now
+            // the message is whole: its words streamed before its calls did.
+            if !wrote_nothing {
+                self.emit(events::commentary(&self.message_id())).await?;
             }
             self.run_calls(&calls, cut, &cancel, &mut calls_made)
                 .await?;
@@ -738,11 +762,21 @@ impl Session {
         specs
     }
 
+    /// The id the model's latest words are recorded under: its latest message's, or the latest
+    /// part's of it.
+    fn message_id(&self) -> String {
+        part_id(
+            &format!("{}-{}", self.config.session_id, self.messages_written),
+            self.message_part,
+        )
+    }
+
     async fn call_model(&mut self, cancel: &Cancel, call: Call) -> Result<Completion, CallError> {
         self.messages_written += 1;
-        let message_id = format!("{}-{}", self.config.session_id, self.messages_written);
+        self.message_part = 0;
+        let message_id = self.message_id();
         let bare = call == Call::BareSummary;
-        let offered = !bare || self.provider.keeps_tools_for_summaries();
+        let offered = !bare || self.provider.keeps_tools_for_summaries(&self.config.model);
         let tools = if offered {
             self.tool_specs()
         } else {
@@ -772,8 +806,11 @@ impl Session {
             sink: self.sink.as_ref(),
             message_id: &message_id,
             quiet: matches!(call, Call::Summary | Call::BareSummary),
+            parts: Mutex::default(),
         };
-        self.provider.complete(&request, &deltas, cancel).await
+        let completion = self.provider.complete(&request, &deltas, cancel).await;
+        self.message_part = deltas.parts().current();
+        completion
     }
 
     /// Whether the next model call may be made: [`Spend`] says so, and nobody cancelled the turn
@@ -975,7 +1012,9 @@ impl Session {
             Builtin::ReadFile => {
                 // Only a plain file is looked into: opening a pipe to read its start would wait
                 // for whatever writes to it.
-                let file = text("path").map(|path| tools::resolve(&self.config.cwd, path));
+                let file = text("path").map(|path| {
+                    tools::resolve_reading(&self.config.cwd, &self.config.knowledge, path)
+                });
                 if file.is_some_and(|file| {
                     std::fs::metadata(&file).is_ok_and(|meta| meta.is_file())
                         && Kind::of(&file) == Some(Kind::Picture)
@@ -1126,7 +1165,7 @@ impl Session {
         call: &ToolCall,
         mut input: Value,
     ) -> Result<Result<Value, Output>, AgentError> {
-        let prepared = match tool.prepare(&input, &self.config.cwd) {
+        let prepared = match tool.prepare(&input, &self.config.cwd, &self.config.knowledge) {
             Ok(prepared) => prepared,
             Err(said) => {
                 self.emit(events::tool_call(
@@ -1162,7 +1201,9 @@ impl Session {
             match self.permissions.request(&request).await {
                 Decision::Allow => {}
                 Decision::AllowEdited(edited) => {
-                    if let Err(said) = tool.prepare(&edited, &self.config.cwd) {
+                    if let Err(said) =
+                        tool.prepare(&edited, &self.config.cwd, &self.config.knowledge)
+                    {
                         let said = format!("The person's change didn't work: {said}");
                         self.emit(events::tool_update(&call.id, ToolStatus::Failed, &said))
                             .await?;
@@ -1207,6 +1248,7 @@ impl Session {
                 };
                 let context = Context {
                     cwd: &self.config.cwd,
+                    connected: &self.config.knowledge,
                     cancel,
                     command: &settings,
                     pictures: {
@@ -1587,12 +1629,26 @@ fn stopped(cancel: &Cancel) -> StopReason {
     }
 }
 
-fn ended(stop_reason: StopReason, usage: Usage, reply: &[String]) -> TurnEnd {
+fn ended(stop_reason: StopReason, usage: Usage, words: &Words) -> TurnEnd {
+    let said = if words.answer.is_empty() {
+        &words.on_the_way
+    } else {
+        &words.answer
+    };
     TurnEnd {
         stop_reason,
         usage,
-        reply: reply.join("\n\n").trim_end().to_owned(),
+        reply: said.join("\n\n").trim_end().to_owned(),
     }
+}
+
+/// What a turn wrote, each message a paragraph. The reply is its answer: the messages that asked
+/// for no tool. What it wrote alongside tool calls was said on the way ("I'll read the notes
+/// first."), and is the reply only when the turn wrote nothing else.
+#[derive(Default)]
+struct Words {
+    answer: Vec<String>,
+    on_the_way: Vec<String>,
 }
 
 /// Adds a message's words to the turn's reply: a paragraph of its own, or, when `carrying_on`,
@@ -1784,12 +1840,38 @@ fn cut(text: &str, limit: usize) -> String {
     format!("{kept}\n… ({} more characters)", total - limit)
 }
 
+/// The id the `part`th part of the message `message_id` is recorded under ([`Parts`]). The first
+/// part's is the message's own.
+fn part_id(message_id: &str, part: usize) -> String {
+    if part == 0 {
+        message_id.to_owned()
+    } else {
+        format!("{message_id}.{part}")
+    }
+}
+
 /// Streams a reply's text and reasoning to the sink as they arrive.
 struct Streaming<'a> {
     sink: &'a dyn EventSink,
     message_id: &'a str,
     /// A summary the agent writes for itself isn't shown.
     quiet: bool,
+    /// Where the provider's own searches split the message: each part is recorded as a message
+    /// of its own.
+    parts: Mutex<Parts>,
+}
+
+impl Streaming<'_> {
+    fn parts(&self) -> Parts {
+        *self.parts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn emit(&self, update: Value) -> Result<(), CallError> {
+        self.sink
+            .update(update)
+            .await
+            .map_err(|error| CallError::Failed(AgentError::Record(error)))
+    }
 }
 
 impl DeltaSink for Streaming<'_> {
@@ -1798,11 +1880,26 @@ impl DeltaSink for Streaming<'_> {
             if self.quiet {
                 return Ok(());
             }
-            self.sink
-                .update(events::message_chunk(text, self.message_id))
+            let (begun, part) = {
+                let mut parts = self.parts.lock().unwrap_or_else(PoisonError::into_inner);
+                (parts.begins(text), parts.current())
+            };
+            // The words before a search were said on the way to it, and the record says so before
+            // the words after it begin.
+            if begun {
+                self.emit(events::commentary(&part_id(self.message_id, part - 1)))
+                    .await?;
+            }
+            self.emit(events::message_chunk(text, &part_id(self.message_id, part)))
                 .await
-                .map_err(|error| CallError::Failed(AgentError::Record(error)))
         })
+    }
+
+    fn server_tool(&self) {
+        self.parts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .tool();
     }
 
     fn reasoning<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<(), CallError>> {
@@ -1810,10 +1907,7 @@ impl DeltaSink for Streaming<'_> {
             if self.quiet {
                 return Ok(());
             }
-            self.sink
-                .update(events::thought_chunk(text))
-                .await
-                .map_err(|error| CallError::Failed(AgentError::Record(error)))
+            self.emit(events::thought_chunk(text)).await
         })
     }
 }

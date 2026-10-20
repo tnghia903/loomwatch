@@ -104,9 +104,7 @@ def next_number():
         return COUNTER[0]
 
 
-def signature(thinking):
-    """The signature a thinking block is sent with; a replay must bring it back unchanged."""
-    return "mock-sig-" + hashlib.sha256(thinking.encode()).hexdigest()[:24]
+signature = SCRIPT.signature
 
 
 def b64(data):
@@ -123,12 +121,7 @@ def task_of(conversation):
     return (users[-1] if users else "").rsplit("## Task", 1)[-1]
 
 
-def words(text):
-    pieces = text.split(" ")
-    step = max(1, len(pieces) // 4)
-    for start in range(0, len(pieces), step):
-        piece = " ".join(pieces[start:start + step])
-        yield piece + (" " if start + step < len(pieces) else "")
+words = SCRIPT.words
 
 
 class Base(BaseHTTPRequestHandler):
@@ -175,30 +168,7 @@ class Base(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------------------- Anthropic
 
 
-def claude_conversation(body):
-    """The Messages body as the chat-completions shape the scripted replies read."""
-    system = body.get("system")
-    if isinstance(system, list):
-        system = "".join(block.get("text", "") for block in system if isinstance(block, dict))
-    conversation = [{"role": "system", "content": system or ""}]
-    for message in body.get("messages") or []:
-        content = message.get("content")
-        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else (content or [])
-        if message.get("role") == "assistant":
-            calls = [{"id": b.get("id"), "function": {"name": b.get("name")}} for b in blocks if b.get("type") == "tool_use"]
-            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-            conversation.append({"role": "assistant", "content": text, "tool_calls": calls})
-            continue
-        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        if text:
-            conversation.append({"role": "user", "content": text})
-        for block in blocks:
-            if block.get("type") == "tool_result":
-                result = block.get("content")
-                if isinstance(result, list):
-                    result = "".join(part.get("text", "") for part in result if isinstance(part, dict))
-                conversation.append({"role": "tool", "tool_call_id": block.get("tool_use_id"), "content": result or ""})
-    return conversation
+claude_conversation = SCRIPT.claude_conversation
 
 
 def claude_refusal(body):
@@ -272,42 +242,8 @@ class Anthropic(Base):
         log({**entry, "answer": kind, "detail": value if kind == "calls" else value[:120]})
 
         self.start_stream()
-        prompt = 900 + 40 * len(body.get("messages") or [])
-        self.event({"type": "message_start", "message": {
-            "id": f"msg_{number}", "type": "message", "role": "assistant", "model": body.get("model"), "content": [],
-            "stop_reason": None, "usage": {"input_tokens": prompt - 600, "cache_read_input_tokens": 600,
-                                           "cache_creation_input_tokens": 0, "output_tokens": 1}}}, "message_start")
-        self.event({"type": "ping"}, "ping")
-        index = 0
-        if (body.get("thinking") or {}).get("type") == "adaptive":
-            thought = f"Working out step {number}."
-            self.event({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}, "content_block_start")
-            self.event({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": thought}}, "content_block_delta")
-            self.event({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": signature(thought)}}, "content_block_delta")
-            self.event({"type": "content_block_stop", "index": 0}, "content_block_stop")
-            index = 1
-        if kind == "text":
-            self.event({"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}}, "content_block_start")
-            for piece in words(value):
-                self.event({"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": piece}}, "content_block_delta")
-                time.sleep(0.05)
-            self.event({"type": "content_block_stop", "index": index}, "content_block_stop")
-            stop = "end_turn"
-        else:
-            for offset, (name, args) in enumerate(value):
-                at = index + offset
-                arguments = json.dumps(args)
-                half = len(arguments) // 2
-                self.event({"type": "content_block_start", "index": at, "content_block": {
-                    "type": "tool_use", "id": f"toolu_{number}_{offset}", "name": name, "input": {}}}, "content_block_start")
-                self.event({"type": "content_block_delta", "index": at, "delta": {"type": "input_json_delta", "partial_json": arguments[:half]}}, "content_block_delta")
-                time.sleep(0.03)
-                self.event({"type": "content_block_delta", "index": at, "delta": {"type": "input_json_delta", "partial_json": arguments[half:]}}, "content_block_delta")
-                self.event({"type": "content_block_stop", "index": at}, "content_block_stop")
-            stop = "tool_use"
-        self.event({"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None},
-                    "usage": {"output_tokens": 120}}, "message_delta")
-        self.event({"type": "message_stop"}, "message_stop")
+        for name, payload in SCRIPT.claude_events(body, kind, value, number, {"output_tokens": 120}):
+            self.event(payload, name)
 
 
 # ------------------------------------------------------------------------------------------- OpenAI

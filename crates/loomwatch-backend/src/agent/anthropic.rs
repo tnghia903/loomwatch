@@ -14,9 +14,16 @@
 //!
 //! Anthropic reports tokens, not dollars, so the cost is worked out from list prices and marked as
 //! such. A call `pause_turn` stops (a long web search) is carried on within the same call.
+//!
+//! The same calls go to `OpenRouter`'s Anthropic-shaped `/messages` for a Claude on the operator's
+//! `OpenRouter` key ([`Route::OpenRouter`]): there a Claude's own web search is a block of its own
+//! between the words around it, where chat completions marks nothing. That route sends the key as
+//! `OpenRouter` takes it, offers `OpenRouter`'s web tools held to the team's limits, and takes
+//! `OpenRouter`'s exact cost and its refusals.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use reqwest::{Client, StatusCode};
@@ -24,8 +31,9 @@ use serde_json::{Map, Value, json};
 
 use super::ApiKey;
 use super::error::{AgentError, CallError, redact};
+use super::openrouter;
 use super::provider::{
-    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Native, ToolCall, Usage,
+    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Native, ToolCall, Usage, Written,
 };
 use super::sse::SseDecoder;
 use crate::ai::anthropic::API_VERSION;
@@ -94,11 +102,41 @@ pub fn list_price(model: &str) -> Option<Price> {
         })
 }
 
-/// A connection to Anthropic with the person's key.
+/// Where a connection's calls go: whose key it carries, which web tools it offers and whose
+/// figures its cost is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    /// Anthropic itself, with the person's Claude API key.
+    Anthropic,
+    /// `OpenRouter`'s Anthropic-shaped `/messages`, with the operator's `OpenRouter` key.
+    OpenRouter,
+}
+
+impl Route {
+    /// The source its calls are paid through and its errors are about.
+    const fn source(self) -> Source {
+        match self {
+            Self::Anthropic => Source::Anthropic,
+            Self::OpenRouter => Source::OpenRouter,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Anthropic => "Anthropic",
+            Self::OpenRouter => "OpenRouter",
+        }
+    }
+}
+
+/// A connection to Anthropic with the person's key, or to `OpenRouter`'s `/messages` with the
+/// operator's.
 #[derive(Debug)]
 pub struct Anthropic {
     client: Client,
-    base: String,
+    route: Route,
+    /// Where each call is posted.
+    endpoint: String,
     key: ApiKey,
     backoff: Duration,
     /// What each model takes, from the key's last check.
@@ -106,6 +144,9 @@ pub struct Anthropic {
     prices: HashMap<String, Price>,
     /// Anthropic refused the thinking binding beta for this key, so it is no longer asked for.
     no_binding: AtomicBool,
+    /// Models whose provider refused `OpenRouter`'s web limits, so they get the web tools without
+    /// them for as long as the daemon runs.
+    unlimited: Mutex<HashSet<String>>,
 }
 
 impl Anthropic {
@@ -121,11 +162,33 @@ impl Anthropic {
         models: Vec<ClaudeModel>,
         prices: HashMap<String, Price>,
     ) -> anyhow::Result<Self> {
-        let base = base.trim_end_matches('/').to_owned();
-        let local = super::is_loopback_http(&base);
+        let base = base.trim_end_matches('/');
+        let mut connection = Self::connect(key, Route::Anthropic, &format!("{base}/v1/messages"))?;
+        connection.models = models
+            .into_iter()
+            .map(|model| (model.id.clone(), model))
+            .collect();
+        connection.prices = prices;
+        Ok(connection)
+    }
+
+    /// `OpenRouter`'s `/messages` under its API at `base` (`…/api/v1`), with the operator's key.
+    ///
+    /// # Errors
+    ///
+    /// When `base` is neither `https` nor `http` on this computer, or the HTTP client cannot be
+    /// built.
+    pub(crate) fn through_openrouter(key: ApiKey, base: &str) -> anyhow::Result<Self> {
+        let base = base.trim_end_matches('/');
+        Self::connect(key, Route::OpenRouter, &format!("{base}/messages"))
+    }
+
+    fn connect(key: ApiKey, route: Route, endpoint: &str) -> anyhow::Result<Self> {
+        let local = super::is_loopback_http(endpoint);
         anyhow::ensure!(
-            base.starts_with("https://") || local,
-            "an Anthropic address must be https"
+            endpoint.starts_with("https://") || local,
+            "an {} address must be https",
+            route.name()
         );
         let client = Client::builder()
             .user_agent(concat!("LoomWatch/", env!("CARGO_PKG_VERSION")))
@@ -135,15 +198,14 @@ impl Anthropic {
             .build()?;
         Ok(Self {
             client,
-            base,
+            route,
+            endpoint: endpoint.to_owned(),
             key,
             backoff: Duration::from_secs(1),
-            models: models
-                .into_iter()
-                .map(|model| (model.id.clone(), model))
-                .collect(),
-            prices,
+            models: HashMap::new(),
+            prices: HashMap::new(),
             no_binding: AtomicBool::new(false),
+            unlimited: Mutex::default(),
         })
     }
 
@@ -184,16 +246,32 @@ impl Anthropic {
         deltas: &dyn DeltaSink,
         cancel: &Cancel,
     ) -> Result<Streamed, CallError> {
+        let route = self.route;
+        // `OpenRouter` holds its web tools to the team's limits unless this model's provider
+        // refused them.
+        let mut limited =
+            route == Route::OpenRouter && request.server_tools.any() && !self.refuses_limits(model);
         let mut attempt = 0;
         loop {
             attempt += 1;
             let binding = !self.no_binding.load(Ordering::Relaxed);
-            let body = body(request, model, self.models.get(model), so_far, binding);
+            let shape = Shape {
+                route,
+                binding,
+                limited,
+            };
+            let body = body(request, model, self.models.get(model), so_far, shape);
             let mut sent = self
                 .client
-                .post(format!("{}/v1/messages", self.base))
-                .header("x-api-key", self.key.expose())
+                .post(&self.endpoint)
                 .header("anthropic-version", API_VERSION);
+            sent = match route {
+                Route::Anthropic => sent.header("x-api-key", self.key.expose()),
+                Route::OpenRouter => sent
+                    .bearer_auth(self.key.expose())
+                    .header("HTTP-Referer", openrouter::REFERER)
+                    .header("X-OpenRouter-Title", openrouter::TITLE),
+            };
             if binding {
                 sent = sent.header("anthropic-beta", BINDING_BETA);
             }
@@ -208,21 +286,24 @@ impl Anthropic {
                     continue;
                 }
                 Err(error) => {
-                    return Err(
-                        AgentError::Network(Source::Anthropic, network_error(&error)).into(),
-                    );
+                    return Err(AgentError::Network(route.source(), network_error(&error)).into());
                 }
             };
             let status = response.status();
             if status.is_success() {
-                match read_stream(response, model, deltas, cancel).await? {
+                match read_stream(response, route, model, deltas, cancel).await? {
                     Outcome::Whole(streamed) => return Ok(streamed),
                     Outcome::Refused { status, said } => {
+                        if limited && openrouter::refused_the_limits(status, &said) {
+                            self.forget_limits(model);
+                            limited = false;
+                            continue;
+                        }
                         if attempt < ATTEMPTS && retryable(status) {
                             self.wait(attempt, None, cancel).await?;
                             continue;
                         }
-                        return Err(status_error(status, &said, model).into());
+                        return Err(status_error(route, status, &said, model).into());
                     }
                 }
             }
@@ -242,8 +323,30 @@ impl Anthropic {
                 self.no_binding.store(true, Ordering::Relaxed);
                 continue;
             }
-            return Err(status_error(status, &said, model).into());
+            if limited && openrouter::refused_the_limits(status, &said) {
+                self.forget_limits(model);
+                limited = false;
+                continue;
+            }
+            return Err(status_error(route, status, &said, model).into());
         }
+    }
+
+    fn refuses_limits(&self, model: &str) -> bool {
+        self.unlimited
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(model)
+    }
+
+    fn forget_limits(&self, model: &str) {
+        eprintln!(
+            "warning: {model}'s provider refused the web limits; it reads the web without them"
+        );
+        self.unlimited
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(model.to_owned());
     }
 
     async fn wait(
@@ -262,14 +365,14 @@ impl Anthropic {
 
     /// The finished message, from the blocks every call of it wrote.
     fn finish(&self, model: &str, blocks: Vec<Value>, stop: &str, mut usage: Usage) -> Completion {
-        let mut content = String::new();
+        let mut written = Written::default();
         let mut tool_calls = Vec::new();
         let mut server_tool_calls = Vec::new();
         for block in &blocks {
             match block.get("type").and_then(Value::as_str) {
                 Some("text") => {
                     if let Some(text) = block.get("text").and_then(Value::as_str) {
-                        content.push_str(text);
+                        written.text(text);
                     }
                 }
                 Some("tool_use") => tool_calls.push(ToolCall {
@@ -280,6 +383,7 @@ impl Anthropic {
                         .map_or_else(|| "{}".to_owned(), Value::to_string),
                 }),
                 Some("server_tool_use") => {
+                    written.tool();
                     let id = text_of(block, "id");
                     let result = blocks.iter().find(|result| {
                         result.get("tool_use_id").and_then(Value::as_str) == Some(id.as_str())
@@ -301,18 +405,22 @@ impl Anthropic {
             _ if !tool_calls.is_empty() => Finish::ToolCalls,
             _ => Finish::Stop,
         };
-        usage.paid_by = Some(Source::Anthropic);
-        usage.cost_estimated = true;
-        usage.cost_usd = self.cost(model, &usage);
+        // `OpenRouter` reports what each call cost; Anthropic reports tokens only.
+        if self.route == Route::Anthropic {
+            usage.paid_by = Some(Source::Anthropic);
+            usage.cost_estimated = true;
+            usage.cost_usd = self.cost(model, &usage);
+        }
         Completion {
-            content,
+            content: written.content,
             reasoning_details: Vec::new(),
             tool_calls,
             finish,
             usage,
             server_tool_calls,
+            answer_from: written.answer_from,
             native: Some(Native {
-                source: Source::Anthropic,
+                source: self.route.source(),
                 items: blocks,
             }),
         }
@@ -389,13 +497,23 @@ fn retryable(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() || status.as_u16() == 529
 }
 
+/// How one try's body is shaped.
+#[derive(Debug, Clone, Copy)]
+struct Shape {
+    route: Route,
+    /// Ask for the thinking binding beta.
+    binding: bool,
+    /// Hold `OpenRouter`'s web tools to the team's limits.
+    limited: bool,
+}
+
 /// The request body.
 fn body(
     request: &ChatRequest<'_>,
     model: &str,
     known: Option<&ClaudeModel>,
     so_far: &[Value],
-    binding: bool,
+    shape: Shape,
 ) -> Value {
     let mut body = Map::new();
     body.insert("model".into(), json!(model));
@@ -403,6 +521,10 @@ fn body(
     body.insert("stream".into(), json!(true));
     // The whole request is cached up to its last block, so the next call reads it back cheaply.
     body.insert("cache_control".into(), json!({"type": "ephemeral"}));
+    if shape.route == Route::OpenRouter {
+        // A session's calls stay on one route and keep their cache.
+        body.insert("session_id".into(), json!(request.session_key));
+    }
     let system: Vec<&str> = request
         .messages
         .iter()
@@ -414,7 +536,7 @@ fn body(
     if !system.is_empty() {
         body.insert("system".into(), json!(system.join("\n\n")));
     }
-    let mut messages = wire_messages(request.messages);
+    let mut messages = wire_messages(request.messages, shape.route.source());
     if !so_far.is_empty() {
         messages.push(json!({"role": "assistant", "content": so_far}));
     }
@@ -432,23 +554,33 @@ fn body(
         })
         .collect();
     let web = request.server_tools;
-    if web.web_search {
-        let mut search = json!({"type": "web_search_20260209", "name": "web_search"});
-        if let Some(uses) = web.limits.searches {
-            search["max_uses"] = json!(uses);
+    match shape.route {
+        Route::Anthropic => {
+            if web.web_search {
+                let mut search = json!({"type": "web_search_20260209", "name": "web_search"});
+                if let Some(uses) = web.limits.searches {
+                    search["max_uses"] = json!(uses);
+                }
+                tools.push(search);
+            }
+            if web.web_fetch {
+                let mut fetch = json!({
+                    "type": "web_fetch_20260209",
+                    "name": "web_fetch",
+                    "max_content_tokens": web.limits.page_tokens,
+                });
+                if let Some(uses) = web.limits.pages {
+                    fetch["max_uses"] = json!(uses);
+                }
+                tools.push(fetch);
+            }
         }
-        tools.push(search);
-    }
-    if web.web_fetch {
-        let mut fetch = json!({
-            "type": "web_fetch_20260209",
-            "name": "web_fetch",
-            "max_content_tokens": web.limits.page_tokens,
-        });
-        if let Some(uses) = web.limits.pages {
-            fetch["max_uses"] = json!(uses);
+        Route::OpenRouter => {
+            tools.extend(openrouter::web_tools(web, shape.limited));
+            if let Some(steps) = openrouter::web_steps(web, shape.limited) {
+                body.insert("max_tool_calls".into(), json!(steps));
+            }
         }
-        tools.push(fetch);
     }
     if !tools.is_empty() {
         body.insert("tools".into(), Value::Array(tools));
@@ -462,7 +594,7 @@ fn body(
     let adaptive = known.is_none_or(|known| known.adaptive_thinking);
     if adaptive {
         let mut thinking = json!({"type": "adaptive", "display": "summarized"});
-        if binding {
+        if shape.binding {
             thinking["block_binding"] = json!({"prefix_mismatch_behavior": "drop_block"});
         }
         body.insert("thinking".into(), thinking);
@@ -497,8 +629,8 @@ fn effort_for(effort: Option<&str>, known: Option<&ClaudeModel>) -> Option<&'sta
 
 /// The conversation as Anthropic's messages. The system prompt goes at the top instead; every tool
 /// result of a turn, and the words that follow them, go in one user message; an assistant message
-/// Anthropic wrote goes back exactly as it was.
-fn wire_messages(history: &[Message]) -> Vec<Value> {
+/// this route (`source`) wrote goes back exactly as it was.
+fn wire_messages(history: &[Message], source: Source) -> Vec<Value> {
     let mut messages: Vec<Value> = Vec::new();
     let mut user: Vec<Value> = Vec::new();
     let flush = |messages: &mut Vec<Value>, user: &mut Vec<Value>| {
@@ -555,9 +687,7 @@ fn wire_messages(history: &[Message]) -> Vec<Value> {
             } => {
                 flush(&mut messages, &mut user);
                 let blocks = match native {
-                    Some(native)
-                        if native.source == Source::Anthropic && !native.items.is_empty() =>
-                    {
+                    Some(native) if native.source == source && !native.items.is_empty() => {
                         native.items.clone()
                     }
                     _ => written_by_another(content, tool_calls),
@@ -570,7 +700,7 @@ fn wire_messages(history: &[Message]) -> Vec<Value> {
     messages
 }
 
-/// An assistant message from before this session was on Anthropic, as plain blocks.
+/// An assistant message from before this session was on this route, as plain blocks.
 fn written_by_another(content: &str, tool_calls: &[ToolCall]) -> Vec<Value> {
     let mut blocks = Vec::new();
     if !content.is_empty() {
@@ -621,6 +751,7 @@ struct Assembled {
 
 async fn read_stream(
     mut response: reqwest::Response,
+    route: Route,
     model: &str,
     deltas: &dyn DeltaSink,
     cancel: &Cancel,
@@ -633,15 +764,15 @@ async fn read_stream(
             () = cancel.cancelled() => return Err(CallError::Cancelled),
         };
         let chunk = match chunk {
-            Err(_) => return Err(AgentError::Stalled(Source::Anthropic).into()),
+            Err(_) => return Err(AgentError::Stalled(route.source()).into()),
             Ok(Err(error)) => {
-                return Err(AgentError::Network(Source::Anthropic, network_error(&error)).into());
+                return Err(AgentError::Network(route.source(), network_error(&error)).into());
             }
             Ok(Ok(None)) => break,
             Ok(Ok(Some(bytes))) => bytes,
         };
         for event in decoder.push(&chunk) {
-            if let Some(refused) = take_event(&event, &mut message, model, deltas).await? {
+            if let Some(refused) = take_event(&event, &mut message, route, model, deltas).await? {
                 return Ok(refused);
             }
             if message.done {
@@ -650,12 +781,12 @@ async fn read_stream(
         }
     }
     if let Some(event) = decoder.finish()
-        && let Some(refused) = take_event(&event, &mut message, model, deltas).await?
+        && let Some(refused) = take_event(&event, &mut message, route, model, deltas).await?
     {
         return Ok(refused);
     }
     if message.stop.is_none() {
-        return Err(AgentError::Stalled(Source::Anthropic).into());
+        return Err(AgentError::Stalled(route.source()).into());
     }
     Ok(Outcome::Whole(message.into_streamed()))
 }
@@ -673,25 +804,34 @@ impl Assembled {
 async fn take_event(
     event: &str,
     message: &mut Assembled,
+    route: Route,
     model: &str,
     deltas: &dyn DeltaSink,
 ) -> Result<Option<Outcome>, CallError> {
     let Ok(event) = serde_json::from_str::<Value>(event) else {
         return Ok(None);
     };
-    match event.get("type").and_then(Value::as_str) {
+    // `OpenRouter` reports an error of its own as `{"error": {"code", "message"}}`, with no type.
+    let kind = event.get("type").and_then(Value::as_str).or_else(|| {
+        event
+            .get("error")
+            .filter(|error| error.is_object())
+            .map(|_| "error")
+    });
+    match kind {
         Some("message_start") => {
             if let Some(usage) = event.pointer("/message/usage") {
-                read_usage(usage, &mut message.usage);
+                read_usage(usage, route, &mut message.usage);
             }
         }
         Some("content_block_start") => {
             let index = block_index(&event);
             let mut block = event.get("content_block").cloned().unwrap_or(Value::Null);
-            if matches!(
-                block.get("type").and_then(Value::as_str),
-                Some("tool_use" | "server_tool_use")
-            ) {
+            let kind = block.get("type").and_then(Value::as_str);
+            if kind == Some("server_tool_use") {
+                deltas.server_tool();
+            }
+            if matches!(kind, Some("tool_use" | "server_tool_use")) {
                 // Its input streams as JSON text; it is put back together when the block ends.
                 block["input"] = json!({});
                 message.inputs.insert(index, String::new());
@@ -720,7 +860,7 @@ async fn take_event(
                 message.stop = Some(stop.to_owned());
             }
             if let Some(usage) = event.get("usage") {
-                read_usage(usage, &mut message.usage);
+                read_usage(usage, route, &mut message.usage);
             }
         }
         Some("message_stop") => message.done = true,
@@ -734,18 +874,23 @@ async fn take_event(
                 .and_then(Value::as_str)
                 .unwrap_or("the stream ended with an error")
                 .to_owned();
-            let status = match kind {
+            let code = event
+                .pointer("/error/code")
+                .and_then(Value::as_u64)
+                .and_then(|code| u16::try_from(code).ok())
+                .and_then(|code| StatusCode::from_u16(code).ok());
+            let status = code.unwrap_or_else(|| match kind {
                 "overloaded_error" => StatusCode::from_u16(529).unwrap_or(StatusCode::BAD_GATEWAY),
                 "rate_limit_error" => StatusCode::TOO_MANY_REQUESTS,
                 "api_error" => StatusCode::INTERNAL_SERVER_ERROR,
                 "billing_error" => StatusCode::PAYMENT_REQUIRED,
                 "authentication_error" => StatusCode::UNAUTHORIZED,
                 _ => StatusCode::BAD_REQUEST,
-            };
+            });
             if !message.begun {
                 return Ok(Some(Outcome::Refused { status, said }));
             }
-            return Err(status_error(status, &said, model).into());
+            return Err(status_error(route, status, &said, model).into());
         }
         _ => {}
     }
@@ -827,8 +972,9 @@ fn append(blocks: &mut [Value], index: usize, key: &str, piece: &str) {
 }
 
 /// Anthropic's usage: `message_start` gives the prompt, each `message_delta` the running totals.
-/// `input_tokens` already leaves out what the cache served or wrote.
-fn read_usage(usage: &Value, into: &mut Usage) {
+/// `input_tokens` already leaves out what the cache served or wrote. `OpenRouter` adds the exact
+/// `cost` to the last one, and counts the pages it read itself among its tool calls.
+fn read_usage(usage: &Value, route: Route, into: &mut Usage) {
     let number = |key: &str| usage.get(key).and_then(Value::as_u64);
     if let Some(input) = number("input_tokens") {
         into.input_tokens = input;
@@ -841,6 +987,17 @@ fn read_usage(usage: &Value, into: &mut Usage) {
     }
     if let Some(output) = number("output_tokens") {
         into.output_tokens = output;
+    }
+    if route == Route::OpenRouter {
+        if let Some(cost) = usage.get("cost").and_then(Value::as_f64) {
+            into.cost_usd = cost;
+        }
+        if usage.get("server_tool_use").is_some_and(Value::is_object) {
+            let web = openrouter::web_use(usage);
+            into.web_searches = web.searches;
+            into.web_fetches = web.fetches;
+        }
+        return;
     }
     if let Some(searches) = usage
         .pointer("/server_tool_use/web_search_requests")
@@ -876,8 +1033,11 @@ async fn read_error_body(mut response: reqwest::Response) -> String {
         .unwrap_or_else(|| text.trim().chars().take(300).collect())
 }
 
-/// What a refused request means for the person.
-fn status_error(status: StatusCode, said: &str, model: &str) -> AgentError {
+/// What a refused request means for the person: in `OpenRouter`'s terms on that route.
+fn status_error(route: Route, status: StatusCode, said: &str, model: &str) -> AgentError {
+    if route == Route::OpenRouter {
+        return openrouter::status_error(status, said, model);
+    }
     let said = redact(said);
     let lower = said.to_lowercase();
     if lower.contains("credit balance is too low") || status == StatusCode::PAYMENT_REQUIRED {
@@ -931,6 +1091,14 @@ mod tests {
         }
     }
 
+    fn shape(route: Route, binding: bool) -> Shape {
+        Shape {
+            route,
+            binding,
+            limited: true,
+        }
+    }
+
     fn request<'a>(messages: &'a [Message], tools: &'a [ToolSpec]) -> ChatRequest<'a> {
         ChatRequest {
             model: "anthropic:claude-opus-5-5",
@@ -966,7 +1134,7 @@ mod tests {
             },
         ];
         assert_eq!(
-            wire_messages(&history),
+            wire_messages(&history, Source::Anthropic),
             [json!({"role": "user", "content": [
                 {"type": "tool_result", "tool_use_id": "toolu_1", "content": [
                     {"type": "text", "text": "shot.png: a picture, 40×20 pixels."},
@@ -1027,7 +1195,7 @@ mod tests {
             "claude-opus-5-5",
             Some(&opus()),
             &[],
-            true,
+            shape(Route::Anthropic, true),
         );
         assert_eq!(sent["system"], "Be brief.");
         assert_eq!(sent["cache_control"], json!({"type": "ephemeral"}));
@@ -1059,7 +1227,13 @@ mod tests {
             tools_off: true,
             ..request(&history, &tools)
         };
-        let sent = body(&summary, "claude-opus-5-5", Some(&opus()), &[], false);
+        let sent = body(
+            &summary,
+            "claude-opus-5-5",
+            Some(&opus()),
+            &[],
+            shape(Route::Anthropic, false),
+        );
         assert_eq!(sent["tool_choice"], json!({"type": "none"}));
         assert_eq!(sent["tools"].as_array().unwrap().len(), 1);
         assert!(sent["thinking"].get("block_binding").is_none());
@@ -1105,6 +1279,7 @@ mod tests {
         let model = "claude-opus-5-5";
         assert!(matches!(
             status_error(
+                Route::Anthropic,
                 StatusCode::BAD_REQUEST,
                 "Your credit balance is too low to access the Anthropic API.",
                 model
@@ -1112,15 +1287,26 @@ mod tests {
             AgentError::OutOfCredits(Source::Anthropic)
         ));
         assert!(matches!(
-            status_error(StatusCode::UNAUTHORIZED, "invalid x-api-key", model),
+            status_error(
+                Route::Anthropic,
+                StatusCode::UNAUTHORIZED,
+                "invalid x-api-key",
+                model
+            ),
             AgentError::KeyRefused(Source::Anthropic)
         ));
         assert!(matches!(
-            status_error(StatusCode::NOT_FOUND, "model: claude-x", model),
+            status_error(
+                Route::Anthropic,
+                StatusCode::NOT_FOUND,
+                "model: claude-x",
+                model
+            ),
             AgentError::ModelUnavailable(Source::Anthropic, _)
         ));
         assert!(matches!(
             status_error(
+                Route::Anthropic,
                 StatusCode::BAD_REQUEST,
                 "prompt is too long: 1200000 tokens > 1000000",
                 model
@@ -1128,6 +1314,7 @@ mod tests {
             AgentError::ContextTooLong
         ));
         let AgentError::Provider(Source::Anthropic, said) = status_error(
+            Route::Anthropic,
             StatusCode::BAD_REQUEST,
             "bad key sk-ant-api03-abcdefabcdefabcdef",
             model,
