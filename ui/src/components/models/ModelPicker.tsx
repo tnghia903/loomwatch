@@ -111,6 +111,20 @@ function connectNudge(model: string, tier: ModelTier, source: ModelSource, conne
 }
 
 /**
+ * The model suggested for `suggestFor`'s agent, from what is connected, and from AI's reading of it
+ * once one is read. Its reading is asked for only while `active` (the list is open), so the button
+ * of a closed list names the same suggestion as the list without asking for one.
+ */
+function useSuggestion(suggestFor: ModelSuggestionInput | undefined, active: boolean) {
+  const ai = useAiStatus()
+  // Until the daemon says what is connected, OpenRouter's list shows as it always did.
+  const connected: readonly ModelSource[] | null = useMemo(() => (ai ? connectedSources(ai) : null), [ai])
+  const read = useSetupReading(suggestFor?.agent, active)
+  const suggestion = suggestFor ? suggestModel({ ...suggestFor, reading: read.reading, ...(connected ? { sources: connected } : {}) }) : undefined
+  return { ai, connected, read, suggestion }
+}
+
+/**
  * The models to choose from, in three clearly separate sections, one per way of paying (ADR 0073):
  * the person's ChatGPT plan, their Claude API credit, and OpenRouter, each headed by what it costs.
  * A source with nothing connected shows one row to connect it instead of its models. Every row says
@@ -132,12 +146,8 @@ function connectNudge(model: string, tier: ModelTier, source: ModelSource, conne
  */
 export function ModelChoices({ value, suggestFor, follows, onPick }: { value: string; suggestFor?: ModelSuggestionInput; follows?: boolean; onPick: (id: string, follow: boolean) => void }) {
   const { catalog, error } = useModels()
-  const ai = useAiStatus()
-  // Until the daemon says what is connected, OpenRouter's list shows as it always did.
-  const connected: readonly ModelSource[] | null = useMemo(() => (ai ? connectedSources(ai) : null), [ai])
+  const { ai, connected, read, suggestion } = useSuggestion(suggestFor, Boolean(suggestFor))
   const offered = (source: ModelSource) => source !== 'chatgpt' || ai?.chatgpt.available === true
-  const read = useSetupReading(suggestFor?.agent, Boolean(suggestFor))
-  const suggestion = suggestFor ? suggestModel({ ...suggestFor, reading: read.reading, ...(connected ? { sources: connected } : {}) }) : undefined
   const [query, setQuery] = useState('')
   const listId = useId()
   const all = useMemo(() => (catalog ? everyModel(catalog) : []), [catalog])
@@ -286,9 +296,12 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
   moved?: { from: string; onUndo: () => void }
 }) {
   const { catalog } = useModels()
-  // Asked for now, so the list's sources and suggestion are known before it opens.
-  useAiStatus()
   const [open, setOpen] = useState(false)
+  // Worked out now, as the list does, so its sources and suggestion are known before it opens, and
+  // the button says Suggested whenever the model in use is the one suggested for this agent: on
+  // every page, whether or not its model follows the suggestion (that is said in the list).
+  const { suggestion } = useSuggestion(suggestFor, open)
+  const suggested = Boolean(suggestion && value && value === suggestion.model)
   const source = value && value !== OFFLINE_MODEL ? parseModelRef(value).source : null
   const root = useRef<HTMLDivElement>(null)
   const toggle = useRef<HTMLButtonElement>(null)
@@ -312,7 +325,7 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
   return (
     <div ref={root} className="model-picker field" onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close() } }}>
       <span className="t-meta" id={labelId}>{label}</span>
-      <button ref={toggle} type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}${follows ? ` ${suggestedId}` : ''}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
+      <button ref={toggle} type="button" className="input model-picker-current" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-labelledby={`${labelId} ${nameId}${suggested ? ` ${suggestedId}` : ''}`} data-agent-field={field} disabled={disabled} onClick={() => setOpen(!open)}>
         {value && value !== OFFLINE_MODEL && (value.includes('/') || parseModelRef(value).source !== 'openrouter') && <MakerMark maker={makerOf(value)} />}
         <span className="model-picker-text">
           <span className="t-body" id={nameId}>{current ? shortName(current) : value ? modelNameFromId(value) : 'Choose a model'}</span>
@@ -322,7 +335,7 @@ export function ModelPicker({ value, onChange, label = 'Model', disabled = false
           {!current && value && value !== OFFLINE_MODEL && catalog && source === 'openrouter' && <span className="t-meta inline-error">Not in OpenRouter’s list</span>}
         </span>
         {source && <SourceChip source={source} />}
-        {follows && <span className="model-picker-suggested t-meta" id={suggestedId}><Sparkles size={11} aria-hidden="true" />Suggested</span>}
+        {suggested && <span className="model-picker-suggested t-meta" id={suggestedId}><Sparkles size={11} aria-hidden="true" />Suggested</span>}
         <ChevronDown className="model-picker-arrow" size={16} aria-hidden="true" />
       </button>
       {moved && !open && <p className="t-meta model-moved" role="status">
