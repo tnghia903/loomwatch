@@ -15,7 +15,7 @@ const ITEMS = [
 
 function rail(overrides: Partial<CrewRailProps> = {}) {
   const go = vi.fn()
-  render(<CrewRail label="My agents" items={ITEMS} find="Find an agent" add={{ label: 'New agent', href: '/agents/new' }} go={go} {...overrides} />)
+  render(<CrewRail label="My agents" items={ITEMS} find="Find an agent" none="No agents yet." add={{ label: 'New agent', href: '/agents/new' }} go={go} {...overrides} />)
   return { go, nav: screen.getByRole('navigation', { name: 'My agents' }) }
 }
 
@@ -77,6 +77,12 @@ describe('CrewRail', () => {
       expect(screen.queryByRole('dialog', { name: 'Find an agent' })).not.toBeInTheDocument()
     })
 
+    it('says there are none yet before anything is typed', () => {
+      const { nav } = rail({ items: [] })
+      fireEvent.click(within(nav).getByRole('button', { name: 'Find an agent' }))
+      expect(screen.getByText('No agents yet.')).toBeInTheDocument()
+    })
+
     it('says when nothing matches, and Escape closes it', () => {
       const { nav } = rail()
       fireEvent.click(within(nav).getByRole('button', { name: 'Find an agent' }))
@@ -131,11 +137,12 @@ describe('CrewRail', () => {
       expect(go).toHaveBeenCalledWith('/agents/researcher?view=chat')
     })
 
+    // A disabled button's tooltip often never shows, so the reason is in the question's words.
     it('can’t save what has a problem, and says what it is', () => {
       const { nav } = guarded({ problem: 'Give it a name.' })
       fireEvent.click(within(nav).getByRole('link', { name: 'Researcher' }))
       expect(screen.getByRole('button', { name: 'Save first' })).toBeDisabled()
-      expect(screen.getByRole('button', { name: 'Save first' })).toHaveAttribute('title', 'Give it a name.')
+      expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toHaveTextContent('Unsaved changes. Give it a name.')
     })
 
     it('asks from the find box too', () => {

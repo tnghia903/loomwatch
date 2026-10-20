@@ -1,8 +1,8 @@
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { baseName, dirName } from '../../lib/files/paths'
-import { reviewProblems, shortenDirectory, type ReviewProblem } from '../../lib/team-file/problems'
+import { baseName } from '../../lib/files/paths'
+import { reviewProblems, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 import type { AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
 import { ChipDot, type ChipState } from '../ui/glyphs'
@@ -14,7 +14,6 @@ export interface DocumentSwitcherProps {
   teamName?: string | null
   saveState: SaveState
   saveError: string | null
-  linesDiffer: number
   entrypointProblem: EntrypointProblem | null
   documentProblems: DocumentProblem[]
   fieldProblemsByAgent: ReadonlyMap<string, AgentFieldProblems>
@@ -42,7 +41,7 @@ export interface DocumentSwitcherProps {
 // the only place file state is expressed; its menu is what is done to the file. Other teams, and a
 // new one, are reached from the team rail beside the page (ADR 0043: one control per action).
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, saveState, saveError, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -64,14 +63,14 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
 
   if (!path) return null
   const filename = baseName(path)
-  const directory = /[\\/]/.test(path) ? shortenDirectory(dirName(path)) : ''
   const dirty = ['dirty', 'invalid', 'conflict', 'new'].includes(saveState)
   // Leaving the page after a delete would stop on the browser's "unsaved changes" prompt.
   const unsaved = dirty || saveState === 'saving' || saveState === 'error'
 
   let state: ChipState = 'clean'
   let l1 = teamName ?? filename
-  let l2 = teamName ? filename : directory || 'teams'
+  // Saved, as an agent's chip says it; the file's name and folder are in the menu.
+  let l2 = 'Saved'
   let action: React.ReactNode = null
   const primarySave = <button type="button" className="btn btn-primary" onClick={onSave} disabled={!isValid || editingDisabled} title={!isValid ? (errors[0]?.message ?? incomplete[0]?.message) : editingDisabled ? 'Editing needs a wider window' : undefined}>Save <kbd className="t-mono-sm" style={{ opacity: .8 }}>{keys('⌘S')}</kbd></button>
   const review = <button type="button" className="btn" onClick={() => { onProblemsOpenChange(!problemsOpen); setSwitcherOpen(false) }} aria-expanded={problemsOpen} aria-controls="problems-pop">Review</button>
@@ -128,8 +127,6 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
                 ? <button type="button" className="link alert" onClick={() => discardConfirm ? (onDiscard(), setDiscardConfirm(false), setSwitcherOpen(false)) : setDiscardConfirm(true)}>{discardConfirm ? 'Discard changes?' : 'Discard'}</button>
                 : <button type="button" className="link" onClick={onReload} disabled={saveState === 'new'}>Reload from disk</button>}
             </span>
-            {/* How much a save or a discard would change: the list of teams used to say it on this one's row. */}
-            {dirty && saveState !== 'new' && linesDiffer > 0 && <span className="pop-note t-meta">{linesDiffer} line{linesDiffer === 1 ? '' : 's'} changed since it was last saved.</span>}
             <span className="pop-note t-meta">Saves keep your comments and key order.</span>
           </div>
         </div>

@@ -61,5 +61,5 @@ export function TeamRail({ open, runs, savedJobs, view, go, onNewTeam, leave }: 
       art: <TeamCrewArt figures={team.agents.map((agent) => agentFigure(agent, savedJobs))} />,
     }))
   }, [teams, root, open, runs, savedJobs, view])
-  return <CrewRail label="Your teams" items={items} find="Find a team" add={{ label: 'New team', onAdd: onNewTeam }} go={go} leave={leave} />
+  return <CrewRail label="Your teams" items={items} find="Find a team" none="No teams yet." add={{ label: 'New team', onAdd: onNewTeam }} go={go} leave={leave} />
 }

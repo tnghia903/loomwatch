@@ -221,8 +221,8 @@ with a lead that hands out work and asks its teammates questions as it goes.
 Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
 **Chat** tab, then add it to any team. Change it later and each team keeps the copy it has until
 you choose **Update** there. Tell them about you once, in **About you**, and every agent fits its answers
-to you. Your agents stand down the side of each agent's page, and your teams down the side of each
-team's: one click moves to another, and each glows while it works or waits for you.
+to you. Your agents line the left of each agent's page, and your teams the left of each team's:
+one click moves to another, and each glows while it works or waits for you.
 
 </td>
 <td width="33%" valign="top">
@@ -378,16 +378,16 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as a team. Build an agent, New team and the 3-minute guide, a box to describe the job to Ask, the Agents, Workflow and Chat steps, a row of Your agents with their figures and versions, and Your teams below, where the Review stop demo is Waiting for you. At the top, the bell says 1 needs you.">
+  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as a team. Build an agent, New team and the 3-minute guide, a box to describe the job to Ask, the Agents, Workflow and Chat steps, a row of My agents with their figures, and Your teams below, where the Review stop demo is Waiting for you. At the top, the bell says 1 needs you.">
 </picture>
-<br><sub><strong>Home.</strong> Your agents first, each with its face and version, then the teams they work in.</sub>
+<br><sub><strong>Home.</strong> Your agents first, each with its face, then the teams they work in.</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists Your agents with their versions and the models they think with, the Build a new agent link, then Workflow steps with You (review step). The heading says Your team is ready, beside Run team.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists My agents with the models they think with, the Build a new agent link, then Workflow steps with You (review step). The heading says Your team is ready, beside Run team.">
 </picture>
 <br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
@@ -1154,8 +1154,8 @@ Saving a change to what a team copies, such as its job, leaves the teams' copies
 new face changes nothing in them. The agent's panel in a team says **Changed in My agents** when
 there is something new, and offers **Update**, **Edit in My agents**, or **Make it this team's
 own** to change it there alone. The builder lists the teams that use the agent and which of them
-have an update ready. LoomWatch keeps the earlier copies on disk to know which, and shows no
-version numbers.
+have an update ready. LoomWatch keeps earlier copies on disk so it can tell which teams have an
+update ready; it shows no version numbers.
 Removing an agent from My agents leaves the teams' copies alone. An agent is one small file, so
 you can share it by copying it into another teams folder's `.jobs`.
 

@@ -636,11 +636,11 @@ fn job_error(error: crate::jobs::JobError) -> ApiError {
             StatusCode::PRECONDITION_FAILED,
             format!("You already have an agent called “{name}”."),
         ),
-        JobError::Stale(version) => ApiError::new(
+        // Versions stay behind the scenes: the person is told what happened, not a number.
+        JobError::Stale(_) => ApiError::new(
             StatusCode::PRECONDITION_FAILED,
-            format!(
-                "This agent was saved somewhere else since you opened it; it is at version {version} now. Reload to see that version before you save."
-            ),
+            "This agent was changed in another window since you opened it. Reload the page to see that change, then make yours again."
+                .to_owned(),
         ),
         JobError::NotFound(id) => ApiError::new(
             StatusCode::NOT_FOUND,
@@ -2031,6 +2031,45 @@ mod tests {
             "{path}"
         );
         assert_eq!(fs::read_to_string(path).expect("kept"), "# Plan\n");
+    }
+
+    /// A save made against a copy someone has changed since is refused in words a person reads:
+    /// what happened and what to do, with no version number (versions stay behind the scenes).
+    #[tokio::test]
+    async fn a_stale_job_save_says_what_happened_without_a_version_number() {
+        let root = TempDirectory::new();
+        let put = |if_match: Option<&str>| {
+            let mut request = Request::builder()
+                .method("PUT")
+                .uri("/api/jobs/writer")
+                .header(header::HOST, "localhost")
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(version) = if_match {
+                request = request.header(header::IF_MATCH, version);
+            }
+            request
+                .body(Body::from(
+                    r#"{"name":"Writer","instructions":"Write the draft."}"#,
+                ))
+                .expect("request")
+        };
+        let saved = test_router(&root.0)
+            .oneshot(put(None))
+            .await
+            .expect("response");
+        assert_eq!(saved.status(), StatusCode::OK);
+        let stale = test_router(&root.0)
+            .oneshot(put(Some("\"7\"")))
+            .await
+            .expect("response");
+        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+        let body = response_json(stale).await;
+        let message = body["error"].as_str().expect("error");
+        assert!(message.contains("changed in another window"), "{message}");
+        assert!(
+            !message.contains("version") && !message.chars().any(|c| c.is_ascii_digit()),
+            "{message}"
+        );
     }
 
     /// A saved job round-trips through the API: created once, refused a second create so the UI

@@ -33,6 +33,8 @@ export interface CrewRailProps {
   items: readonly RailItem[] | null
   /** The find button's words and the find box's: "Find an agent". */
   find: string
+  /** What the find box says with nothing to find yet: "No agents yet." */
+  none: string
   /** The last place: a new one. `current` while that is the page. */
   add: { label: string; current?: boolean } & ({ href: string; onAdd?: never } | { onAdd: () => void; href?: never })
   /** Go to an item's page. */
@@ -48,14 +50,20 @@ const sayName = (item: RailItem) => (PRESENCE_WORDS[item.presence] ? `${item.nam
  * Where a floating part goes: beside the rail while it stands down the side, under it while it lies
  * along the top. A name is centred on its figure; a box starts level with it.
  */
-function placeBeside(anchor: Element, rail: Element | null, centred = false) {
+function placeBeside(anchor: Element, rail: Element | null, centred = false, size = { width: 0, height: 0 }) {
   const box = anchor.getBoundingClientRect()
   const along = rail ? rail.getBoundingClientRect() : box
   const lying = along.width > along.height
+  // Kept inside the window: a figure at the far end of a phone's row, or low in the column, opens
+  // its box where all of it can be read and pressed.
+  const inside = (value: number, extent: number, room: number) => Math.max(8, Math.min(value, room - extent - 8))
   return lying
-    ? { top: along.bottom + 6, left: Math.max(8, box.left), lying }
-    : { top: centred ? box.top + box.height / 2 : Math.max(8, box.top), left: along.right + 8, lying }
+    ? { top: along.bottom + 6, left: inside(box.left, size.width, window.innerWidth), lying }
+    : { top: centred ? box.top + box.height / 2 : inside(box.top, size.height, window.innerHeight), left: along.right + 8, lying }
 }
+/** About as big as each floating box gets, to keep it on screen before it is drawn. */
+const LEAVE_BOX = { width: 360, height: 120 }
+const FIND_BOX = { width: 360, height: 480 }
 
 /**
  * The crew rail: every agent you have, or every team, as its figures in a slim column down the side
@@ -64,7 +72,7 @@ function placeBeside(anchor: Element, rail: Element | null, centred = false) {
  * finishing elsewhere is seen from here. Names show on hover, and the find button at the top finds
  * one by name or by what it does.
  */
-export function CrewRail({ label, items, find, add, go, leave, className = '' }: CrewRailProps) {
+export function CrewRail({ label, items, find, none, add, go, leave, className = '' }: CrewRailProps) {
   const rail = useRef<HTMLElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const findButton = useRef<HTMLButtonElement>(null)
@@ -92,7 +100,7 @@ export function CrewRail({ label, items, find, add, go, leave, className = '' }:
     const guard = leave?.() ?? null
     if (!guard) { go(href); return }
     setFinding(null)
-    setPending({ href, guard, ...placeBeside(anchor, rail.current) })
+    setPending({ href, guard, ...placeBeside(anchor, rail.current, false, LEAVE_BOX) })
   }
   // A plain click moves here; a click that asks for a new tab or window gets one.
   const follow = (event: MouseEvent<HTMLAnchorElement>, href: string, current: boolean) => {
@@ -134,7 +142,7 @@ export function CrewRail({ label, items, find, add, go, leave, className = '' }:
     <>
       <nav ref={rail} className={`crew-rail ${className}`.trim()} aria-label={label} onPointerLeave={() => setTip(null)}>
         <button ref={findButton} type="button" className="crew-rail-find" aria-label={find} aria-expanded={Boolean(finding)} aria-controls={finding ? `${ids}-float` : undefined}
-          onClick={(event) => { const place = placeBeside(event.currentTarget, rail.current); setTip(null); setPending(null); setFinding((open) => (open ? null : place)) }}
+          onClick={(event) => { const place = placeBeside(event.currentTarget, rail.current, false, FIND_BOX); setTip(null); setPending(null); setFinding((open) => (open ? null : place)) }}
           onPointerEnter={(event) => showTip(find, event.currentTarget)} onFocus={(event) => showTip(find, event.currentTarget)} onBlur={() => setTip(null)}>
           <Search size={17} aria-hidden="true" />
         </button>
@@ -167,15 +175,15 @@ export function CrewRail({ label, items, find, add, go, leave, className = '' }:
       {pending && (
         <div id={`${ids}-float`} ref={leaveRef} className="crew-rail-float crew-rail-leave pop-inline t-meta" role="alertdialog" aria-label="Unsaved changes" style={{ top: pending.top, left: pending.left }}
           onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeLeave() } }}>
-          <span>Unsaved changes.</span>
-          <button type="button" className="btn btn-primary" onClick={() => void keep()} disabled={saving || Boolean(pending.guard.problem)} title={pending.guard.problem ?? undefined}>{saving ? 'Saving…' : 'Save first'}</button>
+          <span>Unsaved changes.{pending.guard.problem ? ` ${pending.guard.problem}` : ''}</span>
+          <button type="button" className="btn crew-rail-keep" onClick={() => void keep()} disabled={saving || Boolean(pending.guard.problem)} title={pending.guard.problem ?? undefined}>{saving ? 'Saving…' : 'Save first'}</button>
           <button type="button" className="btn btn-danger" onClick={() => void drop()} disabled={saving}>Discard</button>
           <button type="button" className="btn" onClick={closeLeave}>Cancel</button>
         </div>
       )}
 
       {finding && (
-        <FindBox id={`${ids}-float`} label={find} items={items ?? []} place={finding}
+        <FindBox id={`${ids}-float`} label={find} none={none} items={items ?? []} place={finding}
           onPick={(item) => { setFinding(null); if (!item.current) pick(item.href, findButton.current ?? rail.current!) }}
           onClose={() => { setFinding(null); findButton.current?.focus() }} />
       )}
@@ -184,7 +192,7 @@ export function CrewRail({ label, items, find, add, go, leave, className = '' }:
 }
 
 /** The find box beside the rail: type part of a name or what it does, then pick one. */
-function FindBox({ id, label, items, place, onPick, onClose }: { id: string; label: string; items: readonly RailItem[]; place: { top: number; left: number }; onPick: (item: RailItem) => void; onClose: () => void }) {
+function FindBox({ id, label, none, items, place, onPick, onClose }: { id: string; label: string; none: string; items: readonly RailItem[]; place: { top: number; left: number }; onPick: (item: RailItem) => void; onClose: () => void }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const matches = useMemo(() => {
@@ -207,7 +215,7 @@ function FindBox({ id, label, items, place, onPick, onClose }: { id: string; lab
           onChange={(event) => { setQuery(event.target.value); setActive(0) }} />
       </div>
       <ul id={list} className="crew-rail-found" role="listbox" aria-label={label}>
-        {matches.length === 0 && <li className="pop-empty t-meta" role="presentation">Nothing matches “{query.trim()}”.</li>}
+        {matches.length === 0 && <li className="pop-empty t-meta" role="presentation">{query.trim() ? `Nothing matches “${query.trim()}”.` : none}</li>}
         {matches.map((item, index) => (
           <li key={item.key} id={`${id}-${item.key}`} role="option" aria-selected={index === shown} aria-current={item.current ? 'page' : undefined} className={`crew-rail-hit ${item.presence}${index === shown ? ' active' : ''}`}
             onPointerMove={() => setActive(index)} onClick={() => onPick(item)}>

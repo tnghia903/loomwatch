@@ -75,7 +75,7 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
       {usedIn && (
         <div className="agent-badge-row">
           <span className="agent-badge-label">Used in</span>
-          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}{usedIn.behind > 0 ? <em className="agent-badge-behind"> · {usedIn.behind} not updated yet</em> : null}</span>
+          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}{usedIn.behind > 0 ? <em className="agent-badge-behind"> · update ready in {usedIn.behind}</em> : null}</span>
         </div>
       )}
     </div>

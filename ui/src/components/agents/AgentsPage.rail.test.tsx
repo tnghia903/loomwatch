@@ -108,16 +108,27 @@ describe('Moving between agents from the rail', () => {
       window.history.replaceState({}, '', '/agents/new?from=researcher')
       page()
       await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 })
-      fireEvent.click(within(screen.getByRole('navigation', { name: 'My agents' })).getByRole('link', { name: 'Editor' }))
+      fireEvent.click(await within(screen.getByRole('navigation', { name: 'My agents' })).findByRole('link', { name: 'Editor' }, { timeout: 5000 }))
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(here()).toBe('/agents/editor')
+    })
+
+    // The rail asks itself; the brand and the menu leave the page, where the browser asks.
+    it('has the browser ask before a changed new agent’s page goes, and not before an untouched one’s', async () => {
+      window.history.replaceState({}, '', '/agents/new?from=researcher')
+      page()
+      const instructions = await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 })
+      const leaving = () => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented }
+      expect(leaving()).toBe(false)
+      fireEvent.change(instructions, { target: { value: 'Find three sources.' } })
+      expect(leaving()).toBe(true)
     })
 
     it('asks before leaving a new agent you have changed', async () => {
       window.history.replaceState({}, '', '/agents/new?from=researcher')
       page()
       fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Find three sources.' } })
-      fireEvent.click(within(screen.getByRole('navigation', { name: 'My agents' })).getByRole('link', { name: 'Editor' }))
+      fireEvent.click(await within(screen.getByRole('navigation', { name: 'My agents' })).findByRole('link', { name: 'Editor' }, { timeout: 5000 }))
       expect(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).toBeInTheDocument()
       expect(here()).toBe('/agents/new?from=researcher')
     })

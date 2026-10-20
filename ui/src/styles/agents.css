@@ -56,7 +56,10 @@
 /* On an agent's own page: the way back to a team, and what a save did. With nothing to say it keeps
    its place for screen readers and takes none on screen. */
 .agent-notices { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); }
-.agent-builder > .agent-notices:not(:has(a)):has(> .agent-save-state:empty) { position: absolute; }
+.agent-builder > .agent-notices:not(:has(a)):has(> .agent-save-state:is(:empty, .quiet)) { position: absolute; }
+.agent-notices .agent-save-state { flex-basis: auto; text-align: left; }
+/* Read out, not shown: the chip already says Saved. */
+.agent-notices .agent-save-state.quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .agent-back { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; align-self: flex-start; }
 .agent-builder-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-5); align-items: end; }
 .agent-backs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); }

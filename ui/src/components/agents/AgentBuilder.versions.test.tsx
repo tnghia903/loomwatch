@@ -37,7 +37,9 @@ describe('An agent’s page without version numbers', () => {
     expect(await within(usedIn).findByText('Update ready there', {}, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Versions' })).not.toBeInTheDocument()
     expect(screen.getByText(/^Saved /)).toBeInTheDocument()
-    expect(screen.getByText(/1 not updated yet/)).toBeInTheDocument()
+    expect(screen.getByText(/update ready in 1/)).toBeInTheDocument()
+    // The link goes to the team's Agents tab with this agent open, where its Update is.
+    expect(within(usedIn).getByRole('link', { name: /Blog/ })).toHaveAttribute('href', '/?path=blog.yaml&view=agents&agent=writer')
     expect(container.textContent).not.toMatch(/\bv\d/)
   })
 
@@ -46,7 +48,7 @@ describe('An agent’s page without version numbers', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Write a short draft with a title.' } })
     expect(screen.queryByRole('textbox', { name: /What changed/ })).not.toBeInTheDocument()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
-    expect(await screen.findByText('Saved. Teams that use it get this when you choose Update in them.', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('Saved. Each team that uses it keeps its copy until you press Update in that team.', {}, { timeout: 5000 })).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/\bv\d/)
   })
 })

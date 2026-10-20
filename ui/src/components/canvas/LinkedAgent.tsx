@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowUpCircle, ExternalLink, Unlink } from 'lucide-react'
 
 import { fetchJobVersions, type JobSpec, type JobVersion, type SavedJob } from '../../lib/library/jobs'
-import { changedHere, type AgentLinkState } from '../../lib/library/link'
+import { changedBetween, changedHere, type AgentLinkState } from '../../lib/library/link'
 import type { AgentConfig } from '../../lib/team-file/types'
 
 export interface LinkedAgentProps {
@@ -43,6 +43,8 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
   const changed = pinned ? changedHere(agent, pinned.spec) : []
   const newer = (versions ?? []).filter((version) => version.version > link.version)
   const notes = newer.map((version) => version.note?.trim()).filter((note): note is string => Boolean(note))
+  // What Update brings, so pressing it is no guess.
+  const brings = pinned && link.job ? changedBetween(pinned.spec, link.job) : []
   const name = link.job?.name ?? id
   const putBack = pinned && link.job ? () => onApply({ ...pinned.spec, id, file: link.job!.file }, pinned.spec) : null
 
@@ -53,14 +55,14 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
       {!link.job && <p className="t-meta">It is no longer in My agents. This team keeps its copy.</p>}
       {link.behind && link.latest !== null && (
         <div className="linked-agent-update">
-          <p><b>Changed in My agents.</b>{notes.length > 0 ? ` ${notes.join(' · ')}` : ''}</p>
+          <p><b>{brings.length > 0 ? `Changed in My agents: its ${list(brings)}.` : 'Changed in My agents.'}</b>{notes.length > 0 ? ` ${notes.join(' · ')}` : ''}</p>
           <button type="button" className="btn btn-primary" disabled={readOnly} onClick={() => link.job && onApply(link.job, pinned?.spec ?? null)}><ArrowUpCircle size={13} aria-hidden="true" />Update</button>
         </div>
       )}
       {changed.length > 0 && (
         <div className="linked-agent-changed" role="status">
           <p>This team changed its {list(changed)} from the copy it was given.</p>
-          {putBack && <button type="button" className="btn" disabled={readOnly} onClick={putBack}>Put it back</button>}
+          {putBack && <button type="button" className="btn" disabled={readOnly} onClick={putBack}>Undo this team’s changes</button>}
         </div>
       )}
       <div className="linked-agent-acts">

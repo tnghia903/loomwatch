@@ -14,7 +14,7 @@ import { figureFor, freshFigure } from '../../lib/library/figures'
 import { JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobSpec, type SavedJob } from '../../lib/library/jobs'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import type { TeamKnowledge } from '../../lib/library/teamDraft'
-import { useAgentUses } from '../../lib/library/uses'
+import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LeaveGuard } from '../rail/CrewRail'
@@ -133,12 +133,15 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
   const changed = base ? draftChanged(draft, base) : true
   const problem = !draft.name.trim() ? 'Give it a name.' : !draft.instructions.trim() ? 'Write its instructions.' : null
+  // What leaving would lose: changes to a saved agent, or a new one changed since it began. The
+  // browser asks before the page goes (the brand, a menu item, closing it); the rail asks itself.
+  const unsaved = base ? changed : startedAs !== null && draftChanged(draft, startedAs)
   useEffect(() => {
-    if (!changed || !base) return
+    if (!unsaved) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault() }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [changed, base])
+  }, [unsaved])
 
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => { setDraft((current) => ({ ...current, [key]: value })); if (save.kind !== 'saving') setSave({ kind: 'idle' }) }
 
@@ -172,8 +175,6 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     }
   }
 
-  // What another agent's page would lose: changes to this one, or a new one changed since it began.
-  const unsaved = base ? changed : startedAs !== null && draftChanged(draft, startedAs)
   useEffect(() => {
     if (leaveRef) leaveRef.current = unsaved ? { save: doSave, problem } : null
   })
@@ -206,7 +207,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
   const name = draft.name.trim() || 'New agent'
   const saveButton = <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
-  const saveSaid = save.kind === 'saved' ? (save.bumped ? (inTeam ? `Saved, and ${inTeam.name} now uses it. Save the team to keep that.` : 'Saved. Teams that use it get this when you choose Update in them.') : 'Saved.')
+  const saveSaid = save.kind === 'saved' ? (save.bumped ? (inTeam ? `Saved, and ${inTeam.name} now uses it. Save the team to keep that.` : mine.length > 0 ? 'Saved. Each team that uses it keeps its copy until you press Update in that team.' : 'Saved.') : 'Saved.')
     : save.kind === 'error' ? <span className="agent-save-error">{save.message}</span> : null
   // Back to the team's agents: that is where an agent is added, or updated.
   const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ' to update it' : ''}</a>
@@ -234,7 +235,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
                 : <ul className="agent-uses">
                   {mine.map((use) => (
                     <li key={`${use.teamPath}#${use.agentId}`}>
-                      <a href={`/?path=${encodeURIComponent(use.teamPath)}`}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
+                      {/* To the team's Agents tab with this agent open, where its Update is. */}
+                      <a href={teamAgentHref(use)}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
                       <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>{version && use.version < version ? 'Update ready there' : 'Up to date'}</span>
                       {use.scheduled && <span className="t-meta">on a schedule</span>}
                     </li>
@@ -268,7 +270,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
         {bar.tabs && createPortal(<AgentViewTabs view={view} onView={showView} tour inBar />, bar.tabs)}
         <h1 className="visually-hidden">{name}</h1>
         {/* The way back to a team, and what a save did. Always there, so a save is announced. */}
-        <div className="agent-notices">{backToTeam}<span className="agent-save-state t-meta" role="status">{saveSaid}</span></div>
+        <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid}</span></div>
         {bench}
         {side}
       </div>
@@ -278,7 +280,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
       <AgentHead
-        above={inTeam ? <span className="agent-backs t-meta">From My agents. Saving here saves it there, and {inTeam.name} uses it at once.</span> : <span className="agent-backs">
+        above={inTeam ? <span className="agent-backs t-meta">From My agents. Saving changes it there too. Other teams keep their copy until you update them.</span> : <span className="agent-backs">
           <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
           {backToTeam}
         </span>}

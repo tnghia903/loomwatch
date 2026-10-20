@@ -178,21 +178,6 @@ interface WorkspaceProps {
 
 type AnyNode = Node
 
-function linesDiffer(a: string, b: string): number {
-  if (a === b) return 0
-  const left = a.split('\n')
-  const right = b.split('\n')
-  const rightSet = new Map<string, number>()
-  right.forEach((line) => rightSet.set(line, (rightSet.get(line) ?? 0) + 1))
-  let onlyLeft = 0
-  const leftSet = new Map<string, number>()
-  left.forEach((line) => leftSet.set(line, (leftSet.get(line) ?? 0) + 1))
-  for (const [line, count] of leftSet) onlyLeft += Math.max(0, count - (rightSet.get(line) ?? 0))
-  let onlyRight = 0
-  for (const [line, count] of rightSet) onlyRight += Math.max(0, count - (leftSet.get(line) ?? 0))
-  return Math.max(onlyLeft, onlyRight, 1)
-}
-
 /**
  * One stable key for "which memory is this", so a sidecar card and a `memory.inherits` entry that
  * name the same source are recognised as one thing.
@@ -2477,8 +2462,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Lineage as a thread: follow-ups indented under the run they follow, retries labelled as today.
   const leadAgent = projection.agents.find((agent) => agent.id === leadId)
   const lifecycleResult = phase === 'queued' || phase === 'starting' ? 'not started' : phase === 'running' ? (responseText ? 'streaming' : 'pending') : phase === 'succeeded' ? 'done' : phase
-  const loadedYaml = doc.loadedYaml ?? ''
-  const differ = doc.documentChipState === 'dirty' ? linesDiffer(loadedYaml, doc.yamlPreview) : 0
 
   const askNotice = askActions.notice && (
     <div role="status" className="ask-notice e2">
@@ -2748,7 +2731,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
+          <a className="delivery-brand" href="/" aria-label="LoomWatch, your teams" title="Your teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
           <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
@@ -2759,7 +2742,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); setRunPresentation('delivery'); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher
-            path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError} linesDiffer={differ}
+            path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError}
             entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames}
             isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768}
             onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()}

@@ -23,7 +23,8 @@ describe('LinkedAgent', () => {
   it('offers Update when the agent changed in My agents, with no version number', async () => {
     const onApply = vi.fn()
     const { container } = render(<LinkedAgent agent={agent('Check every story.')} link={{ job, version: 1, latest: 2, behind: true }} onApply={onApply} onUnlink={vi.fn()} />)
-    expect(await screen.findByText('Changed in My agents.')).toBeInTheDocument()
+    // What Update brings, from the copy it has to the newest: the instructions changed.
+    expect(await screen.findByText('Changed in My agents: its instructions.')).toBeInTheDocument()
     expect(screen.getByText(/Checks dates too/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Update' }))
     expect(onApply).toHaveBeenCalledWith(job, v1)
@@ -34,7 +35,7 @@ describe('LinkedAgent', () => {
     const onApply = vi.fn()
     const { container } = render(<LinkedAgent agent={agent('Check every story twice.')} link={{ job: { ...v1, id: 'reader', file: '.jobs/reader.yaml' }, version: 1, latest: 1, behind: false }} onApply={onApply} onUnlink={vi.fn()} />)
     expect(await screen.findByText(/This team changed its instructions from the copy it was given/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Put it back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Undo this team’s changes' }))
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ instructions: 'Check every story.' }), v1)
     expect(container.textContent).not.toMatch(/\bv\d/)
   })

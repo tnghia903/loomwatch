@@ -8,7 +8,7 @@ afterEach(() => { cleanup() })
 function renderSwitcher(overrides: Partial<DocumentSwitcherProps> = {}) {
   render(
     <DocumentSwitcher
-      path="/teams/trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null} linesDiffer={0}
+      path="/teams/trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null}
       entrypointProblem={null} documentProblems={[]} fieldProblemsByAgent={new Map()} agentNames={new Map()} isValid
       readOnlyReason={null} onSave={vi.fn()} onSaveCopy={vi.fn()} onReload={vi.fn()} onDiscard={vi.fn()}
       onSelectProblem={vi.fn()} problemsOpen={false} onProblemsOpenChange={vi.fn()}
@@ -39,14 +39,19 @@ it('offers no rename where the team cannot be edited', () => {
 })
 
 // ADR 0043: other teams, and a new one, are the team rail's; the chip's menu is this team's file.
-it('lists no other teams and no New team, and says how much a save would change', () => {
-  renderSwitcher({ saveState: 'dirty', linesDiffer: 3 })
+it('lists no other teams and no New team', () => {
+  renderSwitcher({ saveState: 'dirty' })
   fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
   const menu = screen.getByRole('dialog', { name: 'Team menu' })
   expect(within(menu).queryByRole('listbox')).not.toBeInTheDocument()
   expect(within(menu).queryByRole('textbox', { name: 'Filter teams' })).not.toBeInTheDocument()
   expect(within(menu).queryByText(/New team/)).not.toBeInTheDocument()
-  expect(menu).toHaveTextContent('3 lines changed since it was last saved.')
+})
+
+// A saved team says Saved under its name, as a saved agent does; its file is in the menu.
+it('says Saved under a saved team’s name', () => {
+  renderSwitcher()
+  expect(screen.getByRole('button', { name: 'Trip planner, Saved, open team menu' })).toBeInTheDocument()
 })
 
 it('says nothing is left to finish on a valid saved team', () => {

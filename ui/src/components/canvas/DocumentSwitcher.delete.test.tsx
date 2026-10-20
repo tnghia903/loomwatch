@@ -15,7 +15,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 function renderSwitcher(overrides: Partial<DocumentSwitcherProps> = {}) {
   render(
     <DocumentSwitcher
-      path="trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null} linesDiffer={0}
+      path="trip-planner.yaml" teamName="Trip planner" saveState="clean" saveError={null}
       entrypointProblem={null} documentProblems={[]} fieldProblemsByAgent={new Map()} agentNames={new Map()} isValid
       readOnlyReason={null} onSave={vi.fn()} onSaveCopy={vi.fn()} onReload={vi.fn()} onDiscard={vi.fn()}
       onSelectProblem={vi.fn()} problemsOpen={false} onProblemsOpenChange={vi.fn()}

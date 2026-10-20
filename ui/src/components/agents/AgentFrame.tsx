@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
@@ -22,6 +22,15 @@ export interface AgentFrameProps {
 
 export interface AgentBarSlots { chip: HTMLElement | null; tabs: HTMLElement | null }
 
+/** Where the team header hides its name chip and menu (prototype-workspace.css, prototype-parity.css). */
+const NARROW = '(max-width: 767px)'
+const subscribeNarrow = (changed: () => void) => {
+  const query = window.matchMedia?.(NARROW)
+  query?.addEventListener('change', changed)
+  return () => query?.removeEventListener('change', changed)
+}
+const isNarrow = () => window.matchMedia?.(NARROW).matches ?? false
+
 /**
  * An agent's page in the same frame as a team's: the rail down the side with its find button in
  * the header's row, then the header itself, built from the team header's own parts so the two
@@ -33,13 +42,18 @@ export interface AgentBarSlots { chip: HTMLElement | null; tabs: HTMLElement | n
 export function AgentFrame({ mark, tray, rail, chip, onSlots, children }: AgentFrameProps) {
   const { resolved, toggle } = useTheme()
   const chipSlot = useRef<HTMLDivElement>(null)
+  const narrowChipSlot = useRef<HTMLDivElement>(null)
   const tabsSlot = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => { onSlots({ chip: chipSlot.current, tabs: tabsSlot.current }) }, [onSlots])
+  // A narrow window has no room for the name chip or the menu in the header, and a team's page
+  // hides them there. An agent's Save lives in its chip, so here they move to a row under it.
+  const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false)
+  useLayoutEffect(() => { onSlots({ chip: narrow ? narrowChipSlot.current : chipSlot.current, tabs: tabsSlot.current }) }, [onSlots, narrow])
   const more = [
     { label: 'Skills…', run: () => window.location.assign('/skills') },
     { label: 'Quests…', run: () => window.location.assign('/quests') },
     { label: resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', run: toggle },
   ]
+  const menu = <WorkspaceMenu more={more} screen="agent" />
   return (
     <div className="lw-railed agent-frame-root" data-tour="agents">
       {rail}
@@ -47,14 +61,17 @@ export function AgentFrame({ mark, tray, rail, chip, onSlots, children }: AgentF
         <div className="lw-shell agent-bar">
           <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
             {/* The brand is the way home: every team is one click from the list of all teams. */}
-            <a className="delivery-brand" href="/" aria-label="LoomWatch — all teams" data-tour="your-teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={mark} /><LoomWordmark height={19} /></a>
-            <WorkspaceMenu more={more} screen="agent" />
-            {tray && <div className="needs-you-anchor">{tray}</div>}
+            <a className="delivery-brand" href="/" aria-label="LoomWatch, your teams" title="Your teams" data-tour="your-teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={mark} /><LoomWordmark height={19} /></a>
+            {!narrow && menu}
+            {!narrow && tray && <div className="needs-you-anchor">{tray}</div>}
             <div ref={tabsSlot} className="agent-bar-tabs" />
-            <div ref={chipSlot} className="agent-bar-chip">{chip}</div>
+            <div ref={chipSlot} className="agent-bar-chip">{!narrow && chip}</div>
           </div>
         </div>
-        <div className="agent-frame-body">{children}</div>
+        <div className="agent-frame-body">
+          {narrow && <div className="agent-bar-narrow"><div ref={narrowChipSlot} className="agent-narrow-chip">{chip}</div>{tray && <div className="needs-you-anchor">{tray}</div>}{menu}</div>}
+          {children}
+        </div>
       </div>
     </div>
   )

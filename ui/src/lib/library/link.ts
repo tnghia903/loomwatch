@@ -91,3 +91,24 @@ export function changedHere(agent: AgentConfig, pinned: JobSpec): string[] {
   if (SWITCHES.some((key) => Boolean(mine[key]) !== Boolean(theirs[key])) || !sameAllow(toolAllowOf(agent), pinned.toolAllow ?? {}, tools)) changed.push('what it may do without asking')
   return changed
 }
+
+/**
+ * What a newer copy of an agent in My agents changes from the copy a team has, in the panel's
+ * words, so Update says what it will bring. Its face is not here: a team never copies it.
+ */
+export function changedBetween(older: JobSpec, newer: JobSpec): string[] {
+  const same = (a: readonly string[] = [], b: readonly string[] = []) => [...a].sort().join('\n') === [...b].sort().join('\n')
+  const changed: string[] = []
+  if (older.name.trim() !== newer.name.trim()) changed.push('name')
+  if (older.instructions.trim() !== newer.instructions.trim()) changed.push('instructions')
+  if ((older.model ?? '') !== (newer.model ?? '') || (older.thinkingEffort ?? '') !== (newer.thinkingEffort ?? '')) changed.push('model')
+  if (!same(older.skills, newer.skills)) changed.push('skills')
+  if (!same(older.tools, newer.tools)) changed.push('tools')
+  if (!same((older.reads ?? []).map(readKey), (newer.reads ?? []).map(readKey))) changed.push('what it reads')
+  if ((older.doneWhen ?? []).join('\n') !== (newer.doneWhen ?? []).join('\n')) changed.push('done when')
+  const before = onlyOn(older.allow) ?? {}
+  const after = onlyOn(newer.allow) ?? {}
+  const tools = [...new Set([...(older.tools ?? []), ...(newer.tools ?? [])])]
+  if (SWITCHES.some((key) => Boolean(before[key]) !== Boolean(after[key])) || !sameAllow(older.toolAllow ?? {}, newer.toolAllow ?? {}, tools)) changed.push('what it may do without asking')
+  return changed
+}

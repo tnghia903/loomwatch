@@ -8,7 +8,7 @@
    COMPOSER — TNG89 §1. 720 × 56, bottom-centre, absorbs the mode pill.
    --------------------------------------------------------------------------- */
 .lw-composer {
-  width: min(var(--lw-composer-w), calc(100vw - 2 * var(--lw-panel-inset)));
+  width: min(var(--lw-composer-w), calc(100vw - var(--lw-rail-w, 0px) - 2 * var(--lw-panel-inset)));
   min-height: 56px; padding: 0;
   display: flex; align-items: stretch; overflow: visible;
 }
@@ -237,11 +237,11 @@
    centred 720 px would run under the open Library, so it centres in the space beside it. */
 @media (min-width: 768px) and (max-width: 1179px) {
   .lib-open .lw-composer {
-    --lw-beside: calc(100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset));
+    --lw-beside: calc(100vw - var(--lw-rail-w, 0px) - var(--lw-library-w) - 3 * var(--lw-panel-inset));
     width: min(var(--lw-composer-w), var(--lw-beside));
     left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + var(--lw-beside) / 2);
   }
-  .lib-open .lw-history { left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + (100vw - var(--lw-library-w) - 3 * var(--lw-panel-inset)) / 2); }
+  .lib-open .lw-history { left: calc(var(--lw-library-w) + 2 * var(--lw-panel-inset) + (100vw - var(--lw-rail-w, 0px) - var(--lw-library-w) - 3 * var(--lw-panel-inset)) / 2); }
   /* the view controls would sit under the composer's right end; stack them above it */
   .lib-open .lw-viewctl { bottom: calc(var(--lw-panel-inset) + 68px); }
   .lib-open .lw-legend { display: none; }

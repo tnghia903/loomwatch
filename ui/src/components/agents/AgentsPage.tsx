@@ -99,7 +99,7 @@ function AgentRail({ route, records, leave }: { route: Exclude<AgentsRoute, { ki
     current: route.kind === 'agent' && route.id === job.id,
     art: <FigureStill className="crew-rail-figure" figure={figureFor(job.id, job.figure)} alt="" width={46} height={46} decoding="async" />,
   }))
-  return <CrewRail label="My agents" items={items} find="Find an agent" add={{ label: 'New agent', href: '/agents/new', current: route.kind === 'new' }} go={(href) => navigate(href)} leave={leave} />
+  return <CrewRail label="My agents" items={items} find="Find an agent" none="No agents yet." add={{ label: 'New agent', href: '/agents/new', current: route.kind === 'new' }} go={(href) => navigate(href)} leave={leave} />
 }
 
 /**

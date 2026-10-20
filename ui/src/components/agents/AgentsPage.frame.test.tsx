@@ -39,7 +39,9 @@ describe('An agent’s page in the team page’s frame', () => {
     const chip = await screen.findByRole('button', { name: /^Writer, Saved, open agent menu$/ }, { timeout: 5000 })
     const header = chip.closest('.workspace-chrome') as HTMLElement
     expect(header).not.toBeNull()
-    expect(within(header).getByRole('link', { name: 'LoomWatch — all teams' })).toHaveAttribute('href', '/')
+    // The brand is the way to your teams, and says so on hover.
+    expect(within(header).getByRole('link', { name: 'LoomWatch, your teams' })).toHaveAttribute('href', '/')
+    expect(within(header).getByRole('link', { name: 'LoomWatch, your teams' })).toHaveAttribute('title', 'Your teams')
     const tabs = within(header).getByRole('navigation', { name: 'Agent view' })
     expect(within(tabs).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(header).getByRole('button', { name: 'All clear' })).toBeInTheDocument()
@@ -95,6 +97,22 @@ describe('An agent’s page in the team page’s frame', () => {
     fireEvent.click(await within(rail).findByRole('link', { name: 'Editor' }, { timeout: 5000 }))
     expect(await screen.findByRole('button', { name: /^Editor, Saved/ }, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'My agents' })).toBe(rail)
+  })
+
+  // A team's header hides its name chip and menu in a narrow window; an agent's Save is in its chip,
+  // so on an agent's page they move to a row under the header instead of going away.
+  it('keeps the name chip, Save and the menu in a narrow window', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 767px)', media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    window.history.replaceState({}, '', '/agents/writer')
+    page()
+    fireEvent.change(await screen.findByRole('textbox', { name: /Instructions/ }, { timeout: 5000 }), { target: { value: 'Write a short draft with a title.' } })
+    const chip = screen.getByRole('button', { name: /^Writer, Unsaved changes/ }).closest('.lw-chip') as HTMLElement
+    expect(chip.closest('.workspace-chrome')).toBeNull()
+    expect(chip.closest('.agent-bar-narrow')).not.toBeNull()
+    expect(within(chip).getByRole('button', { name: 'Save' })).toBeEnabled()
+    expect(screen.getAllByRole('button', { name: 'Menu' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Menu' }).closest('.agent-bar-narrow')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'All clear' }).closest('.agent-bar-narrow')).not.toBeNull()
   })
 
   it('starts a new agent in the same frame, and the list keeps Home’s header', async () => {
