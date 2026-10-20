@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { Moon, Plus, Sun, UserRound } from 'lucide-react'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
@@ -8,22 +8,27 @@ import { figureFor } from '../../lib/library/figures'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
+import { agentPresence } from '../../lib/rail/presence'
+import type { RunRecord } from '../../lib/runs/client'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
 import { QuestsLink } from '../quests/QuestsLink'
+import { CrewRail, type LeaveGuard } from '../rail/CrewRail'
 import { SkillsLink } from '../skills/SkillsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { KnowYou } from '../you/KnowYou'
 import { AgentBadge } from './AgentBadge'
 import { AgentBuilder } from './AgentBuilder'
 import { FigureStill } from './FigureStill'
-import { navigate, useAgentsRoute } from './route'
+import { navigate, useAgentsRoute, type AgentsRoute } from './route'
 
 export interface AgentsPageProps {
   skills: DetectedCapability[]
   skillsLoading: boolean
   /** What the header's mark says, from the needs-you poll. */
   mark?: LoomMarkState
+  /** Every run the daemon knows, from the same poll: what each agent in the rail is doing. */
+  records?: readonly RunRecord[]
 }
 
 /**
@@ -34,6 +39,18 @@ export interface AgentsPageProps {
 export function AgentsPage(props: AgentsPageProps) {
   const route = useAgentsRoute()
   const { resolved, toggle } = useTheme()
+  const { records = NO_RUNS, ...builder } = props
+  // What leaving the agent on screen would lose, kept by its builder and read by the rail.
+  const leave = useRef<LeaveGuard | null>(null)
+  const main = (
+    <main className="home-main agents-main">
+      {route.kind === 'list'
+        ? <AgentsList />
+        : route.kind === 'new' && !route.from
+          ? <AgentTemplates team={route.team} />
+          : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} leaveRef={leave} {...builder} />}
+    </main>
+  )
   return (
     <div className="lw-home lw-agents" data-tour="agents">
       <div className="ground" aria-hidden="true" />
@@ -46,15 +63,32 @@ export function AgentsPage(props: AgentsPageProps) {
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
       </header>
-      <main className="home-main agents-main">
-        {route.kind === 'list'
-          ? <AgentsList />
-          : route.kind === 'new' && !route.from
-            ? <AgentTemplates team={route.team} />
-            : <AgentBuilder key={route.kind === 'agent' ? route.id : `new-${route.from ?? ''}`} id={route.kind === 'agent' ? route.id : null} startFrom={route.kind === 'new' ? route.from : null} cameFrom={route.team} view={route.view} {...props} />}
-      </main>
+      {/* The list shows every agent already; an agent's page has the rest of them beside it. */}
+      {route.kind === 'list' ? main : <div className="agents-railed"><AgentRail route={route} records={records} leave={() => leave.current} />{main}</div>}
     </div>
   )
+}
+
+const NO_RUNS: readonly RunRecord[] = []
+
+/**
+ * My agents down the side of an agent's page: one click is another agent, on the same tab, so
+ * moving between agents never goes back through the list. Each glows what it is doing in its own
+ * chat, so one finishing, or waiting for you, is seen while you work with another.
+ */
+function AgentRail({ route, records, leave }: { route: Exclude<AgentsRoute, { kind: 'list' }>; records: readonly RunRecord[]; leave: () => LeaveGuard | null }) {
+  const { jobs } = useSavedJobs()
+  const tab = route.view === 'chat' ? '?view=chat' : ''
+  const items = jobs.map((job) => ({
+    key: job.id,
+    href: `/agents/${encodeURIComponent(job.id)}${tab}`,
+    name: job.name,
+    detail: job.does || undefined,
+    presence: agentPresence(records, job.id),
+    current: route.kind === 'agent' && route.id === job.id,
+    art: <FigureStill className="crew-rail-figure" figure={figureFor(job.id, job.figure)} alt="" width={46} height={46} decoding="async" />,
+  }))
+  return <CrewRail label="My agents" items={items} find="Find an agent" add={{ label: 'New agent', href: '/agents/new', current: route.kind === 'new' }} go={(href) => navigate(href)} leave={leave} />
 }
 
 /**

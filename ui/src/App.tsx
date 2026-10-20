@@ -79,14 +79,14 @@ function Editor({ initialRunId }: { initialRunId: string | null }) {
 /** Your agents (`/agents`): build and try one agent at a time, then use it in any team. */
 function Agents() {
   const capabilities = useCapabilities()
-  // The same poll as the workspace's, so the header's mark and the tab icon say the same here.
-  const { mark } = useNeedsYou()
+  // The same poll as the workspace's, so the header's mark, the tab icon and the rail's figures say the same here.
+  const { mark, records } = useNeedsYou()
   return (
     <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading your agents…</p>}>
       {/* The guide starts with building an agent, here, then carries on at Home and in a team. */}
       <Guide />
       <Feedback />
-      <AgentsPage skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} mark={mark} />
+      <AgentsPage skills={capabilities.inventory.skills} skillsLoading={capabilities.loading} mark={mark} records={records} />
     </Suspense>
   )
 }

@@ -1,0 +1,127 @@
+/* The crew rail (components/rail/CrewRail.tsx): every agent you have, or every team, as figures
+   down the side of its page, and along the top on a phone. What each is doing is its figure's
+   glow, as in the team chat (team-chat.css): gold waiting for you, blue working, red failed. A pose
+   says it too, so colour is never alone: a waiting figure leans in, a working one breathes, a
+   failed one greys. The page you are on has the gold line. */
+
+.crew-rail {
+  position: relative; z-index: 45; flex: none; box-sizing: border-box;
+  width: 72px; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+}
+.crew-rail-find {
+  flex: none; width: 40px; height: 40px; display: grid; place-items: center;
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--color-ink-3); cursor: pointer;
+}
+.crew-rail-find:hover, .crew-rail-find[aria-expanded='true'] { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 7%, transparent); }
+.crew-rail-scroll { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; overflow: hidden auto; scrollbar-width: none; }
+.crew-rail-scroll::-webkit-scrollbar { display: none; }
+.crew-rail-list { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.crew-rail-who, .crew-rail-add {
+  position: relative; display: grid; place-items: center; box-sizing: border-box;
+  width: 56px; height: 56px; border-radius: var(--r-md); text-decoration: none; color: var(--color-ink-3);
+}
+.crew-rail-who[aria-current='page'] { background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
+.crew-rail-add { width: 44px; height: 44px; margin: 6px; border: 1px dashed color-mix(in srgb, var(--color-ink) 28%, transparent); background: transparent; cursor: pointer; }
+.crew-rail-add:hover { color: var(--color-ink); border-color: color-mix(in srgb, var(--color-ink) 50%, transparent); }
+.crew-rail-add[aria-current='page'] { color: var(--color-ink); border-style: solid; }
+.crew-rail :is(.crew-rail-who, .crew-rail-add, .crew-rail-find):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+
+/* The gold line beside the page you are on: a line, not a fill. */
+.crew-rail-mark { position: absolute; pointer-events: none; }
+.crew-rail-mark::before { content: ''; position: absolute; left: -8px; top: 14px; bottom: 14px; width: 3px; border-radius: 3px; background: var(--color-accent); }
+
+/* A figure: the agent's own, or a team's crew. */
+.crew-rail-art { display: grid; place-items: center; width: 48px; height: 48px; }
+.crew-rail-figure { width: 46px; height: 46px; object-fit: contain; -webkit-user-drag: none; }
+.crew-team { position: relative; display: block; width: 48px; height: 48px; }
+.crew-team > * { position: absolute; object-fit: contain; -webkit-user-drag: none; }
+.crew-team.n1 > :nth-child(1) { left: 1px; top: 1px; width: 46px; height: 46px; }
+.crew-team.n2 > :nth-child(1) { left: -3px; top: 1px; width: 34px; height: 34px; }
+.crew-team.n2 > :nth-child(2) { right: -3px; bottom: -1px; width: 34px; height: 34px; }
+.crew-team.n3 > :nth-child(1) { left: -2px; top: -1px; width: 29px; height: 29px; }
+.crew-team.n3 > :nth-child(2) { right: -2px; top: -1px; width: 29px; height: 29px; }
+.crew-team.n3 > :nth-child(3) { left: 8px; bottom: -3px; width: 32px; height: 32px; }
+.crew-team.none { width: 34px; height: 34px; border: 1px dashed color-mix(in srgb, var(--color-ink) 28%, transparent); border-radius: var(--r-md); }
+
+/* What it is doing. */
+:is(.crew-rail-who, .crew-rail-hit) { --glow: transparent; }
+:is(.crew-rail-who, .crew-rail-hit).waiting { --glow: var(--color-accent); }
+:is(.crew-rail-who, .crew-rail-hit).working { --glow: var(--color-live); }
+:is(.crew-rail-who, .crew-rail-hit).failed { --glow: var(--color-alert); }
+:is(.crew-rail-who, .crew-rail-hit):is(.waiting, .working, .failed) .crew-rail-art { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 4px var(--glow)); }
+:is(.crew-rail-who, .crew-rail-hit).waiting .crew-rail-art { rotate: -8deg; }
+:is(.crew-rail-who, .crew-rail-hit).failed .crew-rail-art { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 4px var(--glow)); }
+
+.crew-rail-tip {
+  position: fixed; z-index: 120; pointer-events: none; white-space: nowrap;
+  padding: 5px 9px; border-radius: var(--r-sm); border: 1px solid var(--color-hairline);
+  background: var(--color-panel-solid); box-shadow: var(--e2-shadow);
+  font: 500 12.5px/1.3 var(--font-sans); color: var(--color-ink);
+}
+.crew-rail-tip.beside { translate: 0 -50%; }
+
+/* Unsaved changes, and the find box: beside the rail. */
+.crew-rail-float { position: fixed; z-index: 110; }
+.crew-rail-leave {
+  flex-wrap: wrap; max-width: min(360px, calc(100vw - 16px)); box-sizing: border-box;
+  border-radius: var(--r-md); border: 1px solid var(--color-hairline); background: var(--color-panel-solid); box-shadow: var(--e2-shadow);
+}
+.crew-rail-findbox.pop { position: fixed; width: min(360px, calc(100vw - 16px)); }
+.crew-rail-found { list-style: none; margin: 0; padding: var(--sp-2); max-height: min(420px, 60vh); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.crew-rail-hit {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; flex-shrink: 0;
+  padding: 4px var(--sp-2); border-radius: var(--r-sm); cursor: pointer; color: var(--color-ink-2);
+}
+.crew-rail-hit.active { background: color-mix(in srgb, var(--color-ink) 7%, transparent); color: var(--color-ink); }
+.crew-rail-hit[aria-current='page'] { box-shadow: inset 3px 0 0 var(--color-accent); }
+.crew-rail-hit .crew-rail-art { width: 40px; height: 40px; }
+.crew-rail-hit .crew-rail-figure { width: 38px; height: 38px; }
+.crew-rail-hit .crew-team { scale: .84; }
+.crew-rail-hit-text { display: flex; flex-direction: column; min-width: 0; }
+.crew-rail-hit-text b { font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crew-rail-hit-text em { font-style: normal; font-size: 12.5px; line-height: 1.35; color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crew-rail-hit-state { font-size: 12px; color: var(--color-ink-3); white-space: nowrap; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .crew-rail-art { transition: translate var(--t-quick) var(--ease-out), scale var(--t-quick) var(--ease-out), rotate var(--t-quick) var(--ease-out); }
+  .crew-rail-who:hover .crew-rail-art { translate: 0 -2px; scale: 1.06; }
+  .crew-rail-who:active .crew-rail-art { scale: .94; }
+  /* The one you just picked hops into place, and the gold line slides to it. */
+  .crew-rail-who[aria-current='page'] .crew-rail-art { animation: crew-rail-hop 460ms var(--ease-out) 1; }
+  .crew-rail-mark { transition: top var(--t-quick) var(--ease-out), left var(--t-quick) var(--ease-out); }
+  .crew-rail-who.working .crew-rail-art { animation: crew-rail-breathe var(--t-flow) ease-in-out infinite; }
+}
+@keyframes crew-rail-hop { 0% { translate: 0 0; } 35% { translate: 0 -7px; } 70% { translate: 0 1px; } 100% { translate: 0 0; } }
+@keyframes crew-rail-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 7px var(--glow)); } }
+
+/* My agents: the rail stands at the left of an agent's page and stays as the page scrolls. */
+.agents-railed { position: relative; flex: 1; display: flex; align-items: flex-start; min-width: 0; }
+.agents-railed > .crew-rail { position: sticky; top: 0; max-height: 100dvh; }
+.agents-railed > .agents-main { flex: 1 1 auto; width: auto; min-width: 0; max-width: 1180px; padding-left: var(--sp-5); }
+.agents-railed > .agents-main:has(.agent-builder) { max-width: 1440px; }
+
+/* A team: the rail runs the height of the window, its find button in the header's row. */
+.lw-railed { display: flex; width: 100%; height: 100%; }
+.lw-railed > .lw-shell { flex: 1; min-width: 0; }
+.lw-railed > .crew-rail { padding-top: 0; border-right: 1px solid var(--color-hairline); background: var(--color-ground); }
+.lw-railed > .crew-rail > .crew-rail-find { width: 100%; height: 64px; border-radius: 0; border-bottom: 1px solid var(--color-hairline); }
+
+/* On a phone the rail lies along the top, and the gold line runs under the page you are on. */
+@media (max-width: 720px) {
+  .crew-rail { width: 100%; flex-direction: row; padding: 4px var(--sp-3); gap: var(--sp-1); }
+  .crew-rail-scroll { overflow: auto hidden; }
+  .crew-rail-list { flex-direction: row; padding: 0 0 6px; }
+  .crew-rail-who { width: 48px; height: 48px; }
+  .crew-rail-art { width: 42px; height: 42px; }
+  .crew-rail-figure { width: 40px; height: 40px; }
+  .crew-rail .crew-team { scale: .88; }
+  .crew-rail-add { width: 38px; height: 38px; }
+  .crew-rail-mark::before { left: 12px; right: 12px; top: auto; bottom: -5px; width: auto; height: 3px; }
+  .agents-railed { flex-direction: column; align-items: stretch; }
+  .agents-railed > .crew-rail { max-height: none; z-index: 5; background: var(--color-ground); border-bottom: 1px solid var(--color-hairline); }
+  .agents-railed > .agents-main, .agents-railed > .agents-main:has(.agent-builder) { width: 100%; max-width: none; margin: 0; padding-left: var(--sp-4); }
+  .lw-railed { flex-direction: column; }
+  .lw-railed > .crew-rail { border-right: 0; border-bottom: 1px solid var(--color-hairline); }
+  .lw-railed > .crew-rail > .crew-rail-find { width: 40px; height: 40px; border-radius: var(--r-md); border-bottom: 0; }
+}

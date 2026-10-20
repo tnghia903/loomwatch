@@ -221,7 +221,8 @@ with a lead that hands out work and asks its teammates questions as it goes.
 Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
 **Chat** tab, then add it to any team. A new job makes a new version, and teams keep theirs until
 you choose **Update**. Tell them about you once, in **About you**, and every agent fits its answers
-to you.
+to you. Your agents stand down the side of each agent's page, and your teams down the side of each
+team's: one click moves to another, and each glows while it works or waits for you.
 
 </td>
 <td width="33%" valign="top">
@@ -1128,7 +1129,8 @@ copy `loomwatch.db` while it is stopped.
 <details>
 <summary>Deleting and restoring a team</summary>
 
-To delete a team, choose **Delete team…** from its **…** menu on Home or from the team switcher.
+To delete a team, choose **Delete team…** from its **…** menu on Home, or click the team's name at
+the top of its page.
 LoomWatch refuses while the team is running, or while another team reads its memory. Nothing is
 erased. The team file, its layout, its own notes folder (`<team>.brief`) and the folder of files
 added to its agents with **Add file…** (`<team>.files`) move to `.trash/<date>-<team>/` inside your

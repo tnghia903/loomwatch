@@ -1,8 +1,7 @@
-import { ChevronDown, Plus } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { baseName, dirName, relativeUnder, splitPath } from '../../lib/files/paths'
-import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from '../../lib/team-file/client'
+import { baseName, dirName } from '../../lib/files/paths'
 import { reviewProblems, shortenDirectory, type ReviewProblem } from '../../lib/team-file/problems'
 import type { EntrypointProblem, SaveState } from '../../lib/team-file/useTeamDocument'
 import type { AgentFieldProblems, DocumentProblem } from '../../lib/team-file/validation'
@@ -29,7 +28,6 @@ export interface DocumentSwitcherProps {
   onSaveCopy: () => void
   onReload: () => void
   onDiscard: () => void
-  onNewTeam: () => void
   /** Rename the open team; absent while it cannot be edited. */
   onRename?: (name: string) => void
   /** Ask to delete the open team (the confirmation is the caller's); absent while it has no file. */
@@ -41,15 +39,11 @@ export interface DocumentSwitcherProps {
 
 
 // UX_REDESIGN §9.1: the canvas is a view over a file and the file is the truth. This chip is
-// the only place file state is expressed, and the only way to reach another file.
+// the only place file state is expressed; its menu is what is done to the file. Other teams, and a
+// new one, are reached from the team rail beside the page (ADR 0043: one control per action).
 export function DocumentSwitcher(props: DocumentSwitcherProps) {
-  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onNewTeam, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
+  const { path, teamName = null, saveState, saveError, linesDiffer, entrypointProblem, documentProblems, fieldProblemsByAgent, agentNames, isValid, readOnlyReason, fileGone = false, editingDisabled = false, onSave, onSaveCopy, onReload, onDiscard, onRename, onDelete, onSelectProblem, problemsOpen, onProblemsOpenChange } = props
   const [switcherOpen, setSwitcherOpen] = useState(false)
-  const [files, setFiles] = useState<TeamSummary[] | null>(null)
-  const [root, setRoot] = useState<string | null>(null)
-  const [filesError, setFilesError] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const chipRef = useRef<HTMLDivElement>(null)
@@ -60,17 +54,9 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   const scheduleErrors = errors.filter((problem) => problem.yamlPath?.[0] === 'schedule')
 
   useEffect(() => {
-    if (!switcherOpen) return
-    let cancelled = false
-    fetchTeamsDiscovery().then((discovery) => { if (!cancelled) { setFiles(teamSummaries(discovery)); setRoot(discovery.root); setFilesError(null) } })
-      .catch((error: unknown) => { if (!cancelled) setFilesError(error instanceof Error ? error.message : String(error)) })
-    return () => { cancelled = true }
-  }, [switcherOpen])
-
-  useEffect(() => {
     if (!switcherOpen && !problemsOpen) return
     function onPointerDown(event: MouseEvent) {
-      if (chipRef.current && !chipRef.current.contains(event.target as Node)) { setSwitcherOpen(false); onProblemsOpenChange(false); setPendingSwitch(null); setDiscardConfirm(false); setRenaming(null) }
+      if (chipRef.current && !chipRef.current.contains(event.target as Node)) { setSwitcherOpen(false); onProblemsOpenChange(false); setDiscardConfirm(false); setRenaming(null) }
     }
     window.addEventListener('mousedown', onPointerDown)
     return () => window.removeEventListener('mousedown', onPointerDown)
@@ -105,24 +91,11 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
   else if (editingDisabled) { l2 = 'Editing needs a wider window' }
 
   const ledger = saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'failed' : ''
-  const needle = query.toLowerCase()
-  const matches = (files ?? []).filter((team) => teamDisplayName(team).toLowerCase().includes(needle) || team.path.toLowerCase().includes(needle))
-  // Two teams may share a name; their files never do, so a shared name shows its file beside it.
-  const nameCounts = new Map<string, number>()
-  for (const team of files ?? []) nameCounts.set(teamDisplayName(team), (nameCounts.get(teamDisplayName(team)) ?? 0) + 1)
-  // The list names files under the root; the open team has its full path, `C:\…` on Windows.
-  const openUnderRoot = root && path ? relativeUnder(root, path) : null
-  const isCurrent = (file: string) => file === path || (openUnderRoot !== null && splitPath(file).join('/') === openUnderRoot)
-
-  function switchTo(file: string) {
-    if (dirty && saveState !== 'new') { setPendingSwitch(file); return }
-    window.location.assign(`/?path=${encodeURIComponent(file)}`)
-  }
 
   return (
     <div ref={chipRef} style={{ position: 'relative', pointerEvents: 'auto' }}>
       <div className={`e1 lw-chip ${ledger}`} style={{ position: 'relative' }} title={readOnlyReason ?? saveError ?? undefined}>
-        <button type="button" className="chip-open" onClick={() => { setSwitcherOpen((open) => !open); onProblemsOpenChange(false) }} aria-controls="switcher-pop" aria-expanded={switcherOpen} aria-label={`${l1}, ${l2}, open team switcher`} title={`${l1} · ${l2}`}>
+        <button type="button" className="chip-open" onClick={() => { setSwitcherOpen((open) => !open); onProblemsOpenChange(false) }} aria-controls="switcher-pop" aria-expanded={switcherOpen} aria-label={`${l1}, ${l2}, open team menu`} title={`${l1} · ${l2}`}>
           <ChipDot state={state} />
           <span className="chip-text">
             <span className="chip-l1 t-body-m">{l1}</span>
@@ -135,47 +108,7 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
       </div>
 
       {switcherOpen && (
-        <div id="switcher-pop" className="pop e2" role="dialog" aria-label="Team switcher" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: '50%', transform: 'translateX(-50%)', width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') setSwitcherOpen(false) }}>
-          <div className="pop-search">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4.3-4.3" /></svg>
-            <input autoFocus placeholder="Filter teams" aria-label="Filter teams" value={query} onChange={(event) => setQuery(event.target.value)} />
-          </div>
-          <div className="pop-list" role="listbox" aria-label="Your teams">
-            {files === null && !filesError && <p className="pop-empty t-meta">Finding teams…</p>}
-            {filesError && <p className="pop-empty t-meta" role="alert" style={{ color: 'var(--color-alert)' }}>{filesError}</p>}
-            {files !== null && matches.length === 0 && <p className="pop-empty t-meta">No team matches.</p>}
-            {matches.map((team) => {
-              const file = team.path
-              const current = isCurrent(file)
-              return (
-                <div key={file}>
-                  <button type="button" role="option" aria-selected={current} className={`pop-row ${current ? 'current' : ''}`} onClick={() => !current && switchTo(file)}>
-                    {current ? <ChipDot state={state} /> : <span style={{ width: 12 }} />}
-                    <span className={`name ${current ? 't-body-m' : 't-body'}`} title={file}>{current && teamName ? teamName : teamDisplayName(team)}</span>
-                    {current && dirty
-                      ? <span className="aside t-mono-sm">{linesDiffer > 0 ? `${linesDiffer} differ` : 'unsaved'}</span>
-                      : (nameCounts.get(teamDisplayName(team)) ?? 0) > 1 && <span className="aside t-mono-sm">{file}</span>}
-                  </button>
-                  {pendingSwitch === file && (
-                    <div className="pop-inline t-meta" role="alertdialog" aria-label="Unsaved changes">
-                      <span>Unsaved changes.</span>
-                      <button type="button" className="btn btn-primary" onClick={() => { onSave(); setPendingSwitch(null) }} disabled={!isValid}>Save first</button>
-                      <button type="button" className="btn btn-danger" onClick={() => window.location.assign(`/?path=${encodeURIComponent(file)}`)}>Discard</button>
-                      <button type="button" className="btn" onClick={() => setPendingSwitch(null)}>Cancel</button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <div className="pop-sep" />
-          <div className="pop-list">
-            <button type="button" className="pop-row" onClick={() => { setSwitcherOpen(false); onNewTeam() }}>
-              <Plus size={15} aria-hidden="true" />
-              <span className="name t-body">New team…</span><span className="kbd t-mono-sm">{keys('⌘N')}</span>
-            </button>
-          </div>
-          <div className="pop-sep" />
+        <div id="switcher-pop" className="pop e2" role="dialog" aria-label="Team menu" style={{ top: 'calc(var(--lw-chip-h) + 8px)', left: '50%', transform: 'translateX(-50%)', width: 'min(392px, calc(100vw - 32px))' }} onKeyDown={(event) => { if (event.key === 'Escape') setSwitcherOpen(false) }}>
           {renaming !== null && onRename && (
             <form className="pop-inline t-meta" aria-label="Rename team" onSubmit={(event) => { event.preventDefault(); onRename(renaming); setRenaming(null) }}>
               <input className="input" autoFocus aria-label="Team name" value={renaming} onChange={(event) => setRenaming(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setRenaming(null) } }} style={{ flex: 1, minWidth: 0 }} />
@@ -195,6 +128,8 @@ export function DocumentSwitcher(props: DocumentSwitcherProps) {
                 ? <button type="button" className="link alert" onClick={() => discardConfirm ? (onDiscard(), setDiscardConfirm(false), setSwitcherOpen(false)) : setDiscardConfirm(true)}>{discardConfirm ? 'Discard changes?' : 'Discard'}</button>
                 : <button type="button" className="link" onClick={onReload} disabled={saveState === 'new'}>Reload from disk</button>}
             </span>
+            {/* How much a save or a discard would change: the list of teams used to say it on this one's row. */}
+            {dirty && saveState !== 'new' && linesDiffer > 0 && <span className="pop-note t-meta">{linesDiffer} line{linesDiffer === 1 ? '' : 's'} changed since it was last saved.</span>}
             <span className="pop-note t-meta">Saves keep your comments and key order.</span>
           </div>
         </div>

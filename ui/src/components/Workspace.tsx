@@ -141,6 +141,9 @@ import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-fi
 import { filesTouched } from '../lib/files/fileRefs'
 import type { AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
+import type { TeamView as TeamTab } from '../lib/team-file/useTeamList'
+import type { LeaveGuard } from './rail/CrewRail'
+import { TeamRail } from './rail/TeamRail'
 import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
 
 // The Ask panel is code-split like the Markdown stack: most visits never open it.
@@ -2283,6 +2286,19 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // ---- commands + keys ----------------------------------------------------------------------
   // With a team open the dialog belongs to the workspace; on Home, Home owns it.
   const openNewTeam = useCallback(() => { if (doc.path) setNewTeamSheet(true); else window.dispatchEvent(new Event('loomwatch:new-team')) }, [doc.path])
+  // The team rail: this team as it is on screen, and leaving it for another. Changes not saved are
+  // saved or dropped first (the rail asks), and the page moves once they are, so the browser's own
+  // "Leave site?" prompt never asks a second time.
+  const railAgents = useMemo(() => doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => node.data.agent), [doc.nodes])
+  const railTeam = useMemo(() => (doc.path ? { path: doc.path, name: doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, ''), agents: railAgents } : null), [doc.path, doc.teamName, railAgents])
+  const railTab: TeamTab = runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'
+  const unsavedTeam = ['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)
+  const [leavingTo, setLeavingTo] = useState<string | null>(null)
+  useEffect(() => { if (leavingTo && !unsavedTeam) window.location.assign(leavingTo) }, [leavingTo, unsavedTeam])
+  const { save: saveTeam, reloadFromDisk } = doc
+  const leaveTeam = useCallback((): LeaveGuard | null => (unsavedTeam
+    ? { save: saveTeam, problem: doc.isValid ? null : 'It has problems to fix before it can be saved.', discard: async () => { await reloadFromDisk() } }
+    : null), [unsavedTeam, saveTeam, reloadFromDisk, doc.isValid])
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
     { label: 'Ask LoomWatch…', shortcut: '⌘J', icon: MessageSquareText, run: () => askFor() },
@@ -2514,6 +2530,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     <SavedAgentsContext.Provider value={savedJobs}>
     <TeamFiguresContext.Provider value={agentFigures}>
     <CanvasActionsContext.Provider value={canvasActions}>
+      <div className="lw-railed">
+      {railTeam && <TeamRail open={railTeam} runs={needsYou.records} savedJobs={savedJobs} view={railTab} go={setLeavingTo} onNewTeam={openNewTeam} leave={leaveTeam} />}
       <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {/* ADR 0040: an agent paused on a request its switches do not cover, waiting for you. */}
         {runView && !deliveryShown && record && (record.permissionRequests?.length ?? 0) > 0 && (
@@ -2745,7 +2763,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             entrypointProblem={doc.entrypointProblem} documentProblems={doc.documentProblems} fieldProblemsByAgent={doc.fieldProblemsByAgent} agentNames={nodeNames}
             isValid={doc.isValid} readOnlyReason={doc.readOnlyReason} fileGone={doc.fileGone} editingDisabled={windowWidth < 768}
             onSave={() => void doc.save()} onSaveCopy={() => setSaveCopyOpen(true)} onReload={() => void doc.reloadFromDisk()} onDiscard={() => void doc.reloadFromDisk()}
-            onNewTeam={openNewTeam} onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
+            onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
             onSelectProblem={selectProblem} problemsOpen={problemsOpen} onProblemsOpenChange={setProblemsOpen}
           />
           {runView && runPresentation === 'trace' && (
@@ -3013,6 +3031,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />
         )}
+      </div>
       </div>
     </CanvasActionsContext.Provider>
     </TeamFiguresContext.Provider>

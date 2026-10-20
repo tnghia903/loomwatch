@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { ArrowLeft, ExternalLink, History, MessagesSquare, Trash2, Wrench } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
@@ -16,6 +16,7 @@ import type { TeamKnowledge } from '../../lib/library/teamDraft'
 import { useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
 import type { RunRecord } from '../../lib/runs/client'
+import type { LeaveGuard } from '../rail/CrewRail'
 import { SegmentThumb } from '../ui/SegmentThumb'
 import { AgentBadge } from './AgentBadge'
 import { useBenchFile } from '../../lib/files/useBenchFile'
@@ -44,6 +45,8 @@ export interface AgentBuilderProps {
    * the same (`knowledge`); its tools are the version's, like its skills.
    */
   inTeam?: { name: string; onSaved: (job: SavedJob, previous: Pick<JobSpec, 'reads'> | null) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
+  /** Kept up to date with what moving to another agent would lose (the rail asks it first). */
+  leaveRef?: MutableRefObject<LeaveGuard | null>
 }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; version: number; bumped: boolean } | { kind: 'error'; message: string }
@@ -60,7 +63,7 @@ type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; versio
  * Inside a team (`inTeam`) it has the same two tabs, and its Chat is the one it has in Your agents:
  * talking to one agent on its own is a different thing from giving the team work in the team's chat.
  */
-export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam }: AgentBuilderProps) {
+export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, cameFrom = null, view: asked = 'build', inTeam, leaveRef }: AgentBuilderProps) {
   // Inside a team the address is the team's, so the page keeps which tab is open.
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
@@ -82,6 +85,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   // Start once per agent: from the saved version, from a built-in job, or blank on the default model.
   // Later reloads of the list (every save anywhere) must never overwrite edits on screen.
   const [startedFor, setStartedFor] = useState<string | null>(null)
+  // What a new agent started as, so moving away from it asks only once something was changed.
+  const [startedAs, setStartedAs] = useState<AgentDraft | null>(null)
   const startKey = id ?? `new:${startFrom ?? ''}`
   if (startedFor !== startKey) {
     if (id && saved) {
@@ -96,8 +101,10 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       const from = preset ? draftFromPreset(preset) : blankDraft()
       // A new agent wears a figure none of your agents wears yet, so it is easy to tell apart.
       const worn = jobs.map((job) => figureFor(job.id, job.figure))
+      const started = { ...from, figure: freshFigure(`${startKey}:${jobs.length}`, worn) }
       setBase(null)
-      setDraft({ ...from, figure: freshFigure(`${startKey}:${jobs.length}`, worn) })
+      setStartedAs(started)
+      setDraft(started)
     }
   }
 
@@ -131,8 +138,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => { setDraft((current) => ({ ...current, [key]: value })); if (save.kind !== 'saving') setSave({ kind: 'idle' }) }
 
-  async function doSave() {
-    if (problem) return
+  async function doSave(): Promise<boolean> {
+    if (problem) return false
     setSave({ kind: 'saving' })
     try {
       const spec = specFromDraft(draft, bumps ? note : '')
@@ -151,14 +158,23 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
         if (view === 'chat') query.set('view', 'chat')
         navigate(`/agents/${encodeURIComponent(result.id)}${query.size ? `?${query}` : ''}`, true)
       }
+      return true
     } catch (failed) {
       const message = failed instanceof JobApiError && failed.status === 412
         ? saved ? failed.message : `You already have an agent called “${draft.name.trim()}”. Give this one another name, or open that one from My agents.`
         : failed instanceof JobApiError && failed.status === 404 ? 'This LoomWatch server is older than My agents. Restart it, then save again.'
         : failed instanceof Error ? failed.message : String(failed)
       setSave({ kind: 'error', message })
+      return false
     }
   }
+
+  // What another agent's page would lose: changes to this one, or a new one changed since it began.
+  const unsaved = base ? changed : startedAs !== null && draftChanged(draft, startedAs)
+  useEffect(() => {
+    if (leaveRef) leaveRef.current = unsaved ? { save: doSave, problem } : null
+  })
+  useEffect(() => () => { if (leaveRef) leaveRef.current = null }, [leaveRef])
 
   async function doRemove() {
     if (!saved) return

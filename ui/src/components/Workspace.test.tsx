@@ -294,7 +294,7 @@ describe('Workspace', () => {
   it('shows the team canvas with the document chip, composer and the configured pipeline', () => {
     renderWorkspace()
     expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /demo.yaml, .*open team switcher/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /demo.yaml, .*open team menu/ })).toBeInTheDocument()
     expect(screen.getByText('2 steps in order')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: RUN_BUTTON })).toBeDisabled()
     expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
@@ -750,7 +750,7 @@ describe('Workspace', () => {
     expect(screen.queryByRole('complementary', { name: /cargo test/ })).not.toBeInTheDocument()
   })
 
-  // A newcomer never meets the team file's raw YAML: there is no Show YAML in the team switcher or
+  // A newcomer never meets the team file's raw YAML: there is no Show YAML in the team menu or
   // the palette, and a problem with nothing on the canvas to point at no longer opens it.
   it('never shows the team file as YAML', async () => {
     Object.assign(documentState, {
@@ -760,8 +760,8 @@ describe('Workspace', () => {
       yamlPreview: 'schemaVersion: 1\nunexpected: true\nagents: []\n',
     })
     renderWorkspace()
-    fireEvent.click(screen.getByRole('button', { name: /open team switcher/ }))
-    expect(screen.getByRole('dialog', { name: 'Team switcher' })).toHaveTextContent('Copy path')
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    expect(screen.getByRole('dialog', { name: 'Team menu' })).toHaveTextContent('Copy path')
     expect(screen.queryByRole('button', { name: 'Show YAML' })).not.toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'k', metaKey: true })
@@ -1631,5 +1631,85 @@ describe('Home', () => {
     } finally {
       documentState.path = path
     }
+  })
+})
+
+// The team rail: every team beside the open one, one click away, without going back to Home.
+describe('the team rail', () => {
+  let assign: ReturnType<typeof vi.fn>
+  let real: Location
+  beforeEach(() => {
+    const fallback = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/teams')) return new Response(JSON.stringify({ root: '/teams', files: ['demo.yaml', 'trip.yaml'], teams: [{ path: 'demo.yaml', name: 'Demo', agentCount: 2 }, { path: 'trip.yaml', name: 'Trip', agentCount: 1 }] }), { status: 200 })
+      if (url.startsWith('/api/team?')) {
+        const path = new URLSearchParams(url.split('?')[1]).get('path')
+        return new Response(JSON.stringify({ path, revision: 'r1', yaml: path === 'trip.yaml' ? 'name: Trip\nagents:\n  - {id: planner, name: Planner}\n' : 'name: Demo\nagents: []\n' }), { status: 200 })
+      }
+      return fallback(input, init)
+    }))
+    // jsdom makes location.assign non-configurable, so stand in a whole location.
+    real = window.location
+    assign = vi.fn()
+    Object.defineProperty(window, 'location', { configurable: true, value: { href: real.href, pathname: real.pathname, search: real.search, assign } })
+  })
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { configurable: true, value: real })
+    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean', isValid: true })
+  })
+
+  it('lists the teams, this one as it is on screen, and opens another on the same tab', async () => {
+    renderWorkspace()
+    const rail = screen.getByRole('navigation', { name: 'Your teams' })
+    const trip = await within(rail).findByRole('link', { name: 'Trip' })
+    // The open team's name and agents are the canvas's, saved or not.
+    expect(within(rail).getByRole('link', { name: 'demo' })).toHaveAttribute('aria-current', 'page')
+    expect(within(rail).getByRole('link', { name: 'demo' }).querySelector('.crew-team')).toHaveClass('n2')
+    expect(trip).toHaveAttribute('href', '/?path=trip.yaml')
+    fireEvent.click(trip)
+    expect(assign).toHaveBeenCalledWith('/?path=trip.yaml')
+  })
+
+  it('asks before leaving changes, and opens the other team once they are saved', async () => {
+    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
+    const view = renderWorkspace()
+    fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
+    expect(assign).not.toHaveBeenCalled()
+    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).getByRole('button', { name: 'Save first' })) })
+    expect(documentState.save).toHaveBeenCalledOnce()
+    // The page moves only once the team says it is saved, so the browser's own "Leave site?",
+    // which asks while there are changes, never asks a second time.
+    expect(assign).not.toHaveBeenCalled()
+    Object.assign(documentState, { documentChipState: 'saved', saveState: 'saved' })
+    view.rerender(<Workspace onDocumentOpen={vi.fn()} initialRunId={null} />)
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
+  })
+
+  it('drops the changes by reading the file again, then goes', async () => {
+    Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
+    const view = renderWorkspace()
+    fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Discard' })) })
+    expect(documentState.reloadFromDisk).toHaveBeenCalledOnce()
+    expect(documentState.save).not.toHaveBeenCalled()
+    expect(assign).not.toHaveBeenCalled()
+    Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean' })
+    view.rerender(<Workspace onDocumentOpen={vi.fn()} initialRunId={null} />)
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
+  })
+
+  // ADR 0043: the rail is the one way to another team or a new one; the team menu is this team's file.
+  it('opens New team from the rail’s +, and the team menu lists no teams', async () => {
+    renderWorkspace()
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Your teams' })).getByRole('button', { name: 'New team' }))
+    expect(await screen.findByRole('dialog', { name: 'Create a team' })).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Create a team' }), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
+    const menu = screen.getByRole('dialog', { name: 'Team menu' })
+    expect(within(menu).queryByRole('listbox')).not.toBeInTheDocument()
+    expect(within(menu).queryByText(/New team/)).not.toBeInTheDocument()
+    // However a list might come back, the other team's name is not in it.
+    expect(within(menu).queryByText('Trip')).not.toBeInTheDocument()
   })
 })
