@@ -41,7 +41,7 @@
 }
 .story-face { flex: none; width: 24px; height: 24px; margin: -4px 2px -4px -4px; }
 .story-face > * { display: block; width: 100%; height: 100%; object-fit: contain; }
-.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); color: var(--color-accent); }
+.story-name:hover, .story-name:focus-visible { border-color: var(--color-accent); }
 .story-name.you { background: transparent; border-style: dashed; }
 .story-schedule { color: var(--color-accent); background: transparent; }
 span.story-schedule { cursor: default; }
@@ -55,7 +55,7 @@ span.story-schedule { cursor: default; }
   border-radius: 7px; border: 1px solid var(--color-accent-dim); background: transparent; cursor: pointer;
   font: 500 12.5px/1.4 var(--font-sans); color: var(--color-accent); vertical-align: middle;
 }
-.story-fix:hover, .story-fix:focus-visible { background: var(--color-accent-tint); }
+.story-fix:hover, .story-fix:focus-visible { background: var(--color-accent-tint); color: var(--color-ink); }
 
 /* ---------- hire by job (Build palette) ---------- */
 .palette-item .palette-engine { display: block; margin-top: 3px; font: 500 10.5px/1.2 var(--font-mono); font-style: normal; color: var(--color-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -122,7 +122,7 @@ span.story-schedule { cursor: default; }
 .depth-dial { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 8px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); }
 .depth-dial button { border: 0; background: transparent; padding: 4px 9px; border-radius: 6px; font: 500 11.5px/1.2 var(--font-sans); color: var(--color-ink-3); cursor: pointer; }
 .depth-dial button:hover { color: var(--color-ink); }
-.depth-dial button[aria-checked="true"] { background: var(--color-accent-tint); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.depth-dial button[aria-checked="true"] { background: var(--color-accent-tint); color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-accent); }
 
 /* ---------- weft timeline (Run) ---------- */
 .weft { margin: 0 0 20px; padding: 16px 18px 14px; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel); }
@@ -349,7 +349,7 @@ span.story-schedule { cursor: default; }
 .receipt-checks li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding-left: 14px; position: relative; }
 .receipt-checks li::before { content: "!"; position: absolute; left: 0; color: var(--color-accent); font-weight: 600; }
 .receipt-open { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; border: 0; background: transparent; color: var(--color-ink-3); cursor: pointer; }
-.receipt-open:hover, .receipt-open:focus-visible { color: var(--color-accent); background: var(--color-accent-tint); }
+.receipt-open:hover, .receipt-open:focus-visible { color: var(--color-ink); background: var(--color-accent-tint); }
 /* ADR 0037: a refused line offers the switch that covers it, under its sentence. */
 .receipt-allow, .receipt-allowed { display: block; margin-top: 2px; font-size: 12px; }
 .receipt-allowed { color: var(--color-ok); }
@@ -463,7 +463,7 @@ span.story-schedule { cursor: default; }
 .fabric-thread.st-working { fill: var(--color-live); animation: weft-breathe 1.6s ease-in-out infinite; }
 .fabric-thread.st-waiting { fill: transparent; stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 3 2; }
 .home-card.waiting { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
-.home-card-waiting { margin-left: 8px; padding: 1px 7px; border-radius: 99px; background: var(--color-accent-tint); color: var(--color-accent); font: 600 10.5px/1.6 var(--font-sans); font-style: normal; letter-spacing: .02em; vertical-align: 2px; }
+.home-card-waiting { margin-left: 8px; padding: 1px 7px; border-radius: 99px; background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px var(--color-accent); color: var(--color-ink); font: 600 10.5px/1.6 var(--font-sans); font-style: normal; letter-spacing: .02em; vertical-align: 2px; }
 
 /* ---------- outcome-first templates (New team) ---------- */
 .lw-newteam { width: min(660px, calc(100vw - 32px)); }
@@ -485,7 +485,7 @@ span.story-schedule { cursor: default; }
 .pop-row.understood { align-items: flex-start; border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent); background: var(--color-accent-tint); margin-bottom: 4px; }
 .pop-row.understood .name { display: flex; flex-direction: column; gap: 2px; color: var(--color-ink); font-weight: 500; }
 .understood-detail { font-size: 12px; color: var(--color-ink-3); font-weight: 400; }
-.understood-dialect { flex: none; margin-left: auto; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--color-accent-dim); color: var(--color-accent); font: 600 10px/1.6 var(--font-sans); letter-spacing: .04em; }
+.pop-row.understood .understood-dialect { flex: none; margin-left: auto; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--color-accent); color: var(--color-ink); font: 600 10px/1.6 var(--font-sans); letter-spacing: .04em; }
 .pop-hint { margin: 6px 10px 4px; padding-top: 8px; border-top: 1px solid var(--color-hairline); color: var(--color-ink-3); line-height: 1.6; }
 .pop-hint code { font-size: 11px; padding: 1px 4px; border-radius: 4px; background: var(--color-ground); color: var(--color-ink-2); }
 .weft-head-acts { margin-left: auto; display: inline-flex; gap: 14px; align-items: center; }
@@ -776,7 +776,7 @@ span.story-schedule { cursor: default; }
 }
 .md-source-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .md-source svg { flex: none; color: var(--color-ink-3); transition: color var(--t-quick) var(--ease-out); }
-.md-source:any-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.md-source:any-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-ink); }
 .md-source:any-link:hover svg { color: var(--color-accent); }
 .md-source:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .file-chip:disabled { cursor: default; }

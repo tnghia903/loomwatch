@@ -139,8 +139,9 @@
 .model-suggestion { position: relative; z-index: 2; margin-bottom: var(--sp-2); display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1); border: 1px solid color-mix(in srgb, var(--color-accent) 34%, transparent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
 .model-suggestion-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .model-follow-note { padding: 4px var(--sp-2) 2px; color: var(--color-ink-3); }
-/* Its model follows its suggestion (ADR 0072): said on the picker's button, in the accent. */
-.model-picker-suggested { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--r-xs); color: var(--color-accent); background: var(--color-accent-tint); }
+/* Its model follows its suggestion (ADR 0072): said on the picker's button, on the gold tint with a gold mark. */
+.model-picker-suggested { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--r-xs); color: var(--color-ink); background: var(--color-accent-tint); }
+.model-picker-suggested svg { color: var(--color-accent); }
 /* Its model just moved with its configuration: what it was, with Undo. */
 .model-moved { margin: 4px 0 0; color: var(--color-ink-2); }
 .model-moved .link { font: inherit; }

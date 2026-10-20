@@ -299,7 +299,8 @@ kbd.key {
 .schedule-note { color: var(--color-ink-3); }
 .schedule-stage { color: var(--color-ink-3); }
 .schedule-save-file { width: 100%; height: 36px; justify-content: center; gap: 6px; }
-.schedule-save-file kbd { opacity: .7; }
+.schedule-save-file kbd { padding: 2px 4px; border-radius: 4px; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); }
+@media (hover: none) { .schedule-save-file kbd { display: none; } }
 .schedule-editor header { display: flex; flex-direction: column; gap: 2px; }
 .schedule-editor header span { color: var(--color-ink-2); }
 .schedule-tabs { height: 40px; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--color-hairline); border-radius: var(--r-sm); overflow: hidden; }
@@ -349,7 +350,7 @@ kbd.key {
    the fanned state — the one the operator opened — is the only chip that carries it. */
 .node-chips { align-self: flex-start; margin-top: 7px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
 .node-chips .handover-chip { margin-top: 0; }
-.node-chips .handover-chip.on { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-tint); }
+.node-chips .handover-chip.on { border-color: var(--color-accent); color: var(--color-ink); background: var(--color-accent-tint); }
 /* docs/TEAM_MEMORY.md "Before a run": what this agent is configured to be supplied. Static text,
    not a control — the toggles live in the Inspector's Behaviour zone. */
 .mem-chip {
@@ -707,14 +708,14 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
 .given-chip.missing { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); }
 .given-chip.missing > svg { color: var(--color-accent); }
 .given-chip.toggle { border-style: solid; cursor: pointer; }
-.given-chip.toggle.on { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
+.given-chip.toggle.on { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); background: var(--color-accent-tint); color: var(--color-ink); }
 .given-chip.toggle.on > svg { color: var(--color-accent); }
 .given-chip.toggle:disabled { cursor: default; opacity: .7; }
 .given-count { color: var(--color-ink-3); font-weight: 400; }
 .given-chip.toggle.on .given-count { color: inherit; opacity: .75; }
 .given-chip.add { border-color: color-mix(in srgb, var(--color-accent) 35%, transparent); color: var(--color-accent); cursor: pointer; }
 .given-chip.add > svg { color: inherit; }
-.given-chip.add:hover:not(:disabled) { background: var(--color-accent-tint); }
+.given-chip.add:hover:not(:disabled) { background: var(--color-accent-tint); color: var(--color-ink); }
 .given-chip.add:disabled { border-color: var(--color-hairline); color: var(--color-ink-3); cursor: default; }
 .given-none { color: var(--color-ink-3); }
 /* WORKS IN: the folder as one object, with the one consequence worth knowing under it. */
@@ -731,8 +732,11 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
 .allow-tile:disabled { cursor: default; opacity: .7; }
 .allow-tile-name { color: var(--color-ink); font: 500 12px/1.2 var(--font-sans); }
 .allow-tile-state { color: var(--color-ink-3); font: 400 10.5px/1.2 var(--font-sans); }
-.allow-tile.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-accent); }
-.allow-tile.on .allow-tile-state { color: var(--color-accent); }
+.allow-tile.on { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); }
+/* Lit, its words are ink on the tint and its icons keep the gold (a glyph needs 3:1; gold on the tint is 4.45:1). */
+.allow-tile.on > svg { color: var(--color-accent); }
+.allow-tile.on:hover:not(:disabled) > svg:not(.allow-tile-tick) { color: inherit; }
+.allow-tile.on .allow-tile-state { color: var(--color-ink); }
 .allow-tile-tick { position: absolute; top: 5px; right: 5px; color: var(--color-accent); }
 /* Auto mode (ADR 0061): not allowed outright, not always asked — commands that only read run. */
 .allow-tile.auto { border-style: dashed; border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); color: var(--color-accent); }

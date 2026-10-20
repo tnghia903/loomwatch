@@ -42,7 +42,7 @@
 .byhand-tool-text em.problem { color: var(--color-alert); }
 .byhand-tool-text em.byhand-tool-try { color: var(--color-ink-3); }
 .byhand-tool-allowed { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
-.byhand-tool-allowed li { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 8px; border-radius: 999px; background: var(--color-accent-tint); color: var(--color-accent); font-size: 12px; }
+.byhand-tool-allowed li { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 8px; border-radius: 999px; background: var(--color-accent-tint); color: var(--color-ink); font-size: 12px; }
 .byhand-tool-allowed .iconbtn { width: 20px; height: 20px; color: inherit; }
 .byhand-tool-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .byhand-tools-give { display: flex; flex-direction: column; gap: var(--sp-2); }

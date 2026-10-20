@@ -14,7 +14,7 @@
 .build-node .node-kind { display:block; color:var(--color-ink-3); text-transform:uppercase; letter-spacing:.065em; font-size:10px; margin-bottom:5px; }
 .build-node strong { display:block; font-size:12px; font-weight:550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .build-node small { display:block; color:var(--color-ink-2); font-size:11px; margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.build-node .primary-chip { position:absolute; right:8px; top:7px; font-size:10px; color:var(--color-accent); }
+.build-node .primary-chip { position:absolute; right:8px; top:7px; font-size:10px; color:var(--color-ink); }
 .build-node-issue { position:absolute; bottom:-18px; color:var(--color-accent); font-size:10px; }
 .build-resource-remove { position:absolute; right:5px; top:5px; color:var(--color-ink-3); background:transparent; border:0; padding:3px; opacity:0; }
 .build-node:hover .build-resource-remove,.build-node.selected .build-resource-remove,.build-resource-remove:focus-visible { opacity:1; }
@@ -47,7 +47,7 @@
 .lw-shell .workspace-view-tabs button { min-width:100px; height:34px; font-size:13px; }
 /* Selected is a tint, not a fill: the screen's one gold fill belongs to its primary action (Run team,
    Review output), DESIGN_LANGUAGE §8 Law 2. Same selected-segment look as the depth dial. */
-.lw-shell .workspace-view-tabs button[aria-pressed=true] { background:var(--color-accent-tint); color:var(--color-accent); font-weight:600; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.lw-shell .workspace-view-tabs button[aria-pressed=true] { background:var(--color-accent-tint); color:var(--color-ink); font-weight:600; box-shadow:inset 0 0 0 1px var(--color-accent); }
 .delivery-shown .delivery-lane { inset:64px 0 0; grid-template-columns:minmax(0,1fr); gap:0; background:transparent; }
 .delivery-shown .delivery-work { padding:0 30px 24px; background:transparent; border:0; border-radius:0; box-shadow:none; backdrop-filter:none; }
 .delivery-heading { min-height:115px; padding:26px 0 22px; margin-bottom:0; border-bottom:1px solid var(--color-hairline); }
