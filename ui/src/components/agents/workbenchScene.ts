@@ -139,7 +139,7 @@ export function placeFace(element: HTMLElement, { x, y, ux, uy, vx, vy }: BenchQ
 /** How the app's bench differs from the landing page's, which keeps the bench as it was drawn. */
 export interface BenchOptions {
   /**
-   * Hang the job's clipboard on the pegboard, under the key hooks, rather than standing it on the
+   * Hang the job's clipboard in the middle of the pegboard, rather than standing it on the
    * bench: the back of the bench is where helpers sit (ADR 0079), and a clipboard in front of
    * them hides them.
    */
@@ -147,11 +147,12 @@ export interface BenchOptions {
 }
 
 /**
- * Where the clipboard hangs on the pegboard, in the pegboard's own space: under the key hooks on
- * its left, clear of the skill cards on its right and of the figure's head in the middle. Its
- * origin is the clipboard's bottom edge; it is drawn this much smaller than on the bench.
+ * Where the clipboard hangs on the pegboard, in the pegboard's own space: in the middle, above
+ * the figure's head, between the key hooks on its left (where keys you hand over hang) and the
+ * skill cards on its right. Its origin is the clipboard's bottom edge; it is drawn this much
+ * smaller than on the bench.
  */
-const CLIPBOARD_ON_BOARD = { x: -0.68, y: -0.41, z: 0.03, size: 0.78 }
+const CLIPBOARD_ON_BOARD = { x: 0, y: 0.1, z: 0.03, size: 0.66 }
 
 export interface BenchCallbacks {
   onPart: (part: FigurePart) => void
@@ -705,7 +706,7 @@ export class WorkbenchScene {
 
   /**
    * The job's clipboard on the pegboard (BenchOptions.clipboardOnBoard): upright, its sheet facing
-   * you, hung under the key hooks; the stand it leant on at the bench is put away. Its sheet's words,
+   * you, hung in the middle of the board; the stand it leant on at the bench is put away. Its sheet's words,
    * its tag and the figure's glances at its job follow it there.
    */
   private hangClipboard() {
