@@ -172,6 +172,12 @@ depend on the document as a whole:
   checks its result against them before it replies, fixes what it can, and lists any it could not
   meet under `## Not met`. A later stage and any check step read it with the work. No second turn
   is taken on the agent's own say-so: a check step with `sendBack` is what sends work back.
+- Optional `Agent.learns: false` stops an agent learning from the operator's feedback on its work
+  (ADR 0078, [How agents learn](LEARNING.md)). It is on when absent: the operator's words about a
+  finished answer, and a check step's item that was not met and then met after the send-back,
+  become short lessons in the agent's standing instructions, each shown in the chat with Undo.
+  With `false` it learns nothing new and is given none of its lessons. `from: {agent}` is also read
+  now: one of My agents keeps one list of lessons in every team that places it.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
   operator, not the answer's reader:
   - `## Not met`: the `doneWhen` items it could not meet.
