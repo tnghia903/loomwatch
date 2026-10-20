@@ -841,7 +841,9 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
    big enough to read without a word. Yours wears the gold ring and a gold face, because gold is
    you. A check step's "All met" is green, because it finished well. An agent that reacted is there
    as its figure's head, peeking up from the chip. */
-.tc-reactable { position: relative; display: grid; justify-items: start; width: fit-content; min-width: 0; max-width: 100%; }
+/* Its column is the chat's room, not its widest child's: an `auto` column takes the document card's
+   460px, and the card's `max-width: 100%` then measures that column and runs past a narrow chat. */
+.tc-reactable { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; width: fit-content; min-width: 0; max-width: 100%; }
 .tc-reactable.mine { justify-items: end; justify-self: end; }
 .tc-reactable > .tc-doc { width: 460px; max-width: 100%; }
 .tc-reacts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 5px 2px 0; }

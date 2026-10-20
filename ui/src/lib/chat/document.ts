@@ -5,6 +5,8 @@
  * is read from the agent's own text; nothing is summarised or guessed.
  */
 
+import { CLAIM_MARK } from './claims'
+
 /** Past this many characters an answer no longer reads as a chat message. */
 export const DOCUMENT_CHARS = 600
 /** A titled answer is a document from this length; "# Done" and a line is still a message. */
@@ -35,9 +37,12 @@ export function describeDocument(answer: string, previewChars = 220): DocumentFa
   const titled = titleAt >= 0 && titleAt <= firstText + 1
   const title = titled ? plain(lines[titleAt].match(HEADING)?.[2] ?? '') : cut(plain(lines[firstText] ?? ''), 80)
   const rest = lines.slice((titled ? titleAt : firstText) + 1)
-  const prose = rest
-    .filter((line) => !/^\s*(\|.*\||[-*_]{3,}|```)/.test(line))
-    .map((line) => plain(line.replace(HEADING, '$2')))
+  const body = rest.filter((line) => !/^\s*(\|.*\||[-*_]{3,}|```)/.test(line))
+  // Its words, not its section headings: "Chips" run into "Shares up." reads as one sentence. The
+  // headings are its words only when it has nothing else.
+  const said = body.filter((line) => !HEADING.test(line))
+  const prose = (said.some((line) => line.trim()) ? said : body)
+    .map((line) => plain(line.replace(HEADING, '$2')).replace(CLAIM_MARK, ''))
     .filter(Boolean)
     .join(' ')
   const words = plain(answer).split(/\s+/).filter((word) => /\w/.test(word)).length
