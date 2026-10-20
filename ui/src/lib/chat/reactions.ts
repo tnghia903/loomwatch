@@ -6,11 +6,13 @@ import { allMet, OPERATOR_ID, type TeamMessage } from '../watch/messages'
  * Reactions in a team's chat: the crew's face, the one LoomWatch's mark wears, pulling a face at
  * something said (components/chat/Reactions.tsx draws them). The face says it; its word is its name.
  *
- * Your face is feedback the team uses. You put one on something an agent said — its answer, a
- * handover, a question — the way a tapback works, and the daemon keeps it (`chat_reactions`). The
- * next time the team works, its conversation says what the reaction means and what it was on: Good
- * and Love it, keep doing this; Not sure, it is revisited; Wrong, nothing is built on it. Seen
- * tells the team nothing. A run already working is not told.
+ * Your face is feedback the team uses. You put one on anything said in the chat, the way a tapback
+ * works — an agent's answer, a handover, a question, an agent's reply to your note, and your own
+ * words — and the daemon keeps it (`chat_reactions`). The next time the team works, its
+ * conversation says what the reaction means and what it was on. On what an agent said: Good and
+ * Love it, keep doing this; Not sure, it is revisited; Wrong, nothing is built on it. On your own
+ * words: Good, you stand by it; Love it, exactly what you meant; Not sure, you are not sure of it
+ * yourself; Wrong, you take it back. Seen tells the team nothing. A run already working is not told.
  *
  * The agents react too, but never by guessing how they feel: each of their faces is a fact the run
  * recorded, read back here as a receipt. An agent looks up at what it was handed (`seen`) — your
@@ -25,14 +27,15 @@ export type Face = 'glad' | 'love' | 'hmm' | 'off' | 'seen' | 'met' | 'done'
 
 /**
  * The faces you can pick, in the tray's order: what each is called, and what it tells the team the
- * next time it works. The daemon keeps the same list and says the same thing to the agents.
+ * next time it works — on what an agent said (`tells`), and on your own words (`yours`). The daemon
+ * keeps the same list and says the same thing to the agents.
  */
-export const PALETTE: readonly { face: Face; label: string; tells: string }[] = [
-  { face: 'glad', label: 'Good', tells: 'The team keeps doing this' },
-  { face: 'love', label: 'Love it', tells: 'Exactly right. The team keeps to it' },
-  { face: 'hmm', label: 'Not sure', tells: 'The team looks at it again' },
-  { face: 'off', label: 'Wrong', tells: 'The team won’t build on it' },
-  { face: 'seen', label: 'Seen', tells: 'You read it. The team isn’t told' },
+export const PALETTE: readonly { face: Face; label: string; tells: string; yours: string }[] = [
+  { face: 'glad', label: 'Good', tells: 'The team keeps doing this', yours: 'You stand by it' },
+  { face: 'love', label: 'Love it', tells: 'Exactly right. The team keeps to it', yours: 'Exactly what you meant' },
+  { face: 'hmm', label: 'Not sure', tells: 'The team looks at it again', yours: 'You’re having second thoughts' },
+  { face: 'off', label: 'Wrong', tells: 'The team won’t build on it', yours: 'You take it back' },
+  { face: 'seen', label: 'Seen', tells: 'You read it. The team isn’t told', yours: 'The team isn’t told' },
 ]
 
 /** What the tray says before you point at a reaction. */
@@ -40,8 +43,14 @@ export const TRAY_SAYS = 'The team reads your reaction next time'
 
 const LABELS: Record<Face, string> = { ...Object.fromEntries(PALETTE.map(({ face, label }) => [face, label])) as Record<Face, string>, met: 'All met', done: 'Done' }
 
-/** What your face tells the team, in a sentence; `null` for a face only the agents put on. */
-export const faceTells = (face: Face): string | null => PALETTE.find((entry) => entry.face === face)?.tells ?? null
+/**
+ * What your face tells the team, in a sentence, on what an agent said or on your own words (`own`);
+ * `null` for a face only the agents put on.
+ */
+export function faceTells(face: Face, own = false): string | null {
+  const entry = PALETTE.find((candidate) => candidate.face === face)
+  return entry ? (own ? entry.yours : entry.tells) : null
+}
 
 /** What a reaction says, in a word or two: "Good", "Not sure", "All met". */
 export const faceLabel = (face: Face): string => LABELS[face]
@@ -51,15 +60,16 @@ const AGENT_SAYS: Partial<Record<Face, string>> = { seen: 'picked this up', met:
 
 /** One of the operator's reactions, as the daemon keeps it. */
 export interface Reaction {
-  /** What in the piece of work: `answer`, or `talk:<line>` for a line of the agents' talk. */
+  /** What in the piece of work or on the team note, as `targets` names it. */
   target: string
   face: Face
   at: string
 }
 
 /**
- * What a line of the agents' talk was, sent with your face on it so the next work's conversation
- * can say what the face was on: who said it, in a word what it was, and its words.
+ * What a line of the talk was, sent with your face on it so the next work's conversation can say
+ * what the face was on: who said it, in a word what it was, and its words. The daemon reads
+ * everything else you react to from the chat itself.
  */
 export interface ReactionAbout {
   agent: string | null
@@ -88,10 +98,18 @@ export interface Chip {
   detail?: string
 }
 
-/** What a piece of work names the things the agents said in it, for a reaction. */
+/**
+ * What the chat names the things said in it, for a reaction. In a piece of work: its answer, a line
+ * of the agents' talk, the request that started it, a note you sent into it, and a line of yours in
+ * the talk. A team note is named the same way on itself, and so is each agent's reply to it.
+ */
 export const targets = {
   answer: 'answer',
   talk: (bubble: Pick<Bubble, 'key'>) => `talk:${bubble.key}`,
+  request: 'request',
+  note: (id: string) => `note:${id}`,
+  mine: (bubble: Pick<Bubble, 'key'>) => `mine:${bubble.key}`,
+  reply: (agent: string) => `reply:${agent}`,
 } as const
 
 /** Your face on one thing said, from the piece's reactions. */
