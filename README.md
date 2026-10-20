@@ -395,7 +395,7 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/chat-dark.webp">
-  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users, then Researcher's handover to You, with Approve and Send back to Researcher waiting under it. Beside the chat, Details shows the live timeline with a replay slider and the team handoff, stage by stage, with the model each agent runs on. Commands · Ask me sits beside the message box.">
+  <img src="site/assets/app/chat-light.webp" alt="A team's Chat tab: the request @team Prepare a short getting-started guide for new users, then Researcher's handover to You, with Approve and Send back to Researcher waiting under it. Beside the chat, Details shows the live timeline with a replay slider and the team handoff, stage by stage, with the model each agent runs on.">
 </picture>
 <br><sub><strong>Chat.</strong> What the agents say to each other, your review, and the record one pane away in Details.</sub>
 </td>
