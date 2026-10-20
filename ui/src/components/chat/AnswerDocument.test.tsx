@@ -40,6 +40,21 @@ describe('a document answer, read beside the chat', () => {
     expect(screen.getByRole('link', { name: 'Reading list' })).not.toHaveClass('md-source')
   })
 
+  it('opens a file the agent names from its own folder', async () => {
+    // The shape of a real reply (run aace60a2): a link relative to the agent's folder, spaces as %20.
+    const guide = '/Users/me/LoomWatch/teams/.loomwatch/bench-coby/coby/LLM Prefill Guide.html'
+    const { container } = render(<AnswerDocument by="Coby" streaming={false} touched={[guide]} text={[
+      '### [Open the interactive guide](./LLM%20Prefill%20Guide.html)',
+      '**File:** `LLM Prefill Guide.html`',
+      'Also [notes](./notes.md), which it never wrote.',
+    ].join('\n\n')} />)
+    const chips = await screen.findAllByRole('button', { name: /LLM Prefill Guide\.html/ })
+    expect(chips.map((chip) => chip.getAttribute('title')?.split('\n')[0])).toEqual([guide, guide])
+    // Opened in a new tab, a name from a folder the page cannot know would only load LoomWatch again.
+    expect(screen.queryByRole('link', { name: 'notes' })).toBeNull()
+    expect(container.querySelector('.md-unlinked')).toHaveTextContent('notes')
+  })
+
   it('says it is still being written', () => {
     render(<AnswerDocument by="Writer" streaming text="# Draft" />)
     expect(screen.getByText('Writer is writing this')).toBeInTheDocument()
