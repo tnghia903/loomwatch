@@ -28,6 +28,7 @@ use super::ApiKey;
 use super::error::{AgentError, CallError, redact};
 use super::provider::{
     Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, ServerTools, ToolCall, Usage,
+    Written,
 };
 use super::sse::SseDecoder;
 use crate::ai::Source;
@@ -427,7 +428,7 @@ fn wire_message(message: &Message) -> Value {
 /// The message a stream assembles, piece by piece.
 #[derive(Default)]
 struct Assembled {
-    content: String,
+    written: Written,
     reasoning_details: Vec<Value>,
     calls: Vec<PartialCall>,
     finish: Option<Finish>,
@@ -502,7 +503,7 @@ async fn read_stream(
             return Ok(Streamed::Refused { status, said });
         }
     }
-    if message.finish.is_none() && message.content.is_empty() && message.calls.is_empty() {
+    if message.finish.is_none() && message.written.content.is_empty() && message.calls.is_empty() {
         return Err(AgentError::Stalled(Source::OpenRouter).into());
     }
     Ok(Streamed::Whole(finish(message)))
@@ -544,7 +545,7 @@ async fn take_event(
         if let Some(text) = delta.get("content").and_then(Value::as_str)
             && !text.is_empty()
         {
-            message.content.push_str(text);
+            message.written.text(text);
             message.streamed = true;
             deltas.text(text).await?;
         }
@@ -556,7 +557,15 @@ async fn take_event(
         }
         if let Some(details) = delta.get("reasoning_details").and_then(Value::as_array) {
             for detail in details {
-                merge_reasoning(&mut message.reasoning_details, detail);
+                let began = merge_reasoning(&mut message.reasoning_details, detail);
+                // A search `OpenRouter` runs itself began. Words in the same chunk came before it.
+                if began
+                    && detail.get("type").and_then(Value::as_str)
+                        == Some("reasoning.server_tool_call")
+                {
+                    message.written.tool();
+                    deltas.server_tool();
+                }
             }
         }
         if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
@@ -583,9 +592,10 @@ async fn take_event(
     Ok(())
 }
 
-/// Adds one streamed reasoning piece. Pieces of one block share an `index` and a `type`: their
-/// text joins up, and whatever else they carry (a signature, an id) is the block's final word.
-fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) {
+/// Adds one streamed reasoning piece, and says whether it began a block. Pieces of one block share
+/// an `index` and a `type`: their text joins up, and whatever else they carry (a signature, an id)
+/// is the block's final word.
+fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) -> bool {
     let index = piece.get("index");
     let kind = piece.get("type");
     let existing = index.and_then(|index| {
@@ -595,10 +605,10 @@ fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) {
     });
     let (Some(existing), Some(piece)) = (existing, piece.as_object()) else {
         details.push(piece.clone());
-        return;
+        return true;
     };
     let Some(existing) = existing.as_object_mut() else {
-        return;
+        return false;
     };
     for (key, value) in piece {
         match (key.as_str(), existing.get_mut(key), value) {
@@ -610,6 +620,7 @@ fn merge_reasoning(details: &mut Vec<Value>, piece: &Value) {
             }
         }
     }
+    false
 }
 
 /// Adds one streamed tool-call piece. The first piece of a call carries its id and name; later
@@ -697,12 +708,13 @@ fn finish(message: Assembled) -> Completion {
     usage.web_searches = usage.web_searches.max(ran("web_search"));
     usage.web_fetches = usage.web_fetches.max(ran("web_fetch"));
     Completion {
-        content: message.content,
+        content: message.written.content,
         reasoning_details: message.reasoning_details,
         tool_calls,
         finish,
         usage,
         server_tool_calls,
+        answer_from: message.written.answer_from,
         native: None,
     }
 }

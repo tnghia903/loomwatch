@@ -6653,6 +6653,66 @@ pub(crate) mod tests {
         );
     }
 
+    /// A live run of 2026-10-20: a model searched the web part way through its answer, and what it
+    /// wrote before the search ran into the answer with no space ("…sources I plan to cite.# Brief").
+    /// The words before the search stay in the record, a paragraph apart, and out of the answer.
+    #[tokio::test]
+    async fn words_before_a_web_search_stay_in_the_record_and_out_of_the_answer() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let model = demo_model(Demo::scripted(vec![Completion::searched(&[
+            "Now let me verify the primary sources I plan to cite.",
+            "# Brief\n\nBasic will cost 159,000 VND a month.",
+        ])]));
+        dir.write_team("brief.yaml", &model);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let app = router(Some(archive.clone()), dir.0.clone(), registry.clone());
+        let response = app
+            .oneshot(post_json(
+                "/api/runs",
+                &json!({"teamPath": "brief.yaml", "prompt": "Write the brief"}),
+            ))
+            .await
+            .unwrap();
+        let started: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
+        let done = wait_for(&registry, &started.run_id, |record| {
+            record.status.is_terminal()
+        })
+        .await;
+
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(
+            done.reply.as_deref(),
+            Some("# Brief\n\nBasic will cost 159,000 VND a month.")
+        );
+        let events = archive.load_session(&done.run_id).await.unwrap();
+        let said: Vec<(&str, &str)> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Message && event.payload["role"] == "agent")
+            .filter_map(|event| {
+                Some((
+                    event.payload["messageId"].as_str()?,
+                    event.payload["content"]["text"].as_str()?,
+                ))
+            })
+            .collect();
+        let [(before, aside), (after, answer)] = said[..] else {
+            panic!("the words on each side of the search: {said:?}");
+        };
+        assert_eq!(
+            aside,
+            "Now let me verify the primary sources I plan to cite."
+        );
+        assert_eq!(answer, "# Brief\n\nBasic will cost 159,000 VND a month.");
+        assert_ne!(before, after, "a message of its own on each side");
+        let marked: Vec<&str> = events
+            .iter()
+            .filter_map(|event| crate::engine::commentary(&event.payload))
+            .collect();
+        assert_eq!(marked, [before]);
+    }
+
     #[tokio::test]
     async fn team_mode_checkpoints_without_replacing_its_answer() {
         let pool = crate::db::Db::temp().await;

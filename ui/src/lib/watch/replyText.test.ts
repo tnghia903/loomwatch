@@ -57,6 +57,18 @@ describe('ReplyText', () => {
     expect(onlyAsides.text).toBe("I'll read the notes first.\n\nNow the prices.")
   })
 
+  it('leaves out the parts of a message before a web search the provider ran', () => {
+    const reply = new ReplyText()
+    reply.push('Now let me verify the sources I plan to cite.', 's-1')
+    reply.setAside('s-1')
+    reply.push('Let me verify the freshness claim.', 's-1.1')
+    reply.setAside('s-1.1')
+    reply.push('# Brief\n\n', 's-1.2')
+    reply.push('Permissions are checked at query time.', 's-1.2')
+    expect(reply.said).toBe('Now let me verify the sources I plan to cite.\n\nLet me verify the freshness claim.\n\n# Brief\n\nPermissions are checked at query time.')
+    expect(reply.text).toBe('# Brief\n\nPermissions are checked at query time.')
+  })
+
   it('starts a new message at a turn boundary even when the ID repeats', () => {
     const turns = new ReplyText()
     turns.push('First turn.', 'message-1')

@@ -25,7 +25,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -37,8 +37,8 @@ use super::events::{self, EventSink, ToolKind, ToolStatus};
 use super::permission::{Decision, PermissionRequest, Permissions};
 use super::prompt::{Abilities, loomwatch_brief, project_notes, system_prompt};
 use super::provider::{
-    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Picture, Provider, ServerTools,
-    ToolCall, ToolSpec, Usage, WebLimits,
+    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Parts, Picture, Provider,
+    ServerTools, ToolCall, ToolSpec, Usage, WebLimits,
 };
 use super::skills::{SkillIndex, prompt_section};
 use super::spend::{Go, Spend, Unmetered};
@@ -358,6 +358,8 @@ pub struct Session {
     usage: Usage,
     last_prompt_tokens: u64,
     messages_written: u64,
+    /// The part of the latest message its latest words were recorded under ([`Parts`]).
+    message_part: usize,
     /// The prompt of the turn under way, which a summary keeps word for word.
     task: String,
     /// What the turn under way is for, for the usage record.
@@ -397,6 +399,7 @@ impl Session {
             usage: Usage::default(),
             last_prompt_tokens: 0,
             messages_written: 0,
+            message_part: 0,
             task: String::new(),
             turn: config.purpose.clone(),
             skills,
@@ -430,6 +433,7 @@ impl Session {
             usage: snapshot.usage,
             last_prompt_tokens: 0,
             messages_written: snapshot.messages_written,
+            message_part: 0,
             task: String::new(),
             turn: config.purpose.clone(),
             skills: SkillIndex::default(),
@@ -578,7 +582,14 @@ impl Session {
             let cut = completion.finish == Finish::Length;
             let calls = completion.tool_calls.clone();
             if calls.is_empty() {
-                take_reply(&mut reply.answer, &completion.content, carrying_on, cut);
+                // What it wrote before the provider's last search was said on the way to it, and
+                // words follow the search whenever there is one.
+                let split = completion.answer_from > 0;
+                let answer = completion
+                    .content
+                    .get(completion.answer_from..)
+                    .unwrap_or(&completion.content);
+                take_reply(&mut reply.answer, answer, carrying_on && !split, cut);
             } else {
                 take_reply(&mut reply.on_the_way, &completion.content, false, cut);
             }
@@ -747,13 +758,18 @@ impl Session {
         specs
     }
 
-    /// The id of the model's latest message, which its words are recorded under.
+    /// The id the model's latest words are recorded under: its latest message's, or the latest
+    /// part's of it.
     fn message_id(&self) -> String {
-        format!("{}-{}", self.config.session_id, self.messages_written)
+        part_id(
+            &format!("{}-{}", self.config.session_id, self.messages_written),
+            self.message_part,
+        )
     }
 
     async fn call_model(&mut self, cancel: &Cancel, call: Call) -> Result<Completion, CallError> {
         self.messages_written += 1;
+        self.message_part = 0;
         let message_id = self.message_id();
         let bare = call == Call::BareSummary;
         let offered = !bare || self.provider.keeps_tools_for_summaries();
@@ -786,8 +802,11 @@ impl Session {
             sink: self.sink.as_ref(),
             message_id: &message_id,
             quiet: matches!(call, Call::Summary | Call::BareSummary),
+            parts: Mutex::default(),
         };
-        self.provider.complete(&request, &deltas, cancel).await
+        let completion = self.provider.complete(&request, &deltas, cancel).await;
+        self.message_part = deltas.parts().current();
+        completion
     }
 
     /// Whether the next model call may be made: [`Spend`] says so, and nobody cancelled the turn
@@ -1816,12 +1835,38 @@ fn cut(text: &str, limit: usize) -> String {
     format!("{kept}\n… ({} more characters)", total - limit)
 }
 
+/// The id the `part`th part of the message `message_id` is recorded under ([`Parts`]). The first
+/// part's is the message's own.
+fn part_id(message_id: &str, part: usize) -> String {
+    if part == 0 {
+        message_id.to_owned()
+    } else {
+        format!("{message_id}.{part}")
+    }
+}
+
 /// Streams a reply's text and reasoning to the sink as they arrive.
 struct Streaming<'a> {
     sink: &'a dyn EventSink,
     message_id: &'a str,
     /// A summary the agent writes for itself isn't shown.
     quiet: bool,
+    /// Where the provider's own searches split the message: each part is recorded as a message
+    /// of its own.
+    parts: Mutex<Parts>,
+}
+
+impl Streaming<'_> {
+    fn parts(&self) -> Parts {
+        *self.parts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn emit(&self, update: Value) -> Result<(), CallError> {
+        self.sink
+            .update(update)
+            .await
+            .map_err(|error| CallError::Failed(AgentError::Record(error)))
+    }
 }
 
 impl DeltaSink for Streaming<'_> {
@@ -1830,11 +1875,26 @@ impl DeltaSink for Streaming<'_> {
             if self.quiet {
                 return Ok(());
             }
-            self.sink
-                .update(events::message_chunk(text, self.message_id))
+            let (begun, part) = {
+                let mut parts = self.parts.lock().unwrap_or_else(PoisonError::into_inner);
+                (parts.begins(text), parts.current())
+            };
+            // The words before a search were said on the way to it, and the record says so before
+            // the words after it begin.
+            if begun {
+                self.emit(events::commentary(&part_id(self.message_id, part - 1)))
+                    .await?;
+            }
+            self.emit(events::message_chunk(text, &part_id(self.message_id, part)))
                 .await
-                .map_err(|error| CallError::Failed(AgentError::Record(error)))
         })
+    }
+
+    fn server_tool(&self) {
+        self.parts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .tool();
     }
 
     fn reasoning<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<(), CallError>> {
@@ -1842,10 +1902,7 @@ impl DeltaSink for Streaming<'_> {
             if self.quiet {
                 return Ok(());
             }
-            self.sink
-                .update(events::thought_chunk(text))
-                .await
-                .map_err(|error| CallError::Failed(AgentError::Record(error)))
+            self.emit(events::thought_chunk(text)).await
         })
     }
 }

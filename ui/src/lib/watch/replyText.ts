@@ -6,10 +6,11 @@
  * a paragraph apart, so the notes an agent writes between tool calls do not run together into one
  * line. ACP's `messageId` names a chunk's message and is authoritative when both sides carry one;
  * a harness that sends none is read at tool, plan and permission activity, the only boundary it
- * gives. A message the harness marks as commentary (`commentaryOf`) asked for tool calls, so its
- * words were said on the way, not the answer: `text` leaves them out, unless they are all the
- * agent said. The two implementations must agree, or a saved reply stops matching its archived
- * turn.
+ * gives. A message the harness marks as commentary (`commentaryOf`) asked for tool calls, or came
+ * before a web search the provider ran part way through a message (the harness records each side
+ * of the search as a message of its own), so its words were said on the way, not the answer:
+ * `text` leaves them out, unless they are all the agent said. The two implementations must agree,
+ * or a saved reply stops matching its archived turn.
  */
 export class ReplyText {
   /** Everything the agent said, the words on the way included. */

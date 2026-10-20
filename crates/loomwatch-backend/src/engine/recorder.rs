@@ -153,7 +153,9 @@ pub(crate) fn new_event_id() -> String {
 ///
 /// A message the harness marks as commentary ([`commentary`]) asked for tool calls, so its words
 /// were said on the way ("Paths are relative to the work folder; I'll use the full paths."), not
-/// the answer. The reply leaves those out, unless they are all the agent said.
+/// the answer. So were the words before a web search the provider ran part way through a message:
+/// the harness records each side of the search as a message of its own, and marks the one before
+/// it. The reply leaves those out, unless they are all the agent said.
 ///
 /// `ui/src/lib/watch/replyText.ts` applies the same rule to the archive. The two must agree, or a
 /// saved reply stops matching the archived turn it came from.

@@ -28,7 +28,7 @@ use serde_json::{Map, Value, json};
 use super::BoxFuture;
 use super::error::{AgentError, CallError, redact};
 use super::provider::{
-    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Native, ToolCall, Usage,
+    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Native, ToolCall, Usage, Written,
 };
 use super::sse::SseDecoder;
 use crate::ai::{ChatGptModel, ModelRef, Source};
@@ -504,7 +504,12 @@ async fn take_event(
                 deltas.reasoning(text).await?;
             }
         }
-        Some("response.output_item.added") => message.begun = true,
+        Some("response.output_item.added") => {
+            message.begun = true;
+            if event.pointer("/item/type").and_then(Value::as_str) == Some("web_search_call") {
+                deltas.server_tool();
+            }
+        }
         Some("response.output_item.done") => {
             if let Some(item) = event.get("item") {
                 message.items.push(item.clone());
@@ -545,7 +550,7 @@ async fn take_event(
 }
 
 fn finish(message: Assembled) -> Completion {
-    let mut content = String::new();
+    let mut written = Written::default();
     let mut tool_calls = Vec::new();
     let mut server_tool_calls = Vec::new();
     let mut searches = 0_u64;
@@ -559,7 +564,7 @@ fn finish(message: Assembled) -> Completion {
                     .flatten()
                 {
                     if let Some(text) = part.get("text").and_then(Value::as_str) {
-                        content.push_str(text);
+                        written.text(text);
                     }
                 }
             }
@@ -574,6 +579,7 @@ fn finish(message: Assembled) -> Completion {
                     .to_owned(),
             }),
             Some("web_search_call") => {
+                written.tool();
                 searches += 1;
                 let action = item.get("action").cloned().unwrap_or(Value::Null);
                 let reading = action.get("type").and_then(Value::as_str) == Some("open_page");
@@ -598,12 +604,13 @@ fn finish(message: Assembled) -> Completion {
     usage.paid_by = Some(Source::ChatGpt);
     usage.cost_usd = 0.0;
     Completion {
-        content,
+        content: written.content,
         reasoning_details: Vec::new(),
         tool_calls,
         finish,
         usage,
         server_tool_calls,
+        answer_from: written.answer_from,
         native: Some(Native {
             source: Source::ChatGpt,
             items: message.items,

@@ -307,8 +307,19 @@ impl Demo {
             }
             None => Completion::text(&offline_reply(request)),
         };
-        if !completion.content.is_empty() {
-            deltas.text(&completion.content).await?;
+        // A reply that searched part way streams as the provider would: the words, the search,
+        // then the rest, without the paragraph break the parts were put together with.
+        let (before, after) = completion
+            .content
+            .split_at_checked(completion.answer_from)
+            .unwrap_or(("", &completion.content));
+        let before = before.trim_end_matches('\n');
+        if !before.is_empty() {
+            deltas.text(before).await?;
+            deltas.server_tool();
+        }
+        if !after.is_empty() {
+            deltas.text(after).await?;
         }
         Ok(completion)
     }

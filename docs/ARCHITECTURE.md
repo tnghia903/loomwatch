@@ -17,12 +17,13 @@ instructions and tools.
   through every tool call the model asks for, each one allowed or declined first (see
   [Permissions](#permissions)). It ends when the model replies without a tool call, when the turn
   has made 200 tool calls, or when it is cancelled. What the model writes alongside tool calls
-  ("I'll read the notes first.") is recorded as said on the way, and the turn's reply leaves it out
-  unless it is all the turn wrote. A reply the length limit cut off is carried on
-  (twice at most), and a tool call it cut off is sent back with the reason, so the model makes it
-  smaller instead of repeating it. A long tool output is set aside behind an id the agent can read
-  back. A conversation that nears the model's context window, or 160k tokens on a larger one, is
-  replaced by a summary the model writes.
+  ("I'll read the notes first."), or before a web search its provider runs part way through a
+  message ("Let me check the prices."), is recorded as said on the way, a paragraph of its own, and
+  the turn's reply leaves it out unless it is all the turn wrote. A reply the length limit cut off
+  is carried on (twice at most), and a tool call it cut off is sent back with the reason, so the
+  model makes it smaller instead of repeating it. A long tool output is set aside behind an id the
+  agent can read back. A conversation that nears the model's context window, or 160k tokens on a
+  larger one, is replaced by a summary the model writes.
 - **What the provider caches** stays the same from call to call: the tools offered (all of them
   from the first call), the opening instructions, and the conversation, which is only ever added
   to. The summary call offers the same tools, so it reads the conversation from the cache too.

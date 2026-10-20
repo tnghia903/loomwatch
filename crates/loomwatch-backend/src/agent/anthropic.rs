@@ -25,7 +25,7 @@ use serde_json::{Map, Value, json};
 use super::ApiKey;
 use super::error::{AgentError, CallError, redact};
 use super::provider::{
-    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Native, ToolCall, Usage,
+    Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Native, ToolCall, Usage, Written,
 };
 use super::sse::SseDecoder;
 use crate::ai::anthropic::API_VERSION;
@@ -262,14 +262,14 @@ impl Anthropic {
 
     /// The finished message, from the blocks every call of it wrote.
     fn finish(&self, model: &str, blocks: Vec<Value>, stop: &str, mut usage: Usage) -> Completion {
-        let mut content = String::new();
+        let mut written = Written::default();
         let mut tool_calls = Vec::new();
         let mut server_tool_calls = Vec::new();
         for block in &blocks {
             match block.get("type").and_then(Value::as_str) {
                 Some("text") => {
                     if let Some(text) = block.get("text").and_then(Value::as_str) {
-                        content.push_str(text);
+                        written.text(text);
                     }
                 }
                 Some("tool_use") => tool_calls.push(ToolCall {
@@ -280,6 +280,7 @@ impl Anthropic {
                         .map_or_else(|| "{}".to_owned(), Value::to_string),
                 }),
                 Some("server_tool_use") => {
+                    written.tool();
                     let id = text_of(block, "id");
                     let result = blocks.iter().find(|result| {
                         result.get("tool_use_id").and_then(Value::as_str) == Some(id.as_str())
@@ -305,12 +306,13 @@ impl Anthropic {
         usage.cost_estimated = true;
         usage.cost_usd = self.cost(model, &usage);
         Completion {
-            content,
+            content: written.content,
             reasoning_details: Vec::new(),
             tool_calls,
             finish,
             usage,
             server_tool_calls,
+            answer_from: written.answer_from,
             native: Some(Native {
                 source: Source::Anthropic,
                 items: blocks,
@@ -688,10 +690,11 @@ async fn take_event(
         Some("content_block_start") => {
             let index = block_index(&event);
             let mut block = event.get("content_block").cloned().unwrap_or(Value::Null);
-            if matches!(
-                block.get("type").and_then(Value::as_str),
-                Some("tool_use" | "server_tool_use")
-            ) {
+            let kind = block.get("type").and_then(Value::as_str);
+            if kind == Some("server_tool_use") {
+                deltas.server_tool();
+            }
+            if matches!(kind, Some("tool_use" | "server_tool_use")) {
                 // Its input streams as JSON text; it is put back together when the block ends.
                 block["input"] = json!({});
                 message.inputs.insert(index, String::new());
