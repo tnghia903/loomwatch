@@ -503,6 +503,18 @@ describe('who has the work', () => {
     expect(pill()?.querySelector('.chat-dots')).toBeNull()
   })
 
+  it('names each agent at work in its own colour, as its messages do, with green dots for the work', async () => {
+    fold()
+    page = working({ working: ['researcher', 'writer'] })
+    renderChat()
+    const line = await within(screen.getByRole('log')).findByText(/are working/)
+    expect(line).toHaveTextContent('Researcher and Writer are working')
+    expect([...line.querySelectorAll('b')].map((name) => [name.textContent, name.className])).toEqual([['Researcher', 'chat-name hue-1'], ['Writer', 'chat-name hue-2']])
+    expect(line.querySelector('.chat-dots')).not.toBeNull()
+    // Two agents are a thread, not one knot in the gutter.
+    expect(document.querySelector('.tc-weft')).not.toHaveClass('one')
+  })
+
   it('flashes nothing between two agents, and brings the count back once the work is done', async () => {
     fold()
     page = working({ working: [] })
@@ -575,6 +587,7 @@ describe('the piece’s line and the header’s pill', () => {
     asking()
     renderChat()
     await waitFor(() => expect(line()?.querySelector('.tc-talk-line')).toHaveTextContent('Writer is asking Researcher'))
+    expect([...line()!.querySelectorAll('.tc-talk-line b')].map((name) => name.className)).toEqual(['chat-name hue-2', 'chat-name hue-1'])
     scrollLine(true)
     expect(pill()).toBeNull()
     // Scrolled away: the line sets off from the chat's edge, and the pill waits hidden until it lands.
@@ -974,6 +987,16 @@ describe('one agent’s own chat', () => {
     fireEvent.keyDown(soloBox(), { key: 'Enter' })
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { to: { kind: 'agent', agent: 'ada' } } }))
     expect(props.prepare).not.toHaveBeenCalled()
+  })
+
+  it('says it is working in its own colour, its face one knot in the gutter', async () => {
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] }), request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
+    renderSolo()
+    const line = await within(screen.getByRole('log')).findByText(/is working/)
+    expect(line).toHaveTextContent('Ada is working')
+    expect(line.querySelector('b')).toHaveClass('chat-name', 'hue-3')
+    expect(document.querySelector('.tc-weft')).toHaveClass('one')
+    expect(document.querySelector('.tc-weft .chat-avatar')).toHaveClass('hue-3', 'working')
   })
 
   it('reports the newest piece’s run, for the figure at the bench', async () => {

@@ -256,18 +256,28 @@
 .tc-plain { white-space: pre-wrap; }
 .tc-schedule { display: inline-grid; place-items: center; }
 
-/* The talk between the agents, folded to one line. */
+/* The talk between the agents, folded to one line. It reads like a message: its words in the text
+   column, and the agents' faces in the gutter with the faces of the messages (loom.css .chat-msg:
+   a 42px gutter, 36px in a narrow chat, a 28px face at its start). */
 .tc-talk {
+  --tc-gutter: 42px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 10px;
-  margin: 10px 0 2px 42px;
+  margin: 10px 0 2px;
+  padding-left: var(--tc-gutter);
   font-size: 12.5px;
   color: var(--color-ink-3);
 }
-/* The team on a piece as a thread: knots for the agents, gold as far as the work has come. */
-.tc-weft { position: relative; display: inline-flex; align-items: center; gap: 14px; }
+@container (max-width: 520px) {
+  .tc-talk { --tc-gutter: 36px; }
+}
+/* The team on a piece as a thread: knots for the agents, gold as far as the work has come. The thread
+   starts in the gutter, its first knot centred on the messages' faces, and runs on to the right. */
+.tc-weft { position: relative; display: inline-flex; align-items: center; gap: 14px; margin-left: calc((28px - 22px) / 2 - var(--tc-gutter)); }
+/* One agent is one knot, all in the gutter: the words after it start where a message's words do. */
+.tc-weft.one { margin-right: calc(var(--tc-gutter) - (28px + 22px) / 2 - 10px); }
 .tc-weft .chat-avatar { position: relative; z-index: 1; }
 .tc-weft-track, .tc-weft-fill { position: absolute; left: 11px; right: 11px; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; }
 .tc-weft-track { background: var(--color-hairline); }
@@ -290,7 +300,9 @@
 .tc-weft.waiting .tc-weft-bead { background: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent); }
 .tc-talk-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--color-ink-2); }
 .tc-talk-line b { font-weight: 600; color: var(--color-ink); }
-.tc-piece.live .tc-talk-line b { color: var(--color-ok); }
+/* An agent keeps its own colour here, as on its messages; the green dots say it is working. */
+.tc-talk-line .chat-name { color: var(--hue); }
+.tc-piece.live .tc-talk-line .chat-dots i { background: var(--color-ok); }
 .tc-piece.live .tc-talk-line b.tc-wait { color: var(--color-accent); }
 .tc-talk-acts { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; }
 /* What the run spent (ADR 0068): a bobbin that unwinds as the agents spend, the thread run off it
@@ -500,7 +512,7 @@
 }
 
 @container (max-width: 560px) {
-  .tc-talk, .tc-decision, .tc-stopped, .tc-continue, .tc-piece .permission-prompt.inline { margin-left: 0; }
+  .tc-decision, .tc-stopped, .tc-continue, .tc-piece .permission-prompt.inline { margin-left: 0; }
   .tc-talk-acts { margin-left: 0; }
 }
 @container (max-width: 400px) {

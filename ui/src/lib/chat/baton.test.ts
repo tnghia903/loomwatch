@@ -132,7 +132,7 @@ describe('batonWords', () => {
   it('says the pass on the pill, from the agent’s side in the list, and on the piece’s line with its names', () => {
     expect(batonWords({ agent: 'researcher', kind: 'ask', from: 'writer' }, name)).toEqual({
       pill: 'Asking Researcher…', row: 'asked by News Writer', sentence: 'News Writer is asking Researcher',
-      line: [{ text: 'News Writer', name: true }, { text: ' is asking ' }, { text: 'Researcher', name: true }],
+      line: [{ text: 'News Writer', agent: 'writer' }, { text: ' is asking ' }, { text: 'Researcher', agent: 'researcher' }],
     })
     expect(batonWords({ agent: 'writer', kind: 'answer', from: 'researcher' }, name).pill).toBe('Back to News Writer…')
     expect(batonWords({ agent: 'lead', kind: 'dispatch', from: 'writer' }, name).row).toBe('on a task from News Writer')
