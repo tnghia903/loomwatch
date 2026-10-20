@@ -1,6 +1,6 @@
-import { lazy, memo, Suspense } from 'react'
+import { memo, Suspense } from 'react'
 
-const MarkdownRenderer = lazy(() => import('./MarkdownRenderer'))
+import { MarkdownRenderer } from './markdownCode'
 
 /**
  * Markdown, code-split. Until the renderer arrives the text shows as-is (wrapped, selectable), so a

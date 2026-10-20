@@ -1,5 +1,5 @@
 import { ArrowRight, CalendarClock, ChevronDown, ChevronRight, FileText, PanelRight, RotateCcw, Square } from 'lucide-react'
-import { Fragment, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../../lib/chat/baton'
@@ -25,6 +25,7 @@ import type { AutoRan } from '../../lib/watch/events'
 import { workPhase } from '../../lib/watch/workPhase'
 import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
+import { AgentMessages } from '../run/AgentMessages'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
 import { Markdown } from '../ui/Markdown'
@@ -40,7 +41,6 @@ import { Reactions } from './Reactions'
 import { Spool } from './Spool'
 import { ReplyQuote } from './ReplyQuote'
 
-const AgentMessages = lazy(() => import('../run/AgentMessages').then((module) => ({ default: module.AgentMessages })))
 
 /** The team as the chat draws it. */
 export interface TeamView {
@@ -366,24 +366,22 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
 
       {open && (
         <div className="tc-said">
-          <Suspense fallback={null}>
-            <AppearContext.Provider value={news && painted && talkSettled}>
-              <AgentMessages
-                bare
-                messages={session.projection.messages}
-                order={team.parties}
-                predecessors={team.predecessors}
-                evidence={session.projection.evidence}
-                live={live}
-                onInspectEvidence={() => onDetails(run.runId)}
-                reveal={talkReveal}
-                yourTurn={onTheMessage ? yourTurn : undefined}
-                permissionTurn={permissionTurn}
-                onReply={onReply ? (reply) => onReply({ ...reply, runId: run.runId }) : undefined}
-                reactions={talkReacts}
-              />
-            </AppearContext.Provider>
-          </Suspense>
+          <AppearContext.Provider value={news && painted && talkSettled}>
+            <AgentMessages
+              bare
+              messages={session.projection.messages}
+              order={team.parties}
+              predecessors={team.predecessors}
+              evidence={session.projection.evidence}
+              live={live}
+              onInspectEvidence={() => onDetails(run.runId)}
+              reveal={talkReveal}
+              yourTurn={onTheMessage ? yourTurn : undefined}
+              permissionTurn={permissionTurn}
+              onReply={onReply ? (reply) => onReply({ ...reply, runId: run.runId }) : undefined}
+              reactions={talkReacts}
+            />
+          </AppearContext.Provider>
           {toggled && !live && session.projection.messages.length === 0 && loaded && <p className="chat-none">Nothing passed between the agents in this piece of work.</p>}
         </div>
       )}

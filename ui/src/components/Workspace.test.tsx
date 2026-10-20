@@ -153,7 +153,8 @@ describe('Workspace', () => {
     renderWorkspace()
     const ask = () => screen.queryByRole('complementary', { name: 'Ask LoomWatch' })
     fireEvent.click(screen.getByRole('button', { name: 'Ask LoomWatch' }))
-    expect(await screen.findByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
+    // At once: the panel comes with the app, so nothing waits for its code.
+    expect(screen.getByRole('complementary', { name: 'Ask LoomWatch' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Message to Ask LoomWatch' })).toHaveAttribute('placeholder', 'Ask for a change, or say “run it”')
     expect(screen.getByRole('button', { name: 'Add a fact-checker before the last step' })).toBeInTheDocument()
 

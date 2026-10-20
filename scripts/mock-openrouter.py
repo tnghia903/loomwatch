@@ -17,6 +17,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
                                          instructions hold the bullets lesson answers in three bullets
+- "MOCK-LONG: <n>" in the task        -> an answer of about n words, streamed three words at a time
+                                         as a real model streams (for measuring how the app keeps up)
 - "MOCK-HELPERS: <n>" in the task     -> n start_helper calls at once (ADR 0079); each helper lists
   its folder, waits a few seconds ("MOCK-WAIT: <s>" in its brief) and sends back its findings, and
   the agent then answers with what they found
@@ -183,6 +185,8 @@ def plan(body):
                           for i in range(1, count + 1)])
     if "MOCK-WAIT:" in task and find_tool(names, "list_files"):
         return ("calls", [(find_tool(names, "list_files"), {"path": "."})])
+    if "MOCK-LONG:" in task:
+        return ("text", long_answer(int(task.rsplit("MOCK-LONG:", 1)[1].split()[0])))
     if "MOCK-RUN:" in task:
         command = task.rsplit("MOCK-RUN:", 1)[1].strip().splitlines()[0]
         return ("calls", [(find_tool(names, "run_command") or "run_command", {"command": command})])
@@ -235,9 +239,25 @@ def signature(thinking):
     return "mock-sig-" + hashlib.sha256(thinking.encode()).hexdigest()[:24]
 
 
+def long_answer(count):
+    """About `count` words of a cited Markdown report: headings, paragraphs, a list and links."""
+    sentence = ("Short onboarding guides are finished more often than long ones, and a screenshot "
+                "beside each step helps a newcomer follow along ([Example](https://example.com/{n}), 2026-09-01).")
+    parts, total, n = ["# Findings"], 2, 0
+    while total < count:
+        n += 1
+        if n % 6 == 1:
+            parts.append(f"## Part {n // 6 + 1}")
+        line = sentence.format(n=n)
+        parts.append(f"- {line}" if n % 3 == 0 else line)
+        total += len(line.split(" "))
+    return "\n\n".join(parts)
+
+
 def words(text):
     pieces = text.split(" ")
-    step = max(1, len(pieces) // 4)
+    # A long answer streams three words at a time, as a real model's tokens arrive; a short one in four.
+    step = 3 if len(pieces) > 200 else max(1, len(pieces) // 4)
     for start in range(0, len(pieces), step):
         piece = " ".join(pieces[start:start + step])
         yield piece + (" " if start + step < len(pieces) else "")
@@ -288,9 +308,10 @@ def claude_events(body, kind, value, number, usage):
         index = 1
     if kind == "text":
         yield "content_block_start", {"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}}
-        for piece in words(value):
+        pieces = list(words(value))
+        for piece in pieces:
             yield "content_block_delta", {"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": piece}}
-            time.sleep(0.05)
+            time.sleep(0.01 if len(pieces) > 50 else 0.05)
         yield "content_block_stop", {"type": "content_block_stop", "index": index}
         stop = "end_turn"
     else:
@@ -395,14 +416,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b": OPENROUTER PROCESSING\n\n")
         base = {"id": f"gen-{number}", "model": body.get("model"), "object": "chat.completion.chunk"}
         if kind == "text":
-            words = value.split(" ")
-            step = max(1, len(words) // 4)
-            for start in range(0, len(words), step):
-                piece = " ".join(words[start:start + step])
-                if start + step < len(words):
-                    piece += " "
+            pieces = list(words(value))
+            for piece in pieces:
                 event({**base, "choices": [{"index": 0, "delta": {"role": "assistant", "content": piece}, "finish_reason": None}]})
-                time.sleep(0.05)
+                time.sleep(0.01 if len(pieces) > 50 else 0.05)
             finish = "stop"
         else:
             for index, (name, args) in enumerate(value):

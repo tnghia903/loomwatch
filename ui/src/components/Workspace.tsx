@@ -1,6 +1,6 @@
 import { Background, ConnectionLineType, getNodesBounds, getViewportForBounds, ReactFlow, useNodesInitialized, useReactFlow, useStore, type EdgeChange, type Node, type NodeChange, type OnNodeDrag } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import { shortName } from '../lib/ai/client'
 import { useAiStatus } from '../lib/ai/useKeyStatus'
@@ -134,6 +134,7 @@ import { useAsk } from '../lib/ask/useAsk'
 import { DEFAULT_ROUTINE_NOTION_TITLE, NOTION_PAGE_SOURCE, useNotionConnection, type NotionPageHit } from '../lib/notion/connection'
 import type { AskContext } from '../lib/ask/client'
 import { AskButton } from './ask/AskButton'
+import { AskPanel } from './ask/AskPanel'
 import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
@@ -145,9 +146,6 @@ import type { TeamView as TeamTab } from '../lib/team-file/useTeamList'
 import type { LeaveGuard } from './rail/CrewRail'
 import { TeamRail } from './rail/TeamRail'
 import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
-
-// The Ask panel is code-split like the Markdown stack: most visits never open it.
-const AskPanel = lazy(() => import('./ask/AskPanel').then((module) => ({ default: module.AskPanel })))
 
 // One canvas anatomy for both surfaces. Run ("Full trace") draws the team the operator composed,
 // so it must be recognisably the same object: the agent and capability cards are the Build cards,
@@ -413,7 +411,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const [checkpoints, setCheckpoints] = useState<{ runId: string; rows: Checkpoint[] } | null>(null)
   // Read for what still counts runs — the run's number in Details — never shown as a list: past
   // work is in each team's chat (ADR 0051).
-  const history = useRunHistory(false)
+  const history = useRunHistory()
   const schedules = useSchedules()
   const [routineBusy, setRoutineBusy] = useState(false)
   // A pipeline that ends on a check step answers with the work it checked (ADR 0062), and one that
@@ -987,7 +985,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const lineageLabel = useMemo(() => {
     if (!activeRunId) return null
     const attemptOf = (runId: string) => {
-      const all = teamRunIds(mergeHistory(history.records, history.sessions), record?.teamPath ?? doc.path)
+      const all = teamRunIds(mergeHistory(history.records, []), record?.teamPath ?? doc.path)
       const index = all.indexOf(runId)
       return index >= 0 ? String(index + 1).padStart(2, '0') : runId.slice(0, 8)
     }
@@ -995,7 +993,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     const retriedServerSide = record?.retryOfRunId
     const retried = retriedServerSide ?? retryOf.get(activeRunId)
     return retried ? `Retry of Run ${attemptOf(retried)}` : null
-  }, [activeRunId, record, retryOf, history.records, history.sessions, doc.path])
+  }, [activeRunId, record, retryOf, history.records, doc.path])
 
   // Who the request goes to first: the one agent of a one-agent turn (ADR 0051), the stage a run
   // started at, or the team's entrypoint.
@@ -1032,10 +1030,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const live = session.mode === 'live'
   const attempt = useMemo(() => {
     if (!activeRunId) return 1
-    const all = teamRunIds(mergeHistory(history.records, history.sessions), record?.teamPath ?? doc.path)
+    const all = teamRunIds(mergeHistory(history.records, []), record?.teamPath ?? doc.path)
     const index = all.indexOf(activeRunId)
     return index >= 0 ? index + 1 : all.length + 1
-  }, [activeRunId, history.records, history.sessions, record?.teamPath, doc.path])
+  }, [activeRunId, history.records, record?.teamPath, doc.path])
   // A finished run ends when the daemon says it did. The last recorded event can be much earlier: a
   // run stopped while it waited for you records nothing after the handover, and read "took 63ms".
   const runningNow = live && !isTerminalRun(record?.status)
@@ -2496,7 +2494,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       >
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
-        {ask.open && <Suspense fallback={null}><AskPanel ask={ask} view="home" cards={askCards} onHome /></Suspense>}
+        {ask.open && <AskPanel ask={ask} view="home" cards={askCards} onHome />}
         {askNotice}
       </Home>
     )
@@ -2939,7 +2937,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           onDismiss={(alert) => setDismissedAlerts((ids) => new Set([...ids, alert.id]))}
         />
 
-        {ask.open && <Suspense fallback={null}><AskPanel ask={ask} view={askContext.view} cards={askCards} hidden={askDockBusy} /></Suspense>}
+        {ask.open && <AskPanel ask={ask} view={askContext.view} cards={askCards} hidden={askDockBusy} />}
         {askNotice}
 
         {layersVisible && runPresentation === 'trace' && <LayerLegend configured={doc.edges.length} observed={observedCount} solo={soloActive} onSolo={setSolo} />}

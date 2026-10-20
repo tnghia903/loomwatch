@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ExternalLink, FilePlus2, FileText, Folder, FolderPlus, KeyRound, Network, NotebookText, Plug, Plus, Puzzle, Search, Store, Wrench, X } from 'lucide-react'
 
 import { shortName } from '../../lib/ai/client'
@@ -37,14 +37,13 @@ import { EffortSlider } from '../models/EffortSlider'
 import { ModelPicker } from '../models/ModelPicker'
 import type { LessonsOf } from '../../lib/lessons/client'
 import { SkillDetails } from '../skills/SkillDetails'
+import SkillsMarket from '../skills/SkillsMarket'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
 import type { BenchLabel } from './AgentFigure'
+import { AgentFigure } from './benchFigure'
 import type { BenchHelper, BenchView } from './workbenchScene'
 import { LearnedBlock } from './LearnedBlock'
-
-const AgentFigure = lazy(() => import('./AgentFigure'))
-const SkillsMarket = lazy(() => import('../skills/SkillsMarket'))
 
 /**
  * BUILD BY HAND: every setting of the agent as a block of plain words and controls, always open,
@@ -439,7 +438,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           {learned && <LearnedBlock of={learned} name={draft.name.trim() || 'this agent'} readOnly={readOnly} />}
         </div>
       </div>
-      {market && <Suspense fallback={null}><SkillsMarket agentName={draft.name.trim() || 'your new agent'} query={market.query} onClose={backFromMarket} /></Suspense>}
+      {market && <SkillsMarket agentName={draft.name.trim() || 'your new agent'} query={market.query} onClose={backFromMarket} />}
     </div>
   )
 }

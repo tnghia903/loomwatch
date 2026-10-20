@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { keepIfSame } from '../keepIfSame'
-import type { SessionSummary } from '../watch/events'
-import { readArchive } from '../watch/useSessionEvents'
 import { fetchRuns, isTerminalRun, RunApiError, type RunRecord } from './client'
 
 /**
- * The run history behind the composer's history button: live registry records merged with
- * archived sessions. Polled slowly in the background (so a run started elsewhere shows up)
- * and quickly while the popover is open.
+ * Every run the daemon knows, for the run view's attempt numbers ("Retry of Run 02"). Polled slowly
+ * in the background, so a run started elsewhere counts, and more often while one is live. The
+ * archive's session list is not read: a session the daemon has forgotten names no team, so it never
+ * counts, and that list carries each run's whole prompt.
  */
-export function useRunHistory(open: boolean) {
+export function useRunHistory() {
   const [records, setRecords] = useState<RunRecord[]>([])
-  const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [error, setError] = useState<string | null>(null)
   const [unavailable, setUnavailable] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -21,13 +19,9 @@ export function useRunHistory(open: boolean) {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const mine = ++generation.current
     try {
-      const [runs, archived] = await Promise.all([
-        fetchRuns(signal),
-        readArchive<SessionSummary[]>('/api/sessions', signal).catch((caught: unknown) => { throw caught }),
-      ])
+      const runs = await fetchRuns(signal)
       if (signal?.aborted || mine !== generation.current) return
       setRecords((previous) => keepIfSame(previous, runs))
-      setSessions((previous) => keepIfSame(previous, archived))
       setError(null)
       setUnavailable(null)
     } catch (caught) {
@@ -39,19 +33,18 @@ export function useRunHistory(open: boolean) {
     }
   }, [])
 
+  const live = records.some((record) => !isTerminalRun(record.status))
   useEffect(() => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout>
-    const live = records.some((record) => !isTerminalRun(record.status))
-    const interval = open ? 3000 : live ? 5000 : 20000
+    const interval = live ? 5000 : 20000
     const tick = async () => {
       await refresh(controller.signal)
       if (!controller.signal.aborted) timer = setTimeout(() => void tick(), interval)
     }
     void tick()
     return () => { controller.abort(); clearTimeout(timer) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, refresh, records.some((record) => !isTerminalRun(record.status))])
+  }, [live, refresh])
 
-  return { records, sessions, error, unavailable, loaded, refresh }
+  return { records, error, unavailable, loaded, refresh }
 }
