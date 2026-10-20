@@ -69,7 +69,7 @@ and asks.
 <td width="50%" valign="middle">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/agents-dark.webp">
-  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer in Your agents. On the left, a figure sits at a workbench: a clipboard for its job, a laptop showing the model it thinks with, Claude Opus 5.5, a recipe card for its one skill, empty key hooks because it may not act without asking, and a tray for what it hands back. On the right, the same settings as plain blocks, starting with Name and Instructions. Above them, one sentence sums the agent up: Writer thinks with Claude Opus 5.5 and has 1 recipe card.">
+  <img src="site/assets/app/agents-light.webp" alt="Building an agent called Writer. Along the top, the name Writer, marked Saved, the Build and Chat tabs, and the bell saying 1 needs you. Down the left edge, a column of My agents' figures, with Writer's marked; pick one to open it. Under the top bar, one sentence sums the agent up: Writer thinks with Claude Opus 5.5, has 1 recipe card and reads nothing yet. Below it, Writer's figure sits at a workbench: a clipboard for its job, a laptop showing the model it thinks with, Claude Opus 5.5, a recipe card for its one skill, empty key hooks because it asks you before it searches the web, changes files or runs a command, and a tray for what it hands back. On the right, the same settings as a form, starting with Name and Instructions.">
 </picture>
 </td>
 <td width="50%" valign="middle">
@@ -378,7 +378,7 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as a team. Build an agent, New team and the 3-minute guide, a box to describe the job to Ask, the Agents, Workflow and Chat steps, a row of My agents with their figures, and Your teams below, where the Review stop demo is Waiting for you. At the top, the bell says 1 needs you.">
+  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as one team. See every step. Step in any time. Build an agent, New team and the 3-minute guide, a box to describe the job, with an Ask button, the Agents, Workflow and Chat steps, a row of My agents with their figures and a link to tell them about you, and Your teams below, where the Review stop demo is Waiting for you. At the top right, the bell says 1 needs you, between search and the menu.">
 </picture>
 <br><sub><strong>Home.</strong> Your agents first, each with its face, then the teams they work in.</sub>
 </td>
@@ -387,7 +387,7 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/workflow-dark.webp">
-  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. Above the canvas the team is read back as one sentence, with each agent's figure. On the left, the add panel lists My agents with the models they think with, the Build a new agent link, then Workflow steps with You (review step). The heading says Your team is ready, beside Run team.">
+  <img src="site/assets/app/workflow-light.webp" alt="A team's Workflow tab: a daily schedule feeds Gatherer, then Reader, then Writer, which produces the team response. At the top of the canvas the team is read back as one sentence, with each agent's figure. Down the left edge, a column shows each of your teams by its agents' figures, with this one marked; pick one to switch. Beside it, the Add to your team panel lists My agents with the models they think with, the Build a new agent link, then Workflow steps with You (review step). The heading says Your team is ready, beside Run team.">
 </picture>
 <br><sub><strong>Workflow.</strong> Your agents on the canvas, connected in order and read back as one sentence.</sub>
 </td>
