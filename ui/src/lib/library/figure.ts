@@ -90,10 +90,9 @@ export const TOOL_SLOTS = 4
  *
  * - `still`: no run on the bench.
  * - `starting`: the run is starting.
- * - `working`: the run is live and one of its events arrived in the last few seconds (it types).
- * - `quiet`: the run is live and no event has arrived for a while: its hands rest on the keys.
- *   A quiet run says nothing about why (the model may be thinking, or waiting on the network),
- *   so the figure doesn't act out thinking.
+ * - `working`: the run is live and one of its events arrived in the last few seconds.
+ * - `quiet`: the run is live and no event has arrived for a while.
+ *   While it is live, what it is at (`WorkPhase`, from the run's events) says what it acts out.
  * - `asking`: it waits on you, for a permission or an answer (a hand up).
  * - `done`, `failed`, `stopped`: how the run ended.
  */
@@ -101,6 +100,66 @@ export type FigureMood = 'still' | 'starting' | 'working' | 'quiet' | 'asking' |
 
 /** A run that moved this recently counts as working; quieter than that, it is quiet. */
 export const WORKING_WINDOW_MS = 3000
+
+/**
+ * What the agent is at while its run is live, from the run's events (lib/watch/workPhase.ts), as
+ * its figure acts it out and its chat shows it:
+ *
+ * - `reading`: it reads the message it was given, before anything comes back from its model.
+ * - `thinking`: its model reasons, or is quiet working out what to do next. A comic thought bubble
+ *   over its head says what it is thinking about, from its reasoning (lib/watch/workPhase.ts).
+ * - `tools`: it uses a tool (a web search, a file, a command): it works at its laptop, whose
+ *   screen flashes.
+ * - `typing`: it writes its reply, and the chat shows it typing.
+ */
+export type WorkPhase = 'reading' | 'thinking' | 'tools' | 'typing'
+
+/**
+ * The short actions a figure takes in turn while it works, so it is never still for long. Each
+ * phase has its own, picked by weight: it reads its message or its job sheet; it scratches its
+ * head, rests its chin on a hand or looks up while it thinks; it clicks, types or leans in to the
+ * screen while it uses a tool; and it types its reply, nodding now and then.
+ */
+export type BusyKind = 'read' | 'checkJob' | 'scratch' | 'ponder' | 'lookUp' | 'click' | 'peer' | 'type' | 'nod'
+
+export const BUSY: Record<WorkPhase, readonly { kind: BusyKind; weight: number }[]> = {
+  reading: [{ kind: 'read', weight: 3 }, { kind: 'checkJob', weight: 1 }],
+  thinking: [{ kind: 'scratch', weight: 3 }, { kind: 'ponder', weight: 3 }, { kind: 'lookUp', weight: 2 }],
+  tools: [{ kind: 'click', weight: 3 }, { kind: 'type', weight: 2 }, { kind: 'peer', weight: 2 }],
+  typing: [{ kind: 'type', weight: 5 }, { kind: 'nod', weight: 1 }],
+}
+
+/** How long each action lasts, in seconds: somewhere between the two. */
+export const BUSY_SECONDS: Record<BusyKind, readonly [number, number]> = {
+  read: [3, 4.5], checkJob: [2.2, 2.8], scratch: [2.4, 3.2], ponder: [3.5, 5], lookUp: [3, 4], click: [2.5, 4], peer: [2.5, 3.5], type: [2.5, 5], nod: [1.4, 1.8],
+}
+
+/** Reading and typing carry on from one stretch to the next; anything else is not done twice in a row. */
+const CARRIES_ON: ReadonlySet<BusyKind> = new Set(['read', 'type'])
+
+/**
+ * Something on the bench its agent just used, for its figure to go and get: a skill's recipe card
+ * from the pegboard, a folder or file from the reads drawer, or a tool's tile from the tool drawer.
+ * `id` is the run event that used it, so each use is fetched once.
+ */
+export interface BenchUse {
+  kind: 'skill' | 'read' | 'tool'
+  /** The skill's or the tool's name, or what it reads (ReadSource.name). */
+  name: string
+  id: string
+}
+
+/** The next action in `phase`, after `last`, for a roll of the dice in [0, 1). */
+export function nextBusy(phase: WorkPhase, last: BusyKind | null, roll: number): BusyKind {
+  const pool = BUSY[phase].filter(({ kind }) => kind !== last || CARRIES_ON.has(kind))
+  const total = pool.reduce((sum, { weight }) => sum + weight, 0)
+  let at = Math.min(Math.max(roll, 0), 0.999999) * total
+  for (const { kind, weight } of pool) {
+    if (at < weight) return kind
+    at -= weight
+  }
+  return pool[pool.length - 1].kind
+}
 
 export function figureMood(record: Pick<RunRecord, 'status' | 'permissionRequests' | 'waitingOn' | 'spendStops'> | null, lastMoveAt: number | null, now: number): FigureMood {
   if (!record) return 'still'

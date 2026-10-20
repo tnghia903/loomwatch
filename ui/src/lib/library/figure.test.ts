@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PermissionRequest } from '../runs/client'
-import { askedKey, figureMood, partOfNode, reactionsBetween, WORKING_WINDOW_MS, type FigureLook } from './figure'
+import { askedKey, BUSY, figureMood, nextBusy, partOfNode, reactionsBetween, WORKING_WINDOW_MS, type BusyKind, type FigureLook, type WorkPhase } from './figure'
 
 const ask = (sw: PermissionRequest['switch']): PermissionRequest => ({ id: 'p1', agent: 'a', name: 'A', title: 'Web search', kind: 'fetch', switch: sw, since: '', expiresAt: '' })
 
@@ -95,5 +95,36 @@ describe('what the figure reacts to', () => {
   it('hangs a key on its hook when you hand it over, and puts it in your dish when you take it back', () => {
     expect(reactionsBetween(look, { ...look, allow: { ...look.allow, web: true } })).toEqual([{ kind: 'key', key: 'web', given: true }])
     expect(reactionsBetween({ ...look, allow: { ...look.allow, edits: true } }, look)).toEqual([{ kind: 'key', key: 'edits', given: false }])
+  })
+})
+
+describe('what the figure does while it works', () => {
+  const phases = Object.keys(BUSY) as WorkPhase[]
+  const rolls = Array.from({ length: 40 }, (_, index) => index / 40)
+
+  it('takes each phase’s own actions, every one of them for some roll', () => {
+    for (const phase of phases) {
+      const picked = new Set(rolls.map((roll) => nextBusy(phase, null, roll)))
+      expect([...picked].sort()).toEqual(BUSY[phase].map(({ kind }) => kind).sort())
+    }
+  })
+
+  it('scratches its head and thinks in other ways too, never the same twice in a row', () => {
+    for (const last of BUSY.thinking.map(({ kind }) => kind)) {
+      for (const roll of rolls) expect(nextBusy('thinking', last, roll)).not.toBe(last)
+    }
+    expect(BUSY.thinking.map(({ kind }) => kind)).toContain('scratch')
+  })
+
+  it('carries on typing and reading, but changes anything else', () => {
+    expect(rolls.some((roll) => nextBusy('typing', 'type', roll) === 'type')).toBe(true)
+    expect(rolls.some((roll) => nextBusy('reading', 'read', roll) === 'read')).toBe(true)
+    for (const roll of rolls) expect(nextBusy('tools', 'click', roll)).not.toBe('click')
+    for (const roll of rolls) expect(nextBusy('typing', 'nod', roll)).toBe('type')
+  })
+
+  it('keeps any roll in range', () => {
+    const kinds = new Set<BusyKind>(BUSY.tools.map(({ kind }) => kind))
+    for (const roll of [-1, 0, 0.999999, 1, 2, Number.NaN]) expect(kinds.has(nextBusy('tools', null, roll))).toBe(true)
   })
 })

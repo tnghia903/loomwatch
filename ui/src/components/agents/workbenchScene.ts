@@ -33,7 +33,7 @@ import {
 } from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-import { CARD_SLOTS, FIGURE_KEYS, partOfNode, reactionsBetween, READ_SLOTS, TOOL_SLOTS, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource } from '../../lib/library/figure'
+import { BUSY, BUSY_SECONDS, CARD_SLOTS, FIGURE_KEYS, nextBusy, partOfNode, reactionsBetween, READ_SLOTS, TOOL_SLOTS, type BenchUse, type BusyKind, type FigureLook, type FigureMood, type FigurePart, type FigureReaction, type ReadSource, type WorkPhase } from '../../lib/library/figure'
 import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } from '../../lib/library/figures'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { dress, type Dressed } from './accessoryMeshes'
@@ -51,6 +51,23 @@ export interface BenchView {
   mood: FigureMood
   /** Recorded events in the run so far: each one flickers its screen. */
   events: number
+  /**
+   * What its agent is at while the run is live (WorkPhase, from the run's events): reading its
+   * message, thinking, using a tool or typing. It acts that out a few ways in turn (BUSY), so it is
+   * never still while it works. Left out, as the landing page's bench leaves it, it types while
+   * events arrive and rests its hands on the keys while they don't.
+   */
+  phase?: WorkPhase
+  /**
+   * What its model is thinking about while it thinks, in a few words from its reasoning
+   * (thoughtLine), for the comic bubble AgentFigure lays over its head; null when it hasn't said.
+   */
+  thought?: string | null
+  /**
+   * What its agent just used from the bench (BenchUse): a skill, a folder it reads, a tool. It goes
+   * and gets each one, and carries it back to the desk. Left out, as on the landing page, it stays.
+   */
+  uses?: readonly BenchUse[]
   asked: AllowSwitch | null
   open: FigurePart | null
   /** A skill card is being dragged over the bench. */
@@ -75,7 +92,7 @@ export interface BenchTool {
   icon: string | null
 }
 
-export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply'
+export type BenchAnchor = 'mind' | 'app' | 'name' | 'job' | 'skills' | 'reads' | 'tools' | 'keys' | 'dish' | 'reply' | 'thought'
 export type BenchAnchors = Record<BenchAnchor, { x: number; y: number }>
 /** The faces that carry words: the nameplate, the job sheet and the laptop's lid. */
 export type BenchFace = 'name' | 'job' | 'app'
@@ -161,17 +178,86 @@ const HEAD_TURN = 0.5
 const HEAD_NOD = 0.24
 
 /** The figure's pose, as offsets the frame eases toward. Arms at rest reach out to the laptop. */
-const REST = { bodyY: 0, bodyRX: 0, bodyRY: 0, neckRX: 0, neckRZ: 0, lookX: 0, lookY: -0.3, armLRX: -1.42, armLRZ: -0.05, armRRX: -1.42, armRRZ: 0.05, scale: 1, band: 0, screen: 0.12, typing: 0, hands: 0 }
+const REST = { bodyY: 0, bodyRX: 0, bodyRY: 0, neckRX: 0, neckRZ: 0, lookX: 0, lookY: -0.3, armLRX: -1.42, armLRZ: -0.05, armRRX: -1.42, armRRZ: 0.05, scale: 1, band: 0, screen: 0.12, typing: 0, hands: 0, click: 0 }
 type Pose = typeof REST
 type Channel = keyof Pose
 
 interface Action { kind: string; start: number; duration: number; side?: number }
+/** What it does now while it works, and what it does next once that is decided. */
+interface Busy { kind: BusyKind; start: number; duration: number; next: BusyKind | null }
+/**
+ * A trip from the desk to something it uses on the bench (BenchUse) and back: the thing, where it
+ * lives, and the way there from the desk, which it comes back along.
+ */
+interface Trip {
+  item: Object3D
+  home: { parent: Object3D; p: Vector3; q: Quaternion; s: number }
+  /** Whether the thing is still the bench's, so one taken off the bench meanwhile isn't put back. */
+  still: () => boolean
+  path: Vector3[]
+  length: number
+  /** Which way it faces there, how high it hops to reach, whether it reaches up (the pegboard) or down (a drawer), and the thing's size in its hand. */
+  face: number
+  hop: number
+  reach: 'up' | 'down'
+  held: number
+  start: number
+  /** Seconds going, reaching, coming back, and looking at it at the desk. */
+  legs: readonly [number, number, number, number]
+  picked: boolean
+  returned: boolean
+}
+/** How fast it goes, in metres a second; how long it takes to reach a thing; how long it looks at it at the desk. */
+const STRIDE = 1.1
+const REACH_S = 1.5
+const LOOK_S = 1.6
+/** Where it stands to reach into a drawer: past the bench's end, and on the floor in front. */
+const BENCH_END = 1.2
+const FLOOR_Y = 0.12
+const UP = new Vector3(0, 1, 0)
+/** How far above the top of its head (and what it wears there) its thought bubble starts. */
+const THOUGHT_GAP = 0.06
 interface Tween { node: Object3D; fromP: Vector3; toP: Vector3; fromQ: Quaternion; toQ: Quaternion; fromS: number; toS: number; start: number; duration: number; arc: number; done?: () => void }
 
 const smooth = (edge0: number, edge1: number, x: number) => MathUtils.smoothstep(x, edge0, edge1)
 const shown = (object: Object3D | null): boolean => { for (let at = object; at; at = at.parent) if (!at.visible) return false; return true }
 const envelope = (u: number) => smooth(0, 0.18, u) * (1 - smooth(0.72, 1, u))
 const bump = (u: number) => Math.sin(Math.PI * MathUtils.clamp(u, 0, 1))
+
+/** Typing: its mittens tap the keys in turn (mittens()), its arms bob a little with them, by `amount`. */
+function typeAway(target: Pose, t: number, amount: number) {
+  const tap = (phase: number) => Math.max(0, Math.sin(t * 7.5 + phase)) * (0.65 + 0.35 * Math.sin(t * 2.3 + phase))
+  target.typing = MathUtils.lerp(target.typing, 1, amount)
+  target.armLRX -= 0.05 * tap(0) * amount
+  target.armRRX -= 0.05 * tap(Math.PI) * amount
+  target.armLRZ += 0.05 * Math.sin(t * 4.1) * amount
+  target.armRRZ += 0.05 * Math.sin(t * 3.3 + 1) * amount
+  target.bodyY += 0.003 * Math.abs(Math.sin(t * 15)) * amount
+}
+
+/** Where `distance` along a path is, and which way it heads there (a turn about the vertical, 0 facing +z). */
+function alongPath(path: readonly Vector3[], distance: number): { point: Vector3; heading: number } {
+  let left = Math.max(0, distance)
+  for (let index = 1; index < path.length; index += 1) {
+    const from = path[index - 1]
+    const to = path[index]
+    const span = from.distanceTo(to)
+    const flat = Math.hypot(to.x - from.x, to.z - from.z)
+    if (left <= span || index === path.length - 1) {
+      const point = from.clone().lerp(to, span > 0 ? Math.min(1, left / span) : 1)
+      return { point, heading: flat > 0.001 ? Math.atan2(to.x - from.x, to.z - from.z) : 0 }
+    }
+    left -= span
+  }
+  return { point: path[0].clone(), heading: 0 }
+}
+
+/** An action that starts now, or `under` of the way through it already, for as long as its kind lasts. */
+function startBusy(kind: BusyKind, now: number, under = 0): Busy {
+  const [low, high] = BUSY_SECONDS[kind]
+  const duration = low + (high - low) * Math.random()
+  return { kind, start: now - under * duration, duration, next: null }
+}
 
 /** A square `size` across with rounded corners, standing on its bottom edge, its middle at x = 0. */
 function roundedSquare(size: number, radius: number): Shape {
@@ -208,10 +294,13 @@ function corners(mesh: Mesh): Vector3[] {
  * the bench, and the figure with every head it can wear. This dresses it from the agent's settings
  * and the figure it wears, lets each object on the bench be picked up or clicked, and moves the
  * figure. It moves for two reasons only: a change you just made (it looks at what changed) and the
- * run in its chat (it types while its events arrive, rests its hands while the run is quiet,
- * points at your dish when it waits on you for a key, and hands its reply to the tray when it is
- * done). Nothing else: no pose for a feeling the run doesn't show. Between runs it looks
- * around and blinks. Reduced motion keeps every pose and drops the motion.
+ * run in its chat. While the run works, it acts out what the run's events say its agent is at
+ * (BenchView.phase): it reads its message, thinks (scratching its head, chin on a hand, a thought
+ * bubble over its head saying what about), uses the laptop while a tool runs (its screen flashing), and types its
+ * reply; when it uses something on the bench (a skill, a folder, a tool), it goes and gets it and
+ * carries it back to the desk. It points at your dish when it waits on you for a key, and hands its reply to the tray
+ * when it is done. Between runs it looks around and blinks. Reduced motion keeps every pose and
+ * drops the motion: while it works it keeps its hands on the keys and its eyes on the screen.
  */
 export class WorkbenchScene {
   private readonly renderer: WebGLRenderer
@@ -261,6 +350,17 @@ export class WorkbenchScene {
   private flicker = 0
   private screenLight: PointLight | null = null
   private moodSince = 0
+  private busy: Busy | null = null
+  /** While it uses a tool, its screen flashes now and then as pages and results come up: how bright now, and when next. */
+  private flash = 0
+  private nextFlash = 0
+  /** Where its thought bubble starts: a point riding on its head, just above the top of it. */
+  private readonly thoughtMark = new Object3D()
+  /** Things it used, waiting to be fetched; the uses it has seen; the trip it is on; and where it stands at the desk. */
+  private errands: BenchUse[] = []
+  private readonly seenUses = new Set<string>()
+  private trip: Trip | null = null
+  private readonly figureHome = new Vector3()
   private wound: Texture | null = null
   /** Each head it can wear, and every eye (they blink together; only the worn head's show). */
   private readonly heads = new Map<FigureKind, Object3D>()
@@ -348,11 +448,25 @@ export class WorkbenchScene {
       this.keyDish.set(key, middle.multiplyScalar(-DISH_KEY_SCALE))
     }
     this.lights()
+    this.figureHome.copy(this.node('figure').position)
+    this.node('head').add(this.thoughtMark)
+    this.placeThought()
     // Every shader it draws with, the hidden parts' too, compiled before its first frame (readyToDraw).
     await readyToDraw(this.renderer, this.scene, this.camera)
     this.loaded = true
     this.frame()
     if (this.view) this.apply(null, this.view)
+  }
+
+  /** Put the point its thought bubble starts from just above the head it wears now, and what it wears on it. */
+  private placeThought() {
+    const head = this.node('head')
+    head.updateWorldMatrix(true, true)
+    const box = new Box3()
+    head.traverse((object) => { if (object instanceof Mesh && shown(object)) box.expandByObject(object) })
+    if (box.isEmpty()) return
+    const top = head.worldToLocal(new Vector3(0, box.max.y, 0).setX((box.min.x + box.max.x) / 2).setZ((box.min.z + box.max.z) / 2))
+    this.thoughtMark.position.set(0, top.y + THOUGHT_GAP, 0)
   }
 
   /** The laptop screen's light on the figure, off until it works. */
@@ -492,6 +606,12 @@ export class WorkbenchScene {
 
     // Each recorded event flickers its screen, as if a line had just come up.
     if (view.events > this.events && !this.reduced) this.flicker = 1
+    // Each thing it uses from the bench, it goes and gets: two at most wait their turn.
+    for (const use of view.uses ?? []) {
+      if (this.seenUses.has(use.id)) continue
+      this.seenUses.add(use.id)
+      if (!this.reduced && this.errands.length < 2) this.errands.push(use)
+    }
     this.events = view.events
     if (before) {
       for (const reaction of reactionsBetween(before.look, look)) this.react(reaction)
@@ -511,6 +631,7 @@ export class WorkbenchScene {
     const deep = skin.clone().multiplyScalar(0.86)
     for (const mesh of this.meshes('skin_deep')) (mesh.material as MeshStandardMaterial).color.copy(deep)
     this.dress(figure)
+    this.placeThought()
   }
 
   /** Put on what it wears from the wardrobe, fitted to the head it wears (accessoryMeshes.ts). */
@@ -869,25 +990,13 @@ export class WorkbenchScene {
         target.screen = 0.45
         look = 'viewer'
         break
-      case 'working': {
-        // Typing: its mittens tap the keys in turn, its arms bob a little with them.
-        const tap = (phase: number) => Math.max(0, Math.sin(t * 7.5 + phase)) * (0.65 + 0.35 * Math.sin(t * 2.3 + phase))
-        target.typing = 1
-        target.armLRX -= 0.05 * tap(0) * motion
-        target.armRRX -= 0.05 * tap(Math.PI) * motion
-        target.armLRZ += 0.05 * Math.sin(t * 4.1) * motion
-        target.armRRZ += 0.05 * Math.sin(t * 3.3 + 1) * motion
-        target.bodyY = 0.003 * Math.abs(Math.sin(t * 15)) * motion
-        target.band = 1
-        target.screen = 0.75
-        look = screenPoint()
-        break
-      }
+      case 'working':
       case 'quiet':
-        // The record is quiet: hands on the keys, eyes on the screen. Nothing more, because a quiet
-        // record doesn't say whether the model is thinking or the network is slow.
+        // Hands on the keys, eyes on the screen. What it is at (its phase) is acted out below;
+        // without one, it types while events arrive.
+        if (!view.phase && view.mood === 'working') typeAway(target, t, motion)
         target.band = 1
-        target.screen = 0.5
+        target.screen = view.mood === 'working' ? 0.75 : 0.5
         look = screenPoint()
         break
       case 'asking':
@@ -923,6 +1032,14 @@ export class WorkbenchScene {
       case 'stopped':
         break
     }
+
+    // While it works: what it is at, acted out a few seconds at a time.
+    const phase = view.mood === 'working' || view.mood === 'quiet' ? view.phase ?? null : null
+    if (phase) look = this.work(phase, target, look ?? screenPoint(), screenPoint)
+    else this.busy = null
+    // A trip to fetch what it just used takes it from the desk for a few seconds.
+    const away = this.travel(target, dt, view.mood === 'working' || view.mood === 'quiet')
+    if (away) look = away
 
     // While a skill is dragged over the bench, it turns to the pegboard to take the card.
     if (view.dropping) look = this.node('card_3').getWorldPosition(new Vector3())
@@ -1026,6 +1143,9 @@ export class WorkbenchScene {
       const head = this.node('head').getWorldPosition(new Vector3())
       const point = look === 'viewer' ? this.camera.position.clone() : look
       const toward = point.sub(head)
+      // Away from the desk it may face another way: where to look is turned with it.
+      const yaw = this.node('figure').rotation.y
+      if (yaw !== 0) toward.applyAxisAngle(UP, -yaw)
       const behind = toward.z < -0.1
       target.lookX = MathUtils.clamp(toward.x / 0.75, -1, 1)
       target.lookY = MathUtils.clamp(toward.y / 0.6, -1, 1)
@@ -1052,11 +1172,12 @@ export class WorkbenchScene {
     const light = this.node('laptop_light') as Mesh
     const band = light.material as MeshStandardMaterial
     band.emissive.copy(LIVE)
-    band.emissiveIntensity = p.band * (this.reduced ? 1 : 0.75 + 0.25 * Math.sin(t * 5))
+    band.emissiveIntensity = p.band * (this.reduced ? 1 : 0.75 + 0.25 * Math.sin(t * 5)) + this.flash * 0.8
     this.flicker = Math.max(0, this.flicker - dt * 4)
+    this.flash = Math.max(0, this.flash - dt * 5)
     const screen = (this.node('laptop_screen') as Mesh).material as MeshStandardMaterial
-    screen.emissiveIntensity = p.screen + this.flicker * 0.9
-    if (this.screenLight) this.screenLight.intensity = (p.screen + this.flicker * 0.6) * 0.35
+    screen.emissiveIntensity = p.screen + this.flicker * 0.9 + this.flash * 1.2
+    if (this.screenLight) this.screenLight.intensity = (p.screen + this.flicker * 0.6) * 0.35 + this.flash * 0.9
     this.highlight(view)
 
     this.liftAsked(view)
@@ -1079,8 +1200,260 @@ export class WorkbenchScene {
     const t = this.now
     for (const [side, phase] of [['l', 0], ['r', 1.9]] as const) {
       const tap = Math.max(0, Math.sin(t * 11 + phase)) ** 3
-      this.node(`hand_${side}`).rotation.x = p.hands + p.typing * 0.35 * tap * motion
+      // Its right mitten clicks the trackpad while it uses a tool.
+      this.node(`hand_${side}`).rotation.x = p.hands + p.typing * 0.35 * tap * motion + (side === 'r' ? p.click * 0.45 : 0)
     }
+  }
+
+  /**
+   * What it does while it works, in `phase`: the screen that goes with it, and one short
+   * action after another (BUSY), each easing in and out of the hands-on-the-keys pose. It returns
+   * where it looks. Reduced motion keeps the pose still: hands on the keys, eyes on the screen.
+   */
+  private work(phase: WorkPhase, target: Pose, look: Vector3 | 'viewer', screen: () => Vector3): Vector3 | 'viewer' {
+    const t = this.now
+    switch (phase) {
+      case 'reading': target.screen = 0.6; break
+      // Thinking, it looks away from a dimmer screen (AgentFigure shows its thought bubble).
+      case 'thinking': target.screen = 0.3; break
+      case 'tools':
+        // Using the computer: its screen flashes as pages and results come up.
+        target.screen = 0.9
+        if (!this.reduced && t >= this.nextFlash) {
+          this.flash = Math.max(this.flash, 0.55 + 0.45 * Math.random())
+          this.nextFlash = t + 0.22 + 0.7 * Math.random()
+        }
+        break
+      case 'typing': break
+    }
+    if (this.reduced || this.trip) { this.busy = null; return look }
+
+    // One action after another. One that carries on (typing, reading) runs on without easing out.
+    const fits = (kind: BusyKind | null) => BUSY[phase].some((item) => item.kind === kind)
+    let busy = this.busy
+    if (!busy || !fits(busy.kind)) busy = this.busy = startBusy(nextBusy(phase, busy?.kind ?? null, Math.random()), t)
+    else if (t >= busy.start + busy.duration) busy = this.busy = startBusy(busy.next && fits(busy.next) ? busy.next : nextBusy(phase, busy.kind, Math.random()), t)
+    else if (!busy.next && t >= busy.start + busy.duration * 0.7) {
+      busy.next = nextBusy(phase, busy.kind, Math.random())
+      if (busy.next === busy.kind) busy = this.busy = startBusy(busy.kind, t, 0.2)
+    }
+    const u = (t - busy.start) / busy.duration
+    const w = envelope(u)
+    const set = (channel: Channel, value: number) => { target[channel] = MathUtils.lerp(target[channel], value, w) }
+    const add = (channel: Channel, value: number) => { target[channel] += value * w }
+    const above = (x: number, y: number, z: number) => this.node('head').getWorldPosition(new Vector3()).add(new Vector3(x, y, z))
+    let at: Vector3
+    switch (busy.kind) {
+      case 'read': {
+        // Reading down the screen: its eyes run along a line, then back for the next.
+        const line = Math.floor(t / 1.6)
+        set('bodyRX', 0.07)
+        at = screen().add(new Vector3(-0.08 + 0.16 * smooth(0, 0.85, (t / 1.6) % 1), 0.04 - 0.025 * (line % 4), 0))
+        break
+      }
+      case 'checkJob':
+        set('armRRX', -1.45)
+        set('armRRZ', -0.42)
+        at = this.node('job').getWorldPosition(new Vector3())
+        break
+      case 'scratch': {
+        // It scratches the side of its head in little bursts, its head tipped.
+        const scratch = Math.max(0, Math.sin(t * 3.1)) * Math.sin(t * 17)
+        set('armRRX', -0.45)
+        set('armRRZ', -2.45)
+        add('armRRZ', 0.12 * scratch)
+        set('hands', -0.6)
+        add('hands', 0.3 * scratch)
+        set('neckRZ', 0.07)
+        at = above(-0.35, 0.3, 0.6)
+        break
+      }
+      case 'ponder':
+        // A hand to its cheek, eyes up and away, a mitten tapping now and then.
+        set('armRRX', -2)
+        set('armRRZ', -0.75)
+        set('hands', 0.5)
+        add('hands', 0.2 * Math.max(0, Math.sin(t * 4.5)) ** 4)
+        set('bodyRX', -0.03)
+        at = above(-0.5 + 0.12 * Math.sin(t * 0.7), 0.5 + 0.06 * Math.sin(t * 1.1), 0.5)
+        break
+      case 'lookUp':
+        // Hands off the keys, it sits back and looks up, toward its thought.
+        set('armLRX', -1.2)
+        set('armRRX', -1.2)
+        set('bodyRX', -0.05)
+        at = above(0.3 * Math.sin(t * 0.5), 0.9, 0.3)
+        break
+      case 'click':
+        // A hand on the trackpad: the pointer moves, it clicks, its eyes follow.
+        set('armRRX', -1.5)
+        set('armRRZ', 0.16 + 0.07 * Math.sin(t * 1.7))
+        add('click', Math.max(0, Math.sin(t * 5.3)) ** 10)
+        set('bodyRX', 0.03)
+        at = screen().add(new Vector3(0.06 * Math.sin(t * 1.7), 0.03 * Math.sin(t * 2.3), 0))
+        break
+      case 'peer':
+        // It leans in close to see what came up.
+        set('bodyRX', 0.12)
+        set('neckRX', 0.06)
+        at = screen()
+        break
+      case 'type':
+        typeAway(target, t, w)
+        at = screen()
+        break
+      case 'nod':
+        // A pause to nod at what it wrote.
+        add('neckRX', 0.12 * Math.max(0, Math.sin(u * Math.PI * 4)))
+        at = screen()
+        break
+    }
+    return w > 0.3 ? at : look
+  }
+
+  /**
+   * A trip to fetch what it just used (BenchUse), one at a time: it goes to the thing (back to the
+   * pegboard for a recipe card, round the end of the bench to a drawer), hops or bends to take it,
+   * carries it back to the desk and looks at it, and the thing goes back to its place. It returns
+   * where it looks while it is away, or null at the desk. It starts trips only while the run is
+   * live, and none under reduced motion.
+   */
+  private travel(target: Pose, dt: number, live: boolean): Vector3 | null {
+    if (!live && this.errands.length > 0) this.errands = []
+    if (!this.trip) {
+      const use = this.errands.shift()
+      this.trip = use ? this.tripTo(use) : null
+      if (!this.trip) return null
+    }
+    const trip = this.trip
+    const figure = this.node('figure')
+    const [out, reach, back, desk] = trip.legs
+    const t = this.now - trip.start
+    const thing = () => trip.item.getWorldPosition(new Vector3())
+    const set = (channel: Channel, value: number, weight = 1) => { target[channel] = MathUtils.lerp(target[channel], value, weight) }
+    // Carrying it in both hands in front of it.
+    const carry = (weight: number) => { set('armRRX', -1.15, weight); set('armLRX', -1.15, weight); set('armRRZ', 0.28, weight); set('armLRZ', -0.28, weight) }
+    target.typing = 0
+    let place = this.figureHome.clone()
+    let yaw = 0
+    let stride = -1
+    let look: Vector3
+    if (t < out + reach + back) {
+      if (t >= out && t < out + reach) {
+        // There: it turns to the thing, hops or bends, and takes it.
+        const u = (t - out) / reach
+        place = trip.path[trip.path.length - 1].clone()
+        place.y += trip.hop * bump(u)
+        yaw = trip.face
+        const w = smooth(0, 0.35, u) * (1 - smooth(0.55, 0.9, u))
+        if (trip.reach === 'up') { set('armRRX', -2.75, w); set('armRRZ', 0.1, w) }
+        else { set('armRRX', -0.85, w); set('armLRX', -0.85, w); set('bodyRX', 0.3, w) }
+        if (!trip.picked && u >= 0.5) this.take(trip)
+        if (trip.picked) carry(smooth(0.55, 0.9, u))
+        look = thing()
+      } else {
+        // On its way: there along the path, or back along it with the thing.
+        const going = t < out
+        const u = going ? t / out : (t - out - reach) / back
+        const walked = smooth(0, 1, u) * trip.length
+        const { point, heading } = alongPath(trip.path, going ? walked : trip.length - walked)
+        place = point
+        yaw = going ? heading : heading + Math.PI
+        stride = walked
+        if (trip.picked) carry(1)
+        else {
+          set('armLRX', -0.5 + 0.35 * Math.sin(walked * 16))
+          set('armRRX', -0.5 - 0.35 * Math.sin(walked * 16))
+        }
+        look = going ? thing() : point.clone().add(new Vector3(0, 0.9, 0)).addScaledVector(new Vector3(Math.sin(yaw), 0, Math.cos(yaw)), 0.8)
+      }
+    } else if (t < out + reach + back + desk) {
+      // Back at the desk, it holds it up and looks at it, then puts it back.
+      const u = (t - out - reach - back) / desk
+      if (!trip.returned && u >= 0.6) this.putBack(trip)
+      const w = 1 - smooth(0.55, 0.85, u)
+      set('armRRX', -1.75, w)
+      set('armRRZ', 0.3, w)
+      set('armLRX', -1.3, w)
+      look = trip.returned ? this.node('laptop_lid').getWorldPosition(new Vector3()).add(new Vector3(0, 0.12, 0)) : thing()
+    } else {
+      if (!trip.returned) this.putBack(trip)
+      figure.position.copy(this.figureHome)
+      figure.rotation.set(0, 0, 0)
+      this.trip = null
+      return null
+    }
+    // A little hop at each step while it goes.
+    figure.position.copy(place)
+    figure.position.y += stride >= 0 ? 0.03 * Math.abs(Math.sin(stride * 8)) : 0
+    figure.rotation.z = stride >= 0 ? 0.07 * Math.sin(stride * 8) : 0
+    const turn = Math.atan2(Math.sin(yaw - figure.rotation.y), Math.cos(yaw - figure.rotation.y))
+    const turned = figure.rotation.y + turn * (1 - Math.exp(-dt * 9))
+    figure.rotation.y = Math.atan2(Math.sin(turned), Math.cos(turned))
+    return look
+  }
+
+  /** The way to what it used, and how it reaches it, or null when it isn't on the bench (more than the bench shows). */
+  private tripTo(use: BenchUse): Trip | null {
+    const home = this.figureHome
+    let item: Object3D | null | undefined
+    let still: () => boolean
+    let path: Vector3[]
+    let hop = 0
+    let reach: Trip['reach'] = 'down'
+    let held: number
+    if (use.kind === 'skill') {
+      const slot = this.cards.findIndex((card) => card.skill === use.name)
+      const card = this.cards[slot]?.group
+      if (!card) return null
+      item = card
+      still = () => this.cards[slot].group === card
+      const at = card.getWorldPosition(new Vector3())
+      // Back to the pegboard behind it, under the card, and up to it.
+      path = [home.clone(), new Vector3(at.x, home.y, -0.84)]
+      hop = MathUtils.clamp(at.y - 0.42 - home.y, 0, 0.4)
+      reach = 'up'
+      held = 0.7
+    } else {
+      const side: DrawerName = use.kind === 'read' ? 'reads' : 'tools'
+      const slot = use.kind === 'read' ? this.files.findIndex((file) => file.source?.split('\n')[1] === use.name) : this.stocked.findIndex((hung) => hung.tool?.name === use.name)
+      const group = use.kind === 'read' ? this.files[slot]?.group : this.stocked[slot]?.group
+      if (!group) return null
+      item = group
+      still = () => (use.kind === 'read' ? this.files[slot].group : this.stocked[slot].group) === group
+      const at = group.getWorldPosition(new Vector3())
+      // Round the end of the bench, down to the floor, and in front of the drawer.
+      const end = Math.sign(DRAWER_X[side]) * BENCH_END
+      const front = at.z + 0.3
+      path = [home.clone(), new Vector3(end, home.y, home.z), new Vector3(end, FLOOR_Y, front), new Vector3(at.x, FLOOR_Y, front)]
+      held = use.kind === 'read' ? 0.55 : 0.9
+    }
+    if (!item.parent) return null
+    const at = item.getWorldPosition(new Vector3())
+    const spot = path[path.length - 1]
+    const face = Math.atan2(at.x - spot.x, at.z - spot.z)
+    let length = 0
+    for (let index = 1; index < path.length; index += 1) length += path[index].distanceTo(path[index - 1])
+    const walk = Math.max(0.8, length / STRIDE)
+    return { item, home: { parent: item.parent, p: item.position.clone(), q: item.quaternion.clone(), s: item.scale.x }, still, path, length, face, hop, reach, held, start: this.now, legs: [walk, REACH_S, walk, LOOK_S], picked: false, returned: false }
+  }
+
+  /** It takes the thing in its right hand. */
+  private take(trip: Trip) {
+    trip.picked = true
+    if (!trip.still()) return
+    this.tweens = this.tweens.filter((tween) => tween.node !== trip.item)
+    this.node('hand_r').attach(trip.item)
+    this.tween(trip.item, new Vector3(0, -0.07, 0.06), new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2), 0.35, 0, undefined, false, trip.held)
+  }
+
+  /** The thing goes back where it lives, unless it was taken off the bench meanwhile. */
+  private putBack(trip: Trip) {
+    trip.returned = true
+    if (!trip.picked || !trip.still()) return
+    this.tweens = this.tweens.filter((tween) => tween.node !== trip.item)
+    trip.home.parent.attach(trip.item)
+    this.tween(trip.item, trip.home.p, trip.home.q, 0.6, 0.12, undefined, false, trip.home.s)
   }
 
   /** Now and then it blinks: both eyes close for a moment. Not under reduced motion. */
@@ -1128,6 +1501,7 @@ export class WorkbenchScene {
     const cards = world('card_1', [0, 0, 0]).lerp(world('card_2', [0, 0, 0]), 0.5).add(new Vector3(0, 0.11, 0))
     return {
       mind: this.screen(world('neck', [0.33, 0.3, 0])),
+      thought: this.screen(this.thoughtMark.getWorldPosition(new Vector3())),
       app: this.screen(world('laptop_face', [0, 0, 0])),
       name: this.screen(world('nameplate', [0, 0, 0])),
       job: this.screen(world('job', [0, 0.3, -0.12])),

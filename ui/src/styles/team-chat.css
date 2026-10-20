@@ -423,6 +423,8 @@
 .tc-where-hint { font-style: normal; font-weight: 400; color: var(--color-ink-3); }
 .tc-where-escape { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding: 0; border: 0; background: none; font-size: 12px; font-weight: 400; color: var(--color-ink-3); cursor: pointer; }
 .tc-where-escape:hover, .tc-where-escape:focus-visible { color: var(--color-accent); }
+/* Who is typing now, its figure at the bench typing too: on the right of the line over the box. */
+.tc-typing-now { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; font-size: 12px; font-weight: 400; color: var(--color-ink-3); }
 .tc-box {
   position: relative;
   display: flex;

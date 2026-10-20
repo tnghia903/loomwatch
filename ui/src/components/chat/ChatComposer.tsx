@@ -4,6 +4,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Keyb
 import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
 import { quoteLine, replyWhat } from '../../lib/chat/reply'
 import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent, type Destination } from '../../lib/chat/route'
+import { listNames } from '../../lib/chat/format'
 import { Swap } from './Appearing'
 import type { RunRecord } from '../../lib/runs/client'
 
@@ -49,6 +50,8 @@ interface ChatComposerProps {
   onAddress?: (agent: string) => void
   /** Counts the times Reply was pressed on what the team waits on you for: the box goes back to answering it. */
   answerAsked?: number
+  /** The agents typing their words now, their figures typing at the bench: said beside where the message goes. */
+  typing?: readonly string[]
 }
 
 /**
@@ -57,7 +60,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0 }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, typing = [] }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
@@ -225,6 +228,11 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const parties = replyTo && !solo ? [replyTo.from, replyTo.to].filter((id): id is string => id !== null && agents.some((agent) => agent.id === id && !agent.operator)) : []
   const other = parties.length === 2 && parties[0] !== parties[1] ? parties.find((id) => id !== addressed) ?? null : null
 
+  // Who is typing now, their figures typing at the bench, on the right of the line above the box.
+  const typingNow = typing.length > 0
+    ? <span className="tc-typing-now" role="status">{listNames(typing)} {typing.length === 1 ? 'is' : 'are'} typing<span className="chat-dots" aria-hidden="true"><i /><i /><i /></span></span>
+    : null
+
   return (
     <form className={`tc-composer${answering ? ' answering' : ''}`} data-tour="composer" onSubmit={(event) => { event.preventDefault(); void send(false) }}>
       {!quiet && (
@@ -237,8 +245,10 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
             </button>
           )}
           {!answering && route === 'team_note' && trimmed && <em className="tc-where-hint">Add @team or @{agents.find((agent) => !agent.operator)?.name ?? 'name'} to start work.</em>}
+          {typingNow}
         </div>
       )}
+      {quiet && typingNow && <div className="tc-where">{typingNow}</div>}
       {replyTo && (
         <div className="tc-replying" role="group" aria-label={`Replying to ${replyWhat(replyTo, name)}`}>
           <Reply size={14} aria-hidden="true" />

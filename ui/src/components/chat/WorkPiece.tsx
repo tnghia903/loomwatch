@@ -12,6 +12,7 @@ import { answerRun, cancelRun, isTerminalRun, type RunRecord } from '../../lib/r
 import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
 import { openStops, stopSentence } from '../../lib/runs/spend'
 import { useRunSession } from '../../lib/runs/useRunSession'
+import { useNow } from '../../lib/useNow'
 import { fileRefsIn, filesTouched, withFolderPaths } from '../../lib/files/fileRefs'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
@@ -19,6 +20,7 @@ import type { Bubble, Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import { OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
+import { workPhase } from '../../lib/watch/workPhase'
 import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
@@ -78,6 +80,8 @@ interface WorkPieceProps {
   onRun: (run: RunRecord) => void
   /** Who has the work while this piece runs, each time that changes: what the chat's header shows. */
   onBaton?: (runId: string, baton: Baton | null) => void
+  /** Who of this piece's agents is typing now (lib/watch/workPhase.ts), for the message box to say. */
+  onTyping?: (runId: string, typing: readonly string[]) => void
   /** This piece's line, which says who has the work: the header shows its pill while it is out of view. */
   onLine?: (runId: string, element: HTMLElement | null) => void
   onTryAgain: (item: Work) => void
@@ -101,7 +105,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onTyping, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -173,6 +177,13 @@ export function WorkPiece({ item, newest = false, reveal = null, followed, conti
   const checked = [...(team.configs?.values() ?? [])].some((config) => config.checks === run.responder)
   const streamed = live && !checked ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
+  // Whoever is writing now (lib/watch/workPhase.ts), its figure typing at the bench: the message
+  // box says so while it types.
+  const now = useNow(live)
+  const typing = (live ? record.working ?? [] : []).filter((id) => workPhase(session.events, id, now) === 'typing')
+  const typingKey = typing.join('\n')
+  useEffect(() => { onTyping?.(run.runId, typingKey ? typingKey.split('\n') : []) }, [onTyping, run.runId, typingKey])
+  useEffect(() => () => onTyping?.(run.runId, []), [onTyping, run.runId])
   // The files the answer names, for its tools: a scan of the whole text, so once per answer. An
   // agent names a file from its own folder ("./guide.html"); what it read or wrote says which.
   const finishedAnswer = isTerminalRun(record.status)

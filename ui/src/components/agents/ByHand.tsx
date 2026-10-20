@@ -15,11 +15,12 @@ import { replyLine, replySays, replySection, withReply } from '../../lib/library
 import { knowledgeOf, readKey, type AgentRead } from '../../lib/library/reads'
 import { readsOf } from '../../lib/library/teamDraft'
 import { CONNECT_NOTION_HREF, useNotionConnection } from '../../lib/notion/connection'
-import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, READ_SLOTS, TOOL_SLOTS, type FigurePart, type ReadSource } from '../../lib/library/figure'
+import { askedKey, CARD_SLOTS, FIGURE_KEYS, figureMood, READ_SLOTS, TOOL_SLOTS, type BenchUse, type FigurePart, type ReadSource } from '../../lib/library/figure'
 import type { FigureChoice } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { useNow } from '../../lib/useNow'
 import { useSessionEvents } from '../../lib/watch/useSessionEvents'
+import { benchUses, thoughtLine, workPhase, type BenchKit } from '../../lib/watch/workPhase'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import { allowedFor, withoutAllowed } from '../../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
@@ -150,7 +151,6 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
   const ids = useId()
   const shape = { ...instructionShape(draft.instructions), ...(draft.doneWhen.length ? { check: true } : {}) }
   const replyPart = replySection(draft.instructions)
-  const { mood, events } = useFigureMood(record)
   const given = FIGURE_KEYS.filter(({ key }) => draft.allow[key])
   const kept = FIGURE_KEYS.filter(({ key }) => !draft.allow[key])
   const giveKey = (key: AllowSwitch, on: boolean) => set('allow', { ...draft.allow, [key]: on })
@@ -200,6 +200,9 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     setFocus('reads')
   }
 
+  const kit = useMemo<BenchKit>(() => ({ skills: draft.skills, reads, tools: draft.tools }), [draft.skills, reads, draft.tools])
+  const { mood, events, phase, thought, uses } = useFigureMood(record, kit)
+
   const view = useMemo<BenchView>(() => ({
     look: { name: draft.name, instructions: draft.instructions, app: draft.model, model: `${draft.model}|${draft.effort}`, skills: draft.skills, allow: draft.allow },
     figure,
@@ -209,12 +212,15 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
     hasReply: Boolean(replyLine(draft.instructions)),
     mood,
     events,
+    phase,
+    thought,
+    uses,
     asked,
     open: focus,
     dropping: dragging === 'skill',
     reads,
     tools: benchTools,
-  }), [draft, figure, model, mood, events, asked, focus, dragging, reads, benchTools])
+  }), [draft, figure, model, mood, events, phase, thought, uses, asked, focus, dragging, reads, benchTools])
 
   /** From the bench: go to the block for what was picked, and start working in it. */
   const goTo = (target: FigurePart) => {
@@ -434,19 +440,28 @@ function showBlock(block: HTMLElement | undefined) {
 
 /**
  * The figure's mood, from the run record, on the shared clock while the run is live, to tell working
- * from quiet; and the run's events so far, each one flickering its screen. The record counts its
+ * from quiet; the run's events so far, each one flickering its screen; and, while it runs, what its
+ * agent is at (reading, thinking, using a tool or typing), what it is thinking about, and what on
+ * its bench it just used (a skill, a folder, a tool) for its figure to go and get, from those events. The record counts its
  * events only once the run is over, so while it runs they are counted as they arrive.
  */
-function useFigureMood(record: RunRecord | null) {
+function useFigureMood(record: RunRecord | null, kit: BenchKit) {
   const live = record?.status === 'running'
   const now = useNow(live)
-  const arrived = useSessionEvents(live ? record.sessionId : '').events.length
+  const followed = useSessionEvents(live ? record.sessionId : '').events
+  const arrived = followed.length
   const [moved, setMoved] = useState<{ run: string; events: number; at: number } | null>(null)
   const run = record?.runId ?? null
   const events = live ? arrived : record?.eventCount ?? 0
   // When the run moves, note when (adjusting state while rendering, not in an effect).
   if (run && (moved?.run !== run || moved.events !== events)) setMoved({ run, events, at: now })
-  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events }
+  const phase = live ? workPhase(followed, record.responder || null, now) : undefined
+  const thought = live && phase === 'thinking' ? thoughtLine(followed, record.responder || null) : null
+  // The same uses keep the same list, so the bench is told only when there is a new one.
+  const fresh = live ? benchUses(followed, record.responder || null, now, kit) : []
+  const [uses, setUses] = useState<readonly BenchUse[]>([])
+  if (fresh.length > 0 && fresh.map((use) => use.id).join() !== uses.map((use) => use.id).join()) setUses(fresh)
+  return { mood: figureMood(record, moved && moved.run === run ? moved.at : null, now), events, phase, thought, uses }
 }
 
 /** What the skills shelf says: recipe cards on the pegboard. */

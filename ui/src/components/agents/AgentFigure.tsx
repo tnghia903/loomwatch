@@ -44,6 +44,7 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
   const scene = useRef<WorkbenchScene | null>(null)
   const tags = useRef(new Map<BenchAnchor, HTMLElement>())
   const faces = useRef(new Map<BenchFace, HTMLElement>())
+  const bubble = useRef<HTMLDivElement>(null)
   const width = useRef(0)
   const latest = useRef({ view, onPart, onKey, onFail })
   useLayoutEffect(() => { latest.current = { view, onPart, onKey, onFail } })
@@ -59,6 +60,13 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
     // stage so none runs off its edge.
     const place = (anchors: BenchAnchors, quads: BenchFaces) => {
       for (const [face, element] of faces.current) placeFace(element, quads[face])
+      // The thought bubble rides above its head, its cloud to the right, or to the left near the edge.
+      const thought = bubble.current
+      if (thought) {
+        const at = anchors.thought
+        thought.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`
+        thought.classList.toggle('flip', width.current > 0 && at.x > width.current - 250)
+      }
       for (const [anchor, element] of tags.current) {
         const at = anchors[anchor]
         const wide = (element.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0
@@ -112,6 +120,8 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
   const does = view.does.trim()
   const instructions = view.look.instructions.trim()
   const appWord = view.appName || 'No app yet'
+  // While it thinks, a comic thought bubble over its head says what about, from its reasoning.
+  const thinking = view.phase === 'thinking' && (view.mood === 'working' || view.mood === 'quiet')
 
   const at = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -148,6 +158,11 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
         <div ref={face('name')} className="bench-face bench-face-name" style={{ '--chars': name.length } as CSSProperties}><p><b>{name}</b>{does && <span>{does}</span>}</p></div>
         <div ref={face('job')} className={`bench-face bench-face-job${instructions ? '' : ' empty'}`}><p>{instructions || 'Nothing written yet.'}</p></div>
         <div ref={face('app')} className={`bench-face bench-face-app${view.appName ? '' : ' empty'}`} style={{ '--chars': appWord.length } as CSSProperties}><p>{appWord}</p></div>
+      </div>
+      <div ref={bubble} className={`bench-thought${thinking && ready ? ' on' : ''}`} aria-hidden="true">
+        <div className="bench-thought-cloud">{view.thought ? <p>{view.thought}</p> : <span className="chat-dots"><i /><i /><i /></span>}</div>
+        <i className="bench-thought-dot near" />
+        <i className="bench-thought-dot far" />
       </div>
       {labels.map((tag) => (
         <button

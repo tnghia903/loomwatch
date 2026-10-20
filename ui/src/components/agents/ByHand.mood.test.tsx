@@ -12,11 +12,11 @@ const shown: { view: AgentFigureProps['view'] | null } = { view: null }
 vi.mock('./AgentFigure', () => ({ default: ({ view }: AgentFigureProps) => { shown.view = view; return null } }))
 
 // The run's events as they arrive, and which session the bench asked to follow.
-const stream = vi.hoisted(() => ({ asked: [] as string[], count: 0 }))
+const stream = vi.hoisted(() => ({ asked: [] as string[], count: 0, events: null as unknown[] | null }))
 vi.mock('../../lib/watch/useSessionEvents', () => ({
   useSessionEvents: (sessionId: string) => {
     stream.asked.push(sessionId)
-    return { sessionId, events: sessionId ? Array.from({ length: stream.count }, (_, seq) => ({ seq })) : [], error: null, connected: Boolean(sessionId), loading: false }
+    return { sessionId, events: sessionId ? stream.events ?? Array.from({ length: stream.count }, (_, seq) => ({ seq })) : [], error: null, connected: Boolean(sessionId), loading: false }
   },
 }))
 
@@ -29,7 +29,7 @@ function bench(record: RunRecord | null) {
   return <ByHand draft={{ ...BLANK_DRAFT, name: 'Reader', instructions: 'Check it.' }} set={vi.fn()} skills={[]} skillsLoading={false} roleField={createRef()} figure={{ kind: 'yarn', color: 'sage' }} record={record} />
 }
 
-beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); shown.view = null; stream.asked = []; stream.count = 0 })
+beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); shown.view = null; stream.asked = []; stream.count = 0; stream.events = null })
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 // The daemon counts a run's events only once it is over (eventCount is null while it runs), so a
@@ -55,6 +55,30 @@ describe('the figure at the bench, while its run works', () => {
     render(bench(run('succeeded', 12)))
     await waitFor(() => expect(shown.view?.mood).toBe('done'))
     expect(shown.view?.events).toBe(12)
+    expect(shown.view?.phase).toBeUndefined()
     expect(stream.asked.every((sessionId) => sessionId === '')).toBe(true)
+  })
+
+  // lib/watch/workPhase.ts: it acts out what its agent is at, from the run's own events.
+  it('reads its message, thinks, uses a tool and types, as the run’s events say', async () => {
+    let seq = 0
+    const event = (kind: string, payload: Record<string, unknown> = {}) => ({ id: `e${seq}`, sessionId: 'session-1', agentId: 'reader', seq: seq++, ts: new Date().toISOString(), kind, payload })
+    stream.events = [event('message', { role: 'user' })]
+    const page = render(bench(run('running')))
+    await waitFor(() => expect(shown.view?.phase).toBe('reading'))
+    for (const [next, phase] of [
+      [event('thought', { content: { type: 'text', text: '**Weighing the claims**' } }), 'thinking'],
+      [event('tool_call', { callId: 'w', title: 'Search the web: claims', toolKind: 'fetch', status: 'in_progress' }), 'tools'],
+      [event('message', { role: 'agent' }), 'typing'],
+    ] as const) {
+      stream.events = [...stream.events, next]
+      page.rerender(bench(run('running')))
+      expect(shown.view?.phase).toBe(phase)
+      // Only while it thinks does its bubble say what about.
+      expect(shown.view?.thought ?? null).toBe(phase === 'thinking' ? 'Weighing the claims' : null)
+    }
+    // Its words stopped a few seconds ago: its model is working out what comes next.
+    act(() => { vi.advanceTimersByTime(4000) })
+    expect(shown.view?.phase).toBe('thinking')
   })
 })

@@ -12,10 +12,10 @@ import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
 // saying what the agents said when a test gives it messages.
-const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[] }))
+const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[] }))
 vi.mock('../../lib/runs/useRunSession', () => ({
   useRunSession: (runId: string | null) => ({
-    record: null, applyRecord: vi.fn(), missing: false, events: runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
+    record: null, applyRecord: vi.fn(), missing: false, events: runId && said.events.length > 0 ? said.events : runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
     projection: { agents: runId ? said.agents : [], evidence: [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
     latest: null, cursor: null, setCursor: vi.fn(), lastSeq: -1, mode: 'replay', terminal: true, evidenceComplete: true,
   }),
@@ -57,6 +57,7 @@ beforeEach(() => {
   posted = []
   said.messages = []
   said.agents = []
+  said.events = []
   said.read = false
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -706,6 +707,21 @@ describe("an agent's face", () => {
 })
 
 describe('a piece of work', () => {
+  // lib/watch/workPhase.ts: while its own words come in, its figure types at the bench and the
+  // message box says it is typing; while it thinks or uses a tool, it doesn't.
+  it('says who is typing while its words come in, and not while it thinks', async () => {
+    const event = (kind: string, payload: Record<string, unknown>) => ({ id: `e-${kind}`, sessionId: 'run-1', agentId: 'researcher', seq: 1, ts: new Date().toISOString(), kind, payload })
+    said.events = [event('message', { role: 'agent', content: { text: 'Looking at' } })]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'] }), request: message({}), notes: [] }]
+    renderChat()
+    expect(await screen.findByText('Researcher is typing')).toHaveAttribute('role', 'status')
+    cleanup()
+    said.events = [event('thought', { role: 'thought', content: { text: 'Which stories matter' } })]
+    renderChat()
+    expect(await within(screen.getByRole('log')).findByText(/is working/)).toBeInTheDocument()
+    expect(screen.queryByText(/is typing/)).not.toBeInTheDocument()
+  })
+
   it('asks for your review with buttons: Approve needs no words, Send back needs them', async () => {
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn: { node: 'review', name: 'Your review', kind: 'review_stop', since: '2026-10-06T02:01:00.000Z', question: 'Check it', context: '## Summary\nThree stories', handoverFrom: 'researcher', park: 'reloadable', parkNote: '', sendBackAvailable: true } }), request: message({}), notes: [] }]
     answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
