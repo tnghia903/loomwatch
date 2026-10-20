@@ -183,7 +183,8 @@
 .bench-tag:focus-visible { outline: none; }
 .bench-tag:focus-visible > span { box-shadow: 0 0 0 2px #E9C46A; }
 .bench-tag.plate { width: 140px; height: 40px; margin: -20px 0 0 -70px; border-radius: 12px; pointer-events: none; }
-.bench-tag.plate:focus-visible { outline: 2px solid #E9C46A; outline-offset: 2px; }
+/* A dark band inside the gold ring, as a label has, so it reads on the bench in either theme. */
+.bench-tag.plate:focus-visible { outline: 2px solid #E9C46A; outline-offset: 2px; box-shadow: 0 0 0 2px rgba(8, 8, 10, .84); }
 /* What its model is thinking about, in a comic thought bubble over its head while it thinks (AgentFigure):
    a cloud in the bench's own bone and ink, and two little puffs trailing down to its head. It breathes. */
 .bench-thought { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .3s ease; }
