@@ -133,10 +133,11 @@ export function folderWords(folder: string | null | undefined, path: string): st
 
 /**
  * Every distinct file a Markdown reply names, in the order it first names them. `touched` is what
- * the run's agents read or wrote ([`filesTouched`]), for the names they give from their own folder.
+ * the run's agents read or wrote ([`filesTouched`]) and `agentFolder` the one the answering agent
+ * works in, for the names they give from their own folder.
  */
-export function fileRefsIn(markdown: string, touched: readonly string[] = []): string[] {
-  const text = withFolderPaths(markdown, touched)
+export function fileRefsIn(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null): string[] {
+  const text = withFolderPaths(markdown, touched, agentFolder)
   const found: string[] = []
   const add = (path: string | null) => {
     if (path && !found.includes(path)) found.push(path)
@@ -162,10 +163,12 @@ export function fileRefsIn(markdown: string, touched: readonly string[] = []): s
  *
  * An agent also names files from its own folder without saying where that is: "[Open the
  * guide](./guide.html)". Such a name, in a link or in code, resolves to the one file in `touched`
- * — what the run's agents read or wrote — whose path ends with it. A file the agents never touched
- * is not guessed at.
+ * — what the run's agents read or wrote — whose path ends with it. A file it made with a command
+ * was never touched by name, so a link to one resolves under `agentFolder`, where the answering
+ * agent works. A name in code is not taken from there: code names files the agent ran or quoted too.
  */
-export function withFolderPaths(markdown: string, touched: readonly string[] = []): string {
+export function withFolderPaths(markdown: string, touched: readonly string[] = [], agentFolder: string | null = null): string {
+  const home = agentFolder && isAbsolutePath(agentFolder) ? agentFolder : null
   const lines = markdown.split('\n')
   for (const passage of passagesOf(lines)) {
     const folders: Array<{ at: number; path: string }> = []
@@ -175,7 +178,7 @@ export function withFolderPaths(markdown: string, touched: readonly string[] = [
         if (path) folders.push({ at: order * LINE + (match.index ?? 0), path })
       }
     })
-    if (!folders.length && !touched.length) continue
+    if (!folders.length && !touched.length && !home) continue
     // The nearest folder named before the name, else the first one named after it.
     const folderFor = (at: number) => folders.filter((folder) => folder.at < at).at(-1)?.path ?? folders.find((folder) => folder.at > at)?.path
     passage.forEach((index, order) => {
@@ -184,7 +187,7 @@ export function withFolderPaths(markdown: string, touched: readonly string[] = [
         const named = span ?? decodedLink(href)
         const relative = relativeFileFrom(named)
         const folder = relative ? folderFor(order * LINE + offset) : undefined
-        const path = relative && folder ? joinPath(folder, relative) : touchedFile(named, touched)
+        const path = relative && folder ? joinPath(folder, relative) : touchedFile(named, touched) ?? (href !== undefined ? fileUnder(home, named) : null)
         if (!path) return whole
         return span !== undefined ? `\`${path}\`` : `](${linkTarget(path)})`
       })
@@ -268,6 +271,19 @@ function touchedFile(name: string | undefined, touched: readonly string[]): stri
     return parts.length > wanted.length && wanted.every((segment, index) => parts[parts.length - wanted.length + index] === segment)
   })
   return found.length === 1 ? found[0] : null
+}
+
+/**
+ * A link's relative target (`./guide.html`, `drafts/plan.md`) as a file under `folder`, for a kind
+ * of file this module names. Nothing that climbs out (`..`), hides (`.cache/…`), is a web address
+ * or carries a query or a fragment.
+ */
+function fileUnder(folder: string | null, name: string | undefined): string | null {
+  const value = name?.trim() ?? ''
+  if (!folder || !value || value.length > 255 || isAbsolutePath(value) || /[\n\r`:?#*"<>|]/.test(value)) return null
+  const segments = splitPath(value).filter((segment, index) => !(index === 0 && segment === '.'))
+  if (!segments.length || segments.some((segment) => segment.startsWith('.') || segment !== segment.trim())) return null
+  return Object.hasOwn(LABELS, extensionOf(value)) ? joinPath(folder, segments.join('/')) : null
 }
 
 function decodedLink(href: string | undefined): string | undefined {

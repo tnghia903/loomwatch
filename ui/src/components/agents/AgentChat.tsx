@@ -202,7 +202,7 @@ export function AgentAnswer({ runId, name, onClose }: { runId: string; name: str
   return (
     <div className="agent-answer" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <button type="button" className="link agent-answer-back" onClick={onClose}><ArrowLeft size={14} aria-hidden="true" />Back to {name} at the bench</button>
-      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} />
+      <AnswerDocument text={text} by={name} streaming={!session.terminal} touched={touched} folder={responder?.folder} />
     </div>
   )
 }

@@ -3,6 +3,21 @@ import { recordedReplyText, appendEvents, isNotebookWrite, parseEvents, projectE
 
 const event = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload'], agentId = 'lead'): RunEvent => ({ id: `event-${seq}`, sessionId: 'session', agentId, seq, ts: '2026-09-10T00:00:00Z', kind, payload })
 
+describe('where an agent works', () => {
+  it('is the folder its spawned record names, and unknown for a record from before', () => {
+    const state = projectRun([
+      event(0, 'process', { phase: 'spawned', pid: 1, cwd: '/teams/.loomwatch/news/writer' }, 'writer'),
+      event(1, 'process', { phase: 'spawned', pid: 1 }, 'researcher'),
+      event(2, 'process', { phase: 'spawned', pid: 1, cwd: null }, 'editor'),
+    ])
+    expect(state.agents.map((agent) => [agent.id, agent.folder])).toEqual([
+      ['writer', '/teams/.loomwatch/news/writer'],
+      ['researcher', undefined],
+      ['editor', undefined],
+    ])
+  })
+})
+
 describe('archive replay', () => {
   it('deduplicates retries and rejects gaps, mutations, and cross-session evidence', () => {
     const first = event(0, 'process', { phase: 'spawned' })

@@ -904,10 +904,14 @@ impl AgentRun {
         }
         let mut recorder = Recorder::with_log(event_log, session_id.to_owned(), agent_id);
         recorder.bus = context.bus.cloned();
+        // Where it works, by its full path: an agent names what it made from there
+        // (`./guide.html`), and its commands leave no other record of where that is. A folder
+        // whose name is not UTF-8 is left out rather than misnamed.
+        let cwd = std::path::absolute(&self.spec.cwd).ok();
         recorder
             .append(
                 EventKind::Process,
-                json!({"phase": "spawned", "pid": std::process::id()}),
+                json!({"phase": "spawned", "pid": std::process::id(), "cwd": cwd.as_deref().and_then(std::path::Path::to_str)}),
                 None,
             )
             .await?;
@@ -1300,6 +1304,30 @@ mod tests {
             .err()
             .context("an agent can be reopened only once")?;
         assert!(refused.to_string().contains("is gone"), "{refused:#}");
+        Ok(())
+    }
+
+    /// **The record says where the agent works.** A file it makes with a command leaves no path
+    /// behind, so `./guide.html` in its answer can only be found from its folder.
+    #[tokio::test]
+    async fn the_spawned_record_names_the_agents_folder() -> Result<()> {
+        let archive = EventArchive::new(crate::db::Db::temp().await);
+        let (model, _demo) = stand_in(vec![turn(&[], "made it")]);
+        let run_id = Uuid::new_v4().to_string();
+        let folder = std::env::temp_dir().join(format!("loomwatch-cwd-{}", Uuid::new_v4()));
+        let mut agent = AgentRun::spawn(&spec(&folder))?;
+        let log = EventLog::new(archive.clone(), run_id.clone());
+        agent
+            .open_live("maker", &model, &mut context(&archive, Some(log)))
+            .await?;
+        archive.flush().await;
+        let events = archive.load_session(&run_id).await?;
+        let spawned = events
+            .iter()
+            .find(|event| event.kind == EventKind::Process)
+            .context("a spawned record")?;
+        assert_eq!(spawned.payload["phase"], "spawned");
+        assert_eq!(spawned.payload["cwd"], folder.to_str().context("UTF-8")?);
         Ok(())
     }
 

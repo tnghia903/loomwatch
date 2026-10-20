@@ -217,6 +217,9 @@ export interface ProjectedAgent {
   exitCode: number | null
   stopReason: string | null
   pid: number | null
+  /** The folder it works in, by its full path, from its `spawned` record. Absent before the daemon
+      recorded it. */
+  folder?: string
   model: string | null
   /** The harness did not advertise HTTP MCP, so this agent cannot reach the Team Bus. */
   busUnavailable: boolean
@@ -782,6 +785,7 @@ export function projectRun(events: readonly RunEvent[], throughSeq = Infinity, c
           agent.status = 'starting'
           agent.task = 'Starting the harness'
           agent.pid = typeof p.pid === 'number' ? p.pid : agent.pid
+          if (typeof p.cwd === 'string' && p.cwd) agent.folder = p.cwd
         } else if (p.phase === 'exited') {
           // A conversation kept open and closed when the run ended did no work at its close: its
           // time ends with its last turn.

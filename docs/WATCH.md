@@ -204,7 +204,9 @@ Response (`202 Accepted`):
   `GET /api/session/stream?session=<runId>` as soon as the run is accepted; the first
   frame is the entrypoint's `process`/`spawned` event. Nothing is started for it: each agent is
   a session of LoomWatch's own agent inside the daemon, and the event marks that session opening,
-  in the same shape older runs were recorded in.
+  in the same shape older runs were recorded in. Its `cwd` is the folder the agent works in, by its
+  full path (absent in runs recorded before it), so a file its answer links from there
+  (`./guide.html`) can be found even when a command made it.
 - `status` moves forward only: `queued` → `starting` (the task began; `startedAt` set)
   → `running` (the first `process`/`spawned` event is archived; polled every 250 ms)
   → `succeeded` (`exitCode`, `eventCount`, `reply` = the responder's reply) or `failed`
