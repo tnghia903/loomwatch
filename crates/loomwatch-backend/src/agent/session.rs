@@ -190,6 +190,9 @@ pub struct SessionConfig {
     pub instructions: Option<String>,
     /// What the person told their agents about themselves (ADR 0074), in the instructions.
     pub person: Option<AboutYou>,
+    /// What this agent learned from the person's feedback on its work (ADR 0078), in the
+    /// instructions.
+    pub lessons: Vec<String>,
     /// The longest reply one model call may write.
     pub max_tokens: u32,
     /// The model's context size, from the model catalog.
@@ -233,6 +236,7 @@ impl SessionConfig {
             turned_off: Vec::new(),
             instructions: None,
             person: None,
+            lessons: Vec::new(),
             max_tokens: 16_000,
             context_window: None,
             max_tool_calls: 200,
@@ -1695,6 +1699,7 @@ fn instructions(
         &config.cwd,
         abilities,
         config.person.as_ref(),
+        &config.lessons,
         &prompt_section(skills, work),
         notes.as_deref(),
         config.instructions.as_deref(),

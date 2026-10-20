@@ -208,6 +208,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
       <ByHand
         draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
+        learned={saved ? { savedAgent: saved.id } : null}
         chat={view === 'chat' ? <AgentChat draft={draft} model={draft.model} chatId={chatId} figure={figure} onAllow={(what) => (typeof what === 'string' ? set('allow', { ...draft.allow, [what]: true }) : set('toolAllow', withAllowed(draft.toolAllow, what.tool, what.call)))} onRecord={setBenchRecord} answerRunId={answerRun} onOpenAnswer={setAnswerRun} knowledge={inTeam?.knowledge} file={benchFile.chat} /> : undefined}
         onBuild={() => showView('build')}
         cover={view === 'chat' && benchFile.reading ? <AgentFile bench={benchFile} chatId={chatId} name={draft.name.trim() || 'New agent'} figure={figure} /> : view === 'chat' && answerRun ? <AgentAnswer runId={answerRun} name={draft.name.trim() || 'New agent'} onClose={() => setAnswerRun(null)} /> : undefined}

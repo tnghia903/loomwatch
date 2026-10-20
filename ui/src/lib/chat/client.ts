@@ -1,5 +1,6 @@
 import { daemonFetch } from '../daemonFetch'
 import { readRun, type RunRecord } from '../runs/client'
+import type { Lesson } from '../lessons/client'
 import type { Face, Reaction, ReactionAbout } from './reactions'
 
 /**
@@ -97,8 +98,11 @@ export interface ReplyTo {
 
 /** One item of the chat, newest first from the daemon. */
 export type ChatItem =
-  /** A piece of work: a run, the message that started it, and the notes you sent into it. */
-  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[] }
+  /**
+   * A piece of work: a run, the message that started it, and the notes you sent into it. With what
+   * the agents learned from your feedback on it (ADR 0078).
+   */
+  | { kind: 'work'; run: RunRecord; request: ChatMessage | null; notes: ChatMessage[]; reactions?: Reaction[]; lessons?: Lesson[] }
   /** A team note: it started nothing, and the next work reads it. With your reactions to it and to its replies. */
   | { kind: 'note'; message: ChatMessage; reactions?: Reaction[] }
 

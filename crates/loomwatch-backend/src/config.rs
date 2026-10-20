@@ -538,6 +538,11 @@ pub struct AgentConfig {
     pub send_back: Option<SendBack>,
     /// The agent's own guard on what one run may spend on it (ADR 0068). No guard unless set.
     pub spend: crate::spend::SpendConfig,
+    /// The agent in My agents this one was placed from (`from: {agent}`, ADR 0071), whose lessons
+    /// it reads and adds to (ADR 0078). `None` for a team's own agent.
+    pub from_agent: Option<String>,
+    /// It learns from the person's feedback on its work (ADR 0078). On unless `learns: false`.
+    pub learns: bool,
 }
 
 /// At most this many `doneWhen` items, each at most [`DONE_WHEN_CHARS`] characters: the schema's
@@ -674,10 +679,20 @@ struct RawAgent {
     send_back: Option<SendBack>,
     #[serde(default)]
     spend: Option<crate::spend::SpendConfig>,
+    #[serde(default)]
+    from: Option<RawFrom>,
+    #[serde(default)]
+    learns: Option<bool>,
     /// Runtime annotation. Accepted and discarded: writers must not persist it and readers must
     /// ignore it (`docs/TEAM_CONFIG.md`).
     #[serde(default, rename = "status")]
     _status: Option<String>,
+}
+
+/// `from: {agent, version}` (ADR 0071): only the agent is read; the version is the canvas's.
+#[derive(Debug, Deserialize)]
+struct RawFrom {
+    agent: String,
 }
 
 impl TryFrom<RawAgent> for AgentConfig {
@@ -699,6 +714,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     ("sendBackOnce", raw.send_back_once),
                     ("sendBack", raw.send_back.is_some()),
                     ("spend", raw.spend.is_some()),
+                    ("learns", raw.learns.is_some()),
                 ] {
                     if present {
                         return Err(format!(
@@ -737,6 +753,8 @@ impl TryFrom<RawAgent> for AgentConfig {
                     checks: None,
                     send_back: None,
                     spend: crate::spend::SpendConfig::default(),
+                    from_agent: None,
+                    learns: false,
                 })
             }
             AgentKind::Harness => {
@@ -769,6 +787,11 @@ impl TryFrom<RawAgent> for AgentConfig {
                         .filter(|checked| !checked.is_empty()),
                     send_back,
                     spend: raw.spend.unwrap_or_default(),
+                    from_agent: raw
+                        .from
+                        .map(|from| from.agent.trim().to_owned())
+                        .filter(|agent| !agent.is_empty()),
+                    learns: raw.learns.unwrap_or(true),
                 })
             }
         }

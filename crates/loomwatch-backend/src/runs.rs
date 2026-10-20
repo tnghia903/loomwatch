@@ -753,6 +753,9 @@ pub struct RunRegistry {
     /// The team revisions the operator approved to run here (ADR 0048). Installed once at startup,
     /// before the scheduler's first tick; absent in tests and the CLI, which run what they are given.
     approvals: Arc<OnceLock<Arc<TeamApprovals>>>,
+    /// The model agents learn with (ADR 0078), set by a test. Unset, the daemon learns on the fast
+    /// tier's model once model settings are installed, and a registry without them learns nothing.
+    learner_model: Arc<OnceLock<String>>,
 }
 
 /// Opaque: the records are the API's to report, and the REST router's state only needs to be
@@ -776,7 +779,31 @@ impl RunRegistry {
             store: Some(store),
             publisher: Arc::default(),
             approvals: Arc::default(),
+            learner_model: Arc::default(),
         }
+    }
+
+    /// Learn with `model` (ADR 0078) instead of the fast tier's: a test's stand-in. The first call
+    /// wins.
+    pub fn set_learner_model(&self, model: String) {
+        let _first = self.learner_model.set(model);
+    }
+
+    /// What learning from feedback needs (ADR 0078), or `None` where nothing can learn: a registry
+    /// with no database, or a daemon with no model settings.
+    pub(crate) fn learner(&self, teams_root: &Path) -> Option<crate::lessons::Learner> {
+        let store = self.store.as_ref()?;
+        let model = self
+            .learner_model
+            .get()
+            .cloned()
+            .or_else(|| crate::ai::installed().map(|_| crate::control::tier_model("fast")))?;
+        Some(crate::lessons::Learner {
+            lessons: crate::lessons::Lessons::new(store.db.clone()),
+            archive: EventArchive::new(store.db.clone()),
+            teams_root: teams_root.to_path_buf(),
+            model,
+        })
     }
 
     /// Install the publisher every run's delivery goes through. The first call wins; the
@@ -1716,6 +1743,14 @@ impl RunRegistry {
         self.store
             .as_ref()
             .map(|store| crate::chat::ChatStore::new(store.db.clone()))
+    }
+
+    /// What agents learned (ADR 0078), on the same database, when this registry is durable.
+    #[must_use]
+    pub(crate) fn lessons(&self) -> Option<crate::lessons::Lessons> {
+        self.store
+            .as_ref()
+            .map(|store| crate::lessons::Lessons::new(store.db.clone()))
     }
 }
 
@@ -2851,6 +2886,9 @@ fn spawn_prepared(registry: &RunRegistry, prepared: PreparedRun, run_id: &str) {
     // Every run started through the API can reach a person; a `loomwatchd run` from the CLI
     // cannot, and a team file with a review stop is refused there rather than hanging.
     lineage.operator = Some(registry.operator_desk(Some(&prepared.archive)));
+    // A check step that finds work short and sees it fixed teaches the agent that did it (ADR
+    // 0078). The CLI's run has no learner: nobody would see what it learned.
+    lineage.learner = registry.learner(&prepared.teams_root);
     let handle = tokio::spawn(execute(
         registry.clone(),
         prepared.archive,

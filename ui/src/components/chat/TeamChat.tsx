@@ -13,6 +13,7 @@ import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { FollowContext, type ChatFollow } from '../../lib/chat/follow'
 import { useTeamChat, type PendingMessage } from '../../lib/chat/useTeamChat'
 import { DaemonUnreachableError } from '../../lib/daemonFetch'
+import { undoLesson, type Lesson } from '../../lib/lessons/client'
 import { failedAgent } from '../../lib/runs/errors'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
@@ -103,6 +104,11 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  */
 export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
+  // Something an agent learned from your feedback, taken back (ADR 0078): the chat reads again.
+  const undoLearned = useCallback(async (lesson: Lesson) => {
+    await undoLesson({ teamPath, agent: lesson.agentId }, lesson.id)
+    chat.refresh()
+  }, [teamPath, chat])
   // Run team means start the team. Without an @, what is written is a note that starts nothing,
   // which is not what someone who pressed Run team expects, so the box it opens starts with @team.
   // Run team is on the workflow, where the chat is not open, so the chat always opens fresh for it.
@@ -600,7 +606,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onTyping={onTyping} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
-                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} />
+                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} />
                   : <TeamNote message={item.message} reactions={item.reactions} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} />}
               </Fragment>
             )

@@ -117,6 +117,12 @@ impl EventArchive {
         crate::memory::Notebook::new(self.db.clone())
     }
 
+    /// What agents learned from the person's feedback (ADR 0078), on the same database.
+    #[must_use]
+    pub fn lessons(&self) -> crate::lessons::Lessons {
+        crate::lessons::Lessons::new(self.db.clone())
+    }
+
     /// The `runs` table on the same database.
     ///
     /// Like [`Self::notebook`], this is only where the handle comes from: the run record's SQL

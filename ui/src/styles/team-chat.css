@@ -385,6 +385,13 @@
 .tc-stopped.bad { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }
 .tc-stopped.bad b { color: var(--color-alert); }
 .tc-continue { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0 0 42px; }
+/* What the agents learned from your feedback on the work (ADR 0078): a quiet line each, with Undo. */
+.tc-learned { display: grid; gap: 4px; margin: 8px 0 0 42px; }
+.tc-learned-line { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 1.45; color: var(--color-ink-2); }
+.tc-learned-mark { flex: none; align-self: center; color: var(--color-ink-3); }
+.tc-learned-words { min-width: 0; overflow-wrap: anywhere; }
+.tc-learned-words b { font-weight: 600; color: var(--color-ink); }
+.tc-learned-undo { flex: none; font-size: 12px; }
 .tc-continue .btn { display: inline-flex; align-items: center; gap: 6px; }
 
 .tc-note .chat-bubble, .tc-team-note .chat-bubble { border-style: dashed; background: transparent; }
@@ -514,7 +521,7 @@
 }
 
 @container (max-width: 560px) {
-  .tc-decision, .tc-stopped, .tc-continue, .tc-piece .permission-prompt.inline { margin-left: 0; }
+  .tc-decision, .tc-stopped, .tc-continue, .tc-learned, .tc-piece .permission-prompt.inline { margin-left: 0; }
   .tc-talk-acts { margin-left: 0; }
 }
 @container (max-width: 400px) {

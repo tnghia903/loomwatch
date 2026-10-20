@@ -34,11 +34,13 @@ import { NotionPagePicker } from '../canvas/NotionPagePicker'
 import { InstructionShape } from '../canvas/InstructionShape'
 import { EffortSlider } from '../models/EffortSlider'
 import { ModelPicker } from '../models/ModelPicker'
+import type { LessonsOf } from '../../lib/lessons/client'
 import { SkillDetails } from '../skills/SkillDetails'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
 import type { BenchLabel } from './AgentFigure'
 import type { BenchView } from './workbenchScene'
+import { LearnedBlock } from './LearnedBlock'
 
 const AgentFigure = lazy(() => import('./AgentFigure'))
 const SkillsMarket = lazy(() => import('../skills/SkillsMarket'))
@@ -92,6 +94,8 @@ export interface ByHandProps {
   teamOwn?: { teamPath: string | null }
   /** In a team: open its Workflow, where the team gives it more to read with a line. */
   onShowWorkflow?: () => void
+  /** Whose lessons its Learned block lists (ADR 0078); absent until there is an agent to learn. */
+  learned?: LessonsOf | null
   /** In a team: the agent and its team, which the suggested model is read from. Absent, its own
       setup alone decides. */
   suggestFor?: ModelSuggestionInput
@@ -121,7 +125,7 @@ const BLOCKS: readonly { part: FigurePart; title: string; where: string }[] = [
   { part: 'reply', title: 'What it hands back', where: 'the tray' },
 ]
 
-export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, suggestFor, following, chat, onBuild, cover }: ByHandProps) {
+export function ByHand({ draft, set: write, skills, skillsLoading, roleField, figure, record, hideDoes = false, readOnly = false, reads: teamReads, teamOwn, onShowWorkflow, learned, suggestFor, following, chat, onBuild, cover }: ByHandProps) {
   const chatting = chat !== undefined
   const set: ByHandProps['set'] = (key, value) => { if (!readOnly) write(key, value) }
   // The block you are working in: its thing on the bench is lit.
@@ -424,6 +428,7 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
           </ul>)}
 
           {block('reply', <ReplyField role={draft.instructions} readOnly={readOnly} onChange={(role) => set('instructions', role)} />)}
+          {learned && <LearnedBlock of={learned} name={draft.name.trim() || 'this agent'} readOnly={readOnly} />}
         </div>
       </div>
       {market && <Suspense fallback={null}><SkillsMarket agentName={draft.name.trim() || 'your new agent'} query={market.query} onClose={backFromMarket} /></Suspense>}
