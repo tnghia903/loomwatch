@@ -1,6 +1,6 @@
 import type { Evidence, RunProjection } from '../watch/events'
 import { baseName } from '../files/paths'
-import { commandName } from './commands'
+import { commandName, commandOf } from './commands'
 import { failuresOf, mendOf, skillName, workCount, type MendHow, type WorkCount } from './reads'
 
 /**
@@ -118,7 +118,7 @@ export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'r
     case 'command': {
       // Named by the program it ran, not the folder it ran in: `cd /tmp/build && python3 build.py`
       // is "python3 build.py", where the first path in it would make every command there "build".
-      const named = commandName(item.name)
+      const named = commandName(commandOf(item))
       const command = named ? `“${named}”` : quoted
       if (item.declined === 'answered') return `${agent} didn’t run ${command}: you answered instead.`
       if (item.declined === 'denied') return `${agent} wasn’t allowed to run ${command}.`
@@ -135,7 +135,7 @@ export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'r
     case 'permission': {
       // A request to run a command names it as the command itself is named once it runs.
       const request = item.rawInput as { toolCall?: { kind?: unknown } } | null | undefined
-      const named = request?.toolCall?.kind === 'execute' ? commandName(item.name) : null
+      const named = request?.toolCall?.kind === 'execute' ? commandName(commandOf(item)) : null
       return `${agent} asked permission for ${named ? `“${named}”` : quoted}${failed ? ', and it was refused' : ''}.`
     }
     default: return failed ? `${agent}’s ${quoted} call failed.` : `${agent} used ${quoted}.`
@@ -277,7 +277,8 @@ export function clock(msValue: number): string {
 /** One line of the run told as a story; `at` lets the reader jump the timeline to it. */
 export interface StoryBeat { at: number; text: string; bad: boolean }
 
-function span(msValue: number): string {
+/** A length of time in words: "14 seconds", "6 minutes". */
+export function span(msValue: number): string {
   const seconds = Math.max(1, Math.round(msValue / 1000))
   if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'}`
   const minutes = Math.round(seconds / 60)
