@@ -3,7 +3,7 @@
 An agent you told "too long, three bullets" should not need telling again next week, after the
 chat has scrolled past it. This page covers how a LoomWatch agent learns from what you say about
 its work (ADR 0078). It says what counts as feedback, what the agent keeps, how that reaches its
-next work, and why it is built this way. The last section summarises how other agent apps and the
+next work, and why it is built this way. Section 9 summarises how other agent apps and the
 research do it.
 
 ---
@@ -21,6 +21,9 @@ research do it.
 
 - From its next piece of work on, the lesson is in the agent's standing instructions. The agent's
   builder lists every lesson under **Learned**, with where it came from and **Forget**.
+- A lesson about you rather than one job, such as "always write in Vietnamese", also offers
+  **Tell all my agents**. Once you say yes, it moves to About you, and every agent follows it
+  (section 6).
 
 Nothing about the agent changes without showing you. Your instructions, its tools, its switches
 and its checks stay exactly as you set them.
@@ -28,7 +31,7 @@ and its checks stay exactly as you set them.
 ## 2. What counts as feedback
 
 The research is clear on one point: an agent improves from experience only when the signal comes
-from outside it (section 8). So LoomWatch learns from two sources and nothing else.
+from outside it (section 9). So LoomWatch learns from two sources and nothing else.
 
 | Source | When | What the learner is told |
 |---|---|---|
@@ -45,7 +48,7 @@ Never learned from:
 - A check item that was never met. What can't be fixed is often a missing input or a wrong
   finding, so a lesson from it would be a guess.
 - Reactions on their own. A face carries no words to learn from. Good or Love it **backs** the
-  lessons that work was given (section 6).
+  lessons that work was given (section 7).
 
 ## 3. What a lesson is
 
@@ -71,7 +74,8 @@ is the usual answer. It is also told not to learn:
    and the agent's current lessons as a numbered list.
 3. It answers with JSON: at most **two** edits among `add`, `change` and `drop`, plus `missed`
    marks for any lesson the feedback shows the agent did not follow. `{"edits": []}` means
-   nothing.
+   nothing. An `add` or `change` may say `"aboutYou": true` when the lesson is about you, not the
+   work (section 6).
 4. LoomWatch checks each edit and makes it itself. It never takes a rewritten list.
    - A lesson longer than 200 characters, or a number not on the list, is left out, not cut.
    - An `add` that says what a kept lesson already says counts as `missed` on that lesson
@@ -109,7 +113,38 @@ never changes what you may do.
   provider's prompt cache keeps it.
 - **Nothing learned, nothing changes.** An agent with no lessons gets byte-identical instructions.
 
-## 6. Whose lessons, and how they are kept honest
+## 6. Lessons about you: Tell all my agents
+
+Some feedback is about you, not about one kind of work. In the live check (section 10), four of
+the seven lessons were like that, for example "When replying to this person, always write in
+Vietnamese." Such a lesson fits every agent you have, so it belongs in About you (ADR 0074), which
+every agent reads, rather than in one agent's list.
+
+- **The learner marks it.** It adds `"aboutYou": true` to an `add` or `change` only when every
+  agent working for you should do it, whatever the job: the language to write in, the units you
+  use. Only `true` counts; any other value leaves the lesson about the work, and the rest of the
+  reply still counts. A lesson changed later, by the learner or in your own words, stays about you.
+- **The chat and the builder offer one action.** The lesson's line gets **Tell all my agents**.
+  Pressing it only asks: "Add to About you, so every agent does this?" with **Add** and
+  **Cancel**.
+- **Add moves it.** The sentence goes on its own line at the end of About you, with your name and
+  everything else kept. If a line of About you already says it, nothing is added. The lesson then
+  leaves the agent's list (dropped by `about_you`). The chat line now reads:
+
+  > 💡 **All your agents** know: When replying to this person, always write in Vietnamese. · Undo
+
+  In the builder, the lesson leaves the Learned list, and a line under it says the same, with
+  Undo.
+- **Undo puts both back.** The lesson returns to the agent's list, and the line it added comes out
+  of About you. A line About you already had, or one you changed or took out since, is left as it
+  is. If the agent's list is full, the least backed other lesson makes room, as when a lesson is
+  learned.
+- **Only your click writes About you.** Learning only marks a lesson. About you changes only
+  through the two routes behind **Add** and **Undo**, and like the About you page's own Save, they
+  accept a request only from LoomWatch's own page. If About you has no room (1,000 characters),
+  nothing changes and the chat says so.
+
+## 7. Whose lessons, and how they are kept honest
 
 | Agent | Its list |
 |---|---|
@@ -128,9 +163,10 @@ The builder shows these as "liked 2×" and "missed 1×". Backing decides what ma
 list is full.
 
 **Undo** drops a lesson. When the lesson changed an older one, Undo brings the older one back.
-Nothing is deleted: dropped and replaced lessons stay in the table with who dropped them.
+On a lesson moved to About you, Undo moves it back (section 6). Nothing is deleted: dropped and
+replaced lessons stay in the table with who dropped them.
 
-## 7. Configuration, storage and API
+## 8. Configuration, storage and API
 
 ```yaml
 agents:
@@ -140,7 +176,7 @@ agents:
 
 | Table | Holds |
 |---|---|
-| `agent_lessons` | id, scope, agent id, text, source (`you`, `check`), feedback (cut to 600 characters), run it came from, state (`active`, `dropped`, `replaced`), `replaces`, `dropped_by`, `missed`, times |
+| `agent_lessons` | id, scope, agent id, text, source (`you`, `check`), `about_you` (the learner found it is about you), feedback (cut to 600 characters), run it came from, state (`active`, `dropped`, `replaced`), `replaces`, `dropped_by` (`you`, `learning`, `room`, `about_you`), `added_to_about_you` (its sentence went into About you, so Undo takes it out), `missed`, times |
 | `agent_lesson_uses` | which lessons each run gave which agent, and whether you backed that run's answer |
 
 | Route | Purpose |
@@ -148,19 +184,22 @@ agents:
 | `GET /api/lessons?teamPath=…&agent=…` or `?savedAgent=…` | An agent's kept lessons, whether it learns, and the limit. |
 | `POST /api/lessons/undo {teamPath, agent \| savedAgent, id}` | Undo a lesson. |
 | `PUT /api/lessons {teamPath, agent \| savedAgent, id, text}` | Put a lesson in your own words. |
-| `GET /api/chat` | Each piece of work carries `lessons`: what was learned from feedback on it. |
+| `POST /api/lessons/tell-all {teamPath, agent \| savedAgent, id}` | Tell all my agents: move a lesson about you to About you. Only from LoomWatch's own page (`X-LoomWatch-Request: 1`). |
+| `POST /api/lessons/tell-all/undo {teamPath, agent \| savedAgent, id}` | Undo it: the lesson back with its agent, its line out of About you. Same rule. |
+| `GET /api/chat` | Each piece of work carries `lessons`: what was learned from feedback on it, and kept or moved to About you. |
 
 The code is in `crates/loomwatch-backend/src/lessons.rs`. The triggers are `learn_from_words` in
 `chat.rs` and `learn_from_checks` in `lib.rs`. The section is rendered by `lessons::section`,
-called from `agent/prompt.rs`. The UI is `components/chat/Learned.tsx` and
-`components/agents/LearnedBlock.tsx`.
+called from `agent/prompt.rs`. Tell all my agents is `Lessons::tell_all` and `Lessons::untell`,
+writing About you through `You::change` in `you.rs`. The UI is `components/chat/Learned.tsx`,
+`components/agents/LearnedBlock.tsx` and `components/you/TellAllAsk.tsx`.
 
 **Cost.** One fast-tier turn per message sent after finished work, and per check step that missed
 and then met. That is a few thousand tokens in and a few lines out. The agent's prompt grows by
 its lessons, cached. A message that is a new request rather than feedback still costs that one
 turn; the learner answers "nothing".
 
-## 8. How other agent apps and the research do it
+## 9. How other agent apps and the research do it
 
 Researched 2026-10-20. Full notes, with a source for every claim, are in ADR 0078.
 
@@ -210,7 +249,7 @@ What it leaves out on purpose:
 - automatic edits to your instructions;
 - periodic reviews of every transcript.
 
-## 9. Does it work?
+## 10. Does it work?
 
 Checked on 2026-10-20 on Claude Sonnet 5.5 through OpenRouter. Each of seven corrections was made
 once in one team, for example "Too long. Next time give me just three short bullet points." Then
@@ -231,15 +270,15 @@ the correction, so only a lesson could carry it there.
   that a correction reaches new work and doesn't override a clear request. It does not grade answer
   quality in general. The details are in ADR 0078.
 
-## 10. What is not built yet
+## 11. What is not built yet
 
 - A switch for learning in the agent's builder. Today it is `learns: false` in the team file, and
   Forget per lesson.
 - A team's own agent keeps a separate list in its Chat tab. Its bench team cannot name the team
   agent it stands for. One of My agents has one list everywhere.
-- "Tell all my agents": a lesson about you rather than about one job ("always in Vietnamese")
-  belongs in About you (ADR 0074). That path is for you to confirm.
 - A lesson that keeps proving itself could be offered as an edit to the agent's instructions, for
   you to accept.
-- Moving a lesson about you to About you. Four of the seven checked lessons were about the person
-  ("When replying to this person, always write in Vietnamese"), and those fit every agent.
+- How well the learner marks lessons about you has not been checked on a live model yet. The
+  tests use a stand-in model.
+- The learner is not shown About you, so it can learn what About you already says. Tell all my
+  agents then adds nothing, and the lesson still leaves the agent's list.
