@@ -1,6 +1,6 @@
 [package]
 name = "loomwatch-app"
-version = "0.10.0"
+version = "0.10.1"
 description = "LoomWatch's own app program: starts loomwatchd and keeps LoomWatch in the menu bar (macOS) or the notification area (Windows)."
 edition.workspace = true
 license.workspace = true
