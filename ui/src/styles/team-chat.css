@@ -1085,3 +1085,100 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
   .tc-helpers.busy .tc-helper-face.working:nth-child(3n) { animation-delay: -.9s; }
   @keyframes tc-helper-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -2px; } }
 }
+
+/* ---------- Files with a message (ADR 0082) ----------
+   Dragged over the chat, files are met by the gold stitch round the whole column: a line, never a
+   fill. Above the box, each file going with the words is a small chip, as a reply's quote is; in
+   the message, pictures are drawn small and open full size in the reader. */
+.tc.dropping::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  z-index: 40;
+  border: 2px dashed var(--color-accent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-accent-tint) 55%, transparent);
+  pointer-events: none;
+}
+.tc-attach {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  transition: color var(--t-quick) var(--ease-out);
+}
+.tc-attach:hover, .tc-attach:focus-visible { color: var(--color-accent); }
+.tc-attach:disabled { opacity: 0.45; cursor: default; }
+.tc-attached { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; padding: 6px 6px 0 0; list-style: none; }
+.tc-attached-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(260px, 100%);
+  min-height: 44px;
+  padding: 4px 30px 4px 6px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 10px;
+  background: var(--color-panel-solid);
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.tc-attached-item.picture { padding: 0; }
+.tc-attached-item.picture img { display: block; width: 56px; height: 56px; object-fit: cover; border-radius: 9px; }
+.tc-attached-item.uploading { border-bottom: 2px dashed var(--color-live); }
+.tc-attached-item.uploading :is(img, .tc-attached-sheet) { opacity: 0.55; }
+.tc-attached-item.failed { flex-wrap: wrap; border-color: var(--color-alert); }
+.tc-attached-sheet { display: inline-grid; justify-items: center; gap: 1px; flex: none; color: var(--color-ink-3); }
+.tc-attached-sheet b { font: 600 10px/1 var(--font-mono); letter-spacing: 0.04em; color: var(--color-ink-2); }
+.tc-attached-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-attached-problem { flex-basis: 100%; color: var(--color-ink-2); }
+.tc-attached-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-hairline);
+  border-radius: 50%;
+  background: var(--color-panel-solid);
+  color: var(--color-ink-2);
+  cursor: pointer;
+}
+.tc-attached-remove:hover, .tc-attached-remove:focus-visible { color: var(--color-ink); border-color: var(--color-accent); }
+/* On a picture the ✕ sits on its corner, so the picture stays in sight. */
+.tc-attached-item.picture .tc-attached-remove { top: -6px; right: -6px; }
+.tc-sent-files { display: grid; justify-items: start; gap: 6px; margin: 0 0 6px; }
+.tc-sent-pictures { display: flex; flex-wrap: wrap; gap: 6px; }
+.tc-sent-picture {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-hairline);
+  border-radius: 10px;
+  background: var(--color-ground);
+  cursor: zoom-in;
+}
+.tc-sent-picture img { display: block; width: 112px; height: 112px; object-fit: cover; }
+/* One picture alone is the message's picture: drawn bigger, still a thumbnail. */
+.tc-sent-picture:only-child img { width: min(240px, 60cqi); height: 160px; }
+.tc-sent-picture:hover, .tc-sent-picture:focus-visible { border-color: var(--color-accent); }
+@media (pointer: coarse) {
+  .tc-attached-remove { width: 28px; height: 28px; top: 8px; right: 6px; }
+  .tc-attached-remove::before { content: ""; position: absolute; inset: -8px; }
+  .tc-attached-item:not(.picture) { padding-right: 40px; }
+  .tc-attached-item.picture .tc-attached-remove { top: -8px; right: -8px; }
+  .tc-attached { gap: 12px; padding: 8px 8px 0 0; }
+  .tc-attach { width: 44px; height: 44px; }
+}
+/* What happened to something done from the chat, such as a dropped folder added: a line over the box. */
+.tc-notice { margin: 0; font-size: 12.5px; color: var(--color-ink-2); }

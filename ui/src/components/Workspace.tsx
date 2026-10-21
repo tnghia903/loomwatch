@@ -34,6 +34,9 @@ import { withRoom } from '../lib/canvas/makeRoom'
 import { markLinked } from '../lib/canvas/linked'
 import { useComposerLayout } from '../lib/composer-layout/useComposerLayout'
 import { RELATION, capabilityForCard, capabilityIsCard, capabilityNodeId, cardId, freeCapabilitySlot, notionPageKey, refuseCapabilityEdge, teamFileKind, type CapabilityDragPayload, type CapabilityNodeConfig, type MemoryRef } from '../lib/composer-layout/types'
+import { FolderPicker } from './canvas/FolderPicker'
+import { withFolderSource } from '../lib/chat/attachments'
+import type { FolderEntry } from '../lib/knowledge/client'
 import { chosenIsFile, chosenName, chosenSource } from '../lib/knowledge/chosen'
 import { setThemeMode, useTheme } from '../lib/theme'
 import { startTour } from '../lib/tour/store'
@@ -1629,6 +1632,19 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return { ok: true, revision: doc.currentRevision() }
   }, [doc])
   const [chatReview, setChatReview] = useState<{ review: TeamReview; retry: () => void } | null>(null)
+  // A folder dropped on the chat (ADR 0082), by its name: a page can't learn where it is, so the
+  // folder picker finds it and it is connected to the team as a source, linked rather than copied.
+  const [chatFolder, setChatFolder] = useState<{ name: string; said: (line: string | null) => void } | null>(null)
+  const connectChatFolder = useCallback((name: string) => new Promise<string | null>((said) => {
+    if (!editable) { said('This team can’t be changed here, so a folder can’t be added to it.'); return }
+    setChatFolder({ name, said })
+  }), [editable])
+  const connectFolder = useCallback((folder: FolderEntry) => {
+    chatFolder?.said(`${folder.name} added. Your agents can read it from their next piece of work.`)
+    setChatFolder(null)
+    for (const added of withFolderSource(doc.nodes.map((node) => ({ ...node.data.agent, id: node.id })), folder)) doc.setAgentCapabilities(added.id, added.capabilities)
+    void doc.save()
+  }, [doc, chatFolder])
   // ADR 0051: Details is open by default on a wide screen, beside the chat, and follows the newest
   // piece of work — until you open an older piece (it stays there) or close it (it stays closed).
   // Starting work from the chat follows again. A narrow screen keeps the chat first.
@@ -2554,6 +2570,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onStartTeamTaken={startTeamTaken}
             ask={chatAsk}
             onPassages={takePassages}
+            onConnectFolder={connectChatFolder}
           />
           {detailsOpen && wide && <ChatResizer width={chatWidth} onResize={setChatWidth} />}
           {detailsOpen && (
@@ -3011,6 +3028,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {deleteTeamOpen && doc.path && <DeleteTeamDialog path={doc.path} name={doc.teamName ?? baseName(doc.path).replace(/\.ya?ml$/i, '')} onDeleted={() => window.location.assign('/')} onClose={() => setDeleteTeamOpen(false)} />}
         {/* ADR 0048: a team from outside LoomWatch is checked before its first run. */}
         {teamReview && <TeamReviewDialog review={teamReview} onTrust={trustAndRun} onClose={dismissReview} />}
+        {chatFolder !== null && (
+          <FolderPicker
+            title="Add a folder for the team"
+            note={`Open “${chatFolder.name}” below, then add it. Your agents can read its files each time they work. Nothing is copied.`}
+            want={chatFolder.name}
+            onClose={() => { chatFolder.said(null); setChatFolder(null) }}
+            onChoose={connectFolder}
+          />
+        )}
         {chatReview && <TeamReviewDialog review={chatReview.review} onTrust={async () => { await approveTeam(chatReview.review.teamPath, chatReview.review.teamRevision); const { retry } = chatReview; setChatReview(null); retry() }} onClose={() => setChatReview(null)} />}
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />

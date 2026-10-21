@@ -331,7 +331,7 @@ fn last_user_message(messages: &[Message]) -> &str {
         .iter()
         .rev()
         .find_map(|message| match message {
-            Message::User { content } => Some(super::session::without_date(content)),
+            Message::User { content, .. } => Some(super::session::without_date(content)),
             _ => None,
         })
         .unwrap_or_default()
@@ -376,7 +376,7 @@ fn offline_reply(request: &ChatRequest<'_>) -> String {
 /// The newest send-back the agent was given, if any.
 fn sent_back(messages: &[Message]) -> Option<&str> {
     messages.iter().rev().find_map(|message| match message {
-        Message::User { content } => feedback_in(content),
+        Message::User { content, .. } => feedback_in(content),
         _ => None,
     })
 }
@@ -432,6 +432,7 @@ mod tests {
     fn user(text: &str) -> Message {
         Message::User {
             content: text.to_owned(),
+            pictures: Vec::new(),
         }
     }
 

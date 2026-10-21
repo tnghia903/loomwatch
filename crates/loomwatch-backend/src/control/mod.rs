@@ -426,6 +426,7 @@ pub(crate) fn ask_spec(workspace: PathBuf) -> ProcessSpec {
         permissions: None,
         asker: None,
         lessons: Vec::new(),
+        pictures: Vec::new(),
     }
 }
 

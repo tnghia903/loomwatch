@@ -384,47 +384,8 @@ pub fn store_file_in(
     requested_name: &str,
     bytes: &[u8],
 ) -> Result<StoredFile, String> {
-    if bytes.len() > MAX_FILE_BYTES {
-        return Err(format!(
-            "{requested_name} is larger than {} MB. Put it in a folder and add the folder instead.",
-            MAX_FILE_BYTES / 1024 / 1024
-        ));
-    }
-    let name = safe_name(requested_name)
-        .ok_or_else(|| format!("{requested_name:?} cannot be used as a file name"))?;
-    let team_dir = within.to_path_buf();
-    let folder = within.join(folder_name);
-    fs::create_dir_all(&folder)
-        .map_err(|error| format!("{} could not be created ({error})", folder.display()))?;
-    // Re-checked after creating: a symlinked folder already on the way would put the file outside
-    // the team.
-    let resolved = crate::platform::canonicalize(&folder).map_err(|error| error.to_string())?;
-    let team_dir = crate::platform::canonicalize(&team_dir).map_err(|error| error.to_string())?;
-    if !resolved.starts_with(&team_dir) {
-        return Err(format!(
-            "{folder_name} resolves outside the team's own folder"
-        ));
-    }
-    let mut stored = name.clone();
-    let mut counter = 2;
-    loop {
-        let target = resolved.join(&stored);
-        match fs::read(&target) {
-            Ok(existing) if existing == bytes => break,
-            Ok(_) => {
-                stored = numbered(&name, counter);
-                counter += 1;
-            }
-            Err(_) => {
-                let partial = resolved.join(format!(".{stored}.partial"));
-                fs::write(&partial, bytes)
-                    .map_err(|error| format!("{stored} could not be saved ({error})"))?;
-                fs::rename(&partial, &target)
-                    .map_err(|error| format!("{stored} could not be saved ({error})"))?;
-                break;
-            }
-        }
-    }
+    let (resolved, stored) = save_unique(within, folder_name, requested_name, bytes)?;
+    let team_dir = crate::platform::canonicalize(within).map_err(|error| error.to_string())?;
     let relative = format!("{folder_name}/{stored}");
     let snapshot = snapshot(&team_dir, Path::new(&relative))?;
     let content = snapshot
@@ -449,6 +410,65 @@ pub fn store_file_in(
         excerpted: snapshot.text_copy.is_some(),
         note,
     })
+}
+
+/// Write `bytes` into the folder `folder_name` inside `within`, made when missing, under the
+/// uploaded name kept recognisable: an identical file already there is reused, a different one
+/// with the same name gets a numbered name rather than being replaced. Returns the folder,
+/// resolved, and the name the file has in it. No text is read: [`store_file_in`] does that for
+/// knowledge, and the chat hands its files over by path.
+///
+/// # Errors
+///
+/// Returns the reason when the name is unusable, the file is too large, the folder would resolve
+/// outside `within`, or the write fails.
+pub(crate) fn save_unique(
+    within: &Path,
+    folder_name: &str,
+    requested_name: &str,
+    bytes: &[u8],
+) -> Result<(PathBuf, String), String> {
+    if bytes.len() > MAX_FILE_BYTES {
+        return Err(format!(
+            "{requested_name} is larger than {} MB. Put it in a folder and add the folder instead.",
+            MAX_FILE_BYTES / 1024 / 1024
+        ));
+    }
+    let name = safe_name(requested_name)
+        .ok_or_else(|| format!("{requested_name:?} cannot be used as a file name"))?;
+    let folder = within.join(folder_name);
+    fs::create_dir_all(&folder)
+        .map_err(|error| format!("{} could not be created ({error})", folder.display()))?;
+    // Re-checked after creating: a symlinked folder already on the way would put the file outside
+    // the team.
+    let resolved = crate::platform::canonicalize(&folder).map_err(|error| error.to_string())?;
+    let within = crate::platform::canonicalize(within).map_err(|error| error.to_string())?;
+    if !resolved.starts_with(&within) {
+        return Err(format!(
+            "{folder_name} resolves outside the team's own folder"
+        ));
+    }
+    let mut stored = name.clone();
+    let mut counter = 2;
+    loop {
+        let target = resolved.join(&stored);
+        match fs::read(&target) {
+            Ok(existing) if existing == bytes => break,
+            Ok(_) => {
+                stored = numbered(&name, counter);
+                counter += 1;
+            }
+            Err(_) => {
+                let partial = resolved.join(format!(".{stored}.partial"));
+                fs::write(&partial, bytes)
+                    .map_err(|error| format!("{stored} could not be saved ({error})"))?;
+                fs::rename(&partial, &target)
+                    .map_err(|error| format!("{stored} could not be saved ({error})"))?;
+                break;
+            }
+        }
+    }
+    Ok((resolved, stored))
 }
 
 /// The last component of an uploaded name, without control characters or a leading dot.

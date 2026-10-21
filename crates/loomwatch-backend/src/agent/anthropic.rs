@@ -641,7 +641,21 @@ fn wire_messages(history: &[Message], source: Source) -> Vec<Value> {
     for message in history {
         match message {
             Message::System { .. } => {}
-            Message::User { content } => {
+            Message::User { content, pictures } => {
+                // Pictures the operator sent come before the words about them, each named.
+                for picture in pictures {
+                    user.push(
+                        json!({"type": "text", "text": format!("The picture {}:", picture.name)}),
+                    );
+                    user.push(json!({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": picture.media_type,
+                            "data": picture.data,
+                        },
+                    }));
+                }
                 if !content.is_empty() {
                     user.push(json!({"type": "text", "text": content}));
                 }
@@ -1145,6 +1159,27 @@ mod tests {
         );
     }
 
+    /// Pictures the operator sent with a message go before its words, each named (ADR 0082).
+    #[test]
+    fn pictures_sent_with_a_message_go_before_its_words() {
+        let sent = Message::User {
+            content: "What is wrong here?".into(),
+            pictures: vec![crate::agent::provider::Picture {
+                name: "shot.png".into(),
+                media_type: "image/png".into(),
+                data: "iVBORw0K".into(),
+            }],
+        };
+        assert_eq!(
+            wire_messages(&[sent], Source::Anthropic),
+            [json!({"role": "user", "content": [
+                {"type": "text", "text": "The picture shot.png:"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0K"}},
+                {"type": "text", "text": "What is wrong here?"},
+            ]})]
+        );
+    }
+
     /// The system prompt goes on top, a turn's tool results and the words after them share one user
     /// message, Anthropic's own message goes back exactly as written, and a summary keeps the
     /// tools while asking for no call.
@@ -1161,6 +1196,7 @@ mod tests {
             },
             Message::User {
                 content: "Read both.".into(),
+                pictures: Vec::new(),
             },
             Message::Assistant {
                 content: String::new(),
@@ -1183,6 +1219,7 @@ mod tests {
             },
             Message::User {
                 content: "Now sum up.".into(),
+                pictures: Vec::new(),
             },
         ];
         let tools = [ToolSpec {

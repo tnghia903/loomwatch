@@ -300,6 +300,10 @@ pub struct QueuedNote {
     /// (`Replied::quoted`). `None` for a note that replies to nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply: Option<String>,
+    /// Files sent with it (ADR 0082): the agent is told where they are, and shown the pictures
+    /// with its words when its model sees pictures.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<crate::chat_files::ChatFile>,
 }
 
 /// "Send now" (ADR 0051): a request to stop an agent's current turn so a note can go in at once.
@@ -1922,6 +1926,10 @@ pub(crate) struct StartRunRequest {
     /// Only the chat sets it: `POST /api/runs` has no reply to give.
     #[serde(skip)]
     reply: Option<crate::Replied>,
+    /// Files sent with the chat message that starts the run (ADR 0082): every agent is told where
+    /// they are, and the agent the run reaches first is shown the pictures. Only the chat sets it.
+    #[serde(skip)]
+    files: Vec<crate::chat_files::ChatFile>,
 }
 
 impl StartRunRequest {
@@ -1951,6 +1959,13 @@ impl StartRunRequest {
     #[must_use]
     pub(crate) fn replying(mut self, reply: Option<crate::Replied>) -> Self {
         self.reply = reply;
+        self
+    }
+
+    /// The files the request's message was sent with.
+    #[must_use]
+    pub(crate) fn giving(mut self, files: Vec<crate::chat_files::ChatFile>) -> Self {
+        self.files = files;
         self
     }
 
@@ -2215,6 +2230,7 @@ pub(crate) async fn launch_manual(
         None => resolve_continuation(registry, &mut prepared, request).await?,
     }
     prepared.lineage.reply.clone_from(&request.reply);
+    prepared.lineage.files.clone_from(&request.files);
     // Retry lineage is a column, not a `Map` in the browser: a reloaded page still says
     // "Retry of Run 07". Written after `resolve_continuation` so an explicit `retryOfRunId` wins
     // over the one a checkpoint continuation derives, which is the more specific claim.

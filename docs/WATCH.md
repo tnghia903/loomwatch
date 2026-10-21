@@ -94,7 +94,22 @@ resets it. The chat is paged from `GET /api/chat`. The magnifier in its header f
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.
 What matches shows in place of the chat, best first; a line opens the chat at that message with
-the words lit, and **Back to what matches** returns to the list. Deep links use `?run=<id>`, which opens the chat with that run's Details; the legacy
+the words lit, and **← Back to the list** returns to it.
+
+Pictures and files go with a message (ADR 0082): paste one into the message box, drop files on the
+chat (a dashed gold line goes round it while you drag), or press the paperclip. Each is kept the
+moment it is added, with `PUT /api/chat/files?teamPath=&name=` (raw bytes, 25 MB at most), in
+`<team>.files/chat/` beside the team file, and shows as a chip above the box; a message carries up
+to 10 and still needs words. `POST /api/chat/messages` names them in `files: [{path}]`, and the
+daemon refuses any path outside that team's `chat/` folder. Every agent of the team may read them
+without asking. Each agent the work reaches finds them listed under its task, by path, and the
+agent the message reaches first is shown the pictures with its words when its model sees pictures;
+a note's pictures go to the agent it is for. A message with files always starts work, never a quick
+answer in the chat. Your sent message shows the pictures small, opening full size in the reader
+beside the chat, and other files as cards. An answer to an agent's question takes words only, and
+the box says so while files are in it. A dropped folder isn't sent: the folder picker opens, its
+button waits until that folder is open, and it is added for every agent of the team as a linked
+source, with a line over the box saying so. Deep links use `?run=<id>`, which opens the chat with that run's Details; the legacy
 `/watch?session=<id>` route redirects there, and a bare `/watch` opens the team list. A run the
 daemon no longer remembers (restart) is read from the archive alone.
 

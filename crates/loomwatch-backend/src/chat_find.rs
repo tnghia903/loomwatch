@@ -7,7 +7,7 @@
 //! (`ui/src/lib/chat/findWords.ts`) to light the words where they are shown.
 //!
 //! What to index is kept in `work_index_queue`, filled by triggers on `runs` and `chat_messages`
-//! (`migrations/20261021120000_work_passages.sql`), so no way of writing a run or a message can
+//! (`migrations/20261022090000_work_passages.sql`), so no way of writing a run or a message can
 //! be missed. [`WorkIndex::drain`] empties it: in the background after anything is written, at
 //! start for what an older version left, and before every search, so a search never misses what
 //! was already said.
