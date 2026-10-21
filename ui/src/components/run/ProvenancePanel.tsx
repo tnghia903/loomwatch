@@ -6,10 +6,7 @@ import { CoverageGlyph, EntityGlyph, StatusGlyph } from '../ui/glyphs'
 import { CATEGORIES, EMPTY_REASONS, coverageFor, coverageSummary, coverageWord } from './coverage'
 
 // The six categories, their empty reasons, the level lookup and the §5.2 coverage sentence
-// live in ./coverage, shared with the narrow RunColumn — which states coverage on its own
-// face because this panel is an overlay at that width (TNG-173 N1/N4). Two independently
-// built sentences could disagree, and a column reading "Complete capture" over a panel that
-// names gaps is the one failure §5 exists to prevent.
+// live in ./coverage.
 
 // TNG89 §6.4: an entity's accessible name is "<kind>: <name>, <capture word>" (CONTRACT
 // §8.1 defines the words). The word is the entity's own `capture` field — set by the

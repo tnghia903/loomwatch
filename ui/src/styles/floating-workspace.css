@@ -5,8 +5,7 @@
 .lw-shell .build-outcome,
 .lw-shell .workspace-view-tabs,
 .delivery-shown .delivery-work,
-.delivery-shown .workspace-chrome,
-.delivery-shown .lw-composer {
+.delivery-shown .workspace-chrome {
   background: var(--workspace-glass);
   border: 1px solid var(--color-hairline);
   border-radius: var(--r-lg);
@@ -40,15 +39,6 @@
   .delivery-shown .delivery-lane {
     inset: 92px 20px 20px;
     grid-template-columns: minmax(0, 1fr);
-  }
-  .delivery-shown .lw-composer {
-    left: calc(60% + 7.6px);
-    right: 32px;
-    bottom: 32px;
-    width: auto;
-    transform: none;
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--r-lg);
   }
   .delivery-shown .lw-composer-notices {
     left: calc(60% + 7.6px);

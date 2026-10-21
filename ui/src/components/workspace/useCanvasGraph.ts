@@ -2,98 +2,43 @@ import { useMemo } from 'react'
 
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { modelLabelForAgent } from '../../lib/models'
-import { helperPositions, historicalRunPositions } from '../../lib/runs/runOverlay'
 import { buildCanvasGraph, type CanvasGraphInput } from './canvasGraph'
 
-interface CanvasGraphHookInput extends Omit<CanvasGraphInput, 'helperPlacements' | 'historicalPositions'> {
+interface CanvasGraphHookInput extends CanvasGraphInput {
   /** The model list's own names by id, once it has arrived. */
   modelNames?: ReadonlyMap<string, string>
-  /** The planned deliverable, which Build names on the Output node. */
+  /** The planned deliverable, which the Output node names. */
   outputPlan: { name: string; format: string } | undefined
   /** What LoomWatch did to an agent's instructions after a removal (ADR 0059), by agent id. */
   instructionNotes?: ReadonlyMap<string, string>
-  /** Build only: where every answer also goes (ADR 0038), named on the Output node. */
+  /** Where every answer also goes (ADR 0038), named on the Output node. */
   sendsTo?: string | null
 }
 
 /**
- * The one canvas both surfaces draw (TNG89_INTERACTION.md §15), memoised on exactly what
- * `buildCanvasGraph` reads, plus the per-surface finish React Flow is handed.
+ * The Workflow canvas, memoised on exactly what `buildCanvasGraph` reads, plus the finish React
+ * Flow is handed.
  *
  * Every input is destructured before use so the dependency lists below are checked against the
  * builder's input by `react-hooks/exhaustive-deps` rather than kept in step by hand.
  */
 export function useCanvasGraph(input: CanvasGraphHookInput) {
-  const { runView, doc, session, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge, modelNames, outputPlan, instructionNotes, sendsTo = null } = input
-
-  // §15.2.6: helpers a run reveals that the document has no node for. They are placed by the
-  // existing seeded auto-layout around the entrypoint, as view state — node positions are not
-  // part of the team file at all, so there is nothing to offer saving them to (see the ledger).
-  const entrypointPosition = useMemo(() => {
-    const entry = doc.nodes.find((node) => node.id === (doc.entrypoint ?? leadId)) ?? doc.nodes[0]
-    return entry?.position ?? null
-  }, [doc.nodes, doc.entrypoint, leadId])
-  const helperPlacements = useMemo(() => {
-    if (!entrypointPosition) return {}
-    const helpers = orderedAgentIds.filter((id) => !doc.nodes.some((node) => node.id === id))
-    return helperPositions(helpers, entrypointPosition)
-  }, [orderedAgentIds, doc.nodes, entrypointPosition])
-
-  /**
-   * Replays are read-only stories, so they may use a clean presentation layout without moving the
-   * saved Build canvas. Include observed handoffs as layout constraints and bridge an archived lead
-   * into the current configured entrypoint when the team file has changed since the run. This is
-   * exactly the case that previously stranded an old `collector` beneath the current pipeline.
-   */
-  const historicalPositions = useMemo(() => {
-    if (!runView || session.mode !== 'replay') return null
-    const agentIds = new Set(orderedAgentIds)
-    const rank = new Map(orderedAgentIds.map((id, index) => [id, index]))
-    const sequence = [
-      ...doc.edges.map((edge) => ({ from: edge.source, to: edge.target })),
-      // Only calls that run with the story's order shape the layout. A later stage asking an
-      // earlier one is drawn as an arc above the row; as a layout constraint it formed a cycle,
-      // which dagre broke by reversing the stages and stacking them over the Prompt.
-      ...projection.delegations
-        .filter((edge) => (rank.get(edge.from) ?? Infinity) < (rank.get(edge.to) ?? -Infinity))
-        .map((edge) => ({ from: edge.from, to: edge.to })),
-    ].filter(({ from, to }) => agentIds.has(from) && agentIds.has(to) && from !== to)
-    return historicalRunPositions(
-      orderedAgentIds.map((id) => ({ id, ...synthMeasurements[id] })),
-      sequence,
-      capabilityCards.map((node) => ({ id: node.id, ...synthMeasurements[node.id] })),
-      allWiringEdges,
-      leadId,
-      doc.entrypoint,
-    )
-  }, [runView, session.mode, orderedAgentIds, doc.edges, doc.entrypoint, projection.delegations, synthMeasurements, capabilityCards, allWiringEdges, leadId])
+  const { doc, nodeNames, overlayPositions, synthMeasurements, responderFromDoc, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityEdge, modelNames, outputPlan, instructionNotes, sendsTo = null } = input
 
   const graph = useMemo(() => buildCanvasGraph({
-    runView,
     doc: { nodes: doc.nodes, edges: doc.edges, mode: doc.mode, entrypoint: doc.entrypoint },
-    session: { mode: session.mode, cursor: session.cursor, error: session.error, lastSeq: session.lastSeq, terminal: session.terminal },
-    nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent,
-    leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, helperPlacements, historicalPositions, fannedAgentId,
-    inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText,
-    visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities,
-    selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge,
-  }), [runView, doc.nodes, doc.edges, doc.mode, doc.entrypoint, session.mode, session.cursor, session.error, session.lastSeq, session.terminal, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel, orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements, helperPlacements, historicalPositions, fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText, provenanceOpen, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge])
+    nodeNames, overlayPositions, synthMeasurements, responderFromDoc, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule,
+    capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityEdge,
+  }), [doc.nodes, doc.edges, doc.mode, doc.entrypoint, nodeNames, overlayPositions, synthMeasurements, responderFromDoc, composerText, visibleSchedule, scheduleInvalid, scheduleEditorOpen, onOpenSchedule, capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityEdge])
 
-  // Both surfaces draw the same agent card, so both name the model that card runs on. The Prompt node
-  // and the configured output name belong to Build alone: a run has an attempt to show instead of
-  // a draft, and an answer to read instead of a promise.
-  const canvasNodes = useMemo(() => {
-    const named = graph.nodes.map((node) => node.type === 'agent'
-      ? { ...node, data: { ...node.data, modelLabel: modelLabelForAgent((node as AgentNode).data.agent, modelNames) } }
-      : node)
-    if (runView) return named
-    return named
-      .filter((node) => node.id !== '__prompt' || allWiringEdges.some((edge) => edge.from === '__prompt'))
-      .map((node) => node.type === 'response' ? { ...node, data: { ...node.data, outputName: outputPlan?.name, outputFormat: outputPlan?.format, sendsTo } }
-        : node.type === 'agent' && instructionNotes?.has(node.id)
-          ? { ...node, data: { ...node.data, instructionNote: instructionNotes.get(node.id) } }
-          : node)
-  }, [graph.nodes, modelNames, runView, allWiringEdges, outputPlan, instructionNotes, sendsTo])
+  // Each agent card names the model it runs on. The Prompt node shows only once something is wired
+  // to it, and the Output node names the planned deliverable and where it also goes.
+  const canvasNodes = useMemo(() => graph.nodes
+    .filter((node) => node.id !== '__prompt' || allWiringEdges.some((edge) => edge.from === '__prompt'))
+    .map((node) => node.type === 'agent'
+      ? { ...node, data: { ...node.data, modelLabel: modelLabelForAgent((node as AgentNode).data.agent, modelNames), ...(instructionNotes?.has(node.id) ? { instructionNote: instructionNotes.get(node.id) } : {}) } }
+      : node.type === 'response' ? { ...node, data: { ...node.data, outputName: outputPlan?.name, outputFormat: outputPlan?.format, sendsTo } }
+        : node), [graph.nodes, modelNames, allWiringEdges, outputPlan, instructionNotes, sendsTo])
 
   return { graph, canvasNodes }
 }

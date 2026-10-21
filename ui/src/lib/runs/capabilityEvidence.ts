@@ -130,6 +130,15 @@ export function capabilityEvidence(
  * into prompt" for it would claim something the daemon did not do. A run archived before routes
  * existed carries no route and keeps the original wording.
  */
+/**
+ * Its instructions went whole into what the agent was sent. A skill on the native route was only
+ * pointed at (ADR 0021): the agent still had to open it, so being given one is not having it.
+ */
+export const givenInFull = (skill: RunCapability) => skill.state === 'loaded' && skill.receipt?.route !== 'native'
+
+/** It opened the skill, or had it given in full: the required skills a stage's mark counts as met. */
+export const hadSkill = (skill: RunCapability) => skill.receipt?.state === 'opened' || skill.state === 'read' || givenInFull(skill)
+
 function routeLabel(route: RequiredSkillReceipt['route']): string {
   if (route === 'native') return 'Delivered, pointer in prompt'
   if (route === 'inline') return 'Loaded into prompt, translated'

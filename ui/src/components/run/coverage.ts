@@ -3,8 +3,7 @@ import type { Coverage, EntityKind } from '../ui/glyphs'
 
 // TNG89 §4.1 / CONTRACT §12: six grouped summaries in fixed order — agents, reasoning,
 // skills, tools, commands, sources. Fixed order matters: the operator learns positions, and
-// a list that reorders itself by count is unlearnable. Shared by the wide ProvenancePanel
-// and the narrow RunColumn so the two surfaces cannot drift into different orders.
+// a list that reorders itself by count is unlearnable.
 export interface ProvenanceCategory {
   key: CoverageKey
   kind: EntityKind

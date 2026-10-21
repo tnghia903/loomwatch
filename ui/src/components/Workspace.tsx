@@ -13,11 +13,9 @@ import type { CapabilityRef, ScheduleConfig } from '../lib/team-file/types'
 import { newSchedule } from '../lib/team-file/schedule'
 import type { TeamNotionPage, TeamSource } from './library/ComponentPalette'
 import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
-import { connectedServersByAgent } from '../lib/library/observed'
 import { approveTeam, isTerminalRun, runScheduleNow, scheduleForPath, useSchedules, type TeamReview } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { modelLabelForAgent } from '../lib/models'
-import type { OutputNode } from '../lib/runs/graph'
 import { causalOrder, DOCK } from '../lib/runs/runOverlay'
 import { mergeHistory, teamRunIds } from '../lib/runs/history'
 import { useRunHistory } from '../lib/runs/useRunHistory'
@@ -58,14 +56,13 @@ import { Home } from './home/Home'
 import { ALLOW_SWITCHES } from '../lib/team-file/allow'
 import type { AgentConfig } from '../lib/team-file/types'
 import type { InspectedCapability } from './canvas/CapabilityInspector'
-import { LayerLegend, type LayerSolo } from './canvas/LayerLegend'
 import { ParseFailureModal } from './canvas/ParseFailureModal'
 import { ScheduleNodeCard } from './canvas/ScheduleNodeCard'
 import { SchedulePanel } from './canvas/SchedulePanel'
 import { ViewControls } from './canvas/ViewControls'
 import { CardConnectionLine } from './canvas/CardConnectionLine'
 import { YamlSheet } from './canvas/YamlSheet'
-import { ProvEdgeView, WarpEdgeView, WeftEdgeView } from './canvas/edges'
+import { ProvEdgeView, WarpEdgeView } from './canvas/edges'
 import { BuildAgentCard, BuildCapabilityCard, BuildOutputCard } from './canvas/BuildNodeCard'
 import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
@@ -74,14 +71,13 @@ import { ComponentPalette } from './library/ComponentPalette'
 import { BookOpenText, MessageSquareText, MessagesSquare, Network, UserRound, X } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
-import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
+import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
 import { BriefEditStrip } from './memory/BriefEditStrip'
 import { CheckpointStrip } from './memory/CheckpointStrip'
 import { MemoryPanel } from './memory/MemoryPanel'
 import { ReviewStrip } from './memory/ReviewStrip'
 import { ActivityPanel } from './run/ActivityPanel'
 import { HandoverPanel } from './run/HandoverPanel'
-import { LifecycleStrip } from './run/LifecycleStrip'
 import { ProvenancePanel } from './run/ProvenancePanel'
 import { DeliveryLane } from './run/DeliveryLane'
 import { AnswerDocument } from './chat/AnswerDocument'
@@ -93,9 +89,7 @@ import type { ReplyTo } from '../lib/chat/client'
 import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
 import { isDocument } from '../lib/chat/document'
 import type { ReceiptLine } from '../lib/story/receipt'
-import { PermissionPrompt } from './run/PermissionPrompt'
-import { SpendStopCard } from './run/SpendStopCard'
-import { EvidenceNodeCard, MoreEvidenceCard, OutputNodeCard, PromptNodeCard, RunNodeCard } from './run/StoryNodes'
+import { PromptNodeCard } from './run/StoryNodes'
 import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
@@ -112,6 +106,7 @@ import { capabilityEdgeId } from './workspace/canvasGraph'
 import { OutputEditor } from './workspace/OutputEditor'
 import { ConflictSheetFooter, InlineConfirm, NewTeamSheet, OpenTeamSheet, SaveCopySheet } from './workspace/Sheets'
 import { useCanvasGraph } from './workspace/useCanvasGraph'
+import { useRunAgents } from './workspace/runAgents'
 import { useRunController } from './workspace/useRunController'
 import { useWorkspaceShortcuts } from './workspace/useWorkspaceShortcuts'
 import { TeamStory } from './workspace/TeamStory'
@@ -150,19 +145,12 @@ import type { LeaveGuard } from './rail/CrewRail'
 import { TeamRail } from './rail/TeamRail'
 import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
 
-// One canvas anatomy for both surfaces. Run ("Full trace") draws the team the operator composed,
-// so it must be recognisably the same object: the agent and capability cards are the Build cards,
-// with the run's projected state layered onto them. Only the nodes a run alone owns — the attempt,
-// its evidence and the response it produced — have a Run-only renderer, and only the response node
-// differs between the two, because before a run there is no answer to read.
-const nodeTypes = { agent: BuildAgentCard, schedule: ScheduleNodeCard, capability: BuildCapabilityCard, prompt: PromptNodeCard, run: RunNodeCard, evidence: EvidenceNodeCard, more: MoreEvidenceCard, response: OutputNodeCard }
-// One set of lines and one word for each relationship on both canvases (ADR 0041); a run's own
-// routing — the arc onto the Output node's top handle, the resource lane — rides the edge data.
-const edgeTypes = { warp: WarpEdgeView, weft: WeftEdgeView, prov: ProvEdgeView }
-// Before a run there is no answer to show, so the Output card is the planned one.
-const buildNodeTypes = { ...nodeTypes, response: BuildOutputCard }
+// The Workflow canvas: the team as it is configured. A run is read in the team's chat and its
+// Details, never drawn here. The Output card is the planned one: the canvas holds no answer.
+const nodeTypes = { agent: BuildAgentCard, schedule: ScheduleNodeCard, capability: BuildCapabilityCard, prompt: PromptNodeCard, response: BuildOutputCard }
+// One set of lines and one word for each relationship (ADR 0041); the resource lane rides the edge data.
+const edgeTypes = { warp: WarpEdgeView, prov: ProvEdgeView }
 const EMPTY_CAPABILITY_INVENTORY: CapabilityInventory = { skills: [], sources: [] }
-const EMPTY_EVIDENCE: readonly Evidence[] = []
 /** Where this browser keeps the add panel's width. */
 const PALETTE_WIDTH_KEY = 'loomwatch.paletteWidth'
 const CHAT_WIDTH_KEY = 'loomwatch.chatWidth'
@@ -293,7 +281,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // React Flow keeps a synthetic node hidden until it has been measured, and a controlled `nodes`
   // prop rebuilt from scratch each render loses that measurement unless we hand it back. Agent
   // nodes get this for free because their `dimensions` changes reach `doc.onNodesChange`; every
-  // node the document does not own — the schedule card, capability cards, run/evidence cards —
+  // node the document does not own — the schedule card, capability cards, the docked anchors —
   // needs its size remembered here or it can settle at `visibility: hidden`.
   const [synthMeasurements, setSynthMeasurements] = useState<Record<string, { width: number; height: number }>>({})
   const [libraryCollapsed, setLibraryCollapsed] = useState(true)
@@ -334,7 +322,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [chatWidth])
   /** The agent a skill, tool, folder or file is being dragged over, so its card can say it takes it. */
   const [dropAgentId, setDropAgentId] = useState<string | null>(null)
-  const [solo, setSolo] = useState<LayerSolo>('both')
   const [sweeping, setSweeping] = useState(false)
   const [notificationsOn, setNotificationsOn] = useState(false)
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set())
@@ -383,14 +370,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     setAgentsView(false)
     writeBuildViewToUrl(false, null)
   }, [])
-  const [runPresentation, setRunPresentation] = useState<'delivery' | 'trace'>('delivery')
-  // §15.2.1: the *configured* graph's positions are the document's in every state, so what is left
-  // here is presentation-only: the two docked anchors, the Run card, and the evidence cards the
-  // operator has dragged out of their fan. `runPositions` — which used to hold every agent's
-  // run-time position and move the design the moment a run opened — is gone.
+  // §15.2.1: the configured graph's positions are the document's, so what is left here is
+  // presentation-only: where the operator dragged Build's docked Prompt and Output cards.
   const [overlayPositions, setOverlayPositions] = useState<Record<string, { x: number; y: number }>>({})
-  // §15.2.3: evidence folds to a count and fans for one agent at a time. This is that one agent.
-  const [fannedAgentId, setFannedAgentId] = useState<string | null>(null)
   const [inspectedEvidenceId, setInspectedEvidenceId] = useState<string | null>(null)
   const [handoverAgentId, setHandoverAgentId] = useState<string | null>(null)
   const [provenanceOpen, setProvenanceOpen] = useState(false)
@@ -400,7 +382,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Which agents this run stored a context packet for. The packet inspector used to open only
   // from a stage's handover chip, so the entrypoint — which is handed nothing and still has a
   // packet — had no entry point at all (docs/TEAM_MEMORY.md, known gaps).
-  const [packetAgents, setPacketAgents] = useState<{ runId: string; ids: string[]; notes: Record<string, number> } | null>(null)
+  const [packetAgents, setPacketAgents] = useState<{ runId: string; ids: string[] } | null>(null)
   // The Notebook, read over REST like the Brief. Notes never ride the WebSocket: an incoming bus
   // `memory_write` on the run stream is an invalidation hint and nothing more, which is what keeps
   // docs/WEBSOCKET_SCHEMA.md frozen.
@@ -440,7 +422,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const waiting = record?.status === 'running' ? record.waitingOn ?? null : null
   const projection = session.projection
   const runView = activeRunId !== null
-  const observedConnected = useMemo(() => connectedServersByAgent(projection.agents), [projection.agents])
   // What the run's agents read or wrote: the answer names files from an agent's own folder.
   const touchedFiles = useMemo(() => filesTouched(projection.evidence), [projection.evidence])
   const routine = useMemo(() => scheduleForPath(schedules.entries, doc.path), [schedules.entries, doc.path])
@@ -483,11 +464,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   /** Every route into or out of a run passes through here so per-run view state resets together. */
   const showRun = useCallback((runId: string | null) => {
     setActiveRunId(runId)
-    setRunPresentation('delivery')
     setRunSetup(false)
     writeRunToUrl(runId)
     setOverlayPositions({})
-    setFannedAgentId(null)
     setInspectedEvidenceId(null)
     setProvenanceOpen(false)
     setDismissedAlerts(new Set())
@@ -496,16 +475,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     // next run would silently skip stages of a run the operator never chose it for.
     setFollowUpTarget(null)
     setCheckpoints(null)
-    // Solo is per-run view state too: a layer soloed in one story must not bleed into the next.
-    setSolo('both')
   }, [])
   // The add panel is composition chrome; once a run is on screen it folds. Keyed on the path too:
-  // before the document loads there is no panel mounted to hear the event. The full trace mounts
-  // the panel again, and reviewing a run starts with the graph, not the catalogue — the folded
-  // panel names what the run used, for when the reader wants it (ADR 0041).
+  // before the document loads there is no panel mounted to hear the event.
   useEffect(() => {
     if (activeRunId && doc.path) window.dispatchEvent(new Event('loomwatch:close-library'))
-  }, [activeRunId, doc.path, runPresentation])
+  }, [activeRunId, doc.path])
 
   useEffect(() => {
     const resize = () => { setWindowWidth(window.innerWidth); setWindowHeight(window.innerHeight) }
@@ -547,8 +522,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const composerLayout = useComposerLayout(doc.path, agentIds, doc.saveState !== 'new')
   // Starting, answering and stopping runs, and the composer text they consume.
   const {
-    composerText, setComposerText, pendingPrompt, starting, startError, setStartError, answerSending, retryOf,
-    submit, stop, sendAnswer, replyToAgent, retry, followUp, startFromCheckpoint, reusePrompt,
+    composerText, setComposerText, pendingPrompt, starting, startError, setStartError, answerSending,
+    submit, stop, sendAnswer, replyToAgent, retry, followUp, startFromCheckpoint,
     teamReview, trustAndRun, dismissReview,
   } = useRunController({
     doc, session, history, activeRunId, record, waiting, projectionPrompt: projection.prompt, showRun, followUpTarget,
@@ -965,38 +940,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     setScheduleSaved(false)
     setStatusAnnouncement('Schedule removed. Save the team file to finish.')
   }, [doc])
-  const configuredPairs = useMemo(() => new Set(doc.edges.map((edge) => `${edge.source}->${edge.target}`)), [doc.edges])
-
-  // A question travels back up a configured edge: the stage before this one stays alive precisely
-  // so it can be asked, so `b asked a` where the file declares `a → b` is the design working, not a
-  // delegation outside the graph. Any other pair still is.
-  const anomalies = useMemo(() => (doc.mode === 'pipeline'
-    ? projection.delegations.filter((delegation) => {
-      if (configuredPairs.has(`${delegation.from}->${delegation.to}`)) return false
-      return !(delegation.kind === 'ask' && configuredPairs.has(`${delegation.to}->${delegation.from}`))
-    })
-    : []), [doc.mode, projection.delegations, configuredPairs])
-
-  /**
-   * What this attempt follows, in the two words the design uses (§15.2.2).
-   *
-   * The **record** is preferred over the client-side retry `Map`: `followsRunId`/`retryOfRunId` are
-   * server-side lineage and survive a page reload, which the `Map` does not. A run that is both a
-   * follow-up and another attempt at the same job — "Start a new run from this checkpoint" — reads
-   * as a follow-up, which is what it mechanically is.
-   */
-  const lineageLabel = useMemo(() => {
-    if (!activeRunId) return null
-    const attemptOf = (runId: string) => {
-      const all = teamRunIds(mergeHistory(history.records, []), record?.teamPath ?? doc.path)
-      const index = all.indexOf(runId)
-      return index >= 0 ? String(index + 1).padStart(2, '0') : runId.slice(0, 8)
-    }
-    if (record?.followsRunId) return `Follow-up of Run ${attemptOf(record.followsRunId)}`
-    const retriedServerSide = record?.retryOfRunId
-    const retried = retriedServerSide ?? retryOf.get(activeRunId)
-    return retried ? `Retry of Run ${attemptOf(retried)}` : null
-  }, [activeRunId, record, retryOf, history.records, doc.path])
 
   // Who the request goes to first: the one agent of a one-agent turn (ADR 0051), the stage a run
   // started at, or the team's entrypoint.
@@ -1028,6 +971,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // It walks every event, so it is worked out again only when they or the saved reply change.
   const recordedReply = record?.reply ?? null
   const recordedText = useMemo(() => (recordedReply != null ? recordedReplyText(session.events, responderId, recordedReply) : null), [session.events, responderId, recordedReply])
+  // The run's events as far as the replay cursor, as the projection reads them.
+  const shownEvents = useMemo(() => (session.cursor === null ? session.events : session.events.filter((event) => event.seq <= (session.cursor ?? Infinity))), [session.events, session.cursor])
   const responseText = session.cursor === null && recordedText != null ? recordedText : responderAgent?.reply ?? ''
   const phase: RunPhase = projection.phase
   const live = session.mode === 'live'
@@ -1082,35 +1027,26 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     () => new Set(packetAgents?.runId === activeRunId ? packetAgents.ids : []),
     [packetAgents, activeRunId],
   )
-  /**
-   * Notebook entries each agent was **supplied**, counted from its own stored packet.
-   *
-   * Not from the notes that exist: the notebook grows during a run, and what an agent was given
-   * is what its packet recorded when its session opened. Counting live notes would make the chip
-   * say "given 5 notes" to a stage that was given two.
-   */
-  const givenNotes = useMemo(
-    () => (packetAgents?.runId === activeRunId ? packetAgents.notes : {}),
-    [packetAgents, activeRunId],
-  )
-
-  // ---- one canvas — TNG89_INTERACTION.md §15: the configured graph never moves; a run is drawn onto it.
+  // ---- the Workflow canvas: the team as it is configured. A run is read in the chat and its Details.
   const { graph, canvasNodes } = useCanvasGraph({
-    runView, doc, session, nodeNames, projection, record, activeRunId, attempt, retryOf, phase, elapsed, lineageLabel,
-    orderedAgentIds, ownerLabels, evidenceByAgent, leadId, live, waiting, configuredPairs, overlayPositions, synthMeasurements,
-    fannedAgentId, inspectedEvidenceId, packetAgentIds, givenNotes, responderAgent, responderId, responderFromDoc, responseText,
-    provenanceOpen, composerText, visibleSchedule, scheduleInvalid: scheduleProblems.length > 0, scheduleEditorOpen, onOpenSchedule: openScheduleEditor,
-    capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, focusComposer, removeCapabilityEdge,
+    doc, nodeNames, overlayPositions, synthMeasurements, responderFromDoc,
+    composerText, visibleSchedule, scheduleInvalid: scheduleProblems.length > 0, scheduleEditorOpen, onOpenSchedule: openScheduleEditor,
+    capabilityCards, allWiringEdges, editable, selectedCapabilities, selectedCapabilityEdgeIds, removeCapabilityEdge,
     modelNames, outputPlan: composerLayout.output, instructionNotes: instructionUpdates.notes,
     sendsTo: doc.teamDeliver?.notion ? 'Notion' : null,
+  })
+  // The run's agents, each with what the run says of it, for Details and the agent panel it opens.
+  const runAgents = useRunAgents(runView, {
+    doc, session, projection, record, phase, orderedAgentIds, evidenceByAgent, leadId, waiting, packetAgentIds,
+    synthMeasurements, capabilityCards, allWiringEdges,
   })
 
   // Agents an Ask proposal adds or changes wear its dashes until it is applied (styles/ask.css).
   const askMarks = askActions.marks
-  const markedNodes = useMemo(() => (askMarks.size === 0 || runView ? canvasNodes : canvasNodes.map((node) => {
+  const markedNodes = useMemo(() => (askMarks.size === 0 ? canvasNodes : canvasNodes.map((node) => {
     const mark = askMarks.get(node.id)
     return mark ? { ...node, className: [node.className, `ask-${mark}`].filter(Boolean).join(' ') } : node
-  })), [canvasNodes, askMarks, runView])
+  })), [canvasNodes, askMarks])
 
   // Trace makes a card several times taller where it stands, so whatever is under it is drawn
   // lower until it clears it, and the lines meet the cards where they are drawn
@@ -1119,15 +1055,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const roomy = useMemo(() => (depth === 'trace' ? withRoom(markedNodes, graph.edges, synthMeasurements) : { nodes: markedNodes, edges: graph.edges }), [depth, markedNodes, graph.edges, synthMeasurements])
   const roomyNodes = roomy.nodes
 
-  const observedCount = projection.delegations.length
-  // UX_REDESIGN §6.7: solo is conditional chrome — the legend is its only readout and click-path
-  // back, so the cycle control may act only while the legend is on screen. Observed (weft) edges
-  // are a run-view projection, so the predicate is run-view only; a solo left over from a run
-  // (e.g. a replay scrubbed past the delegations) suspends instead of silently blanking edges.
-  const layersVisible = runView && observedCount > 0
-  const soloActive: LayerSolo = layersVisible ? solo : 'both'
-  const visibleEdges = useMemo(() => roomy.edges.filter((edge) => soloActive === 'both' || (soloActive === 'configured' ? edge.type !== 'weft' : edge.type !== 'warp')), [roomy.edges, soloActive])
-  const canvasEdges = useMemo(() => (runView ? visibleEdges : visibleEdges.filter((edge) => edge.source !== '__prompt' || allWiringEdges.some((wire) => wire.from === '__prompt'))), [runView, visibleEdges, allWiringEdges])
+  // The Prompt node shows only once something is wired to it, and its line with it.
+  const canvasEdges = useMemo(() => roomy.edges.filter((edge) => edge.source !== '__prompt' || allWiringEdges.some((wire) => wire.from === '__prompt')), [roomy.edges, allWiringEdges])
   // A selected card's own lines light up in gold with the cards at their other ends, and the other
   // lines step back (lib/canvas/linked.ts).
   const lit = useMemo(() => markLinked(roomyNodes, canvasEdges), [roomyNodes, canvasEdges])
@@ -1149,7 +1078,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     doc.applyPositions(agents)
     composerLayout.arrange(agents, capabilityCards.map((node) => ({ ...node, position: positions[node.id] ?? node.position })))
     setOverlayPositions({})
-    setFannedAgentId(null)
     setLayoutRevision((revision) => revision + 1)
   }, [canOrganize, doc, synthMeasurements, capabilityCards, allWiringEdges, arrangementKey, overlayPositions, composerLayout])
   const undoOrganize = useCallback(() => {
@@ -1162,10 +1090,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [canOrganize, previousArrangement, arrangementKey, doc, composerLayout])
 
   // ---- fit the visible workspace after a structural or viewport change -----------------
-  // Opening or organizing a graph, loading its sidecar, and showing a terminal notice change
-  // the available space. Fit those transitions, but never follow streamed tokens or replay
-  // scrubbing: the camera must stay still while someone is reading.
-  const fitKey = `${composerLayout.loadedFor}:${capabilityCards.length}:${session.terminal}:${latestCheckpoints.length}:${layoutRevision}:${doc.path ?? ''}:${doc.nodes.length}:${visibleSchedule ? 'scheduled' : 'manual'}:${activeRunId ?? 'design'}:${runView ? orderedAgentIds.length : 0}`
+  // Opening or organizing a graph and loading its sidecar change what there is to frame. Fit
+  // those transitions, but never anything else: the camera must stay still while someone is reading.
+  const fitKey = `${composerLayout.loadedFor}:${capabilityCards.length}:${layoutRevision}:${doc.path ?? ''}:${doc.nodes.length}:${visibleSchedule ? 'scheduled' : 'manual'}:${activeRunId ?? 'design'}`
   const nodesInitialized = useNodesInitialized()
   const canvasRef = useRef<HTMLDivElement>(null)
   const pendingFit = useRef<string | null>(null)
@@ -1190,12 +1117,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       const panel = shell?.querySelector(selector)?.getBoundingClientRect()
       if (panel && panel.height > 0) bottom = Math.min(bottom, panel.top - 24)
     }
-    // Build keeps the team sentence above the cards, so a fitted team starts below it.
-    const top = !runView ? (storyShown ? 124 : 68) : windowWidth >= 768 && windowWidth < 1400 ? 184 : 132
+    // The team sentence sits above the cards, so a fitted team starts below it.
+    const top = storyShown ? 124 : 68
     const bounds = getNodesBounds(nodes)
-    const viewport = getViewportForBounds(bounds, Math.max(200, rect.width - 24), Math.max(160, bottom - rect.top - top), runView ? 0.1 : 0.35, Math.min(maxZoom ?? Infinity, runView ? 1 : 1.5), runView ? 0.12 : 0.2)
+    const viewport = getViewportForBounds(bounds, Math.max(200, rect.width - 24), Math.max(160, bottom - rect.top - top), 0.35, Math.min(maxZoom ?? Infinity, 1.5), 0.2)
     void flow.setViewport({ ...viewport, y: viewport.y + top }, { duration: document.hidden ? 0 : 300 })
-  }, [flow, windowWidth, runView, storyShown])
+  }, [flow, storyShown])
   useEffect(() => {
     // React Flow can only frame nodes it has measured; a fit requested while new cards are
     // still mounting waits for `useNodesInitialized` to flip back to true.
@@ -1203,10 +1130,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     // Frame the story in the area the Library (or its rail) leaves visible, not the whole
     // canvas: computed directly from the measured bounds so nothing races React Flow's own
     // asynchronous fitView, and applied without animation in a hidden tab.
-    // Timers rather than requestAnimationFrame: a run often finishes while the tab is in the
-    // background, where animation frames are paused and the fit would never happen. Cards
-    // that grow after mounting (streamed text, wrapped titles) shift the bounds once more, so
-    // a settle pass keeps the whole story in frame without following every keystroke.
+    // Timers rather than requestAnimationFrame: in a background tab animation frames are paused
+    // and the fit would never happen. Cards that grow after mounting (wrapped titles) shift the
+    // bounds once more, so a settle pass keeps the whole team in frame.
     // The request is only spent once the fit runs: a card that mounts in this same commit (the
     // Schedule button's draft) re-renders with `nodesInitialized` false, and that cleanup cancels
     // these timers — clearing the request up front left nothing to retry once it was measured.
@@ -1232,10 +1158,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     })
   }, [])
 
-  // §15.2.1/§15.2.5: one handler, because there is one canvas. A change to a node the *document*
-  // owns is the same edit whether or not a run is shown — including a drag, which moves the
-  // design, because it *is* the design. Only the presentation nodes (the two docked anchors, the
-  // Run card, fanned evidence) keep their positions in local view state.
+  // §15.2.1: a change to a node the *document* owns is an edit — including a drag, which moves the
+  // design, because it *is* the design. Only the presentation nodes (the two docked anchors) keep
+  // their positions in local view state.
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     // Measurements are recorded for every id, unconditionally: filtering them by membership
     // read `composerLayout.nodes` from a closure that is one render stale for the card just
@@ -1305,16 +1230,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         continue
       }
       if (isDocNode(change.id)) continue
-      // Presentation nodes only from here: `__prompt`, `__run`, `__output`, evidence, `+N more`.
+      // Presentation nodes only from here: the docked `__prompt` and `__output`.
       if (change.type === 'position' && change.position) {
         const { id, position } = change
         setOverlayPositions((current) => (current[id]?.x === position.x && current[id]?.y === position.y ? current : { ...current, [id]: position }))
       }
-      if (change.type === 'select' && change.selected && projection.evidence.some((item) => item.id === change.id)) setInspectedEvidenceId(change.id)
     }
 
     doc.onNodesChange(changes.filter((change) => !('id' in change) || isDocNode(change.id)) as NodeChange<AgentNode>[])
-  }, [doc, projection.evidence, composerLayout, capabilityCards, capabilityInventory, recordMeasurements, removeCapabilityCards])
+  }, [doc, composerLayout, capabilityCards, capabilityInventory, recordMeasurements, removeCapabilityCards])
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     const documentChanges: EdgeChange[] = []
@@ -1387,7 +1311,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const selectedEdges = doc.edges.filter((edge) => edge.selected)
   const selectedDocNode = selectedNodes.length === 1 && selectedEdges.length === 0 ? selectedNodes[0] : null
   const inspectedNode = selectedDocNode
-    ? ((runView ? graph.nodes.find((node) => node.id === selectedDocNode.id && node.type === 'agent') : undefined) as AgentNode | undefined) ?? selectedDocNode
+    ? (runView ? runAgents.find((node) => node.id === selectedDocNode.id) : undefined) ?? selectedDocNode
     : null
   const inspectedUpdate = inspectedNode && !runView ? instructionUpdates.forAgent(inspectedNode.id) : null
   const inspectedAppHas = useMemo(() => inspectedNode && inspectedNode.data.agent.kind !== 'operator' ? inLibrary(capabilityInventory) : null, [inspectedNode, capabilityInventory])
@@ -1464,8 +1388,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [handoverAgentId, activeRunId])
 
   // Which agents this run stored a packet for. One read per run — packets are written before the
-  // prompt is sent and are immutable — so an agent card can offer the inspector even when it was
-  // handed nothing. Without it the entrypoint's packet was unreachable from the canvas.
+  // prompt is sent and are immutable — so Details can offer the inspector even for an agent that
+  // was handed nothing. Without it the entrypoint's packet was unreachable.
   // Every write happens in a promise callback, and staleness is derived from the run id the read
   // answered for — the same shape as the Brief read above, and the reason no state is cleared
   // synchronously here.
@@ -1475,19 +1399,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     let cancelled = false
     fetchRunContext(runId)
       .then((packets) => {
-        if (cancelled) return
-        const notes: Record<string, number> = {}
-        for (const entry of packets) {
-          const supplied = entry.sections
-            .filter((section) => section.kind === 'notebook')
-            .reduce((sum, section) => sum + (section.notes?.length ?? 0), 0)
-          notes[entry.agentId] = (notes[entry.agentId] ?? 0) + supplied
-        }
-        setPacketAgents({ runId, ids: [...new Set(packets.map((entry) => entry.agentId))], notes })
+        if (!cancelled) setPacketAgents({ runId, ids: [...new Set(packets.map((entry) => entry.agentId))] })
       })
       // A run that stored no packets and a read that failed are both "no route offered": the
       // panel is the place that reports a packet problem, and it only opens with an agent in hand.
-      .catch(() => { if (!cancelled) setPacketAgents({ runId, ids: [], notes: {} }) })
+      .catch(() => { if (!cancelled) setPacketAgents({ runId, ids: [] }) })
     return () => { cancelled = true }
   }, [activeRunId])
 
@@ -1596,8 +1512,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // The right dock holds one panel at a time, and every panel has to be in this condition or two
   // of them overlap. Memory yields to a selection the same way the schedule editor does.
   const memoryPanelOpen = Boolean(memoryOpen && !inspectedNode && !inspectedCapability && !inspectedEvidence && !handoverAgentId && !provenanceOpen && !scheduleOpen)
-  /** Whether the deliverable, rather than the canvas, is the surface on screen. */
-  const deliveryShown = (runView || runSetup) && runPresentation === 'delivery'
+  /** Whether the team's chat, rather than the Workflow canvas, is the surface on screen. */
+  const deliveryShown = runView || runSetup
   // ADR 0051: the Run tab is the team's chat. A run open beside it is its Details.
   const detailsOpen = deliveryShown && runView
   // Details' timeline asks to read a message: the chat shows it, in the piece it belongs to.
@@ -2063,31 +1979,18 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     const plannedSource = event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(CAPABILITY_DRAG_MIME) || event.dataTransfer.types.includes(CONNECTION_DRAG_MIME)
-    const evidenceSource = event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)
-    if (!(plannedSource && editable) && !(evidenceSource && runView)) return
+    if (!(plannedSource && editable)) return
     event.preventDefault()
-    event.dataTransfer.dropEffect = evidenceSource ? 'move' : 'copy'
+    event.dataTransfer.dropEffect = 'copy'
     // A capability over an agent's card is connected there on drop, so that card says so now.
     const over = editable && (event.dataTransfer.types.includes(CAPABILITY_DRAG_MIME) || event.dataTransfer.types.includes(CONNECTION_DRAG_MIME))
       ? agentAt(flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }))
       : null
     setDropAgentId((current) => (current === over ? current : over))
-  }, [agentAt, editable, flow, runView])
+  }, [agentAt, editable, flow])
   const onDrop = useCallback((event: React.DragEvent) => {
     setLibraryDragging(false)
     setDropAgentId(null)
-    const evidenceId = runView ? event.dataTransfer.getData(EVIDENCE_DRAG_MIME) : ''
-    if (evidenceId) {
-      const item = projection.evidence.find((candidate) => candidate.id === evidenceId)
-      if (!item) return
-      event.preventDefault()
-      // Dropping an evidence card onto the canvas fans its agent, or the card would have no
-      // node to land on — the fold is the default and only one agent is ever open.
-      setFannedAgentId(item.agentId)
-      setOverlayPositions((current) => ({ ...current, [evidenceId]: flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }) }))
-      setInspectedEvidenceId(evidenceId)
-      return
-    }
     if (!editable) return
     // A connected service is not a card yet: it asks which page, for the agent it landed on.
     if (event.dataTransfer.getData(CONNECTION_DRAG_MIME)) {
@@ -2111,7 +2014,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
     doc.addAgentFromDrop(raw, at)
     placeJobSkills(raw, at)
-  }, [doc, flow, editable, runView, projection.evidence, placeCapability, overPromptNode, placeJobSkills, agentAt, connectDropped])
+  }, [doc, flow, editable, placeCapability, overPromptNode, placeJobSkills, agentAt, connectDropped])
 
   const onNodeDragStart = useCallback<OnNodeDrag<AnyNode>>(() => {
     nodeDraggingRef.current = true
@@ -2178,7 +2081,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     const fix = fixForAlert(alert)
     if (!fix) return
     setInspectedEvidenceId(null)
-    setRunPresentation('delivery')
     closeRun()
     doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === fix.agentId })))
     setForcedInspectorField({ agentId: fix.agentId, field: fix.field, hint: fix.hint })
@@ -2196,9 +2098,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [])
 
   // "Go to what raised this." An alert that names a recorded call opens that call; one that does
-  // not — a crash, a stop reason — can still name its agent, so both surfaces
-  // move to the stage that owns it. Trace frames the node on the canvas; Delivery opens the
-  // stage, whose skills and tools panel is already scoped to it.
+  // not — a crash, a stop reason — can still name its agent, so Details moves to the stage that
+  // owns it, whose skills and tools are already scoped to it.
   const [attentionFocusAgentId, setAttentionFocusAgentId] = useState<string | null>(null)
   // A finding of an answer's review is shown in Details: the record it points at, or the agent's work.
   const openFinding = useCallback((runId: string, line: ReceiptLine) => {
@@ -2210,21 +2111,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [newestPiece, showRun])
   const revealAttention = useCallback((alert: Attention) => {
     const evidence = alert.evidenceId ? projection.evidence.find((item) => item.id === alert.evidenceId) : undefined
-    if (evidence) {
-      setFannedAgentId(evidence.agentId)
-      setInspectedEvidenceId(evidence.id)
-    } else {
-      setInspectedEvidenceId(null)
-    }
-    if (runPresentation === 'trace') {
-      doc.onNodesChange(doc.nodes.map((node) => ({ id: node.id, type: 'select' as const, selected: node.id === alert.agentId })))
-      const target = graph.nodes.find((node) => node.id === evidence?.id) ?? graph.nodes.find((node) => node.id === alert.agentId)
-      if (target) void flow.fitView({ nodes: [target], padding: 0.8, maxZoom: 1, duration: 300 })
-    } else {
-      // Delivery is a reading surface: move the lane, and leave the node Inspector closed.
-      setAttentionFocusAgentId(alert.agentId)
-    }
-  }, [projection.evidence, runPresentation, doc, graph.nodes, flow])
+    setInspectedEvidenceId(evidence ? evidence.id : null)
+    // Details is a reading surface: move the lane, and leave the agent panel closed.
+    setAttentionFocusAgentId(alert.agentId)
+  }, [projection.evidence])
   const notifiedThrough = useRef(-1)
   useEffect(() => {
     if (!notificationsOn || !activeRunId) return
@@ -2307,7 +2197,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     // no goal to run yet, and focusing the field is the honest half of the promise.
     { label: 'Run the team…', shortcut: '⌘↵', run: () => { if (composerText.trim()) void submit(); else document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus() }, disabled: !doc.path },
     // In the chat, Esc closes Details and keeps the chat; the Build tab is how you leave it.
-    ...(runView ? [detailsOpen ? { label: 'Close details', shortcut: 'Esc', run: closeDetails } : { label: 'Clear the run', shortcut: 'Esc', run: closeRun }] : []),
+    ...(detailsOpen ? [{ label: 'Close details', shortcut: 'Esc', run: closeDetails }] : []),
     { label: 'Add agent…', run: toggleLibrary, disabled: !doc.path || !editable },
     { label: 'Save', shortcut: '⌘S', run: () => void doc.save(), disabled: !doc.path || !editable || !doc.isValid },
     { label: 'Open team…', run: () => setOpenPathOpen(true) },
@@ -2318,7 +2208,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     { label: 'Fit view', shortcut: 'F', run: fitCanvas },
     { label: 'Organize pipeline', shortcut: '⌥⌘L', run: organize, disabled: !canOrganize },
     { label: 'Toggle library', shortcut: '⌘\\', run: toggleLibrary, disabled: !doc.path || windowWidth < 768 },
-    ...(layersVisible ? [{ label: 'Solo edge layer', shortcut: 'L', run: () => setSolo((current) => (current === 'both' ? 'configured' : current === 'configured' ? 'observed' : 'both')) }] : []),
     { label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', shortcut: '⌘⇧L', run: () => setThemeMode(theme === 'dark' ? 'light' : 'dark') },
     { label: 'Follow system appearance', run: () => setThemeMode('system') },
     { label: notificationsOn ? 'Disable notifications' : 'Enable notifications', run: () => void enableNotifications() },
@@ -2331,7 +2220,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     { label: 'Getting started guide', run: startTour },
     { label: 'Send feedback…', run: () => openFeedback({ screen: !doc.path ? 'home' : runView ? 'run' : 'build' }) },
     { label: 'Check for updates…', run: openUpdates },
-  ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, detailsOpen, closeDetails, closeRun, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, layersVisible, fitCanvas, organize, canOrganize, askFor])
+  ], [doc, editable, composerText, submit, openNewTeam, toggleLibrary, windowWidth, runView, detailsOpen, closeDetails, cycleProblem, problems.length, theme, notificationsOn, enableNotifications, fitCanvas, organize, canOrganize, askFor])
   // Words the palette has no command for are a request: hand them to Ask LoomWatch.
   const askUnavailable = ask.unavailable
   const askFallback = useCallback((query: string): CommandAction | null => {
@@ -2381,13 +2270,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [doc.path, editable, modelNames, flow, needsYou, setComposerText, savedJobs])
 
   useWorkspaceShortcuts({
-    editable, doc, flow, theme, windowWidth, runView, layersVisible, session,
-    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeRun, closeDetails: detailsOpen ? closeDetails : undefined, organize, fitCanvas,
+    editable, doc, flow, theme, windowWidth, runView,
+    submit, openNewTeam, toggleLibrary, cycleProblem, clearSelection, closeDetails: detailsOpen ? closeDetails : undefined, organize, fitCanvas,
     pendingNodeDelete, setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm,
     paletteOpen, setPaletteOpen, problemsOpen, setProblemsOpen,
     compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen, setMemoryOpen,
-    fannedAgentId, setFannedAgentId, setSolo, setSweeping,
+    setSweeping,
     selectedNodes, selectedEdges, selectedCapabilities, selectedCapabilityEdgeIds, capabilityCards, capabilityEdgeById,
     removeCapabilityCards, removeCapabilityEdge,
   })
@@ -2404,19 +2293,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
   const canvasActions: CanvasActions = useMemo(() => ({
     editable, renameAgent: doc.renameAgent, touchField: doc.touchField, mode: doc.mode, stepById, nodeNames,
-    inspectEvidence: (id) => { setInspectedEvidenceId(id); if (id) { doc.onNodesChange(doc.nodes.filter((node) => node.selected).map((node) => ({ id: node.id, type: 'select' as const, selected: false }))) } },
     inspectHandover: (id) => { setHandoverAgentId(id); setInspectedEvidenceId(null) },
     toggleProvenance: () => setProvenanceOpen((open) => !open),
-    reusePrompt,
     focusComposer,
-    // §15.2.3: one agent at a time. Opening another folds the first, which is the whole point —
-    // the provenance panel, not a second fan, is where the full list lives.
-    toggleEvidenceFan: (agentId) => setFannedAgentId((current) => (current === agentId ? null : agentId)),
     briefCount: memory?.entries.length ?? 0,
     teamDeliverAs: memory?.deliverAs,
     notebookEnabled: memory?.notebookEnabled ?? false,
     dropTargetId: dropAgentId,
-  }), [editable, doc, stepById, nodeNames, reusePrompt, focusComposer, memory, dropAgentId])
+  }), [editable, doc, stepById, nodeNames, focusComposer, memory, dropAgentId])
 
   const validationProblemCount = problems.length
   // TNG89 §6.3: the preflight blocker is assertive, and the polite channel is a queue
@@ -2475,10 +2359,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return at ? new Date(at) : null
   }, [projection.startedAt, record?.startedAt, record?.createdAt])
 
-  // Lineage as a thread: follow-ups indented under the run they follow, retries labelled as today.
-  const leadAgent = projection.agents.find((agent) => agent.id === leadId)
-  const lifecycleResult = phase === 'queued' || phase === 'starting' ? 'not started' : phase === 'running' ? (responseText ? 'streaming' : 'pending') : phase === 'succeeded' ? 'done' : phase
-
   const askNotice = askActions.notice && (
     <div role="status" className="ask-notice e2">
       <span>{askActions.notice.text}</span>
@@ -2517,10 +2397,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }
 
   const shellClass = [
-    // `build-graph` is the canvas's own presentation — card and edge anatomy, handles, backdrop —
-    // and both surfaces that draw the graph set it. `build-workspace` is Build's page layout alone.
-    'lw-shell', !runView && !runSetup ? 'build-workspace' : '', runPresentation === 'trace' || (!runView && !runSetup) ? 'build-graph' : '', `mode-${doc.mode}`, libraryDragging ? 'dragging' : '', nodeDragging ? 'node-dragging' : '', inspecting ? 'inspecting' : '', sweeping ? 'sweeping' : '',
-    soloActive === 'configured' ? 'solo-configured' : soloActive === 'observed' ? 'solo-observed' : '', runView ? 'run-shown' : '', deliveryShown ? 'delivery-shown' : '', detailsOpen ? 'details-open' : '',
+    // `build-graph` is the canvas's own presentation — card and edge anatomy, handles, backdrop.
+    // `build-workspace` is Build's page layout.
+    'lw-shell', !deliveryShown ? 'build-workspace build-graph' : '', `mode-${doc.mode}`, libraryDragging ? 'dragging' : '', nodeDragging ? 'node-dragging' : '', inspecting ? 'inspecting' : '', sweeping ? 'sweeping' : '',
+    runView ? 'run-shown' : '', deliveryShown ? 'delivery-shown' : '', detailsOpen ? 'details-open' : '',
     libraryCollapsed ? 'lib-collapsed' : 'lib-open',
     ask.open && !askDockBusy ? 'ask-docked' : '',
   ].filter(Boolean).join(' ')
@@ -2531,17 +2411,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     <CanvasActionsContext.Provider value={canvasActions}>
       <div className="lw-railed">
       {railTeam && <TeamRail open={railTeam} runs={needsYou.records} savedJobs={savedJobs} view={railTab} go={setLeavingTo} onNewTeam={openNewTeam} leave={leaveTeam} />}
-      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME) || event.dataTransfer.types.includes(EVIDENCE_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
-        {/* ADR 0040: an agent paused on a request its switches do not cover, waiting for you. */}
-        {runView && !deliveryShown && record && (record.permissionRequests?.length ?? 0) > 0 && (
-          <PermissionPrompt
-            run={record}
-            team={record.agentIds.length > 1}
-            onAlwaysAllow={editable && sameTeamFile(doc.path, record.teamPath) ? allowAlways : undefined}
-          />
-        )}
-        {/* ADR 0068: the run, or an agent, used what it may spend, and waits for you. */}
-        {runView && !deliveryShown && record && (record.spendStops?.length ?? 0) > 0 && <SpendStopCard run={record} />}
+      <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {deliveryShown ? (
           <FileReaderContext.Provider value={readHere}>
           <TeamChat
@@ -2611,7 +2481,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                   harnessLabels={new Map(doc.nodes.map((node) => [node.id, modelLabelForAgent(node.data.agent, modelNames)]))}
                   pipeline={(record?.mode ?? doc.mode) === 'pipeline'}
                   linearPipeline={doc.edges.length === doc.nodes.length - 1 && doc.nodes.every((node) => doc.edges.filter((edge) => edge.source === node.id).length <= 1 && doc.edges.filter((edge) => edge.target === node.id).length <= 1)}
-                  onTrace={() => { if (runSetup) closeRun(); else setRunPresentation('trace') }}
                   onAllow={editable ? (agentId, key) => {
                     // ADR 0037: switched on and saved in one step, so the next run is not refused again.
                     doc.updateAgentAllow(agentId, key, true)
@@ -2619,14 +2488,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                     const name = doc.nodes.find((node) => node.id === agentId)?.data.agent.name ?? agentId
                     setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === key)?.label.toLowerCase() ?? key} from the next run.`)
                   } : undefined}
-                  prompt={record?.prompt ?? projection.prompt ?? composerText} attempt={attempt} phase={phase} branch={retryOf.get(activeRunId ?? '') ? 'Retry of an earlier run' : 'Initiating branch'} elapsed={elapsed} mode={session.mode}
-                  agents={graph.nodes.filter((node): node is AgentNode => node.type === 'agent' && (!record?.onlyAgent || node.id === record.onlyAgent)).sort((a, b) => runSetup ? (stepById.get(a.id)?.step ?? Infinity) - (stepById.get(b.id)?.step ?? Infinity) : 0)}
+                  prompt={record?.prompt ?? projection.prompt ?? composerText} attempt={attempt} phase={phase} elapsed={elapsed} mode={session.mode}
+                  agents={runAgents.filter((node) => !record?.onlyAgent || node.id === record.onlyAgent).sort((a, b) => runSetup ? (stepById.get(a.id)?.step ?? Infinity) - (stepById.get(b.id)?.step ?? Infinity) : 0)}
                   evidenceByAgent={new Map(orderedAgentIds.map((id) => [id, projection.evidence.filter((item) => item.agentId === id)]))}
-                  ownerLabels={ownerLabels}
-                  output={(graph.nodes.find((node) => node.id === '__output') as OutputNode | undefined)?.data ?? { text: responseText, phase, phaseText: '', producer: null, producerLabel: 'the responder', mode: session.mode, streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: session.terminal }}
+                  output={{ text: responseText, producer: responderAgent?.id ?? responderId ?? null }}
                   projection={projection}
                   record={record}
-                  selectedEvidenceId={inspectedEvidenceId}
+                  events={shownEvents}
                   focusAgentId={attentionFocusAgentId}
                   onInspectEvidence={(id) => setInspectedEvidenceId(id)}
                   onRevealMessage={activeRunId ? (id) => setChatReveal({ runId: activeRunId, id, at: Date.now() }) : undefined}
@@ -2638,14 +2506,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           )}
           </FileReaderContext.Provider>
         ) : (
-        <div ref={canvasRef} role="application" aria-label={runView ? 'Run graph' : 'Team canvas'} className="lw-canvas" data-depth={depth}>
+        <div ref={canvasRef} role="application" aria-label="Team canvas" className="lw-canvas" data-depth={depth}>
           <ReactFlow
             nodes={lit.nodes}
             edges={lit.edges}
-            nodeTypes={runView ? nodeTypes : buildNodeTypes}
+            nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             connectionLineType={ConnectionLineType.SmoothStep}
-            onNodeClick={(_, node) => { if (!runView) { setOutputEditorOpen(node.id === '__output'); if (node.id === '__output') clearSelection() } }}
+            onNodeClick={(_, node) => { setOutputEditorOpen(node.id === '__output'); if (node.id === '__output') clearSelection() }}
             onPaneClick={() => setOutputEditorOpen(false)}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -2656,15 +2524,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onNodeDragStart={onNodeDragStart}
             onNodeDragStop={onNodeDragStop}
             deleteKeyCode={null}
-            nodesDraggable={editable || runView}
+            nodesDraggable={editable}
             nodesConnectable={editable}
             edgesReconnectable={editable}
             nodesFocusable
             edgesFocusable
             snapToGrid
             snapGrid={[12, 12]}
-            minZoom={runView ? 0.1 : 0.35}
-            maxZoom={runView ? 2 : 1.5}
+            minZoom={0.35}
+            maxZoom={1.5}
             fitView
             fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
             proOptions={{ hideAttribution: true }}
@@ -2677,11 +2545,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               </div>
             )}
           </ReactFlow>
-          {!runView && <>{storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a node to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}</>}
+          {storyParts.length > 0 ? <TeamStory parts={storyParts} figures={agentFigures} onAgent={focusAgent} onSchedule={doc.teamSchedule ? openScheduleEditor : undefined} onConnect={editable ? (edges) => { for (const edge of edges) doc.onConnect({ source: edge.from, target: edge.to, sourceHandle: null, targetHandle: null }) } : undefined} /> : <div className="build-canvas-help"><strong>Connect your agents</strong><span>Drag from the dot on the right of a card to the next card to hand work along.</span></div>}<div className="build-canvas-legend"><span><i />Workflow</span><span><i className="resource" />Resources</span><span>Select a node to edit</span></div>{!runSetup && <div className="canvas-notes"><InstructionUpdateBar entries={instructionUpdates.entries} names={nodeNames} readOnly={!editable} onReview={focusAgent} onKeepAll={instructionUpdates.keepAll} onRewrite={ask.unavailable ? undefined : instructionUpdates.rewrite} />{turnedOffNote && <TurnedOffNote note={turnedOffNote} names={nodeNames} onDismiss={() => setTurnedOffNote(null)} />}</div>}
         </div>
         )}
         <div className="lw-sweep" aria-hidden="true" />
-        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={keyProblem} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setRunPresentation('delivery'); setStartTeam(true); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} scheduling={scheduleOpen && schedulePending} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
+        {!runView && !runSetup && !agentsView && <BuildHeading proposal={askActions.preview ? { isNew: askActions.preview.beforeYaml === null, from: proposalSource(askActions.preview.proposal.source), lines: askActions.preview.changes.lines, applying: askActions.preview.applying, error: askActions.preview.error, onApply: () => void askActions.applyProposal(), onDiscard: askActions.discardProposal } : null} agentCount={doc.nodes.length} isValid={doc.isValid} checking={doc.checking} saveState={doc.saveState} appProblem={keyProblem} undelivered={editable ? legacyWiring.length : 0} onDeliver={deliverLegacyWiring} onRun={() => { setRunSetup(true); setStartTeam(true); window.setTimeout(focusComposer, 0) }} onSchedule={editable && !visibleSchedule ? startSchedule : undefined} scheduling={scheduleOpen && schedulePending} checkup={{ findings: teamCheckup.findings, hiddenCount: teamCheckup.hiddenCount, onRestore: teamCheckup.restore, onOpenAgent: focusAgent, names: nodeNames }} usage={teamCheckup.usage} />}
 
         <div aria-live="polite" aria-atomic="true" className="visually-hidden">{politeAnnouncement}</div>
         <div aria-live="assertive" className="visually-hidden">{assertiveAnnouncement}</div>
@@ -2692,18 +2560,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           {startError && <div role="alert" className="bar alert"><ChipDot state="failed" /><span className="msg t-body-m">{startError}</span><span className="acts"><button type="button" className="btn" onClick={() => setStartError(null)}>Dismiss</button></span></div>}
         </div>
 
-        {(!runView && !runSetup && !agentsView || runPresentation === 'trace') && (
-          // One add panel on both canvases (ADR 0041); a run adds what it used, at the top.
-          <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} observedEvidence={runView ? projection.evidence : EMPTY_EVIDENCE} observedConnected={observedConnected} agentNames={nodeNames} teamSources={teamSources} onRevealSource={revealSource} teamPath={doc.path} teamAgents={ownAgents} onRevealAgent={focusAgent} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} onRevealEvidence={(id) => {
-            // Folded is the default, so "reveal" means: fan the agent that owns this card, then
-            // frame it. Framing the agent rather than the card is deliberate — the evidence node
-            // does not exist yet on this render.
-            const item = projection.evidence.find((candidate) => candidate.id === id)
-            if (item) setFannedAgentId(item.agentId)
-            const target = graph.nodes.find((node) => node.id === id) ?? graph.nodes.find((node) => node.id === item?.agentId)
-            if (target) void flow.fitView({ nodes: [target], padding: 0.8, maxZoom: 1, duration: 300 })
-            setInspectedEvidenceId(id)
-          }} />
+        {!deliveryShown && !agentsView && (
+          <ComponentPalette capabilityInventory={capabilityInventory} capabilitiesLoading={capabilitiesLoading} capabilitiesError={capabilitiesError} capabilitiesScannedAt={capabilitiesScannedAt} onRetryCapabilities={onRetryCapabilities} onInspectCapability={inspectCapability} onDragStateChange={(dragging) => { setLibraryDragging(dragging); if (!dragging) setDropAgentId(null) }} onCollapsedChange={setLibraryCollapsed} teamSources={teamSources} onRevealSource={revealSource} teamPath={doc.path} teamAgents={ownAgents} onRevealAgent={focusAgent} notion={{ connection: notionConnection, pages: notionPages, ...(editable && doc.path ? { onChoosePage: () => setNotionPicker({ agentId: null, at: flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) }) } : {}) }} width={paletteWidth} onResize={windowWidth >= 768 ? setPaletteWidth : undefined} />
         )}
 
         {agentsView && !runView && !runSetup && (
@@ -2756,7 +2614,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             {/* In the order a team is made: its agents, then its workflow, then its chat. */}
             <button type="button" aria-pressed={!runView && !runSetup && agentsView} onClick={() => { const chosen = inspectedNode?.id ?? null; clearSelection(); closeRun(); showAgents(chosen) }} data-tour="tab-agents"><UserRound size={15} />Agents</button>
             <button type="button" aria-pressed={!runView && !runSetup && !agentsView} onClick={() => { clearSelection(); closeRun(); showWorkflow() }} data-tour="tab-workflow"><Network size={15} />Workflow</button>
-            <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); setRunPresentation('delivery'); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
+            <button type="button" aria-pressed={runView || runSetup} onClick={() => { clearSelection(); if (!activeRunId) setRunSetup(true) }} data-tour="tab-chat"><MessagesSquare size={15} />Chat</button>
           </nav>
           <DocumentSwitcher
             path={doc.path} teamName={doc.teamName} saveState={doc.documentChipState} saveError={doc.saveError}
@@ -2766,9 +2624,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onRename={editable ? doc.renameTeam : undefined} onDelete={doc.saveState !== 'new' && !doc.fileGone ? () => setDeleteTeamOpen(true) : undefined}
             onSelectProblem={selectProblem} problemsOpen={problemsOpen} onProblemsOpenChange={setProblemsOpen}
           />
-          {runView && runPresentation === 'trace' && (
-            <LifecycleStrip waiting={Boolean(waiting)} attempt={attempt} phase={phase} leadTask={waiting?.handoverFrom === leadId ? 'done' : leadAgent?.taskState.toLowerCase() ?? (phase === 'queued' ? 'queued' : 'ready')} result={lifecycleResult} mode={session.mode} lastSeq={session.lastSeq} cursor={session.cursor} onCursor={session.setCursor} elapsed={elapsed} />
-          )}
           {doc.diskNotice && <p className="lw-notice t-meta" style={{ margin: 0 }}>{doc.diskNotice}</p>}
           {doc.entrypointProblem && doc.entrypointProblem.candidates.length > 0 && editable && <EntrypointProblemBar problem={doc.entrypointProblem} onPromote={doc.promoteEntrypoint} />}
           {doc.modeSwitchBanner && <p className="mode-switch-note t-meta" style={{ margin: 0, pointerEvents: 'auto' }}>Your agents now hand work along in the order you connected them.</p>}
@@ -2914,7 +2769,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} calls={projection.evidence.filter((item) => item.agentId === inspectedEvidence.agentId)} onInspectEvidence={setInspectedEvidenceId} onClose={() => setInspectedEvidenceId(null)} />}
         {handover && (
           <HandoverPanel
-            modal={runPresentation === 'delivery'}
+            modal
             text={handover.text} toLabel={handover.toLabel} fromLabel={handover.fromLabel}
             packet={packetFresh ? packet.packet : null}
             packetLoading={packetLoading}
@@ -2945,11 +2800,11 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           />
         )}
         {provenanceOpen && !inspectedEvidence && !inspectedNode && !inspectedCapability && runView && (
-          <ProvenancePanel projection={projection} ownerLabels={ownerLabels} onInspect={(id) => { const item = projection.evidence.find((candidate) => candidate.id === id); if (item) setFannedAgentId(item.agentId); setInspectedEvidenceId(id) }} onClose={() => setProvenanceOpen(false)} />
+          <ProvenancePanel projection={projection} ownerLabels={ownerLabels} onInspect={setInspectedEvidenceId} onClose={() => setProvenanceOpen(false)} />
         )}
 
         <AttentionAlerts
-          alerts={alerts} nodeNames={nodeNames} waiting={Boolean(waiting)} deliveryShown={deliveryShown}
+          alerts={alerts} nodeNames={nodeNames}
           canFix={(alert) => fixForAlert(alert) !== null} onFix={fixAttention} onReveal={revealAttention}
           onDismiss={(alert) => setDismissedAlerts((ids) => new Set([...ids, alert.id]))}
         />
@@ -2957,8 +2812,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {ask.open && <AskPanel ask={ask} view={askContext.view} cards={askCards} hidden={askDockBusy} />}
         {askNotice}
 
-        {layersVisible && runPresentation === 'trace' && <LayerLegend configured={doc.edges.length} observed={observedCount} solo={soloActive} onSolo={setSolo} />}
-        {(!runView && !runSetup && !agentsView || runPresentation === 'trace') && <ViewControls onFit={() => fitCanvas(STORY_MAX_ZOOM)} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
+        {!deliveryShown && !agentsView && <ViewControls onFit={() => fitCanvas(STORY_MAX_ZOOM)} onOrganize={windowWidth >= 768 ? organize : undefined} organizeDisabled={!canOrganize} onUndoOrganize={canOrganize && previousArrangement?.key === arrangementKey ? undoOrganize : undefined} />}
 
         {(doc.refusal || planRefusal) && <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 72px)' }}><EdgeRefusalPopover refusal={doc.refusal ?? { message: planRefusal ?? '' }} onPromote={doc.promoteEntrypoint} onDismiss={() => { doc.dismissRefusal(); setPlanRefusal(null) }} /></div>}
         {composerLayout.error && <div className="pointer-events-none absolute inset-x-0 z-40 flex justify-center" style={{ bottom: 'calc(var(--lw-panel-inset) + 164px)' }}><EdgeRefusalPopover refusal={{ message: `Capability wiring: ${composerLayout.error}` }} onPromote={doc.promoteEntrypoint} onDismiss={composerLayout.dismissError} /></div>}
@@ -3005,13 +2859,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         )}
         </div>
 
-        {!deliveryShown && <Composer compact={deliveryShown} agentNames={nodeNames}
+        {!deliveryShown && <Composer agentNames={nodeNames}
           reviewContext={waiting?.context ? { label: `What ${nodeNames.get(waiting.handoverFrom ?? '') ?? waiting.name} handed over`, text: waiting.context } : undefined}
           replyAgents={(record?.replyableAgents ?? []).map((id) => ({ id, name: nodeNames.get(id) ?? id }))}
           onReply={(id) => void replyToAgent(id)} replySending={answerSending}
           dirty={['dirty', 'new'].includes(doc.documentChipState)} onAnswer={(sendBack) => void sendAnswer(sendBack)}
           note={!runView && composerState.kind === 'ready' && routine ? <RoutineNote schedule={routine} onRunNow={() => void runRoutineNow()} busy={routineBusy} /> : undefined}
-          mode={doc.mode} stepCount={doc.pipelineSteps.length || doc.nodes.length} anomalyCount={anomalies.length} state={composerState}
+          mode={doc.mode} stepCount={doc.pipelineSteps.length || doc.nodes.length} state={composerState}
           value={composerText} onChange={setComposerText} onSubmit={() => void submit()} onStop={() => void stop()} onRetry={retry} onNewRun={() => void submit()}
           followUpStages={followUpStages} followUpTarget={followUpTarget} onFollowUpTargetChange={setFollowUpTarget}
           onFollowUp={runView && activeRunId ? () => void followUp() : undefined}

@@ -437,6 +437,9 @@ function toolCallKind(name: string | null, title: string, toolKind: string | nul
   if (lowerName.includes('skill')) return { kind: 'skill', relation: 'used skill' }
   // Claude's adapter reports its WebSearch tool as kind `fetch` titled "Web search".
   if (lowerTitle.startsWith('web search') || lowerTitle.startsWith('search "')) return { kind: 'search', relation: 'searched' }
+  // Code the model ran on its provider's computer, for its web tools: not a command run here, and
+  // not a search, whatever words its first line holds.
+  if (/^run code\b/.test(lowerTitle) && toolKind === 'other') return { kind: 'tool', relation: 'ran code' }
   switch (toolKind) {
     case 'execute': return { kind: 'command', relation: 'ran command' }
     case 'read': return locations.length > 0 || /read|cat |view/.test(lowerName) ? { kind: 'file', relation: 'read file' } : { kind: 'tool', relation: 'invoked tool' }

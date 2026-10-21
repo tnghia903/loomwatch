@@ -7,26 +7,12 @@
    move with `translate` / `scale` (the individual properties), so they compose with the
    `transform: translateX(-50%)` several popovers centre themselves with. Every animation sits
    behind `prefers-reduced-motion: no-preference`; the rules outside it are static: what reduced
-   motion keeps (a running stage's 2 px blue perimeter) and what moving needs to exist at all (the
+   motion keeps (a working agent's blue card edge and glow, delivery.css) and what moving needs to exist at all (the
    switch thumb, which simply jumps).
    --------------------------------------------------------------------------- */
 
-/* ---- Run view: the stage that is working ---------------------------------- */
+/* ---- Run view: the status of live work ----------------------------------- */
 
-.delivery-stage {
-  position: relative;
-  transition: border-color var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
-}
-/* Blue means live. Selection keeps its gold ring; the live perimeter sits inside it. */
-.delivery-stage.working:not(.selected) { border-color: var(--color-live); }
-.delivery-stage.working::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 1px var(--color-live-tint);
-}
 /* The status word fades to its next colour as the agent's mark ties off. */
 .delivery-status { transition: color var(--t-move) var(--ease-out), border-color var(--t-move) var(--ease-out); }
 /* Waiting on you: a hollow ring that holds still, so it reads apart from work by shape, not colour alone. */
@@ -53,24 +39,13 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .delivery-stage.working::after {
-    box-shadow: inset 0 0 0 1px var(--color-live-tint), inset 0 0 18px color-mix(in srgb, var(--color-live) 16%, transparent);
-    animation: stage-breathe var(--t-breathe) ease-in-out infinite;
-  }
   .delivery-lane.live .delivery-status:is(.status-running, .status-starting)::before {
     animation: breathe var(--t-breathe) ease-in-out infinite;
   }
-  /* Work reaching the next stage: the arrow into it travels once, in live blue, then rests. */
-  .delivery-handoff-arrow.passing svg { animation: handoff-pass var(--t-settle) var(--ease-out) both; }
   /* The answer arriving: it rises into the panel once; streamed text then grows in place. */
   .delivery-response { animation: rise-in var(--t-entrance) var(--ease-out) both; }
 }
 
-@keyframes stage-breathe { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
-@keyframes handoff-pass {
-  0% { translate: -14px 0; opacity: 0; color: var(--color-live); }
-  60% { translate: 0 0; opacity: 1; color: var(--color-live); }
-}
 @keyframes rise-in { from { opacity: 0; translate: 0 6px; } }
 
 /* ---- Overlays: entrances ---------------------------------------------------
@@ -151,21 +126,6 @@
 }
 
 @keyframes thread-grow { from { scale: 1 0; } }
-
-/* ---- Canvas: live signals that keep zoomed text sharp ---------------------
-   In Safari a running opacity or transform animation anywhere inside the React Flow viewport
-   turns the whole canvas into one layer drawn at its base scale and then stretched, so zoomed-in
-   text goes soft (measured ~4x at 150 %) for as long as the animation runs; Chrome repaints at
-   the new scale and is unaffected. What pulses on the canvas therefore pulses in colour, which
-   repaints in place: the Output card's Live pip for the whole run, and the caret of an answer
-   still streaming. Only the keyframes change; duration and timing stay with each base rule. */
-@media (prefers-reduced-motion: no-preference) {
-  .react-flow .badge-live .pip { animation-name: canvas-pip-breathe; }
-  .react-flow .caret { animation-name: canvas-caret-blink; }
-}
-
-@keyframes canvas-pip-breathe { 50% { background-color: color-mix(in srgb, currentColor 35%, transparent); } }
-@keyframes canvas-caret-blink { 0%, 20% { background-color: var(--color-live); } 70%, 100% { background-color: transparent; } }
 
 /* ---- The header's mark: it watches with you (LoomMark, lib/story/loomMark.ts) ---------
    Like the crew's figures, the mark moves only when the app has something true to say, and it is

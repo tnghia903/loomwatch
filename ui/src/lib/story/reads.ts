@@ -1,5 +1,6 @@
 import type { Evidence } from '../watch/events'
 import { commandOf, commandRedone } from './commands'
+import { failedRead, isProviderCode, isWebSearch, webPageOf } from './webCalls'
 
 /**
  * What an agent's calls came to, judged by outcome rather than call by call.
@@ -15,7 +16,7 @@ import { commandOf, commandRedone } from './commands'
  * Counts are of things, not calls: a skill the agent opened and LoomWatch then recorded as opened
  * is one skill, and a file read in two pages is one file.
  */
-type Item = Pick<Evidence, 'id' | 'kind' | 'relation' | 'name' | 'status' | 'toolKind' | 'rawInput' | 'locations'> & Partial<Pick<Evidence, 'declined'>>
+type Item = Pick<Evidence, 'id' | 'kind' | 'relation' | 'name' | 'status' | 'toolKind' | 'rawInput' | 'locations'> & Partial<Pick<Evidence, 'declined' | 'content' | 'rawOutput'>>
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 const failed = (item: Pick<Evidence, 'status'>) => item.status === 'failed' || item.status === 'rejected'
@@ -35,7 +36,8 @@ function pathsOf(item: Item): string[] {
   return [...new Set([...(item.locations ?? []).map((location) => location.path), ...named].map(clean).filter(Boolean))]
 }
 
-const pageOf = (item: Item) => text(input(item).url) ?? item.name
+// A page by its address wherever the record keeps it (lib/story/webCalls.ts), else by its name.
+const pageOf = (item: Item) => webPageOf(item) ?? text(input(item).url) ?? item.name
 const noteOf = (item: Item) => text(input(item).id) ?? item.id
 
 /**
@@ -157,7 +159,8 @@ export function readCount(items: readonly Item[]): ReadCount {
   for (const item of items) {
     if (item.status !== 'succeeded') continue
     if (item.relation === 'read file' && item.kind === 'file' && !skillFileRead(item)) files.add(pathsOf(item)[0] ?? item.id)
-    else if (item.relation === 'consulted source') pages.add(pageOf(item))
+    // A search and the code that ran it are not pages read; a read that got nothing read nothing.
+    else if (item.relation === 'consulted source' && !isWebSearch(item) && !isProviderCode(item) && !failedRead(item)) pages.add(pageOf(item))
     else if (item.relation === 'retrieved') notes.add(noteOf(item))
   }
   return { files: files.size, pages: pages.size, notes: notes.size }
@@ -194,7 +197,8 @@ export function workCount(items: readonly Item[]): WorkCount {
   return {
     skills: skillsUsed(items).length,
     read: readCount(items),
-    searches: items.filter((item) => item.kind === 'search').length,
+    // A web search its app filed as a source (LoomWatch's own engine does) is still a search.
+    searches: items.filter((item) => item.kind === 'search' || (item.kind === 'source' && isWebSearch(item))).length,
     changed: changedFiles(items),
     // A command that was declined, or answered in the agent's place, never ran.
     commands: items.filter((item) => item.kind === 'command' && !item.declined).length,

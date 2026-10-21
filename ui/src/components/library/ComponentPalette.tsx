@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, Globe, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, UserRound, Wrench, type LucideIcon } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { BookmarkCheck, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, UserRound, type LucideIcon } from 'lucide-react'
 import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
-import { usedInRun, type UsedInRun } from '../../lib/library/observed'
 import { isOpenTeam, teamAgentSource, useAgentUses, type TeamOwnAgent } from '../../lib/library/uses'
 import { figureFor, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { modelForPreset, roleSource, type RoleIcon, type RolePreset } from '../../lib/library/roles'
 import type { CapabilityInventory, DetectedCapability } from '../../lib/library/client'
 import type { CapabilityDragPayload, CapabilityKind } from '../../lib/composer-layout/types'
-import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
-import type { Evidence } from '../../lib/watch/events'
-import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
+import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { CONNECT_NOTION_HREF, NOTION_PAGE_SOURCE, type NotionConnection } from '../../lib/notion/connection'
 import { PALETTE_WIDTH } from '../../lib/library/paletteWidth'
@@ -22,7 +19,6 @@ import { keys } from '../../lib/platform'
 
 const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
 
-const USED = 'Used in this run'
 const YOURS = 'My agents'
 const STEPS = 'Workflow steps'
 const SKILLS = 'Skills'
@@ -41,13 +37,6 @@ export interface LibraryProps {
   onDragStateChange?: (dragging: boolean) => void
   /** Lets the shell keep its layout clear of the panel. */
   onCollapsedChange?: (collapsed: boolean) => void
-  /** The run on screen's recorded evidence; empty in Build. */
-  observedEvidence?: readonly Evidence[]
-  /** The servers LoomWatch connected to each agent in that run (`connectedServersByAgent`). */
-  observedConnected?: ReadonlyMap<string, readonly string[]>
-  onRevealEvidence?: (id: string) => void
-  /** Agent ids to the names on their cards, for "Used in this run". */
-  agentNames?: ReadonlyMap<string, string>
   /** This team's folders and files, one per card, and who reads each. */
   teamSources?: readonly TeamSource[]
   /** Find a source's card on the canvas and open it. */
@@ -210,22 +199,6 @@ function notionPageItem(page: TeamNotionPage, reveal?: (id: string) => void): Pa
   }
 }
 
-/** "Built into the app · Researcher and Fact-checker" — what it is, and who used it. */
-function usedDetail(row: UsedInRun, name: (id: string) => string): string {
-  const origin = { app: 'Built into LoomWatch', connected: 'Connected tool', team: 'LoomWatch', skill: 'Skill' }[row.origin]
-  return `${origin} · ${listOf(row.agents.map((agent) => name(agent.id)))}`
-}
-
-/** Why a call did not go through, in the words of the switch that would let it (ADR 0037). */
-function usedRefusal(row: UsedInRun, name: (id: string) => string): string | null {
-  if (row.refused === 0) return null
-  const declined = `Declined ${row.refused}×`
-  const doing = ALLOW_SWITCHES.find((item) => item.key === row.allow)?.label
-  if (!doing) return declined
-  const who = row.refusedBy.map(name)
-  return `${declined}: ${listOf(who)} ${who.length === 1 ? 'isn’t' : 'aren’t'} allowed to ${doing.charAt(0).toLowerCase()}${doing.slice(1)}`
-}
-
 /**
  * What each group is, behind its heading's "?". The panel itself shows rows, or one dashed slot
  * when a group is empty; these sentences are for whoever wonders why.
@@ -239,13 +212,8 @@ const EXPLAIN: Record<string, ReactNode> = {
   [YOURS]: <>A team’s agents come from here: the ones you built, then the ones that live in your teams. A team keeps its copy of a built agent until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
 }
 
-/**
- * The one add panel, in Build and in a run's full trace (ADR 0041): what you can add — jobs,
- * skills, knowledge — and, while a run is shown, what that run used. It replaced a
- * second "Library" that the trace drew with other groups, other rows and other words for the
- * same skills and tools.
- */
-export function ComponentPalette({ capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, observedEvidence = [], observedConnected, onRevealEvidence, agentNames, teamSources = [], onRevealSource, notion, teamPath = null, teamAgents = [], onRevealAgent, width, onResize }: LibraryProps) {
+/** The one add panel, beside the Workflow canvas (ADR 0041): what you can add — jobs, skills, knowledge. */
+export function ComponentPalette({ capabilityInventory, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities, onInspectCapability, onDragStateChange, onCollapsedChange, teamSources = [], onRevealSource, notion, teamPath = null, teamAgents = [], onRevealAgent, width, onResize }: LibraryProps) {
   // On a phone the panel would take half the screen, so it starts closed and overlays the canvas
   // when opened; adding something closes it again so the new card is in view.
   const narrow = () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -260,15 +228,13 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   // their team, so this list does as well. This team's are read from the canvas, which is newer
   // than its file while it is being edited.
   const { own: teamOwn, root: teamsRoot } = useAgentUses()
-  const used = useMemo(() => usedInRun(observedEvidence, observedConnected), [observedEvidence, observedConnected])
-  const agentName = (id: string) => agentNames?.get(id) ?? id
   useEffect(() => { onCollapsedChange?.(collapsed) }, [collapsed, onCollapsedChange])
   const expand = () => {
     setCollapsed(false)
     window.dispatchEvent(new Event('loomwatch:open-library'))
   }
-  // Something else needs the canvas for a moment — an Ask proposal to review, a run to read, an
-  // inspector at tablet width — so the panel folds; ⌘\ toggles it.
+  // Something else needs the canvas for a moment — an Ask proposal to review, an inspector at
+  // tablet width — so the panel folds; ⌘\ toggles it.
   useEffect(() => {
     const fold = () => setCollapsed(true)
     const toggle = () => setCollapsed((current) => {
@@ -306,7 +272,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   ]
   // The agent lists are short and are what a new team needs, so they are shown whole; the
   // capability groups can run to hundreds of entries and fold to three.
-  const limitFor = (group: string) => (group === YOURS ? 8 : group === USED || group === FILES ? 6 : group === CONNECTIONS ? 7 : 3)
+  const limitFor = (group: string) => (group === YOURS ? 8 : group === FILES ? 6 : group === CONNECTIONS ? 7 : 3)
   const matches = (text: string) => text.toLowerCase().includes(query.trim().toLowerCase())
   const remove = (item: PaletteItem) => {
     if (!item.jobId) return
@@ -331,20 +297,6 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
       <button className={confirming ? 'palette-job-remove confirming' : 'palette-job-remove icon-button'} onClick={() => remove(item)} onBlur={() => { if (confirming) setConfirmRemove(null) }} aria-label={confirming ? `Confirm removing ${item.name}` : `Remove the agent ${item.name}`} title={confirming ? 'Click again to remove. Teams that use it keep their copy.' : 'Remove this job'}>{confirming ? 'Remove' : <Trash2 size={12} />}</button>
     </div>
   }
-  const usedRow = (item: UsedInRun) => {
-    const detail = usedDetail(item, agentName)
-    // An outward tool ran without asking (ADR 0044): say what it did where the row says what was declined.
-    const refusal = item.outward ? `Used without asking: ${item.outward}` : usedRefusal(item, agentName)
-    const Icon = item.kind === 'skill' ? Puzzle : item.allow === 'web' ? Globe : Wrench
-    return <button key={item.key} className="palette-item palette-used" title={`${detail}${refusal ? `\n${refusal}` : ''}\n\nClick to show it on the canvas`} draggable
-      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData(EVIDENCE_DRAG_MIME, item.evidenceId); e.dataTransfer.setData('text/plain', item.name); onDragStateChange?.(true) }}
-      onDragEnd={() => onDragStateChange?.(false)}
-      onClick={() => onRevealEvidence?.(item.evidenceId)}>
-      <GripVertical size={13} /><span className="palette-icon"><Icon size={15} /></span>
-      <span><strong>{item.name}</strong><small>{detail}</small>{refusal && <em className="palette-engine refused">{refusal}</em>}</span>
-      <span className="palette-used-count" aria-label={`${item.calls} call${item.calls === 1 ? '' : 's'}`}>×{item.calls}</span>
-    </button>
-  }
   const section = (name: string, rows: ReactNode[], total: number, extra?: ReactNode, explain?: ReactNode) => <section key={name} aria-label={name}>
     <SectionHead as="h3" title={name} explain={explain} />
     {rows}
@@ -354,9 +306,8 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
   const visible = <T,>(name: string, items: readonly T[]) => items.slice(0, query || expanded[name] ? undefined : limitFor(name))
 
   if (collapsed) return <button className="palette-reopen" onClick={expand} title={`Open the panel (${keys('⌘\\')})`}>
-    <PanelLeftOpen size={16} />{used.length > 0 ? `${USED} · ${used.length}` : 'Add agents'}
+    <PanelLeftOpen size={16} />Add agents
   </button>
-  const usedShown = used.filter(item => matches(`${item.name} ${usedDetail(item, agentName)}`))
   const scanned = capabilitiesScannedAt ? `Skills listed at ${capabilitiesScannedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Listing LoomWatch’s skills'
   return <aside className="node-palette" aria-label="Add to your team" data-tour="palette">
     <div className="palette-body">
@@ -365,9 +316,6 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
     <p className="palette-scan" role="status">{capabilitiesLoading ? 'Listing skills…' : scanned}</p>
     {capabilitiesError && !capabilitiesLoading && <div className="palette-alert" role="alert"><span>Couldn’t list the skills.</span><small>{capabilitiesError}</small>{onRetryCapabilities && <button className="btn" onClick={onRetryCapabilities}>Try again</button>}</div>}
     {removeError && <p role="alert">{removeError}</p>}
-    {/* A run's own record first, while one is shown: what it used, one row per tool, not per call. */}
-    {used.length > 0 && usedShown.length > 0 && section(USED, visible(USED, usedShown).map(usedRow), usedShown.length, undefined,
-      used.some(item => item.origin === 'app' && !item.outward) && <>LoomWatch’s own tools are not added from here. Switch them on per agent, under <b>Allowed without asking</b>.</>)}
     {groups.map(group => {
       const items = group.items.filter(item => matches(`${item.name} ${item.detail}`))
       if (query && items.length === 0) return null
@@ -386,7 +334,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
         {group.name === SKILLS && !query && <a className="palette-hint palette-build-agent" href="/skills">Manage skills</a>}
       </>, EXPLAIN[group.name])
     })}
-    {query && usedShown.length === 0 && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
+    {query && groups.every(group => !group.items.some(item => matches(`${item.name} ${item.detail}`))) && <p className="palette-hint">Nothing matches “{query}”.</p>}
     </div>
     {onResize && <PaletteResizer width={width ?? PALETTE_WIDTH.default} onResize={onResize} />}
   </aside>

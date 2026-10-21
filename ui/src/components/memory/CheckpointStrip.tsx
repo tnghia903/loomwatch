@@ -20,7 +20,7 @@ import type { Checkpoint } from '../../lib/memory/client'
  * gap that reads as "nothing left to do".
  */
 export interface CheckpointStripProps {
-  /** The attempt number, as the lifecycle strip counts it. */
+  /** The attempt number: the run's number among this team's runs. */
   attempt: number
   /** The newest checkpoint per agent, in the order the run reached them. */
   checkpoints: readonly Checkpoint[]

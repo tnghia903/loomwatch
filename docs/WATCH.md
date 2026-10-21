@@ -1,10 +1,9 @@
 # Watch and replay
 
-Watching lives in the workspace itself. A run started from the composer (`POST /api/runs`)
-or by `loomwatchd run` is projected onto the canvas as one causal story — **Prompt · user
-request → Run NN → Agent A · lead → its evidence → Agent B · responder → Output / response**
-— from the exact events in the run archive. The viewer never starts processes;
-`POST /api/runs` does (see *Run control* below).
+Watching lives in the team's chat. A run started there (`POST /api/runs`) or by `loomwatchd run`
+is a piece of work in the chat, and its **Details** beside the chat show how it was made, all from
+the exact events in the run archive. The viewer never starts processes; `POST /api/runs` does (see
+*Run control* below).
 
 ## Start
 
@@ -26,27 +25,21 @@ output, paths and other private data; this implementation does not publish it on
 
 ## Reading a run
 
-Open a team, type a goal in the composer and press **Run** (`⌘↵`; a dirty document offers
-**Save & run** instead — a run executes an exact snapshot of the file, so there is no “run
-without saving”). The canvas then shows:
+Open a team's **Chat** (or press **Run team** in Workflow) and send the team a request with
+`@team`. Unsaved changes to the team file are saved first: a run executes an exact snapshot of the
+file, so there is no “run without saving”. The run is then a piece of work in the chat, and
+**Details** beside it shows:
 
-- the **Prompt** card (the operator's own words, `Original kept`), the **Run NN** card
-  (attempt, state, elapsed) and named arrows `starts` / `assigns lead` / `responds with` /
-  `completes as`;
-- each agent card with a live task row — `Agent A · lead · RUNNING · $ cargo test` — a blue
-  breathing perimeter while it executes;
-- one **evidence card per accepted event**: tool calls, commands, file reads and edits,
-  searches, fetched sources, Team Bus delegations, permission requests and plans, each with
-  owner, ordinal, elapsed time, status and relationship word. Click one for its input,
-  output and raw events;
-- observed delegations as gold dashed *weft* edges (or a shuttle and `×n` badge on the
-  configured edge they coincide with; an anomaly badge when a pipeline deviates);
-- the **Output** card streaming the canonical responder's reply, with `Live` / `Replay`
-  and the failure or cancellation strip when a run ends abnormally; **Show provenance**
-  opens the six-category coverage summary;
-- a lifecycle strip under the document chip: lead task, run state, result, elapsed,
-  and a scrubber (`←` / `→`) that replays any earlier event as a complete, byte-equivalent
-  picture. Scrubbing never alters execution or YAML.
+- once the run ends, its **receipt**: what was asked, who did what, what failed and what happened
+  instead, and what is worth a second look;
+- the **timeline**: each agent's work on a line of its own, with a mark for each call it made
+  (one that failed is marked as failed) and for each time the work passed to another agent. Drag
+  across it to replay what happened, and when; replaying never alters execution or YAML;
+- the team in one row, described below;
+- **What was recorded**: every accepted event behind the cards, grouped into six categories with
+  how much of each was captured. Tool calls, commands, file reads and edits, searches, fetched
+  sources, Team Bus delegations, permission requests and plans each carry owner, ordinal, elapsed
+  time, status and relationship word. Click one for its input, output and raw events.
 
 Each piece of work in the team's chat shows **what they said to each other**: each pipeline handover,
 every Team Bus `ask` with the answer it got (and whether the asked agent answered from its open
@@ -62,8 +55,8 @@ on to, and the direction and handover that stage was then given fold into it, as
 repeat it. A long message shows its first lines and **Read more** shows it verbatim; **Info**
 says how long the answer took, what the agent did meanwhile, and leads to the record.
 `ui/src/lib/watch/messages.ts` collects the messages in the same pass as the rest of the
-projection, so they follow the replay scrubber, and the timeline's **Read the message** in
-Details opens the piece in the chat and lands on that message.
+projection, and the timeline's **Read the message** in Details opens the piece in the chat and
+lands on that message.
 
 Who said what to whom is read from the record, not from the team file as it is now:
 
@@ -86,7 +79,17 @@ answer is read only in the chat, with its record's verdict (which opens the revi
 names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt (the
 run's tokens, and its cost on each turn's `turn_end`: as OpenRouter reported it, ≈ at Claude's list
 prices, or "ChatGPT plan"), timeline,
-stages and tools. A long answer (or a titled one past a few lines) is a document: the
+and the team in one row: your request, a card for each agent, and the team's answer, joined by
+the lines the work moves along. While the run is watched, an agent's figure acts out what it is
+at (reading, thinking, using a tool, typing), what it is thinking or the call it is on floats over
+its card, and its last words show as it types; the work slides along the line to the next agent,
+or back when a check sends it back, which leaves a dashed arc under that line. An agent's skills
+hang under its card and light up as it opens them. Each card's marks count what that agent used:
+skills (a required one it never had, once the run is over, leaves the mark dashed), the web
+(pages read and searches, with the programs its model ran to search), files, commands, plan. A
+mark opens its list under the row: the pages read by site, marked when the team's answer links
+them, and what each search found; each skill's receipt; or the calls, each opening its record.
+The request and the answer themselves are read in the chat, not again here. A long answer (or a titled one past a few lines) is a document: the
 chat shows a card with its title, opening words and length, and **Open** shows it in full in the
 pane beside the chat, under an **Answer** tab next to **Details**. Once a document answer
 arrives, the pane following the newest work switches to it. Drag the edge between them to resize; double-click
@@ -116,9 +119,6 @@ permission action (⌘K → *Enable notifications*). Dismissing an alert affects
 Connection loss never starts, cancels, or restarts a team. Reconnect uses the last verified
 sequence, rejects gaps, and deduplicates replay. The browser retains up to 50,000 events;
 use `loomwatchd show --session <id>` for larger sessions.
-
-Below 768 px the coordinate graph becomes a reading column in the same causal order, with
-the relationship words kept on the cards.
 
 ## Verifying without a model provider
 

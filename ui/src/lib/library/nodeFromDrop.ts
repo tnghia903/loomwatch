@@ -2,7 +2,6 @@ import type { Node } from '@xyflow/react'
 
 import { snapToGrid } from '../grid'
 import { offsetCollision } from '../team-file/layout'
-import type { WaitingOn } from '../runs/client'
 import type { AgentRuntime } from '../runs/graph'
 import type { AgentConfig } from '../team-file/types'
 import type { AgentFieldProblems } from '../team-file/validation'
@@ -15,13 +14,11 @@ export type AgentNode = Node<{
   modelLabel?: string
   agent: AgentConfig
   isEntrypoint?: boolean
-  waiting?: WaitingOn | null
-  onAnswer?: () => void
   /** docs/CANVAS_SPEC.md §5.2/§5.4: live per-field problems, already reveal-gated. */
   fieldProblems?: AgentFieldProblems
   /** Build only: what LoomWatch did to this agent's instructions after a removal (ADR 0059). */
   instructionNote?: string
-  /** TNG-113: runtime task state while a run is shown. View state only. */
+  /** What the run on screen says of this agent, for Details. View state only. */
   runtime?: AgentRuntime
 }>
 

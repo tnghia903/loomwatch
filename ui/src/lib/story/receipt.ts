@@ -13,7 +13,7 @@ import { describeEvidence } from './weft'
  * The run receipt: a printed account of one run, in the order a person checks it.
  *
  * What was asked, who did what, what failed and what happened instead, then what is worth a second
- * look. It says the same facts the trace holds, once and in plain words, and every line carries the
+ * look. It says the same facts the record holds, once and in plain words, and every line carries the
  * evidence id it came from so an expert can open the record behind it. Nothing here is inferred
  * from an agent's prose: a skill counts as used only when the stream shows it opened. Lines report
  * outcomes, not calls (lib/story/reads.ts): a failed read is a failure only when no read of the

@@ -37,23 +37,6 @@
   gap: 16px;
   margin-bottom: 26px;
 }
-.delivery-heading-acts {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-}
-/* A finished run's outcome is stamped on its receipt, so the heading keeps only its actions: a
-   toolbar line over the sheet, not a band holding a button. */
-.delivery-heading.receipted,
-.delivery-shown .delivery-heading.receipted {
-  height: auto;
-  min-height: 0;
-  justify-content: flex-end;
-  padding: 14px 0 0;
-  margin-bottom: 10px;
-  border-bottom: 0;
-}
 .delivery-eyebrow {
   text-transform: uppercase;
   font-size: 11px;
@@ -90,8 +73,7 @@
 .delivery-status.status-succeeded {
   color: var(--color-ok);
 }
-.delivery-status.status-failed,
-.delivery-cap-state.state-failed {
+.delivery-status.status-failed {
   color: var(--color-alert);
 }
 .delivery-status.status-partial {
@@ -121,94 +103,6 @@
   color: var(--color-ink-3);
   font-size: 11px;
 }
-.delivery-stages {
-  display: flex;
-  gap: 24px;
-  overflow-x: auto;
-  padding: 2px 1px 10px;
-}
-.delivery-stage-wrap {
-  min-width: 260px;
-  flex: 1;
-  position: relative;
-}
-.delivery-stage {
-  background: var(--color-panel-solid);
-  border: 1px solid var(--color-hairline);
-  border-radius: 10px;
-  padding: 16px;
-  height: 100%;
-}
-.delivery-stage.selected {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 1px var(--color-accent);
-}
-.delivery-stage-select {
-  display: flex;
-  gap: 8px;
-  text-align: left;
-  align-items: flex-start;
-  width: 100%;
-}
-/* Named, not positional: other things (the stage number, the agent's mark) sit beside it. When the
-   card is narrow the status moves to its own line rather than squeezing the name mid-word. */
-.delivery-stage-select { flex-wrap: wrap; }
-.delivery-stage-select > .delivery-stage-name {
-  flex: 1;
-  min-width: min(7.5em, 100%);
-}
-.delivery-stage-select strong {
-  display: block;
-  font-size: 14px;
-  overflow-wrap: break-word;
-}
-.delivery-stage-select small {
-  display: block;
-  color: var(--color-ink-3);
-  margin-top: 5px;
-  font-size: 12px;
-  line-height: 1.5;
-  max-height: 3em;
-  overflow: hidden;
-}
-.delivery-stage-number {
-  border-radius: 50%;
-  font-size: 11px;
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  flex: none;
-}
-.delivery-stage > p {
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 18px 0;
-  color: var(--color-ink-2);
-  overflow-wrap: anywhere;
-}
-/* A planned stage whose app is not on this computer: the same sentence its Build card carries. */
-.delivery-stage > p.delivery-stage-problem {
-  margin: 12px 0 4px;
-  color: var(--color-alert);
-}
-.delivery-stage-meta {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  border-top: 1px solid var(--color-hairline);
-  padding-top: 12px;
-  font-size: 11px;
-  color: var(--color-ink-3);
-}
-.delivery-handoff-arrow {
-  position: absolute;
-  left: -21px;
-  top: 45%;
-  color: var(--color-accent-dim);
-}
-.delivery-skill-summary,
 .delivery-link {
   display: inline-flex;
   align-items: center;
@@ -216,202 +110,6 @@
   color: var(--color-accent);
   font-size: 12px;
   text-align: left;
-}
-.delivery-stage .delivery-link,
-.delivery-skill-summary {
-  margin-top: 14px;
-}
-.delivery-capabilities {
-  margin-top: 20px;
-  border: 1px solid var(--color-hairline);
-  border-radius: 12px;
-  background: var(--color-panel-solid);
-  overflow: hidden;
-}
-.delivery-capabilities > .delivery-section-head {
-  padding: 20px 20px 12px;
-  margin: 0;
-}
-.delivery-verification {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--color-ink-2);
-  margin: 0 20px 16px;
-}
-.delivery-verification svg {
-  flex: none;
-  margin-top: 2px;
-  color: var(--color-accent);
-}
-.delivery-filters {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 20px;
-  border-block: 1px solid var(--color-hairline);
-  flex-wrap: wrap;
-}
-.delivery-filters > div {
-  display: flex;
-  gap: 3px;
-}
-.delivery-filters button {
-  font-size: 11px;
-  padding: 5px 9px;
-  border-radius: 5px;
-}
-.delivery-filters button[aria-pressed='true'] {
-  color: var(--color-accent);
-}
-.delivery-filters label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-  max-width: 155px;
-  color: var(--color-ink-3);
-}
-.delivery-filters input {
-  width: 100%;
-  min-width: 0;
-  font-size: 11px;
-  background: transparent;
-  padding: 5px;
-}
-.delivery-cap-map {
-  padding: 24px;
-}
-.delivery-cap-root {
-  width: max-content;
-  max-width: 100%;
-  margin: 0 auto;
-  display: grid;
-  justify-items: center;
-  gap: 7px;
-  border: 1px solid var(--color-hairline);
-  background: var(--color-ground);
-  padding: 14px 25px 8px;
-  border-radius: 8px;
-  font-size: 13px;
-  text-align: center;
-}
-.delivery-cap-root svg {
-  color: var(--color-accent);
-}
-.delivery-cap-root small {
-  font-size: 10px;
-  color: var(--color-ink-3);
-}
-.layout-graph .delivery-cap-leaves {
-  border-left: 1px solid var(--color-accent-dim);
-  margin: 0 0 0 18px;
-  padding: 14px 0 0 18px;
-}
-.delivery-cap-branch {
-  position: relative;
-  padding-top: 5px;
-  margin-bottom: 10px;
-}
-.layout-graph .delivery-cap-branch:before {
-  content: '';
-  position: absolute;
-  width: 18px;
-  height: 1px;
-  background: var(--color-accent-dim);
-  left: -18px;
-  top: 52%;
-}
-.delivery-edge-word {
-  font-size:11px;
-  color: var(--color-ink-3);
-  display: block;
-  margin: 0 0 5px 8px;
-}
-.delivery-cap-leaf {
-  width: 100%;
-  text-align: left;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  border: 1px solid var(--color-hairline);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--color-ground);
-}
-.delivery-cap-leaf:hover {
-  border-color: var(--color-accent);
-}
-.delivery-cap-leaf.state-unverified {
-  border-style: dashed;
-}
-.delivery-cap-leaf.state-failed {
-  border-color: var(--color-alert);
-}
-.delivery-cap-leaf strong {
-  font-size: 14px;
-  font-weight: 500;
-  display: block;
-  overflow-wrap: anywhere;
-}
-.delivery-cap-leaf > span:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-}
-.delivery-cap-leaf small {
-  display: block;
-  margin-top: 4px;
-  color: var(--color-ink-3);
-  font-size: 11px;
-}
-.delivery-cap-icon {
-  color: var(--color-accent);
-  flex: none;
-}
-.delivery-cap-state {
-  font-size: 11px;
-  color: var(--color-ink-3);
-  max-width: 120px;
-}
-.state-read .delivery-cap-state,
-.delivery-cap-state.state-read {
-  color: var(--color-ok);
-}
-.state-failed .delivery-cap-state {
-  color: var(--color-alert);
-}
-.delivery-cap-footer {
-  padding: 12px 20px;
-  border-top: 1px solid var(--color-hairline);
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  font-size: 10px;
-  color: var(--color-ink-3);
-}
-/* Stays on the right when the line beside it is left out (no required skills). */
-.delivery-cap-footer > .delivery-link:only-child {
-  margin-left: auto;
-}
-.delivery-receipt {
-  padding: 20px;
-}
-.delivery-receipt h3 {
-  font-size: 18px;
-  margin: 18px 0 8px;
-  overflow-wrap: anywhere;
-}
-.delivery-receipt p,
-.delivery-empty {
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--color-ink-3);
-  padding-block: 12px;
-}
-.delivery-empty {
-  padding: 24px;
 }
 .delivery-receipt-row {
   width: 100%;
@@ -455,18 +153,6 @@
   box-shadow: inset 0 0 0 1px var(--color-accent);
   color: var(--color-ink);
 }
-.workspace-view-tabs .trace-back {
-  border-left: 1px solid var(--color-hairline);
-  border-radius: 0;
-  font-size: 11px;
-  color: var(--color-accent);
-}
-.delivery-shown .lw-lifecycle {
-  display: none;
-}
-.delivery-shown .lw-composer {
-  max-width: calc(100% - 32px);
-}
 @media (max-width: 1050px) {
   .delivery-work {
     padding: 22px;
@@ -477,17 +163,6 @@
   .delivery-heading h1 {
     flex-wrap: wrap;
     gap: 8px;
-  }
-  .delivery-stages {
-    flex-direction: column;
-  }
-  .delivery-stage-wrap {
-    min-width: 0;
-  }
-  .delivery-handoff-arrow {
-    left: 50%;
-    top: -20px;
-    transform: rotate(90deg);
   }
   .delivery-section-head > span {
     display: none;
@@ -503,18 +178,6 @@
   .delivery-work {
     overflow: visible;
     padding: 22px 16px;
-  }
-  .delivery-cap-map {
-    padding: 18px 12px;
-  }
-  .delivery-cap-state {
-    max-width: 85px;
-  }
-  .delivery-cap-footer {
-    flex-direction: column;
-  }
-  .delivery-filters label {
-    max-width: 135px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -598,10 +261,6 @@
   font-size: 0.85em;
 }
 
-.state-loaded .delivery-cap-state,
-.delivery-cap-state.state-loaded {
-  color: var(--color-ok);
-}
 .delivery-skill-receipt {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr);
@@ -692,19 +351,6 @@
     top: 64px;
     bottom: 0;
   }
-  .delivery-shown .lw-composer {
-    left: 60%;
-    right: 0;
-    bottom: 0;
-    transform: none;
-    width: 40%;
-    max-width: none;
-    border-radius: 0;
-    border-right: 0;
-    border-bottom: 0;
-    background: var(--color-panel-solid);
-    box-shadow: none;
-  }
   .delivery-shown .lw-composer-notices {
     left: 60%;
     right: 0;
@@ -738,118 +384,20 @@
   .delivery-shown .workspace-chrome .chip-l2 {
     display: none;
   }
-  .layout-graph.delivery-cap-map {
-    display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
-    align-items: center;
-    gap: 64px;
-  }
-  .layout-graph .delivery-cap-root {
-    margin: 0;
-    width: 160px;
-    max-width: 160px;
-    position: relative;
-    padding: 18px 12px;
-  }
-  .layout-graph .delivery-cap-root > svg:last-child {
-    display: none;
-  }
-  .layout-graph .delivery-cap-root:after {
-    content: '';
-    position: absolute;
-    right: -32px;
-    top: 50%;
-    width: 32px;
-    border-top: 1px solid var(--color-accent-dim);
-  }
-  .layout-graph .delivery-cap-leaves {
-    border: 0;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    position: relative;
-  }
-  .layout-graph .delivery-cap-leaves:before {
-    content: '';
-    position: absolute;
-    left: -32px;
-    top: 38px;
-    bottom: 38px;
-    border-left: 1px solid var(--color-accent-dim);
-  }
-  .layout-graph .delivery-cap-branch {
-    padding: 0;
-    margin: 0;
-  }
-  .layout-graph .delivery-cap-branch:before {
-    left: -32px;
-    width: 32px;
-    top: 50%;
-  }
-  .layout-graph .delivery-edge-word {
-    position: absolute;
-    left: -48px;
-    top: calc(50% - 17px);
-    width: 48px;
-    font-size:11px;
-    text-align: center;
-    margin: 0;
-  }
-  .layout-graph .delivery-cap-leaf {
-    min-height: 76px;
-  }
   .delivery-shown .delivery-heading {
     margin-bottom: 20px;
   }
   .delivery-shown .delivery-section-head {
     margin-top: 22px;
   }
-  .delivery-shown .delivery-capabilities > .delivery-section-head {
-    margin-top: 0;
-  }
 }
 @media (min-width: 768px) and (max-width: 1050px) {
-  .delivery-shown .lw-composer,
   .delivery-shown .lw-composer-notices {
     left: 52.38%;
     width: 47.62%;
   }
-  .layout-graph.delivery-cap-map {
-    grid-template-columns: 100px minmax(0, 1fr);
-    gap: 48px;
-    padding-inline: 16px;
-  }
-  .layout-graph .delivery-cap-root {
-    width: 100px;
-  }
-  .layout-graph .delivery-cap-root:after {
-    right: -24px;
-    width: 24px;
-  }
-  .layout-graph .delivery-cap-leaves:before {
-    left: -24px;
-  }
-  .layout-graph .delivery-cap-branch:before {
-    left: -24px;
-    width: 24px;
-  }
-  .delivery-cap-leaf {
-    flex-wrap: wrap;
-  }
-  .delivery-cap-leaf .delivery-cap-state {
-    flex: 1 0 100%;
-    padding-left: 28px;
-    max-width: none;
-  }
 }
 @media (min-width: 768px) {
-  .layout-graph .delivery-cap-root {
-    align-self: start;
-    position: sticky;
-    top: 16px;
-  }
   .delivery-shown .workspace-chrome > div:has(.lw-chip) {
     justify-self: end;
     min-width: 0;
@@ -913,35 +461,6 @@
   }
 }
 
-/* A narrow result column always gives the request its own row. */
-.delivery-shown .lw-composer {
-  flex-wrap: wrap;
-  padding: var(--sp-2);
-  gap: var(--sp-2);
-}
-.delivery-shown .lw-composer .comp-mid {
-  order: -1;
-  flex: 1 0 100%;
-  padding: var(--sp-2);
-  box-sizing: border-box;
-  min-height: 76px;
-}
-.delivery-shown .lw-composer .comp-note {
-  display: block;
-  line-height: 1.4;
-}
-.delivery-shown .lw-composer .mode-chip {
-  min-height: 36px;
-  padding: 0 var(--sp-2);
-  border-right: 0;
-}
-.delivery-shown .lw-composer .comp-act {
-  margin-left: auto;
-  padding: 0;
-  flex-wrap: wrap;
-  max-width: 100%;
-}
-
 .capability-agent-option {
   display: flex;
   gap: 12px;
@@ -973,28 +492,6 @@
 .capability-required {
   color: var(--color-accent);
   font-size: 11px;
-}
-
-.delivery-scope {
-  background: var(--color-ground);
-  border: 1px solid var(--color-hairline);
-  border-radius: 5px;
-  padding: 6px;
-  font-size: 11px;
-  color: var(--color-ink-2);
-}
-.delivery-cap-groups > .delivery-cap-map + .delivery-cap-map {
-  border-top: 1px solid var(--color-hairline);
-}
-.delivery-group-name {
-  margin: 0 0 14px;
-  font-size: 14px;
-  font-weight: 500;
-}
-.delivery-receipt .delivery-receipt-owner {
-  padding: 0;
-  margin: 0 0 12px;
-  color: var(--color-ink-2);
 }
 
 /* The plain-text stand-in shown for the moment before the Markdown renderer chunk arrives. */
@@ -1053,3 +550,169 @@
 .notion-send-note.alert { color: var(--color-alert); }
 .notion-send .link { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
 .notion-send-button { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; }
+
+/* ---------- A stage's run (StageActivity.tsx): its figure at work, what it is on, and its tray ---------- */
+/* The figure alone, its state in its glow: blue working, gold waiting for you, green done, red failed. */
+.stage-figure { display: inline-flex; flex: none; transform-origin: 50% 90%; }
+.stage-figure .agent-portrait { margin: -4px -2px; }
+.stage-figure[data-glow="working"] { --glow: var(--color-live); }
+.stage-figure[data-glow="waiting"] { --glow: var(--color-accent); }
+.stage-figure[data-glow="done"] { --glow: var(--color-ok); }
+.stage-figure[data-glow="failed"] { --glow: var(--color-alert); }
+.stage-figure[data-glow] { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
+/* An agent with no figure wears its mark, which glows by itself: one glow, not two. */
+.stage-figure[data-glow]:has(.lw-mark) { filter: none; }
+/* What it is on now: the start of its reasoning in a thought bubble, or the call by name. */
+.stage-now { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; max-width: 100%; min-width: 0; font-size: 12px; line-height: 16px; color: var(--color-ink); }
+.stage-now > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.stage-now.doing { width: fit-content; padding: 3px 10px 3px 8px; border: 1px solid var(--color-live); border-radius: var(--r-full); background: var(--color-live-tint); }
+.stage-now.doing svg { flex: none; color: var(--color-live); }
+.stage-now.thought { position: relative; width: fit-content; max-width: calc(100% - 10px); padding: 5px 11px; margin-left: 10px; border: 1px solid var(--color-hairline); border-radius: 14px; background: var(--color-panel); }
+.stage-now.thought::before { content: ""; position: absolute; left: -9px; top: -3px; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--color-hairline); background: var(--color-panel); }
+/* The tray: one mark per kind it used, its count beside it; the words are in the label. */
+.stage-tray { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.stage-mark { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; min-width: 32px; justify-content: center; padding: 0 8px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: transparent; color: var(--color-ink-2); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
+/* The count is the information, so it reads at full strength beside the quieter glyph. */
+.stage-mark > span { color: var(--color-ink); }
+.stage-mark:hover { color: var(--color-ink); border-color: var(--color-ink-3); }
+.stage-mark:focus-visible { outline: 2px solid var(--color-live); outline-offset: 2px; }
+.stage-mark[aria-expanded="true"] { color: var(--color-ink); border-color: var(--color-ink-2); background: var(--color-panel); }
+.stage-mark.doing { color: var(--color-ink); border-color: var(--color-live); background: var(--color-live-tint); }
+/* A required skill it never had, once the run is over, leaves its mark dashed, drawn so it shows. */
+.stage-mark.short { border-style: dashed; border-color: var(--color-ink-3); }
+/* What a mark opens, in the card under the tray. */
+.stage-sheet { display: grid; gap: 12px; margin-top: 10px; padding: 12px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-ground); font-size: 12.5px; line-height: 18px; min-width: 0; }
+.stage-sheet section { display: grid; gap: 6px; min-width: 0; }
+/* The list's own headings only: a skill receipt keeps the headings it has elsewhere. */
+.stage-sheet > section > h4 { margin: 0; display: flex; gap: 6px; font: 500 11px/14px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--color-ink-2); }
+.stage-sheet > section > h4 span { color: var(--color-ink); font-variant-numeric: tabular-nums; }
+.stage-sheet ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.stage-sheet li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.stage-sheet a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-ink); overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: var(--color-ink-3); text-underline-offset: 3px; }
+.stage-sheet a:hover { text-decoration-color: var(--color-ink); }
+.stage-sheet a svg { flex: none; color: var(--color-ink-3); }
+.stage-site { display: grid; gap: 4px; }
+.stage-site > strong { font-size: 12.5px; }
+.stage-times { color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+/* The answer links this page: a plain mark, not green, which would say it was checked. */
+.stage-cited { display: inline-flex; align-items: center; gap: 3px; padding: 0 7px 0 5px; border: 1px solid var(--color-ink-3); border-radius: var(--r-full); color: var(--color-ink); font-size: 11.5px; }
+.stage-cited svg { color: var(--color-ink); }
+.stage-sheet li.stage-search { display: grid; gap: 3px; padding-top: 6px; border-top: 1px solid var(--color-hairline); }
+.stage-sheet li.stage-search:first-child { border-top: 0; padding-top: 0; }
+.stage-found { display: grid; gap: 2px; padding-left: 10px; border-left: 2px solid var(--color-hairline); }
+.stage-muted { color: var(--color-ink-2); margin: 0; }
+.stage-use, .stage-skill { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 6px; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--color-ink); text-align: left; cursor: pointer; }
+.stage-use:hover, .stage-skill:hover { background: var(--color-panel); }
+.stage-use:focus-visible, .stage-skill:focus-visible { outline: 2px solid var(--color-live); outline-offset: 1px; }
+.stage-use > span, .stage-skill > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.stage-use small, .stage-skill > span { color: var(--color-ink-2); font-size: 11.5px; }
+.stage-skills > li { display: grid; }
+.stage-skill-receipt { display: grid; gap: 8px; padding: 6px 6px 8px 28px; }
+.stage-skill-receipt > p { margin: 0; color: var(--color-ink-2); }
+/* A finger needs a bigger target than a pointer. */
+@media (max-width: 767px) {
+  .stage-mark, .stage-use, .stage-skill { min-height: 44px; }
+  .stage-mark { min-width: 44px; }
+  .stage-sheet li > a { min-height: 44px; }
+}
+
+/* At work, a figure acts out what it is at, at the pace the chat's figures keep; reduced motion
+   keeps it still and lets the glow and the status word say it. */
+@media (prefers-reduced-motion: no-preference) {
+  .stage-figure[data-phase="reading"] { animation: stage-read var(--t-breathe) ease-in-out infinite; }
+  .stage-figure[data-phase="thinking"] { animation: stage-sway var(--t-breathe) ease-in-out infinite; }
+  .stage-figure[data-phase="tools"] { animation: stage-hop var(--t-flow) var(--ease-out) infinite; }
+  .stage-figure[data-phase="typing"] { animation: stage-bob var(--t-settle) ease-in-out infinite; }
+}
+@keyframes stage-read { 50% { transform: rotate(5deg) translateY(1px); } }
+@keyframes stage-sway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes stage-hop { 25% { transform: translateY(-5px); } 50% { transform: translateY(0); } }
+@keyframes stage-bob { 50% { transform: translateY(-2px); } }
+
+
+/* ---------- The team at work (TeamFlow.tsx), as option A of the trace sketches drew it ----------
+   Your request, each agent's card and the team's answer in one row, joined by the lines the work
+   moves along; what an agent is at floats over its card, its skills hang under it. The row scrolls
+   on its own when the team is wider than the pane; on a phone it stands in a column. */
+.team-flow { overflow-x: auto; padding: 2px 2px 10px; }
+.flow-row { display: flex; align-items: flex-start; width: max-content; min-width: 100%; }
+.flow-node { display: flex; align-items: flex-start; }
+/* The ends have nothing floating over them: they start where the agents' cards start. */
+.flow-end { padding-top: 44px; }
+.flow-column { display: grid; min-width: 0; }
+.flow-above { height: 44px; max-width: 220px; display: flex; align-items: flex-end; padding-bottom: 8px; }
+.flow-above .stage-now { margin: 0; }
+.flow-card { width: 220px; display: grid; gap: 8px; padding: 10px 12px 12px; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-md); box-shadow: var(--e1-shadow); transition: border-color var(--t-settle), box-shadow var(--t-settle); }
+.flow-request, .flow-answer { width: 136px; }
+.flow-agent.working { border-color: color-mix(in srgb, var(--color-live) 55%, transparent); }
+.flow-agent.selected { border-color: var(--color-accent-dim); }
+.flow-micro { font: 500 10.5px/14px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--color-ink-3); }
+.flow-text { margin: 0; font-size: 12px; line-height: 16px; color: var(--color-ink-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.flow-answer strong.flow-text { font-size: 13px; line-height: 18px; font-weight: 550; color: var(--color-ink); }
+.flow-answer.done { border-color: var(--color-ok); }
+.flow-answer { position: relative; }
+.flow-answer-mark { position: absolute; top: 10px; right: 10px; color: var(--color-ink-3); }
+.flow-muted { color: var(--color-ink-3); }
+.flow-who { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.flow-who:focus-visible { outline: 2px solid var(--color-live); outline-offset: 3px; border-radius: var(--r-xs); }
+.flow-names { display: grid; gap: 2px; min-width: 0; }
+.flow-names strong { font: 550 15px/20px var(--font-sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.flow-names .delivery-status { font: inherit; letter-spacing: inherit; }
+.flow-said { margin: 0; font-size: 11.5px; line-height: 16px; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.flow-card-link { justify-self: start; font-size: 12px; }
+.flow-card .stage-tray { margin-top: 0; }
+
+/* The line the work moves along, at the height of the cards' names. A send-back leaves a dashed
+   arc under it; the work itself is a sheet sliding along it, once, while the run is watched. */
+.flow-link { position: relative; flex: none; width: 44px; align-self: stretch; }
+.flow-line { position: absolute; left: 0; right: 0; top: 78px; border-top: 1.5px solid var(--color-warp); transition: border-color var(--t-settle); }
+.flow-link.passing .flow-line, .flow-link[data-pass="on"] .flow-line { border-top-color: var(--color-live); }
+.flow-link[data-pass="back"] .flow-line { border-top-color: var(--color-accent); }
+.flow-back { position: absolute; left: 6px; right: 6px; top: 92px; height: 22px; border: 1.5px dashed var(--color-accent-dim); border-top: 0; border-radius: 0 0 14px 14px; }
+.flow-link .handoff-sheet { position: absolute; left: 50%; top: 69px; width: 12px; height: 15px; margin-left: -6px; border: 1px solid var(--color-paper-rule); border-radius: 2px; background: var(--color-paper); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-ink) 25%, transparent); opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .flow-link[data-pass="on"] .handoff-sheet { animation: handoff-sheet-on var(--t-flow) var(--ease-out) both; }
+  .flow-link[data-pass="back"] .handoff-sheet { animation: handoff-sheet-back var(--t-flow) var(--ease-out) both; }
+}
+@keyframes handoff-sheet-on { 0% { opacity: 0; transform: translateX(-28px) rotate(-8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateX(28px) rotate(4deg); } }
+@keyframes handoff-sheet-back { 0% { opacity: 0; transform: translateX(28px) rotate(8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateX(-28px) rotate(-4deg); } }
+
+/* Its skills hang under its card on dashed lines; one lights up as it opens it, and keeps a tick. */
+.flow-skills { position: relative; display: grid; gap: 8px; margin-top: 16px; padding-left: 20px; }
+.flow-skills::before { content: ""; position: absolute; left: 8px; top: -16px; bottom: 18px; border-left: 1.5px dashed var(--color-warp); }
+.flow-skill { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; width: 100%; min-height: 44px; padding: 6px 10px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: var(--color-panel-solid); color: var(--color-ink); text-align: left; cursor: pointer; transition: border-color var(--t-settle), box-shadow var(--t-settle); }
+.flow-skill::before { content: ""; position: absolute; left: -13px; top: 50%; width: 12px; border-top: 1.5px dashed var(--color-warp); }
+.flow-skill:hover { border-color: var(--color-ink-3); }
+.flow-skill:focus-visible { outline: 2px solid var(--color-live); outline-offset: 2px; }
+.flow-skill .flow-micro, .flow-skill strong { grid-column: 1; }
+.flow-skill strong { font: 550 12.5px/17px var(--font-sans); overflow-wrap: anywhere; }
+.flow-skill-tick { grid-column: 2; grid-row: 1 / span 2; color: var(--color-ink-3); }
+.flow-skill.had .flow-skill-tick { color: var(--color-ink); }
+.flow-skill.opening { border-color: var(--color-live); box-shadow: 0 0 0 1px var(--color-live); }
+
+/* A mark's list, under the row: the card it belongs to keeps its size beside the others. */
+.flow-sheet { margin-top: 4px; }
+.flow-sheet-who { margin: 0; font-weight: 600; font-size: 13px; }
+
+/* A phone stands the row up: one card under another, the line running down between them. */
+@media (max-width: 640px) {
+  .team-flow { overflow: visible; }
+  .flow-row { flex-direction: column; align-items: stretch; width: auto; }
+  .flow-node { flex-direction: column; align-items: stretch; }
+  .flow-end { padding-top: 0; }
+  .flow-card, .flow-request, .flow-answer { width: 100%; }
+  .flow-above { height: auto; max-width: none; padding: 0 0 6px; }
+  .flow-above:empty { display: none; }
+  .flow-link { width: auto; height: 28px; align-self: stretch; }
+  .flow-line { top: 0; bottom: 0; left: 50%; right: auto; border-top: 0; border-left: 1.5px solid var(--color-warp); }
+  .flow-link.passing .flow-line, .flow-link[data-pass="on"] .flow-line { border-left-color: var(--color-live); }
+  .flow-link[data-pass="back"] .flow-line { border-left-color: var(--color-accent); }
+  .flow-back { display: none; }
+  .flow-link .handoff-sheet { top: 6px; }
+}
+@media (prefers-reduced-motion: no-preference) and (max-width: 640px) {
+  .flow-link[data-pass="on"] .handoff-sheet { animation-name: handoff-sheet-down; }
+  .flow-link[data-pass="back"] .handoff-sheet { animation-name: handoff-sheet-up; }
+}
+@keyframes handoff-sheet-down { 0% { opacity: 0; transform: translateY(-8px) rotate(-8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(16px) rotate(4deg); } }
+@keyframes handoff-sheet-up { 0% { opacity: 0; transform: translateY(16px) rotate(8deg); } 15%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px) rotate(-4deg); } }

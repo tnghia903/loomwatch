@@ -103,17 +103,13 @@ const at = (seconds: number) => new Date(Date.UTC(2026, 8, 11, 0, 0, seconds)).t
 const event = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload'], agentId = 'researcher'): RunEvent => ({ id: `e${seq}`, sessionId: 'run-1', agentId, seq, ts: at(seq), kind, payload })
 const runRecord = { runId: 'run-1', sessionId: 'run-1', teamPath: 'demo.yaml', prompt: 'Summarise the repo', status: 'running', mode: 'pipeline', entrypoint: 'researcher', responder: 'reviewer', agentIds: ['researcher', 'reviewer'], createdAt: at(0), startedAt: at(0), finishedAt: null, error: null, exitCode: null, eventCount: null, reply: null }
 
-function renderWorkspace(runId: string | null = null, presentation: 'trace' | 'delivery' = 'trace') {
-  const view = render(<Workspace onDocumentOpen={vi.fn()} initialRunId={runId} />)
-  // Existing graph regressions exercise the preserved Full trace surface.
-  if (runId && presentation === 'trace') fireEvent.click(screen.getByRole('button', { name: 'Full trace' }))
-  return view
+function renderWorkspace(runId: string | null = null) {
+  return render(<Workspace onDocumentOpen={vi.fn()} initialRunId={runId} />)
 }
 
-async function openRunTrace() {
-  const opener = await screen.findByRole('button', { name: 'Full trace' })
-  fireEvent.click(opener)
-  expect(screen.getByRole('application', { name: 'Run graph' })).toBeInTheDocument()
+/** Waits until a run the composer started is the one on screen. */
+async function runOnScreen() {
+  await waitFor(() => expect(window.location.search).toContain('run=run-1'))
 }
 
 beforeEach(() => {
@@ -169,7 +165,7 @@ describe('Workspace', () => {
 
   // ADR 0051: Run team opens the team's chat, where work starts only when you send @team.
   it('opens the team’s chat from Run team without starting work', async () => {
-    renderWorkspace(undefined, 'delivery')
+    renderWorkspace()
     expect(screen.queryByRole('button', {name: 'Preview next run'})).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', {name: 'Run team'}))
     expect(screen.getByRole('region', {name: /chat$/})).toBeInTheDocument()
@@ -230,7 +226,7 @@ describe('Workspace', () => {
   it('opens a run’s Details beside the chat, and Run comes back to the chat after Build', async () => {
     // As a reloaded chat's address has it: the chat, and the piece open in Details.
     window.history.replaceState({}, '', '/?path=demo.yaml&view=chat&run=run-1')
-    renderWorkspace('run-1', 'delivery')
+    renderWorkspace('run-1')
     expect(screen.queryByText('Not started')).not.toBeInTheDocument()
     const details = screen.getByRole('complementary', { name: 'Details of this piece of work' })
     expect(within(details).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
@@ -289,7 +285,10 @@ describe('Workspace', () => {
     cleanup()
     vi.stubGlobal('fetch', withStatus('failed'))
     renderWorkspace('run-1')
-    if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
+    // The failed run's record and its notes are both in before the strip's absence counts.
+    expect(await screen.findByRole('region', { name: 'Run receipt' })).toHaveTextContent('Failed')
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).startsWith('/api/memory/notes'))).toBe(true))
+    await act(async () => {})
     expect(screen.queryByTestId('review-strip')).not.toBeInTheDocument()
   })
 
@@ -538,29 +537,6 @@ describe('Workspace', () => {
     expect(screen.queryByRole('button', { name: /Solo edge layer/ })).not.toBeInTheDocument()
   })
 
-  it('solos edge layers in run view while the legend names the state and offers the way back', async () => {
-    sessionState.events = [
-      event(0, 'process', { phase: 'spawned', pid: 1 }),
-      event(1, 'tool_call', { callId: 'd1', name: 'dispatch', title: 'Team Bus: dispatch', toolKind: 'mcp', status: 'in_progress', rawInput: { agent: 'reviewer' } }),
-      event(2, 'tool_update', { callId: 'd1', status: 'completed' }),
-    ]
-    const { container } = renderWorkspace('run-1')
-    const shell = container.querySelector('.lw-shell')!
-    await waitFor(() => expect(screen.getByRole('group', { name: 'Edge layers' })).toBeInTheDocument())
-    expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: 'l' })
-    expect(shell).toHaveClass('solo-configured')
-    fireEvent.keyDown(window, { key: 'l' })
-    expect(shell).toHaveClass('solo-observed')
-    expect(screen.queryByText('sequence from Researcher to Reviewer')).not.toBeInTheDocument()
-    expect(screen.getByRole('group', { name: 'Edge layers' })).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: 'l' })
-    expect(shell).not.toHaveClass('solo-observed')
-    expect(screen.getByText('sequence from Researcher to Reviewer')).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: 'k', metaKey: true })
-    expect(screen.getByRole('button', { name: /Solo edge layer/ })).toBeInTheDocument()
-  })
-
   it('puts the getting-started guide’s example in the request box without running it', () => {
     renderWorkspace()
     act(() => { window.dispatchEvent(new CustomEvent('loomwatch:compose', { detail: 'Give me three ideas' })) })
@@ -568,19 +544,17 @@ describe('Workspace', () => {
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
   })
 
-  it('starts a run from the composer and rewires the canvas into the prompt-to-output story', async () => {
+  it('starts a run from the composer and shows it in the team’s chat, with its Details beside it', async () => {
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
     fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
-    if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
+    await runOnScreen()
     const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!
     // §1.4/§1.6: the run is pinned to the revision on screen and carries one start key per attempt.
     expect(JSON.parse(String(post[1]!.body))).toEqual({ teamPath: '/teams/demo.yaml', prompt: 'Summarise the repo', expectedRevision: 'rev-7', startKey: expect.any(String) })
-    expect(screen.getByLabelText(/Prompt, original user request/)).toHaveTextContent('Summarise the repo')
-    expect(screen.getByRole('status', { name: /Run 01, queued/ })).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: 'Lifecycle summary' })).toHaveTextContent('Live')
-    expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
-    expect(window.location.search).toContain('run=run-1')
+    expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Details of this piece of work' })).toBeInTheDocument()
+    expect(screen.queryByRole('application')).not.toBeInTheDocument()
   })
 
   // TNG89 §1.2: "⌘↵ — submit — from anywhere in the app, including a focused canvas." The
@@ -596,7 +570,8 @@ describe('Workspace', () => {
     fireEvent.keyDown(canvas, { key: 'Enter' })
     expect(renamed).toHaveBeenCalledOnce()
     fireEvent.keyDown(canvas, { key: 'Enter', metaKey: true })
-    if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
+    await runOnScreen()
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
     expect(renamed).toHaveBeenCalledOnce()
     window.removeEventListener('loomwatch:rename-agent', renamed)
     documentState.nodes[0].selected = false
@@ -621,7 +596,7 @@ describe('Workspace', () => {
     expect(screen.queryByRole('button', { name: 'Saving…' })).not.toBeInTheDocument()
     expect(screen.queryByText(/Saving demo.yaml/)).not.toBeInTheDocument()
     await act(async () => { release(new Response(JSON.stringify({ ...runRecord, status: 'queued' }), { status: 202 })) })
-    if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
+    await runOnScreen()
   })
 
   // §1.6: "A connection loss during submit never retries blind." The re-press is the same attempt,
@@ -671,8 +646,10 @@ describe('Workspace', () => {
     renderWorkspace()
     fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
     fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
-    if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
+    await runOnScreen()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // The request went into that run, so the box it was typed in is empty again.
+    fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('')
   })
 
@@ -691,7 +668,7 @@ describe('Workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
     expect(await screen.findByRole('alert')).toHaveTextContent('changed before the run could start')
     await waitFor(() => expect(documentState.checkDiskRevision).toHaveBeenCalled())
-    expect(screen.queryByRole('application', { name: 'Run graph' })).not.toBeInTheDocument()
+    expect(window.location.search).not.toContain('run=')
     expect(screen.getByLabelText('What should the team do?')).toHaveValue('Summarise the repo')
   })
 
@@ -706,50 +683,6 @@ describe('Workspace', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be saved')
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
     Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean' })
-  })
-
-  it('projects archived evidence into owner-tagged cards, live task rows and the response', async () => {
-    sessionState.events = [
-      event(0, 'process', { phase: 'spawned', pid: 1 }),
-      event(1, 'message', { role: 'user', content: { type: 'text', text: '## Your assigned role\nResearch\n\n## Task\nSummarise the repo' } }),
-      event(2, 'tool_call', { callId: 'c1', title: '$ cargo test', name: 'terminal', toolKind: 'execute', status: 'in_progress' }),
-      event(3, 'tool_update', { callId: 'c1', status: 'completed' }),
-      event(4, 'message', { role: 'agent', content: { type: 'text', text: 'Lead done.' } }),
-      event(5, 'turn_end', { stopReason: 'end_turn' }),
-      event(6, 'process', { phase: 'exited', exitCode: 0 }),
-      event(7, 'process', { phase: 'spawned', pid: 2 }, 'reviewer'),
-      event(8, 'message', { role: 'agent', content: { type: 'text', text: 'Looks good.' } }, 'reviewer'),
-    ]
-    renderWorkspace('run-1')
-    // TNG89 §15.2.3: evidence folds to a count on the agent card and fans for one agent at a
-    // time, so the cards are a disclosure now — the count, its owner and the fan are what the
-    // canvas offers first. Everything below this line is what §12 row 28 still requires of a
-    // fanned card, unchanged.
-    const fan = await screen.findByRole('button', { name: '1 event from Researcher · lead; fan its evidence' })
-    expect(fan).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('button', { name: /Inspect command: \$ cargo test/ })).not.toBeInTheDocument()
-    fireEvent.click(fan)
-    await waitFor(() => expect(screen.getByRole('button', { name: /Inspect command: \$ cargo test, recorded, Researcher · lead, succeeded, event 1/ })).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /fold its evidence/ })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByLabelText(/Researcher, Researcher · lead, DONE, Reply delivered/)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Reviewer, Reviewer · final answer, STREAMING/)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Output response from Reviewer, Streaming/)).toHaveTextContent('Looks good.')
-    expect(screen.getByLabelText(/Prompt, original user request/)).toHaveTextContent('Summarise the repo')
-    expect(screen.getByLabelText(/Inspect command: \$ cargo test/)).not.toHaveClass('nodrag')
-
-    act(() => flowRuntime.onNodesChange?.([{ id: 'researcher:c1', type: 'dimensions', dimensions: { width: 190, height: 68 } }]))
-    expect(screen.getByLabelText(/Inspect command: \$ cargo test/).closest('[data-node]')).toHaveAttribute('data-measured', '190x68')
-
-    const shell = document.querySelector('.lw-shell')!
-    act(() => flowRuntime.onNodeDragStart?.(new MouseEvent('mousedown'), { id: 'c1' }))
-    expect(shell).toHaveClass('node-dragging')
-    act(() => flowRuntime.onNodeDragStop?.(new MouseEvent('mouseup'), { id: 'c1', position: { x: 0, y: 0 } }))
-    expect(shell).not.toHaveClass('node-dragging')
-
-    fireEvent.click(screen.getByRole('button', { name: /Inspect command: \$ cargo test, recorded/ }))
-    expect(screen.getByRole('complementary', { name: /cargo test/ })).toHaveTextContent('Researcher · lead')
-    fireEvent.click(screen.getByRole('button', { name: 'Close activity details' }))
-    expect(screen.queryByRole('complementary', { name: /cargo test/ })).not.toBeInTheDocument()
   })
 
   // A newcomer never meets the team file's raw YAML: there is no Show YAML in the team menu or
@@ -988,24 +921,27 @@ describe('Workspace', () => {
     Object.assign(documentState, { nodes: originalNodes, isValid: true, documentChipState: 'clean', fieldProblemsByAgent: new Map() })
   })
 
-  it('cancels a live run through the API', async () => {
+  // The chat's piece of work is where a run is stopped.
+  it('cancels a live run through the API from its piece in the chat', async () => {
+    const cancelled: string[] = []
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.endsWith('/cancel')) return new Response(JSON.stringify({ ...runRecord, status: 'cancelled', finishedAt: at(9) }), { status: 200 })
+      if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: runRecord, request: null, notes: [] }] }), { status: 200 })
+      if (url.endsWith('/cancel')) { cancelled.push(url); return new Response(JSON.stringify({ ...runRecord, status: 'cancelled', finishedAt: at(9) }), { status: 200 }) }
       if (url.includes('/checkpoints')) return new Response(JSON.stringify([]), { status: 200 })
       if (url.includes('/api/runs/run-1')) return new Response(JSON.stringify(runRecord), { status: 200 })
       return new Response(JSON.stringify({ error: `unexpected ${url} ${init?.method ?? ''}` }), { status: 404 })
     })
     sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
     renderWorkspace('run-1')
-    await waitFor(() => expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument())
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Stop/ })) })
-    await waitFor(() => expect(screen.getByRole('group', { name: 'Lifecycle summary' })).toHaveTextContent('cancelled'))
-    expect(screen.getByRole('button', { name: /Retry/ })).toBeInTheDocument()
+    const chat = screen.getByRole('region', { name: /chat$/ })
+    const stop = await within(chat).findByRole('button', { name: 'Stop' })
+    await act(async () => { fireEvent.click(stop) })
+    await waitFor(() => expect(cancelled).toEqual(['/api/runs/run-1/cancel']))
   })
   // ---- Canvas A: one canvas (TNG89 §15, acceptance rows 40–45) --------------------------
   //
-  // The rule under test throughout: the configured graph never moves; a run is drawn onto it.
+  // The rule under test throughout: the configured graph never moves.
 
   const nodeKinds = (container: HTMLElement) => [...container.querySelectorAll('[data-node]')].map((node) => node.getAttribute('data-node'))
   const positionOf = (name: string) => screen.getByText(name, { selector: '.node-name' }).closest('[data-node]')!.getAttribute('data-position')
@@ -1020,28 +956,19 @@ describe('Workspace', () => {
 
       fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
       fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
-      if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
+      await runOnScreen()
+      fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
 
       expect(positionOf('Researcher')).toBe('0x0')
       expect(positionOf('Reviewer')).toBe('300x0')
     })
 
-    it('docks the Prompt first and the Output last, with and without a run (rows 23, 24, 42)', async () => {
+    it('docks the Output last, one gutter right of the stage that answers (rows 24, 42)', () => {
       const { container } = renderWorkspace()
       expect(nodeKinds(container)[0]).toBe('agent')
       expect(nodeKinds(container).at(-1)).toBe('response')
-
-      fireEvent.change(screen.getByLabelText('What should the team do?'), { target: { value: 'Summarise the repo' } })
-      fireEvent.click(screen.getByRole('button', { name: RUN_BUTTON }))
-      if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
-
-      const kinds = nodeKinds(container)
-      expect(kinds[0]).toBe('prompt')
-      expect(kinds.at(-1)).toBe('response')
-      // Docked, not stacked: the anchors are one gutter either side of the agents the operator
-      // placed, computed from those positions rather than from a layout of their own.
-      expect(screen.getByLabelText(/Prompt, original user request/).closest('[data-node]')).toHaveAttribute('data-position', '-460x0')
-      expect(screen.getByLabelText(/Output response|Output,/).closest('[data-node]')).toHaveAttribute('data-position', '760x0')
+      // Docked, not stacked: computed from the positions the operator placed, not a layout of its own.
+      expect(screen.getByLabelText('Output, No run yet.').closest('[data-node]')).toHaveAttribute('data-position', '760x0')
     })
 
     it('opens the Run request from Build without adding a prompt node to the canvas', () => {
@@ -1139,87 +1066,13 @@ describe('Workspace', () => {
       }
     })
 
-    it('fans one agent at a time, folding the other, and keeps every card exact (row 43)', async () => {
-      sessionState.events = [
-        event(0, 'process', { phase: 'spawned', pid: 1 }),
-        event(1, 'tool_call', { callId: 'c1', title: '$ cargo test', name: 'terminal', toolKind: 'execute', status: 'in_progress' }),
-        event(2, 'tool_update', { callId: 'c1', status: 'completed' }),
-        event(3, 'message', { role: 'agent', content: { type: 'text', text: 'Lead done.' } }),
-        event(4, 'tool_call', { callId: 'c2', title: '$ cargo clippy', name: 'terminal', toolKind: 'execute', status: 'in_progress' }, 'reviewer'),
-        event(5, 'tool_update', { callId: 'c2', status: 'completed' }, 'reviewer'),
-      ]
-      const { container } = renderWorkspace('run-1')
-      const lead = await screen.findByRole('button', { name: '1 event from Researcher · lead; fan its evidence' })
-      const responder = screen.getByRole('button', { name: '1 event from Reviewer · final answer; fan its evidence' })
-      // Folded is the default: the count is on the card and no evidence node is rendered.
-      expect(container.querySelectorAll('[data-node="evidence"]')).toHaveLength(0)
-
-      fireEvent.click(lead)
-      expect(container.querySelectorAll('[data-node="evidence"]')).toHaveLength(1)
-      // Row 28 / §15.3: owner, ordinal, time and state are properties of the record, so they are
-      // unchanged by being fanned.
-      expect(screen.getByRole('button', { name: 'Inspect command: $ cargo test, recorded, Researcher · lead, succeeded, event 1, 01.0s' })).toBeInTheDocument()
-
-      fireEvent.click(responder)
-      expect(container.querySelectorAll('[data-node="evidence"]')).toHaveLength(1)
-      expect(screen.queryByRole('button', { name: /cargo test/ })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Inspect command: $ cargo clippy, recorded, Reviewer · final answer, succeeded, event 2, 04.0s' })).toBeInTheDocument()
-
-      // Esc folds the fan; it does not clear the run.
-      fireEvent.keyDown(window, { key: 'Escape' })
-      expect(container.querySelectorAll('[data-node="evidence"]')).toHaveLength(0)
-      expect(screen.getByRole('application', { name: 'Run graph' })).toBeInTheDocument()
-    })
-
-    // The replay bar's Clear did what the Build tab does (ADR 0043).
-    it('returns to Build from the full trace through the Build tab', async () => {
-      sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
-      const { container } = renderWorkspace('run-1')
-      await waitFor(() => expect(screen.getByRole('group', { name: 'Lifecycle summary' })).toBeInTheDocument())
-      expect(container.querySelector('.lw-shell')).toHaveClass('run-shown')
-
-      expect(screen.queryByRole('button', { name: 'Clear this run and show the design alone' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Back to output' })).not.toBeInTheDocument()
-      fireEvent.click(screen.getByRole('button', { name: 'Workflow' }))
-
-      expect(screen.getByRole('application', { name: 'Team canvas' })).toBeInTheDocument()
-      expect(container.querySelector('.lw-shell')).not.toHaveClass('run-shown')
-      expect(container.querySelector('.lw-shell')).not.toHaveClass('compose-view')
-      // The design is intact, and the two docked nodes are back to their pre-run state.
-      expect(positionOf('Researcher')).toBe('0x0')
-      expect(nodeKinds(container)).not.toContain('run')
-      expect(screen.queryByRole('button', { name: /Prompt, your draft/ })).not.toBeInTheDocument()
-      expect(window.location.search).not.toContain('run=')
-
-      fireEvent.keyDown(window, { key: 'k', metaKey: true })
-      expect(screen.queryByRole('button', { name: /Back to the team canvas/ })).not.toBeInTheDocument()
-    })
-
-    it('treats a drag during a run as the edit it is, not as view state (row 41)', async () => {
-      sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
-      renderWorkspace('run-1')
-      if (!screen.queryByRole('application', { name: 'Run graph' })) await openRunTrace()
-      documentState.onNodesChange.mockClear()
-
-      const change = { id: 'researcher', type: 'position', position: { x: 64, y: 24 }, dragging: true }
-      act(() => flowRuntime.onNodeDragStart?.(new MouseEvent('mousedown'), { id: 'researcher' }))
-      act(() => flowRuntime.onNodesChange?.([change]))
-      act(() => flowRuntime.onNodeDragStop?.(new MouseEvent('mouseup'), { id: 'researcher', position: { x: 64, y: 24 } }))
-
-      // The document hears the drag, exactly as it does outside a run — the old run branch
-      // swallowed it into local `runPositions` instead.
-      expect(documentState.onNodesChange).toHaveBeenCalledWith([change])
-      expect(documentState.capturePositionHistory).toHaveBeenCalled()
-      expect(documentState.settleNodeCollision).toHaveBeenCalledWith('researcher', { x: 64, y: 24 })
-    })
-
     it('keeps the output and capabilities reader below 768 px', async () => {
       const width = window.innerWidth
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: 420, writable: true })
       sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
-      renderWorkspace('run-1', 'delivery')
+      renderWorkspace('run-1')
       await waitFor(() => expect(screen.getByRole('main', { name: 'Run workspace' })).toBeInTheDocument())
-      expect(screen.queryByRole('application', { name: 'Run graph' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('application')).not.toBeInTheDocument()
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: width, writable: true })
     })
 
@@ -1233,13 +1086,19 @@ describe('Workspace', () => {
         return new Response(JSON.stringify({ error: `unexpected ${url}` }), { status: 404 })
       })
       sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
-      renderWorkspace('run-1')
-
-      const chips = await screen.findAllByRole('button', { name: 'What it was given' })
-      fireEvent.click(chips[0])
-      const panel = await screen.findByRole('region', { name: /What Researcher was given/ })
-      expect(panel).toHaveTextContent('no preceding stage')
-      expect(panel).toHaveTextContent('1 entry · pinned')
+      // jsdom has no modal dialogs; the panel opens as one over Details.
+      const showModal = HTMLDialogElement.prototype.showModal
+      HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
+      try {
+        renderWorkspace('run-1')
+        const routes = await screen.findAllByRole('button', { name: 'What it received' })
+        fireEvent.click(routes[0])
+        const panel = await screen.findByRole('region', { name: /What Researcher was given/ })
+        expect(panel).toHaveTextContent('no preceding stage')
+        expect(panel).toHaveTextContent('1 entry · pinned')
+      } finally {
+        HTMLDialogElement.prototype.showModal = showModal
+      }
     })
   })
   // ---- ADR 0016: positions in the sidecar, contract in the team file -------------------------
@@ -1362,33 +1221,6 @@ describe('Workspace', () => {
 })
 
 
-it.each(['review_stop', 'question'] as const)('answers a %s from the live workspace and shows Attention without starting another run', async (kind) => {
-  const waiting = { node: 'reviewer', name: 'Reviewer', kind, since: at(4), question: 'Approve the smaller budget?', park: 'reloadable', parkNote: 'Researcher is parked', handoverFrom: kind === 'review_stop' ? 'researcher' : null, sendBackAvailable: kind === 'review_stop', context: 'The budget is 20.', questionId: 'q-1' }
-  const fallback = globalThis.fetch
-  const calls: Array<{ url: string; body: unknown }> = []
-  let answered = false
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    if (init?.method === 'POST') calls.push({ url, body: JSON.parse(String(init.body)) })
-    if (url === '/api/runs/run-1/answers') {
-      answered = true
-      return new Response(JSON.stringify({ ...runRecord, waitingOn: null }), { status: 202 })
-    }
-    if (url === '/api/runs/run-1') return new Response(JSON.stringify({ ...runRecord, waitingOn: answered ? null : waiting }), { status: 200 })
-    return fallback(input, init)
-  }))
-  renderWorkspace('run-1')
-  // A review stop's box is the operator's note; a question's is the answer to whoever asked.
-  const label = kind === 'review_stop' ? 'Your note to the team' : 'Answer to Reviewer'
-  const textbox = await screen.findByLabelText(label)
-  expect(screen.getAllByText(/waiting for you/i).length).toBeGreaterThan(0)
-  expect(screen.getAllByText('Approve the smaller budget?').length).toBeGreaterThan(0)
-  fireEvent.change(textbox, { target: { value: 'Proceed with the smaller budget.' } })
-  fireEvent.keyDown(textbox, { key: 'Enter', metaKey: true })
-  await waitFor(() => expect(calls).toEqual([{ url: '/api/runs/run-1/answers', body: { node: 'reviewer', text: 'Proceed with the smaller budget.' } }]))
-  await waitFor(() => expect(screen.queryByLabelText(label)).not.toBeInTheDocument())
-})
-
 it('organizes execution and resources without changing the team, and restores the old arrangement', async () => {
   composerLayoutState.nodes = [{ id: 'knowledge:source', kind: 'knowledge', name: 'source', source: 'local', position: { x: -400, y: -200 } }]
   composerLayoutState.edges = [{ from: 'researcher', to: 'knowledge:source' }]
@@ -1415,29 +1247,10 @@ it('organizes execution and resources without changing the team, and restores th
   expect(documentState.onEdgesChange).not.toHaveBeenCalled()
 })
 
-// One canvas anatomy: Full trace draws the team the operator composed, so it draws the Build
-// cards. Before this, Run had a second agent card of its own, and a run looked like a different
-// application from the team that produced it.
-describe('the Full trace canvas and the Build canvas draw the same cards', () => {
+describe('the Workflow canvas cards', () => {
   const agentCards = () => [...document.querySelectorAll('[data-node="agent"] > *')].map((card) => card.className)
 
-  it('draws Build agent cards on Full trace, carrying the run state the trace exists to show', async () => {
-    composerLayoutState.nodes = [{ id: 'skill:design', kind: 'skill', name: 'claude-design', source: 'Claude Code', position: { x: 0, y: 240 } }]
-    composerLayoutState.edges = [{ from: 'researcher', to: 'skill:design' }]
-    sessionState.events = [
-      event(0, 'process', { phase: 'spawned', pid: 1 }),
-      event(1, 'message', { role: 'agent', content: { type: 'text', text: 'Lead done.' } }),
-    ]
-    renderWorkspace('run-1')
-    await waitFor(() => expect(agentCards()).toHaveLength(2))
-    for (const card of agentCards()) expect(card).toContain('build-node')
-    // The run's own facts are on that card, not on a card of Run's own.
-    expect(document.querySelector('.build-node.has-run .build-node-task')).toHaveTextContent('Researcher · lead')
-    expect(document.querySelector('[data-node="capability"] > *')).toHaveClass('build-node')
-    expect(document.querySelector('.lw-shell')).toHaveClass('build-graph')
-  })
-
-  it('draws the same cards on the Build canvas, with no run state to claim', async () => {
+  it('draws the Build cards, with no run state to claim', async () => {
     composerLayoutState.nodes = []
     composerLayoutState.edges = []
     renderWorkspace()
@@ -1552,20 +1365,12 @@ describe('an Attention alert routes to the repair and to the record', () => {
     expect(screen.queryByRole('button', { name: /Fix in Workflow/ })).not.toBeInTheDocument()
   })
 
-  it('keeps the record reachable: "Show evidence" opens the failing call', async () => {
+  it('keeps the record reachable: "Show evidence" opens the failing call, without the agent panel over it', async () => {
     sessionState.events = busFailure()
     renderWorkspace('run-1')
     fireEvent.click(await screen.findByRole('button', { name: 'Show evidence' }))
     await waitFor(() => expect(screen.getByRole('complementary', { name: 'Researcher couldn’t ask market-researcher' })).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /fold its evidence/ })).toBeInTheDocument()
-  })
-
-  it('opens the same call from the delivery lane, without opening the node inspector over it', async () => {
-    sessionState.events = busFailure()
-    renderWorkspace('run-1', 'delivery')
-    fireEvent.click(await screen.findByRole('button', { name: 'Show evidence' }))
-    await waitFor(() => expect(screen.getByRole('complementary', { name: 'Researcher couldn’t ask market-researcher' })).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /Researcher/, pressed: true })).toHaveClass('delivery-stage-select')
+    expect(screen.getByRole('button', { name: /Researcher/, pressed: true })).toHaveClass('flow-who')
     expect(screen.queryByRole('region', { name: 'Inspector' })).not.toBeInTheDocument()
   })
 })
@@ -1630,7 +1435,7 @@ describe('switching workspace tab closes the node inspector', () => {
   it('leaves the delivery lane’s own "Agent details" route working', async () => {
     const restore = selectionBackedByState(null)
     sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
-    renderWorkspace('run-1', 'delivery')
+    renderWorkspace('run-1')
     fireEvent.click(await screen.findByRole('button', { name: 'Agent details' }))
     await waitFor(() => expect(nodePanel()).toBeInTheDocument())
     restore()

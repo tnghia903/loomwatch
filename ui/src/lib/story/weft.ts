@@ -3,6 +3,7 @@ import { nameWithHelpers } from '../chat/helpers'
 import { baseName } from '../files/paths'
 import { commandName, commandOf } from './commands'
 import { failuresOf, mendOf, skillName, workCount, type MendHow, type WorkCount } from './reads'
+import { isProviderCode, isWebSearch, searchWords, webPageOf } from './webCalls'
 
 /**
  * A run as woven cloth, for the weft timeline.
@@ -102,14 +103,25 @@ export function shortName(name: string): string {
 }
 
 /** One recorded call as a sentence, in the words a person would use for that kind of call. */
-export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'> & Partial<Pick<Evidence, 'rawInput' | 'declined'>>): string {
+export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'> & Partial<Pick<Evidence, 'rawInput' | 'declined' | 'toolKind' | 'content' | 'rawOutput'>>): string {
   const what = shortName(item.name)
   const failed = item.status === 'failed' || item.status === 'rejected'
   const quoted = what ? `“${what}”` : 'something'
   switch (item.kind) {
     case 'delegation': return item.target ? `${agent} ${item.relation} ${item.target}${failed ? ', which failed' : ''}.` : `${agent} ${item.relation}${failed ? ', which failed' : ''}.`
     // The operator's own answer is filed as a source of the next stage, but nobody "opened" it.
-    case 'source': return item.relation === 'directed' ? `${agent} answered.` : failed ? `${agent} couldn’t open ${what || 'a source'}.` : `${agent} opened ${what || 'a source'}.`
+    case 'source': {
+      if (item.relation === 'directed') return `${agent} answered.`
+      // The web as the stage cards read it (lib/story/webCalls.ts): an older record titled a search
+      // "Search the web: the web", which read as "opened the web: the web".
+      if (isProviderCode(item)) return `${agent} ran a program to search the web.`
+      if (isWebSearch(item)) {
+        const words = searchWords(item)
+        return words ? `${agent} searched the web for “${words}”.` : `${agent} searched the web.`
+      }
+      const page = webPageOf(item)?.replace(/^https?:\/\/(www\.)?/, '') ?? what
+      return failed ? `${agent} couldn’t open ${page || 'a source'}.` : `${agent} opened ${page || 'a source'}.`
+    }
     case 'search': return failed ? `${agent}’s search for ${quoted} failed.` : `${agent} searched for ${quoted}.`
     case 'file': {
       const verb = item.relation.replace(/ file$/, '')

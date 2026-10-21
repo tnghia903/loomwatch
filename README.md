@@ -773,8 +773,8 @@ learn the interface without calling a model provider.
 </details>
 
 Everything the team has done stays in its chat: scroll up, or search it with the magnifier at the
-top. **Details** on any piece opens its stages, timeline and record beside the chat, and **Full
-trace** there has the replay slider. To change one step's work, write **@** and that agent's name
+top. **Details** on any piece opens its stages, timeline and record beside the chat; drag across
+the timeline to replay what happened. To change one step's work, write **@** and that agent's name
 with what should change; under its new version, **Continue with the team** runs the steps after it.
 
 ## Run your own agents
@@ -889,9 +889,8 @@ Choose **Team memory** from the ☰ menu to add shared instructions or reference
 Select an agent in Workflow to see its **Context**: its place in the team (for example "Step 2 of 3 ·
 after Researcher · hands its work to Writer"), the team Brief, and every skill, folder, file and
 tool connected to it, each with an × to disconnect it. In a team of two or more, each agent is told
-its place at the start of every run. In the Run view, an agent's **What this agent received** link
-(**What it was given** on its card in Full trace) shows what it was supplied when its session
-started.
+its place at the start of every run. In a run's **Details**, an agent's **What it received** link
+shows what it was supplied when its session started.
 
 For a review checkpoint in a pipeline, add a **You** step between two agents and say what to look
 at in its **What to check** box. **Approve** passes the work on (it says **Continue** once you

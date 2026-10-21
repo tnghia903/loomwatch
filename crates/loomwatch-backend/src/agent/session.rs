@@ -936,22 +936,13 @@ impl Session {
                 .and_then(Value::as_str)
                 .and_then(|text| serde_json::from_str(text).ok())
                 .unwrap_or_else(|| json!({}));
-            let (title, kind) = if name.ends_with("web_fetch") {
-                let url = input.get("url").and_then(Value::as_str).unwrap_or("a page");
-                (format!("Read {url}"), ToolKind::Fetch)
-            } else {
-                let query = input
-                    .get("query")
-                    .and_then(Value::as_str)
-                    .unwrap_or("the web");
-                (format!("Search the web: {query}"), ToolKind::Fetch)
-            };
-            self.emit(events::tool_call(&id, &title, kind, &input, &[]))
-                .await?;
             let result = call
                 .get("result")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            let (title, kind) = server_tool_title(name, &input, result);
+            self.emit(events::tool_call(&id, &title, kind, &input, &[]))
+                .await?;
             self.emit(events::tool_update(
                 &id,
                 ToolStatus::Completed,
@@ -1887,6 +1878,54 @@ fn provider_effort(effort: Option<&str>) -> Option<&'static str> {
         "max" => Some("max"),
         "ultra" => Some("ultra"),
         _ => None,
+    }
+}
+
+/// What a call the provider ran on its own side is called in the run record, and its kind.
+///
+/// Claude's newer web tools write and run code to search and read, so a call can be code, or a
+/// search or page read that code started. One started by code can come with no input, and the page
+/// it read is then known only from its result ("Read <address>"). Code is said as code, never as a
+/// search: it ran on the provider's computer, not this one, so it is not a command either.
+fn server_tool_title(name: &str, input: &Value, result: &str) -> (String, ToolKind) {
+    let text = |key: &str| {
+        input
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    if name.contains("code_execution") || text("code").is_some() {
+        let line = text("code")
+            .or_else(|| text("command"))
+            .and_then(|code| code.lines().map(str::trim).find(|line| !line.is_empty()))
+            .map(|line| {
+                let short: String = line.chars().take(80).collect();
+                if short.len() < line.len() {
+                    format!("{short}…")
+                } else {
+                    short
+                }
+            });
+        return match line {
+            Some(line) => (format!("Run code: {line}"), ToolKind::Other),
+            None => ("Run code".to_owned(), ToolKind::Other),
+        };
+    }
+    if name.ends_with("web_fetch") {
+        let read = result
+            .lines()
+            .next()
+            .and_then(|line| line.strip_prefix("Read "))
+            .map(str::trim);
+        return match text("url").or(read) {
+            Some(url) => (format!("Read {url}"), ToolKind::Fetch),
+            None => ("Read a page".to_owned(), ToolKind::Fetch),
+        };
+    }
+    match text("query") {
+        Some(query) => (format!("Search the web: {query}"), ToolKind::Fetch),
+        None => ("Search the web".to_owned(), ToolKind::Fetch),
     }
 }
 

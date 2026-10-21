@@ -1,41 +1,42 @@
-import { CapabilityGraph } from './CapabilityGraph'
-import { SuppliedInstructions } from './SuppliedInstructions'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ArrowRight,
-  FileText,
-  Network,
-  Search,
-  ShieldCheck,
-  Wrench,
-  Code2,
-  CheckCircle2,
-} from 'lucide-react'
-import {
-  capabilityEvidence,
-  type RunCapability,
-} from '../../lib/runs/capabilityEvidence'
-import { formatOffset } from '../../lib/watch/events'
+import { ArrowRight } from 'lucide-react'
+import { capabilityEvidence, hadSkill } from '../../lib/runs/capabilityEvidence'
+import type { Evidence, RunEvent, RunPhase, RunProjection } from '../../lib/watch/events'
+import { cardActivity, linkedIn, asUse, USE_NAMES, WEB_KINDS, type Use, type UseKind } from '../../lib/watch/cardActivity'
+import { useNow } from '../../lib/useNow'
 import type { AllowSwitch } from '../../lib/team-file/types'
-import type { RunColumnProps } from './RunColumn'
+import { SkillList, UseList, WebList, type FigureGlow, type SkillSummary } from './StageActivity'
+import { FlowLinkButton, TeamFlow, type FlowStage } from './TeamFlow'
+import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
 import { buildReceipt } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
 import { WeftBar } from './WeftBar'
 import type { WeftKnot } from '../../lib/story/weft'
 import { markLabel, markState } from '../../lib/story/mark'
-import { AgentPortrait } from '../agents/AvatarFace'
+import { skillName } from '../../lib/story/reads'
 import type { RunRecord } from '../../lib/runs/client'
 import { modelLabelForAgent } from '../../lib/models'
 import { useRunQuests } from './useRunQuests'
 
-export interface DeliveryLaneProps extends RunColumnProps {
+export interface DeliveryLaneProps {
+  prompt: string
+  attempt: number
+  phase: RunPhase
+  elapsed: string
+  mode: 'live' | 'replay'
+  agents: AgentNode[]
+  evidenceByAgent: ReadonlyMap<string, Evidence[]>
+  /** The team's answer so far, and the agent that wrote it. */
+  output: { text: string; producer: string | null }
+  projection: RunProjection
+  onInspectEvidence: (id: string) => void
+  onSelectAgent: (id: string) => void
   /** The model each agent runs on, in words, by agent id. */
   harnessLabels?: ReadonlyMap<string, string>
   planned?: boolean
   pipeline: boolean
   linearPipeline?: boolean
-  onTrace: () => void
   /** ADR 0037: allow what a refused receipt line names, for that agent's next runs. */
   onAllow?: (agentId: string, key: AllowSwitch) => void
   /**
@@ -51,19 +52,24 @@ export interface DeliveryLaneProps extends RunColumnProps {
   onRevealMessage?: (messageId: string) => void
   /** The run's record, for the quests a finished run earned (lib/quests). */
   record?: RunRecord | null
+  /** The run's events up to the replay cursor, for what each figure acts out while it works. */
+  events?: readonly RunEvent[]
 }
 
-/**
- * How each route is described to the operator, in the daemon's own terms (ADR 0021).
- *
- * `native` deliberately keeps the skill's text out of the prompt, so this must not say "loaded
- * into prompt" for it — that would claim something the run did not do.
- */
-const ROUTE_SENTENCE: Record<'native' | 'inline' | 'blocked', string> = {
-  native: 'Native — the bundle sits in the agent’s skills folder and the prompt points at it.',
-  inline: 'In-prompt, translated — it could not be relied on to run as written, so its body was inlined with a mapping note.',
-  blocked: 'Blocked — this run had no skills folder for it.',
+/** The glow a stage's figure wears for its state. Waiting on you is gold, not work. */
+function glowOf(status: string | undefined, waiting: boolean): FigureGlow {
+  if (waiting) return 'waiting'
+  if (status === 'running' || status === 'starting') return 'working'
+  if (status === 'succeeded') return 'done'
+  if (status === 'failed') return 'failed'
+  return null
 }
+
+const NO_EVENTS: readonly RunEvent[] = []
+/** How long after work passes on, or is sent back, the line between the cards shows it moving. */
+const PASS_MS = 2400
+/** How long a skill's card stays lit after its agent opens it. */
+const OPENING_MS = 1600
 
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
@@ -92,23 +98,16 @@ export function DeliveryLane({
   harnessLabels = new Map(),
   onInspectEvidence,
   onSelectAgent,
-  onTrace,
   onAllow,
   focusAgentId = null,
   onRevealMessage,
   record = null,
+  events = NO_EVENTS,
 }: DeliveryLaneProps) {
   const [selectedId, setSelectedId] = useState<string | null>(output.producer)
-  const [filter, setFilter] = useState<'all' | 'skill' | 'tool'>('all')
-  const [query, setQuery] = useState('')
-  const [layout, setLayout] = useState<'graph' | 'list'>('graph')
-  const [scope, setScope] = useState<'agent' | 'team'>('agent')
-  const [receiptSelection, setReceipt] = useState<RunCapability | null>(null)
-  const [sourceAgent, setSourceAgent] = useState<string | null>(null)
-  const sourceDialog = useRef<HTMLDialogElement>(null)
-  useEffect(() => { if (sourceAgent) sourceDialog.current?.showModal() }, [sourceAgent])
-  const receiptBack = useRef<HTMLButtonElement>(null)
-  const capabilityButtons = useRef(new Map<string, HTMLButtonElement>())
+  // The one list open from a stage's tray, and the skill whose receipt is open in it.
+  const [openMark, setOpenMark] = useState<{ agentId: string; kind: UseKind } | null>(null)
+  const [openSkill, setOpenSkill] = useState<string | null>(null)
   const { inspectHandover, toggleProvenance } =
     useCanvasActions()
   const selected =
@@ -133,52 +132,22 @@ export function DeliveryLane({
       )?.text ?? null
   const selfReportFor = (agentId: string | null) =>
     projection.agents.find((agent) => agent.id === agentId)?.skillSelfReport ?? null
-  const teamCapabilities = useMemo(
-    () =>
-      agents.flatMap((node) =>
-        capabilityEvidence(
-          node.data.agent,
-          evidenceByAgent.get(node.id) ?? [],
-          snapshots.get(node.id),
-        ).map((item) => ({
-          ...item,
-          id: `${node.id}:${item.id}`,
-          agentId: node.id,
-          agentName: node.data.agent.name,
-        })),
-      ),
-    [agents, evidenceByAgent, snapshots],
-  )
-  const capabilities =
-    scope === 'team'
-      ? teamCapabilities
-      : teamCapabilities.filter((item) => item.agentId === selected?.id)
-  const receipt =
-    capabilities.find((item) => item.id === receiptSelection?.id) ?? null
-  const receiptId = receipt?.id
-  useEffect(() => {
-    if (receiptId) receiptBack.current?.focus()
-  }, [receiptId])
-  const closeReceipt = () => {
-    setReceipt(null)
-    requestAnimationFrame(() => {
-      if (receiptId) capabilityButtons.current.get(receiptId)?.focus()
-    })
-  }
-  const visible = capabilities.filter(
-    (item) =>
-      (filter === 'all' || item.kind === filter) &&
-      `${item.name} ${item.agentName}`.toLowerCase().includes(query.toLowerCase()),
-  )
-  const requirements = teamCapabilities.filter((item) => item.required)
-  const reads = requirements.filter(
-    (item) => item.state === 'read' || item.state === 'loaded',
-  ).length
-  const select = (id: string) => {
-    setSelectedId(id)
-    setScope('agent')
-    setReceipt(null)
-    setQuery('')
+  // Every agent's requirements and instruction fingerprints were archived with this run.
+  const fingerprinted = agents.every((node) => snapshots.has(node.id) && snapshots.get(node.id) !== undefined)
+  // Each stage's skills: what it was required to use and what it opened, and what the run shows of each.
+  const skillsByAgent = useMemo(() => new Map(agents.map((node): [string, SkillSummary] => {
+    const skills = capabilityEvidence(node.data.agent, evidenceByAgent.get(node.id) ?? [], snapshots.get(node.id)).filter((item) => item.kind === 'skill')
+    const required = skills.filter((item) => item.required)
+    return [node.id, {
+      skills,
+      required: required.length,
+      met: required.filter(hadSkill).length,
+    }]
+  })), [agents, evidenceByAgent, snapshots])
+  const select = (id: string) => setSelectedId(id)
+  const openFrom = (agentId: string, kind: UseKind | null) => {
+    setOpenMark(kind ? { agentId, kind } : null)
+    setOpenSkill(null)
   }
   // The loom views of this run: the timeline (who worked when) and, once it ends, the receipt.
   const weftOrder = useMemo(() => agents.map((node) => ({ id: node.id, name: node.data.agent.name, operator: node.data.agent.kind === 'operator', status: node.data.runtime?.status, taskState: node.data.runtime?.taskState })), [agents])
@@ -216,15 +185,21 @@ export function DeliveryLane({
   const [honouredFocus, setHonouredFocus] = useState<string | null>(focusAgentId)
   if (focusAgentId !== honouredFocus) {
     setHonouredFocus(focusAgentId)
-    if (focusAgentId) {
-      setSelectedId(focusAgentId)
-      setScope('agent')
-      setReceipt(null)
-      setQuery('')
-    }
+    if (focusAgentId) setSelectedId(focusAgentId)
   }
   // Stage motion follows the session, not a recorded status: a replay never shows work in motion.
   const live = mode === 'live' && !planned
+  // While the run is watched, what each figure acts out moves with the clock between events too.
+  const now = useNow(live)
+  // The pages the team's answer links, so the web list can mark the ones it rests on.
+  const linked = useMemo(() => linkedIn(output.text ?? ''), [output.text])
+  // The stage whose tray list is open under the row.
+  const openStage = openMark ? agents.find((node) => node.id === openMark.agentId) ?? null : null
+  // The team has answered: its answer's card says so, and where to read it.
+  const answered = Boolean(output.text?.trim())
+  // The answer just came in from the stage that wrote it: the work slides onto the answer's card.
+  const lastEnd = useMemo(() => [...events].reverse().find((event) => event.kind === 'turn_end' && event.agentId === output.producer)?.ts, [events, output.producer])
+  const answerPass = live && answered && lastEnd !== undefined && now - Date.parse(lastEnd) < PASS_MS
   // Beside the record, the receipt stays in view while the record scrolls past it. A slip taller
   // than the pane sticks by its foot rather than its head, so its last lines are never held out of view.
   const work = useRef<HTMLElement>(null)
@@ -244,16 +219,20 @@ export function DeliveryLane({
       className={`delivery-lane ${live ? 'live' : ''}`}
       aria-label="Run workspace"
       onKeyDown={(event) => {
-        if (event.key !== 'Escape' || !receipt) return
+        // Escape folds an open tray list away, and gives focus back to the mark that opened it.
+        if (event.key !== 'Escape' || !openMark) return
         event.stopPropagation()
-        closeReceipt()
+        const { agentId, kind } = openMark
+        openFrom(agentId, null)
+        requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`#delivery-stage-${CSS.escape(agentId)} .stage-mark[data-kind="${kind}"]`)?.focus())
       }}
     >
       <section ref={work} className="delivery-work" aria-label="Team work">
-        <header className={`delivery-heading${runReceipt ? ' receipted' : ''}`}>
-          {/* How it went leads; which run it was is a label above it, for the receipt and the trace.
-              Once the run is over, its receipt says both, stamped on the slip, so they are not said here. */}
-          {!runReceipt && (
+        {/* How it went leads; which run it was is a label above it. Once the run is over, its
+            receipt says both, stamped on the slip, so no heading says them again. What was asked,
+            the answer, and its review live in the chat beside this record (ADR 0051). */}
+        {!runReceipt && (
+          <header className="delivery-heading">
             <div>
               <span className="delivery-eyebrow delivery-run-kicker">{planned ? 'Next run' : `Run ${attempt}`}</span>
               <h1>
@@ -263,15 +242,8 @@ export function DeliveryLane({
               </h1>
               {planned && <p>Describe the result you want to create.</p>}
             </div>
-          )}
-          {/* One control per thing (ADR 0043, 0051): the full trace opens only here. What was asked,
-              the answer, and its review live in the chat beside this record, so they are not here. */}
-          {!planned && (
-            <div className="delivery-heading-acts">
-              <button className="btn" onClick={onTrace}><Network size={15} /> Full trace</button>
-            </div>
-          )}
-        </header>
+          </header>
+        )}
         {/* A finished run's receipt sits beside the record it sums up, once the pane is wide enough
             for both (delivery.css); a narrower pane keeps it above. */}
         <div className={`delivery-sheet${runReceipt ? ' with-receipt' : ''}`}>
@@ -287,397 +259,83 @@ export function DeliveryLane({
                   ? `${plural(agents.length, 'stage')} · 1 deliverable`
                   : 'Select an agent to see its work'}
               </span>
+              {/* Every record behind the cards, for an expert. */}
+              {!planned && <button className="delivery-link" onClick={toggleProvenance}>What was recorded <ArrowRight size={13} /></button>}
             </div>
-            <div className="delivery-stages" role="list" aria-label="Team stages" data-tour="stages">
-              {agents.map((node, index) => {
+            <TeamFlow
+              asked={Boolean(prompt.trim())}
+              relay={pipeline && linearPipeline}
+              answered={answered}
+              answerPass={answerPass}
+              planned={planned}
+              finished={terminal}
+              animate={mode === 'live'}
+              onSelect={select}
+              onOpen={openFrom}
+              onOpenSkill={(agentId, skillId) => { setSelectedId(agentId); setOpenMark({ agentId, kind: 'skill' }); setOpenSkill(skillId) }}
+              stages={agents.map((node, index): FlowStage => {
                 const { agent, runtime } = node.data
                 // The model the run recorded for it, else the one the team file names now.
                 const recorded = projection.agents.find((item) => item.id === node.id)?.model
-                const model = recorded ? modelLabelForAgent({ ...agent, model: recorded }) : harnessLabels.get(node.id) ?? modelLabelForAgent(agent)
-                const required = capabilityEvidence(
-                  agent,
-                  evidenceByAgent.get(node.id) ?? [],
-                  snapshots.get(node.id),
-                ).filter((item) => item.required)
+                const model = agent.kind === 'operator' ? 'Your review step' : recorded ? modelLabelForAgent({ ...agent, model: recorded }) : harnessLabels.get(node.id) ?? modelLabelForAgent(agent)
                 // Waiting on you (a permission it asked for) looks like waiting, not work: gold, still.
                 const waiting = live && runtime?.status === 'running' && markState(runtime) === 'waiting'
                 const working = live && (runtime?.status === 'starting' || runtime?.status === 'running') && !waiting
-                return (
-                  <div
-                    className="delivery-stage-wrap"
-                    role="listitem"
-                    key={node.id}
-                  >
-                    {/* The arrow only shows the order; what an agent received opens from its own card. */}
-                    {index > 0 && pipeline && linearPipeline && (
-                      <span className={`delivery-handoff-arrow prototype-handoff ${working ? 'passing' : ''}`} aria-hidden="true"><span>Handoff</span><ArrowRight size={24} /></span>
-                    )}
-                    <article
-                      id={`delivery-stage-${node.id}`}
-                      className={`delivery-stage ${selected?.id === node.id ? 'selected' : ''} ${working ? 'working' : ''}`}
-                      data-tour="stage"
-                    >
-                      <button
-                        className="delivery-stage-select"
-                        aria-pressed={selected?.id === node.id}
-                        onClick={() => select(node.id)}
-                      >
-                        <span className="delivery-stage-number">{index + 1}</span>
-                        <AgentPortrait id={node.id} name={agent.name} size={30} operator={agent.kind === 'operator'} state={planned ? 'still' : markState(runtime)} events={runtime?.eventCount ?? 0} animate={mode === 'live'} />
-                        <span className="delivery-stage-name">
-                          <strong>{agent.name}</strong>
-                          <small>{agent.role || 'Team agent'}</small>
-                        </span>
-                        <span
-                          className={`delivery-status status-${waiting ? 'waiting' : runtime?.status ?? 'idle'}`}
-                        >
-                          {planned
-                            ? 'Ready'
-                            : runtime ? markLabel(markState(runtime), runtime.openCalls) : 'Not started yet'}
-                        </span>
-                      </button>
-                      <div className="delivery-agent-facts">
-                        <div><span>{agent.kind === 'operator' ? 'Done by' : 'Model'}</span><strong><Code2 size={15} />{agent.kind === 'operator' ? 'You' : model}</strong></div>
-                        <div><span>{planned ? 'Produces' : 'Contribution'}</span><strong>{node.id === output.producer ? 'Team output' : pipeline ? 'Stage handoff' : 'Agent response'}</strong></div>
-                        {(evidenceByAgent.get(node.id) ?? []).some(item => item.kind === 'source') && <div><span>Sources</span><button className="delivery-link" onClick={() => setSourceAgent(node.id)}><FileText size={14} />{plural((evidenceByAgent.get(node.id) ?? []).filter(item => item.kind === 'source').length, 'source')} <ArrowRight size={12} /></button></div>}
-                      </div>
-                      <div className="delivery-stage-meta">
-                        <span>
-                          {agent.kind === 'operator'
-                            ? 'Your review step'
-                            : model}
-                        </span>
-                        <span>{runtime?.eventCount ?? 0} events</span>
-                      </div>
-                      {required.length > 0 && (
-                        <button
-                          className="delivery-skill-summary"
-                          onClick={() => {
-                            select(node.id)
-                            setFilter('skill')
-                          }}
-                        >
-                          <CheckCircle2 size={14} />
-                          <span className="delivery-required-name">{required[0].name}</span>
-                          {planned
-                            ? `${required.length} required ${required.length === 1 ? 'skill' : 'skills'}`
-                            : `${required.filter((item) => item.receipt?.state === 'opened').length}/${required.length} opened`}
-                        </button>
-                      )}
-                      {(runtime?.hasPacket || runtime?.received) && (
-                        <button
-                          className="delivery-link"
-                          onClick={() => inspectHandover?.(node.id)}
-                        >
-                          <FileText size={14} /> What this agent received{' '}
-                          <ArrowRight size={13} />
-                        </button>
-                      )}
-                    </article>
-                  </div>
-                )
+                const evidence = evidenceByAgent.get(node.id) ?? []
+                const activity = cardActivity({ events, evidence, agentId: node.id, working, now, linked })
+                // The work passing on to this stage, or sent back from it, just now while watched.
+                const before = index > 0 ? agents[index - 1].id : null
+                const backFrom = (message: (typeof projection.messages)[number]) => message.kind === 'check' && message.check?.sentBack === true && message.from === node.id && message.to === before
+                const pass = live ? [...projection.messages].reverse().find((message) => now - Date.parse(message.ts) < PASS_MS && ((message.kind === 'handover' && message.to === node.id) || backFrom(message))) : undefined
+                return {
+                  id: node.id,
+                  name: agent.name,
+                  model,
+                  status: planned ? 'Ready' : runtime ? markLabel(markState(runtime), runtime.openCalls) : 'Not started yet',
+                  statusClass: `status-${waiting ? 'waiting' : runtime?.status ?? 'idle'}`,
+                  glow: planned || agent.kind === 'operator' ? null : glowOf(runtime?.status, waiting),
+                  phase: activity.phase,
+                  markState: planned ? 'still' : markState(runtime),
+                  events: runtime?.eventCount ?? 0,
+                  operator: agent.kind === 'operator',
+                  working,
+                  selected: selected?.id === node.id,
+                  activity,
+                  skills: skillsByAgent.get(node.id) ?? { skills: [], required: 0, met: 0 },
+                  opening: new Set(live ? evidence.filter((item) => item.kind === 'skill' && now - Date.parse(item.ts) < OPENING_MS).map((item) => skillName(item) ?? item.name) : []),
+                  pass: pass ? { id: pass.id, way: pass.kind === 'handover' ? 'on' : 'back' } : null,
+                  sentBack: projection.messages.some(backFrom),
+                  open: openMark?.agentId === node.id ? openMark.kind : null,
+                  extra: (
+                    <>
+                      {(runtime?.hasPacket || runtime?.received) && <FlowLinkButton onClick={() => inspectHandover?.(node.id)}>What it received</FlowLinkButton>}
+                      {/* The selected stage's way to its agent's settings: one on the screen, as before. */}
+                      {selected?.id === node.id && agent.kind !== 'operator' && <FlowLinkButton onClick={() => onSelectAgent(node.id)}>Agent details</FlowLinkButton>}
+                    </>
+                  ),
+                }
               })}
-            </div>
-            <section
-              className="delivery-capabilities"
-              aria-label="Skills and tools"
-            >
-              <div className="delivery-section-head">
-                <div>
-                  <h2>
-                    {scope === 'team'
-                      ? 'Team'
-                      : (selected?.data.agent.name ?? 'Agent')}{' '}
-                    · skills & tools
-                  </h2>
-                  <p>
-                    {planned
-                      ? `Skills connected to ${scope === 'team' ? 'your team' : 'this agent'}.`
-                      : 'Required skills alongside observed calls.'}
-                  </p>
+            />
+            {openStage && openMark && (() => {
+              const { kind } = openMark
+              const evidence = evidenceByAgent.get(openStage.id) ?? []
+              const skills = skillsByAgent.get(openStage.id) ?? { skills: [], required: 0, met: 0 }
+              const uses = !WEB_KINDS.has(kind) ? evidence.map(asUse).filter((use): use is Use => use?.kind === kind) : []
+              const web = cardActivity({ events, evidence, agentId: openStage.id, working: false, now, linked }).web
+              return (
+                <div className="stage-sheet flow-sheet" role="region" aria-label={`${openStage.data.agent.name}: ${kind === 'skill' ? 'skills' : WEB_KINDS.has(kind) ? 'on the web' : USE_NAMES[kind].toLowerCase()}`}>
+                  <p className="flow-sheet-who">{openStage.data.agent.name}</p>
+                  {kind === 'skill'
+                    ? <SkillList skills={skills} planned={planned} open={openSkill} onOpen={setOpenSkill} translationFor={(skill) => translationFor(openStage.id, skill)} selfReport={selfReportFor(openStage.id)} recorded={fingerprinted} uses={uses} evidence={evidence} onInspect={onInspectEvidence} />
+                    : WEB_KINDS.has(kind)
+                      ? <WebList web={web} />
+                      : <section><h4>{USE_NAMES[kind]} <span>{uses.length}</span></h4><UseList uses={uses} evidence={evidence} onInspect={onInspectEvidence} /></section>}
                 </div>
-                {selected && scope === 'agent' && (
-                  <button
-                    className="delivery-link"
-                    onClick={() => onSelectAgent(selected.id)}
-                  >
-                    Agent details
-                  </button>
-                )}
-              </div>
-              {/* With no required skill there is nothing to count: "0/0 required loaded" only puzzled. */}
-              {requirements.length > 0 && <details className="delivery-verification"><summary>{planned ? `${requirements.length} required skills` : `${reads}/${requirements.length} required loaded`}</summary>
-                <ShieldCheck size={15} />
-                <span>
-                  {planned
-                    ? `${requirements.length} required ${requirements.length === 1 ? 'skill' : 'skills'} across the team`
-                    : requirements.length
-                      ? `${reads}/${requirements.length} required skills across the team have loading evidence`
-                      : 'No required skills'}
-                  .{' '}
-                  {planned
-                    ? 'Their full instructions are loaded when each agent starts.'
-                    : agents.every(
-                          (node) =>
-                            snapshots.has(node.id) &&
-                            snapshots.get(node.id) !== undefined,
-                        )
-                      ? 'Requirements and instruction fingerprints were recorded for this run.'
-                      : 'Some requirements are from the open team file; older runs did not archive skill versions.'}
-                </span>
-              </details>}
-              <div className="delivery-filters">
-                <div role="group" aria-label="Capability type">
-                  {(['all', 'skill', 'tool'] as const).map((value) => (
-                    <button
-                      key={value}
-                      aria-pressed={filter === value}
-                      onClick={() => {
-                        setFilter(value)
-                        setReceipt(null)
-                      }}
-                    >
-                      {value === 'all'
-                        ? 'All'
-                        : value === 'skill'
-                          ? 'Skills'
-                          : 'Tools'}
-                    </button>
-                  ))}
-                </div>
-                <select
-                  className="delivery-scope"
-                  aria-label="Capability graph scope"
-                  value={scope}
-                  onChange={(event) => {
-                    setScope(event.target.value as 'agent' | 'team')
-                    setReceipt(null)
-                  }}
-                >
-                  <option value="agent">Selected agent</option>
-                  <option value="team">Whole team</option>
-                </select>
-                <label>
-                  <Search size={14} />
-                  <input
-                    aria-label="Find a skill or tool"
-                    placeholder="Find capability"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                </label>
-                <button
-                  className="btn"
-                  aria-label={
-                    layout === 'graph'
-                      ? 'Show capability list'
-                      : 'Show capability graph'
-                  }
-                  onClick={() => setLayout(layout === 'graph' ? 'list' : 'graph')}
-                >
-                  {layout === 'graph' ? 'List' : 'Graph'}
-                </button>
-              </div>
-              {receipt ? (
-                <div className="delivery-receipt">
-                  <button
-                    ref={receiptBack}
-                    className="delivery-link"
-                    onClick={closeReceipt}
-                  >
-                    ← Back to {layout}
-                  </button>
-                  <h3>{receipt.name}</h3>
-                  <p className="delivery-receipt-owner">{receipt.agentName}</p>
-                  <span className={`delivery-cap-state state-${receipt.state}`}>
-                    {planned ? 'Required for the next run' : receipt.label}
-                  </span>
-                  <p>
-                    {planned
-                      ? 'This connected skill is required. LoomWatch will load its full instructions when this agent starts, then record the source and exact instructions sent.'
-                      : receipt.state === 'loaded'
-                        ? 'The daemon supplied this skill’s complete instructions in the prompt sent to the agent. Following those instructions and output quality remain separate checks.'
-                        : receipt.required && receipt.state === 'failed'
-                          ? 'The captured reads of this skill failed. These events do not verify loading. Open a receipt below to inspect the failure.'
-                          : receipt.required
-                            ? 'A successful recorded read of this skill’s SKILL.md establishes that the instructions were read. It does not establish full instruction coverage or output quality.'
-                            : 'These calls were observed for this agent. Their relationship to a skill is not inferred.'}
-                  </p>
-                  {receipt.receipt && (
-                    <dl className="delivery-skill-receipt">
-                      <dt>Skill source</dt>
-                      <dd>{receipt.receipt.source}</dd>
-                      {receipt.receipt.harness && (
-                        <>
-                          <dt>Ran on</dt>
-                          <dd>{receipt.receipt.harness}</dd>
-                        </>
-                      )}
-                      <dt>Instruction file</dt>
-                      <dd>{receipt.receipt.path}</dd>
-                      <dt>Instructions fingerprint</dt>
-                      <dd>{receipt.receipt.sha256}</dd>
-                      {receipt.receipt.route && (
-                        <>
-                          <dt>Route</dt>
-                          <dd>
-                            {ROUTE_SENTENCE[receipt.receipt.route]}
-                            {receipt.receipt.needs?.length
-                              ? ` Needs: ${receipt.receipt.needs.join(', ')}.`
-                              : ' It assumes nothing the agent lacks.'}
-                          </dd>
-                        </>
-                      )}
-                      <dt>Opened by the agent</dt>
-                      <dd>
-                        {receipt.receipt.state === 'opened'
-                          ? 'Yes — its own stream shows it reading the delivered file.'
-                          : 'Not recorded. Delivery is not use: nothing in this run’s evidence shows the agent opening it.'}
-                      </dd>
-                      <dt>Instructions</dt>
-                      <dd>
-                        {receipt.receipt.chars.toLocaleString()} characters ·{' '}
-                        {receipt.receipt.state === 'prepared'
-                          ? 'prepared; send not yet recorded'
-                          : 'sent in opening prompt'}
-                        <SuppliedInstructions receipt={receipt.receipt} />
-                      </dd>
-                    </dl>
-                  )}
-                  {translationFor(receipt.agentId, receipt.name) && (
-                    <div className="delivery-translation">
-                      <h4 className="t-body-m">
-                        What LoomWatch told this agent about running it here
-                      </h4>
-                      <pre className="supplied-text t-mono-sm">
-                        {translationFor(receipt.agentId, receipt.name)}
-                      </pre>
-                    </div>
-                  )}
-                  {selfReportFor(receipt.agentId) && (
-                    <div className="delivery-translation">
-                      <h4 className="t-body-m">
-                        What the agent said it could not follow
-                      </h4>
-                      <p className="t-meta">
-                        The agent’s own account. It is not evidence of what happened.
-                      </p>
-                      <pre className="supplied-text t-mono-sm">
-                        {selfReportFor(receipt.agentId)}
-                      </pre>
-                    </div>
-                  )}
-                  {receipt.evidence.length ? (
-                    receipt.evidence.map((item) => (
-                      <button
-                        className="delivery-receipt-row"
-                        key={item.id}
-                        onClick={() => onInspectEvidence(item.id)}
-                      >
-                        <span>
-                          #{item.order} · {formatOffset(item.offsetMs)}
-                        </span>
-                        <strong>{item.name}</strong>
-                        <span>
-                          {item.status} · {item.capture}
-                        </span>
-                        <ArrowRight size={15} />
-                      </button>
-                    ))
-                  ) : receipt.state === 'loaded' || planned ? null : (
-                    <p className="delivery-no-evidence">
-                      No matching read receipt was captured. Local discovery and
-                      connected skills alone cannot verify loading.
-                    </p>
-                  )}
-                </div>
-              ) : visible.length ? (
-                layout === 'graph' ? <CapabilityGraph items={visible} harnesses={harnessLabels} planned={planned} scoped={scope === 'team'} onInspect={setReceipt} buttonRef={(id, element) => { if (element) capabilityButtons.current.set(id, element); else capabilityButtons.current.delete(id) }} /> : <div className="delivery-cap-groups">
-                  {agents
-                    .filter((node) =>
-                      visible.some((item) => item.agentId === node.id),
-                    )
-                    .map((group) => (
-                      <div
-                        key={group.id}
-                        className={`delivery-cap-map layout-${layout}`}
-                        aria-label={`${group.data.agent.name} capability ${layout}`}
-                      >
-                        {layout === 'list' && scope === 'team' && (
-                          <h3 className="delivery-group-name">
-                            {group.data.agent.name}
-                          </h3>
-                        )}
-                        <div className="delivery-cap-leaves">
-                          {visible
-                            .filter((item) => item.agentId === group.id)
-                            .map((item) => (
-                              <div className="delivery-cap-branch" key={item.id}>
-                                <button
-                                  className={`delivery-cap-leaf state-${item.state}`}
-                                  aria-label={`Inspect ${item.name}: ${planned && item.required ? 'Will load' : item.label}${scope === 'team' ? ` · ${item.agentName}` : ''}`}
-                                  ref={(element) => {
-                                    if (element)
-                                      capabilityButtons.current.set(
-                                        item.id,
-                                        element,
-                                      )
-                                    else capabilityButtons.current.delete(item.id)
-                                  }}
-                                  onClick={() => setReceipt(item)}
-                                >
-                                  <span className="delivery-cap-icon">
-                                    {item.kind === 'skill' ? (
-                                      <ShieldCheck size={18} />
-                                    ) : (
-                                      <Wrench size={18} />
-                                    )}
-                                  </span>
-                                  <span>
-                                    <strong>{item.name}</strong>
-                                    <small>
-                                      {item.required
-                                        ? 'Required skill'
-                                        : 'Observed tool activity'}
-                                    </small>
-                                  </span>
-                                  <span className="delivery-cap-state">
-                                    {planned && item.required
-                                      ? 'Will load'
-                                      : item.label}
-                                  </span>
-                                </button>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <p className="delivery-empty">
-                  {query || filter !== 'all'
-                    ? 'No capabilities match this filter.'
-                    : planned ? `No required skills connected to ${scope === 'team' ? 'this team' : 'this agent'}.` : `No required skills or tool activity recorded for ${scope === 'team' ? 'this team' : 'this agent'} yet.`}
-                </p>
-              )}
-              {(requirements.length > 0 || !planned) && <footer className="delivery-cap-footer">
-                {requirements.length > 0 && <span>
-                  Loading evidence and output quality are separate checks.
-                </span>}
-                {!planned && (
-                  <button
-                    className="delivery-link"
-                    onClick={toggleProvenance}
-                  >
-                    What was recorded <ArrowRight size={13} />
-                  </button>
-                )}
-              </footer>}
-            </section>
+              )
+            })()}
           </div>
         </div>
       </section>
-      {sourceAgent && <dialog ref={sourceDialog} className="delivery-review-dialog" aria-label="Agent sources" onCancel={() => setSourceAgent(null)} onClose={() => setSourceAgent(null)}><h2>{agents.find(node => node.id === sourceAgent)?.data.agent.name}’s sources</h2><p>Sources recorded in this run.</p>{(evidenceByAgent.get(sourceAgent) ?? []).filter(item => item.kind === 'source').map(item => <button key={item.id} className="source-record" onClick={() => { setSourceAgent(null); onInspectEvidence(item.id) }}><FileText size={18} /><span>{item.name}</span><ArrowRight size={14} /></button>)}<div><button className="btn" onClick={() => setSourceAgent(null)}>Close</button></div></dialog>}
     </main>
   )
 }

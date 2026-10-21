@@ -25,7 +25,7 @@ code, kbd, pre { font-family: var(--font-mono); }
    clickable node and edge wrapper; that is its state, not our opt-in, and matching it turned
    whole cards into text that a connection drag highlighted on its way across. */
 .lw-shell { user-select: none; -webkit-user-select: none; }
-.lw-shell .rr-body, .lw-shell .rr-body code, .lw-shell .ent-out, .lw-shell .story-prompt .rt-body,
+.lw-shell .ent-out, .lw-shell .story-prompt .rt-body,
 .lw-shell .code, .lw-shell input, .lw-shell textarea, .lw-shell [contenteditable],
 .lw-shell .selectable:not(.react-flow__node, .react-flow__edge) { user-select: text; -webkit-user-select: text; }
 
@@ -54,8 +54,7 @@ code, kbd, pre { font-family: var(--font-mono); }
 .react-flow__node.dragging, .lw-shell.node-dragging .react-flow__node { transition: none; }
 .react-flow__node:focus, .react-flow__node:focus-visible { outline: 0; }
 .react-flow__node:focus-visible > .node,
-.react-flow__node:focus-visible > .rt,
-.react-flow__node:focus-visible > .activity-ent {
+.react-flow__node:focus-visible > .rt {
   box-shadow: 0 0 0 1px var(--color-panel-solid), 0 0 0 3px var(--lw-node-ring);
 }
 .react-flow__edge:focus, .react-flow__edge:focus-visible { outline: 0; }
@@ -223,14 +222,6 @@ kbd.key {
 .node.st-succeeded .rail { background: var(--color-ok); }
 .node.st-failed .rail { background: var(--color-alert); }
 .node.st-unavailable .rail { background: color-mix(in srgb, var(--color-ink-3) 40%, transparent); }
-/* TNG-113: task execution owns the whole perimeter. Blue means executing. */
-.node.has-task { min-height: 124px; }
-.node.has-task.st-running, .node.has-task.st-starting {
-  border-color: var(--lw-node-live);
-  box-shadow: 0 0 0 1px var(--color-live-tint), 0 0 0 3px color-mix(in srgb, var(--color-live) 28%, transparent);
-  animation: live-border var(--t-breathe) ease-in-out infinite;
-}
-.node.has-task.st-succeeded { border-color: var(--color-ok); }
 
 /* Planned capability cards (TNG-122 §5). Same 276 px width and shell as an agent so the canvas
    reads as one system, but a dashed perimeter and no step badge: this is editable INTENT, and it
@@ -325,39 +316,6 @@ kbd.key {
 .schedule-editor footer .link { display: inline-flex; align-items: center; gap: 6px; }
 .schedule-editor footer .link.muted { color: var(--color-ink-3); }
 .schedule-editor footer > :last-child { margin-left: auto; }
-.node.has-task.st-failed { border-color: var(--color-alert); }
-.node.has-task.st-stopped { border-color: var(--color-halt); border-style: dashed; }
-@keyframes live-border { 50% { box-shadow: 0 0 0 1px var(--color-live-tint), 0 0 0 6px color-mix(in srgb, var(--color-live) 12%, transparent); } }
-.node-task { min-width: 0; display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--color-hairline); color: var(--color-ink-2); white-space: nowrap; }
-.node-task b { flex: none; color: var(--color-ink); font-size: 10px; letter-spacing: .07em; text-transform: uppercase; }
-.node-task .task-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.node.has-task .node-rule { display: none; }
-.node.has-task .node-meta { margin-top: auto; }
-/* The pipeline handover is archived as the receiving stage's first user message but was never
-   shown; this opens it. Only the stages that were handed something render the chip. */
-.handover-chip {
-  align-self: flex-start; margin-top: 7px;
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 20px; padding: 0 8px;
-  border: 1px solid var(--color-hairline); border-radius: var(--r-full);
-  background: none; color: var(--color-ink-2);
-  cursor: pointer;
-  transition: background-color var(--t-instant) var(--ease-out), border-color var(--t-instant) var(--ease-out), color var(--t-instant) var(--ease-out);
-}
-.handover-chip:hover { background: var(--color-accent-tint); border-color: var(--color-accent-dim); color: var(--color-ink); }
-/* TNG89 §15.2.3: the event count and the packet route sit on one row, so folded evidence and
-   "what it was given" are both on the card the operator already placed. Gold is "act here", so
-   the fanned state — the one the operator opened — is the only chip that carries it. */
-.node-chips { align-self: flex-start; margin-top: 7px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
-.node-chips .handover-chip { margin-top: 0; }
-.node-chips .handover-chip.on { border-color: var(--color-accent); color: var(--color-ink); background: var(--color-accent-tint); }
-/* docs/TEAM_MEMORY.md "Before a run": what this agent is configured to be supplied. Static text,
-   not a control — the toggles live in the Inspector's Behaviour zone. */
-.mem-chip {
-  display: inline-flex; align-items: center; height: 18px; padding: 0 7px;
-  border: 1px solid var(--color-hairline); border-radius: var(--r-full);
-  color: var(--color-ink-3); white-space: nowrap;
-}
 .status-arc { transform-origin: 6px 6px; animation: status-spin 1200ms linear infinite; }
 .status-halo { animation: status-breathe 2400ms ease-in-out infinite; transform-origin: 6px 6px; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
@@ -425,48 +383,16 @@ kbd.key {
 .lw-shell.dragging .ghost { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
 
 /* ---------------------------------------------------------------------------
-   EDGES — DESIGN_LANGUAGE §13. Configured = warp, observed = weft.
+   EDGES — DESIGN_LANGUAGE §13. Configured = warp.
    --------------------------------------------------------------------------- */
 .react-flow__edge-path.warp { stroke: var(--lw-edge-warp); stroke-width: 1.5; fill: none; }
 .react-flow__edge.selected .react-flow__edge-path.warp { stroke: var(--color-accent); stroke-width: 2.5; }
-.react-flow__edge-path.weft { stroke: var(--lw-edge-weft); stroke-width: 1.5; fill: none; filter: var(--bloom); animation: flow var(--t-flow) linear infinite; }
-.react-flow__edge-path.weft.dispatch { stroke-dasharray: 6 4; }
-.react-flow__edge-path.weft.ask { stroke-dasharray: 2 3; stroke-opacity: .8; animation-direction: alternate; }
-.react-flow__edge-path.weft.handoff { stroke-dasharray: 10 4; stroke-width: 2.5; animation: none; }
-.react-flow__edge-path.weft.anomaly { stroke-dasharray: 1 4; stroke: var(--lw-edge-anomaly); filter: none; }
-.react-flow__edge-path.weft.aged { stroke: var(--lw-edge-weft-aged); animation: none; }
-@keyframes flow { to { stroke-dashoffset: -28; } }
-.react-flow__edge-path.shuttle {
-  stroke: var(--color-accent); stroke-width: 2.5; stroke-linecap: round; fill: none;
-  stroke-dasharray: 24 4000; filter: var(--bloom); animation: shuttle 1400ms var(--ease-out) infinite; pointer-events: none;
-}
-@keyframes shuttle { from { stroke-dashoffset: 24 } to { stroke-dashoffset: -700 } }
-.solo-configured .react-flow__edge-path.weft, .solo-configured .react-flow__edge-path.shuttle, .solo-configured .edge-badge { display: none; }
-.solo-observed .react-flow__edge-path.warp { display: none; }
 .edge-badge {
   padding: 1px var(--sp-2); border-radius: var(--r-full);
   background: var(--color-accent-tint); border: 1px solid var(--color-accent-dim); color: var(--color-ink);
   pointer-events: none;
 }
-.edge-badge.alert { border-color: var(--color-alert); color: var(--color-alert); background: transparent; }
 .edge-label { position: absolute; transform: translate(-50%, -50%); pointer-events: none; }
-
-/* ---------------------------------------------------------------------------
-   LAYER LEGEND — §6.7. Conditional chrome: only while observed edges exist.
-   --------------------------------------------------------------------------- */
-.lw-legend {
-  width: 148px; padding: var(--sp-3);
-  display: flex; flex-direction: column; gap: 6px;
-  left: calc(var(--lw-panel-inset) + var(--lw-library-w) + var(--sp-3));
-  transition: left var(--t-move) var(--ease-out);
-}
-.lib-collapsed .lw-legend, .lib-hidden .lw-legend { left: calc(var(--lw-panel-inset) + var(--lw-library-rail-w) + var(--sp-3)); }
-.lib-hidden .lw-legend { left: var(--lw-panel-inset); }
-.legend-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 1px solid transparent; border-radius: var(--r-xs); color: var(--color-ink-2); background: none; width: 100%; }
-.legend-row:hover { background: var(--color-accent-tint); }
-.legend-row .count { margin-left: auto; color: var(--color-ink-3); }
-.legend-row.soloed { border-color: var(--color-accent); color: var(--color-ink); }
-.legend-row.dimmed { color: var(--color-ink-3); opacity: .55; }
 
 /* ---------------------------------------------------------------------------
    VIEW CONTROLS — §3 / DESIGN_LANGUAGE §11. Carries the theme toggle.
@@ -885,13 +811,9 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
 @keyframes frIn { from { opacity: 0; transform: translateY(8px) scale(.96) } to { opacity: 1; transform: none } }
 
 /* ---------------------------------------------------------------------------
-   BADGES — live vs replay must be unmistakable
+   BADGES
    --------------------------------------------------------------------------- */
 .badge { display: inline-flex; align-items: center; gap: 5px; padding: 1px var(--sp-2); border-radius: var(--r-full); border: 1px solid currentColor; flex: none; }
-.badge-live    { color: var(--color-live); }
-.badge-replay  { color: var(--color-halt); }
-.badge-live .pip { width: 6px; height: 6px; border-radius: var(--r-full); background: currentColor; animation: breathe 2400ms ease-in-out infinite; }
-.badge-replay .pip { width: 6px; height: 6px; background: currentColor; }
 @keyframes breathe { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
 
 /* ---------------------------------------------------------------------------
@@ -920,7 +842,6 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
    NARROW — the coordinate canvas becomes a reading column (TNG-115).
    --------------------------------------------------------------------------- */
 @media (max-width: 767px) {
-  .lw-legend { display: none !important; }
   .lw-inspector { width: auto; left: var(--sp-3); right: var(--sp-3); top: auto; bottom: 88px; max-height: 60vh; }
   .inspector-scroll { max-height: 60vh; }
   .lw-schedule-panel { width: auto; }
@@ -937,7 +858,4 @@ button.thread-node:hover svg, button.thread-node:focus-visible svg { color: var(
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
-  .react-flow__edge-path.weft { animation: none !important; }
-  .react-flow__edge-path.shuttle { display: none; }
-  .node.has-task.st-running, .node.has-task.st-starting { animation: none !important; border-width: 2px; box-shadow: 0 0 0 2px var(--color-live-tint); }
 }

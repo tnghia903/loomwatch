@@ -463,9 +463,24 @@ fn text_of(block: &Value, key: &str) -> String {
         .to_owned()
 }
 
-/// A server tool's result as the record shows it: the pages a search found, or the page read.
+/// A server tool's result as the record shows it: the pages a search found, the page read, or what
+/// code the model ran printed.
 fn result_text(result: &Value) -> String {
     let content = result.get("content");
+    let printed = |key: &str| {
+        content
+            .and_then(|content| content.get(key))
+            .and_then(Value::as_str)
+            .map(str::trim_end)
+            .filter(|text| !text.is_empty())
+    };
+    if content.is_some_and(|content| content.get("stdout").is_some()) {
+        return [printed("stdout"), printed("stderr")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
     if let Some(found) = content.and_then(Value::as_array) {
         return found
             .iter()
@@ -846,8 +861,11 @@ async fn take_event(
                 deltas.server_tool();
             }
             if matches!(kind, Some("tool_use" | "server_tool_use")) {
-                // Its input streams as JSON text; it is put back together when the block ends.
-                block["input"] = json!({});
+                // Its input streams as JSON text; it is put back together when the block ends. A
+                // call the model's own code made can come whole here, with nothing streamed after.
+                if !block.get("input").is_some_and(Value::is_object) {
+                    block["input"] = json!({});
+                }
                 message.inputs.insert(index, String::new());
             }
             place(&mut message.blocks, index, block);
@@ -861,6 +879,7 @@ async fn take_event(
         Some("content_block_stop") => {
             let index = block_index(&event);
             if let Some(text) = message.inputs.remove(&index)
+                && !text.trim().is_empty()
                 && let Some(block) = message.blocks.get_mut(index)
             {
                 block["input"] = serde_json::from_str::<Value>(&text)

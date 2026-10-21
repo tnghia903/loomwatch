@@ -18,7 +18,7 @@ import type { Note } from '../../lib/memory/client'
  *   does not appear at all: `Workspace` renders it only for a `succeeded` record.
  */
 export interface ReviewStripProps {
-  /** The attempt number, as the lifecycle strip counts it. */
+  /** The attempt number: the run's number among this team's runs. */
   attempt: number
   /** Notes this run wrote that are still `active` — eligible to be kept, and not yet kept. */
   notes: Note[]
