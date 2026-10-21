@@ -10,6 +10,7 @@ pub mod archive;
 pub mod auto_mode;
 pub mod capabilities;
 pub mod chat;
+pub mod chat_files;
 pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;
@@ -193,6 +194,9 @@ pub struct RunLineage {
     /// operator's request replies to. Handed to every agent the run starts, as the conversation is,
     /// because the request is theirs too.
     pub reply: Option<Replied>,
+    /// Files the operator's message was sent with (ADR 0082): every agent the run starts is told
+    /// where they are, under its task, and the agent it starts with is shown the pictures.
+    pub files: Vec<chat_files::ChatFile>,
     /// A one-agent turn (ADR 0051): the one agent this run executes. It starts there, stops after
     /// it, and its reply is the run's answer.
     pub only: Option<String>,
@@ -538,6 +542,7 @@ async fn run_team_mode(
         own_previous_output: lineage.own_output,
         conversation: lineage.conversation.clone(),
         reply: lineage.reply.clone(),
+        files: lineage.files.clone(),
         ..NodeTask::goal(prompt)
     };
     let composed = compose_for(agent, &packet, &task, workspace.as_ref());
@@ -555,7 +560,7 @@ async fn run_team_mode(
         event_log.as_ref().map(EventLog::session_id),
         agent,
     );
-    let mut spec = agent_process_spec(agent, cwd, &composed.delivery, asker);
+    let mut spec = agent_process_spec(agent, team_path, cwd, &composed.delivery, asker);
     spec.lessons = lessons::supply(
         &archive,
         team,
@@ -564,6 +569,8 @@ async fn run_team_mode(
         event_log.as_ref().map(EventLog::session_id),
     )
     .await;
+    // The lead is the agent the message reaches first: it is shown its pictures (ADR 0082).
+    spec.pictures = chat_files::pictures(&lineage.files);
 
     let process = AgentRun::spawn(&spec)
         .with_context(|| format!("failed to spawn ACP harness for agent {}", agent.id))?;
@@ -840,6 +847,11 @@ async fn run_pipeline_nodes(
             shared_log.as_ref().map(EventLog::session_id),
         )
         .await;
+        // The first stage that runs is the agent the message reaches first: it is shown its
+        // pictures (ADR 0082). The stages after it have their paths, in the task.
+        if first_executed {
+            spec.pictures = chat_files::pictures(&lineage.files);
+        }
         let mut node_prompt = stage_task(
             team,
             agent_id,
@@ -1416,6 +1428,11 @@ impl<'a> Work<'a> {
                 let ids = notes.iter().map(|note| note.id.clone()).collect::<Vec<_>>();
                 store.mark_delivered(&ids).await;
             }
+            session.process.show_pictures(
+                notes
+                    .iter()
+                    .flat_map(|note| chat_files::pictures(&note.files)),
+            );
             reply = session
                 .process
                 .prompt_turn(&mut session.recorder, &note_turn(&notes))
@@ -1444,12 +1461,15 @@ fn note_turn(notes: &[runs::QueuedNote]) -> String {
     // about, not more direction.
     let words = notes
         .iter()
-        .map(|note| match &note.reply {
-            Some(reply) => format!(
-                "It replies to this, quoted as it was (what the note is about, not more direction):\n{reply}\n\n{}",
-                note.text.trim()
-            ),
-            None => note.text.trim().to_owned(),
+        .map(|note| {
+            // The files sent with it are part of what it says (ADR 0082).
+            let said = chat_files::with_files(note.text.trim(), &note.files);
+            match &note.reply {
+                Some(reply) => format!(
+                    "It replies to this, quoted as it was (what the note is about, not more direction):\n{reply}\n\n{said}"
+                ),
+                None => said,
+            }
         })
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -1962,6 +1982,7 @@ fn stage_task(
     }
     task.conversation.clone_from(&lineage.conversation);
     task.reply.clone_from(&lineage.reply);
+    task.files.clone_from(&lineage.files);
     task
 }
 
@@ -2261,11 +2282,13 @@ async fn park_open_session(
 /// (ADR 0037) and who it asks about anything else (ADR 0040).
 fn agent_process_spec(
     agent: &config::AgentConfig,
+    team_path: &Path,
     cwd: PathBuf,
     delivery: &delivery::Delivery,
     asker: Option<permissions::PermissionAsker>,
 ) -> ProcessSpec {
-    let permissions = permissions::PermissionPolicy::for_run_agent(agent, &cwd, delivery);
+    let permissions =
+        permissions::PermissionPolicy::for_run_agent(agent, team_path, &cwd, delivery);
     ProcessSpec {
         cmd: agent.spawn.cmd.clone(),
         args: agent.spawn.args.clone(),
@@ -2275,6 +2298,7 @@ fn agent_process_spec(
         permissions: Some(permissions),
         asker,
         lessons: Vec::new(),
+        pictures: Vec::new(),
     }
 }
 
@@ -2320,7 +2344,8 @@ fn node_process_spec(
     let (skills, delivery) = workspace.map_or_else(Default::default, |workspace| {
         (workspace.required_skills, workspace.delivery)
     });
-    let permissions = permissions::PermissionPolicy::for_run_agent(agent, &cwd, &delivery);
+    let permissions =
+        permissions::PermissionPolicy::for_run_agent(agent, team_path, &cwd, &delivery);
     Ok((
         ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
@@ -2331,6 +2356,7 @@ fn node_process_spec(
             permissions: Some(permissions),
             asker: None,
             lessons: Vec::new(),
+            pictures: Vec::new(),
         },
         skills,
         delivery,
@@ -2373,6 +2399,7 @@ fn node_task(
         place: None,
         conversation: None,
         reply: None,
+        files: Vec::new(),
         replayed: false,
     }
 }
@@ -2898,12 +2925,14 @@ pub(crate) fn compose_prompt(
             text: replied,
         });
     }
+    // The files sent with it are part of what was asked (ADR 0082).
+    let goal = chat_files::with_files(&task.goal, &task.files);
     text.push_str("\n\n## Task\n");
-    text.push_str(&task.goal);
+    text.push_str(&goal);
     sections.push(PromptSection {
         kind: PromptSectionKind::Task,
         heading: "## Task".to_owned(),
-        text: task.goal.clone(),
+        text: goal,
     });
     // Last of all: §9's trust boundary makes this the one heading rendered as instruction, and the
     // operator's latest decision is what should be freshest when the agent starts work. It says it
@@ -3017,6 +3046,8 @@ pub(crate) struct NodeTask {
     /// `## The message this replies to`: what the operator's task replies to in the team's chat
     /// (ADR 0051). `None` for a task that replies to nothing.
     pub(crate) reply: Option<Replied>,
+    /// Files the operator sent with the task (ADR 0082), listed under it by where they are.
+    pub(crate) files: Vec<chat_files::ChatFile>,
     /// `stage_results` and `direction` are not this run's: they were handed on from the work this
     /// run follows, so the agent has them again (a follow-up, a one-agent turn — ADR 0051).
     /// Recorded beside the prompt so the chat says the agent picked them up, rather than drawing
@@ -7228,7 +7259,7 @@ mod tests {
             .find(|request| request.agent == "lead")
             .and_then(|request| {
                 request.messages.iter().find_map(|message| match message {
-                    crate::agent::Message::User { content } => Some(content.clone()),
+                    crate::agent::Message::User { content, .. } => Some(content.clone()),
                     _ => None,
                 })
             })
@@ -7447,7 +7478,7 @@ mod tests {
         let worker = crate::engine::demo_model(crate::agent::Demo::responder(|request| {
             let prompt = request.prompt();
             let saw_the_draft = request.messages.iter().any(|message| {
-                matches!(message, crate::agent::Message::User { content } if content.contains("Draft the launch note."))
+                matches!(message, crate::agent::Message::User { content, .. } if content.contains("Draft the launch note."))
             });
             Some(crate::agent::Completion::text(
                 if prompt.contains("## More work from lead name")
@@ -9254,6 +9285,7 @@ mod tests {
                 },
                 None,
             )),
+            files: Vec::new(),
         };
         let outcome = run_pipeline_mode(
             &team,
@@ -9427,6 +9459,7 @@ mod tests {
                     },
                     None,
                 )),
+                files: Vec::new(),
             },
         )
         .await?;

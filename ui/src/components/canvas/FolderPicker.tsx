@@ -14,6 +14,9 @@ export interface FolderPickerProps {
   verb?: string
   /** Open here rather than in the home folder. */
   start?: string
+  /** The one folder to choose, by name: a folder dropped on the chat (ADR 0082). The button waits
+      until it is the open folder, so the folder you happen to be in is never added by mistake. */
+  want?: string
 }
 
 const KNOWLEDGE_NOTE = 'The agent is given the folder’s list of files and its README, and may open the files in it. The folder is linked, not copied, so every run sees what is in it then.'
@@ -26,7 +29,7 @@ const KNOWLEDGE_NOTE = 'The agent is given the folder’s list of files and its 
  * lists folders and this dialog walks them. Portalled to the body: the inspector it opens from
  * clips its own overflow.
  */
-export function FolderPicker({ onChoose, onClose, title = 'Add a folder', note = KNOWLEDGE_NOTE, verb = 'Add', start }: FolderPickerProps) {
+export function FolderPicker({ onChoose, onClose, title = 'Add a folder', note = KNOWLEDGE_NOTE, verb = 'Add', start, want }: FolderPickerProps) {
   const titleId = useId()
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -80,8 +83,8 @@ export function FolderPicker({ onChoose, onClose, title = 'Add a folder', note =
         {error && <p className="folder-picker-error t-meta" role="alert">{error}</p>}
         <footer className="folder-picker-foot">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" disabled={!listing || loading} onClick={() => listing && onChoose({ name: listing.name, path: listing.path })}>
-            {listing ? `${verb} “${listing.name}”` : verb}
+          <button type="button" className="btn btn-primary" disabled={!listing || loading || (want !== undefined && listing.name !== want)} onClick={() => listing && onChoose({ name: listing.name, path: listing.path })}>
+            {want !== undefined && listing?.name !== want ? `Open “${want}” first` : listing ? `${verb} “${listing.name}”` : verb}
           </button>
         </footer>
       </div>

@@ -42,6 +42,19 @@ export interface ChatMessage {
    * Absent from chats before these answers.
    */
   answers?: NoteAnswers | null
+  /** Files sent with it (ADR 0082). Absent when there were none. */
+  files?: ChatFile[]
+}
+
+/** A file pasted or dropped into the chat, as the daemon keeps it beside the team (`chat_files::ChatFile`). */
+export interface ChatFile {
+  /** Its name in the chat's folder: the name it had, numbered when another file had it. */
+  name: string
+  /** Its full path. */
+  path: string
+  bytes: number
+  /** PNG, JPEG, GIF or WebP: shown in the chat, and to an agent whose model sees pictures. */
+  picture: boolean
 }
 
 /** The agents answering a message that needed no workflow (`chat::NoteAnswers`). */
@@ -130,6 +143,8 @@ export interface SendOptions {
   replyTo?: ReplyTo | null
   /** Work to start as sent: never answered in the chat instead, however it reads (the first run's Send). */
   work?: boolean
+  /** Files sent with it, already kept by `uploadChatFile`. */
+  files?: readonly ChatFile[]
   signal?: AbortSignal
 }
 
@@ -159,7 +174,7 @@ export async function fetchChatPage(teamPath: string, before?: string | null, li
   return readRun<ChatPage>(response)
 }
 
-export async function sendChatMessage({ teamPath, text, to, now, expectedRevision, startKey, replyTo, work, signal }: SendOptions): Promise<SendResult> {
+export async function sendChatMessage({ teamPath, text, to, now, expectedRevision, startKey, replyTo, work, files, signal }: SendOptions): Promise<SendResult> {
   const response = await daemonFetch('/api/chat/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -172,11 +187,25 @@ export async function sendChatMessage({ teamPath, text, to, now, expectedRevisio
       ...(startKey ? { startKey } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(work ? { work } : {}),
+      ...(files?.length ? { files: files.map((file) => ({ path: file.path })) } : {}),
     }),
     signal,
     cache: 'no-store',
   })
   return readRun<SendResult>(response)
+}
+
+/** Keep a file pasted or dropped into the team's chat, before the message that sends it (ADR 0082). */
+export async function uploadChatFile(teamPath: string, file: Blob, name: string, signal?: AbortSignal): Promise<ChatFile> {
+  const query = new URLSearchParams({ teamPath, name })
+  const response = await daemonFetch(`/api/chat/files?${query.toString()}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+    signal,
+    cache: 'no-store',
+  })
+  return readRun<ChatFile>(response)
 }
 
 /** "Start the team on this" on a team note: the note becomes the request of the work it starts. */

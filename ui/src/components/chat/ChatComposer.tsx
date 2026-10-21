@@ -1,7 +1,11 @@
-import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Reply, TextQuote, Users, X, Zap } from 'lucide-react'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { ArrowUp, AtSign, CornerDownLeft, MessageSquareText, Paperclip, Reply, TextQuote, Users, X, Zap } from 'lucide-react'
+import { createElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
+import { pastedName, type Attachment, type ChatAttachments } from '../../lib/chat/attachments'
 import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
+import { extensionOf } from '../../lib/files/fileRefs'
+import { fileIcon } from '../../lib/files/icons'
+import { rawFileUrl } from '../../lib/files/reader'
 import { quoteLine, replyWhat } from '../../lib/chat/reply'
 import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent, type Destination } from '../../lib/chat/route'
 import { Swap } from './Appearing'
@@ -49,6 +53,10 @@ interface ChatComposerProps {
   onAddress?: (agent: string) => void
   /** Counts the times Reply was pressed on what the team waits on you for: the box goes back to answering it. */
   answerAsked?: number
+  /** Pictures and files pasted, dropped or chosen to go with the words (ADR 0082). */
+  attachments?: ChatAttachments
+  /** A line about something just done from the chat, such as a dropped folder added. */
+  notice?: string | null
 }
 
 /**
@@ -57,7 +65,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0 }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
@@ -66,6 +74,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   // Each send ripples once from the box, the message leaving it.
   const [sent, setSent] = useState(0)
   const box = useRef<HTMLTextAreaElement>(null)
+  const chooser = useRef<HTMLInputElement>(null)
   const pickerId = useId()
   const whereId = useId()
 
@@ -109,8 +118,12 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   useEffect(() => {
     if (answerAsked > 0) box.current?.focus()
   }, [answerAsked])
+  const attached = attachments?.items ?? []
   // A reply to something else is a message of its own, not your answer to what the team waits on.
   const answering = decision && !teamInstead && !replyTo ? decision : null
+  // Files go with words, and only once each is kept; one that can't be kept is taken out first.
+  // An answer takes words only, so files wait for a message of their own.
+  const filesHold = attached.some((item) => item.state !== 'ready') || Boolean(answering && attached.length > 0)
 
   const mention = useMemo(() => (solo ? null : findMention(text, agents)), [solo, text, agents])
   const target: ChatTarget = solo ? { kind: 'agent', agent: solo.id } : mention?.target ?? null
@@ -144,7 +157,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   }
 
   const send = async (now: boolean) => {
-    if (!trimmed || sending || disabled) return
+    if (!trimmed || sending || disabled || filesHold) return
     // Out of the box at once, as in any chat: the message shows in the log while it goes. It comes
     // back only if it was held — a team that needs checking first — so nothing typed is lost.
     const kept = text
@@ -215,7 +228,9 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const starts = !answering && (route === 'team' || route === 'agent')
   const sendLabel = answering ? 'Reply' : starts ? (solo ? 'Send' : 'Start') : 'Send note'
   const name = (id: string) => names.get(id) ?? id
-  const placeholder = answering?.kind === 'question' ? `Answer ${answering.fromName}…`
+  const them = attached.length === 1 ? 'it' : 'them'
+  const placeholder = attached.length > 0 && !answering ? (solo || target ? `Say what to do with ${them}` : `@team, then what to do with ${them}`)
+    : answering?.kind === 'question' ? `Answer ${answering.fromName}…`
     : answering ? 'A note for Approve, or what to change'
       : replyTo?.kind === 'passage' ? `Ask ${name(replyTo.from)} about this part…`
         : replyTo ? `Reply to ${name(replyTo.from)}…`
@@ -238,8 +253,10 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
             </button>
           )}
           {!answering && route === 'team_note' && trimmed && <em className="tc-where-hint">Add @team or @{agents.find((agent) => !agent.operator)?.name ?? 'name'} to start work.</em>}
+          {answering && attached.length > 0 && <em className="tc-where-hint">Pictures and files can’t go with an answer yet. Take them out to answer.</em>}
         </div>
       )}
+      {notice && <p className="tc-notice" role="status">{notice}</p>}
       {replyTo && (
         <div className={`tc-replying${replyTo.kind === 'passage' ? ' passage' : ''}`} role="group" aria-label={`${replyTo.kind === 'passage' ? 'Asking about' : 'Replying to'} ${replyWhat(replyTo, name)}`}>
           {replyTo.kind === 'passage' ? <TextQuote size={14} aria-hidden="true" /> : <Reply size={14} aria-hidden="true" />}
@@ -251,6 +268,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           {onCancelReply && <button type="button" className="tc-link tc-replying-close" onClick={onCancelReply} aria-label="Don't reply to it" title="Don't reply to it (Esc)"><X size={13} aria-hidden="true" /></button>}
         </div>
       )}
+      {attachments && attached.length > 0 && <Attached items={attached} onRemove={attachments.remove} />}
       <div className="tc-box">
         {sent > 0 && <span key={sent} className="tc-ripple" aria-hidden="true" />}
         {mentioned > 0 && <span key={`mention-${mentioned}`} className="tc-mention-glow" aria-hidden="true" />}
@@ -286,16 +304,35 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           onChange={(event) => { setText(event.target.value); setCaret(event.target.selectionStart); setPickerClosed(false); setPicked(0) }}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
           onKeyDown={keyDown}
+          onPaste={(event) => {
+            // A screenshot or a file copied in Finder goes with the words; text pastes as text.
+            const files = Array.from(event.clipboardData?.files ?? [])
+            if (!attachments || files.length === 0) return
+            event.preventDefault()
+            attachments.add(files, (file) => pastedName(file))
+          }}
         />
         <div className="tc-send">
+          {attachments && (
+            <>
+              <input ref={chooser} type="file" multiple hidden tabIndex={-1} aria-hidden="true" onChange={(event) => {
+                const files = Array.from(event.target.files ?? [])
+                event.target.value = ''
+                if (files.length > 0) attachments.add(files)
+              }} />
+              <button type="button" className="tc-attach" disabled={Boolean(disabled)} onClick={() => chooser.current?.click()} aria-label="Add pictures or files" title="Add pictures or files">
+                <Paperclip size={16} aria-hidden="true" />
+              </button>
+            </>
+          )}
           {canSendNow && !answering && (
-            <button type="button" className="btn tc-now" disabled={!trimmed || sending} onClick={() => void send(true)} title={`Stop ${names.get(where.agent ?? '') ?? 'the agent'}'s current step and give it this at once`}>
+            <button type="button" className="btn tc-now" disabled={!trimmed || sending || filesHold} onClick={() => void send(true)} title={`Stop ${names.get(where.agent ?? '') ?? 'the agent'}'s current step and give it this at once`}>
               <Zap size={13} aria-hidden="true" />Send now
             </button>
           )}
           {/* A review is decided with the buttons on its message; this box only holds the note. */}
           {answering?.kind !== 'review_stop' && (
-            <button type="submit" className="btn btn-primary tc-go" disabled={!trimmed || sending || Boolean(disabled)} aria-label={sendLabel}>
+            <button type="submit" className="btn btn-primary tc-go" disabled={!trimmed || sending || Boolean(disabled) || filesHold} aria-label={sendLabel} title={filesHold && !answering ? 'Waits for your files' : undefined}>
               {starts ? <ArrowUp size={15} aria-hidden="true" /> : <CornerDownLeft size={14} aria-hidden="true" />}
               <span>{sendLabel}</span>
             </button>
@@ -304,5 +341,32 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
       </div>
       {disabled && <p className="tc-disabled" role="status">{disabled}</p>}
     </form>
+  )
+}
+
+/**
+ * The files going with the words, above the box as a reply's quote is: a picture drawn small, any
+ * other file as its sheet and name. Each comes out with its ✕; one that can't be sent says why.
+ */
+function Attached({ items, onRemove }: { items: readonly Attachment[]; onRemove: (id: string) => void }) {
+  return (
+    <ul className="tc-attached" aria-label="Going with your message">
+      {items.map((item) => {
+        const shown = item.state === 'failed' ? null : item.preview ?? (item.picture && item.kept ? rawFileUrl(item.kept.path) : null)
+        const extension = extensionOf(item.name).toUpperCase()
+        return (
+          <li key={item.id} className={`tc-attached-item ${item.state}${shown ? ' picture' : ''}`} aria-busy={item.state === 'uploading'} aria-label={item.problem ? `${item.name}: ${item.problem}` : item.name} title={item.detail ?? item.problem ?? item.name}>
+            {shown
+              ? <img src={shown} alt="" decoding="async" />
+              : <span className="tc-attached-sheet" aria-hidden="true">{createElement(fileIcon(undefined, item.name), { size: 13 })}{extension && <b>{extension}</b>}</span>}
+            {!shown && <span className="tc-attached-name">{item.name}</span>}
+            {item.problem && <span className="tc-attached-problem">{item.problem}</span>}
+            <button type="button" className="tc-attached-remove" onClick={() => onRemove(item.id)} aria-label={`Don’t send ${item.name}`} title="Don’t send it">
+              <X size={12} aria-hidden="true" />
+            </button>
+          </li>
+        )
+      })}
+    </ul>
   )
 }

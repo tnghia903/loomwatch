@@ -428,7 +428,23 @@ fn wire_messages(history: &[Message]) -> Vec<Value> {
 fn wire_message(message: &Message) -> Value {
     match message {
         Message::System { content } => json!({"role": "system", "content": content}),
-        Message::User { content } => json!({"role": "user", "content": content}),
+        Message::User { content, pictures } if pictures.is_empty() => {
+            json!({"role": "user", "content": content})
+        }
+        // Pictures the operator sent come before the words about them, each named.
+        Message::User { content, pictures } => {
+            let mut parts: Vec<Value> = pictures
+                .iter()
+                .flat_map(|picture| {
+                    [
+                        json!({"type": "text", "text": format!("The picture {}:", picture.name)}),
+                        json!({"type": "image_url", "image_url": {"url": picture.data_url()}}),
+                    ]
+                })
+                .collect();
+            parts.push(json!({"type": "text", "text": content}));
+            json!({"role": "user", "content": parts})
+        }
         Message::Assistant {
             content,
             reasoning_details,
@@ -935,6 +951,36 @@ mod tests {
         );
         let without = wire_messages(&history[1..]);
         assert_eq!(without.len(), 2, "no pictures, no extra message");
+    }
+
+    /// Pictures the operator sent with a message go before its words, each named (ADR 0082); words
+    /// alone stay the plain string they always were.
+    #[test]
+    fn pictures_sent_with_a_message_go_before_its_words() {
+        let sent = Message::User {
+            content: "What is wrong here?".into(),
+            pictures: vec![crate::agent::provider::Picture {
+                name: "shot.png".into(),
+                media_type: "image/png".into(),
+                data: "iVBORw0K".into(),
+            }],
+        };
+        assert_eq!(
+            wire_messages(&[sent]),
+            [json!({"role": "user", "content": [
+                {"type": "text", "text": "The picture shot.png:"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0K"}},
+                {"type": "text", "text": "What is wrong here?"},
+            ]})]
+        );
+        let words = Message::User {
+            content: "Hi".into(),
+            pictures: Vec::new(),
+        };
+        assert_eq!(
+            wire_messages(&[words]),
+            [json!({"role": "user", "content": "Hi"})]
+        );
     }
 
     /// A Claude from 4.6 on goes to `/messages`, written as a team file writes it; an older Claude,

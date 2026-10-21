@@ -2293,14 +2293,19 @@ impl TeamBus {
             .map(|workspace| workspace.delivery.clone())
             .unwrap_or_default();
         // A helper is held to its own switches, like any other agent of the team (ADR 0037).
-        let permissions =
-            crate::permissions::PermissionPolicy::for_run_agent(agent, &cwd, &delivery);
+        let permissions = crate::permissions::PermissionPolicy::for_run_agent(
+            agent,
+            &self.state.team_path,
+            &cwd,
+            &delivery,
+        );
         let spec = ProcessSpec {
             cmd: agent.spawn.cmd.clone(),
             args: agent.spawn.args.clone(),
             env: agent.spawn.env.clone(),
             cwd,
             tools: delivery.tools,
+            pictures: Vec::new(),
             permissions: Some(permissions),
             // A helper asks the same person its run does (ADR 0040).
             asker: crate::permissions::PermissionAsker::for_run(
@@ -3547,6 +3552,7 @@ mod tests {
             permissions: None,
             asker: None,
             lessons: Vec::new(),
+            pictures: Vec::new(),
         }
     }
 
@@ -6008,10 +6014,9 @@ mod tests {
 
     /// Whether any message the agent was given holds `words`: what is in its conversation.
     fn was_told(request: &crate::agent::SeenRequest, words: &str) -> bool {
-        request
-            .messages
-            .iter()
-            .any(|message| matches!(message, Message::User { content } if content.contains(words)))
+        request.messages.iter().any(
+            |message| matches!(message, Message::User { content, .. } if content.contains(words)),
+        )
     }
 
     /// The sequence numbers of `agent`'s events in `run` with this `phase`.
@@ -6422,7 +6427,7 @@ mod tests {
             .messages
             .iter()
             .find_map(|message| match message {
-                Message::User { content } => Some(content.as_str()),
+                Message::User { content, .. } => Some(content.as_str()),
                 _ => None,
             })
             .unwrap_or_default();
