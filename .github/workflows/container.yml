@@ -2,19 +2,10 @@ name: Container image
 
 # Proves the Dockerfile still builds. A full release build is the most
 # expensive check in the repository, so it runs only when an input the Dockerfile depends on
-# changes, once a month against fresh base images, or by hand. It never pushes an image. Being
-# path-filtered, it cannot be a required check: on a pull request that skips it, it never reports.
+# changes on main, once a month against fresh base images, or by hand. It never pushes an image.
+# Pull requests run nothing here: scripts/ci-local.sh builds the image on a branch that changes
+# these paths, and keeps its own copy of the list.
 on:
-  pull_request:
-    paths:
-      - Dockerfile
-      - .dockerignore
-      - Cargo.lock
-      - "**/Cargo.toml"
-      - rust-toolchain.toml
-      - ui/package.json
-      - ui/pnpm-lock.yaml
-      - .github/workflows/container.yml
   push:
     branches: [main]
     paths:
@@ -30,9 +21,9 @@ on:
     - cron: "17 3 1 * *"
   workflow_dispatch:
 
+# A run waiting behind another is dropped for the newest, which builds the same inputs or newer.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
   contents: read
@@ -53,5 +44,5 @@ jobs:
           push: false
           tags: loomwatch:ci
           cache-from: type=gha
-          # Only main writes the layer cache, so pull requests don't push its layers out.
-          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
+          # Only main writes the layer cache, so a run on a branch doesn't push its layers out.
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}

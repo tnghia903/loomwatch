@@ -1,22 +1,18 @@
 name: CI
 
-# One run per change: pushes to main, and pull requests (which already cover their branch's
-# pushes). Pushing a feature branch alone runs nothing; open a pull request or dispatch by hand.
+# Runs on main, once a change has merged, and by hand. Pull requests run nothing here: a branch is
+# checked on its author's computer with scripts/ci-local.sh before it merges (docs/CI.md). To run
+# all of this on a branch, for the Windows job especially: `gh workflow run ci.yml --ref <branch>`.
 #
-# A pull request from a fork runs with a read-only token and no secrets, and a first-time
-# contributor's run waits for a maintainer to approve it. Keep the trigger `pull_request`: never
-# `pull_request_target`, which would run the fork's code with this repository's token and secrets.
+# Never add `pull_request_target`: it would run a fork's code with this repository's token and
+# secrets.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
-# A newer push to the same pull request cancels the older run. Runs on main are never cancelled,
-# so every commit on main keeps a result.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+# No concurrency group, so every commit on main keeps a result of its own: a group would drop a run
+# still waiting behind another when several merges land together.
 
 permissions:
   contents: read
@@ -72,7 +68,7 @@ jobs:
           persist-credentials: false
       # ShellCheck comes with the runner image.
       - name: ShellCheck
-        run: shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh
+        run: shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh scripts/ci-local.sh
       - name: Update and rollback
         run: scripts/test-update.sh
 
@@ -94,8 +90,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      # The toolchain comes from rust-toolchain.toml. Only main writes the cache, so pull requests
-      # restore it without each storing a near-duplicate copy.
+      # The toolchain comes from rust-toolchain.toml. Only main writes the cache, so a run on a
+      # branch restores it without storing a near-duplicate copy.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -166,18 +162,20 @@ jobs:
         shell: pwsh
         run: scripts/smoke-windows.ps1 -Dist dist
 
-  # Pull requests only, since it compares the change with its base branch. Fails when the change
-  # adds a dependency, in Cargo.lock, ui/pnpm-lock.yaml or the connectors' package-lock.json files,
-  # with a known vulnerability of moderate severity or worse. It reads GitHub's dependency graph, so
-  # it needs no checkout.
+  # Pushes only, since it compares main before and after the push. Fails when the push added a
+  # dependency, in Cargo.lock, ui/pnpm-lock.yaml or the connectors' package-lock.json files, with a
+  # known vulnerability of moderate severity or worse. It reads GitHub's dependency graph, so it
+  # needs no checkout and can't run on a computer.
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
+          base-ref: ${{ github.event.before }}
+          head-ref: ${{ github.sha }}
           fail-on-severity: moderate
           # glib is in Cargo.lock only as the Linux (GTK) dependency of tao and tray-icon, which
           # crates/loomwatch-app uses on macOS alone, so it is never built for any platform
@@ -185,10 +183,10 @@ jobs:
           # Linux, Windows and macOS. Its advisory concerns an iterator in glib's GVariant API.
           allow-ghsas: GHSA-wrw7-89jp-8q8g
 
-  # The one check for the branch rule on main to require, so adding or renaming a job never needs a
-  # settings change. It waits for every job above and fails unless each one passed; Dependency
-  # review may be skipped, because it runs only for pull requests. It runs even when a job fails
-  # (`always()`): skipped, it would count as passed.
+  # One answer for the whole run, so adding or renaming a job never changes what to read. It waits
+  # for every job above and fails unless each one passed; Dependency review may be skipped, because
+  # a run by hand has no push to compare. It runs even when a job fails (`always()`): skipped, it
+  # would count as passed.
   result:
     name: CI result
     if: always()
