@@ -7021,6 +7021,7 @@ mod tests {
     /// one, a pipeline's first and later stages, a stage after a review stop, a lead and its
     /// helpers, with and without a notebook, a person to ask and a conversation.
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn the_tools_offered_follow_where_the_agent_sits() {
         let seat = |mode, teammates, has_stage_before| BusSeat {
             mode,
