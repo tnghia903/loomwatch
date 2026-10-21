@@ -49,8 +49,10 @@
 .byhand-tools-give > .t-meta { margin: 0; color: var(--color-ink-3); }
 .byhand-tools-connect { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
 
-/* Connections: each connected tool, what it offers, and its actions. */
-.tools-connected { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+/* Connections: each connected tool, what it offers, and its actions. One column the section's
+   width: a grid's own column is as wide as the card's widest line, so a long page title in
+   Notion's list pushed the card out past the section's edge. */
+.tools-connected { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
 .tools-connected > li { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--color-hairline); border-radius: var(--r-md); }
 .tools-connected-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px var(--sp-3); }
 .tools-connected-head b { font-size: 14px; font-weight: 600; color: var(--color-ink); }
@@ -58,8 +60,11 @@
 .tools-connected .t-meta { margin: 0; color: var(--color-ink-2); overflow-wrap: anywhere; }
 .tools-connected .problem { color: var(--color-alert); }
 .tools-connected details > summary { cursor: pointer; font-size: 12.5px; color: var(--color-ink-3); }
-.tools-connected details ul { margin: var(--sp-2) 0 0; padding-left: var(--sp-4); font-size: 12.5px; color: var(--color-ink-2); }
+.tools-connected details ul { margin: var(--sp-2) 0 0; padding-left: var(--sp-4); font-size: 12.5px; color: var(--color-ink-2); overflow-wrap: anywhere; }
 /* Notion's card also chooses the page teams' answers go under (ADR 0070): a part of the card of its own. */
 .notion-answers { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-2) 0; padding-top: var(--sp-3); border-top: 1px solid var(--color-hairline); }
 .notion-answers h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--color-ink); }
 .tools-connected .notion-answers-quiet { color: var(--color-ink-3); }
+/* A page's whole title, wrapped, as the canvas's page picker shows it: two pages can start alike. */
+.notion-answers .pop-row { padding-block: 6px; }
+.notion-answers .pop-row .name { white-space: normal; overflow-wrap: anywhere; }
