@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { announceAiStatus, forgetKeyStatus } from '../../lib/ai/useKeyStatus'
@@ -26,7 +26,7 @@ describe('About you', () => {
 
     expect(screen.getByRole('heading', { name: 'About you' })).toBeInTheDocument()
     const name = await screen.findByLabelText('What should your agents call you?')
-    const about = screen.getByLabelText('What should they know about you?')
+    const about = screen.getByLabelText('What should your agents know about you?')
     expect(name).toHaveAttribute('maxLength', '60')
     expect(about).toHaveAttribute('maxLength', '1000')
     // Nothing typed, nothing to save.
@@ -47,6 +47,54 @@ describe('About you', () => {
     expect(name).toHaveValue('Mai')
     // Saved and unchanged: nothing to save again.
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  // The first run's three questions, here too: each choice writes its sentence into the text agents
+  // are told, and shows what that text says, so a sentence changed by hand moves its choice.
+  it('asks what you do, the language and how long over the text, and saves the text they write', async () => {
+    const saved = 'I like cats.\nI work in coffee farming.'
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ name: 'Mai', about: 'I like cats.\nAnswer in Vietnamese.', skipped: false }))
+      .mockResolvedValueOnce(response({ name: 'Mai', about: saved, skipped: false }))
+    vi.stubGlobal('fetch', fetch)
+    render(<AboutYouPage />)
+    const about = await screen.findByLabelText('What should your agents know about you?')
+    const question = (label: string) => screen.getByRole('group', { name: label })
+    const choice = (label: string, name: string) => within(question(label)).getByRole('button', { name })
+    expect(choice('Answer in', 'Tiếng Việt')).toHaveAttribute('aria-pressed', 'true')
+    expect(within(question('What do you do?')).getAllByRole('button').filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([])
+    // Nothing said about length: agents answer at the length they judge right.
+    expect(choice('How long?', 'Just right')).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(choice('What do you do?', 'Teaching'))
+    expect(about).toHaveValue('I like cats.\nAnswer in Vietnamese.\nI’m a teacher.')
+    fireEvent.click(choice('Answer in', 'English'))
+    expect(about).toHaveValue('I like cats.\nAnswer in English.\nI’m a teacher.')
+    expect(choice('Answer in', 'English')).toHaveAttribute('aria-pressed', 'true')
+    expect(choice('Answer in', 'Tiếng Việt')).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.change(about, { target: { value: 'I like cats.\nKeep answers short.' } })
+    expect(choice('How long?', 'Short')).toHaveAttribute('aria-pressed', 'true')
+    expect(choice('Answer in', 'English')).toHaveAttribute('aria-pressed', 'false')
+    expect(choice('What do you do?', 'Teaching')).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(choice('What do you do?', 'Something else'))
+    const words = screen.getByLabelText('In a few words')
+    fireEvent.change(words, { target: { value: 'coffee ' } })
+    expect(words).toHaveValue('coffee ')
+    fireEvent.change(words, { target: { value: 'coffee farming' } })
+    expect(about).toHaveValue('I like cats.\nKeep answers short.\nI work in coffee farming.')
+
+    // Just right says nothing: it takes the length sentence out, and shows as picked.
+    fireEvent.click(choice('How long?', 'Just right'))
+    expect(about).toHaveValue(saved)
+    expect(choice('How long?', 'Just right')).toHaveAttribute('aria-pressed', 'true')
+    expect(choice('How long?', 'Short')).toHaveAttribute('aria-pressed', 'false')
+    expect(choice('What do you do?', 'Something else')).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Saved.')
+    expect(sent(fetch, 1).body).toEqual({ name: 'Mai', about: saved, skipped: false })
   })
 
   it('says it goes to each AI the agents can run on now, and follows a change in Connections', async () => {

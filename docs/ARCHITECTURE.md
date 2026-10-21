@@ -165,14 +165,16 @@ the state folder so the list still shows offline. `GET /api/models` serves it.
 ### What agents know about you
 
 The operator can tell every agent their name and a few lines about themselves: what they do, the
-language they want answers in, how much detail they like. They write it on Home's first-run card or
-the About you page (`/you`), and `you.rs` keeps it in `<state dir>/you.json` (0600), not in a
-team file. `agent/prompt.rs` puts it in every agent's instructions: the first sentence names them,
-and `## The person you work for` quotes their words and says to follow what they ask of answers
-unless the task says otherwise. That covers team steps, check steps, one-agent chats, the builder's
-test bench, scheduled runs and Ask LoomWatch. The helper that rewrites agents' instructions is left
-out, so a language preference never translates them. With nothing saved, the instructions are
-exactly as before. The text goes to OpenRouter with each agent's work, and the page says so.
+language they want answers in, how much detail they like. They write it in the first run or on the
+About you page (`/you`), which ask the same three questions (what you do, answer in, how long), each
+choice writing one plain sentence into the text, and `you.rs` keeps it in `<state dir>/you.json`
+(0600), not in a team file. `agent/prompt.rs` puts it in every agent's instructions: the first
+sentence names them, and `## The person you work for` quotes their words and says to follow what
+they ask of answers unless the task says otherwise. That covers team steps, check steps, one-agent
+chats, the builder's test bench, scheduled runs and Ask LoomWatch. The helper that rewrites agents'
+instructions is left out, so a language preference never translates them. With nothing saved, the
+instructions are exactly as before. The text goes to OpenRouter with each agent's work, and the page
+says so.
 
 `ai/reading.rs` reads an agent's whole setup for its model suggestion, and only once the operator
 turns on Let AI choose (`AiChoice.tsx`), off by default, under the suggestion in an agent's model

@@ -56,7 +56,7 @@ After    the receipt says what the run did, and why it   (the run receipt, once,
   that runs earn anything at all. It lists every accessory and figure: what you have, when you
   earned it and the run that did, and for each one still locked, what to try and how a run earns
   it. Bobbin shows which of the five parts the wardrobe already holds. A **Quests** pill with the
-  count (`QuestsLink`) sits in the top bar of the My agents list; Home and an agent's page have
+  count (`QuestsLink`) sits in Home's top bar, beside **Skills**; a team's and an agent's page have
   **Quests…** in their ☰ menu, and ⌘K has **Quests…**.
 - **An agent's figure** (`FigurePicker`) sits beside its ID card in My agents, not on the
   workbench: the bench is how the agent works, the figure only how it looks. It has three parts

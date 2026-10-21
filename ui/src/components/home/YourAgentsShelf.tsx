@@ -29,7 +29,7 @@ export function YourAgentsShelf() {
       {/* Home has no About you card since the first run (ADR 0075), so this line is its way there. */}
       <KnowYou />
       {loaded && own !== null && !any && (
-        <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>Start here: build an agent once, chat with it on its own, then use it in any team. <a href="/agents/new">Build your first agent</a></span></div>
+        <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>Start here: build an agent once, chat with it on its own, then use it in any team.</span></div>
       )}
       {any && (
         <ul className="home-agents-row">

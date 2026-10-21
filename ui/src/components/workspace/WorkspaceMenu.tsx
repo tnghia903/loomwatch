@@ -9,8 +9,8 @@ interface WorkspaceMenuProps {
   runView?: boolean
   /** A team's memory. Absent where there is no team: an agent's page. */
   onMemory?: () => void
-  /** What else this menu reaches on its screen, before the guide: on Home and an agent's page,
-      Skills, Quests and the theme, which a team's screen has in its palette and view bar. */
+  /** What else this menu reaches on its screen, before the guide: the theme on Home; Skills, Quests
+      and the theme on an agent's page. A team's screen has them in its palette and view bar. */
   more?: readonly { label: string; run: () => void }[]
   /** Where feedback says it came from; a team's Build or Run when absent. */
   screen?: FeedbackScreen

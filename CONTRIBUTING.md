@@ -32,10 +32,11 @@ C++ build tools it needs.
 them, starts it and opens the app. See [the README](README.md#build-from-source) for the
 details and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit.
 
-Real runs need an [OpenRouter](https://openrouter.ai) API key. To try a change without one, use a
-team whose agents run on `model: fake/offline`, LoomWatch's built-in offline demo model, such as the
-offline demo team ([examples/operator-stop.yaml](examples/operator-stop.yaml)) that `./loomwatch`
-puts in a new teams folder. It calls no model and costs nothing
+Real runs need a way to pay for models: a ChatGPT plan, Claude API credit or an
+[OpenRouter](https://openrouter.ai) key. To try a change without one, use a team whose agents run on
+`model: fake/offline`, LoomWatch's built-in offline demo model, such as the offline demo team
+([examples/operator-stop.yaml](examples/operator-stop.yaml)). Copy it into your teams folder
+(`~/LoomWatch/teams`), since a new install has no teams. It calls no model and costs nothing
 ([docs/WATCH.md](docs/WATCH.md#verifying-without-a-model-provider)).
 
 To try real runs end to end without spending, with tool calls, permission cards, the Team Bus and

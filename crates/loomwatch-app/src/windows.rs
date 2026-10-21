@@ -73,8 +73,6 @@ struct Paths {
     program: PathBuf,
     daemon: PathBuf,
     teams: PathBuf,
-    /// The demo team copied into a new teams folder.
-    examples: PathBuf,
     /// `%LOCALAPPDATA%\LoomWatch`, where `loomwatchd` keeps its run history by default.
     state: PathBuf,
     log: PathBuf,
@@ -112,7 +110,6 @@ impl Paths {
             daemon,
             teams: std::env::var_os("LOOMWATCH_TEAMS_ROOT")
                 .map_or_else(|| home.join("LoomWatch").join("teams"), PathBuf::from),
-            examples: folder.join("examples"),
             log: state.join("Logs").join("loomwatchd.log"),
             state,
             commit,
@@ -130,16 +127,10 @@ impl Paths {
         self.state.join("app-update")
     }
 
-    /// Make the teams folder the first time, with the offline demo team in it.
+    /// Make the teams folder the first time. It starts empty: a newcomer opens on the first run,
+    /// where their first agent asks what to make, not on a demo team.
     fn ensure_teams(&self) -> Result<()> {
-        if self.teams.is_dir() {
-            return Ok(());
-        }
         std::fs::create_dir_all(&self.teams)?;
-        let demo = self.examples.join("operator-stop.yaml");
-        if demo.is_file() {
-            std::fs::copy(&demo, self.teams.join("operator-stop.yaml"))?;
-        }
         Ok(())
     }
 }

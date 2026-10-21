@@ -114,12 +114,6 @@
 .fr-about-body { display: grid; gap: 14px; padding: 16px 18px 18px; }
 .fr-about-field { display: flex; flex-direction: column; gap: 6px; }
 .fr-about-field > .t-meta { color: var(--color-ink-2); }
-.fr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.fr-chip {
-  font: 500 13.5px var(--font-sans); padding: 7px 12px; border-radius: var(--r-full); cursor: pointer;
-  border: 1px solid var(--color-hairline); background: var(--color-panel-solid); color: var(--color-ink);
-}
-.fr-chip[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-tint); color: var(--color-ink); }
 .fr-about-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .fr-about-foot small { max-width: 340px; color: var(--color-ink-3); }
 

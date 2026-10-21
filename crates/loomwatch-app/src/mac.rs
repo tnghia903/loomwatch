@@ -62,8 +62,6 @@ struct Paths {
     bundle: Option<PathBuf>,
     daemon: PathBuf,
     teams: PathBuf,
-    /// The demo team copied into a new teams folder.
-    examples: Option<PathBuf>,
     log: PathBuf,
     /// What `/api/about` reports as the commit, from the bundle's `VERSION`.
     commit: Option<String>,
@@ -108,7 +106,6 @@ impl Paths {
                 .map(PathBuf::from)
                 .filter(|teams| teams.is_absolute())
                 .unwrap_or_else(|| home.join("LoomWatch/teams")),
-            examples: resources.map(|resources| resources.join("examples")),
             log,
             commit,
             state: state_dir.unwrap_or_else(|| home.join("Library/Application Support/LoomWatch")),
@@ -126,18 +123,10 @@ impl Paths {
         self.state.join("app-update")
     }
 
-    /// Make the teams folder the first time, with the offline demo team in it.
+    /// Make the teams folder the first time. It starts empty: a newcomer opens on the first run,
+    /// where their first agent asks what to make, not on a demo team.
     fn ensure_teams(&self) -> Result<()> {
-        if self.teams.is_dir() {
-            return Ok(());
-        }
         std::fs::create_dir_all(&self.teams)?;
-        if let Some(examples) = &self.examples {
-            let from = examples.join("operator-stop.yaml");
-            if from.is_file() {
-                std::fs::copy(&from, self.teams.join("operator-stop.yaml"))?;
-            }
-        }
         Ok(())
     }
 }

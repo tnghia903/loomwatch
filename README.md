@@ -19,7 +19,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/runs%20on-your%20computer-AD8A20" alt="Runs on your computer">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-56524A" alt="Platform: macOS and Windows">
-  <img src="https://img.shields.io/badge/demo-offline%2C%20no%20key-17724A" alt="Demo: offline, no key">
   <img src="https://img.shields.io/badge/models%20via-ChatGPT%20plan%20%7C%20Claude%20credit%20%7C%20OpenRouter-56524A" alt="Models via your ChatGPT plan, your Claude credit or OpenRouter">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20React-56524A" alt="Built with Rust and React">
 </p>
@@ -27,7 +26,7 @@
 <p align="center">
   <img src="docs/assets/readme/demo.gif" width="880" alt="The offline demo in LoomWatch: the three-step team on the Workflow canvas, then its chat. The operator writes @team Prepare a short getting-started guide for new users. Researcher's handover arrives as a message to You, with Approve and Send back to Researcher under it, and the team waits. The operator types the note Keep it to one page in the message box and presses Approve with your note. The approval goes on to Writer, and Writer's answer appears in the chat, marked Nothing flagged.">
   <br>
-  <sub>The bundled offline demo: ask the team in its chat, approve the handover with a note, read the answer.</sub>
+  <sub>A team in its chat: ask it, approve the handover with a note, read the answer.</sub>
 </p>
 
 **Install on a Mac** (macOS 11 or newer; nothing else to install first): download
@@ -340,8 +339,8 @@ connected, and nothing is saved until you click **Apply**.
 
 ### 🎓 Guided first run
 
-Your first agent asks what to make first, and asks which AI should answer only when you send. An
-offline demo team and a three-minute guide are there to look around before you connect anything.
+Your first agent asks what to make first, and asks which AI should answer only when you send.
+**Just look around** skips to Home, where a three-minute guide shows the rest.
 
 </td>
 <td valign="top">
@@ -420,8 +419,8 @@ you built, then add, connect and rename agents to match. To run a team on a sche
    (about 30 MB, for Apple silicon and Intel Macs) and open it.
 2. Drag **LoomWatch** to **Applications**, then open it from Applications.
 
-LoomWatch opens in your browser with an offline demo team ready to run, and keeps an icon in the
-menu bar: **Open LoomWatch**, **Start at login**, **Show log** and **Quit LoomWatch**. There is no
+LoomWatch opens in your browser, where your first agent asks what to make first. It keeps an icon
+in the menu bar: **Open LoomWatch**, **Start at login**, **Show log** and **Quit LoomWatch**. There is no
 window to keep open; closing the browser tab leaves LoomWatch running until you quit it from the
 menu bar. Then follow [Try your first run](#try-your-first-run).
 
@@ -437,8 +436,8 @@ menu bar. Then follow [Try your first run](#try-your-first-run).
 2. It installs LoomWatch for you alone (no administrator needed), adds it to the Start menu, and
    opens it.
 
-LoomWatch opens in your browser with an offline demo team ready to run, and keeps an icon beside the
-clock (click the **^** there if it is hidden). Click the icon to open LoomWatch; right-click it for
+LoomWatch opens in your browser, where your first agent asks what to make first. It keeps an icon
+beside the clock (click the **^** there if it is hidden). Click the icon to open LoomWatch; right-click it for
 what waits on you, who is working and what finished in the last hour (click one to open it), and
 for **Start at sign-in**, **Show log** and **Quit LoomWatch**. There is no window to keep open.
 Then follow [Try your first run](#try-your-first-run).
@@ -457,7 +456,7 @@ curl -fsSL https://loomwatch.github.io/install.sh | bash
 
 It downloads LoomWatch (about 21 MB, one program for Apple silicon and Intel Macs), checks it
 against the release's checksum, puts it in `~/LoomWatch/app`, and opens
-**<http://127.0.0.1:3000>** with an offline demo team ready to run. Nothing is compiled and no
+**<http://127.0.0.1:3000>**, where your first agent asks what to make first. Nothing is compiled and no
 administrator password is needed. Then follow [Try your first run](#try-your-first-run).
 
 On Windows, paste this into PowerShell (from the Start menu, or Terminal) instead:
@@ -472,8 +471,7 @@ command. If PowerShell says running scripts is disabled, run
 `powershell -ExecutionPolicy Bypass -c "irm https://loomwatch.github.io/install.ps1 | iex"` instead.
 
 > [!TIP]
-> Nothing connected yet? The offline demo needs no key or sign-in and calls no model, so you can
-> learn the whole app first.
+> Nothing connected yet? Click **Just look around** to see the app first.
 
 <details>
 <summary>Rather read the installer before running it?</summary>
@@ -521,11 +519,11 @@ your agents can work in the folders you give them.
     that aren't free, and paste it into **OpenRouter (pay per use)**.
 
   LoomWatch checks each with its company, then keeps it in this Mac's Keychain, or on Windows in
-  Windows Credential Manager. You don't need any of them for the demo.
+  Windows Credential Manager. You need one only when you send your first request.
 
 LoomWatch never borrows another AI app's sign-in, such as Claude Code's, Codex's or Gemini's.
 Anthropic doesn't allow a Claude sign-in in other apps, which is why a Claude plan connects through
-its API credit. Nothing else needs installing, not even for the offline demo.
+its API credit. Nothing else needs installing.
 
 > [!WARNING]
 > On Windows, commands an agent runs are not sandboxed: an agent you let run commands can change
@@ -533,8 +531,8 @@ its API credit. Nothing else needs installing, not even for the offline demo.
 
 ### What the first start does
 
-1. Creates your teams folder, `~/LoomWatch/teams`, with an offline demo team in it, if the folder
-   does not exist yet.
+1. Creates your teams folder, `~/LoomWatch/teams`, if the folder does not exist yet. It starts
+   empty: the first run is where you make your first agent.
 2. Starts LoomWatch and opens **<http://127.0.0.1:3000>** in your browser.
 3. Keeps your run history, notes and checkpoints in one file,
    `~/Library/Application Support/LoomWatch/loomwatch.db` (`%LOCALAPPDATA%\LoomWatch` on Windows,
@@ -555,7 +553,7 @@ history is moved into the file. Only one LoomWatch can use the history at a time
 stop the Terminal one before opening the app.
 
 LoomWatch reads no other app's settings or sign-ins. Your skills live in LoomWatch's own folder (see
-[Where your work is saved](#where-your-work-is-saved)). On the Skills page, **Look on this computer**
+[Where your work is saved](#where-your-work-is-saved)). On the **Skills** page (top of Home), **Look on this computer**
 copies in the skills your AI apps keep, and only when you click it.
 
 ### Every day
@@ -727,7 +725,6 @@ app's. A history it kept in Docker before 0.5 is copied in only by 0.5.0: run
 (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build)
 cargo build --release --locked --bin loomwatchd
 mkdir -p "$HOME/LoomWatch/teams"
-cp -n examples/operator-stop.yaml "$HOME/LoomWatch/teams/"
 ./target/release/loomwatchd serve --teams-root "$HOME/LoomWatch/teams" --listen 127.0.0.1:3000 \
   --database .loomwatch/loomwatch.db
 ```
@@ -744,15 +741,21 @@ anything, or pick one of the examples, and send it. If no AI is connected yet, i
 should answer: your ChatGPT plan, your Claude API credit or an OpenRouter key, each with what it
 costs. After its first answer it offers **Tell my agents about me**: your name, what you do, and the
 language and length you want. Then it answers again, made for you. **Keep this agent** adds it to My
-agents, and **Just look around** goes to Home instead.
+agents, and **Go to Home** leaves it there. **Just look around**, at the top, goes to Home at any
+time.
 
 For a tour of the rest, click **New here? Take the 3-minute guide** on Home, or choose **Getting
 started guide** from the ☰ menu or <kbd>⌘</kbd><kbd>K</kbd>. It walks you through building
 an agent, trying it on its own, putting it in a team and running it.
 
-To try a team without calling a model provider, pick **Review stop demo** under **Your teams**. The
-demo is a three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so
-you can learn the interface without calling a model provider.
+<details>
+<summary>Try a team without a model</summary>
+
+A new install has no teams. Download the offline demo team,
+[examples/operator-stop.yaml](examples/operator-stop.yaml), into your teams folder
+(`~/LoomWatch/teams`), open LoomWatch and pick **Review stop demo** under **Your teams**. It is a
+three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can
+learn the interface without calling a model provider.
 
 1. Open the team's **Chat** tab (or click **Run team** in **Workflow**), type
    `@team Prepare a short getting-started guide for new users.` in the message box at the bottom,
@@ -765,6 +768,8 @@ you can learn the interface without calling a model provider.
 4. Click **Approve** to let the team continue. To pass on a note, type it first; the button then
    says **Approve with your note**, and your note goes on as your direction.
 5. Read the team's answer in the chat. The demo writer echoes the direction it received.
+
+</details>
 
 Everything the team has done stays in its chat: scroll up, or search it with the magnifier at the
 top. **Details** on any piece opens its stages, timeline and record beside the chat, and **Full
@@ -825,7 +830,7 @@ you've connected that offers that model, or else through OpenRouter.
 > request, the agents' instructions and the files and pages they read go to the company whose model
 > you chose, through OpenRouter when that is how it's paid. Running LoomWatch locally does not make cloud models
 > offline. Free models change often, and some let their maker learn from what you send, so keep
-> private work for a model you pay for. The offline demo calls no model.
+> private work for a model you pay for.
 
 <details>
 <summary><strong>Keep the pipeline easy to follow</strong></summary>
@@ -924,8 +929,7 @@ and your ChatGPT sign-in stay in this Mac's Keychain (on Windows, in Windows Cre
 Linux, in a file only your user can read), and agents never see them: they are not in their
 commands, their folders, the team file or the run history.
 
-The offline demo needs no key at all, and some models on OpenRouter are free. Free models change
-often, and some let their maker learn from what you send, so keep private work for a model you pay
+Some models on OpenRouter are free. Free models change often, and some let their maker learn from what you send, so keep private work for a model you pay
 for.
 
 </details>
@@ -965,7 +969,7 @@ It depends on how each agent's model is paid:
   receipt shows the exact cost it reported.
 
 **Usage…** in the ☰ menu shows what LoomWatch used on each over the last 30 days, with a link to
-where you see the exact figure. The offline demo costs nothing.
+where you see the exact figure.
 
 </details>
 

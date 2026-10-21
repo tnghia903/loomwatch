@@ -85,7 +85,7 @@ export PATH="$FAKE/bin:$PATH"
 # A release archive the way package-release.sh packs one, around a stand-in program.
 release() {
   local version=$1 stage="$work/stage-$1"
-  mkdir -p "$stage/loomwatch/bin" "$stage/loomwatch/examples" "$FAKE/releases/v$version"
+  mkdir -p "$stage/loomwatch/bin" "$FAKE/releases/v$version"
   cat >"$stage/loomwatch/bin/loomwatchd" <<'EOF'
 #!/usr/bin/env bash
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -125,7 +125,6 @@ fi
 touch "$FAKE/daemon-up"
 EOF
   cp "$root/loomwatch" "$root/scripts/install.sh" "$stage/loomwatch/"
-  cp "$root/examples/operator-stop.yaml" "$stage/loomwatch/examples/"
   chmod 755 "$stage/loomwatch/bin/loomwatchd" "$stage/loomwatch/loomwatch" "$stage/loomwatch/install.sh"
   printf '%s c0ffee%s\n' "$version" "$(printf '%s' "$version" | tr -d .)" >"$stage/loomwatch/VERSION"
   local folder="$FAKE/releases/v$version" archive

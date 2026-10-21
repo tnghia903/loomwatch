@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { relativeTime } from '../../lib/format'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
-import { teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
+import { fetchTeamsDiscovery, teamDisplayName, type DeletedTeam, type TeamSummary } from '../../lib/team-file/client'
 import { openTeam, teamViewFor, useTeamList } from '../../lib/team-file/useTeamList'
 import { useTheme } from '../../lib/theme'
-import { readTourState, startTour } from '../../lib/tour/store'
+import { startTour } from '../../lib/tour/store'
 import { markFirstRun, opensOnFirstRun, readFirstRun } from '../../lib/firstrun/store'
+import { fetchJobs } from '../../lib/library/jobs'
 import { FirstRun } from '../firstrun/FirstRun'
 import { ChipDot, LoomMark, LoomWordmark } from '../ui/glyphs'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
@@ -25,6 +26,8 @@ import { NewTeamDialog } from './NewTeamDialog'
 import { TeamCardMenu } from './TeamCardMenu'
 import { YourAgentsShelf } from './YourAgentsShelf'
 import { WorkspaceMenu } from '../workspace/WorkspaceMenu'
+import { QuestsLink } from '../quests/QuestsLink'
+import { SkillsLink } from '../skills/SkillsLink'
 import { keys } from '../../lib/platform'
 import { dollars } from '../../lib/runs/spend'
 
@@ -103,14 +106,14 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
   // person sees it accepted before the cards make way (ADR 0073).
   const [keyCard, setKeyCard] = useState(false)
   if (ai && sources.length === 0 && !keyCard) setKeyCard(true)
-  // Someone who has never had anything made opens on the first run (ADR 0075),
+  // Someone who has never had anything made in this LoomWatch opens on the first run (ADR 0075),
   // instead of this page; see lib/firstrun/store.ts. Asked once per visit. It replaces the
   // getting-started guide opening by itself, which stays a link here and in the menu.
-  const [firstRun, setFirstRun] = useState<'checking' | 'on' | 'off'>(() => (readFirstRun() || readTourState() ? 'off' : 'checking'))
+  const [firstRun, setFirstRun] = useState<'checking' | 'on' | 'off'>(() => (readFirstRun() ? 'off' : 'checking'))
   useEffect(() => {
     if (firstRun !== 'checking') return
     let live = true
-    void opensOnFirstRun(fetchRuns, Boolean(readTourState())).then((on) => { if (live) setFirstRun(on ? 'on' : 'off') })
+    void opensOnFirstRun({ listRuns: fetchRuns, listAgents: fetchJobs, listTeams: fetchTeamsDiscovery }).then((on) => { if (live) setFirstRun(on ? 'on' : 'off') })
     return () => { live = false }
   }, [firstRun])
   // Teams are listed as chats (ADR 0051): the one with the newest work first, then the rest.
@@ -153,19 +156,23 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
   }
 
   return (
-    <div className="lw-home" data-tour="home">
+    // Unseen while it is asked whether this is a first run, so a newcomer's first screen is the first
+    // run, not Home for a moment before it. home.css shows it after a second whatever the answer.
+    <div className="lw-home" data-tour="home" data-checking={firstRun === 'checking' || undefined}>
       <div className="ground" aria-hidden="true" />
       <header className="home-top">
         <span className="home-brand"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></span>
         <span className="home-top-acts">
           <button type="button" className="iconbtn" onClick={onPalette} aria-label="Open the command palette" title={`Commands (${keys('⌘K')})`}><Search size={15} aria-hidden="true" /></button>
           <UpdateBadge />
-          {/* The bell beside the menu, as on a team's and an agent's page. Skills, Quests and the
-              theme, which a team's screen reaches from its palette and view bar, are in the menu. */}
+          {/* Skills and Quests are Home's own: what every agent can be taught, and what runs earn.
+              A team's and an agent's page reach them from the menu. */}
+          <SkillsLink />
+          <QuestsLink />
+          {/* The bell beside the menu, as on a team's and an agent's page. The theme, which a team's
+              screen reaches from its palette and view bar, is in the menu. */}
           {topActions}
           <WorkspaceMenu screen="home" more={[
-            { label: 'Skills…', run: () => window.location.assign('/skills') },
-            { label: 'Quests…', run: () => window.location.assign('/quests') },
             { label: resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', run: toggle },
           ]} />
         </span>
@@ -211,7 +218,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
           {!error && teams?.length === 0 && (
             <div className="home-empty">
               <Users size={20} aria-hidden="true" />
-              <span>No teams yet. When your agents are ready, put them in a team: <button type="button" className="link" onClick={() => setCreating(true)}>Create one</button></span>
+              <span>No teams yet. When your agents are ready, put them in a team.</span>
             </div>
           )}
           {shown.length > 0 && (

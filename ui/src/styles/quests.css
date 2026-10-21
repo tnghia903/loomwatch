@@ -43,9 +43,8 @@
 .quests-wear { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); font-size: 14px; color: var(--color-ink-2); }
 .quests-wear .link { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
 
-/* The link to it from the top bars of Home and Your agents: how many are earned, at a glance. */
-.quests-link { gap: 6px; text-decoration: none; }
-.quests-link-count { font: 600 11px/1 var(--font-mono); color: var(--color-ink-3); }
+/* The link to it from Home's top bar: how many are earned, at a glance. */
+.quests-link-count { font: 600 12px/1 var(--font-mono); color: var(--color-ink-2); }
 
 @media (max-width: 560px) {
   .quest-card { grid-template-columns: 48px minmax(0, 1fr); gap: var(--sp-3); }

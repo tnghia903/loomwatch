@@ -7,8 +7,8 @@
 //! running until Quit. If `loomwatchd` stops on its own, it is started again.
 //!
 //! Everything a `loomwatchd` needs comes from its own defaults: the state folder and the database
-//! in it, and `~/LoomWatch/teams`, which is made on first start with the offline demo team, as
-//! the `loomwatch` launcher makes it.
+//! in it, and `~/LoomWatch/teams`, which is made empty on first start, as the `loomwatch`
+//! launcher makes it.
 
 // A Windows program with no console window of its own.
 #![cfg_attr(windows, windows_subsystem = "windows")]
