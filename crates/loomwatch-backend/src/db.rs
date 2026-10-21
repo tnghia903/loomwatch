@@ -158,8 +158,6 @@ fn base_options(path: &Path) -> SqliteConnectOptions {
         .busy_timeout(BUSY_TIMEOUT)
         .foreign_keys(true)
         .pragma("temp_store", "memory")
-        // Chat search: case-insensitive in every alphabet, which `LIKE` is not.
-        .with_regexp()
         // Statements are cached per connection and not logged one by one.
         .disable_statement_logging()
 }

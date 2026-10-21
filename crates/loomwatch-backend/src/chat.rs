@@ -338,6 +338,7 @@ impl ChatStore {
         )
         .execute(self.db.writer())
         .await?;
+        crate::chat_find::wake();
         Ok(())
     }
 
@@ -402,6 +403,7 @@ impl ChatStore {
             .bind(run_id)
             .execute(self.db.writer())
             .await?;
+        crate::chat_find::wake();
         Ok(())
     }
 
@@ -412,6 +414,7 @@ impl ChatStore {
             .bind(serde_json::to_value(answers).ok())
             .execute(self.db.writer())
             .await?;
+        crate::chat_find::wake();
         Ok(())
     }
 
@@ -420,21 +423,18 @@ impl ChatStore {
         &self,
         team: &TeamRef,
         before: Option<&str>,
-        search: Option<&str>,
         limit: i64,
     ) -> Result<Vec<ChatMessage>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT * FROM chat_messages
              WHERE (team_key = $1 OR team_path = $2) AND route = 'team_note'
                AND ($3 IS NULL OR created_at < $3)
-               AND ($5 IS NULL OR text REGEXP $5)
              ORDER BY created_at DESC, id DESC LIMIT $4",
         )
         .bind(&team.key)
         .bind(&team.path)
         .bind(before)
         .bind(limit)
-        .bind(search)
         .fetch_all(self.db.reader())
         .await?;
         rows.iter().map(decode_message).collect()
@@ -484,23 +484,18 @@ impl ChatStore {
         &self,
         team: &TeamRef,
         before: Option<&str>,
-        search: Option<&str>,
         limit: i64,
     ) -> Result<Vec<RunRecord>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT * FROM runs
              WHERE (team_key = $1 OR team_key = 'path:' || $2 OR (team_key IS NULL AND team_path = $2))
                AND ($3 IS NULL OR created_at < $3)
-               AND ($5 IS NULL OR prompt REGEXP $5 OR reply REGEXP $5
-                    OR run_id IN (SELECT run_id FROM chat_messages
-                                  WHERE run_id IS NOT NULL AND text REGEXP $5))
              ORDER BY created_at DESC, run_id DESC LIMIT $4",
         )
         .bind(&team.key)
         .bind(&team.path)
         .bind(before)
         .bind(limit)
-        .bind(search)
         .fetch_all(self.db.reader())
         .await?;
         rows.iter()
@@ -816,7 +811,7 @@ pub struct About {
     pub quote: Option<String>,
 }
 
-fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessage, sqlx::Error> {
+pub(crate) fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessage, sqlx::Error> {
     let route: String = row.try_get("route")?;
     Ok(ChatMessage {
         id: row.try_get("id")?,
@@ -917,7 +912,7 @@ async fn gather(
     record: &RunRecord,
 ) -> Result<History, sqlx::Error> {
     let runs = store
-        .runs(team, Some(&record.created_at), None, LOOKBACK)
+        .runs(team, Some(&record.created_at), LOOKBACK)
         .await?
         .into_iter()
         .filter(|run| run.run_id != record.run_id)
@@ -1532,6 +1527,7 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
     let teams_root = crate::platform::canonicalize(&teams_root).unwrap_or(teams_root);
     Router::new()
         .route("/api/chat", get(chat_page))
+        .route("/api/chat/find", get(find))
         .route("/api/chat/messages", post(send_message))
         .route("/api/chat/messages/{id}/start", post(start_from_note))
         .route("/api/chat/continue", post(continue_team))
@@ -1558,15 +1554,6 @@ fn open_team(teams_root: &Path, team_path: &str) -> Result<(String, TeamConfig),
     Ok((relative, team))
 }
 
-/// `words` as a `REGEXP` pattern that matches them anywhere, ignoring case in every alphabet,
-/// with every character taken literally.
-///
-/// Not `LIKE`: SQLite's `LIKE` ignores case only for ASCII letters, so "đường" would miss
-/// "Đường". The regex runs in Rust (sqlx's `REGEXP`), compiled once per query.
-fn search_pattern(words: &str) -> String {
-    format!("(?i){}", regex::escape(words))
-}
-
 fn no_store() -> ApiError {
     ApiError::new(
         StatusCode::SERVICE_UNAVAILABLE,
@@ -1588,9 +1575,6 @@ struct PageQuery {
     /// Only items created before this instant: the `createdAt` of the oldest item already shown.
     before: Option<String>,
     limit: Option<i64>,
-    /// Only work and notes whose words contain this: search within the team's chat.
-    #[serde(default)]
-    q: Option<String>,
 }
 
 /// One item of a chat page, newest first.
@@ -1640,21 +1624,15 @@ async fn chat_page(
     };
     let limit = query.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
     let before = query.before.as_deref().filter(|value| !value.is_empty());
-    let search = query
-        .q
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(search_pattern);
     let Some(store) = state.registry.chat_store() else {
         return Err(no_store());
     };
     let runs = store
-        .runs(&team_ref, before, search.as_deref(), limit + 1)
+        .runs(&team_ref, before, limit + 1)
         .await
         .map_err(|error| database(&error))?;
     let notes = store
-        .team_notes(&team_ref, before, search.as_deref(), limit + 1)
+        .team_notes(&team_ref, before, limit + 1)
         .await
         .map_err(|error| database(&error))?;
     let ids = runs
@@ -1732,6 +1710,39 @@ async fn chat_page(
         "more": more,
     }))
     .into_response())
+}
+
+/// The most pieces one search shows.
+const FIND_PIECES: usize = 30;
+/// The most of a search's words the daemon reads.
+const MAX_FIND_CHARS: usize = 300;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FindQuery {
+    team_path: String,
+    #[serde(default)]
+    q: String,
+    limit: Option<usize>,
+}
+
+/// `GET /api/chat/find?teamPath=…&q=…`: the pieces of a team's chat whose words match, best
+/// first, with the passages that matched and how the words were read (ADR 0081).
+async fn find(
+    State(state): State<ChatState>,
+    Query(query): Query<FindQuery>,
+) -> Result<Response, ApiError> {
+    let (relative, team) = open_team(&state.teams_root, &query.team_path)?;
+    let Some(index) = state.registry.work_index() else {
+        return Err(no_store());
+    };
+    let words: String = query.q.chars().take(MAX_FIND_CHARS).collect();
+    let limit = query.limit.unwrap_or(FIND_PIECES).clamp(1, FIND_PIECES);
+    let found = index
+        .find(&team.chat_key(&relative), &relative, &words, limit)
+        .await
+        .map_err(|error| database(&error))?;
+    Ok(Json(found).into_response())
 }
 
 /// Each piece of work, and each team note the agents answered, with what they learned from
@@ -2069,14 +2080,14 @@ impl Answered {
             return Self::run(state, stored);
         }
         let run = store
-            .runs(team, None, None, 1)
+            .runs(team, None, 1)
             .await
             .ok()
             .and_then(|runs| runs.into_iter().next())
             .and_then(|stored| Self::run(state, stored));
         // Your own notes come between: the newest note the agents answered is what counts.
         let note = store
-            .team_notes(team, None, None, NOTES_LOOKED_BACK)
+            .team_notes(team, None, NOTES_LOOKED_BACK)
             .await
             .ok()
             .and_then(|notes| notes.into_iter().find_map(Self::note));
@@ -3624,6 +3635,36 @@ mod tests {
             .collect()
     }
 
+    /// Find within the chat (ADR 0081): a team note by its words in any case and form, a note
+    /// sent into work by its words in any order, and `%` as nothing to look for.
+    async fn finds_the_note_and_the_work(
+        app: &Router,
+        note_id: &str,
+        run_id: &str,
+        queued_id: &str,
+    ) {
+        let found = page_at(app, "/api/chat/find?teamPath=news.yaml&q=LISTS").await;
+        let pieces = found["pieces"].as_array().unwrap();
+        assert_eq!(pieces.len(), 1, "{found}");
+        assert_eq!(pieces[0]["kind"], "note");
+        assert_eq!(pieces[0]["title"], "we only cover listed companies");
+        assert_eq!(
+            pieces[0]["passages"][0]["target"],
+            format!("note:{note_id}")
+        );
+        assert_eq!(found["terms"], json!([{"text": "list", "prefix": true}]));
+        let found = page_at(app, "/api/chat/find?teamPath=news.yaml&q=short%20keep").await;
+        assert_eq!(found["pieces"][0]["id"], run_id, "{found}");
+        assert_eq!(found["pieces"][0]["title"], "today's digest");
+        assert_eq!(
+            found["pieces"][0]["passages"][0]["target"],
+            format!("note:{queued_id}")
+        );
+        assert_eq!(found["everyWord"], true);
+        let found = page_at(app, "/api/chat/find?teamPath=news.yaml&q=%25").await;
+        assert!(found["pieces"].as_array().unwrap().is_empty(), "{found}");
+    }
+
     #[tokio::test]
     async fn a_team_note_waits_for_the_next_work_and_a_note_joins_the_working_agents_session() {
         let pool = crate::db::Db::temp().await;
@@ -3726,15 +3767,9 @@ mod tests {
             "we only cover listed companies"
         );
 
-        // Search within the chat: by a team note's words, by a note sent into work, with `%` taken
-        // as the character it is.
-        let found = page_at(&rig.app, "/api/chat?teamPath=news.yaml&q=LISTED").await;
-        assert_eq!(found["items"].as_array().unwrap().len(), 1, "{found}");
-        assert_eq!(found["items"][0]["kind"], "note");
-        let found = page_at(&rig.app, "/api/chat?teamPath=news.yaml&q=keep%20it%20short").await;
-        assert_eq!(found["items"][0]["run"]["runId"], run_id, "{found}");
-        let found = page_at(&rig.app, "/api/chat?teamPath=news.yaml&q=%25").await;
-        assert!(found["items"].as_array().unwrap().is_empty(), "{found}");
+        let note_id = noted["message"]["id"].as_str().unwrap();
+        let queued_id = queued["message"]["id"].as_str().unwrap();
+        finds_the_note_and_the_work(&rig.app, note_id, &run_id, queued_id).await;
     }
 
     #[tokio::test]

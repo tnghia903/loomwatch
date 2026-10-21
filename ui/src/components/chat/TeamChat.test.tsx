@@ -1308,3 +1308,106 @@ describe('what the agents learned', () => {
     expect(posted).toEqual([{ url: '/api/lessons/undo', body: { teamPath: 'news.yaml', agent: 'writer', id: 'l1' } }])
   })
 })
+
+describe('finding words in the whole chat (ADR 0081)', () => {
+  type Line = { target: string; who: string | null; text: string }
+  const found = (piece: { id: string; title: string; passages: Line[] }) => ({
+    terms: [{ text: 'digest', prefix: true }],
+    everyWord: true,
+    pieces: [{ id: piece.id, kind: 'work', at: '2026-10-06T02:00:00.000Z', title: piece.title, everyWord: true, agents: piece.passages.flatMap((passage) => (passage.who ? [passage.who] : [])), passages: piece.passages.map((passage) => ({ ...passage, at: '2026-10-06T02:00:00.000Z', part: 0 })) }],
+  })
+  const search = async (words: string) => {
+    fireEvent.click(await screen.findByRole('button', { name: 'Find in this chat' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Find in this chat' }), { target: { value: words } })
+  }
+  const withFind = (result: unknown, older: ChatItem[] = [], status = 200) => {
+    const asked: string[] = []
+    const real = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/chat/find?')) { asked.push(url); return new Response(JSON.stringify(result), { status }) }
+      // The first page is the newest work; an earlier page holds the rest.
+      if (url.startsWith('/api/chat?') && older.length) {
+        const items = url.includes('before=') ? older : page
+        return new Response(JSON.stringify({ teamKey: 'news', teamPath: 'news.yaml', items: [...items].reverse(), more: !url.includes('before=') }), { status: 200 })
+      }
+      return real(input, init)
+    }))
+    return asked
+  }
+  const digest: Line = { target: 'request', who: null, text: '@team today’s digest' }
+
+  it('shows what matches in place of the chat, titled by its request with the words lit', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    const asked = withFind(found({ id: 'run-1', title: '@team today’s digest', passages: [digest, { target: 'answer', who: 'writer', text: 'The digest is ready.' }] }))
+    renderChat()
+    await search('digest')
+    expect(await screen.findByText('One piece of work matches.')).toBeInTheDocument()
+    expect(asked[0]).toContain('q=digest')
+    const head = screen.getByRole('button', { name: /^today’s digest, .*Open this work in the chat$/ })
+    expect(within(head).getByText('digest').tagName).toBe('MARK')
+    // The request is the title, so only the answer is a line of its own.
+    expect(screen.getAllByRole('button', { name: /Show it in the chat$/ })).toHaveLength(1)
+    expect(screen.getByRole('log', { hidden: true })).not.toBeVisible()
+  })
+
+  it('opens the chat at the work, rings it, and goes back to the list', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    withFind(found({ id: 'run-1', title: '@team today’s digest', passages: [digest] }))
+    renderChat()
+    await search('digest')
+    fireEvent.click(await screen.findByRole('button', { name: /Open this work in the chat$/ }))
+    expect(screen.getByRole('log')).toBeVisible()
+    await waitFor(() => expect(document.querySelector('[data-said="request:run-1"]')).toHaveClass('flash'))
+    expect(within(document.querySelector('[data-said="request:run-1"]') as HTMLElement).getByText('digest').tagName).toBe('MARK')
+    fireEvent.click(screen.getByRole('button', { name: '← Back to the list' }))
+    expect(await screen.findByText('One piece of work matches.')).toBeInTheDocument()
+  })
+
+  it('stays at the message it opened when the search is closed there', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    withFind(found({ id: 'run-1', title: '@team today’s digest', passages: [digest] }))
+    renderChat()
+    await search('digest')
+    fireEvent.click(await screen.findByRole('button', { name: /Open this work in the chat$/ }))
+    const scroller = document.querySelector('.tc-scroll') as HTMLElement
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 5000 })
+    scroller.scrollTop = 1200
+    fireEvent.click(screen.getByRole('button', { name: 'Close find' }))
+    expect(scroller.scrollTop).toBe(1200)
+    expect(document.querySelector('mark.tc-find-hit')).toBeNull()
+  })
+
+  it('reads earlier pages until the found work is in the chat', async () => {
+    const old = run({ runId: 'run-0', sessionId: 'run-0', createdAt: '2026-10-01T02:00:00.000Z', prompt: 'the old digest' })
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    withFind(found({ id: 'run-0', title: 'the old digest', passages: [{ target: 'request', who: null, text: 'the old digest' }] }), [{ kind: 'work', run: old, request: null, notes: [] }])
+    renderChat()
+    await search('digest')
+    fireEvent.click(await screen.findByRole('button', { name: /Open this work in the chat$/ }))
+    // The earlier page was read: the old request is in the chat, with its found word lit.
+    expect(await screen.findByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === 'the old digest')).toBeInTheDocument()
+    await waitFor(() => expect(document.querySelector('[data-said="request:run-0"]')).toHaveClass('flash'))
+  })
+
+  it('shows more lines of a piece in place', async () => {
+    const lines = ['one', 'two', 'three', 'four', 'five'].map((n): Line => ({ target: `talk:handover:${n}`, who: 'researcher', text: `digest part ${n}` }))
+    withFind(found({ id: 'run-1', title: 'today’s digest', passages: lines }))
+    renderChat()
+    await search('digest')
+    fireEvent.click(await screen.findByRole('button', { name: 'Show 2 more' }))
+    expect(screen.getAllByRole('button', { name: /Show it in the chat$/ })).toHaveLength(5)
+  })
+
+  it('says so when nothing matches, and when the search itself failed', async () => {
+    withFind({ terms: [{ text: 'penguin', prefix: true }], everyWord: true, pieces: [] })
+    renderChat()
+    await search('penguins')
+    expect(await screen.findByText('Nothing in this chat matches that.')).toBeInTheDocument()
+    withFind({ error: 'the archive is off' }, [], 503)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Find in this chat' }), { target: { value: 'penguins at sea' } })
+    expect(await screen.findByText('Couldn’t search the chat just now.')).toBeInTheDocument()
+    expect(screen.queryByText('Nothing in this chat matches that.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+})

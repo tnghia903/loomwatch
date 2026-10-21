@@ -3423,7 +3423,7 @@ enum Search {
 }
 
 /// Words a web-style query ignores, as Postgres's `english` configuration did.
-const STOP_WORDS: &[&str] = &[
+pub(crate) const STOP_WORDS: &[&str] = &[
     "a",
     "about",
     "above",

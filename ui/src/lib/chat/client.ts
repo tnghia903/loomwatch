@@ -1,4 +1,5 @@
 import { daemonFetch } from '../daemonFetch'
+import type { FindTerm } from './findWords'
 import { readRun, type RunRecord } from '../runs/client'
 import type { Lesson } from '../lessons/client'
 import type { Face, Reaction, ReactionAbout } from './reactions'
@@ -150,13 +151,54 @@ export const itemAnchor = (item: ChatItem): string => (item.kind === 'work' ? it
 /** When an item happened, for ordering pages and asking for the next one. */
 export const itemAt = (item: ChatItem): string => (item.kind === 'work' ? item.run.createdAt : item.message.createdAt)
 
-export async function fetchChatPage(teamPath: string, before?: string | null, limit?: number, signal?: AbortSignal, search?: string): Promise<ChatPage> {
+export async function fetchChatPage(teamPath: string, before?: string | null, limit?: number, signal?: AbortSignal): Promise<ChatPage> {
   const query = new URLSearchParams({ teamPath })
   if (before) query.set('before', before)
   if (limit) query.set('limit', String(limit))
-  if (search?.trim()) query.set('q', search.trim())
   const response = await daemonFetch(`/api/chat?${query.toString()}`, { signal, cache: 'no-store' })
   return readRun<ChatPage>(response)
+}
+
+/** Something said in the chat that a search found, named as the chat names it (ADR 0081). */
+export interface FoundPassage {
+  /** `request`, `answer`, `note:<id>`, `talk:<line>` or `reply:<agent>`. */
+  target: string
+  /** The agent who said it; null for you. */
+  who: string | null
+  at: string
+  /** Which part of a long message, from 0. */
+  part: number
+  text: string
+}
+
+/** A piece of work, or a team note, that holds the words searched for. */
+export interface FoundPiece {
+  /** The run id, or the team note's id. */
+  id: string
+  kind: 'work' | 'note'
+  at: string
+  /** What it began with: the request, or the note. */
+  title: string
+  /** The agents whose words matched. */
+  agents: string[]
+  /** Whether it holds every word searched for, in one message or across several. */
+  everyWord: boolean
+  passages: FoundPassage[]
+}
+
+export interface Found {
+  /** How the words were read, so the same words are lit. */
+  terms: FindTerm[]
+  /** Whether every piece holds all the words; the ones that do come first. */
+  everyWord: boolean
+  pieces: FoundPiece[]
+}
+
+/** Find words in a team's whole chat: requests, answers, notes and the agents' talk. */
+export async function findInChat(teamPath: string, words: string, signal?: AbortSignal): Promise<Found> {
+  const query = new URLSearchParams({ teamPath, q: words })
+  const response = await daemonFetch(`/api/chat/find?${query.toString()}`, { signal, cache: 'no-store' })
+  return readRun<Found>(response)
 }
 
 export async function sendChatMessage({ teamPath, text, to, now, expectedRevision, startKey, replyTo, work, signal }: SendOptions): Promise<SendResult> {

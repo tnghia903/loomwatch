@@ -10,6 +10,7 @@ pub mod archive;
 pub mod auto_mode;
 pub mod capabilities;
 pub mod chat;
+pub(crate) mod chat_find;
 pub mod chosen_knowledge;
 pub mod composer;
 pub mod config;

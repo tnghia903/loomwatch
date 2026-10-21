@@ -1,7 +1,9 @@
 import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from 'lucide-react'
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
+import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, type ChatMessage, type ChatTarget, type ChatItem, type Found, type FoundPassage, type FoundPiece, type ReplyTo } from '../../lib/chat/client'
+import { FindScopeContext, showFoundWords, type FindTerm } from '../../lib/chat/findWords'
+import { isDocument } from '../../lib/chat/document'
 import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
@@ -26,6 +28,8 @@ import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
 import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
+import { ChatFind } from './ChatFind'
+import { FoundText } from './FoundText'
 import { Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
@@ -141,7 +145,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     const frame = requestAnimationFrame(() => setSettled(true))
     return () => cancelAnimationFrame(frame)
   }, [chat.loaded, settled, chat.loadingOlder])
-  const search = useChatSearch(teamPath)
+  const search = useChatFind(teamPath)
   const startKeys = useRef(new Map<string, string>())
   const scroller = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
@@ -471,6 +475,61 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       ? () => setShown({ runId: reply.runId as string, id: reply.messageId, at: Date.now() })
       : undefined)
   const name = (id: string) => nameWithHelpers(team.names, id) ?? id
+  // A found line opened (ADR 0081): the chat goes back to its piece, reading earlier pages until it
+  // is there, and shows the line in it with the words lit.
+  const [noteShown, setNoteShown] = useState<{ id: string; at: number } | null>(null)
+  const [opening, setOpening] = useState<{ piece: FoundPiece; passage: FoundPassage | null } | null>(null)
+  const [landingMissed, setLandingMissed] = useState(false)
+  const openFound = (piece: FoundPiece, passage: FoundPassage | null) => {
+    search.land(search.found?.terms ?? [])
+    setLandingMissed(false)
+    setOpening({ piece, passage })
+  }
+  useEffect(() => {
+    if (!opening) return
+    const here = chat.items.find((item) => (item.kind === 'work' ? item.run.runId : item.message.id) === opening.piece.id)
+    if (!here) {
+      if (chat.loadingOlder) return
+      if (chat.more) { loadOlder(); return }
+      setOpening(null)
+      setLandingMissed(true)
+      return
+    }
+    setOpening(null)
+    const at = Date.now()
+    if (here.kind === 'note') { setNoteShown({ id: here.message.id, at }); return }
+    // A long answer is read beside the chat: it opens there, with the words lit in it too.
+    const target = opening.passage?.target ?? 'request'
+    if (target === 'answer' && here.run.reply && isDocument(here.run.reply) && answerRunId !== here.run.runId) onOpenAnswer(here.run.runId)
+    setShown({ runId: here.run.runId, id: revealId(here.run.runId, target), at })
+    // `loadOlder` and `onOpenAnswer` are read as they are now; what moves the landing on is the chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opening, chat.items, chat.more, chat.loadingOlder, answerRunId])
+  // The words light wherever the chat or the answer beside it shows them, until the search closes.
+  useEffect(() => {
+    showFoundWords(search.lit)
+    return () => showFoundWords(null)
+  }, [search.lit])
+  // What matches is read from the top, wherever the chat was scrolled.
+  const foundKey = search.showing ? JSON.stringify(search.found?.pieces.map((piece) => piece.id) ?? []) : null
+  useLayoutEffect(() => {
+    if (foundKey === null || !scroller.current) return
+    // Not following the newest message while what matches is read: it would pull the list down.
+    atBottom.current = false
+    scroller.current.scrollTop = 0
+  }, [foundKey])
+  // Closing the search from what matches goes back to the newest message, as the chat opens;
+  // closing it at a message it opened stays there, for reading it or replying to it.
+  const searching = search.open
+  const wasLanded = useRef(false)
+  useEffect(() => {
+    if (search.open) wasLanded.current = search.landed
+  })
+  useLayoutEffect(() => {
+    if (searching || !scroller.current || wasLanded.current) return
+    atBottom.current = true
+    scroller.current.scrollTop = scroller.current.scrollHeight
+  }, [searching])
   const [rosterOpen, setRosterOpen] = useState(readRosterOpen)
   const rosterId = useId()
   const toggleRoster = () => {
@@ -484,7 +543,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   }
 
   return (
-    <AppearContext.Provider value={settled && search.results === null}>
+    <AppearContext.Provider value={settled && !search.showing}>
     <FollowContext.Provider value={follow}>
     <AgentFacesContext.Provider value={faces}>
     <section className="tc" aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}>
@@ -559,27 +618,28 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 autoFocus
                 value={search.text}
                 onChange={(event) => search.setText(event.target.value)}
+                onFocus={search.back}
                 onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); search.close() } }}
-                placeholder="Search this chat"
-                aria-label="Search this chat"
+                placeholder="Find in this chat"
+                aria-label="Find in this chat"
               />
-              <button type="button" className="tc-link" onClick={search.close} aria-label="Close search"><X size={13} aria-hidden="true" /></button>
+              <button type="button" className="tc-link" onClick={search.close} aria-label="Close find" title="Close find"><X size={13} aria-hidden="true" /></button>
             </label>
           ) : (
-            <button type="button" className="tc-link" onClick={() => search.setOpen(true)} aria-label="Search this chat"><Search size={14} aria-hidden="true" /></button>
+            <button type="button" className="tc-link" onClick={() => search.setOpen(true)} aria-label="Find in this chat" title="Find in this chat"><Search size={14} aria-hidden="true" /></button>
           )}
           {routine && <div className="tc-routine">{routine}</div>}
         </div>
       </header>
 
       <div className="tc-scroll" ref={scroller} onScroll={onScroll} onPointerDown={() => { touched.current = performance.now() }} onKeyDown={() => { touched.current = performance.now() }}>
-        {chat.more && (
+        {chat.more && !search.showing && (
           <div className="tc-older">
             <button type="button" className="btn" disabled={chat.loadingOlder} onClick={loadOlder}>{chat.loadingOlder ? 'Loading earlier work…' : 'Show earlier work'}</button>
           </div>
         )}
         {!chat.loaded && <p className="tc-loading" role="status">Loading the chat…</p>}
-        {chat.loaded && chat.items.length === 0 && chat.pending.length === 0 && !chat.error && (
+        {chat.loaded && chat.items.length === 0 && chat.pending.length === 0 && !chat.error && !search.showing && (
           <div className="tc-empty">
             <SewnMark />
             {soloAgent ? <>
@@ -596,13 +656,18 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
             )}
           </div>
         )}
-        {search.results !== null && (
-          <p className="tc-search-count" role="status">
-            {search.loading ? 'Searching…' : `${search.results.length === 0 ? 'Nothing' : search.results.length === 1 ? 'One piece' : `${search.results.length} pieces`} in this chat ${search.results.length === 1 ? 'mentions' : 'mention'} “${search.text.trim()}”.`}
-          </p>
+        {search.showing && (
+          <ChatFind found={search.found} loading={search.loading} failed={search.failed} tooShort={search.tooShort} most={FIND_MOST} name={name} face={(id) => <AvatarFace id={id} hue={team.hues.get(id) ?? 1} size={20} fontSize={8} text={initialsOf(name(id))} />} onOpen={openFound} onRetry={search.retry} />
         )}
-        <ol className="tc-log" role="log" aria-label={search.results !== null ? 'Search results' : 'Messages'}>
-          {(search.results ?? chat.items).map((item, index, list) => {
+        {search.landed && (
+          <div className="tc-find-back">
+            <button type="button" className="tc-link" onClick={search.back}>← Back to the list</button>
+            {landingMissed && <span role="status">That message is no longer in this chat.</span>}
+          </div>
+        )}
+        <FindScopeContext.Provider value>
+        <ol className="tc-log" role="log" aria-label="Messages" hidden={search.showing}>
+          {chat.items.map((item, index, list) => {
             const at = item.kind === 'work' ? item.run.createdAt : item.message.createdAt
             const previous = list[index - 1]
             const newDay = !previous || dayKey(previous.kind === 'work' ? previous.run.createdAt : previous.message.createdAt) !== dayKey(at)
@@ -612,15 +677,16 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                 {item.kind === 'work'
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
-                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
-                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} name={name} hue={(id) => team.hues.get(id) ?? 1} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={search.results === null ? chat.react : undefined} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
+                      onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
+                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteShown?.id === item.message.id ? noteShown.at : null} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
             )
           })}
-          {search.results === null && chat.pending.map((message) => (
+          {chat.pending.map((message) => (
             <Pending key={message.localId} message={message} name={name} onRetry={() => void send(message.text, message.to, message.now, message.localId, message.replyTo)} onEdit={() => { chat.dismissPending(message.localId); setDraft(message.text); setReplyTo(message.replyTo) }} onDismiss={() => chat.dismissPending(message.localId)} />
           ))}
         </ol>
+        </FindScopeContext.Provider>
         {chat.error && chat.loaded && (
           <div className="tc-error" role="alert">
             <p>{chat.error}</p>
@@ -727,30 +793,65 @@ function readRosterOpen(): boolean {
 }
 
 /**
- * Search within the team's chat: the daemon matches the words across every piece and note, not
- * just the pages already read. Results replace the log until the search is closed.
+ * Finding words in the team's whole chat (ADR 0081): the daemon matches them in every request,
+ * answer, note and line of the agents' talk, in any order and any form, with or without accents.
+ * What matches shows in place of the chat; opening a line goes back to the chat at that message,
+ * with the words lit until the search is closed.
  */
-function useChatSearch(teamPath: string) {
+function useChatFind(teamPath: string) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
-  // Results are kept with the words they answer, so stale ones never show for new words.
-  const [found, setFound] = useState<{ words: string; items: ChatItem[] } | null>(null)
+  // What was found is kept with the words it answers, so it never shows for other words.
+  const [found, setFound] = useState<{ words: string; found: Found } | null>(null)
+  // The words whose search failed: said as a failure, never as nothing found.
+  const [failed, setFailed] = useState<string | null>(null)
+  const [retries, setRetries] = useState(0)
+  // A line opened: the chat is shown at it, with these words lit.
+  const [landed, setLanded] = useState<readonly FindTerm[] | null>(null)
   const words = text.trim()
   const searching = open && words.length >= 2
   useEffect(() => {
     if (!searching) return
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      void fetchChatPage(teamPath, null, 50, controller.signal, words)
-        .then((page) => setFound({ words, items: [...page.items].sort((left, right) => itemAt(left).localeCompare(itemAt(right))) }))
-        .catch(() => { if (!controller.signal.aborted) setFound({ words, items: [] }) })
+      void findInChat(teamPath, text, controller.signal)
+        .then((result) => { setFailed(null); setFound({ words, found: result }) })
+        .catch(() => { if (!controller.signal.aborted) setFailed(words) })
     }, 250)
     return () => { controller.abort(); window.clearTimeout(timer) }
-  }, [searching, words, teamPath])
-  const results = searching ? (found?.words === words ? found.items : []) : null
-  const loading = searching && found?.words !== words
-  const close = () => { setOpen(false); setText('') }
-  return { open, setOpen, text, setText, results, loading, close }
+    // `text` is read for whether the last word is still being typed; `words` decides when to ask.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searching, words, teamPath, retries])
+  // While new words are asked about, what the last ones found stays, so the list doesn't blink.
+  const current = searching ? found?.found ?? null : null
+  return {
+    open,
+    setOpen,
+    text,
+    setText: (next: string) => { setText(next); setLanded(null) },
+    found: current,
+    loading: searching && found?.words !== words && failed !== words,
+    failed: searching && failed === words,
+    tooShort: open && words.length === 1,
+    retry: () => setRetries((count) => count + 1),
+    showing: (searching || (open && words.length === 1)) && landed === null,
+    landed: landed !== null,
+    lit: landed,
+    land: (terms: readonly FindTerm[]) => setLanded(terms),
+    back: () => setLanded(null),
+    close: () => { setOpen(false); setText(''); setLanded(null); setFound(null); setFailed(null) },
+  }
+}
+
+/** The most pieces a search gives (`FIND_PIECES` in chat.rs). */
+const FIND_MOST = 30
+
+/** What a found line is shown as in its piece: the id `WorkPiece`'s `reveal` takes. */
+function revealId(runId: string, target: string): string {
+  if (target === 'answer') return `answer:${runId}`
+  if (target === 'request') return `request:${runId}`
+  if (target.startsWith('talk:')) return target.slice('talk:'.length)
+  return target
 }
 
 /**
@@ -759,9 +860,24 @@ function useChatSearch(teamPath: string) {
  * ones still writing typing, in place of the work it would have started. You can react to the note
  * and to each answer, as to anything said in the chat; the faces are kept on the note.
  */
-function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; name: (id: string) => string; hue: (id: string) => number; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void> }) {
+function TeamNote({ message, reactions, lessons, name, hue, flash = null, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; name: (id: string) => string; hue: (id: string) => number; flash?: number | null; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void> }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
+  // Found by a search and opened (ADR 0081): it comes into view, ringed for a moment.
+  const shown = useRef<HTMLLIElement>(null)
+  const [seenFlash, setSeenFlash] = useState(flash)
+  const [flashing, setFlashing] = useState<number | null>(null)
+  if (flash !== seenFlash) {
+    setSeenFlash(flash)
+    setFlashing(flash)
+  }
+  useEffect(() => {
+    if (flashing === null) return
+    shown.current?.scrollIntoView?.({ block: 'center' })
+    const timer = window.setTimeout(() => setFlashing(null), 1800)
+    return () => window.clearTimeout(timer)
+  }, [flashing])
+  const lit = flashing !== null ? ' flash' : ''
   const answers = message.answers
   const reactOn = (target: string, about: string, mine = false) => (said: ReactNode) => (
     <Reactions yours={yoursOn(reactions, target)} about={about} name={name} hue={hue} mine={mine} onReact={onReact && ((face) => onReact(message.id, target, face))}>{said}</Reactions>
@@ -773,12 +889,12 @@ function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onSta
     const face = (id: string) => <span className="chat-gutter"><AgentFace id={id}><AvatarFace id={id} hue={hue(id)} size={28} text={initialsOf(name(id))} /></AgentFace></span>
     return (
       <>
-        <li className={`chat-msg mine tc-answered-note${appear ? ' tc-appear' : ''}`}>
+        <li ref={shown} className={`chat-msg mine tc-answered-note${appear ? ' tc-appear' : ''}${lit}`}>
           <div className="chat-stack">
             <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(message.createdAt)}</time></div>
             {yours(<div className="chat-bubble">
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
-              <div className="chat-text tc-plain">{message.text}</div>
+              <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
             </div>)}
           </div>
         </li>
@@ -787,7 +903,7 @@ function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onSta
             {face(said.from)}
             <div className="chat-stack">
               <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
-              {reactOn(targets.reply(said.from), `${name(said.from)}'s reply`)(<div className="chat-bubble"><div className="chat-text tc-plain">{said.text}</div></div>)}
+              {reactOn(targets.reply(said.from), `${name(said.from)}'s reply`)(<div className="chat-bubble"><div className="chat-text tc-plain"><FoundText text={said.text} /></div></div>)}
             </div>
           </li>
         ))}
@@ -811,12 +927,12 @@ function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onSta
     )
   }
   return (
-    <li className={`chat-msg mine tc-team-note${appear ? ' tc-appear' : ''}`}>
+    <li ref={shown} className={`chat-msg mine tc-team-note${appear ? ' tc-appear' : ''}${lit}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">You → the team · note</span><time>{clockTime(message.createdAt)}</time></div>
         {yours(<div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
-          <div className="chat-text tc-plain">{message.text}</div>
+          <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
         </div>)}
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>
@@ -835,7 +951,7 @@ function Pending({ message, name, onRetry, onEdit, onDismiss }: { message: Pendi
         <div className="chat-meta"><span className="tc-to">{message.state === 'sending' ? 'Sending…' : 'Not sent'}</span></div>
         <div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} />}
-          <div className="chat-text tc-plain">{message.text}</div>
+          <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
         </div>
         {message.state === 'failed' && (
           <div className="chat-under tc-pending-acts">

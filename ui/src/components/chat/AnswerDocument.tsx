@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 
+import { FindScopeContext } from '../../lib/chat/findWords'
 import { withFolderPaths } from '../../lib/files/fileRefs'
 import { Markdown } from '../ui/Markdown'
 
@@ -18,7 +19,8 @@ export function AnswerDocument({ text, by, streaming, touched = NONE, folder = n
     <article className="tc-document" aria-label="The team’s answer">
       <p className="tc-document-by">{streaming ? `${by} is writing this` : `Written by ${by}`}</p>
       <div className="tc-document-page delivery-response selectable">
-        <Markdown>{shown}</Markdown>
+        {/* The words a chat search found light here too, when the search opened this answer (ADR 0081). */}
+        <FindScopeContext.Provider value><Markdown>{shown}</Markdown></FindScopeContext.Provider>
         {streaming && <span key={text.length} className="caret" aria-label="Being written" />}
       </div>
     </article>

@@ -35,9 +35,10 @@ base64 = "0.22"
 url = "2.5"
 serde_yaml = "0.9.34"
 # The archive is one SQLite file, built into the program.
-# `regexp` is SQL's REGEXP, which chat search uses to ignore case beyond ASCII.
-sqlx = { version = "0.8.6", default-features = false, features = ["json", "macros", "migrate", "regexp", "runtime-tokio-rustls", "sqlite"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["json", "macros", "migrate", "runtime-tokio-rustls", "sqlite"] }
 regex = "1.11"
+# Chat search reads words without their accents (chat_find.rs).
+unicode-normalization = "0.1"
 # The archive keeps raw ACP frames compressed (archive/codec.rs).
 zstd = { version = "0.13", default-features = false }
 tokio = { version = "1.47", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }

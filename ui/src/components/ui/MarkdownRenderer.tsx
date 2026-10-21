@@ -1,7 +1,9 @@
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import { useMemo } from 'react'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
+import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
 
@@ -24,8 +26,11 @@ import { FileChip } from './FileChip'
  * underlined titles.
  */
 export default function MarkdownRenderer({ children }: { children: string }) {
+  // The words a chat search found, while the chat shows where one was said (ADR 0081).
+  const found = useFoundWords()
+  const rehype = useMemo(() => (found ? [...REHYPE_PLUGINS, () => (tree: { children: HastChild[] }) => markFound(tree, found)] : REHYPE_PLUGINS), [found])
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} skipHtml components={COMPONENTS}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml components={COMPONENTS}>
       {children}
     </ReactMarkdown>
   )
@@ -56,6 +61,26 @@ function markClaimsAndSources(tree: { children: HastChild[] }) {
     }
   }
   visit(tree.children)
+}
+
+/** Every word a search found, in a `<mark>`; code is left as it is. */
+function markFound(tree: { children: HastChild[] }, terms: readonly FindTerm[]) {
+  const visit = (parent: { children: HastChild[] }) => {
+    parent.children = parent.children.flatMap((node): HastChild[] => {
+      if (node.type === 'element') {
+        // Code is left whole: a path in inline code is shown as a file to open.
+        if (node.tagName !== 'pre' && node.tagName !== 'code') visit(node)
+        return [node]
+      }
+      if (node.type !== 'text') return [node]
+      const parts = segments(node.value, terms)
+      if (!parts.some((part) => part.hit)) return [node]
+      return parts.map((part): HastChild => (part.hit
+        ? { type: 'element', tagName: 'mark', properties: { className: ['tc-find-hit'] }, children: [{ type: 'text', value: part.text }] }
+        : { type: 'text', value: part.text }))
+    })
+  }
+  visit(tree)
 }
 
 function markClaim(block: HastElement) {
