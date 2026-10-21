@@ -16,6 +16,15 @@ const lesson = (id: string, text: string, over: Partial<Lesson> = {}): Lesson =>
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
+// Where the keyboard was the moment the line under the list came or went. React runs a plain effect
+// a task after its change, so focus moved from one would leave a moment with nothing focused.
+const focusAtLine = () => {
+  const seen: Array<{ line: boolean; focus: Element | null }> = []
+  const watch = new MutationObserver(() => seen.push({ line: document.querySelector('[role="status"]') !== null, focus: document.activeElement }))
+  watch.observe(document.body, { childList: true, subtree: true })
+  return { when: (line: boolean) => seen.find((one) => one.line === line)?.focus, stop: () => watch.disconnect() }
+}
+
 describe('LearnedBlock', () => {
   it('lists what one of My agents learned, with where it came from, and forgets one', async () => {
     const calls: Array<{ url: string; body?: unknown }> = []
@@ -79,15 +88,21 @@ describe('LearnedBlock', () => {
     expect(document.activeElement).toBe(tell)
     expect(calls).toHaveLength(1)
     fireEvent.click(tell)
+    const added = focusAtLine()
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain(`All your agents know: ${vietnamese}`))
+    added.stop()
     expect(calls[1]).toEqual({ url: '/api/lessons/tell-all', body: { savedAgent: 'writer', id: 'b' }, asPage: true })
     expect(screen.queryByRole('group', { name: 'Tell all my agents' })).toBeNull()
     expect(screen.getByText(/1 of 12/)).toBeTruthy()
     const undo = within(screen.getByRole('status')).getByRole('button', { name: `Undo: ${vietnamese}` })
+    expect(added.when(true)).toBe(undo)
     expect(document.activeElement).toBe(undo)
+    const undone = focusAtLine()
     fireEvent.click(undo)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    undone.stop()
+    expect(undone.when(false)).toBe(screen.getByRole('button', { name: `Tell all my agents: ${vietnamese}` }))
     expect(document.activeElement).toBe(screen.getByRole('button', { name: `Tell all my agents: ${vietnamese}` }))
     expect(calls[2]).toEqual({ url: '/api/lessons/tell-all/undo', body: { savedAgent: 'writer', id: 'b' }, asPage: true })
     expect(screen.getByText(vietnamese)).toBeTruthy()
