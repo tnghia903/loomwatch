@@ -643,7 +643,6 @@ span.story-schedule { cursor: default; }
 .weft-state.st-starting, .weft-state.st-thinking, .weft-state.st-working, .weft-state.st-writing { color: var(--color-live); }
 .weft-state.st-waiting { color: var(--color-accent); }
 .weft-state.st-failed { color: var(--color-alert); }
-.delivery-stage-select .agent-mark { --mark-ground: var(--color-panel-solid); }
 /* The record's exact call under its plain heading: wrapped, at most three lines, full text on hover. */
 .insp-raw { margin-top: 4px; color: var(--color-ink-3); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* A failed call the agent put right: what happened after, as a link to that call (the timeline's darn, in words). */

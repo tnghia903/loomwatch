@@ -33,22 +33,9 @@ export interface Attempt {
 
 const failed = (item: Pick<Evidence, 'status'>) => item.status === 'failed' || item.status === 'rejected'
 
-/** What a call said back: its content's text, else its raw output. */
-export function outputText(item: Pick<Evidence, 'content' | 'rawOutput'>): string {
-  if (Array.isArray(item.content)) {
-    const text = item.content.map((block) => {
-      if (!block || typeof block !== 'object') return ''
-      const record = block as Record<string, unknown>
-      const inner = record.content as Record<string, unknown> | undefined
-      if (inner && typeof inner.text === 'string') return inner.text
-      return typeof record.text === 'string' ? record.text : ''
-    }).filter(Boolean).join('\n')
-    if (text) return text
-  }
-  if (typeof item.rawOutput === 'string') return item.rawOutput
-  if (item.rawOutput === null || item.rawOutput === undefined) return ''
-  try { return JSON.stringify(item.rawOutput) } catch { return String(item.rawOutput) }
-}
+import { outputText } from './webCalls'
+
+export { outputText }
 
 function outcomeOf(item: Evidence, why: Why | null, mend: Mend<Evidence> | null): Outcome {
   if (item.declined === 'answered') return 'answered'

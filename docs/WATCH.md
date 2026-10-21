@@ -86,7 +86,17 @@ answer is read only in the chat, with its record's verdict (which opens the revi
 names, **Copy**, **Download** and **Send to Notion** under it; Details shows the receipt (the
 run's tokens, and its cost on each turn's `turn_end`: as OpenRouter reported it, ≈ at Claude's list
 prices, or "ChatGPT plan"), timeline,
-stages and tools. A long answer (or a titled one past a few lines) is a document: the
+and the team in one row: your request, a card for each agent, and the team's answer, joined by
+the lines the work moves along. While the run is watched, an agent's figure acts out what it is
+at (reading, thinking, using a tool, typing), what it is thinking or the call it is on floats over
+its card, and its last words show as it types; the work slides along the line to the next agent,
+or back when a check sends it back, which leaves a dashed arc under that line. An agent's skills
+hang under its card and light up as it opens them. Each card's marks count what that agent used:
+skills (a required one it never had, once the run is over, leaves the mark dashed), the web
+(pages read and searches, with the programs its model ran to search), files, commands, plan. A
+mark opens its list under the row: the pages read by site, marked when the team's answer links
+them, and what each search found; each skill's receipt; or the calls, each opening its record.
+The request and the answer themselves are read in the chat, not again here. A long answer (or a titled one past a few lines) is a document: the
 chat shows a card with its title, opening words and length, and **Open** shows it in full in the
 pane beside the chat, under an **Answer** tab next to **Details**. Once a document answer
 arrives, the pane following the newest work switches to it. Drag the edge between them to resize; double-click

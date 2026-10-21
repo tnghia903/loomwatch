@@ -1028,6 +1028,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // It walks every event, so it is worked out again only when they or the saved reply change.
   const recordedReply = record?.reply ?? null
   const recordedText = useMemo(() => (recordedReply != null ? recordedReplyText(session.events, responderId, recordedReply) : null), [session.events, responderId, recordedReply])
+  // The run's events as far as the replay cursor, as the projection reads them.
+  const shownEvents = useMemo(() => (session.cursor === null ? session.events : session.events.filter((event) => event.seq <= (session.cursor ?? Infinity))), [session.events, session.cursor])
   const responseText = session.cursor === null && recordedText != null ? recordedText : responderAgent?.reply ?? ''
   const phase: RunPhase = projection.phase
   const live = session.mode === 'live'
@@ -2626,6 +2628,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                   output={(graph.nodes.find((node) => node.id === '__output') as OutputNode | undefined)?.data ?? { text: responseText, phase, phaseText: '', producer: null, producerLabel: 'the responder', mode: session.mode, streaming: false, pending: false, strip: null, compact: false, expanded: false, terminal: session.terminal }}
                   projection={projection}
                   record={record}
+                  events={shownEvents}
                   selectedEvidenceId={inspectedEvidenceId}
                   focusAgentId={attentionFocusAgentId}
                   onInspectEvidence={(id) => setInspectedEvidenceId(id)}

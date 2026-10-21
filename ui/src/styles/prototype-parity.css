@@ -10,31 +10,13 @@
 /* Green is earned: only a finished run reads as success. The other phases keep delivery.css's colours. */
 .delivery-heading .delivery-status { font-size:12px; }
 .delivery-heading .delivery-status.status-succeeded { color:var(--success); }
-.delivery-capabilities { position:relative; }
-.delivery-verification { display:block; padding:0 20px 12px; }
-.delivery-verification summary { cursor:pointer; font-size:10px; color:var(--muted); }
-.delivery-verification[open]>span { display:block; padding:10px 0; }
-.delivery-verification>svg { display:none; }
-.source-record { display:flex; gap:12px; width:100%; padding:15px 0; color:var(--muted); background:transparent; border:0; border-bottom:1px solid var(--line); text-align:left; }
-.source-record span { flex:1; }
-.delivery-filters { display:flex; gap:16px; align-items:center; }
-.delivery-filters>div[role=group] { flex:1; }
-.delivery-filters button { border-radius:0; }
-.delivery-filters button[aria-pressed=true] { background:transparent; border-bottom:2px solid var(--gold); }
 @media(max-width:767px) { .delivery-heading h1 { font-size:24px; } .delivery-response { padding:24px; } .build-workspace .node-inspector { position:fixed; top:auto; right:14px; bottom:14px; width:min(270px,calc(100vw - 28px)); max-height:60vh; } }
 .delivery-response h1,.delivery-response h2,.delivery-response h3 { font-family:var(--font-serif); font-weight:400; }
 .delivery-response h1 { font-size:36px; }
 .delivery-response { font-size:16px; padding:34px 36px; }
 .delivery-response h2 { font-size:24px; }
-.delivery-stages { gap:98px; }
-.prototype-handoff.delivery-handoff-arrow { position:absolute; left:-91px; width:84px; top:50%; transform:translateY(-50%); display:flex; align-items:center; flex-direction:column; gap:5px; color:var(--muted); background:transparent; border:0; font-size:11px; }
-.prototype-handoff small { font-size:10px; opacity:0; }
-.prototype-handoff:hover small,.prototype-handoff:focus-visible small { opacity:1; }
 .delivery-heading h1 { display:flex; align-items:center; gap:14px; }
 .delivery-heading>.btn { min-height:42px; padding-inline:17px; font-size:12px; }
-.delivery-stage { min-height:240px; }
-.delivery-agent-facts>div { padding:15px 0; }
-.delivery-stage-meta { display:none; }
 .delivery-shown .prototype-composer { min-height:50px!important; height:auto; padding:8px 10px 8px 15px; display:flex; align-items:center; flex-wrap:nowrap; gap:12px; border-radius:6px; }
 .prototype-composer>.mode-chip,.prototype-composer .comp-act>.iconbtn:not(.prototype-send),.prototype-composer .comp-note:not(.err):not(.block) { display:none; }
 .delivery-shown .lw-composer.prototype-composer .comp-mid { min-width:0; min-height:0; flex:1; order:0; padding:0; }
@@ -46,7 +28,6 @@
    column (16px inset + 83px tall), so the zoom, Fit team and Story/Team/Trace controls stay clickable. */
 .build-workspace .node-inspector { top:193px; max-height:calc(100dvh - 193px - 111px); overflow:auto; backdrop-filter:blur(18px); background:color-mix(in srgb,var(--surface) 94%,transparent); }
 .inspector-fields input,.inspector-fields select { border:1px solid var(--line); border-radius:5px; background:var(--surface-raised); color:var(--text); }
-@media(max-width:1100px) { .delivery-stages { gap:32px; } .prototype-handoff.delivery-handoff-arrow { top:-28px; left:50%; transform:translateX(-50%); } .prototype-handoff span,.prototype-handoff small { display:none; } }
 /* The prototype's vocabulary, derived from the semantic tokens so both themes come from one source
    (these were obsidian literals, which left dark-ink text on dark cards in the light theme). */
 /* The ☰ menu also stands outside a shell (on Home, and in an agent's page's narrow row), so it takes the same names itself. */
@@ -158,23 +139,11 @@
 .inspector-readonly { color:var(--muted); font-size:12px; line-height:1.6; padding-top:14px; }
 .inspector-readonly p { color:var(--quiet); margin-top:10px; }
 
-.capability-graph { height:282px; width:100%; } .capability-graph.whole-team { height:408px; } .react-flow { --xy-background-color:var(--graph-bg); --xy-edge-stroke:var(--line-strong); } .react-flow__handle { width:5px; height:5px; min-width:5px; min-height:5px; background:var(--line-strong); border:1px solid var(--graph-bg); } .graph-agent { display:flex; gap:11px; align-items:center; width:184px; min-height:60px; padding:12px; background:var(--surface); border:1px solid var(--line); border-radius:6px; } .graph-agent strong { font-size:12px; font-weight:550; } .graph-agent small { display:flex; align-items:center; gap:5px; color:var(--muted); font-size:10px; margin-top:7px; } .graph-node-icon { color:var(--muted); flex-shrink:0; display:grid; place-items:center; } .graph-capability { width:224px; min-height:64px; background:var(--surface); display:flex; gap:12px; align-items:center; padding:12px 13px; border:1px solid var(--line); border-radius:6px; text-align:left; } .graph-capability:hover { background:var(--surface-hover); border-color:var(--gold); } .graph-capability.skill { border-color:var(--gold-dim); } .graph-capability.state-missing { border-color:var(--danger); border-style:dashed; } .graph-capability-copy { flex:1; min-width:0; } .graph-capability strong { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; color:var(--text); } .required-mini { font-size:10px; padding:2px 4px; color:var(--color-ink); background:var(--gold-tint); box-shadow:inset 0 0 0 1px var(--gold); border-radius:3px; font-weight:450; } .graph-capability small { font-size:10px; margin-top:7px; display:flex; align-items:center; gap:5px; }
+.react-flow { --xy-background-color:var(--graph-bg); --xy-edge-stroke:var(--line-strong); } .react-flow__handle { width:5px; height:5px; min-width:5px; min-height:5px; background:var(--line-strong); border:1px solid var(--graph-bg); }
 
 /* Match the reference rhythm while allowing real stage names and evidence. */
 .delivery-shown .delivery-heading { height:115px; min-height:115px; padding:24px 0; }
-.delivery-stages { padding-bottom:8px; }
-.delivery-stage { min-height:274px; }
-.delivery-stage-select { min-height:82px; }
-.delivery-stage-select small { -webkit-line-clamp:1; }
-.delivery-stage-number { background:transparent; color:var(--muted); }
-.delivery-stage>.delivery-link { font-size:10px; margin-top:9px; }
-.delivery-verification:not([open]) { position:absolute; top:30px; right:20px; padding:0; }
-.delivery-capabilities>.delivery-section-head { padding-right:165px; min-height:74px; }
-.delivery-capabilities>.delivery-section-head>.delivery-link { display:none; }
-.delivery-verification[open] { padding-top:0; }
 @media(max-width:767px) {
-  .delivery-verification:not([open]) { position:static; padding:0 20px 12px; }
-  .delivery-capabilities>.delivery-section-head { padding-right:20px; }
   .build-workspace .node-inspector { position:fixed; top:auto; right:14px; bottom:14px; width:min(270px,calc(100vw - 28px)); max-height:60vh; }
 }
 

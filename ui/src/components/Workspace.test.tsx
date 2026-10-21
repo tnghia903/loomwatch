@@ -1565,7 +1565,7 @@ describe('an Attention alert routes to the repair and to the record', () => {
     renderWorkspace('run-1', 'delivery')
     fireEvent.click(await screen.findByRole('button', { name: 'Show evidence' }))
     await waitFor(() => expect(screen.getByRole('complementary', { name: 'Researcher couldn’t ask market-researcher' })).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /Researcher/, pressed: true })).toHaveClass('delivery-stage-select')
+    expect(screen.getByRole('button', { name: /Researcher/, pressed: true })).toHaveClass('flow-who')
     expect(screen.queryByRole('region', { name: 'Inspector' })).not.toBeInTheDocument()
   })
 })
