@@ -44,6 +44,26 @@ describe('proposalChanges', () => {
     expect(proposalChanges(BEFORE, proposed).lines).toEqual([expect.stringMatching(/^Runs on its own: weekdays at 8/)])
   })
 
+  it('names the skills an agent is given or loses, whatever their case, and a new team’s skills', () => {
+    const skill = (...names: string[]) => `    capabilities:\n${names.map((name) => `      - { kind: skill, name: ${name} }\n`).join('')}`
+    const before = team(
+      agent('collector', 'Collector', 'Collect the news.') + skill('report-design') + agent('writer', 'Writer', 'Write the brief.') + skill('house-style'),
+      edge('collector', 'writer'),
+    )
+    const proposed = team(
+      agent('collector', 'Collector', 'Collect the news.') + skill('Report-Design') + agent('writer', 'Writer', 'Write the brief.') + skill('explain-like-im-5', 'plain-words'),
+      edge('collector', 'writer'),
+    )
+    const changes = proposalChanges(before, proposed)
+    expect(changes.changed).toEqual(['writer'])
+    expect(changes.lines).toEqual(['Gives Writer the skills explain-like-im-5 and plain-words', 'Disconnects the skill house-style from Writer'])
+    expect(proposalChanges(null, proposed).lines).toEqual([
+      '2 steps: Collector → Writer',
+      'Gives Collector the skill Report-Design',
+      'Gives Writer the skills explain-like-im-5 and plain-words',
+    ])
+  })
+
   it('still says something when the change is only in the file', () => {
     expect(proposalChanges(BEFORE, `${BEFORE}# a note\n`).lines).toEqual(['Small changes to the team file'])
   })

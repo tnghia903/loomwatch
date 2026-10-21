@@ -8,7 +8,7 @@ import type { AgentConfig, TeamDocument } from '../team-file/types'
 export interface ProposalChanges {
   /** Agent ids the proposal adds, in the order the team runs them. */
   added: string[]
-  /** Agent ids whose job, app, model or kind the proposal changes. */
+  /** Agent ids whose job, app, model, kind or skills the proposal changes. */
   changed: string[]
   /** Names of the agents the proposal takes away (they are no longer on the canvas to name). */
   removed: string[]
@@ -44,6 +44,20 @@ function list(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 }
 
+function skillsOf(agent: AgentConfig): string[] {
+  return (Array.isArray(agent.capabilities) ? agent.capabilities : []).filter((capability) => capability.kind === 'skill').map((capability) => capability.name)
+}
+
+/** `names` that `others` doesn't have, whatever their case, as a run finds a skill. */
+function without(names: string[], others: string[]): string[] {
+  const lower = new Set(others.map((name) => name.toLowerCase()))
+  return names.filter((name) => !lower.has(name.toLowerCase()))
+}
+
+function skills(names: string[]): string {
+  return `the skill${names.length === 1 ? '' : 's'} ${list(names)}`
+}
+
 function runOrder(team: TeamDocument | null): AgentConfig[] {
   const agents = agentsOf(team)
   const edges = Array.isArray(team?.edges) ? team.edges.filter((edge) => edge.layer !== 'observed').map((edge) => ({ from: edge.from, to: edge.to })) : []
@@ -58,8 +72,8 @@ function runOrder(team: TeamDocument | null): AgentConfig[] {
 
 /**
  * The difference between the team as it is (`currentYaml`, null for a new team) and the proposal.
- * Only what a person would notice is reported: who joins, who leaves, whose job changes, the order,
- * and the schedule.
+ * Only what a person would notice is reported: who joins, who leaves, whose job changes, the skills
+ * an agent is given or loses, the order, and the schedule.
  */
 export function proposalChanges(currentYaml: string | null, proposedYaml: string): ProposalChanges {
   const before = parse(currentYaml)
@@ -75,6 +89,10 @@ export function proposalChanges(currentYaml: string | null, proposedYaml: string
 
   if (!before) {
     if (order.length > 0) lines.push(`${order.length} step${order.length === 1 ? '' : 's'}: ${order.join(' → ')}`)
+    for (const agent of ordered) {
+      const given = skillsOf(agent)
+      if (given.length > 0) lines.push(`Gives ${nameOf(agent)} ${skills(given)}`)
+    }
   } else {
     if (added.length > 0) lines.push(`Adds ${list(added.map((id) => nameOf(now.get(id) as AgentConfig)))}`)
     for (const agent of ordered) {
@@ -86,10 +104,12 @@ export function proposalChanges(currentYaml: string | null, proposedYaml: string
       if ((previous.spawn?.cwd ?? '.') !== (agent.spawn?.cwd ?? '.')) what.push('work folder')
       if ((previous.model || '') !== (agent.model || '')) what.push('model')
       if ((previous.kind || 'harness') !== (agent.kind || 'harness')) what.push('kind')
-      if (what.length > 0) {
-        changed.push(agent.id)
-        lines.push(`Changes ${nameOf(agent)}’s ${list(what)}`)
-      }
+      if (what.length > 0) lines.push(`Changes ${nameOf(agent)}’s ${list(what)}`)
+      const given = without(skillsOf(agent), skillsOf(previous))
+      const taken = without(skillsOf(previous), skillsOf(agent))
+      if (given.length > 0) lines.push(`Gives ${nameOf(agent)} ${skills(given)}`)
+      if (taken.length > 0) lines.push(`Disconnects ${skills(taken)} from ${nameOf(agent)}`)
+      if (what.length > 0 || given.length > 0 || taken.length > 0) changed.push(agent.id)
     }
     if (removed.length > 0) lines.push(`Removes ${list(removed)}`)
     const orderBefore = runOrder(before).map((agent) => agent.id)

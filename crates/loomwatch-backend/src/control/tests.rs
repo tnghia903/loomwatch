@@ -232,9 +232,10 @@ fn rewrite(prompt: &str) -> String {
     format!("Here they are:\n```json\n{}\n```", json!({"edits": edits}))
 }
 
-/// A served [`Control`] over a scratch teams folder.
+/// A served [`Control`] over a scratch teams folder and skills folder.
 struct Fixture {
     root: TempDirectory,
+    skills: TempDirectory,
     base: String,
     control: Control,
     registry: RunRegistry,
@@ -246,6 +247,7 @@ impl Fixture {
     /// `LOOMWATCH_ASK_MODEL` makes them.
     async fn start(archive: Option<EventArchive>, ask_model: Option<String>) -> Self {
         let root = TempDirectory::new("teams");
+        let skills = TempDirectory::new("skills");
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("bind");
@@ -254,6 +256,7 @@ impl Fixture {
         let control = Control::new(ControlOptions {
             archive,
             teams_root: root.0.clone(),
+            skills_folder: Some(skills.0.clone()),
             registry: registry.clone(),
             listen: address,
             ask_model,
@@ -262,6 +265,7 @@ impl Fixture {
         tokio::spawn(async move { axum::serve(listener, router).await });
         Self {
             root,
+            skills,
             base: format!("http://{address}"),
             control,
             registry,
@@ -459,6 +463,7 @@ async fn a_conversation_proposes_asks_before_running_and_drafts_a_review_note() 
             "list_teams",
             "read_team",
             "list_models",
+            "list_skills",
             "propose_team",
             "start_run",
             "get_run",
@@ -914,4 +919,87 @@ fn ask_chooses_models_from_the_shared_table() {
     assert!(instructions.contains("`list_models`' `choosing`"));
     assert!(!instructions.contains("open each link again"));
     assert!(!instructions.contains("the default for hard work"));
+}
+
+/// Ask gives an agent a skill the way the canvas does, as a wired skill by its name, so it shows as
+/// a card and the run delivers it: `list_skills` lists what a run can deliver, and a proposal that
+/// wires a skill no run could find is refused before it reaches the canvas.
+#[tokio::test]
+async fn ask_wires_a_skill_by_a_name_a_run_can_deliver() {
+    let fixture = Fixture::start(None, None).await;
+    let skill = fixture.skills.0.join("explain-like-im-5");
+    std::fs::create_dir_all(&skill).expect("skill folder");
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: explain-like-im-5\ndescription: Explain any topic in words a five-year-old could follow.\n---\n\nStart from what they know.\n",
+    )
+    .expect("skill file");
+    let tools = ControlTools::new(
+        fixture.control.clone(),
+        Caller::Conversation("ask-test".to_owned()),
+    );
+    assert!(
+        tools.specs().iter().any(|spec| spec.name == "list_skills"),
+        "Ask can see the skills"
+    );
+    let (answer, failed) = tools.call("list_skills", json!({})).await;
+    assert!(!failed, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).expect("json");
+    assert_eq!(
+        answer["skills"],
+        json!([{
+            "name": "explain-like-im-5",
+            "for": "Explain any topic in words a five-year-old could follow.",
+            "from": "LoomWatch",
+        }])
+    );
+
+    let team = |skills: &[&str]| {
+        let wired = skills.iter().fold(String::new(), |wired, name| {
+            wired + &format!("      - {{kind: skill, name: {name}}}\n")
+        });
+        format!(
+            "schemaVersion: 1\nid: tutor\nname: Tutor\nentrypoint: tutor\nagents:\n  - id: tutor\n    \
+             name: Tutor\n    role: Teach it.\n    model: anthropic/claude-sonnet-5.5\n    \
+             capabilities:\n{wired}edges: []\n"
+        )
+    };
+    let propose = |yaml: String| json!({"file": "tutor.yaml", "yaml": yaml, "summary": "A tutor."});
+    let (answer, failed) = tools
+        .call("propose_team", propose(team(&["Explain-Like-Im-5"])))
+        .await;
+    assert!(!failed, "a run finds a skill whatever its case: {answer}");
+
+    let (message, failed) = tools
+        .call(
+            "propose_team",
+            propose(team(&["explain-like-im-5", "eli5", "ELI5"])),
+        )
+        .await;
+    assert!(failed, "{message}");
+    assert!(
+        message.starts_with("No skill called eli5 is installed")
+            && message.contains("`list_skills`"),
+        "{message}"
+    );
+
+    // A skill the saved team already wires is kept, as a proposal must keep it, even once it is
+    // no longer installed: the person removed it, not Ask.
+    std::fs::write(fixture.root.0.join("tutor.yaml"), team(&["old-skill"])).expect("team");
+    let (answer, failed) = tools
+        .call(
+            "propose_team",
+            propose(team(&["old-skill", "explain-like-im-5"])),
+        )
+        .await;
+    assert!(!failed, "{answer}");
+}
+
+/// Ask is told how a skill is given to an agent, and not to copy one into its instructions.
+#[test]
+fn ask_is_told_to_give_a_skill_as_a_skill() {
+    let instructions = super::mcp::INSTRUCTIONS;
+    assert!(instructions.contains("`capabilities: [{kind: skill, name: "));
+    assert!(instructions.contains("by name from `list_skills`"));
+    assert!(instructions.contains("don't copy what the skill says into the `role`"));
 }
