@@ -55,6 +55,9 @@ pub struct ProcessSpec {
     /// What the agent learned from the person's feedback (ADR 0078), read when its run started, so
     /// every session it opens in the run, a reopened one too, is given the same lessons.
     pub lessons: Vec<String>,
+    /// Pictures the operator sent (ADR 0081), shown to the agent with the next prompt it is given
+    /// and then not again: the conversation keeps them.
+    pub pictures: Vec<PathBuf>,
 }
 
 /// What a session needs from the run that opens it.
@@ -149,6 +152,29 @@ pub(crate) async fn forget_parked(archive: &EventArchive, session_id: &str) -> R
 
 /// Scripted stand-ins for a model, by the `demo/<id>` model name a test gives its team.
 static DEMOS: LazyLock<Mutex<HashMap<String, Demo>>> = LazyLock::new(Mutex::default);
+
+/// Scripted stand-ins a test says see pictures, by model name: no model list says so for them.
+#[cfg(test)]
+static SEEING: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(Mutex::default);
+
+/// The scripted stand-in `model` is shown pictures, as a model whose list says it takes them.
+#[cfg(test)]
+pub(crate) fn sees_pictures(model: &str) {
+    SEEING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(model.to_owned());
+}
+
+/// The scripted stand-in a test's team runs on, to read what it was sent.
+#[cfg(test)]
+pub(crate) fn demo_for(model: &str) -> Option<Demo> {
+    DEMOS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(model)
+        .cloned()
+}
 
 /// Registers `demo` and gives back the model name that runs on it, for a test's team file.
 #[cfg(test)]
@@ -362,6 +388,12 @@ impl AgentRun {
         self.host = Some(host);
         self.tools = Some(ToolSet::NONE);
         self
+    }
+
+    /// Show the agent `pictures` with the next prompt it is given (ADR 0081): the ones a note it
+    /// is about to read was sent with.
+    pub(crate) fn show_pictures(&mut self, pictures: impl IntoIterator<Item = PathBuf>) {
+        self.spec.pictures.extend(pictures);
     }
 
     /// Instructions after the built-in ones, such as Ask's or a helper's.
@@ -581,7 +613,7 @@ impl AgentRun {
         // The same tools it was opened with, or the provider's cache of the conversation is lost:
         // its opening message says whether it was handed a conversation.
         let conversation = snapshot.history.iter().any(|message| {
-            matches!(message, crate::agent::Message::User { content } if crate::has_conversation(content))
+            matches!(message, crate::agent::Message::User { content, .. } if crate::has_conversation(content))
         });
         let host = self.host_tools(context.bus, conversation);
         let session = Session::resume(
@@ -750,10 +782,22 @@ impl AgentRun {
     ) -> Result<String> {
         recorder.reply.clear();
         let session_id = recorder.session_id.clone();
+        // Shown once, with this prompt: the conversation keeps them from here on.
+        let pictures = std::mem::take(&mut self.spec.pictures);
+        let mut said =
+            json!({"role": "user", "messageId": null, "content": {"type": "text", "text": prompt}});
+        if !pictures.is_empty() {
+            // The files the operator sent with it (ADR 0081), whether or not the model could see
+            // them: the prompt's words name them too.
+            said["pictures"] = pictures
+                .iter()
+                .map(|path| json!(path.to_string_lossy()))
+                .collect();
+        }
         recorder
             .append(
                 EventKind::Message,
-                json!({"role": "user", "messageId": null, "content": {"type": "text", "text": prompt}}),
+                said,
                 Some(json!({
                     "jsonrpc": "2.0",
                     "method": "session/prompt",
@@ -771,7 +815,7 @@ impl AgentRun {
                 )
                 .await?;
         }
-        let ended = self.drive(recorder, prompt).await;
+        let ended = self.drive(recorder, prompt, &pictures).await;
         // However the turn ended, it can no longer take an answer to an `ask` it left in flight.
         if let Some(bus) = recorder.bus.clone() {
             bus.turn_ended().await;
@@ -834,6 +878,7 @@ impl AgentRun {
         &mut self,
         recorder: &mut Recorder,
         prompt: &str,
+        pictures: &[PathBuf],
     ) -> Result<Result<crate::agent::TurnEnd, AgentError>> {
         let Self {
             session, records, ..
@@ -848,7 +893,7 @@ impl AgentRun {
         // writing connection while a record is being written, and a turn left unpolled until that
         // record was written held the connection for the pool's whole acquire timeout.
         let turn = async {
-            let ended = session.prompt(prompt).await;
+            let ended = session.prompt_showing(prompt, pictures).await;
             let _ = turn_over.send(());
             Ok::<_, anyhow::Error>(ended)
         };
@@ -1061,6 +1106,14 @@ impl AgentRun {
             // model takes pictures.
             config.sees_pictures = ai.sees_pictures(&model).await;
         }
+        #[cfg(test)]
+        if SEEING
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(model)
+        {
+            config.sees_pictures = true;
+        }
         config
     }
 
@@ -1191,6 +1244,7 @@ mod tests {
             permissions: None,
             asker: None,
             lessons: Vec::new(),
+            pictures: Vec::new(),
         }
     }
 

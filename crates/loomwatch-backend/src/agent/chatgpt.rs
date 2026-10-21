@@ -261,11 +261,20 @@ fn input(history: &[Message]) -> Vec<Value> {
     for message in history {
         match message {
             Message::System { .. } => {}
-            Message::User { content } => items.push(json!({
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": content}],
-            })),
+            Message::User { content, pictures } => {
+                // Pictures the operator sent come before the words about them, each named.
+                let mut parts: Vec<Value> = pictures
+                    .iter()
+                    .flat_map(|picture| {
+                        [
+                            json!({"type": "input_text", "text": format!("The picture {}:", picture.name)}),
+                            json!({"type": "input_image", "image_url": picture.data_url()}),
+                        ]
+                    })
+                    .collect();
+                parts.push(json!({"type": "input_text", "text": content}));
+                items.push(json!({"type": "message", "role": "user", "content": parts}));
+            }
             Message::Tool {
                 tool_call_id,
                 content,
@@ -715,6 +724,27 @@ mod tests {
         );
     }
 
+    /// Pictures the operator sent with a message go before its words, each named (ADR 0081).
+    #[test]
+    fn pictures_sent_with_a_message_go_before_its_words() {
+        let sent = Message::User {
+            content: "What is wrong here?".into(),
+            pictures: vec![crate::agent::provider::Picture {
+                name: "shot.png".into(),
+                media_type: "image/png".into(),
+                data: "iVBORw0K".into(),
+            }],
+        };
+        assert_eq!(
+            input(&[sent]),
+            [json!({"type": "message", "role": "user", "content": [
+                {"type": "input_text", "text": "The picture shot.png:"},
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0K"},
+                {"type": "input_text", "text": "What is wrong here?"},
+            ]})]
+        );
+    }
+
     /// The shape plan usage takes: instructions instead of a system message, nothing stored, the
     /// tools in one namespace, the plan's own items sent back as they came, and none of the fields
     /// it refuses.
@@ -730,6 +760,7 @@ mod tests {
             },
             Message::User {
                 content: "Read it.".into(),
+                pictures: Vec::new(),
             },
             Message::Assistant {
                 content: String::new(),

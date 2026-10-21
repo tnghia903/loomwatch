@@ -1,7 +1,8 @@
 import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from 'lucide-react'
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
+import { continueWithTeam, fetchChatPage, itemAt, sendChatMessage, startFromNote, stillAnswering, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../../lib/chat/client'
+import { carriesFiles, dropped, useChatAttachments } from '../../lib/chat/attachments'
 import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
@@ -31,6 +32,7 @@ import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
 import { Learned } from './Learned'
 import { ReplyQuote } from './ReplyQuote'
+import { ChatFiles } from './ChatFiles'
 import { WorkPiece, type TeamView } from './WorkPiece'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
@@ -83,10 +85,16 @@ interface TeamChatProps {
   ask?: { reply: ReplyTo; words?: string; at: number } | null
   /** The parts of files asked about in this chat, and the one in the box now, whenever they change. */
   onPassages?: (asked: AskedPassage[], asking: string | null) => void
+  /**
+   * A folder dropped on the chat, by its name (ADR 0081): a page can't learn where it is, so it is
+   * found in the folder picker and added for the team rather than sent. Resolves with what to say
+   * about it, or `null` when the picker was closed.
+   */
+  onConnectFolder?: (name: string) => Promise<string | null>
 }
 
 /** Sending one message: as a retry of a pending one, and as a reply to something said. */
-type Send = (text: string, to: ChatTarget, now: boolean, retryOf?: string, replyTo?: ReplyTo | null) => Promise<boolean>
+type Send = (text: string, to: ChatTarget, now: boolean, retryOf?: string, replyTo?: ReplyTo | null, files?: readonly ChatFile[]) => Promise<boolean>
 
 /** Within this of the bottom, the chat follows new messages. */
 const FOLLOW_PX = 120
@@ -104,8 +112,32 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  * With `team.solo` it is one agent's own chat (its Chat tab): everything you write goes to that
  * agent, starting its work when it is free and joining its turn while it works, so there is no @.
  */
-export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages }: TeamChatProps) {
+export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
+  // Pictures and files pasted or dropped in, kept as they are added (ADR 0081).
+  const attachments = useChatAttachments(teamPath)
+  const { add: addFiles, clear: clearFiles } = attachments
+  // A drag of files from outside the page over the chat: drawn as the gold stitch round it. Set on
+  // the way in and out only, never on every move, so nothing re-renders while it is dragged about.
+  const [dropping, setDropping] = useState(false)
+  const dragDepth = useRef(0)
+  const takeFiles = useRef<(transfer: DataTransfer) => void>(() => {})
+  // A file dropped anywhere else while the chat is open is ignored, rather than the browser opening
+  // it in place of LoomWatch.
+  useEffect(() => {
+    const ignore = (event: DragEvent) => {
+      // The chat's own handler took it first: it is a drop there.
+      if (!carriesFiles(event.dataTransfer) || event.defaultPrevented) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+    }
+    window.addEventListener('dragover', ignore)
+    window.addEventListener('drop', ignore)
+    return () => {
+      window.removeEventListener('dragover', ignore)
+      window.removeEventListener('drop', ignore)
+    }
+  }, [])
   // Something an agent learned from your feedback, taken back (ADR 0078): the chat reads again.
   // One that Tell all my agents moved to About you moves back to its agent.
   const undoLearned = useCallback(async (lesson: Lesson) => {
@@ -256,7 +288,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // name itself.
   const resend = useRef<Send>(async () => false)
   const restart = useRef<(message: ChatMessage) => Promise<void>>(async () => {})
-  const send = useCallback<Send>(async (text, to, now, retryOf, replyTo = null) => {
+  const send = useCallback<Send>(async (text, to, now, retryOf, replyTo = null, files = []) => {
     const where = destination(to, live, team.names, steps, now)
     const startsWork = where.route === 'team' || where.route === 'agent'
     let revision: string | null = null
@@ -266,12 +298,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       revision = prepared.revision
     }
     if (retryOf) chat.dismissPending(retryOf)
-    const localId = chat.beginSend(text, to, now, replyTo)
+    const localId = chat.beginSend(text, to, now, replyTo, files)
     const key = (retryOf && startKeys.current.get(retryOf)) || newStartKey()
     startKeys.current.set(localId, key)
     atBottom.current = true
     try {
-      const result = await sendChatMessage({ teamPath, text, to, now, expectedRevision: revision, startKey: startsWork ? key : undefined, replyTo })
+      const result = await sendChatMessage({ teamPath, text, to, now, expectedRevision: revision, startKey: startsWork ? key : undefined, replyTo, files })
       chat.settleSend(localId, result)
       if ((result.route === 'team' || result.route === 'agent') && result.run) onStarted?.(result.run.runId)
       startKeys.current.delete(localId)
@@ -283,9 +315,10 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         chat.dismissPending(localId)
         // Held in the box meanwhile; once "Trust and run" sends it, the box lets it go.
         onTeamReview(caught.review, () => {
-          void resend.current(text, to, now, undefined, replyTo).then((sent) => {
+          void resend.current(text, to, now, undefined, replyTo, files).then((sent) => {
             if (!sent) return
             setDraft((current) => (current.trim() === text ? '' : current))
+            if (files.length > 0) clearFiles()
             setReplyTo((current) => (current?.messageId === replyTo?.messageId ? null : current))
           })
         })
@@ -295,9 +328,34 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       chat.failSend(localId, caught instanceof DaemonUnreachableError ? caught.message : caught instanceof Error ? caught.message : String(caught))
       return true
     }
-  }, [live, team.names, team.solo, steps, prepare, chat, teamPath, announce, onTeamReview, onStale, onStarted])
+  }, [live, team.names, team.solo, steps, prepare, chat, teamPath, announce, onTeamReview, onStale, onStarted, clearFiles])
 
   useEffect(() => { resend.current = send }, [send])
+
+  // What happened to a dropped folder, said over the message box for a while.
+  const [folderNote, setFolderNote] = useState<string | null>(null)
+  useEffect(() => {
+    if (!folderNote) return
+    const timer = window.setTimeout(() => setFolderNote(null), 8000)
+    return () => window.clearTimeout(timer)
+  }, [folderNote])
+  const connectFolder = useCallback(async (names: readonly string[]) => {
+    if (names.length === 0) return
+    if (!onConnectFolder) {
+      const who = team.solo ? team.names.get(team.solo) ?? team.solo : null
+      setFolderNote(who ? `A folder can’t go in a chat. Give it to ${who} in Build, under Folder.` : 'A folder can’t go in a chat. Give it to your agents in Build, under Folder.')
+      return
+    }
+    const said = await onConnectFolder(names[0])
+    if (said) setFolderNote(said)
+  }, [onConnectFolder, team.solo, team.names])
+  useEffect(() => {
+    takeFiles.current = (transfer) => {
+      const { files, folders } = dropped(transfer)
+      if (files.length > 0) addFiles(files)
+      void connectFolder(folders)
+    }
+  }, [addFiles, connectFolder])
 
   const answer = useCallback(async (open: OpenDecision, text: string) => {
     try {
@@ -311,7 +369,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
 
   const tryAgain = useCallback((item: Extract<ChatItem, { kind: 'work' }>) => {
     const text = item.request?.text ?? item.run.prompt
-    void send(text, item.run.onlyAgent ? { kind: 'agent', agent: item.run.onlyAgent } : { kind: 'team' }, false, undefined, item.request?.replyTo ?? null)
+    void send(text, item.run.onlyAgent ? { kind: 'agent', agent: item.run.onlyAgent } : { kind: 'team' }, false, undefined, item.request?.replyTo ?? null, item.request?.files ?? [])
   }, [send])
 
   const keepGoing = useCallback(async (runId: string) => {
@@ -487,7 +545,30 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     <AppearContext.Provider value={settled && search.results === null}>
     <FollowContext.Provider value={follow}>
     <AgentFacesContext.Provider value={faces}>
-    <section className="tc" aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}>
+    <section className={`tc${dropping ? ' dropping' : ''}`} aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}
+      onDragEnter={(event) => {
+        if (!carriesFiles(event.dataTransfer) || blocked) return
+        event.preventDefault()
+        dragDepth.current += 1
+        if (dragDepth.current === 1) setDropping(true)
+      }}
+      onDragOver={(event) => {
+        if (!carriesFiles(event.dataTransfer) || blocked) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={(event) => {
+        if (!carriesFiles(event.dataTransfer)) return
+        dragDepth.current = Math.max(0, dragDepth.current - 1)
+        if (dragDepth.current === 0) setDropping(false)
+      }}
+      onDrop={(event) => {
+        if (!carriesFiles(event.dataTransfer)) return
+        event.preventDefault()
+        dragDepth.current = 0
+        setDropping(false)
+        if (!blocked) takeFiles.current(event.dataTransfer)
+      }}>
       <header className={`tc-head${rosterOpen && !soloAgent ? '' : ' folded'}${soloAgent ? ' solo' : ''}`}>
         {soloAgent ? (
           // One agent's own chat: its face, its name and what it is doing, and nothing to fold.
@@ -618,7 +699,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
             )
           })}
           {search.results === null && chat.pending.map((message) => (
-            <Pending key={message.localId} message={message} name={name} onRetry={() => void send(message.text, message.to, message.now, message.localId, message.replyTo)} onEdit={() => { chat.dismissPending(message.localId); setDraft(message.text); setReplyTo(message.replyTo) }} onDismiss={() => chat.dismissPending(message.localId)} />
+            <Pending key={message.localId} message={message} name={name} onRetry={() => void send(message.text, message.to, message.now, message.localId, message.replyTo, message.files)} onEdit={() => { chat.dismissPending(message.localId); setDraft(message.text); setReplyTo(message.replyTo); attachments.restore(message.files) }} onDismiss={() => chat.dismissPending(message.localId)} />
           ))}
         </ol>
         {chat.error && chat.loaded && (
@@ -640,13 +721,18 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         value={draft}
         onChange={setDraft}
         onSend={async (text, to, now) => {
-          // Out of the box with the words, and back with them if the message was held.
+          // Out of the box with the words and the files, and back with them if the message was held.
           const reply = replyTo
+          const files = attachments.kept
           setReplyTo(null)
-          const ok = await send(text, to, now, undefined, reply)
+          attachments.clear()
+          const ok = await send(text, to, now, undefined, reply, files)
           if (!ok && reply) setReplyTo((current) => current ?? reply)
+          if (!ok && files.length > 0) attachments.restore(files)
           return ok
         }}
+        attachments={attachments}
+        notice={folderNote}
         onAnswer={answer}
         mentioned={mentioned}
         solo={soloAgent}
@@ -778,6 +864,7 @@ function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onSta
             <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(message.createdAt)}</time></div>
             {yours(<div className="chat-bubble">
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
+              {message.files && <ChatFiles files={message.files} />}
               <div className="chat-text tc-plain">{message.text}</div>
             </div>)}
           </div>
@@ -816,6 +903,7 @@ function TeamNote({ message, reactions, lessons, name, hue, onShowReplied, onSta
         <div className="chat-meta"><span className="tc-to">You → the team · note</span><time>{clockTime(message.createdAt)}</time></div>
         {yours(<div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
+          {message.files && <ChatFiles files={message.files} />}
           <div className="chat-text tc-plain">{message.text}</div>
         </div>)}
         <div className="chat-under">
@@ -835,6 +923,7 @@ function Pending({ message, name, onRetry, onEdit, onDismiss }: { message: Pendi
         <div className="chat-meta"><span className="tc-to">{message.state === 'sending' ? 'Sending…' : 'Not sent'}</span></div>
         <div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} />}
+          <ChatFiles files={message.files} />
           <div className="chat-text tc-plain">{message.text}</div>
         </div>
         {message.state === 'failed' && (

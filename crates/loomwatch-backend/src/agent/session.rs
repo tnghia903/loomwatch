@@ -508,11 +508,26 @@ impl Session {
     /// cancelled turn is not an error: it ends with [`StopReason::Cancelled`]. A conversation the
     /// provider refuses as too long is only an error the second time in a turn: the first time,
     /// room is made and it is summarised ([`Self::make_room`]).
-    #[allow(clippy::too_many_lines)] // Every way a turn goes on or ends, in one loop.
     pub async fn prompt(&mut self, text: &str) -> Result<TurnEnd, AgentError> {
+        self.prompt_showing(text, &[]).await
+    }
+
+    /// [`Self::prompt`], with pictures the operator sent shown to the model before the words
+    /// (ADR 0081): when it can see pictures, and as many as the conversation has room for.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::prompt`].
+    #[allow(clippy::too_many_lines)] // Every way a turn goes on or ends, in one loop.
+    pub async fn prompt_showing(
+        &mut self,
+        text: &str,
+        pictures: &[PathBuf],
+    ) -> Result<TurnEnd, AgentError> {
         self.cancel.send_replace(false);
         let cancel = Cancel::new(self.cancel.subscribe());
-        self.begin_turn(text);
+        let pictures = self.shown(pictures).await;
+        self.begin_turn(text, pictures);
         let mut turn = Usage::default();
         let mut reply = Words::default();
         let mut calls_made = 0usize;
@@ -616,6 +631,7 @@ impl Session {
                     carrying_on = !wrote_nothing;
                     self.history.push(Message::User {
                         content: carry_on(wrote_nothing).to_owned(),
+                        pictures: Vec::new(),
                     });
                     continue;
                 }
@@ -710,8 +726,46 @@ impl Session {
             .sum::<usize>();
     }
 
-    /// The turn's prompt joins the conversation, dated.
-    fn begin_turn(&mut self, text: &str) {
+    /// The pictures the operator sent with a prompt, as the model is shown them: none when it
+    /// can't see pictures, and only as many as the conversation has room for, in order. One that
+    /// can't be read is left out; its path is in the prompt's words, and `read_file` says why.
+    async fn shown(&self, paths: &[PathBuf]) -> Vec<Picture> {
+        if paths.is_empty() || !self.config.sees_pictures {
+            return Vec::new();
+        }
+        let (held, bytes) = self.pictures_held();
+        let mut room = self.config.max_pictures.saturating_sub(held);
+        let mut space = self.config.max_picture_bytes.saturating_sub(bytes);
+        let mut shown = Vec::new();
+        for path in paths {
+            if room == 0 {
+                break;
+            }
+            let file = path.clone();
+            // Reading a picture turns and shrinks it in a helper process: off the async workers.
+            let read = tokio::task::spawn_blocking(move || crate::documents::read(&file)).await;
+            let Ok(Ok(crate::documents::Document::Picture(picture))) = read else {
+                continue;
+            };
+            if picture.data.len() > space {
+                continue;
+            }
+            room -= 1;
+            space -= picture.data.len();
+            shown.push(Picture {
+                name: path.file_name().map_or_else(
+                    || path.to_string_lossy().into_owned(),
+                    |name| name.to_string_lossy().into_owned(),
+                ),
+                media_type: picture.media_type,
+                data: picture.data,
+            });
+        }
+        shown
+    }
+
+    /// The turn's prompt joins the conversation, dated, after any pictures it was sent with.
+    fn begin_turn(&mut self, text: &str, pictures: Vec<Picture>) {
         text.clone_into(&mut self.task);
         // Nothing has been sent yet, so the instructions can still list the skills this work
         // calls for: the first message says what it is.
@@ -724,6 +778,7 @@ impl Session {
         }
         self.history.push(Message::User {
             content: format!("{text}\n\n{}", self.today()),
+            pictures,
         });
     }
 
@@ -955,7 +1010,9 @@ impl Session {
         self.history
             .iter()
             .flat_map(|message| match message {
-                Message::Tool { pictures, .. } => pictures.as_slice(),
+                Message::Tool { pictures, .. } | Message::User { pictures, .. } => {
+                    pictures.as_slice()
+                }
                 _ => &[],
             })
             .fold(self.unsent_pictures, |(count, bytes), picture| {
@@ -1517,6 +1574,7 @@ impl Session {
     ) -> Result<Completion, CallError> {
         self.history.push(Message::User {
             content: summary_request(shorter),
+            pictures: Vec::new(),
         });
         let completion = self.call_model(cancel, call).await;
         self.history.pop();
@@ -1570,6 +1628,7 @@ impl Session {
                     completion.content.trim(),
                     self.today()
                 ),
+                pictures: Vec::new(),
             },
         ];
         self.last_prompt_tokens = 0;
@@ -1591,8 +1650,9 @@ fn tokens(bytes: usize) -> u64 {
 /// calls. The reasoning a provider hands back is left out: some send it again, some don't.
 fn size(message: &Message) -> usize {
     match message {
-        Message::System { content } | Message::User { content } => content.len(),
-        Message::Tool {
+        Message::System { content } => content.len(),
+        Message::User { content, pictures }
+        | Message::Tool {
             content, pictures, ..
         } => content.len() + pictures.len() * PICTURE_SIZE,
         Message::Assistant {

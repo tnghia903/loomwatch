@@ -126,11 +126,20 @@ impl PermissionPolicy {
     }
 
     /// The policy for one of a run's agents: [`Self::for_agent`] with what the operator turned off
-    /// for it (ADR 0060).
+    /// for it (ADR 0060), and the files sent in its team's chat to read (ADR 0081): sending one is
+    /// the operator giving it to the team.
     #[must_use]
-    pub fn for_run_agent(agent: &AgentConfig, folder: &Path, delivery: &Delivery) -> Self {
+    pub fn for_run_agent(
+        agent: &AgentConfig,
+        team_file: &Path,
+        folder: &Path,
+        delivery: &Delivery,
+    ) -> Self {
         let mut policy = Self::for_agent(agent.allow, folder, delivery)
             .turning_off(&agent.turned_off, &agent.capabilities);
+        policy
+            .readable
+            .push(resolve(&crate::chat_files::folder(team_file)));
         policy.web_limits = agent.spend.web.limits();
         policy
     }
@@ -932,6 +941,43 @@ mod tests {
         edits: true,
         commands: true,
     };
+
+    /// ADR 0081: a file sent in the team's chat is the operator's to give, so every agent of the
+    /// team reads it without asking. Only reads: writing there still asks, and a file beside the
+    /// team file but outside the chat's folder still asks to be read.
+    #[test]
+    fn an_agent_reads_its_teams_chat_files_without_asking() {
+        let scratch = Scratch::new();
+        let team = crate::config::TeamConfig::parse(
+            "schemaVersion: 1\nentrypoint: a\nagents:\n  - id: a\n    spawn:\n      cmd: acp\n      cwd: .\n    model: test/model\n",
+        )
+        .unwrap();
+        let team_file = scratch.0.join("trip.yaml");
+        let chat = crate::chat_files::folder(&team_file);
+        std::fs::create_dir_all(&chat).unwrap();
+        let shot = chat.join("shot.png");
+        std::fs::write(&shot, "x").unwrap();
+        let policy = PermissionPolicy::for_run_agent(
+            &team.agents[0],
+            &team_file,
+            &scratch.0.join("agent"),
+            &Delivery::default(),
+        );
+        let shot = shot.to_string_lossy().into_owned();
+        assert!(policy.approves(&request(Some("read"), "Read shot.png", &[&shot])));
+        assert!(policy.approves(&request(
+            Some("search"),
+            "Search",
+            &[&chat.to_string_lossy()]
+        )));
+        assert!(!policy.approves(&request(Some("edit"), "Edit shot.png", &[&shot])));
+        let beside = scratch.0.join("trip.files").join("notes.md");
+        assert!(!policy.approves(&request(
+            Some("read"),
+            "Read notes.md",
+            &[&beside.to_string_lossy()]
+        )));
+    }
 
     /// A settings folder is protected however the edit spells it: Windows and macOS make
     /// `.Agents` or `.agents.` the same folder as `.agents` when it does not exist yet.

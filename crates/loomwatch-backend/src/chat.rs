@@ -23,12 +23,13 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path as RoutePath, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, Local, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,7 @@ use uuid::Uuid;
 
 use crate::api::{ApiError, normalized_relative_path, resolve_existing_team_path};
 use crate::archive::EventArchive;
+use crate::chat_files::{ChatFile, SentFile};
 use crate::config::TeamConfig;
 use crate::db::Db;
 use crate::runs::{
@@ -139,6 +141,9 @@ pub struct ChatMessage {
     /// the message stayed a note, and the agents it was for answered it themselves instead.
     #[serde(default)]
     pub answers: Option<NoteAnswers>,
+    /// Files sent with it ([`crate::chat_files`], ADR 0081).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<ChatFile>,
 }
 
 /// The agents answering a message that needed no workflow, each for itself, at the same time.
@@ -310,8 +315,8 @@ impl ChatStore {
         sqlx::query(
             "INSERT INTO chat_messages
              (id, team_key, team_path, text, created_at, route, run_id, agent_id, delivered_at, now,
-              reply_to, answers)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+              reply_to, answers, files)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              ON CONFLICT (id) DO NOTHING",
         )
         .bind(&message.id)
@@ -335,6 +340,11 @@ impl ChatStore {
                 .answers
                 .as_ref()
                 .and_then(|answers| serde_json::to_value(answers).ok()),
+        )
+        .bind(
+            (!message.files.is_empty())
+                .then(|| serde_json::to_value(&message.files).ok())
+                .flatten(),
         )
         .execute(self.db.writer())
         .await?;
@@ -835,6 +845,10 @@ fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessage, sqlx::Er
         answers: row
             .try_get::<Option<Value>, _>("answers")?
             .and_then(|answers| serde_json::from_value(answers).ok()),
+        files: row
+            .try_get::<Option<Value>, _>("files")?
+            .and_then(|files| serde_json::from_value(files).ok())
+            .unwrap_or_default(),
     })
 }
 
@@ -906,6 +920,8 @@ struct History {
     decisions: Vec<Decision>,
     /// What the messages that started these runs replied to, by run id.
     replies: BTreeMap<String, ReplyTo>,
+    /// The files sent with the messages that started these runs, by run id (ADR 0081).
+    files: BTreeMap<String, Vec<ChatFile>>,
     /// The operator's reactions on those runs and notes, by run or note.
     reactions: Vec<(String, Reaction)>,
 }
@@ -946,11 +962,19 @@ async fn gather(
                 .map(|note| note.id.clone()),
         )
         .collect::<Vec<_>>();
-    let replies = store
+    let requests = store
         .of_runs(&ids)
         .await?
         .into_iter()
         .filter(|message| matches!(message.route, Route::Team | Route::Agent))
+        .collect::<Vec<_>>();
+    let files = requests
+        .iter()
+        .filter(|message| !message.files.is_empty())
+        .filter_map(|message| Some((message.run_id.clone()?, message.files.clone())))
+        .collect();
+    let replies = requests
+        .into_iter()
         .filter_map(|message| Some((message.run_id?, message.reply_to?)))
         .collect();
     let reactions = store
@@ -968,6 +992,7 @@ async fn gather(
         notes,
         decisions,
         replies,
+        files,
         reactions,
     })
 }
@@ -1069,7 +1094,10 @@ fn entries(team: &TeamConfig, history: &History, before: &str, person: &Person) 
                 EntryKind::Request {
                     by,
                     to,
-                    text: run.prompt.clone(),
+                    text: crate::chat_files::with_files(
+                        &run.prompt,
+                        history.files.get(&run.run_id).map_or(&[], Vec::as_slice),
+                    ),
                     reply: history
                         .replies
                         .get(&run.run_id)
@@ -1136,7 +1164,7 @@ fn note_entry(team: &TeamConfig, note: &ChatMessage) -> Entry {
         run_id: None,
         kind: EntryKind::Note {
             to: note.agent_id.as_deref().map(|id| agent_name(team, id)),
-            text: note.text.clone(),
+            text: crate::chat_files::with_files(&note.text, &note.files),
             reply: note.reply_to.as_ref().map(|reply| reply.mentioned(team)),
             answers: note.answers.as_ref().map(|answers| {
                 answers
@@ -1533,6 +1561,12 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
     Router::new()
         .route("/api/chat", get(chat_page))
         .route("/api/chat/messages", post(send_message))
+        .route(
+            "/api/chat/files",
+            put(put_chat_file).layer(DefaultBodyLimit::max(
+                crate::chosen_knowledge::MAX_FILE_BYTES,
+            )),
+        )
         .route("/api/chat/messages/{id}/start", post(start_from_note))
         .route("/api/chat/continue", post(continue_team))
         .route("/api/chat/reactions", post(react))
@@ -1542,6 +1576,41 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
             teams_root,
             registry,
         })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatFileUpload {
+    team_path: String,
+    /// The file's own name, as the browser reports it.
+    name: String,
+}
+
+/// `PUT /api/chat/files`: keep a file pasted or dropped into the team's chat (ADR 0081), before
+/// the message that sends it. The body is the file's bytes, `application/octet-stream` only, so a
+/// page on another site cannot send one without a preflight the daemon never answers.
+async fn put_chat_file(
+    State(state): State<ChatState>,
+    Query(query): Query<ChatFileUpload>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<ChatFile>, ApiError> {
+    let octet_stream = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/octet-stream"));
+    if !octet_stream {
+        return Err(ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "send the file as application/octet-stream".into(),
+        ));
+    }
+    let team = resolve_existing_team_path(&state.teams_root, Path::new(&query.team_path))?;
+    tokio::task::spawn_blocking(move || crate::chat_files::store(&team, &query.name, &body))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map(Json)
+        .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, message))
 }
 
 /// A team file the chat may act on: its normalised path and its parsed config.
@@ -1792,6 +1861,9 @@ struct SendMessage {
     /// run's Send (ADR 0075), where every answer is a run's.
     #[serde(default)]
     work: bool,
+    /// Files sent with it, by the paths their uploads answered with.
+    #[serde(default)]
+    files: Vec<SentFile>,
 }
 
 /// Where a message goes, decided from who it is addressed to and who is working right now.
@@ -1908,6 +1980,9 @@ async fn send_message(
     let text = request.text.trim();
     let (relative, team) = open_team(&state.teams_root, &request.team_path)?;
     check_message(text, request.to.as_ref(), &team)?;
+    let team_file = resolve_existing_team_path(&state.teams_root, Path::new(&relative))?;
+    let files = crate::chat_files::check(&team_file, &request.files)
+        .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, message))?;
     let mut reply_to = request.reply_to.clone();
     if let Some(reply) = reply_to.as_mut() {
         check_reply(reply, &team)?;
@@ -1930,6 +2005,7 @@ async fn send_message(
         now: false,
         reply_to,
         answers: None,
+        files,
     };
     let mut decided = decide(request.to.as_ref(), &live);
     learn_from_words(
@@ -1946,6 +2022,7 @@ async fn send_message(
             sent_at: message.created_at.clone(),
             now: request.now,
             reply: replied.as_ref().map(crate::Replied::quoted),
+            files: message.files.clone(),
         };
         match state.registry.queue_note(run_id, note) {
             Ok(record) => {
@@ -1974,7 +2051,7 @@ async fn send_message(
     }
     // "hi @team" asks for no work: the agent it would have started says hello back, and the
     // message stays a note rather than sending the team off to do its standing job.
-    if !request.work {
+    if answers_in_chat(request.work, &message.files) {
         answer_instead(&state, &team, &mut decided, text, &mut message).await;
     }
     match decided {
@@ -1992,7 +2069,8 @@ async fn send_message(
                 request.expected_revision.clone(),
                 request.start_key.clone(),
             )
-            .replying(replied);
+            .replying(replied)
+            .giving(message.files.clone());
             if let Decided::Agent(agent) = &decided {
                 start = start.only(agent);
                 message.route = Route::Agent;
@@ -2258,6 +2336,13 @@ async fn learn_from_words(
             steps: Vec::new(),
         },
     });
+}
+
+/// Whether a message may be answered in the chat instead of starting work ([`answer_instead`]):
+/// not when it was sent as work, and not when it carries files, which that answer, read from the
+/// words alone with no tools, could not open (ADR 0081).
+fn answers_in_chat(work: bool, files: &[ChatFile]) -> bool {
+    !work && files.is_empty()
 }
 
 /// A message that was going to start the workflow but needs none is answered by the agents
@@ -2626,8 +2711,9 @@ async fn start_from_note(
     let task = team
         .as_ref()
         .map_or(message.text.as_str(), |team| task_text(&message.text, team));
-    let mut start =
-        StartRunRequest::from_chat(&message.team_path, task, expected, None).replying(replied);
+    let mut start = StartRunRequest::from_chat(&message.team_path, task, expected, None)
+        .replying(replied)
+        .giving(message.files.clone());
     let route = if let Some(agent) = &only {
         start = start.only(agent);
         Route::Agent
@@ -3060,6 +3146,7 @@ mod tests {
             now: false,
             reply_to: None,
             answers: None,
+            files: Vec::new(),
         }
     }
 
@@ -3091,6 +3178,7 @@ mod tests {
             )],
             decisions: Vec::new(),
             reactions: Vec::new(),
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         // Same input, same bytes.
@@ -3137,6 +3225,7 @@ mod tests {
             notes: Vec::new(),
             decisions: Vec::new(),
             reactions: Vec::new(),
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -3170,6 +3259,7 @@ mod tests {
             notes: Vec::new(),
             decisions: Vec::new(),
             reactions: Vec::new(),
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(!section.contains("THE ANSWER"), "{section}");
@@ -3201,6 +3291,7 @@ mod tests {
                 sent_back_to: None,
             }],
             reactions: Vec::new(),
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -3209,6 +3300,33 @@ mod tests {
         );
         assert!(
             section.contains("You, in a note to Writer while it worked: keep it under 300 words")
+        );
+    }
+
+    /// A team note's files go into the next work's conversation with it, so the agents can open
+    /// them then (ADR 0081).
+    #[test]
+    fn a_team_notes_files_are_in_the_conversation() {
+        let now = finished("ffffffff-now", "2026-10-06T03:00:00.000Z", "today", "");
+        let mut noted = note("2026-10-05T02:10:00.000Z", "use this layout", None);
+        noted.files = vec![ChatFile {
+            name: "layout.png".to_owned(),
+            path: "/teams/news.files/chat/layout.png".to_owned(),
+            bytes: 1,
+            picture: true,
+        }];
+        let history = History {
+            replies: BTreeMap::new(),
+            reactions: Vec::new(),
+            runs: Vec::new(),
+            notes: vec![noted],
+            decisions: Vec::new(),
+            files: BTreeMap::new(),
+        };
+        let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
+        assert!(
+            section.contains("use this layout\n\nFiles sent with this message, which you may open:\n- layout.png, a picture: /teams/news.files/chat/layout.png"),
+            "{section}"
         );
     }
 
@@ -3245,6 +3363,7 @@ mod tests {
                     sent_back_to: Some("writer".to_owned()),
                 },
             ],
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(Some(" Mai "))).unwrap();
         assert!(section.contains("Mai to the team: digest"), "{section}");
@@ -3297,6 +3416,7 @@ mod tests {
                 ),
             ],
             decisions: Vec::new(),
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -4040,6 +4160,293 @@ mod tests {
         );
     }
 
+    async fn put_file(app: &Router, name: &str, kind: &str, bytes: Vec<u8>) -> (StatusCode, Value) {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/chat/files?teamPath=news.yaml&name={name}"))
+                    .header("host", "localhost")
+                    .header(header::CONTENT_TYPE, kind)
+                    .body(Body::from(bytes))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// The `demo/…` model of each agent in a team file, in the file's order.
+    fn team_models(team_file: &Path) -> Vec<String> {
+        std::fs::read_to_string(team_file)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("model: "))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The pictures each user turn the scripted `model` was sent carried, by name, in order.
+    fn pictures_sent(model: &str) -> Vec<Vec<String>> {
+        let mut turns: Vec<Vec<String>> = Vec::new();
+        for request in crate::engine::demo_for(model).unwrap().requests() {
+            for message in &request.messages {
+                if let crate::agent::Message::User { pictures, .. } = message
+                    && !pictures.is_empty()
+                {
+                    let names = pictures
+                        .iter()
+                        .map(|picture| picture.name.clone())
+                        .collect();
+                    if !turns.contains(&names) {
+                        turns.push(names);
+                    }
+                }
+            }
+        }
+        turns
+    }
+
+    /// ADR 0081, a team with no fixed order: its lead is handed the files and shown the pictures;
+    /// "Start the team on this" under a team note hands on that note's files; and the next work's
+    /// conversation lists a piece's files with its request.
+    #[tokio::test]
+    async fn a_lead_and_a_team_note_started_later_are_handed_the_files() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (lead, _) = agent("lead", FirstTurn::Answered);
+        let (helper, _) = agent("helper", FirstTurn::Answered);
+        crate::engine::sees_pictures(&lead);
+        let yaml = format!(
+            "schemaVersion: 1\nid: studio\nname: Studio\nentrypoint: lead\nagents:\n  - id: lead\n    name: Lead\n    role: run the studio\n    model: {lead}\n  - id: helper\n    name: Helper\n    role: help\n    model: {helper}\nedges: []\n"
+        );
+        std::fs::write(dir.0.join("news.yaml"), yaml).unwrap();
+        let rig = rig(pool, &dir);
+        let octets = "application/octet-stream";
+        let (_, shot) = put_file(
+            &rig.app,
+            "shot.png",
+            octets,
+            crate::test_support::png(4, 3, false),
+        )
+        .await;
+        let shot_path = shot["path"].as_str().unwrap().to_owned();
+
+        let (status, started) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "fix this", "to": {"kind": "team"}, "files": [{"path": shot_path}]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+        let first_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        let first = wait_for(&rig.registry, &first_id, |run| run.status.is_terminal()).await;
+        assert_eq!(first.status, RunStatus::Succeeded, "{first:?}");
+        let listed = format!(
+            "Files sent with this message, which you may open:\n- shot.png, a picture: {shot_path}"
+        );
+        let lead_prompt = &prompts(&rig.archive, &first_id, "lead").await[0];
+        assert!(
+            lead_prompt.contains(&format!("fix this\n\n{listed}")),
+            "{lead_prompt}"
+        );
+        assert_eq!(
+            shown(&rig.archive, &first_id, "lead").await[0],
+            json!([shot_path])
+        );
+        assert_eq!(pictures_sent(&lead), [vec!["shot.png".to_owned()]]);
+
+        // A team note with a file, started later from the chat.
+        let (_, layout) = put_file(
+            &rig.app,
+            "layout.png",
+            octets,
+            crate::test_support::png(6, 3, false),
+        )
+        .await;
+        let layout_path = layout["path"].as_str().unwrap().to_owned();
+        let (_, noted) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "use this layout", "files": [{"path": layout_path}]}),
+        )
+        .await;
+        assert_eq!(noted["route"], "team_note", "{noted}");
+        let note_id = noted["message"]["id"].as_str().unwrap().to_owned();
+        let (status, from_note) = post(
+            &rig.app,
+            &format!("/api/chat/messages/{note_id}/start"),
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{from_note}");
+        let second_id = from_note["run"]["runId"].as_str().unwrap().to_owned();
+        wait_for(&rig.registry, &second_id, |run| run.status.is_terminal()).await;
+        let second = &prompts(&rig.archive, &second_id, "lead").await[0];
+        assert!(
+            second.contains(&format!("use this layout\n\nFiles sent with this message, which you may open:\n- layout.png, a picture: {layout_path}")),
+            "{second}"
+        );
+        // The earlier piece's request, in the conversation, with its file.
+        assert!(
+            second.contains(&format!("fix this\n\n{listed}")),
+            "{second}"
+        );
+    }
+
+    /// The pictures each of `agent`'s turns was shown with, in order (ADR 0081).
+    async fn shown(archive: &EventArchive, run_id: &str, agent: &str) -> Vec<Value> {
+        archive
+            .load_session(run_id)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event.agent_id == agent
+                    && event.kind == crate::EventKind::Message
+                    && event.payload["role"] == "user"
+                    && event.payload["content"]["text"].is_string()
+            })
+            .map(|event| event.payload["pictures"].clone())
+            .collect()
+    }
+
+    /// ADR 0081: a file pasted or dropped into the chat is kept beside the team and sent with the
+    /// words. Every agent the work reaches is told where it is; the agent the message reaches
+    /// first is shown its pictures with the words, and a note's pictures go with the note.
+    #[tokio::test]
+    async fn files_sent_in_the_chat_reach_every_agent_and_the_first_is_shown_the_pictures() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let (team_file, gate) = write_news_desk(&dir, FirstTurn::Waits);
+        let models = team_models(&team_file);
+        for model in &models {
+            crate::engine::sees_pictures(model);
+        }
+        let rig = rig(pool, &dir);
+        let png = |width| crate::test_support::png(width, 3, false);
+
+        // Bytes only, so another site's page can't send one without a preflight.
+        let (status, _) = put_file(&rig.app, "shot.png", "image/png", png(4)).await;
+        assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let octets = "application/octet-stream";
+        let (status, shot) = put_file(&rig.app, "shot.png", octets, png(4)).await;
+        assert_eq!(status, StatusCode::OK, "{shot}");
+        assert_eq!(shot["picture"], true);
+        let (_, brief) = put_file(&rig.app, "brief.txt", octets, b"three bullets".to_vec()).await;
+        assert_eq!(brief["picture"], false);
+        let (shot_path, brief_path) = (
+            shot["path"].as_str().unwrap().to_owned(),
+            brief["path"].as_str().unwrap().to_owned(),
+        );
+        assert!(
+            Path::new(&shot_path).starts_with(crate::platform::canonicalize(&dir.0).unwrap()),
+            "{shot_path}"
+        );
+
+        // A message names only files the chat kept for this team.
+        let outside = dir.0.join("news.yaml").to_string_lossy().into_owned();
+        let (status, refused) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "read this", "to": {"kind": "team"}, "files": [{"path": outside}]}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+
+        let (status, started) = send(
+            &rig.app,
+            json!({
+                "teamPath": "news.yaml",
+                "text": "today's digest, like this",
+                "to": {"kind": "team"},
+                "files": [{"path": shot_path}, {"path": brief_path}],
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+        let run_id = started["run"]["runId"].as_str().unwrap().to_owned();
+        wait_for(&rig.registry, &run_id, |run| {
+            run.working.iter().any(|id| id == "researcher")
+        })
+        .await;
+        let (_, chart) = put_file(&rig.app, "chart.png", octets, png(5)).await;
+        let chart_path = chart["path"].as_str().unwrap().to_owned();
+        let (status, noted) = send(
+            &rig.app,
+            json!({
+                "teamPath": "news.yaml",
+                "text": "@Researcher and this one",
+                "to": {"kind": "agent", "agent": "researcher"},
+                "files": [{"path": chart_path}],
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{noted}");
+        assert_eq!(noted["route"], "note");
+        gate.release(1);
+        let done = wait_for(&rig.registry, &run_id, |run| run.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        // The run's own words are what was typed: the receipt and the history read them.
+        assert_eq!(done.prompt, "today's digest, like this");
+
+        let listed = format!(
+            "today's digest, like this\n\nFiles sent with this message, which you may open:\n- shot.png, a picture: {shot_path}\n- brief.txt: {brief_path}"
+        );
+        let researcher = prompts(&rig.archive, &run_id, "researcher").await;
+        assert!(researcher[0].contains(&listed), "{}", researcher[0]);
+        assert!(
+            researcher[1].contains(&format!("and this one\n\nFiles sent with this message, which you may open:\n- chart.png, a picture: {chart_path}")),
+            "{}",
+            researcher[1]
+        );
+        let writer = prompts(&rig.archive, &run_id, "writer").await;
+        assert!(writer[0].contains(&listed), "{}", writer[0]);
+        assert_eq!(
+            shown(&rig.archive, &run_id, "researcher").await[..2],
+            [json!([shot_path]), json!([chart_path])]
+        );
+        assert!(
+            shown(&rig.archive, &run_id, "writer")
+                .await
+                .iter()
+                .all(Value::is_null),
+            "the stages after the first have the path"
+        );
+        // What the models were sent, not only what was recorded: Researcher's first turn and its
+        // note's turn carry the pictures; Writer, after it, is sent none.
+        assert_eq!(
+            pictures_sent(&models[0]),
+            [vec!["shot.png".to_owned()], vec!["chart.png".to_owned()]]
+        );
+        assert!(pictures_sent(&models[1]).is_empty());
+
+        // The chat keeps each message's files.
+        let kept = page(&rig.app).await;
+        let work = &kept["items"][0];
+        assert_eq!(work["request"]["files"][0]["name"], "shot.png", "{kept}");
+        assert_eq!(work["request"]["files"][1]["name"], "brief.txt", "{kept}");
+        assert_eq!(work["notes"][0]["files"][0]["path"], chart_path, "{kept}");
+    }
+
+    /// A message with files is never answered from its words alone: that answer has no tools to
+    /// open them, so it goes to work (ADR 0081).
+    #[test]
+    fn a_message_with_files_goes_to_work() {
+        let shot = ChatFile {
+            name: "shot.png".into(),
+            path: "/t/shot.png".into(),
+            bytes: 1,
+            picture: true,
+        };
+        assert!(answers_in_chat(false, &[]));
+        assert!(!answers_in_chat(true, &[]));
+        assert!(!answers_in_chat(false, &[shot]));
+    }
+
     #[tokio::test]
     async fn a_reply_that_quotes_nothing_or_answers_your_own_words_is_refused() {
         let pool = crate::db::Db::temp().await;
@@ -4319,6 +4726,7 @@ mod tests {
             notes: Vec::new(),
             decisions: Vec::new(),
             reactions: Vec::new(),
+            files: BTreeMap::new(),
         };
         assert_eq!(render(&team(), &history, &now, &Person::named(None)), None);
     }
@@ -4508,6 +4916,7 @@ mod tests {
                 "bbbbbbbb-2".to_owned(),
                 reaction("2026-10-06T02:30:00.000Z"),
             )],
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         assert!(
@@ -4755,6 +5164,7 @@ mod tests {
                     ),
                 ),
             ],
+            files: BTreeMap::new(),
         };
         let section = render(&team(), &history, &now, &Person::named(None)).unwrap();
         for line in [
@@ -4974,6 +5384,7 @@ mod tests {
                     at: now(),
                 }],
             }),
+            files: Vec::new(),
         };
         store.insert(&answered).await.unwrap();
         let (status, _) = send(

@@ -28,6 +28,9 @@ pub enum Message {
     },
     User {
         content: String,
+        /// Pictures the operator sent with these words (ADR 0081), shown before them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pictures: Vec<Picture>,
     },
     Assistant {
         content: String,

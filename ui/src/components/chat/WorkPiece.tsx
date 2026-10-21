@@ -26,6 +26,7 @@ import { workPhase } from '../../lib/watch/workPhase'
 import type { AgentConfig } from '../../lib/team-file/types'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
 import { AgentMessages } from '../run/AgentMessages'
+import { ChatFiles } from './ChatFiles'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
 import { Markdown } from '../ui/Markdown'
@@ -595,6 +596,7 @@ function Request({ run, request, continuedFrom, name, solo, onShowReplied, react
         <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(request?.createdAt ?? run.createdAt)}</time></div>
         {reactions(<div className="chat-bubble">
           {request?.replyTo && <ReplyQuote reply={request.replyTo} name={name} onShow={onShowReplied?.(request.replyTo)} />}
+          {request?.files && <ChatFiles files={request.files} />}
           <div className="chat-text tc-plain">{text}</div>
         </div>)}
       </div>
@@ -614,6 +616,7 @@ function Note({ note, live, name, onShowReplied, reactions }: { note: ChatMessag
         <div className="chat-meta"><span className="tc-to">Note → {name(note.agentId ?? '')}</span><time>{clockTime(note.createdAt)}</time></div>
         {reactions(<div className="chat-bubble">
           {note.replyTo && <ReplyQuote reply={note.replyTo} name={name} onShow={onShowReplied?.(note.replyTo)} />}
+          {note.files && <ChatFiles files={note.files} />}
           <div className="chat-text tc-plain">{note.text}</div>
         </div>)}
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
