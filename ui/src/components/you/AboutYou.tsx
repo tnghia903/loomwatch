@@ -3,10 +3,10 @@ import { Fragment, useEffect, useId, useState } from 'react'
 import type { ModelSource } from '../../lib/ai/modelIds'
 import { SOURCE_INFO, connectedSources } from '../../lib/ai/sources'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
-import { saidIn, withChoice, type QuickChoice, type QuickField } from '../../lib/firstrun/quickAbout'
+import { QUESTIONS, saidIn, withChoice, type QuickChoice, type QuickField } from '../../lib/firstrun/quickAbout'
 import { type AboutYou as Told, MAX_ABOUT_CHARS, MAX_NAME_CHARS, announceYou, fetchYou, saveYou, toldNothing } from '../../lib/you/client'
 import { AskAnotherAI } from './AskAnotherAI'
-import { QUESTIONS, QuickChoices } from './QuickChoices'
+import { QuickChoices } from './QuickChoices'
 
 const count = (value: number) => value.toLocaleString('en-US')
 

@@ -2,13 +2,6 @@ import { LANGUAGE, LENGTH, WORK, type QuickChoice, type QuickField } from '../..
 
 const OPTIONS: { [F in QuickField]: readonly QuickChoice<F>[] } = { work: WORK, language: LANGUAGE, length: LENGTH }
 
-/** The questions "Tell my agents about me" asks, in order, on the first run and the About you page. */
-export const QUESTIONS: readonly { field: QuickField; label: string }[] = [
-  { field: 'work', label: 'What do you do?' },
-  { field: 'language', label: 'Answer in' },
-  { field: 'length', label: 'How long?' },
-]
-
 /** One question's choices, each a toggle: a tap picks it, a second tap takes it back. */
 export function QuickChoices<F extends QuickField>({ field, label, picked, onPick }: {
   field: F

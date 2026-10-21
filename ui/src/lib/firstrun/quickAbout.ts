@@ -47,6 +47,13 @@ export function aboutFrom(told: QuickAbout): string {
 export type QuickField = 'work' | 'language' | 'length'
 export type QuickChoice<F extends QuickField> = NonNullable<QuickAbout[F]>
 
+/** The questions "Tell my agents about me" asks, in order, on the first run and the About you page. */
+export const QUESTIONS: readonly { field: QuickField; label: string }[] = [
+  { field: 'work', label: 'What do you do?' },
+  { field: 'language', label: 'Answer in' },
+  { field: 'length', label: 'How long?' },
+]
+
 /** What the About you text says for one of the questions, and where it says it. */
 interface Said<F extends QuickField> { choice: QuickChoice<F>; at: number; length: number; otherWork?: string }
 

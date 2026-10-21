@@ -330,10 +330,11 @@ describe('the tray on Home on a phone', () => {
     // Spelled in parts: Tailwind reads test files too, and the whole word would add its utility to the app's CSS.
     const wrap = ['flex', 'wrap'].join('-')
     expect(declaredIn(phoneRules, '.home-top', wrap)).toEqual(['wrap'])
-    expect(declaredIn(phoneRules, '.home-top-acts', wrap)).toEqual(['wrap'])
+    // The buttons wrap at every width, so a long bell or update badge never pushes the page sideways.
+    expect(declaredIn(everyRule, '.home-top-acts', wrap)).toEqual(['wrap'])
     for (const selector of ['.home-top', '.home-top-acts']) expect(declaredIn(everyRule, selector, wrap).filter((value) => value !== 'wrap')).toEqual([])
-    // The 30 px pills and the 44 px buttons share a row: on their middles, not their tops.
-    expect(declaredIn(phoneRules, '.home-top-acts', 'align-items')).toEqual(['center'])
+    // Pills and buttons of different heights share a row: on their middles, not their tops.
+    expect(declaredIn(everyRule, '.home-top-acts', 'align-items')).toEqual(['center'])
   })
 })
 
