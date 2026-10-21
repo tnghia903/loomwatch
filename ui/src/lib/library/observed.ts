@@ -168,6 +168,8 @@ const APP_TOOLS: Readonly<Record<string, { name: string; allow?: AllowSwitch }>>
 /** LoomWatch's own tools, which record no name, only an ACP kind and a title. */
 function byKind(toolKind: string | null, title: string): { name: string; allow?: AllowSwitch } {
   if (/^web search\b/i.test(title) || /^search\s+["“]/i.test(title)) return { name: 'Web search', allow: 'web' }
+  // Code the model ran for its web tools, on its provider's computer: one tool, whatever the code.
+  if (toolKind === 'other' && /^run code\b/i.test(title)) return { name: 'Run code' }
   switch (toolKind) {
     case 'fetch': return /^fetch\b|https?:\/\//i.test(title) ? { name: 'Web fetch', allow: 'web' } : { name: 'Web search', allow: 'web' }
     case 'execute': return { name: 'Commands', allow: 'commands' }

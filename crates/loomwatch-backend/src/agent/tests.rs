@@ -3419,6 +3419,133 @@ async fn claude_words_around_its_own_searches_are_said_on_the_way() {
     );
 }
 
+/// The run of 2026-10-21 on Claude Opus 5.5: its web tools ran code, and the pages and searches
+/// that code started came with no input. Before, the code was recorded as "Search the web: the
+/// web" with nothing it printed, a page it read as "Read a page", and a call whose input came whole
+/// in its first event lost it. Now code is code with its output, and each page and search is named
+/// by its input, or else by the page its result says it read.
+#[tokio::test]
+async fn claude_code_pages_and_searches_from_its_web_tools_are_named_by_what_they_were() {
+    let folder = Folder::new();
+    let (_, base) = stand(vec![events(&claude_web_tools_stream())]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    session
+        .prompt("Explain transformers in recommenders.")
+        .await
+        .unwrap();
+    check_claude_web_tools_record(&sink.all());
+}
+
+/// Claude's stream for that run: code it ran, a page read whose input came whole in its first
+/// event, one with no input, a search with no input, and what the code printed.
+fn claude_web_tools_stream() -> Vec<Value> {
+    let code = "import json\nr = await web_fetch({\"url\": \"https://arxiv.org/abs/1706.03762\"})";
+    let whole = |index: u64, id: &str, name: &str, input: &Value| {
+        [
+            json!({"type": "content_block_start", "index": index,
+                   "content_block": {"type": "server_tool_use", "id": id, "name": name, "input": input,
+                                     "caller": {"type": "code_execution_20260120", "tool_id": "srvtoolu_code"}}}),
+            json!({"type": "content_block_stop", "index": index}),
+        ]
+    };
+    [
+        vec![message_start(50, 0)],
+        server_tool_block(0, "srvtoolu_code", "code_execution", &json!({"code": code})).to_vec(),
+        whole(1, "srvtoolu_given", "web_fetch", &json!({"url": "https://arxiv.org/abs/1808.09781"})).to_vec(),
+        result_block(
+            2,
+            "web_fetch_tool_result",
+            "srvtoolu_given",
+            &json!({"type": "web_fetch_result", "url": "https://arxiv.org/abs/1808.09781"}),
+        )
+        .to_vec(),
+        whole(3, "srvtoolu_bare", "web_fetch", &json!({})).to_vec(),
+        result_block(
+            4,
+            "web_fetch_tool_result",
+            "srvtoolu_bare",
+            &json!({"type": "web_fetch_result", "url": "https://arxiv.org/abs/1706.03762"}),
+        )
+        .to_vec(),
+        whole(5, "srvtoolu_search", "web_search", &json!({})).to_vec(),
+        result_block(
+            6,
+            "web_search_tool_result",
+            "srvtoolu_search",
+            &json!([{"type": "web_search_result", "title": "BERT4Rec", "url": "https://arxiv.org/abs/1904.06690"}]),
+        )
+        .to_vec(),
+        result_block(
+            7,
+            "code_execution_tool_result",
+            "srvtoolu_code",
+            &json!({"type": "code_execution_result", "stdout": "Attention Is All You Need\n",
+                    "stderr": "", "return_code": 0}),
+        )
+        .to_vec(),
+        text_block(8, "Transformers read a history as a sequence.").to_vec(),
+        ended("end_turn", 300).to_vec(),
+    ]
+    .concat()
+}
+
+/// What the record of that stream must say: each call named by what it was, the input that came
+/// whole kept, and what the code printed.
+fn check_claude_web_tools_record(updates: &[Value]) {
+    let calls: Vec<(String, String)> = updates
+        .iter()
+        .filter(|update| update["sessionUpdate"] == "tool_call")
+        .map(|update| {
+            let text = |key: &str| update[key].as_str().unwrap_or_default().to_owned();
+            (text("title"), text("kind"))
+        })
+        .collect();
+    let call = |title: &str, kind: &str| (title.to_owned(), kind.to_owned());
+    assert_eq!(
+        calls,
+        [
+            call("Run code: import json", "other"),
+            call("Read https://arxiv.org/abs/1808.09781", "fetch"),
+            call("Read https://arxiv.org/abs/1706.03762", "fetch"),
+            call("Search the web", "fetch"),
+        ]
+    );
+    let output = |id: &str| {
+        updates
+            .iter()
+            .find(|update| {
+                update["sessionUpdate"] == "tool_call_update" && update["toolCallId"] == id
+            })
+            .and_then(|update| update.pointer("/content/0/content/text"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    // The page given whole keeps its own input, not only a title its result happens to match.
+    let given = updates
+        .iter()
+        .find(|update| {
+            update["sessionUpdate"] == "tool_call" && update["toolCallId"] == "srvtoolu_given"
+        })
+        .map(|update| update["rawInput"].clone());
+    assert_eq!(
+        given,
+        Some(json!({"url": "https://arxiv.org/abs/1808.09781"}))
+    );
+    assert_eq!(output("srvtoolu_code"), "Attention Is All You Need");
+    assert_eq!(
+        output("srvtoolu_search"),
+        "BERT4Rec https://arxiv.org/abs/1904.06690"
+    );
+}
+
 /// The same on a `ChatGPT` plan, whose search is an output item between two messages.
 #[tokio::test]
 async fn a_chatgpt_plan_search_between_messages_leaves_the_first_out_of_the_reply() {

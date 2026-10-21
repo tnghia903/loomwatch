@@ -148,3 +148,28 @@ describe('an MCP server LoomWatch did not connect, used without asking', () => {
     expect(outwardCalls(evidence, ['agentmemory', 'cua_repl']).size).toBe(0)
   })
 })
+
+// The daemon's record of Claude's web tools running code on Anthropic's computer (the run of
+// 2026-10-21): each piece of code is one "Run code" tool, never a search or a command run here,
+// however its first line reads.
+describe('code a provider ran for its web tools', () => {
+  const ran = (seq: number, callId: string, title: string) => [
+    event(seq, 'tutor', 'tool_call', { callId, title, toolKind: 'other', status: 'in_progress', rawInput: { code: title.slice(10) } }),
+    event(seq + 1, 'tutor', 'tool_update', { callId, status: 'completed' }),
+  ]
+  const projection = projectRun([
+    ...ran(1, 'c1', 'Run code: results = search_all(queries)'),
+    ...ran(3, 'c2', 'Run code: import json'),
+    event(5, 'tutor', 'tool_call', { callId: 'f1', title: 'Read https://arxiv.org/abs/1706.03762', toolKind: 'fetch', status: 'completed', rawInput: {} }),
+  ])
+
+  it('is ran code, not a search or a command', () => {
+    const code = projection.evidence.filter((item) => item.name.startsWith('Run code'))
+    expect(code.map((item) => [item.kind, item.relation])).toEqual([['tool', 'ran code'], ['tool', 'ran code']])
+  })
+
+  it('is one tool in what the run used', () => {
+    const rows = usedInRun(projection.evidence, connectedServersByAgent(projection.agents))
+    expect(rows.map((row) => [row.name, row.calls])).toEqual([['Run code', 2], ['Web fetch', 1]])
+  })
+})

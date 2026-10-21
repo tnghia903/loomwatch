@@ -38,7 +38,11 @@ instructions and tools.
 - **Built-in tools** (`agent/tools/`) are `list_files`, `read_file`, `search_files`,
   `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. An agent
   allowed the web also gets OpenRouter's web search and fetch. Tools the daemon serves itself,
-  such as the Team Bus and Ask's tools, come in through the `HostTools` trait.
+  such as the Team Bus and Ask's tools, come in through the `HostTools` trait. Calls a provider
+  runs on its own side are recorded as finished tool calls named by what they were
+  (`session.rs` `server_tool_title`): code Claude's web tools run is "Run code: <first line>"
+  with what it printed, and a page or search that code started is named by its input, or by the
+  page its result says it read.
 - **Documents and pictures** (`documents.rs`): `read_file` reads a PDF, Word, Excel or
   PowerPoint file as numbered text, and hands a PNG, JPEG, GIF or WebP picture to a model whose
   model list says it takes pictures, shrunk only past 2576 pixels on its long side. Each provider
