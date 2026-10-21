@@ -388,6 +388,7 @@ async fn main() -> Result<()> {
                 loomwatch_backend::control::ControlOptions {
                     archive: archive.clone(),
                     teams_root: teams_root.clone(),
+                    skills_folder: loomwatch_backend::capabilities::skills_folder(),
                     registry: registry.clone(),
                     listen: address,
                     ask_model: std::env::var("LOOMWATCH_ASK_MODEL").ok(),

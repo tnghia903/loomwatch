@@ -56,6 +56,9 @@ pub struct ControlOptions {
     pub archive: Option<EventArchive>,
     /// The canonical teams root, the same one the editor and run control use.
     pub teams_root: PathBuf,
+    /// `LoomWatch`'s own skills folder (`capabilities::skills_folder`), which `list_skills` lists
+    /// with the project's, as the Library and runs do.
+    pub skills_folder: Option<PathBuf>,
     pub registry: RunRegistry,
     /// The daemon's own listener: links to runs in tool results start with it.
     pub listen: SocketAddr,
@@ -72,6 +75,7 @@ pub struct Control {
 struct Inner {
     archive: Option<EventArchive>,
     teams_root: PathBuf,
+    skills_folder: Option<PathBuf>,
     registry: RunRegistry,
     /// `http://127.0.0.1:<port>`: what links in tool results start with.
     origin: String,
@@ -182,6 +186,7 @@ impl Control {
             inner: Arc::new(Inner {
                 archive: options.archive,
                 teams_root: options.teams_root,
+                skills_folder: options.skills_folder,
                 registry: options.registry,
                 origin: format!("http://{listen}"),
                 ask_model: options

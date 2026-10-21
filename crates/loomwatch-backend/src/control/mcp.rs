@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use super::{Caller, Control, Proposal, RunRequest, lock, now};
 use crate::agent::{BoxFuture, HostTools, ToolSpec};
-use crate::config::{AgentKind, TeamConfig};
+use crate::config::{AgentKind, CapabilityKind, TeamConfig};
 
 const MAX_REQUEST_CHARS: usize = 4_000;
 const MAX_REPLY_CHARS: usize = 4_000;
@@ -65,6 +65,7 @@ Set agents up the way that works best, every time, without being asked; the pers
 - Write each `role` in three parts: what the agent does and what it leaves to others; how to work, as a few short bullets ending with how it checks its work before it replies; and exactly what it replies with. A later stage receives the earlier stage's reply, so say what to hand on. The last stage's reply is the team's answer, so it delivers the finished piece, not a review of it.
 - Make every line specific to this request (its audience, sources, length, format), and give the reason for a rule that isn't obvious. Leave out advice any AI app already follows, such as "be accurate", and don't use capitals for emphasis: AI apps over-apply a shouted rule.
 - An agent that must search the web gets `allow: {web: true}`; leave `edits` and `commands` off unless the work is changing files or running commands.
+- When the person asks for a skill, give it to the agent as a skill, by name from `list_skills`: `capabilities: [{kind: skill, name: report-design}]`. It shows on the canvas as a card connected to the agent, and the agent reads all of it before it starts, so don't copy what the skill says into the `role`. If no skill in `list_skills` is the one they mean, say so: they add skills on the Skills page.
 - Give each agent a `doneWhen`: two or three short, checkable things its finished result must have, such as "Every story links to its source". It checks them before it replies and says which it could not meet. Never more than five.
 - When the result must be right (facts, figures, code), end with a check step: an agent that checks the work it is handed against the other agent's `doneWhen` without rewriting it, connected after that agent and set to `checks: <its id>`; its findings show on the answer. Add `sendBack: {rounds: 2, whenStillNotMet: ask}`, so what the check finds goes back to be fixed before the person sees the answer, and the run stops to ask them if it still isn't met; write `whenStillNotMet: answer` if they would rather see the answer with the problems marked, and leave `sendBack` off only if they want a report of the problems instead. A check step is a whole extra session, so leave it out of quick or low-stakes teams.
 - Give each agent the `model` and `thinkingEffort` that `list_models`' `choosing` gives its kind of work, the same table LoomWatch's own templates use: `jobs` lists the usual kinds, `tiers` says which model each kind of agent runs on, and `efforts` how hard it thinks. Use another recommended model only when the person asks for one. Set `thinkingEffort` only for a model `list_models` marks as reasoning, and never `xhigh` or `max`: thinking is paid for like writing, and the top settings mostly overthink. A free model is limited per day and its maker may learn from what it's sent, so use one only if the person asks.
@@ -141,6 +142,13 @@ fn definitions() -> Vec<Value> {
             "annotations": read_only,
         }),
         json!({
+            "name": "list_skills",
+            "title": "List skills",
+            "description": "The skills an agent can be given: each one's name, what it is for, and where it is kept.",
+            "inputSchema": object(json!({}), &[]),
+            "annotations": read_only,
+        }),
+        json!({
             "name": "propose_team",
             "title": "Propose a team",
             "description": "Show the person a complete team file as a proposal on the canvas. It is checked first; nothing is saved until they press Apply.",
@@ -191,6 +199,7 @@ async fn call(
         "list_teams" => list_teams(control).await,
         "read_team" => read_team(control, arguments),
         "list_models" => list_models().await,
+        "list_skills" => list_skills(control).await,
         "propose_team" => propose_team(control, caller, arguments).await,
         "start_run" => start_run(control, caller, arguments).await,
         "get_run" => get_run(control, caller, arguments).await,
@@ -239,6 +248,31 @@ fn read_team(control: &Control, arguments: &Value) -> Result<Value, String> {
     let yaml =
         std::fs::read_to_string(&path).map_err(|error| format!("couldn't read {file}: {error}"))?;
     Ok(json!({"file": file, "yaml": yaml, "revision": crate::api::revision(yaml.as_bytes())}))
+}
+
+/// The skills the Library lists, the same ones a run can deliver: `LoomWatch`'s skills folder and
+/// the project's. Names and descriptions only; the assistant never needs a skill's text to wire it.
+async fn list_skills(control: &Control) -> Result<Value, String> {
+    let skills = installed_skills(control).await?;
+    Ok(json!({
+        "skills": skills.iter().map(|skill| json!({
+            "name": skill.name,
+            "for": skill.detail,
+            "from": skill.source,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+async fn installed_skills(
+    control: &Control,
+) -> Result<Vec<crate::capabilities::DetectedCapability>, String> {
+    let skills = control.inner.skills_folder.clone();
+    let root = control.inner.teams_root.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::capabilities::detect_capabilities(skills.as_deref(), &root).skills
+    })
+    .await
+    .map_err(|error| format!("couldn't list the skills: {error}"))
 }
 
 /// The default model and the recommended ones, with their prices and whether they reason. Not the
@@ -388,10 +422,18 @@ async fn propose_team(
             problems.join("; ")
         ));
     }
+    let existing = std::fs::read(&path).ok();
+    let missing = missing_skills(control, &team, existing.as_deref()).await?;
+    if !missing.is_empty() {
+        return Err(format!(
+            "No skill called {} is installed, so the run would fail. Use a name from \
+             `list_skills`, or tell the person they can add it on the Skills page.",
+            missing.join(" or ")
+        ));
+    }
     // A check step sends a missed check back unless the proposal says otherwise (ADR 0062), as one
     // made from a template or on the canvas does.
     let yaml = with_send_back(&yaml, &team);
-    let existing = std::fs::read(&path).ok();
     let id = format!("proposal-{}", uuid::Uuid::new_v4());
     let Caller::Conversation(source) = caller.clone();
     let proposal = Proposal {
@@ -440,6 +482,41 @@ async fn propose_team(
         "status": "waiting_for_the_person",
         "message": message,
     }))
+}
+
+/// The skills `team` wires that the Library doesn't list, as a run would find them: by name,
+/// whatever its case. A skill the saved file already wires is let through, so a proposal that
+/// keeps it, as it must, isn't refused for a skill removed since.
+async fn missing_skills(
+    control: &Control,
+    team: &TeamConfig,
+    existing: Option<&[u8]>,
+) -> Result<Vec<String>, String> {
+    let wired = |team: &TeamConfig| {
+        team.agents
+            .iter()
+            .flat_map(|agent| &agent.capabilities)
+            .filter(|capability| capability.kind == CapabilityKind::Skill)
+            .map(|capability| capability.name.clone())
+            .collect::<Vec<_>>()
+    };
+    let mut asked = wired(team);
+    if asked.is_empty() {
+        return Ok(asked);
+    }
+    let kept = existing
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .and_then(|yaml| TeamConfig::parse(yaml).ok())
+        .map(|saved| wired(&saved))
+        .unwrap_or_default();
+    let installed = installed_skills(control).await?;
+    asked.retain(|name| {
+        let known = |other: &String| other.eq_ignore_ascii_case(name);
+        !kept.iter().any(known) && !installed.iter().any(|skill| known(&skill.name))
+    });
+    asked.sort_by_key(|name| name.to_lowercase());
+    asked.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    Ok(asked)
 }
 
 /// `yaml` with a new check step's `sendBack` ([`crate::config::SendBack::NEW`]) under every check

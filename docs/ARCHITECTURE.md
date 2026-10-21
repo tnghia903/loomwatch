@@ -305,9 +305,12 @@ other apps' settings, which hold those apps' credentials. The run records the to
 Ask (`control/`) is the same agent, on the operator's key and the model they chose, but outside
 any run. It is kept open across turns and archived as its own session. It gets the LoomWatch
 Control tools and nothing else: no files, no commands, no web. The tools are `list_teams`,
-`read_team`, `list_models`, `propose_team`, `start_run`, `get_run` and `draft_review_note`, all
-direct calls in the daemon. They read and propose. None of them writes a team file or answers a
-review stop: a proposed team is shown on the canvas and saved only when the person presses Apply.
+`read_team`, `list_models`, `list_skills`, `propose_team`, `start_run`, `get_run` and
+`draft_review_note`, all direct calls in the daemon. They read and propose. None of them writes a
+team file or answers a review stop: a proposed team is shown on the canvas and saved only when the
+person presses Apply. A skill Ask gives an agent is wired by name (`kind: skill`), as the canvas
+wires one, from the skills `list_skills` reports, the same list a run delivers from. A proposal
+that wires a skill no run could find is refused, unless the saved team already wires it.
 
 ---
 
