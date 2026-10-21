@@ -41,6 +41,7 @@ import { Learned } from './Learned'
 import { Reactions } from './Reactions'
 import { Spool } from './Spool'
 import { ReplyQuote } from './ReplyQuote'
+import { FoundText } from './FoundText'
 
 
 /** The team as the chat draws it. */
@@ -130,9 +131,13 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
   // The files the answer names are read beside the chat, and asked about, as this agent's work.
   const fileOrigin = useMemo(() => ({ runId: run.runId, from: run.responder }), [run.runId, run.responder])
   const [answerFlash, setAnswerFlash] = useState<number | null>(null)
+  // Your request, or a note you sent into the work, found by a search (ADR 0081): ringed in place.
+  const [saidFlash, setSaidFlash] = useState<{ id: string; at: number } | null>(null)
+  const yours = (id: string) => id === `request:${run.runId}` || notes.some((note) => id === `note:${note.id}`)
   if (reveal !== revealed) {
     setRevealed(reveal)
     if (reveal?.id === answerKey) setAnswerFlash(reveal.at)
+    else if (reveal && yours(reveal.id)) setSaidFlash({ id: reveal.id, at: reveal.at })
     else if (reveal) setToggled(true)
   }
   const open = toggled ?? (live || newest)
@@ -147,6 +152,12 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
   // has been on screen — not every piece of a long history the moment the chat opens.
   const piece = useRef<HTMLLIElement>(null)
   const seen = useSeen(piece)
+  useEffect(() => {
+    if (saidFlash === null) return
+    piece.current?.querySelector(`[data-said="${CSS.escape(saidFlash.id)}"]`)?.scrollIntoView?.({ block: 'center' })
+    const timer = window.setTimeout(() => setSaidFlash(null), 1800)
+    return () => window.clearTimeout(timer)
+  }, [saidFlash])
   useEffect(() => {
     if (answerFlash === null) return
     piece.current?.querySelector('.tc-answer')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
@@ -321,8 +332,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
   return (
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
-      <Request run={run} request={request} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
-      {notes.map((note) => <Note key={note.id} note={note} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], { mine: true })} />)}
+      <Request run={run} request={request} flash={saidFlash?.id === `request:${run.runId}`} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
+      {notes.map((note) => <Note key={note.id} note={note} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], { mine: true })} />)}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
         {/* Done, the faces on your request say who worked on it; the line says only what is still happening. */}
@@ -573,15 +584,15 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
 }
 
 /** What started this piece: your message, the schedule's, or your Continue. */
-function Request({ run, request, continuedFrom, name, solo, onShowReplied, reactions }: { run: RunRecord; request: ChatMessage | null; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
+function Request({ run, request, flash = false, continuedFrom, name, solo, onShowReplied, reactions }: { run: RunRecord; request: ChatMessage | null; flash?: boolean; continuedFrom: string | null; name: (id: string) => string; solo?: string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   if (continuedFrom) {
-    return <div className="chat-notice"><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
+    return <div className={`chat-notice${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}><span>You pressed Continue with the team · from {continuedFrom}</span><time>{clockTime(run.createdAt)}</time></div>
   }
   const text = request?.text ?? run.prompt
   const to = run.onlyAgent ? name(run.onlyAgent) : solo ? name(solo) : 'the team'
   if (run.trigger === 'schedule') {
     return (
-      <div className="chat-msg">
+      <div className={`chat-msg${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}>
         <span className="chat-gutter"><i className="chat-avatar hue-quiet tc-schedule" style={{ width: 28, height: 28 }}><CalendarClock size={14} aria-hidden="true" /></i></span>
         <div className="chat-stack">
           <div className="chat-meta"><span className="chat-name hue-quiet">The schedule</span><span className="tc-to">to the team</span><time>{clockTime(run.createdAt)}</time></div>
@@ -591,13 +602,13 @@ function Request({ run, request, continuedFrom, name, solo, onShowReplied, react
     )
   }
   return (
-    <div className="chat-msg mine">
+    <div className={`chat-msg mine${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">You → {to}</span><time>{clockTime(request?.createdAt ?? run.createdAt)}</time></div>
         {reactions(<div className="chat-bubble">
           {request?.replyTo && <ReplyQuote reply={request.replyTo} name={name} onShow={onShowReplied?.(request.replyTo)} />}
           {request?.files && <ChatFiles files={request.files} />}
-          <div className="chat-text tc-plain">{text}</div>
+          <div className="chat-text tc-plain"><FoundText text={text} /></div>
         </div>)}
       </div>
     </div>
@@ -605,19 +616,19 @@ function Request({ run, request, continuedFrom, name, solo, onShowReplied, react
 }
 
 /** A note you sent into this piece while an agent worked. */
-function Note({ note, live, name, onShowReplied, reactions }: { note: ChatMessage; live: boolean; name: (id: string) => string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
+function Note({ note, flash = false, live, name, onShowReplied, reactions }: { note: ChatMessage; flash?: boolean; live: boolean; name: (id: string) => string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   const appear = useAppear()
   const state = note.deliveredAt ? `${name(note.agentId ?? '')} took it in its next turn`
     : live ? note.now ? `Stopping ${name(note.agentId ?? '')}'s current step…` : `Waits for ${name(note.agentId ?? '')}'s current step to end`
       : 'The work ended before it was taken · kept for next time'
   return (
-    <div className={`chat-msg mine tc-note${appear ? ' tc-appear' : ''}${note.deliveredAt ? ' taken' : ''}`}>
+    <div className={`chat-msg mine tc-note${appear ? ' tc-appear' : ''}${note.deliveredAt ? ' taken' : ''}${flash ? ' flash' : ''}`} data-said={`note:${note.id}`}>
       <div className="chat-stack">
         <div className="chat-meta"><span className="tc-to">Note → {name(note.agentId ?? '')}</span><time>{clockTime(note.createdAt)}</time></div>
         {reactions(<div className="chat-bubble">
           {note.replyTo && <ReplyQuote reply={note.replyTo} name={name} onShow={onShowReplied?.(note.replyTo)} />}
           {note.files && <ChatFiles files={note.files} />}
-          <div className="chat-text tc-plain">{note.text}</div>
+          <div className="chat-text tc-plain"><FoundText text={note.text} /></div>
         </div>)}
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
       </div>

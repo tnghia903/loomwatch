@@ -887,7 +887,9 @@ impl RunRegistry {
                 key.as_ref().map(|(key, _)| key.as_str()),
                 key.as_ref().map(|(_, fingerprint)| fingerprint.as_str()),
             )
-            .await
+            .await?;
+        crate::chat_find::wake();
+        Ok(())
     }
 
     /// Fill a cold cache from the `runs` table. Returns how many records were recovered.
@@ -906,7 +908,7 @@ impl RunRegistry {
     }
 
     /// [`Self::reload`], then settle every run a previous process left unfinished as a cancel
-    /// would: what it was doing becomes a checkpoint to start a new run from, and the agents it had
+    /// would, and start keeping the chat's search up to date: what it was doing becomes a checkpoint to start a new run from, and the agents it had
     /// parked are let go.
     ///
     /// A parked agent's conversation is in the database and would come back as it was, but the
@@ -923,6 +925,11 @@ impl RunRegistry {
         for run_id in &interrupted {
             record_abandoned_checkpoints(archive, run_id, &crate::RunLineage::default()).await;
             forget_parked_agents(archive, run_id).await;
+        }
+        // From here on the chat's search keeps up with what is written (ADR 0081), starting with
+        // whatever an older version left unindexed.
+        if let Some(index) = self.work_index() {
+            crate::chat_find::spawn_indexer(index);
         }
         Ok(recovered)
     }
@@ -1808,6 +1815,14 @@ impl RunRegistry {
         self.store
             .as_ref()
             .map(|store| crate::chat::ChatStore::new(store.db.clone()))
+    }
+
+    /// The search over this registry's teams' earlier work (ADR 0081), when it is durable.
+    #[must_use]
+    pub(crate) fn work_index(&self) -> Option<crate::chat_find::WorkIndex> {
+        self.store
+            .as_ref()
+            .map(|store| crate::chat_find::WorkIndex::new(store.db.clone()))
     }
 
     /// What agents learned (ADR 0078), on the same database, when this registry is durable.

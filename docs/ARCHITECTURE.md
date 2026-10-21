@@ -256,6 +256,17 @@ which is what makes a run replayable. How it stays fast as history grows:
   already holds. So `raw` is stored as the frame minus the values it shares with `payload`,
   compressed when that is smaller (`archive/codec.rs`). It is read back byte for byte.
 - **Search** in the Notebook is SQLite FTS5 with English stemming.
+- **Finding in a team's chat** (`chat_find.rs`, ADR 0081) searches every request, answer, note and
+  line of the agents' talk (handovers, check verdicts, questions, Team Bus messages), cut into
+  passages of at most 1,200 characters in `work_passages`. The words are matched on a copy that
+  LoomWatch folds itself, because SQLite's `remove_diacritics` leaves `đ` alone: lower case,
+  accents off, `đ` as `d`, so "da nang" finds "Đà Nẵng". A word of four letters or more, or the
+  one still being typed, also finds longer words; an English plural or verb ending comes off
+  ("clipping" finds "clip"). Triggers on `runs` and `chat_messages` queue what changed; a
+  background task indexes it, and every search indexes what is still queued first.
+  `GET /api/chat/find?teamPath=&q=` returns the pieces that hold the most of the words first,
+  each with the lines that matched, named as the chat names them so the app opens the chat at
+  that very line.
 
 `loomwatchd backup <file>` writes a consistent copy while LoomWatch runs (`VACUUM INTO`). The
 launcher saves one before every update. Versions before 0.5 kept the history in PostgreSQL in

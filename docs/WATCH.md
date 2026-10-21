@@ -93,8 +93,11 @@ The request and the answer themselves are read in the chat, not again here. A lo
 chat shows a card with its title, opening words and length, and **Open** shows it in full in the
 pane beside the chat, under an **Answer** tab next to **Details**. Once a document answer
 arrives, the pane following the newest work switches to it. Drag the edge between them to resize; double-click
-resets it. The chat is paged from `GET /api/chat` and searchable with its
-`q`.
+resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
+team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
+agents said to each other, in any order and any form of a word, with or without Vietnamese accents.
+What matches shows in place of the chat, best first; a line opens the chat at that message with
+the words lit, and **← Back to the list** returns to it.
 
 Pictures and files go with a message (ADR 0082): paste one into the message box, drop files on the
 chat (a dashed gold line goes round it while you drag), or press the paperclip. Each is kept the
