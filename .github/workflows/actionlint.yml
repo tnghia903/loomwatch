@@ -1,17 +1,13 @@
 name: Workflow lint
 
 # A broken workflow file fails silently or not at all until it runs; lint it on the change instead.
+# Pull requests run nothing here: scripts/ci-local.sh lints a maintainer's branch, and a pull
+# request from a fork or Dependabot is linted once it reaches main.
 on:
-  pull_request:
-    paths: [".github/workflows/**"]
   push:
     branches: [main]
     paths: [".github/workflows/**"]
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

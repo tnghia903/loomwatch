@@ -1,0 +1,27 @@
+name: Pull requests
+
+# CI for the pull requests a maintainer doesn't check on their own computer: one from a fork, whose
+# code is a stranger's, and Dependabot's. They run ci.yml as main does. A maintainer's own branches
+# run nothing here: they are checked with scripts/ci-local.sh before they merge (docs/CI.md).
+#
+# Keep the trigger `pull_request`: a fork's run gets a read-only token and no secrets, and a
+# first-time contributor's run waits for a maintainer to approve it. Never `pull_request_target`,
+# which would run the fork's code with this repository's token and secrets.
+on:
+  pull_request:
+
+# A newer push to the same pull request cancels the older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository
+      || github.event.pull_request.user.login == 'dependabot[bot]'
+    uses: ./.github/workflows/ci.yml

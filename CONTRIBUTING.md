@@ -70,16 +70,16 @@ out of credit. Each of these addresses, too, is taken only on this computer.
 
 ## Before you open a pull request
 
-CI runs on every pull request, and its **CI result** check says whether everything passed. If this
-is your first pull request here, a maintainer approves the run before it starts. Run the same checks
-yourself first, which is quicker than waiting for CI ([docs/CI.md](docs/CI.md)):
+CI runs on your pull request, on Linux and Windows, and its **CI result** check says whether
+everything passed. If this is your first pull request here, a maintainer approves the run before it
+starts. Run the same checks on your computer first, which is quicker than waiting for CI
+([docs/CI.md](docs/CI.md)):
 
 ```sh
-cd ui && pnpm install --frozen-lockfile && pnpm run lint --deny-warnings && pnpm run build && pnpm test && cd ..
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+scripts/ci-local.sh
 ```
+
+It ends with a summary: which checks passed, and which only CI can run.
 
 Every database test makes a SQLite file of its own, so no test needs a database server.
 

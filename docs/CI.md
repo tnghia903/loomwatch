@@ -1,79 +1,92 @@
 # Continuous integration
 
-Every check runs on GitHub-hosted runners. CI's job is to prove that every pull request, before it
-merges, and `main`, after it, builds, passes its tests and still produces a container image. Two
-workflows publish: **Pages** puts the landing page and the installer on https://loomwatch.github.io,
-and **Release** builds the ready-to-run program for a version tag.
+A maintainer's branch is checked on their computer before it merges, with `scripts/ci-local.sh`. A
+pull request from a fork or from Dependabot runs CI on GitHub-hosted runners, so a stranger's code
+never runs on a maintainer's computer. Once a change merges, those runners check `main`: it builds,
+passes its tests on Linux and Windows and still produces a container image. Two workflows publish:
+**Pages** puts the landing page and the installer on https://loomwatch.github.io, and **Release**
+builds the ready-to-run program for a version tag.
 
 ## Workflows
 
 | Workflow | Runs on | What it proves | Typical time |
 | --- | --- | --- | --- |
-| `ci.yml` — **Frontend**, then **Rust** | every pull request, push to `main`, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite, each database test on a SQLite file of its own, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
+| `ci.yml` — **Frontend**, then **Rust** | every push to `main`, a pull request from a fork or from Dependabot (`pull-requests.yml` calls it), by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite, each database test on a SQLite file of its own, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
 | `ci.yml` — **Windows** | the same, after Frontend | on a Windows runner: the PowerShell scripts parse and are ASCII, Clippy (`-D warnings`) and the full test suite; then the release zip and `LoomWatch-windows-setup.exe` are packed and `scripts/smoke-windows.ps1` tries both: the PowerShell install driven through the offline demo's review stop, an agent on a stand-in for OpenRouter (`scripts/mock-openrouter.py`) keeping its key in Credential Manager and running a `cmd.exe` command in its own folder, `LoomWatch.exe` (one at a time, `--quit`), and the installer installing, updating over a running LoomWatch, and uninstalling | 20–30 min |
 | `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback` and `version` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
-| `ci.yml` — **Dependency review** | every pull request | the change adds no dependency with a known vulnerability of moderate severity or worse (`Cargo.lock`, `ui/pnpm-lock.yaml`) | < 1 min |
-| `ci.yml` — **CI result** | after the jobs above | every job above passed. This is the check the branch rule requires | seconds |
-| `container.yml` — **Build image** | a pull request or push to `main` that changes the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
-| `actionlint.yml` | a pull request or push to `main` that changes `.github/workflows/`, by hand | the workflow files themselves are valid | < 1 min |
+| `ci.yml` — **Dependency review** | the same, not by hand | comparing a pull request with its base, or `main` before and after a push: the change adds no dependency with a known vulnerability of moderate severity or worse (`Cargo.lock`, `ui/pnpm-lock.yaml`) | < 1 min |
+| `ci.yml` — **CI result** | after the jobs above | every job above passed: the one answer to read for a run | seconds |
+| `pull-requests.yml` | every pull request | runs `ci.yml` when the pull request comes from a fork or from Dependabot; skips it for a branch a maintainer pushed here | seconds, then `ci.yml` |
+| `container.yml` — **Build image** | a push to `main` that changes the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
+| `actionlint.yml` | a push to `main` that changes `.github/workflows/`, by hand | the workflow files themselves are valid | < 1 min |
 | `pages.yml` — **Publish** | a change to `site/`, `scripts/install.sh`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
 | `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` for macOS (one universal program, on macOS), Linux x86_64/arm64 (on Ubuntu 22.04) and Windows x86_64, packs each with `scripts/package-release.sh`, builds `LoomWatch-macos.dmg` and `LoomWatch-windows-setup.exe` (Inno Setup, from Chocolatey), and, for a tag, attaches them to a **draft** release. Run by hand, it only builds the files | ~15 min |
 
 ```
-pull request / push to main
+a maintainer's branch: scripts/ci-local.sh on their computer, then merge
+a pull request from a fork or Dependabot: the jobs below on GitHub, then merge
         │
         ▼
+push to main
    Frontend ───ui/dist──▶ Rust (fmt → clippy → test) ──────────────────┐
+                    └───▶ Windows (clippy → test → pack → smoke) ──────┤
    Launcher (shellcheck → update/rollback test) ───────────────────────┼──▶ CI result
-   Dependency review (pull requests only) ─────────────────────────────┘
+   Dependency review (base and head of the change) ────────────────────┘
 ```
 
 ## Conventions
 
-- **One run per change.** CI runs for pull requests and for pushes to `main`, not for every push to
-  every branch, so a commit is not built twice. A pull request is tested as GitHub would merge it
-  into its base branch. A newer push to a pull request cancels the older run; runs on `main` are
-  never cancelled, so every commit there keeps a result.
-- **One required check.** The **CI result** job waits for every other CI job and passes only if they
-  all did, so the branch rule names that one check and survives jobs being added or renamed. The
-  path-filtered workflows (container, actionlint) are not required: on a pull request they skip,
-  they never report, and a required check that never reports blocks the merge.
-- **Safe for pull requests from forks.** Workflows use `pull_request`, never `pull_request_target`,
-  so code from a fork runs with a read-only token and no secrets, and none of the checks need one.
-  A first-time contributor's run waits for a maintainer to approve it.
+- **A maintainer's branch on their computer, everything else on GitHub.** Before a maintainer's
+  branch merges, they run `scripts/ci-local.sh` on it after its last change, on top of the newest
+  `main`, and its pull request runs nothing on GitHub. A pull request from a fork or from
+  Dependabot runs `ci.yml` on GitHub (`pull-requests.yml`), and a newer push to it cancels the
+  older run. Once a change merges, CI runs on `main`, every commit with a run of its own (no
+  concurrency group), so when several merges land together none goes unchecked.
+- **`main` is where Linux and Windows first run a maintainer's change.** On a Mac, Linux-only and
+  Windows-only differences, the Windows tests and installer, and Dependency review show first on
+  `main`. A red run on `main` is the next thing to fix, on a branch. To run CI on a branch before
+  it merges, for the Windows job especially, push it and `gh workflow run ci.yml --ref <branch>`.
+- **No required check.** A maintainer's pull request runs nothing, so the branch rule requires no
+  check: one that never reports would block every merge. **CI result** waits for every other CI
+  job and passes only if they all did, so it is the one answer to read for a run.
+- **A fork's code never runs on a maintainer's computer or with this repository's secrets.** It
+  runs on GitHub's runners through `pull_request`, never `pull_request_target`, with a read-only
+  token and no secrets, and none of the checks need one. A first-time contributor's run waits for
+  a maintainer to approve it.
 - **Pinned and least-privileged.** Actions are pinned to full commit SHAs (the version is in the
   trailing comment), the workflow token is read-only, and checkouts do not keep credentials.
   Dependabot (`.github/dependabot.yml`) proposes updates monthly, grouped, and its pull requests run
-  the same checks.
+  CI on GitHub.
 - **Reproducible.** `pnpm install --frozen-lockfile` and `cargo … --locked` fail on a stale
   lockfile. Versions come from one place each: Node from `.node-version`, pnpm from
   `packageManager` in the root `package.json`, Rust from `rust-toolchain.toml`.
 - **Cheap where it can be.** The pnpm store, Rust build and container layers are cached (only
-  `main` writes the Rust and container caches; pull requests restore them), and the expensive
+  `main` writes the Rust and container caches; a run on a branch restores them), and the expensive
   container build is path-filtered. Each job has a timeout.
 - **Never skip a test to get green.** A red check is fixed or explained, not muted.
 
-## Run the same checks locally
+## Check a branch on your computer
 
 ```sh
-cd ui && pnpm install --frozen-lockfile && pnpm run lint --deny-warnings && pnpm run build && pnpm test && cd ..
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh
-scripts/test-update.sh
+scripts/ci-local.sh
 ```
 
-On a Mac, the Windows build can be checked without Windows (`brew install mingw-w64`, then
-`rustup target add x86_64-pc-windows-gnu`):
+It runs what CI runs, from anywhere in the checkout, and ends with a summary of each check:
+passed, failed, or skipped and why. It exits non-zero when any check failed.
 
-```sh
-cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings
-```
+- **Launcher**: ShellCheck and `scripts/test-update.sh`.
+- **Workflows**: actionlint, when it is installed (`brew install actionlint`).
+- **Frontend**: install, lint, build and tests, exactly as the job runs them.
+- **Rust**: `cargo fmt`, Clippy and the full test suite. These need the Frontend build, since the
+  daemon embeds `ui/dist`; they are skipped when it failed.
+- **Windows**, what a Mac can check: the PowerShell scripts are ASCII; they parse, when `pwsh` is
+  installed (`brew install powershell`); and Clippy for Windows, with `brew install mingw-w64` and
+  `rustup target add x86_64-pc-windows-gnu`. That compiles everything Windows-only,
+  `LoomWatch.exe`'s icon among it, but runs nothing: the **Windows** job is what runs it.
+- **Container**: `docker build`, only when the branch changes what the Dockerfile builds from and
+  Docker is running.
 
-It compiles everything Windows-only, `LoomWatch.exe`'s icon among it, but runs nothing; the
-**Windows** job is what runs it. To run that job on a branch before opening a pull request:
-`gh workflow run ci.yml --ref <branch>`.
+Dependency review reads GitHub's dependency graph, so it runs only on GitHub.
 
 No check needs a database server: each database test makes a SQLite file of its own.
 
@@ -105,7 +118,8 @@ newest **published** release, so a release is drafted first and published only a
 have been tried.
 
 1. Set `version` in `crates/loomwatch-backend/Cargo.toml` (the app reports it in Send feedback),
-   build once so `Cargo.lock` follows, and push that commit to `main`.
+   build once so `Cargo.lock` follows, and push that commit to `main`. Tag it once CI on `main`
+   has passed on that commit.
 2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. The Release workflow
    checks the tag matches the version and drafts the release with `loomwatch-macos-universal.tar.gz`,
    `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz`, `loomwatch-windows-x86_64.zip`,
@@ -156,9 +170,9 @@ These live in GitHub's settings and must be set by an admin:
 
 | Setting | Recommended value | Why |
 | --- | --- | --- |
-| Ruleset "Protect main" (Rules → Rulesets) | Add **Require status checks to pass** with the one check **CI result** (source: GitHub Actions) | A pull request can't merge while its checks fail. Admins keep their bypass, so they can still push a release commit directly. Don't require the container or actionlint checks: they are path-filtered and would block every pull request they skip. |
+| Ruleset "Protect main" (Rules → Rulesets) | No **Require status checks to pass** rule | A maintainer's pull request runs no CI, so a required check would never report on it and would block every merge. Those branches are checked with `scripts/ci-local.sh` before they merge, and **CI result** on `main` after. Admins keep their bypass, so they can still push a release commit directly. |
 | Fork pull request workflows (Actions → General) | Require approval for first-time contributors | A stranger's first pull request runs nothing until a maintainer has read it. |
 | Workflow permissions (Actions → General) | Read repository contents; Actions may not approve pull requests | The default token is read-only; a workflow that needs more asks for it per job, as `release.yml` does. |
 | Require actions to be pinned to a full-length commit SHA (Actions → General) | On | Every action is pinned already; this refuses a workflow that adds one by tag. |
 | Dependency graph, Dependabot alerts and security updates | On | Dependency review reads the graph; alerts and fix pull requests cover Cargo and pnpm dependencies. |
-| Actions budget (Billing) | Keep the $0 "stop usage" budget | Standard GitHub-hosted runners are free for a public repository, so checking every pull request costs nothing. The budget matters only if the repository goes private or a job asks for a larger runner; then jobs stop instead of billing. |
+| Actions budget (Billing) | Keep the $0 "stop usage" budget | Standard GitHub-hosted runners are free for a public repository, so checking `main` and outside pull requests costs nothing. The budget matters only if the repository goes private or a job asks for a larger runner; then jobs stop instead of billing. |
