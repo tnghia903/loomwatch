@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# CI's checks for a branch, run on this computer. Pull requests run nothing on GitHub: a branch is
-# checked here before it merges, and CI runs on main once it has (docs/CI.md). From anywhere in
-# the checkout:
+# CI's checks for a branch, run on this computer. A maintainer's pull request runs nothing on
+# GitHub: their branch is checked here before it merges, and CI runs on main once it has
+# (docs/CI.md). From anywhere in the checkout:
 #
 #   scripts/ci-local.sh
 #

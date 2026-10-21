@@ -3,8 +3,9 @@ name: Container image
 # Proves the Dockerfile still builds. A full release build is the most
 # expensive check in the repository, so it runs only when an input the Dockerfile depends on
 # changes on main, once a month against fresh base images, or by hand. It never pushes an image.
-# Pull requests run nothing here: scripts/ci-local.sh builds the image on a branch that changes
-# these paths, and keeps its own copy of the list.
+# Pull requests run nothing here: scripts/ci-local.sh builds the image on a maintainer's branch
+# that changes these paths, and keeps its own copy of the list. A pull request from a fork or
+# Dependabot is built once it reaches main.
 on:
   push:
     branches: [main]

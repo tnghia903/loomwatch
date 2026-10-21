@@ -70,23 +70,23 @@ out of credit. Each of these addresses, too, is taken only on this computer.
 
 ## Before you open a pull request
 
-Pull requests don't run CI on GitHub. Run the checks on your computer before you open one
+CI runs on your pull request, on Linux and Windows, and its **CI result** check says whether
+everything passed. If this is your first pull request here, a maintainer approves the run before it
+starts. Run the same checks on your computer first, which is quicker than waiting for CI
 ([docs/CI.md](docs/CI.md)):
 
 ```sh
 scripts/ci-local.sh
 ```
 
-It runs what CI runs and ends with a summary: which checks passed, and which only CI can run. Put
-that summary in your pull request. A maintainer runs it again on your branch before merging, and
-CI runs on `main`, on Linux and Windows, once it merges.
+It ends with a summary: which checks passed, and which only CI can run.
 
 Every database test makes a SQLite file of its own, so no test needs a database server.
 
 - Add a test that fails without your change.
 - Paths, programs and processes behave differently on Windows: go through `src/platform.rs` (and
   `ui/src/lib/files/paths.ts` in the browser app) rather than `/`-only string handling, and expect
-  the **Windows** CI job to run your change there once it merges. Test fixtures that are shell scripts use
+  the **Windows** CI job to run your change there. Test fixtures that are shell scripts use
   `test_support::SH` and `fake_program`, which run them with Git's `sh` on Windows.
 - Keep user-facing text plain: short sentences, the words a person who has never used LoomWatch
   would use, and labels that match what the app shows.

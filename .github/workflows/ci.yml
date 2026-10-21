@@ -1,14 +1,16 @@
 name: CI
 
-# Runs on main, once a change has merged, and by hand. Pull requests run nothing here: a branch is
-# checked on its author's computer with scripts/ci-local.sh before it merges (docs/CI.md). To run
-# all of this on a branch, for the Windows job especially: `gh workflow run ci.yml --ref <branch>`.
+# Runs on main, once a change has merged, by hand, and for a pull request from a fork or from
+# Dependabot (pull-requests.yml calls it). A maintainer's own branch is checked on their computer
+# with scripts/ci-local.sh before it merges (docs/CI.md). To run all of this on such a branch, for
+# the Windows job especially: `gh workflow run ci.yml --ref <branch>`.
 #
 # Never add `pull_request_target`: it would run a fork's code with this repository's token and
 # secrets.
 on:
   push:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 # No concurrency group, so every commit on main keeps a result of its own: a group would drop a run
@@ -162,20 +164,21 @@ jobs:
         shell: pwsh
         run: scripts/smoke-windows.ps1 -Dist dist
 
-  # Pushes only, since it compares main before and after the push. Fails when the push added a
-  # dependency, in Cargo.lock, ui/pnpm-lock.yaml or the connectors' package-lock.json files, with a
-  # known vulnerability of moderate severity or worse. It reads GitHub's dependency graph, so it
-  # needs no checkout and can't run on a computer.
+  # Compares a pull request with its base, or main before and after a push. Fails when the change
+  # adds a dependency, in Cargo.lock, ui/pnpm-lock.yaml or the connectors' package-lock.json files,
+  # with a known vulnerability of moderate severity or worse. It reads GitHub's dependency graph, so
+  # it needs no checkout and can't run on a computer. A pull request's own refs come first: on a
+  # new push to one, `github.event.before` is its previous head, not its base.
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'push'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
-          base-ref: ${{ github.event.before }}
-          head-ref: ${{ github.sha }}
+          base-ref: ${{ github.event.pull_request.base.sha || github.event.before }}
+          head-ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fail-on-severity: moderate
           # glib is in Cargo.lock only as the Linux (GTK) dependency of tao and tray-icon, which
           # crates/loomwatch-app uses on macOS alone, so it is never built for any platform
@@ -185,7 +188,7 @@ jobs:
 
   # One answer for the whole run, so adding or renaming a job never changes what to read. It waits
   # for every job above and fails unless each one passed; Dependency review may be skipped, because
-  # a run by hand has no push to compare. It runs even when a job fails (`always()`): skipped, it
+  # a run by hand has nothing to compare. It runs even when a job fails (`always()`): skipped, it
   # would count as passed.
   result:
     name: CI result
