@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- One of the guides: site/build.sh publishes it at https://loomwatch.github.io/get-started/ and site/sitemap.sh lists it
        there; ui/src/site/seo.test.ts checks its title, description and address. -->
-  <title>Get started with LoomWatch: your first AI team in minutes</title>
-  <meta name="description" content="Install LoomWatch on a Mac or Windows PC and run the practice team. No account, no API key and no code needed for your first try.">
+  <title>Get started with LoomWatch: your first answer in minutes</title>
+  <meta name="description" content="Install LoomWatch on a Mac or Windows PC and ask your first AI agent for something. No code and no LoomWatch account to make.">
   <meta name="theme-color" content="#08080A">
   <meta property="og:site_name" content="LoomWatch">
-  <meta property="og:title" content="Get started with LoomWatch: your first AI team in minutes">
-  <meta property="og:description" content="Install LoomWatch on a Mac or Windows PC and run the practice team. No account, no API key and no code needed for your first try.">
+  <meta property="og:title" content="Get started with LoomWatch: your first answer in minutes">
+  <meta property="og:description" content="Install LoomWatch on a Mac or Windows PC and ask your first AI agent for something. No code and no LoomWatch account to make.">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://loomwatch.github.io/get-started/">
   <meta property="og:image" content="https://loomwatch.github.io/social-card.jpg?v=9">
@@ -69,8 +69,8 @@
   <a class="back" href="../">← LoomWatch home</a>
   <header class="guide-head">
     <span class="act-tag"><b>Guide</b>Get started</span>
-    <h1>Get started with LoomWatch. <em>Your first AI team in a few minutes.</em></h1>
-    <p class="lede">LoomWatch is a free app that puts a few AI helpers, called agents, to work on one job together, and shows you every step. This guide installs it and runs a practice team that needs no account, no key and no code.</p>
+    <h1>Get started with LoomWatch. <em>Your first answer in a few minutes.</em></h1>
+    <p class="lede">LoomWatch is a free app that puts a few AI helpers, called agents, to work on one job together, and shows you every step. This guide installs it and gets you a first answer from an agent. No code, and no LoomWatch account.</p>
   </header>
 
   <section aria-labelledby="need-h">
@@ -78,7 +78,7 @@
     <ul>
       <li><strong>A Mac</strong> with macOS 11 or newer (Apple silicon or Intel), or <strong>a Windows PC</strong> with 64-bit Windows 10 or 11.</li>
       <li>Nothing else to install first, and you don't need to know how to code.</li>
-      <li>For real work later, one way to pay for AI models: your ChatGPT Plus or Pro plan, your Claude Max or Team plan's API credit, or an <a href="../openrouter-key/">OpenRouter key</a>. The practice team below needs none of them and costs nothing.</li>
+      <li>One way to pay for AI models: your ChatGPT Plus or Pro plan, your Claude Max or Team plan's API credit, or an <a href="../openrouter-key/">OpenRouter key</a>. LoomWatch asks which when you send your first request.</li>
     </ul>
   </section>
 
@@ -116,32 +116,20 @@
   </section>
 
   <section aria-labelledby="first-h">
-    <h2 id="first-h">Your first run, with the practice team</h2>
-    <p>LoomWatch comes with a practice team called <strong>Review stop demo</strong>. It has three steps: a <strong>Researcher</strong>, then <strong>you</strong>, then a <strong>Writer</strong>. Its agents give fixed answers instead of asking a real AI model, so you can learn how everything works for free.</p>
-    <figure class="shot">
-      <img class="dark" src="../assets/app/home-dark.webp" width="2880" height="1600" alt="LoomWatch's Home: Build an agent, New team and the 3-minute guide at the top, a box to describe the job to Ask, a row of My agents with their figures, and Your teams below, where the Review stop demo is Waiting for you." loading="lazy" decoding="async">
-      <img class="light" src="../assets/app/home-light.webp" width="2880" height="1600" alt="LoomWatch's Home: Build an agent, New team and the 3-minute guide at the top, a box to describe the job to Ask, a row of My agents with their figures, and Your teams below, where the Review stop demo is Waiting for you." loading="lazy" decoding="async">
-      <figcaption>Home, where your agents and teams are. The practice team is under Your teams.</figcaption>
-    </figure>
+    <h2 id="first-h">Your first run</h2>
+    <p>The first time LoomWatch opens, your first agent asks <strong>What shall we make first?</strong></p>
     <ol class="steps-list">
-      <li>On Home, under <strong>Your teams</strong>, pick <strong>Review stop demo</strong> and open its <strong>Chat</strong> tab.</li>
-      <li>Type <code>@team Prepare a short getting-started guide for new users.</code> and press <strong>Enter</strong>. A message starts work only when it has an <strong>@</strong> in it.</li>
-      <li>The team stops for you. The chat shows what the Researcher handed over, with <strong>Approve</strong> and <strong>Send back to Researcher</strong> under it.</li>
-      <li>To ask for a change, type <code>Use the short guide and remove the detailed walkthrough.</code> and click <strong>Send back to Researcher</strong>. The Researcher tries again and asks you again.</li>
-      <li>Click <strong>Approve</strong> to let the team go on. To pass a note to the Writer, type it first: the button becomes <strong>Approve with your note</strong>.</li>
-      <li>Read the team's answer in the chat. The practice Writer repeats the direction you gave it, so you can see your note arrived.</li>
+      <li>Type what you want made, such as <code>Plan a 30-minute lesson about animals</code>, or pick one of the examples under the box, and press <strong>Enter</strong>.</li>
+      <li>If no AI is connected yet, LoomWatch asks which one should answer: your ChatGPT plan, your Claude plan's API credit or an OpenRouter key, each with what it costs. Connect one, and your request goes on.</li>
+      <li>Read the answer. Then click <strong>Tell my agents about me</strong>: your name, what you do, the language you want and how long. Click <strong>Answer that again</strong>, and your agent answers the same request again, made for you.</li>
+      <li>Click <strong>Keep this agent</strong> to keep it in My agents, or <strong>Go to Home</strong>.</li>
     </ol>
-    <figure class="shot">
-      <img class="dark" src="../assets/readme/step-review-dark.png" width="992" height="606" alt="The Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher." loading="lazy" decoding="async">
-      <img class="light" src="../assets/readme/step-review-light.png" width="992" height="606" alt="The Researcher's handover to You in the chat: a summary, and the open question Which format should Writer use? Below it, your turn: Approve, or Send back to Researcher." loading="lazy" decoding="async">
-      <figcaption>The team waits for you. Nothing moves on until you approve or send the work back.</figcaption>
-    </figure>
-    <p>Everything the team did stays in its chat. Click <strong>Details</strong> on any message to see each step, and drag the timeline there to replay what happened.</p>
+    <p>Rather look around first? Click <strong>Just look around</strong> at the top. You can change what your agents know about you any time in <strong>About you</strong>, in the &#9776; menu.</p>
   </section>
 
   <section aria-labelledby="tour-h">
     <h2 id="tour-h">Rather be shown around?</h2>
-    <p>The first time you open LoomWatch, a short guide offers to walk you through building your first agent, trying it on its own, putting it in a team and running it. That last part uses the AI models you've connected. Open the guide again any time with <strong>New here? Take the 3-minute guide</strong> on Home.</p>
+    <p>A short guide walks you through building an agent, trying it on its own, putting it in a team and running it. It uses the AI you connected. Open it any time with <strong>New here? Take the 3-minute guide</strong> on Home.</p>
   </section>
 
   <a class="next" href="../openrouter-key/">

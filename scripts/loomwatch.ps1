@@ -315,8 +315,7 @@ function Assert-Prerequisites {
 function Initialize-TeamsRoot {
   if (Test-Path -LiteralPath $TeamsRoot) { return }
   New-Item -ItemType Directory -Force -Path $TeamsRoot | Out-Null
-  Copy-Item -LiteralPath (Join-Path $RepoRoot 'examples\operator-stop.yaml') -Destination $TeamsRoot
-  Say "Created your teams folder at $(Pretty $TeamsRoot), with an offline demo team in it."
+  Say "Created your teams folder at $(Pretty $TeamsRoot)."
 }
 
 function Get-Hash([string]$Text) {

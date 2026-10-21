@@ -7,7 +7,7 @@
 # is macos-universal, linux-x86_64 or linux-arm64, matching what install.sh asks for, or
 # windows-x86_64, which install.ps1 asks for as loomwatch-windows-x86_64.zip with loomwatchd.exe.
 # The program already holds the browser app, the database (SQLite, built in), its migrations and
-# the team schema; the archive adds the launcher, the offline demo team and the licenses, and on
+# the team schema; the archive adds the launcher and the licenses, and on
 # Windows LoomWatch.exe, the app people open from the Start menu (give it as APP).
 #
 # The archive's names never change between releases, so the installer can always ask GitHub for
@@ -45,10 +45,9 @@ commit=$(git -C "$root" rev-parse --short=7 HEAD)
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 pkg=$stage/loomwatch
-mkdir -p "$pkg/bin" "$pkg/examples"
+mkdir -p "$pkg/bin"
 
 cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$pkg/"
-cp "$root/examples/operator-stop.yaml" "$pkg/examples/"
 # "<version> <commit>": the installer shows the first, and the launcher reports the second in
 # Send feedback, as a copy of the source reports its checkout.
 printf '%s %s\n' "$version" "$commit" >"$pkg/VERSION"

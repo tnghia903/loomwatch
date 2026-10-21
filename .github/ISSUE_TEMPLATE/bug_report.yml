@@ -28,7 +28,7 @@ body:
       label: How can we see it too?
       description: The steps that lead to it, if you know them.
       placeholder: |
-        1. Open the Review stop demo
+        1. Open a team
         2. Click Run team
         3. …
     validations:

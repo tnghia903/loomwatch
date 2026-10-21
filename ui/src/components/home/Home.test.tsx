@@ -121,7 +121,7 @@ describe('Home', () => {
     expect(chip).toHaveAttribute('href', '/?path=research%2Frag.yaml&view=agents&agent=researcher')
     // The operator's stop is a step of the workflow, not an agent.
     expect(screen.queryByRole('link', { name: /^You/ })).toBeNull()
-    expect(screen.queryByText(/Build your first agent/)).toBeNull()
+    expect(screen.queryByText(/Start here/)).toBeNull()
     expect(screen.getByRole('link', { name: /All agents/ })).toHaveAttribute('href', '/agents')
   })
 
@@ -237,27 +237,26 @@ describe('Home', () => {
     expect(screen.getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/usage')
   })
 
-  // Home wears the header a team's and an agent's page have, the bell beside the menu. Skills,
-  // Quests, the theme and feedback are in the menu rather than in buttons of their own.
-  it('has the menu a team’s page has, with Skills, Quests, the theme and feedback in it', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [] }))
+  // Home wears the header a team's and an agent's page have, the bell beside the menu. Skills and
+  // Quests are Home's own, so they stand in the header as links, once: the menu doesn't repeat them.
+  it('has Skills and Quests in its header, and the menu a team’s page has, with the theme and feedback in it', async () => {
+    fetchMock.mockImplementation((url: string) => respond(url === '/api/wardrobe' ? { items: {} } : { root: '/teams', files: [], teams: [] }))
     const sent = vi.fn()
     window.addEventListener(FEEDBACK_EVENT, sent)
     render(<Home onPalette={vi.fn()} topActions={<button type="button">1 needs you</button>} />)
     const header = screen.getByRole('banner')
     expect(within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Open the command palette', '1 needs you', 'Menu'])
-    expect(within(header).queryAllByRole('link')).toEqual([])
+    expect(within(header).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/skills', '/quests'])
+    // The word alone names each, at every width: no stock icon has to carry it on a phone.
+    const skills = within(header).getByRole('link', { name: 'Skills' })
+    const quests = await within(header).findByRole('link', { name: 'Quests 0 of 13 earned' })
+    for (const pill of [skills, quests]) expect(pill.querySelector('svg')).toBeNull()
     const menu = within(header).getByRole('button', { name: 'Menu' })
     fireEvent.click(menu)
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'My agents…', 'About you…', 'Connections…', 'Usage…', 'Skills…', 'Quests…', expect.stringMatching(/^Switch to (light|dark) theme$/), 'Getting started guide', 'Send feedback…',
+      'My agents…', 'About you…', 'Connections…', 'Usage…', expect.stringMatching(/^Switch to (light|dark) theme$/), 'Getting started guide', 'Send feedback…',
     ])
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Skills…' }))
-    expect(assign).toHaveBeenLastCalledWith('/skills')
-    expect(screen.queryByRole('menu')).toBeNull()
     fireEvent.click(menu)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Quests…' }))
-    expect(assign).toHaveBeenLastCalledWith('/quests')
     const before = document.documentElement.dataset.theme
     fireEvent.click(menu)
     fireEvent.click(screen.getByRole('menuitem', { name: /^Switch to (light|dark) theme$/ }))
@@ -389,37 +388,73 @@ describe('Home', () => {
 describe('Home, the first run and the getting-started guide', () => {
   beforeEach(() => { resetTourForTests(); resetFirstRunForTests() })
 
-  const demoTeam = { root: '/teams', files: ['operator-stop.yaml'], teams: [{ path: 'operator-stop.yaml', name: 'Review stop demo', agentCount: 3, modifiedAt: null }] }
+  const desk = { path: 'desk.yaml', name: 'Research desk', agentCount: 3, modifiedAt: null }
+  const helper = { id: 'helper', file: 'helper.yaml', name: 'Helper', version: 1 }
+  const ran = { runId: 'run-1', teamPath: 'desk.yaml', status: 'succeeded' }
+  /** The daemon: `runs` in the history, `agents` in My agents and `teams` in the teams folder. */
+  const daemon = ({ runs = [] as unknown[], agents = [] as unknown[], teams = [] as (typeof desk)[] } = {}) => (url: string) => respond(
+    url === '/api/runs?preview=true' ? runs
+      : url === '/api/jobs' ? { folder: '/teams/.jobs', jobs: agents, problems: [] }
+        : { root: '/teams', files: teams.map((team) => team.path), teams })
+  const homeHeading = () => screen.findByRole('heading', { name: /Put AI agents to work/ })
 
   // ADR 0075: a newcomer makes something first. The guide no longer opens by itself over it.
-  it('opens on the first run for someone who has never run anything, though the demo team is there', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
+  // LoomWatch removed and installed again keeps its address, so this browser still holds what an
+  // earlier copy stored there; only what this copy has made decides.
+  it('opens on the first run when nothing was ever made here, whatever this browser kept from an earlier LoomWatch', async () => {
+    localStorage.setItem('loomwatch:first-run', 'done')
+    startTour()
+    fetchMock.mockImplementation(daemon())
     renderHome()
     expect(await screen.findByText('What shall we make first?')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /Put AI agents to work/ })).toBeNull()
-    expect(readTourState()).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Just look around' }))
-    expect(await screen.findByText('Review stop demo')).toBeInTheDocument()
-    expect(localStorage.getItem('loomwatch:first-run')).toBe('skipped')
-    expect(readTourState()).toBeNull()
+    expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
+
+    // Looking around holds for the visit: back on Home, it stays Home.
+    cleanup()
+    renderHome()
+    expect(await screen.findByText(/No teams yet/)).toBeInTheDocument()
+    expect(screen.queryByText('What shall we make first?')).toBeNull()
   })
 
-  it('is Home for someone who has met the guide, or looked around before', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [] : demoTeam))
-    for (const before of [() => startTour(), () => localStorage.setItem('loomwatch:first-run', 'skipped')]) {
-      resetTourForTests(); resetFirstRunForTests()
-      before()
+  // A team counts too: one made with New team, or the offline demo copied in, though it never ran.
+  it('is Home for someone with a run in the history, one of My agents or a team, and asks once a visit', async () => {
+    for (const made of [{ runs: [ran] }, { agents: [helper] }, { teams: [desk] }]) {
+      resetFirstRunForTests()
+      fetchMock.mockReset()
+      fetchMock.mockImplementation(daemon(made))
       renderHome()
-      expect(await screen.findByText('Review stop demo')).toBeInTheDocument()
+      // Unseen while it asks (home.css), so a newcomer never sees Home before the first run.
+      const home = () => document.querySelector('.lw-home')
+      expect(home()).toHaveAttribute('data-checking')
+      expect(await homeHeading()).toBeInTheDocument()
+      await waitFor(() => expect(sessionStorage.getItem('loomwatch:first-run')).toBe('not-new'))
+      await waitFor(() => expect(home()).not.toHaveAttribute('data-checking'))
       expect(screen.queryByText('What shall we make first?')).toBeNull()
+      cleanup()
+      // Work never goes away, so the next Home in this visit doesn't ask the history again.
+      fetchMock.mockClear()
+      renderHome()
+      expect(home()).not.toHaveAttribute('data-checking')
+      expect(await homeHeading()).toBeInTheDocument()
+      expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(false)
       cleanup()
     }
   })
 
-  it('leaves someone who has run a team on Home, and lets them start the guide', async () => {
-    fetchMock.mockImplementation((url: string) => respond(url === '/api/runs?preview=true' ? [{ runId: 'run-1', teamPath: 'operator-stop.yaml', status: 'succeeded' }] : demoTeam))
+  it('is Home when the history can’t be read', async () => {
+    fetchMock.mockImplementation((url: string) => (url === '/api/runs?preview=true' ? respond({ error: 'busy' }, 500) : daemon()(url)))
     renderHome()
-    await screen.findByText('Review stop demo')
+    expect(await homeHeading()).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
+    await expect(screen.findByText('What shall we make first?', {}, { timeout: 300 })).rejects.toThrow()
+  })
+
+  it('leaves someone who has run a team on Home, and lets them start the guide', async () => {
+    fetchMock.mockImplementation(daemon({ runs: [ran], teams: [desk] }))
+    renderHome()
+    await screen.findByText('Research desk')
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/runs?preview=true')).toBe(true))
     expect(screen.queryByText('What shall we make first?')).toBeNull()
     expect(readTourState()).toBeNull()

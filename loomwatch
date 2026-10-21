@@ -248,8 +248,7 @@ check_prerequisites() {
 ensure_teams_root() {
   [ -d "$teams_root" ] && return 0
   mkdir -p "$teams_root"
-  cp examples/operator-stop.yaml "$teams_root/"
-  say "Created your teams folder at $(pretty_path "$teams_root"), with an offline demo team in it."
+  say "Created your teams folder at $(pretty_path "$teams_root")."
 }
 
 # What the build depends on: the commit plus any local edits. An unchanged checkout never rebuilds.

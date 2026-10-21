@@ -159,7 +159,7 @@ describe('The first run', () => {
     expect(keep![1].headers).toMatchObject({ 'If-None-Match': '*' })
     // Kept in the figure that greeted them, so My agents shows the same crew member.
     expect(JSON.parse(String(keep![1].body))).toMatchObject({ name: 'Helper', figure: { kind: 'spool', color: 'butter' } })
-    expect(localStorage.getItem('loomwatch:first-run')).toBe('done')
+    expect(sessionStorage.getItem('loomwatch:first-run')).toBe('done')
   })
 
   it('says why an answer stopped and tries it again; Not now skips telling about me, and Home ends it', async () => {
@@ -180,7 +180,7 @@ describe('The first run', () => {
     expect(screen.queryByRole('region', { name: 'About you' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Go to Home' }))
     expect(onDone).toHaveBeenCalled()
-    expect(localStorage.getItem('loomwatch:first-run')).toBe('done')
+    expect(sessionStorage.getItem('loomwatch:first-run')).toBe('done')
     expect(sent('/api/you', 'PUT')).toHaveLength(0)
   })
 

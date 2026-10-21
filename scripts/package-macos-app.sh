@@ -36,12 +36,11 @@ commit=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo unknown)
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 app=$stage/LoomWatch.app
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/examples"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$app_program" "$app/Contents/MacOS/LoomWatch"
 cp "$daemon" "$app/Contents/MacOS/loomwatchd"
 chmod 755 "$app/Contents/MacOS/LoomWatch" "$app/Contents/MacOS/loomwatchd"
 cp "$root/packaging/macos/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
-cp "$root/examples/operator-stop.yaml" "$app/Contents/Resources/examples/"
 cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$app/Contents/Resources/"
 printf '%s %s\n' "$version" "$commit" >"$app/Contents/Resources/VERSION"
 

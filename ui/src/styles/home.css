@@ -8,6 +8,13 @@
   display: flex; flex-direction: column;
   background: var(--color-ground); color: var(--color-ink);
 }
+/* While Home asks whether this is a first run: the ground and the mark, where the first run has
+   them too, for at most a second. Only the page's own parts: a palette opened meanwhile must show.
+   The delay is the timer, so reduced motion (which shortens durations) leaves it; never set
+   `animation: none` on these. */
+.lw-home[data-checking] > :is(.home-main, .home-foot),
+.lw-home[data-checking] .home-top-acts { visibility: hidden; animation: home-shows 0s 1s forwards; }
+@keyframes home-shows { to { visibility: visible; } }
 .lw-home .ground {
   position: fixed; inset: 0; pointer-events: none;
   background-image: radial-gradient(circle at 1px 1px, var(--color-ground-dot) 1px, transparent 0);
@@ -20,9 +27,20 @@
 }
 .home-brand { display: inline-flex; align-items: center; gap: 10px; }
 .home-brand .fr-mark { animation: none; }
-.home-top-acts { display: inline-flex; gap: var(--sp-2); }
-/* The menu stands in the row, and stays on a phone, where it is the only way to Skills, Quests,
-   Feedback and the theme. */
+/* Wraps rather than scroll sideways when the bell and an update badge are long. */
+.home-top-acts { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--sp-2); }
+/* Skills and Quests: a word each, quieter than a button, so a newcomer finds them without hunting
+   through menus. */
+.home-pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 var(--sp-3);
+  border-radius: 99px; border: 1px solid var(--color-hairline); background: transparent;
+  color: var(--color-ink-2); font: 500 12px/1 var(--font-sans); text-decoration: none; cursor: pointer;
+  transition: color var(--t-quick) var(--ease-out), border-color var(--t-quick) var(--ease-out);
+}
+.home-pill:hover { color: var(--color-ink); border-color: var(--color-accent-dim); }
+.home-pill:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* The menu stands in the row, and stays on a phone, where it is the only way to Feedback and the
+   theme. */
 .home-top-acts .prototype-workspace-menu { display: flex; position: relative; right: auto; top: auto; }
 
 .home-main {
@@ -110,7 +128,9 @@
    the tray's margins) and starts 8 px under the buttons, as it does under the bell elsewhere. */
 @media (max-width: 767px) {
   .home-top { flex-wrap: wrap; gap: var(--sp-3); }
-  .home-top-acts { flex-wrap: wrap; justify-content: flex-end; align-items: center; margin-left: auto; }
+  .home-top-acts { margin-left: auto; }
+  /* A touch target, as tall as the header's other buttons (app.css, §11.6). */
+  .home-pill { height: 44px; }
   .home-top .needs-you { position: static; }
   .home-top .needs-you-panel { top: calc(100% - var(--sp-3)); right: var(--sp-3); width: min(420px, calc(100% - 2 * var(--sp-3))); }
 }

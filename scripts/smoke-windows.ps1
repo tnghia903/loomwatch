@@ -1,7 +1,8 @@
 # Installs a packed LoomWatch for Windows both ways a person does, and checks each one works:
 #
 #   1. install.ps1 (irm | iex) into a folder with a space, then loomwatch.cmd: help, version, start,
-#      the offline demo team through its review stop to the end, an agent on an OpenRouter model
+#      an empty teams folder, the offline demo team (copied in from this checkout) through its
+#      review stop to the end, an agent on an OpenRouter model
 #      (scripts/mock-openrouter.py standing in for OpenRouter) that keeps its key in Credential
 #      Manager (on a CI runner only) and runs a command with cmd.exe, a Claude API key and a ChatGPT
 #      sign-in kept together in Credential Manager with an agent on each (scripts/mock-vendors.py
@@ -109,7 +110,7 @@ try {
   $env:LOOMWATCH_NO_START = '1'
   & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command 'irm http://127.0.0.1:8765/install.ps1 | iex'
   Check ($LASTEXITCODE -eq 0) 'install.ps1 installs from the release files'
-  foreach ($part in @('bin\loomwatchd.exe', 'LoomWatch.exe', 'loomwatch.cmd', 'scripts\loomwatch.ps1', 'install.ps1', 'examples\operator-stop.yaml', 'VERSION')) {
+  foreach ($part in @('bin\loomwatchd.exe', 'LoomWatch.exe', 'loomwatch.cmd', 'scripts\loomwatch.ps1', 'install.ps1', 'VERSION')) {
     Check (Test-Path -LiteralPath (Join-Path $app $part)) "the install has $part"
   }
   Remove-Item Env:LOOMWATCH_NO_START, Env:LOOMWATCH_APP_DIR, Env:LOOMWATCH_DOWNLOAD_BASE
@@ -129,7 +130,7 @@ try {
   $launcher = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', "`"`"$cmd`" --no-open > `"$daemonLog`" 2>&1`"") -PassThru -WindowStyle Hidden
   Wait-Until { Get-Health $Port } 90 'LoomWatch to answer' | Out-Null
   Check $true 'loomwatch.cmd starts LoomWatch'
-  Check (Test-Path -LiteralPath (Join-Path $teams 'operator-stop.yaml')) 'the first start puts the offline demo team in the teams folder'
+  Check ((Test-Path -LiteralPath $teams -PathType Container) -and -not (Get-ChildItem -LiteralPath $teams -Filter '*.yaml')) 'the first start makes an empty teams folder, with no demo team in it'
   Check (Test-Path -LiteralPath (Join-Path $app '.loomwatch\loomwatch.db')) 'the run history is one file in the copy''s own folder'
   $url = "http://127.0.0.1:$Port"
   $about = Invoke-RestMethod -Uri "$url/api/about"
@@ -137,8 +138,9 @@ try {
   $ai = Invoke-RestMethod -Uri "$url/api/ai"
   Check (-not $ai.openrouter.connected) 'no OpenRouter key is kept yet'
 
-  # The offline demo: Researcher (LoomWatch's offline demo model) hands over, the review stop
-  # waits for an answer, Writer acts on it.
+  # The offline demo, copied in as a developer would: Researcher (LoomWatch's offline demo model)
+  # hands over, the review stop waits for an answer, Writer acts on it.
+  Copy-Item -LiteralPath (Join-Path $repo 'examples\operator-stop.yaml') -Destination $teams
   $started = Invoke-RestMethod -Method Post -Uri "$url/api/runs" -ContentType 'application/json' -Body (@{ teamPath = 'operator-stop.yaml'; prompt = 'Prepare a short getting-started guide for new users.' } | ConvertTo-Json)
   $runId = $started.runId
   Check ([bool]$runId) "the demo run starts ($runId)"
@@ -326,7 +328,7 @@ try {
   Start-Process -FilePath $exe -ArgumentList '--background' | Out-Null
   Wait-Until { Get-Health $appPort } 90 'LoomWatch.exe to start LoomWatch' | Out-Null
   Check $true 'LoomWatch.exe starts LoomWatch'
-  Check (Test-Path -LiteralPath (Join-Path $env:LOOMWATCH_TEAMS_ROOT 'operator-stop.yaml')) 'LoomWatch.exe puts the demo team in a new teams folder'
+  Check ((Test-Path -LiteralPath $env:LOOMWATCH_TEAMS_ROOT -PathType Container) -and -not (Get-ChildItem -LiteralPath $env:LOOMWATCH_TEAMS_ROOT -Filter '*.yaml')) 'LoomWatch.exe makes an empty teams folder, with no demo team in it'
   Check (Test-Path -LiteralPath (Join-Path $env:LOOMWATCH_STATE_DIR 'loomwatch.db')) 'its run history is in the state folder'
   $second = Start-Process -FilePath $exe -ArgumentList '--background' -PassThru
   Check ($second.WaitForExit(10000)) 'a second LoomWatch.exe ends at once instead of starting another'

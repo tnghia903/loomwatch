@@ -1,12 +1,12 @@
 import { ArrowUp } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useState } from 'react'
 
 import type { AiStatus } from '../../lib/ai/client'
 import { sourceMaker } from '../../lib/ai/makers'
 import { SOURCE_INFO, connectedSources, sourceOf } from '../../lib/ai/sources'
 import { useAiStatus } from '../../lib/ai/useKeyStatus'
 import { FIRST_FIGURE, askFirstAgent, firstAgentNow, forMeRequest, keepFirstAgent } from '../../lib/firstrun/firstAgent'
-import { EMPTY_ABOUT, LANGUAGE, LENGTH, WORK, aboutFrom, aboutLine, type QuickAbout } from '../../lib/firstrun/quickAbout'
+import { EMPTY_ABOUT, aboutFrom, aboutLine, type QuickAbout } from '../../lib/firstrun/quickAbout'
 import { markFirstRun } from '../../lib/firstrun/store'
 import { plainRunError } from '../../lib/runs/errors'
 import { isTerminalRun, type RunRecord } from '../../lib/runs/client'
@@ -16,6 +16,7 @@ import { FigureStill } from '../agents/FigureStill'
 import { ChatGptPlan } from '../connections/ChatGptPlan'
 import { ClaudeCredit } from '../connections/ClaudeCredit'
 import { OpenRouterKey } from '../connections/OpenRouterKey'
+import { QUESTIONS, QuickChoices } from '../you/QuickChoices'
 import { MakerMark } from '../models/MakerMark'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { Markdown } from '../ui/Markdown'
@@ -280,16 +281,7 @@ function FirstAnswer({ turn, about, name, onSettled, onRetry }: { turn: Turn; ab
 function AboutCard({ told, onChange, onAnswerAgain }: { told: QuickAbout; onChange: (next: QuickAbout) => void; onAnswerAgain: () => void }) {
   const nameId = useId()
   const otherId = useId()
-  const pick = <K extends 'work' | 'language' | 'length'>(field: K, value: QuickAbout[K]) => onChange({ ...told, [field]: told[field] === value ? null : value })
   const empty = !told.name.trim() && !aboutFrom(told)
-  const choices = <K extends 'work' | 'language' | 'length'>(field: K, options: readonly NonNullable<QuickAbout[K]>[], label: string) => (
-    <div className="fr-about-field" role="group" aria-label={label}>
-      <span className="t-meta">{label}</span>
-      <div className="fr-chips">
-        {options.map((option) => <button key={option} type="button" className="fr-chip" aria-pressed={told[field] === option} onClick={() => pick(field, option)}>{option}</button>)}
-      </div>
-    </div>
-  )
   return (
     <section className="fr-about" aria-labelledby={`${nameId}-title`}>
       <h3 id={`${nameId}-title`} className="fr-about-head">About you</h3>
@@ -298,15 +290,17 @@ function AboutCard({ told, onChange, onAnswerAgain }: { told: QuickAbout; onChan
           <label className="t-meta" htmlFor={nameId}>What should I call you?</label>
           <input id={nameId} className="input" autoComplete="given-name" maxLength={60} placeholder="Your name" value={told.name} onChange={(event) => onChange({ ...told, name: event.target.value })} />
         </div>
-        {choices('work', WORK, 'What do you do?')}
-        {told.work === 'Something else' && (
-          <div className="fr-about-field">
-            <label className="t-meta" htmlFor={otherId}>In a few words</label>
-            <input id={otherId} className="input" maxLength={120} placeholder="For example: coffee farming" value={told.otherWork} onChange={(event) => onChange({ ...told, otherWork: event.target.value })} />
-          </div>
-        )}
-        {choices('language', LANGUAGE, 'Answer in')}
-        {choices('length', LENGTH, 'How long?')}
+        {QUESTIONS.map(({ field, label }) => (
+          <Fragment key={field}>
+            <QuickChoices field={field} label={label} picked={told[field]} onPick={(choice) => onChange({ ...told, [field]: choice })} />
+            {field === 'work' && told.work === 'Something else' && (
+              <div className="fr-about-field">
+                <label className="t-meta" htmlFor={otherId}>In a few words</label>
+                <input id={otherId} className="input" maxLength={120} placeholder="For example: coffee farming" value={told.otherWork} onChange={(event) => onChange({ ...told, otherWork: event.target.value })} />
+              </div>
+            )}
+          </Fragment>
+        ))}
         <div className="fr-about-foot">
           <small className="t-meta">Every agent you make reads this. Kept on this computer, and sent to your AI with each task.</small>
           <button type="button" className="btn btn-primary" disabled={empty} onClick={onAnswerAgain}>Answer that again</button>

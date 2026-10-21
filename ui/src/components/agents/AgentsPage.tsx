@@ -12,9 +12,7 @@ import { agentPresence } from '../../lib/rail/presence'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LoomMarkState } from '../../lib/story/loomMark'
 import { useTheme } from '../../lib/theme'
-import { QuestsLink } from '../quests/QuestsLink'
 import { CrewRail, type LeaveGuard } from '../rail/CrewRail'
-import { SkillsLink } from '../skills/SkillsLink'
 import { LoomMark, LoomWordmark } from '../ui/glyphs'
 import { KnowYou } from '../you/KnowYou'
 import { AgentBadge } from './AgentBadge'
@@ -68,8 +66,6 @@ export function AgentsPage(props: AgentsPageProps) {
       <header className="home-top">
         <a className="home-brand" href="/" aria-label="LoomWatch home"><LoomMark size={28} state={mark} /><LoomWordmark height={19} /></a>
         <span className="home-top-acts">
-          <SkillsLink />
-          <QuestsLink />
           <a className="btn" href="/" data-tour="your-teams">Your teams</a>
           <button type="button" className="iconbtn" onClick={toggle} aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>{resolved === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}</button>
         </span>
