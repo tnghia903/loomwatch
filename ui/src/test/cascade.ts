@@ -94,8 +94,10 @@ export const specificity = (selector: string): number => {
 
 /**
  * The value of `property` the cascade gives `element` at `viewport`, or null if no rule sets it.
- * Given several names (a shorthand and its longhand), they cascade as one. `:hover` stands in as
- * an attribute, so a test can hover without a pointer: set `data-hovered`.
+ * Given several names (a shorthand and its longhand), they cascade as one. `:hover` and
+ * `:focus-visible` stand in as attributes, so a test can hover without a pointer, and count on
+ * keyboard focus where jsdom only guesses it from the last event: set `data-hovered` or
+ * `data-focus-visible`.
  */
 export function cascaded(element: Element, property: string | string[], viewport: Viewport = DESKTOP, rules: Rule[] = appRules): string | null {
   let won: { important: boolean; weight: number; value: string } | null = null
@@ -108,7 +110,7 @@ export function cascaded(element: Element, property: string | string[], viewport
     const value = raw.replace(/\s*!important$/, '')
     for (const selector of topLevel(selectors)) {
       let matches = false
-      try { matches = element.matches(selector.replace(/:hover\b/g, '[data-hovered]')) } catch { /* ::before, keyframe steps */ }
+      try { matches = element.matches(selector.replace(/:hover\b/g, '[data-hovered]').replace(/:focus-visible\b/g, '[data-focus-visible]')) } catch { /* ::before, keyframe steps */ }
       if (!matches) continue
       const weight = specificity(selector)
       if (!won || (important && !won.important) || (important === won.important && weight >= won.weight)) won = { important, weight, value }

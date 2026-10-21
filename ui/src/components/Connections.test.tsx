@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cascaded, heightOf, PHONE, px } from '../test/cascade'
 import Connections from './Connections'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -13,7 +14,7 @@ const page = { id: '550e8400-e29b-41d4-a716-446655440000', title: 'Daily News' }
  * The daemon as Connections reaches it: the OpenRouter key, the tools, and the Notion tool's page
  * answers go under. Every request is recorded.
  */
-function daemon({ tools = [] as unknown[], destination = null as typeof page | null } = {}) {
+function daemon({ tools = [] as unknown[], destination = null as typeof page | null, pages = [page] } = {}) {
   let listed = tools
   let chosen = destination
   const notion = () => (listed.some((tool) => (tool as { notion?: boolean }).notion) ? { connected: true, name: 'Notion', destination: chosen, problem: null } : { connected: false })
@@ -23,7 +24,7 @@ function daemon({ tools = [] as unknown[], destination = null as typeof page | n
     if (url === '/api/tools' && init?.method === 'POST') return Promise.resolve(response({ tool: { ...notionTool, pending: true }, needs: 'signIn', url: 'https://mcp.notion.com/authorize?client_id=c' }))
     if (url.startsWith('/api/tools/') && init?.method === 'DELETE') { listed = []; return Promise.resolve(response({ removed: true })) }
     if (url.startsWith('/api/tools')) return Promise.resolve(response({ tools: listed, catalog: [notionEntry], keptIn: 'keychain' }))
-    if (url === '/api/notion/pages') return Promise.resolve(response({ pages: [page], nextCursor: null }))
+    if (url === '/api/notion/pages') return Promise.resolve(response({ pages, nextCursor: null }))
     if (url === '/api/notion/destination') { chosen = page; return Promise.resolve(response(notion())) }
     if (url === '/api/notion/connection') return Promise.resolve(response(notion()))
     return Promise.resolve(response({ error: 'Not Found' }, 404))
@@ -54,6 +55,58 @@ describe('Notion is one of the tools (ADR 0070)', () => {
     expect(within(card).getByText(/New pages go under/)).toHaveTextContent('New pages go under Daily News.')
     const chose = fetch.mock.calls.find(([url]) => String(url) === '/api/notion/destination')?.[1]
     expect(chose).toMatchObject({ method: 'PUT', body: JSON.stringify({ pageId: page.id }), headers: { 'X-LoomWatch-Request': '1' } })
+  })
+
+  it('keeps long words inside the card, and shows a page’s whole title', async () => {
+    const long = { id: '6ba7b810-9dad-11d1-80b4-00c04fd430c8', title: 'Weekly planning for the capstone team, with every meeting since the start of term, the open questions, and who owns each one before the final review' }
+    daemon({ tools: [notionTool], pages: [page, long] })
+    render(<Connections />)
+    const card = (await screen.findByRole('list', { name: 'Connected tools' })).querySelector('li') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: 'Choose a page' }))
+    const title = (await within(card).findByRole('button', { name: long.title })).querySelector('.name') as HTMLElement
+    // jsdom lays nothing out, so ask the stylesheets. A grid item, or an item in a flex row, is at
+    // least as wide as its widest line unless a rule lets it shrink. One of those between a title
+    // and the Tools section lets a long title (even one scrolled out of sight) widen the card past
+    // the section's edge.
+    const widens: string[] = []
+    for (let item: HTMLElement = title; !item.matches('.lw-settings-section'); item = item.parentElement as HTMLElement) {
+      const box = item.parentElement as HTMLElement
+      const display = cascaded(box, 'display') ?? 'block'
+      const flexRow = /flex$/.test(display) && !/^column/.test(cascaded(box, ['flex-direction', 'flex-flow']) ?? 'row')
+      const gridGrows = /grid$/.test(display) && !/^minmax\(0,/.test(cascaded(box, 'grid-template-columns') ?? '')
+      const shrinks = /^0(px)?$/.test(cascaded(item, 'min-width') ?? '') || (cascaded(item, ['overflow', 'overflow-x']) ?? 'visible') !== 'visible'
+      if ((flexRow || gridGrows) && !shrinks) widens.push(`${box.tagName.toLowerCase()}.${box.className} > ${item.tagName.toLowerCase()}`)
+    }
+    expect(widens).toEqual([])
+    expect(cascaded(title, 'white-space')).toBe('normal')
+    // With the card held to the section's width, a word with no break in it (an address in a
+    // call's description) would run past the card's edge unless it wraps too.
+    expect(cascaded(card.querySelector('details ul') as HTMLElement, 'overflow-wrap')).toBe('anywhere')
+  })
+
+  it('keeps the page list usable from the keyboard and on a phone', async () => {
+    daemon({ tools: [notionTool], pages: [page] })
+    render(<Connections />)
+    const card = (await screen.findByRole('list', { name: 'Connected tools' })).querySelector('li') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: 'Choose a page' }))
+    const row = await within(card).findByRole('button', { name: page.title })
+    // The list scrolls, so it cuts off whatever reaches past it, and it has no padding at the
+    // sides: the ring a keyboard user follows has to stay inside the row.
+    row.setAttribute('data-focus-visible', '')
+    const [ring] = (cascaded(row, ['outline', 'outline-width']) ?? '').split(' ')
+    expect(px(ring) + px(cascaded(row, 'outline-offset'))).toBeLessThanOrEqual(0)
+    expect(heightOf(row, PHONE)).toBeGreaterThanOrEqual(44)
+    // A line above and below, so a wrapped title cut off by the scroll reads as more list.
+    expect(cascaded(within(card).getByRole('list', { name: 'Notion pages' }), ['border-block', 'border']) ?? 'none').toMatch(/--color-hairline/)
+  })
+
+  it('draws no lines around a page list with nothing in it', async () => {
+    daemon({ tools: [notionTool], pages: [] })
+    render(<Connections />)
+    const card = (await screen.findByRole('list', { name: 'Connected tools' })).querySelector('li') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: 'Choose a page' }))
+    expect(await within(card).findByText(/No pages found/)).toBeInTheDocument()
+    expect(cascaded(within(card).getByRole('list', { name: 'Notion pages' }), ['border-block', 'border'])).toBeNull()
   })
 
   it('says what removing Notion stops', async () => {
