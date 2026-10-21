@@ -703,6 +703,7 @@ span.story-schedule { cursor: default; }
 
 .file-card-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .file-card-acts > button { flex: none; white-space: nowrap; }
+.file-card-more { display: inline-flex; align-items: center; gap: 6px; }
 .file-card-open {
   display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 16px; border: 0; border-radius: 10px; cursor: pointer;
   background: var(--color-accent-fill); color: var(--color-accent-on-fill); font: 650 13.5px/1 var(--font-sans);
