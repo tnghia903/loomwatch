@@ -13,6 +13,9 @@ Replies are scripted from what the request says, so a run exercises real tool ca
 - "MOCK-TOOL: <call> <json>" in the task -> a call of any offered tool whose name is <call> or ends
   in "__<call>" (a connected tool's, such as deepwiki__ask_question), then a summary
 - "MOCK-FAIL-402" in the task         -> a 402 out-of-credits answer
+- the chat's read of an @ message     -> TALK for a greeting, thanks or a question ("hi", "thanks",
+                                         "Explain …", "… ?"), so the agents answer it in the chat;
+                                         else WORK, which starts a run
 - the learner (ADR 0078)              -> a lesson when the person's words ask for something shorter
                                          or in bullets, one about the person ("aboutYou") when they
                                          ask for Vietnamese, else no edits; an agent whose
@@ -158,6 +161,13 @@ def plan(body):
             # Both dispatches answered with "accepted": end this turn; the results come back later.
             return ("text", "I handed the two parts of the question to the Researcher. Their findings come back next.")
         return ("text", f"Done. The tool answered: {said[:300]}")
+
+    # The chat's read of an @ message (intent.rs): one turn, one word.
+    if any("You read one message sent to a LoomWatch team" in text_of(m.get("content")) for m in messages):
+        said = latest.split("<message>", 1)[-1].split("</message>", 1)[0].strip().lower()
+        first = said.split()[0].strip(",.!") if said else ""
+        talk = said.endswith("?") or first in ("hi", "hello", "hey", "thanks", "thank", "explain")
+        return ("text", "TALK" if talk else "WORK")
 
     # The learner (ADR 0078): one turn, JSON only. It learns only from the person's words.
     if "You keep the lessons a LoomWatch agent learns" in system:
