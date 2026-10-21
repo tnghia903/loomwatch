@@ -93,7 +93,7 @@ arrives, the pane following the newest work switches to it. Drag the edge betwee
 resets it. The chat is paged from `GET /api/chat` and searchable with its
 `q`.
 
-Pictures and files go with a message (ADR 0081): paste one into the message box, drop files on the
+Pictures and files go with a message (ADR 0082): paste one into the message box, drop files on the
 chat (a dashed gold line goes round it while you drag), or press the paperclip. Each is kept the
 moment it is added, with `PUT /api/chat/files?teamPath=&name=` (raw bytes, 25 MB at most), in
 `<team>.files/chat/` beside the team file, and shows as a chip above the box; a message carries up

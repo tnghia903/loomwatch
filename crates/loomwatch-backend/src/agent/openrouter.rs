@@ -953,7 +953,7 @@ mod tests {
         assert_eq!(without.len(), 2, "no pictures, no extra message");
     }
 
-    /// Pictures the operator sent with a message go before its words, each named (ADR 0081); words
+    /// Pictures the operator sent with a message go before its words, each named (ADR 0082); words
     /// alone stay the plain string they always were.
     #[test]
     fn pictures_sent_with_a_message_go_before_its_words() {

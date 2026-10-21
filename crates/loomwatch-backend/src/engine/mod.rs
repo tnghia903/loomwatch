@@ -55,7 +55,7 @@ pub struct ProcessSpec {
     /// What the agent learned from the person's feedback (ADR 0078), read when its run started, so
     /// every session it opens in the run, a reopened one too, is given the same lessons.
     pub lessons: Vec<String>,
-    /// Pictures the operator sent (ADR 0081), shown to the agent with the next prompt it is given
+    /// Pictures the operator sent (ADR 0082), shown to the agent with the next prompt it is given
     /// and then not again: the conversation keeps them.
     pub pictures: Vec<PathBuf>,
 }
@@ -390,7 +390,7 @@ impl AgentRun {
         self
     }
 
-    /// Show the agent `pictures` with the next prompt it is given (ADR 0081): the ones a note it
+    /// Show the agent `pictures` with the next prompt it is given (ADR 0082): the ones a note it
     /// is about to read was sent with.
     pub(crate) fn show_pictures(&mut self, pictures: impl IntoIterator<Item = PathBuf>) {
         self.spec.pictures.extend(pictures);
@@ -787,7 +787,7 @@ impl AgentRun {
         let mut said =
             json!({"role": "user", "messageId": null, "content": {"type": "text", "text": prompt}});
         if !pictures.is_empty() {
-            // The files the operator sent with it (ADR 0081), whether or not the model could see
+            // The files the operator sent with it (ADR 0082), whether or not the model could see
             // them: the prompt's words name them too.
             said["pictures"] = pictures
                 .iter()

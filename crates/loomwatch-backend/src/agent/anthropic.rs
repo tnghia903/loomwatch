@@ -1159,7 +1159,7 @@ mod tests {
         );
     }
 
-    /// Pictures the operator sent with a message go before its words, each named (ADR 0081).
+    /// Pictures the operator sent with a message go before its words, each named (ADR 0082).
     #[test]
     fn pictures_sent_with_a_message_go_before_its_words() {
         let sent = Message::User {

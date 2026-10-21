@@ -46,7 +46,7 @@ instructions and tools.
   `function_call_output`, and on OpenRouter in a user message after the tool results. Every file
   is read in a short-lived `loomwatchd read-document` process with a time limit, so a damaged file
   costs nothing else. The same reader gives knowledge files their text.
-- **Files sent in the chat** (`chat_files.rs`, ADR 0081) are kept in `<team>.files/chat/`, a
+- **Files sent in the chat** (`chat_files.rs`, ADR 0082) are kept in `<team>.files/chat/`, a
   folder `PermissionPolicy::for_run_agent` lets every agent of the team read. The run carries them
   on `RunLineage::files` (a note on `QueuedNote::files`), and they are listed by path under the
   task as each agent's prompt is composed, so the run's own `prompt` stays the words that were

@@ -141,7 +141,7 @@ pub struct ChatMessage {
     /// the message stayed a note, and the agents it was for answered it themselves instead.
     #[serde(default)]
     pub answers: Option<NoteAnswers>,
-    /// Files sent with it ([`crate::chat_files`], ADR 0081).
+    /// Files sent with it ([`crate::chat_files`], ADR 0082).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<ChatFile>,
 }
@@ -920,7 +920,7 @@ struct History {
     decisions: Vec<Decision>,
     /// What the messages that started these runs replied to, by run id.
     replies: BTreeMap<String, ReplyTo>,
-    /// The files sent with the messages that started these runs, by run id (ADR 0081).
+    /// The files sent with the messages that started these runs, by run id (ADR 0082).
     files: BTreeMap<String, Vec<ChatFile>>,
     /// The operator's reactions on those runs and notes, by run or note.
     reactions: Vec<(String, Reaction)>,
@@ -1586,7 +1586,7 @@ struct ChatFileUpload {
     name: String,
 }
 
-/// `PUT /api/chat/files`: keep a file pasted or dropped into the team's chat (ADR 0081), before
+/// `PUT /api/chat/files`: keep a file pasted or dropped into the team's chat (ADR 0082), before
 /// the message that sends it. The body is the file's bytes, `application/octet-stream` only, so a
 /// page on another site cannot send one without a preflight the daemon never answers.
 async fn put_chat_file(
@@ -2340,7 +2340,7 @@ async fn learn_from_words(
 
 /// Whether a message may be answered in the chat instead of starting work ([`answer_instead`]):
 /// not when it was sent as work, and not when it carries files, which that answer, read from the
-/// words alone with no tools, could not open (ADR 0081).
+/// words alone with no tools, could not open (ADR 0082).
 fn answers_in_chat(work: bool, files: &[ChatFile]) -> bool {
     !work && files.is_empty()
 }
@@ -3304,7 +3304,7 @@ mod tests {
     }
 
     /// A team note's files go into the next work's conversation with it, so the agents can open
-    /// them then (ADR 0081).
+    /// them then (ADR 0082).
     #[test]
     fn a_team_notes_files_are_in_the_conversation() {
         let now = finished("ffffffff-now", "2026-10-06T03:00:00.000Z", "today", "");
@@ -4213,7 +4213,7 @@ mod tests {
         turns
     }
 
-    /// ADR 0081, a team with no fixed order: its lead is handed the files and shown the pictures;
+    /// ADR 0082, a team with no fixed order: its lead is handed the files and shown the pictures;
     /// "Start the team on this" under a team note hands on that note's files; and the next work's
     /// conversation lists a piece's files with its request.
     #[tokio::test]
@@ -4298,7 +4298,7 @@ mod tests {
         );
     }
 
-    /// The pictures each of `agent`'s turns was shown with, in order (ADR 0081).
+    /// The pictures each of `agent`'s turns was shown with, in order (ADR 0082).
     async fn shown(archive: &EventArchive, run_id: &str, agent: &str) -> Vec<Value> {
         archive
             .load_session(run_id)
@@ -4315,7 +4315,7 @@ mod tests {
             .collect()
     }
 
-    /// ADR 0081: a file pasted or dropped into the chat is kept beside the team and sent with the
+    /// ADR 0082: a file pasted or dropped into the chat is kept beside the team and sent with the
     /// words. Every agent the work reaches is told where it is; the agent the message reaches
     /// first is shown its pictures with the words, and a note's pictures go with the note.
     #[tokio::test]
@@ -4433,7 +4433,7 @@ mod tests {
     }
 
     /// A message with files is never answered from its words alone: that answer has no tools to
-    /// open them, so it goes to work (ADR 0081).
+    /// open them, so it goes to work (ADR 0082).
     #[test]
     fn a_message_with_files_goes_to_work() {
         let shot = ChatFile {

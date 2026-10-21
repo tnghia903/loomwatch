@@ -8,7 +8,7 @@ import { FileCard } from '../ui/FileCard'
 const THUMB = 120
 
 /**
- * The files you sent with a message (ADR 0081): pictures drawn small, each opening full size in the
+ * The files you sent with a message (ADR 0082): pictures drawn small, each opening full size in the
  * reader beside the chat, and any other file as the card a file in the chat always is.
  *
  * Kept by path: the chat reads its page again every few seconds, and a picture whose address never

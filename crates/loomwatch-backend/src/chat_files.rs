@@ -1,4 +1,4 @@
-//! Files the operator puts in a team's chat (ADR 0081): pasted or dropped into the message box,
+//! Files the operator puts in a team's chat (ADR 0082): pasted or dropped into the message box,
 //! copied beside the team file under `<team>.files/chat/`, and sent with a message.
 //!
 //! The agents are handed them by path, in the words of the message, so every agent the work

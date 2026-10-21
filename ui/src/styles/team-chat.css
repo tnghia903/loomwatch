@@ -1056,7 +1056,7 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
   @keyframes tc-helper-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -2px; } }
 }
 
-/* ---------- Files with a message (ADR 0081) ----------
+/* ---------- Files with a message (ADR 0082) ----------
    Dragged over the chat, files are met by the gold stitch round the whole column: a line, never a
    fill. Above the box, each file going with the words is a small chip, as a reply's quote is; in
    the message, pictures are drawn small and open full size in the reader. */

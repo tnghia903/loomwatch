@@ -53,7 +53,7 @@ interface ChatComposerProps {
   onAddress?: (agent: string) => void
   /** Counts the times Reply was pressed on what the team waits on you for: the box goes back to answering it. */
   answerAsked?: number
-  /** Pictures and files pasted, dropped or chosen to go with the words (ADR 0081). */
+  /** Pictures and files pasted, dropped or chosen to go with the words (ADR 0082). */
   attachments?: ChatAttachments
   /** A line about something just done from the chat, such as a dropped folder added. */
   notice?: string | null

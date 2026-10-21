@@ -300,7 +300,7 @@ pub struct QueuedNote {
     /// (`Replied::quoted`). `None` for a note that replies to nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply: Option<String>,
-    /// Files sent with it (ADR 0081): the agent is told where they are, and shown the pictures
+    /// Files sent with it (ADR 0082): the agent is told where they are, and shown the pictures
     /// with its words when its model sees pictures.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<crate::chat_files::ChatFile>,
@@ -1911,7 +1911,7 @@ pub(crate) struct StartRunRequest {
     /// Only the chat sets it: `POST /api/runs` has no reply to give.
     #[serde(skip)]
     reply: Option<crate::Replied>,
-    /// Files sent with the chat message that starts the run (ADR 0081): every agent is told where
+    /// Files sent with the chat message that starts the run (ADR 0082): every agent is told where
     /// they are, and the agent the run reaches first is shown the pictures. Only the chat sets it.
     #[serde(skip)]
     files: Vec<crate::chat_files::ChatFile>,

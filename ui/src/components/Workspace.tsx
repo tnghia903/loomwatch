@@ -1632,7 +1632,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return { ok: true, revision: doc.currentRevision() }
   }, [doc])
   const [chatReview, setChatReview] = useState<{ review: TeamReview; retry: () => void } | null>(null)
-  // A folder dropped on the chat (ADR 0081), by its name: a page can't learn where it is, so the
+  // A folder dropped on the chat (ADR 0082), by its name: a page can't learn where it is, so the
   // folder picker finds it and it is connected to the team as a source, linked rather than copied.
   const [chatFolder, setChatFolder] = useState<{ name: string; said: (line: string | null) => void } | null>(null)
   const connectChatFolder = useCallback((name: string) => new Promise<string | null>((said) => {

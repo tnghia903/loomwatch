@@ -5,7 +5,7 @@ import type { AgentConfig, CapabilityRef } from '../team-file/types'
 import { uploadChatFile, type ChatFile } from './client'
 
 /**
- * Pictures and files pasted or dropped into a team's chat (ADR 0081). Each one is kept beside the
+ * Pictures and files pasted or dropped into a team's chat (ADR 0082). Each one is kept beside the
  * team the moment it is added, while the words are still being typed, so Send never waits on it;
  * the message then names what was kept.
  */
@@ -72,7 +72,7 @@ export const carriesFiles = (transfer: DataTransfer | null) => Boolean(transfer 
 
 /**
  * A folder dropped on the chat, once found in the folder picker, as a source for every agent of
- * the team (ADR 0081): each agent's capabilities with the folder added, for the agents that don't
+ * the team (ADR 0082): each agent's capabilities with the folder added, for the agents that don't
  * have it yet. Review steps are you, and read nothing.
  */
 export function withFolderSource(agents: readonly Pick<AgentConfig, 'id' | 'kind' | 'capabilities'>[], folder: { name: string; path: string }): Array<{ id: string; capabilities: CapabilityRef[] }> {

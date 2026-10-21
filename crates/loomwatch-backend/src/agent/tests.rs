@@ -2952,7 +2952,7 @@ async fn sent_with_the_prompt(sees_pictures: bool, max_pictures: usize) -> Vec<S
 }
 
 /// Pictures sent with the words count against the conversation's room as an opened one does: a
-/// second turn past the limit is shown none (ADR 0081).
+/// second turn past the limit is shown none (ADR 0082).
 #[tokio::test]
 async fn pictures_sent_earlier_count_against_the_room() {
     let folder = Folder::new();
@@ -3002,7 +3002,7 @@ async fn pictures_sent_earlier_count_against_the_room() {
     assert_eq!(carried, 0);
 }
 
-/// ADR 0081: pictures the operator sends go with the words to a model that sees pictures, as
+/// ADR 0082: pictures the operator sends go with the words to a model that sees pictures, as
 /// many as the conversation has room for, and to no other.
 #[tokio::test]
 async fn pictures_sent_with_a_prompt_go_with_its_words() {

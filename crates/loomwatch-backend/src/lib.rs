@@ -194,7 +194,7 @@ pub struct RunLineage {
     /// operator's request replies to. Handed to every agent the run starts, as the conversation is,
     /// because the request is theirs too.
     pub reply: Option<Replied>,
-    /// Files the operator's message was sent with (ADR 0081): every agent the run starts is told
+    /// Files the operator's message was sent with (ADR 0082): every agent the run starts is told
     /// where they are, under its task, and the agent it starts with is shown the pictures.
     pub files: Vec<chat_files::ChatFile>,
     /// A one-agent turn (ADR 0051): the one agent this run executes. It starts there, stops after
@@ -569,7 +569,7 @@ async fn run_team_mode(
         event_log.as_ref().map(EventLog::session_id),
     )
     .await;
-    // The lead is the agent the message reaches first: it is shown its pictures (ADR 0081).
+    // The lead is the agent the message reaches first: it is shown its pictures (ADR 0082).
     spec.pictures = chat_files::pictures(&lineage.files);
 
     let process = AgentRun::spawn(&spec)
@@ -848,7 +848,7 @@ async fn run_pipeline_nodes(
         )
         .await;
         // The first stage that runs is the agent the message reaches first: it is shown its
-        // pictures (ADR 0081). The stages after it have their paths, in the task.
+        // pictures (ADR 0082). The stages after it have their paths, in the task.
         if first_executed {
             spec.pictures = chat_files::pictures(&lineage.files);
         }
@@ -1462,7 +1462,7 @@ fn note_turn(notes: &[runs::QueuedNote]) -> String {
     let words = notes
         .iter()
         .map(|note| {
-            // The files sent with it are part of what it says (ADR 0081).
+            // The files sent with it are part of what it says (ADR 0082).
             let said = chat_files::with_files(note.text.trim(), &note.files);
             match &note.reply {
                 Some(reply) => format!(
@@ -2925,7 +2925,7 @@ pub(crate) fn compose_prompt(
             text: replied,
         });
     }
-    // The files sent with it are part of what was asked (ADR 0081).
+    // The files sent with it are part of what was asked (ADR 0082).
     let goal = chat_files::with_files(&task.goal, &task.files);
     text.push_str("\n\n## Task\n");
     text.push_str(&goal);
@@ -3046,7 +3046,7 @@ pub(crate) struct NodeTask {
     /// `## The message this replies to`: what the operator's task replies to in the team's chat
     /// (ADR 0051). `None` for a task that replies to nothing.
     pub(crate) reply: Option<Replied>,
-    /// Files the operator sent with the task (ADR 0081), listed under it by where they are.
+    /// Files the operator sent with the task (ADR 0082), listed under it by where they are.
     pub(crate) files: Vec<chat_files::ChatFile>,
     /// `stage_results` and `direction` are not this run's: they were handed on from the work this
     /// run follows, so the agent has them again (a follow-up, a one-agent turn — ADR 0051).

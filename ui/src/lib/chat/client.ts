@@ -42,7 +42,7 @@ export interface ChatMessage {
    * Absent from chats before these answers.
    */
   answers?: NoteAnswers | null
-  /** Files sent with it (ADR 0081). Absent when there were none. */
+  /** Files sent with it (ADR 0082). Absent when there were none. */
   files?: ChatFile[]
 }
 
@@ -195,7 +195,7 @@ export async function sendChatMessage({ teamPath, text, to, now, expectedRevisio
   return readRun<SendResult>(response)
 }
 
-/** Keep a file pasted or dropped into the team's chat, before the message that sends it (ADR 0081). */
+/** Keep a file pasted or dropped into the team's chat, before the message that sends it (ADR 0082). */
 export async function uploadChatFile(teamPath: string, file: Blob, name: string, signal?: AbortSignal): Promise<ChatFile> {
   const query = new URLSearchParams({ teamPath, name })
   const response = await daemonFetch(`/api/chat/files?${query.toString()}`, {

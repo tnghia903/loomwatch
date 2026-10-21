@@ -126,7 +126,7 @@ impl PermissionPolicy {
     }
 
     /// The policy for one of a run's agents: [`Self::for_agent`] with what the operator turned off
-    /// for it (ADR 0060), and the files sent in its team's chat to read (ADR 0081): sending one is
+    /// for it (ADR 0060), and the files sent in its team's chat to read (ADR 0082): sending one is
     /// the operator giving it to the team.
     #[must_use]
     pub fn for_run_agent(
@@ -942,7 +942,7 @@ mod tests {
         commands: true,
     };
 
-    /// ADR 0081: a file sent in the team's chat is the operator's to give, so every agent of the
+    /// ADR 0082: a file sent in the team's chat is the operator's to give, so every agent of the
     /// team reads it without asking. Only reads: writing there still asks, and a file beside the
     /// team file but outside the chat's folder still asks to be read.
     #[test]

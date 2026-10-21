@@ -513,7 +513,7 @@ impl Session {
     }
 
     /// [`Self::prompt`], with pictures the operator sent shown to the model before the words
-    /// (ADR 0081): when it can see pictures, and as many as the conversation has room for.
+    /// (ADR 0082): when it can see pictures, and as many as the conversation has room for.
     ///
     /// # Errors
     ///

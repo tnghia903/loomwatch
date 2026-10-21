@@ -14,7 +14,7 @@ export interface FolderPickerProps {
   verb?: string
   /** Open here rather than in the home folder. */
   start?: string
-  /** The one folder to choose, by name: a folder dropped on the chat (ADR 0081). The button waits
+  /** The one folder to choose, by name: a folder dropped on the chat (ADR 0082). The button waits
       until it is the open folder, so the folder you happen to be in is never added by mistake. */
   want?: string
 }

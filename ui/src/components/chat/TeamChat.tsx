@@ -86,7 +86,7 @@ interface TeamChatProps {
   /** The parts of files asked about in this chat, and the one in the box now, whenever they change. */
   onPassages?: (asked: AskedPassage[], asking: string | null) => void
   /**
-   * A folder dropped on the chat, by its name (ADR 0081): a page can't learn where it is, so it is
+   * A folder dropped on the chat, by its name (ADR 0082): a page can't learn where it is, so it is
    * found in the folder picker and added for the team rather than sent. Resolves with what to say
    * about it, or `null` when the picker was closed.
    */
@@ -114,7 +114,7 @@ const ROSTER_KEY = 'loomwatch.chatRoster'
  */
 export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, routine, detailsRunId, answerRunId = null, onOpenAnswer, blocked, prepare, onDetails, onTeamReview, onStale, onAlwaysAllow, announce, onNewest, onStarted, reveal = null, onOpenFinding, onNewestRun, startTeam = false, onStartTeamTaken, ask = null, onPassages, onConnectFolder }: TeamChatProps) {
   const chat = useTeamChat(teamPath)
-  // Pictures and files pasted or dropped in, kept as they are added (ADR 0081).
+  // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
   const { add: addFiles, clear: clearFiles } = attachments
   // A drag of files from outside the page over the chat: drawn as the gold stitch round it. Set on

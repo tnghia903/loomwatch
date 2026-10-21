@@ -107,7 +107,7 @@ function fromFinder(files: File[], folders: string[] = []) {
   return { types: ['Files'], items, files, dropEffect: 'none' }
 }
 
-describe('pictures and files go with a message (ADR 0081)', () => {
+describe('pictures and files go with a message (ADR 0082)', () => {
   it('a pasted screenshot is kept at once, named for when it was pasted, and sent with the words', async () => {
     renderChat()
     await screen.findByRole('textbox', { name: 'Message the team' })
