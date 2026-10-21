@@ -186,6 +186,11 @@ function checkWord(message: TeamMessage): string {
 /** Kinds that expect an answer, so an answer not yet given shows as one owed. */
 const ANSWERED: ReadonlySet<MessageKind> = new Set(['ask', 'question', 'escalate', 'note', 'permission', 'helper'])
 
+/** Whether a message to an agent is answered back, so the talk shows the agent owing it while it writes. */
+export function expectsAnswer(kind: MessageKind): boolean {
+  return ANSWERED.has(kind) || kind === 'check'
+}
+
 /** How a permission request was settled, in a word for the bubble that says so. */
 const SETTLED: Record<PermissionOutcome, string> = { allow_once: 'allowed once', allow_run: 'allowed for this run', allow_team: 'allowed for the whole team', deny: 'denied', edited: 'allowed, changed', answered: 'answered instead', timed_out: 'declined, no answer' }
 
@@ -231,7 +236,7 @@ export function bubbles(items: readonly Item[], lanes: readonly Lane[], live: bo
           : message.kind === 'helper' ? (reply.failed ? 'couldn’t finish' : reply.stopped ? 'stopped' : 'done') : 'answer',
         text: plain ? '' : reply.text, offsetMs: reply.offsetMs, ts: reply.ts,
       })
-    } else if (message.state === 'pending' && line.receiver !== null && (ANSWERED.has(message.kind) || reviewing || message.kind === 'check')) {
+    } else if (message.state === 'pending' && line.receiver !== null && (expectsAnswer(message.kind) || reviewing)) {
       const owedByYou = you.has(line.receiver)
       const revising = message.kind === 'check'
       out.push({
