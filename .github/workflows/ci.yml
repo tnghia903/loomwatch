@@ -1,9 +1,7 @@
 name: CI
 
-# Runs on main, once a change has merged, by hand, and for a pull request from a fork or from
-# Dependabot (pull-requests.yml calls it). A maintainer's own branch is checked on their computer
-# with scripts/ci-local.sh before it merges (docs/CI.md). To run all of this on such a branch, for
-# the Windows job especially: `gh workflow run ci.yml --ref <branch>`.
+# Runs on every pull request (pull-requests.yml calls it), on main once a change has merged, and by
+# hand: `gh workflow run ci.yml --ref <branch>` runs it on a branch with no pull request.
 #
 # Never add `pull_request_target`: it would run a fork's code with this repository's token and
 # secrets.
