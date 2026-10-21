@@ -121,6 +121,16 @@ describe('with a reader beside the chat', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/files/open', expect.objectContaining({ body: JSON.stringify({ path: REPORT, reveal: false }) })))
   })
 
+  it('a file in a row ends with Read; its own app and its path come before it, in reading and keyboard order', async () => {
+    beside(<FileCard path={REPORT} compact />)
+    await screen.findByRole('button', { name: 'Read design-report.docx here' })
+    expect(screen.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Open design-report.docx in its own app',
+      'Copy the path of design-report.docx',
+      'Read design-report.docx here',
+    ])
+  })
+
   it('a chip in a sentence reads its file there, to ask the agent whose answer named it', async () => {
     const { open } = beside(<MarkdownRenderer>{`See \`${REPORT}\`.`}</MarkdownRenderer>)
     fireEvent.click(await screen.findByRole('button', { name: 'Read design-report.docx (Word document)' }))

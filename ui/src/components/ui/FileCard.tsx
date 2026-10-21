@@ -48,6 +48,22 @@ export function FileCard({ path, compact = false, agents = [] }: FileCardProps) 
   const readHere = useReadHere(path, maker?.id)
   const canRead = Boolean(readHere && facts?.exists)
 
+  const main = canRead && readHere ? (
+    <button type="button" className="file-card-open file-card-read" onClick={readHere} aria-label={`Read ${name} here`} title="Read it here, and ask about any part">
+      <BookOpenText size={compact ? 13 : 15} aria-hidden="true" />Read
+    </button>
+  ) : (
+    <button type="button" className="file-card-open" disabled={!canOpen || busy} onClick={() => void open()} aria-label={`Open ${name}`} title={canOpen ? 'Open in its own app' : facts?.exists ? 'This kind of file opens from its folder' : undefined}>
+      <ExternalLink size={compact ? 13 : 15} aria-hidden="true" />{compact ? 'Open' : `Open ${fileNoun(path)}`}
+    </button>
+  )
+  const openIcon = canRead && readHere && canOpen && (
+    <button type="button" className="file-card-icon" disabled={busy} onClick={() => void open()} aria-label={`Open ${name} in its own app`} title="Open in its own app"><ExternalLink size={14} aria-hidden="true" /></button>
+  )
+  const copyIcon = (
+    <button type="button" className="file-card-icon" onClick={() => void copy()} aria-label={`Copy the path of ${name}`} title="Copy path">{said === 'Path copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}</button>
+  )
+
   return (
     <span className={['file-card', compact ? 'compact' : 'hero', canOpen && 'ready', (missing || outside) && 'muted'].filter(Boolean).join(' ')} title={path}>
       <span className="file-sheet" aria-hidden="true">
@@ -66,24 +82,22 @@ export function FileCard({ path, compact = false, agents = [] }: FileCardProps) 
         {!compact && !maker && facts?.exists && <span className="file-card-where">{folderWords(facts.folder, path)}</span>}
       </span>
       <span className="file-card-acts">
-        {canRead && readHere ? (
+        {compact ? (
           <>
-            <button type="button" className="file-card-open file-card-read" onClick={readHere} aria-label={`Read ${name} here`} title="Read it here, and ask about any part">
-              <BookOpenText size={compact ? 13 : 15} aria-hidden="true" />Read
-            </button>
-            {canOpen && <button type="button" className="file-card-icon" disabled={busy} onClick={() => void open()} aria-label={`Open ${name} in its own app`} title="Open in its own app"><ExternalLink size={14} aria-hidden="true" /></button>}
+            {/* Read stays at the end of the row; the rest wait beside it (shown on hover in the chat). */}
+            <span className="file-card-more">{openIcon}{copyIcon}</span>
+            {main}
           </>
         ) : (
-          <button type="button" className="file-card-open" disabled={!canOpen || busy} onClick={() => void open()} aria-label={`Open ${name}`} title={canOpen ? 'Open in its own app' : facts?.exists ? 'This kind of file opens from its folder' : undefined}>
-            <ExternalLink size={compact ? 13 : 15} aria-hidden="true" />{compact ? 'Open' : `Open ${fileNoun(path)}`}
-          </button>
+          <>
+            {main}
+            {openIcon}
+            <button type="button" className="file-card-reveal" disabled={!facts?.exists || busy} onClick={() => void open(true)} aria-label={`Show ${name} in its folder`} title="Show in folder">
+              <FolderOpen size={14} aria-hidden="true" /><span className="file-card-reveal-label">Show in folder</span>
+            </button>
+            {copyIcon}
+          </>
         )}
-        {!compact && (
-          <button type="button" className="file-card-reveal" disabled={!facts?.exists || busy} onClick={() => void open(true)} aria-label={`Show ${name} in its folder`} title="Show in folder">
-            <FolderOpen size={14} aria-hidden="true" /><span className="file-card-reveal-label">Show in folder</span>
-          </button>
-        )}
-        <button type="button" className="file-card-icon" onClick={() => void copy()} aria-label={`Copy the path of ${name}`} title="Copy path">{said === 'Path copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}</button>
       </span>
       <span className="file-card-said" role="status">{said === 'Path copied' ? '' : said}</span>
     </span>

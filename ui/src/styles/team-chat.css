@@ -752,6 +752,8 @@
 .tc-files .file-card-acts > .file-card-open { flex: none; height: 28px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); background: transparent; color: var(--color-accent); font-size: 12px; }
 .tc-files .file-card-acts > .file-card-open:hover:not(:disabled) { background: var(--color-accent-tint); color: var(--color-ink); filter: none; }
 .tc-files .file-card.compact .file-card-icon { width: 28px; height: 28px; }
+.tc-files .file-card-more { gap: 4px; }
+.tc-files .file-card-more > button { flex: none; }
 .tc-files .file-card-said { grid-column: 1 / -1; }
 
 /* The pane beside the chat: one piece's answer or its record, chosen at its top. */
@@ -791,9 +793,14 @@
 @media (hover: hover) {
   .tc-piece:not(.newest, .live, .in-details) :is(.tc-talk-acts, .tc-quiet) { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
   .tc-piece:not(.newest, .live, .in-details):is(:hover, :focus-within) :is(.tc-talk-acts, .tc-quiet) { opacity: 1; }
-  /* A file's copy-path button waits for the file itself to be pointed at. */
-  .tc-files .file-card-icon { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
-  .tc-files .file-card:is(:hover, :focus-within) .file-card-icon { opacity: 1; }
+  /* A file's other buttons wait for the file itself to be pointed at, folded away so its name has
+     the room and Read keeps the end of the row; they open to Read's left. The room opens at once
+     and only the buttons fade, so they never squeeze or spill over Read on the way. */
+  .tc-files .file-card-more { max-width: 0; margin-right: -4px; overflow: hidden; opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .tc-files .file-card:is(:hover, :focus-within) .file-card-more { max-width: 64px; margin-right: 0; overflow: visible; opacity: 1; }
+}
+@media (hover: hover) and (prefers-reduced-motion: reduce) {
+  .tc-files .file-card-more { transition: none; }
 }
 
 /* Share: saving and sending behind one button. */
