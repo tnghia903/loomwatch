@@ -2,9 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CapabilityInventory } from '../../lib/library/client'
-import { projectRun, type RunEvent } from '../../lib/watch/events'
 import { ComponentPalette } from './ComponentPalette'
-import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, EVIDENCE_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
+import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './constants'
 
 let jobs: object[] = []
 let problems: object[] = []
@@ -136,8 +135,8 @@ const capabilities: CapabilityInventory = {
   sources: [{ id: 'memory-research', name: 'Research team · memory', source: 'LoomWatch', detail: '1 brief entry', status: 'Ready', memory: { team: 'research-team', brief: 1 } }],
 }
 
-/** ADR 0041: the panels Build and the run trace drew were two components; this is the one left. */
-describe('ComponentPalette in Build and in a run', () => {
+/** ADR 0041: one add panel, beside the Workflow canvas. */
+describe('ComponentPalette in Build', () => {
   it('lists LoomWatch’s skills and other teams’ memory, with no tools from AI apps, and a way to manage skills', () => {
     render(<ComponentPalette capabilityInventory={capabilities} capabilitiesScannedAt={new Date()} />)
     expect(within(section('Skills')).getByRole('button', { name: /notebooklm.*LoomWatch.*Ready/ })).toBeInTheDocument()
@@ -313,7 +312,7 @@ describe('ComponentPalette in Build and in a run', () => {
     expect(section('Skills')).not.toHaveTextContent('None yet')
   })
 
-  it('folds on the shared events and ⌘\\ toggles it, as the run trace expects', () => {
+  it('folds on the shared events and ⌘\\ toggles it', () => {
     render(<ComponentPalette />)
     act(() => { window.dispatchEvent(new Event('loomwatch:close-library')) })
     expect(screen.queryByRole('complementary', { name: 'Add to your team' })).toBeNull()
@@ -322,67 +321,3 @@ describe('ComponentPalette in Build and in a run', () => {
   })
 })
 
-const at = (seconds: number) => new Date(Date.UTC(2026, 9, 3, 0, 0, seconds)).toISOString()
-const event = (seq: number, agentId: string, kind: RunEvent['kind'], payload: RunEvent['payload']): RunEvent => ({ id: `event-${seq}`, sessionId: 'run-1', agentId, seq, ts: at(seq), kind, payload })
-const refusedSearch = (seq: number, callId: string): RunEvent[] => [
-  event(seq, 'researcher', 'tool_call', { callId, name: 'WebSearch', title: 'Web search', toolKind: 'fetch', status: 'pending', rawInput: {} }),
-  event(seq + 1, 'researcher', 'permission', { options: [{ optionId: 'allow-once' }, { optionId: 'reject' }], toolCall: { kind: 'fetch', name: 'WebSearch', title: `Search "q${seq}"`, toolCallId: callId } }),
-  event(seq + 2, 'researcher', 'permission', { outcome: { optionId: 'reject', outcome: 'selected' } }),
-]
-
-describe('ComponentPalette while a run is shown', () => {
-  const evidence = projectRun([...refusedSearch(1, 's1'), ...refusedSearch(5, 's2'), event(9, 'researcher', 'tool_call', { callId: 'n1', name: 'mcp__notion__search', title: 'mcp__notion__search', toolKind: 'other', status: 'completed', rawInput: {} })]).evidence
-  const names = new Map([['researcher', 'Researcher']])
-  // What LoomWatch connected to the researcher, from its run record.
-  const connected = new Map([['researcher', ['notion']]])
-
-  it('leads with what the run used, one row per tool, saying why a built-in one was declined', () => {
-    render(<ComponentPalette capabilityInventory={capabilities} observedEvidence={evidence} observedConnected={connected} agentNames={names} />)
-    const used = section('Used in this run')
-    const headings = screen.getAllByRole('heading').map((heading) => heading.textContent)
-    expect(headings[0]).toBe('Used in this run')
-    expect([...used.querySelectorAll('.palette-item')].map((button) => button.querySelector('strong')?.textContent)).toEqual(['Web search', 'notion · search'])
-    expect(within(used).getByRole('button', { name: /^Web search/ })).toHaveTextContent('Built into LoomWatch · ResearcherDeclined 2×: Researcher isn’t allowed to search the web×2')
-    fireEvent.click(within(used).getByRole('button', { name: 'About Used in this run' }))
-    expect(used).toHaveTextContent('Switch them on per agent, under Allowed without asking.')
-    // Never one row per permission answer, which the old Library listed as tools.
-    expect(screen.queryByText(/^Search "/)).toBeNull()
-  })
-
-  it('reveals a row on the canvas, or lets it be dragged there to reposition the card', () => {
-    const reveal = vi.fn()
-    render(<ComponentPalette observedEvidence={evidence} observedConnected={connected} agentNames={names} onRevealEvidence={reveal} />)
-    const row = within(section('Used in this run')).getByRole('button', { name: /^notion · search/ })
-    fireEvent.click(row)
-    expect(reveal).toHaveBeenCalledWith('researcher:n1')
-    const setData = vi.fn()
-    fireEvent.dragStart(row, { dataTransfer: { setData, effectAllowed: '' } })
-    expect(setData).toHaveBeenCalledWith(EVIDENCE_DRAG_MIME, 'researcher:n1')
-  })
-
-  // ADR 0044: the row used to read "Artifact · Built into the app" like any harmless tool.
-  it('says when an app tool reached past the run without asking', () => {
-    const published = projectRun([event(1, 'researcher', 'tool_call', { callId: 'a1', name: 'Artifact', title: 'Artifact', toolKind: 'other', status: 'completed', rawInput: { action: 'publish' } })]).evidence
-    render(<ComponentPalette observedEvidence={published} agentNames={names} />)
-    expect(within(section('Used in this run')).getByRole('button', { name: /^Artifact/ })).toHaveTextContent('Built into LoomWatch · ResearcherUsed without asking: publishes to your claude.ai account×1')
-    // No switch lets it through, so the hint about switches would point nowhere.
-    expect(within(section('Used in this run')).queryByRole('button', { name: 'About Used in this run' })).not.toBeInTheDocument()
-  })
-
-  // ADR 0047, run 4bb918c5: the ChatGPT app's `cua_repl`, which a Codex Gatherer called without
-  // asking, read "Connected tool" as if the operator had connected it.
-  it('says when a server the app brought, not one LoomWatch connected, ran without asking', () => {
-    const repl = projectRun([
-      event(1, 'researcher', 'tool_call', { callId: 'c1', title: 'mcp.cua_repl.js', toolKind: 'execute', status: 'in_progress', rawInput: { tool: 'js', server: 'cua_repl', arguments: { code: 'await cua.createBrowserTab("iab", "https://github.blog/")' } } }),
-      event(2, 'researcher', 'tool_update', { callId: 'c1', status: 'failed' }),
-    ]).evidence
-    render(<ComponentPalette observedEvidence={repl} observedConnected={connected} agentNames={names} />)
-    expect(within(section('Used in this run')).getByRole('button', { name: /^cua_repl · js/ })).toHaveTextContent('Built into LoomWatch · ResearcherUsed without asking: controls the browser and apps on your computer×1')
-  })
-
-  it('names the folded panel after what a run reader opens it for', () => {
-    render(<ComponentPalette observedEvidence={evidence} agentNames={names} />)
-    act(() => { window.dispatchEvent(new Event('loomwatch:close-library')) })
-    expect(screen.getByRole('button', { name: 'Used in this run · 2' })).toBeInTheDocument()
-  })
-})

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Network } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { capabilityEvidence, hadSkill } from '../../lib/runs/capabilityEvidence'
-import type { RunEvent } from '../../lib/watch/events'
+import type { Evidence, RunEvent, RunPhase, RunProjection } from '../../lib/watch/events'
 import { cardActivity, linkedIn, asUse, USE_NAMES, WEB_KINDS, type Use, type UseKind } from '../../lib/watch/cardActivity'
 import { useNow } from '../../lib/useNow'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { SkillList, UseList, WebList, type FigureGlow, type SkillSummary } from './StageActivity'
 import { FlowLinkButton, TeamFlow, type FlowStage } from './TeamFlow'
-import type { RunColumnProps } from './RunColumn'
+import type { AgentNode } from '../../lib/library/nodeFromDrop'
 import { useCanvasActions } from '../canvas/CanvasActionsContext'
 import { buildReceipt } from '../../lib/story/receipt'
 import { RunReceipt } from './RunReceipt'
@@ -19,13 +19,24 @@ import type { RunRecord } from '../../lib/runs/client'
 import { modelLabelForAgent } from '../../lib/models'
 import { useRunQuests } from './useRunQuests'
 
-export interface DeliveryLaneProps extends RunColumnProps {
+export interface DeliveryLaneProps {
+  prompt: string
+  attempt: number
+  phase: RunPhase
+  elapsed: string
+  mode: 'live' | 'replay'
+  agents: AgentNode[]
+  evidenceByAgent: ReadonlyMap<string, Evidence[]>
+  /** The team's answer so far, and the agent that wrote it. */
+  output: { text: string; producer: string | null }
+  projection: RunProjection
+  onInspectEvidence: (id: string) => void
+  onSelectAgent: (id: string) => void
   /** The model each agent runs on, in words, by agent id. */
   harnessLabels?: ReadonlyMap<string, string>
   planned?: boolean
   pipeline: boolean
   linearPipeline?: boolean
-  onTrace: () => void
   /** ADR 0037: allow what a refused receipt line names, for that agent's next runs. */
   onAllow?: (agentId: string, key: AllowSwitch) => void
   /**
@@ -87,7 +98,6 @@ export function DeliveryLane({
   harnessLabels = new Map(),
   onInspectEvidence,
   onSelectAgent,
-  onTrace,
   onAllow,
   focusAgentId = null,
   onRevealMessage,
@@ -218,10 +228,11 @@ export function DeliveryLane({
       }}
     >
       <section ref={work} className="delivery-work" aria-label="Team work">
-        <header className={`delivery-heading${runReceipt ? ' receipted' : ''}`}>
-          {/* How it went leads; which run it was is a label above it, for the receipt and the trace.
-              Once the run is over, its receipt says both, stamped on the slip, so they are not said here. */}
-          {!runReceipt && (
+        {/* How it went leads; which run it was is a label above it. Once the run is over, its
+            receipt says both, stamped on the slip, so no heading says them again. What was asked,
+            the answer, and its review live in the chat beside this record (ADR 0051). */}
+        {!runReceipt && (
+          <header className="delivery-heading">
             <div>
               <span className="delivery-eyebrow delivery-run-kicker">{planned ? 'Next run' : `Run ${attempt}`}</span>
               <h1>
@@ -231,15 +242,8 @@ export function DeliveryLane({
               </h1>
               {planned && <p>Describe the result you want to create.</p>}
             </div>
-          )}
-          {/* One control per thing (ADR 0043, 0051): the full trace opens only here. What was asked,
-              the answer, and its review live in the chat beside this record, so they are not here. */}
-          {!planned && (
-            <div className="delivery-heading-acts">
-              <button className="btn" onClick={onTrace}><Network size={15} /> Full trace</button>
-            </div>
-          )}
-        </header>
+          </header>
+        )}
         {/* A finished run's receipt sits beside the record it sums up, once the pane is wide enough
             for both (delivery.css); a narrower pane keeps it above. */}
         <div className={`delivery-sheet${runReceipt ? ' with-receipt' : ''}`}>
@@ -255,7 +259,7 @@ export function DeliveryLane({
                   ? `${plural(agents.length, 'stage')} · 1 deliverable`
                   : 'Select an agent to see its work'}
               </span>
-              {/* Every record behind the cards, for an expert; the full trace is the heading's. */}
+              {/* Every record behind the cards, for an expert. */}
               {!planned && <button className="delivery-link" onClick={toggleProvenance}>What was recorded <ArrowRight size={13} /></button>}
             </div>
             <TeamFlow

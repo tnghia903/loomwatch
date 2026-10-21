@@ -3,15 +3,12 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 
 import type { CapabilityEdgeConfig, CapabilityNodeConfig } from '../../lib/composer-layout/types'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
-import type { useRunSession } from '../../lib/runs/useRunSession'
 import { isMac } from '../../lib/platform'
 import type { ConfiguredEdge, useTeamDocument } from '../../lib/team-file/useTeamDocument'
 import { setThemeMode, type ResolvedTheme } from '../../lib/theme'
 import type { InspectedCapability } from '../canvas/CapabilityInspector'
-import type { LayerSolo } from '../canvas/LayerLegend'
 
 type TeamDocument = ReturnType<typeof useTeamDocument>
-type RunSession = ReturnType<typeof useRunSession>
 type Setter<T> = Dispatch<SetStateAction<T>>
 
 /** What the workspace's keyboard shortcuts read and act on, as of the latest render. */
@@ -21,16 +18,13 @@ export interface WorkspaceShortcutContext {
   flow: Pick<ReactFlowInstance, 'fitView' | 'setViewport' | 'zoomIn' | 'zoomOut'>
   theme: ResolvedTheme
   windowWidth: number
+  /** A run is on screen, in the team's chat: the canvas is not. */
   runView: boolean
-  /** The edge-layer legend is on screen, so `L` may cycle the solo layer. */
-  layersVisible: boolean
-  session: Pick<RunSession, 'terminal' | 'lastSeq' | 'cursor' | 'setCursor'>
   submit: () => Promise<void>
   openNewTeam: () => void
   toggleLibrary: () => void
   cycleProblem: (direction: 1 | -1) => void
   clearSelection: () => void
-  closeRun: () => void
   /** Details open beside the team's chat (ADR 0051): Esc closes it, live work or not, and keeps the chat. */
   closeDetails?: () => void
   organize: () => void
@@ -57,9 +51,6 @@ export interface WorkspaceShortcutContext {
   setProvenanceOpen: Setter<boolean>
   memoryOpen: boolean
   setMemoryOpen: Setter<boolean>
-  fannedAgentId: string | null
-  setFannedAgentId: Setter<string | null>
-  setSolo: Setter<LayerSolo>
   setSweeping: Setter<boolean>
   // Selection, for Esc and Delete.
   selectedNodes: readonly AgentNode[]
@@ -92,13 +83,13 @@ export function useWorkspaceShortcuts(context: WorkspaceShortcutContext) {
 
 function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutContext) {
   const {
-    editable, doc, flow, theme, windowWidth, runView, layersVisible, session, submit, openNewTeam,
-    toggleLibrary, cycleProblem, clearSelection, closeRun, closeDetails, organize, fitCanvas, pendingNodeDelete,
+    editable, doc, flow, theme, windowWidth, runView, submit, openNewTeam,
+    toggleLibrary, cycleProblem, clearSelection, closeDetails, organize, fitCanvas, pendingNodeDelete,
     setPendingNodeDelete, requestNodeDelete, deleteNodes, discardConfirm, setDiscardConfirm, paletteOpen,
     setPaletteOpen, problemsOpen, setProblemsOpen,
     compareOpen, setCompareOpen, inspectedEvidenceId, setInspectedEvidenceId,
     handoverAgentId, setHandoverAgentId, inspectedCapability, provenanceOpen, setProvenanceOpen, memoryOpen,
-    setMemoryOpen, fannedAgentId, setFannedAgentId, setSolo, setSweeping, selectedNodes, selectedEdges,
+    setMemoryOpen, setSweeping, selectedNodes, selectedEdges,
     selectedCapabilities, selectedCapabilityEdgeIds, capabilityCards, capabilityEdgeById,
     removeCapabilityCards, removeCapabilityEdge
   } = context
@@ -130,13 +121,9 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
       else if (inspectedCapability) clearSelection()
       else if (provenanceOpen) setProvenanceOpen(false)
       else if (memoryOpen) setMemoryOpen(false)
-      // §6.1: Esc unwinds the deepest disclosure. A fan is one, and folding it is not the same
-      // as clearing the run — that is the last step in the chain, and only once it is terminal.
-      else if (fannedAgentId) setFannedAgentId(null)
       else if (selectedNodes.length > 0 || selectedEdges.length > 0 || selectedCapabilityEdgeIds.size > 0) clearSelection()
       else if (editingText) (event.target as HTMLElement).blur()
       else if (closeDetails) closeDetails()
-      else if (runView && session.terminal) closeRun()
       return
     }
     if (editingText) return
@@ -148,7 +135,6 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
     if (mod && (key === '+' || key === '=')) { event.preventDefault(); void flow.zoomIn({ duration: 200 }); return }
     if (mod && key === '-') { event.preventDefault(); void flow.zoomOut({ duration: 200 }); return }
     if (event.altKey && mod && optionLetter(event, 'l')) { event.preventDefault(); organize(); return }
-    if (layersVisible && key === 'l' && !mod && !event.altKey) { event.preventDefault(); setSolo((current) => (current === 'both' ? 'configured' : current === 'configured' ? 'observed' : 'both')); return }
     if ((event.key === 'Delete' || event.key === 'Backspace') && editable) {
       const selectedNodeIds = doc.nodes.filter((node) => node.selected).map((node) => node.id)
       const selectedEdgeIds = doc.edges.filter((edge) => edge.selected).map((edge) => edge.id)
@@ -164,12 +150,6 @@ function handleWorkspaceKey(event: KeyboardEvent, context: WorkspaceShortcutCont
           if (edge) removeCapabilityEdge(edge.from, edge.to)
         }
       } else if (capabilities.length === 0 && selectedEdgeIds.length > 0) doc.onEdgesChange(selectedEdgeIds.map((id) => ({ id, type: 'remove' as const })))
-      return
-    }
-    if (runView && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && session.lastSeq > 0) {
-      event.preventDefault()
-      const position = session.cursor === null ? session.lastSeq : session.cursor
-      session.setCursor(event.key === 'ArrowLeft' ? Math.max(0, position - 1) : position + 1)
       return
     }
     // Tab walks the agents only while the canvas itself has focus; everywhere else it must keep

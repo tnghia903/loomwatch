@@ -1,22 +1,17 @@
 /* ---------------------------------------------------------------------------
-   ONE CANVAS ANATOMY — Build and Run ("Full trace") draw the same team, so they
-   draw the same cards. `.build-graph` is set on the shell by both surfaces and
-   carries everything that is about the graph rather than the page around it;
-   `.build-workspace` keeps only Build's own layout.
-
-   A run adds rows under the identity row it shares with Build: the projected
-   task state and the routes into this agent's evidence and packet.
+   CANVAS CARD ANATOMY — the Workflow canvas's agent cards. `.build-graph` is set
+   on the shell and carries everything that is about the graph rather than the
+   page around it; `.build-workspace` keeps only Build's own layout.
    --------------------------------------------------------------------------- */
 
-/* The identity row is the whole card when there is no run, so an agent card with
-   no runtime must render exactly as it did before this wrapper existed. */
+/* The identity row is the whole of an agent's card. */
 .build-node-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .build-node-row { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .build-node-row > div { flex: 1; min-width: 0; }
 
-.build-node.has-run, .build-node.kind-operator { width: 248px; min-height: 88px; align-items: stretch; }
+.build-node.kind-operator { width: 248px; min-height: 88px; align-items: stretch; }
 
-/* Owner, state and the sentence the projection recorded for this stage. */
+/* What a review stop pauses for, under its identity row. */
 .build-node-task {
   display: flex; align-items: center; gap: 6px; min-width: 0;
   margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--color-hairline);
@@ -24,14 +19,6 @@
 }
 .build-node-task b { flex: none; color: var(--color-ink); font: 600 10px/14px var(--font-sans); letter-spacing: .065em; text-transform: uppercase; }
 .build-node-task .task-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-
-/* TNG89 §15.2.3: folded evidence and "what it was given", on the card the operator placed. */
-.build-node-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; margin-top: 8px; }
-.build-node-chips .handover-chip, .build-node-chips .mem-chip { height: 18px; margin-top: 0; padding: 0 7px; font: 400 11px/18px var(--font-sans); }
-.build-node-chips .handover-chip svg { flex: none; }
-
-.build-node-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 9px; color: var(--color-ink-3); font: 400 11px/14px var(--font-mono); }
-.build-node-meta .model { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Pipeline ordinal, outside the card as on every other node that carries one. */
 .build-node .step {
@@ -41,20 +28,10 @@
   color: var(--color-ink-2); font: 600 10px/1 var(--font-sans);
 }
 
-/* Status owns the perimeter only while a run is shown; validity owns it in Build. */
-.build-node.has-run.st-starting, .build-node.has-run.st-running { border-color: var(--color-live); }
-.build-node.has-run.st-succeeded { border-color: color-mix(in srgb, var(--color-ok) 60%, transparent); }
-.build-node.has-run.st-failed { border-color: var(--color-alert); }
-.build-node.has-run.st-waiting { border-color: var(--color-halt); }
-.build-node.has-run.st-stopped { border-color: var(--color-halt); border-style: dashed; }
-.build-node.has-run.selected { border-color: var(--color-accent); }
-
-/* A review stop is a person, not a process: gold perimeter, a question, and the way to answer. */
+/* A review stop is a person, not a process: gold perimeter and the decision it pauses for. */
 .build-node.kind-operator { border-color: var(--color-accent); }
 .build-node.kind-operator .build-node-icon { color: var(--color-accent); }
 .build-node.kind-operator small { white-space: normal; overflow: visible; }
-.build-node-answer.btn { height: 26px; margin-top: 10px; padding: 0 10px; font-size: 10px; align-self: flex-start; }
 
-/* Run-only nodes keep their own anatomy — an attempt, its evidence and the answer it produced
-   have no Build counterpart — but they sit on this canvas, so they take its corner radius. */
-.build-graph .rt, .build-graph .activity-ent, .build-graph .prior-branch { border-radius: 7px; }
+/* The Prompt node keeps its own anatomy, but it sits on this canvas, so it takes its corner radius. */
+.build-graph .rt { border-radius: 7px; }

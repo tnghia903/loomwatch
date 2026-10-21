@@ -173,15 +173,11 @@
   --lw-node-border:      var(--color-hairline);
   --lw-node-border-hover: color-mix(in srgb, var(--color-ink-3) 40%, transparent);
   --lw-node-ring:        var(--color-accent);
-  --lw-node-live:        var(--color-live);
   --lw-node-name:        var(--color-ink);
   --lw-node-role:        var(--color-ink-2);
   --lw-node-meta:        var(--color-ink-3);
 
   --lw-edge-warp:        var(--color-warp);
-  --lw-edge-weft:        var(--color-accent);
-  --lw-edge-weft-aged:   var(--color-accent-dim);
-  --lw-edge-anomaly:     var(--color-alert);
   --lw-handle-dormant:   var(--color-warp);
   --lw-handle-live:      var(--color-accent);
 

@@ -2,9 +2,8 @@
    Workspace chrome layering.
 
    The header bar (`.workspace-chrome`) is 64 px tall and owns the top edge. Floating panels used
-   to start at the panel inset and slide underneath or over it: in the full trace the Library hid
-   the brand and the team name, and the replay strip sat on top of the workspace menu. Everything
-   that floats now starts below the header.
+   to start at the panel inset and slide underneath or over it, hiding the brand and the team name.
+   Everything that floats now starts below the header.
    =========================================================================== */
 
 .lw-shell { --lw-header-h: 64px; --lw-below-header: calc(var(--lw-header-h) + 12px); }
@@ -16,15 +15,6 @@
    never scrolls sideways — a long URL used to widen its content and show the record clipped. */
 .lw-shell { --lw-panel-top: var(--lw-below-header); }
 .lw-shell .panel.right.top { overflow-x: hidden; overflow-wrap: anywhere; }
-
-/* The replay strip belongs to the run, not to the header: centre it under the view tabs. */
-.lw-shell .workspace-chrome > .life-strip {
-  position: absolute; top: var(--lw-below-header); left: 50%; transform: translateX(-50%);
-  max-width: calc(100vw - var(--lw-rail-w, 0px) - 2 * var(--lw-library-w) - 64px); flex-wrap: nowrap;
-}
-@media (max-width: 1100px) {
-  .lw-shell .workspace-chrome > .life-strip { max-width: calc(100vw - 32px); flex-wrap: wrap; }
-}
 
 /* Phones: the Build library overlays the canvas instead of squeezing it to half the width. */
 @media (max-width: 767px) {

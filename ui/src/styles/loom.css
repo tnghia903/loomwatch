@@ -92,8 +92,6 @@ span.story-schedule { cursor: default; }
 .lw-canvas[data-depth="story"] .build-node .node-kind,
 .lw-canvas[data-depth="story"] .build-node small,
 .lw-canvas[data-depth="story"] .build-node .build-node-task,
-.lw-canvas[data-depth="story"] .build-node .build-node-chips,
-.lw-canvas[data-depth="story"] .build-node .build-node-meta,
 .lw-canvas[data-depth="story"] .build-node .build-node-issue { display: none; }
 .lw-canvas[data-depth="story"] .build-node-icon { width: 46px; height: 46px; border-radius: 10px; }
 .lw-canvas[data-depth="story"] .build-node-icon svg { width: 25px; height: 25px; }
@@ -102,7 +100,6 @@ span.story-schedule { cursor: default; }
 .lw-canvas[data-depth="story"] .build-node.st-starting .depth-story-line { color: var(--color-live); }
 .lw-canvas[data-depth="story"] .build-node.st-succeeded .depth-story-line { color: var(--color-ok); }
 .lw-canvas[data-depth="story"] .build-node.st-failed .depth-story-line { color: var(--color-alert); }
-.lw-canvas[data-depth="story"] .build-node.kind-operator .build-node-answer { font-size: 18px; min-height: 40px; }
 /* The other cards keep their content and just speak up. */
 .lw-canvas[data-depth="story"] .build-node:not(.kind-harness):not(.kind-operator) strong { font-size: 22px; }
 .lw-canvas[data-depth="story"] .schedule-node .t-node { font-size: 22px; line-height: 1.15; }
@@ -541,11 +538,11 @@ span.story-schedule { cursor: default; }
    cards at their other ends stay as they are; every other card steps behind a veil the colour of
    the canvas, which keeps it opaque, so no line shows through it, and every other line and word
    fades back. The glint moves by stroke-dashoffset, a paint-only property, and only once: an
-   opacity, filter or transform animation in the canvas blurs it in Safari. A live line keeps its
-   blue and a run's gold shuttle its own weight. */
+   opacity, filter or transform animation in the canvas blurs it in Safari. */
 .lw-canvas { --lw-thread-glint: color-mix(in srgb, var(--color-accent) 30%, #FFFFFF); }
 [data-theme="dark"] .lw-canvas { --lw-thread-glint: #FFF8E6; }
-.lw-canvas .react-flow__edge.linked .react-flow__edge-path:not(.prov-live, .shuttle) { stroke: var(--color-accent); stroke-opacity: 1; stroke-width: 2; }
+/* `:not(.faded)` matches every line here; it only keeps this rule as specific as it has always been. */
+.lw-canvas .react-flow__edge.linked .react-flow__edge-path:not(.faded) { stroke: var(--color-accent); stroke-opacity: 1; stroke-width: 2; }
 /* The glint's path is one unit long (pathLength), so its dash is a fraction of the line, and it
    starts just before the line and ends just past it: at rest it draws nothing. */
 .lw-canvas .react-flow__edge-thread { fill: none; stroke: var(--lw-thread-glint); stroke-width: 2; stroke-dasharray: .16 1.16; stroke-dashoffset: -1; filter: var(--bloom); pointer-events: none; }
@@ -567,18 +564,12 @@ span.story-schedule { cursor: default; }
 }
 .lw-canvas .react-flow__node .react-flow__handle.card-catch.connectable.connectingto.valid { box-shadow: 0 0 0 1px var(--color-accent), 0 0 0 3px color-mix(in srgb, var(--color-accent) 45%, transparent); }
 
-/* A drop's word sits beside its line; an arc's word sits on its crest. */
+/* A drop's word sits beside its line. */
 .prov-label.beside { transform: translate(10px, -50%); }
 .build-graph .prov-label.beside { background: transparent; padding-left: 0; }
-.prov-label.arc-label { opacity: .85; }
-/* The run → output frame arc is context, not a step: the quietest line on the canvas. */
-.react-flow__edge-path.arc-edge { stroke-dasharray: 2 5; opacity: .55; }
 /* A tree branch's word sits left of the trunk, level with its branch. */
 .prov-label.before { transform: translate(-100%, -50%); }
 .build-graph .prov-label.before { background: transparent; padding-right: 0; }
-/* Evidence cards are laid out at DOCK.evidenceH (lib/runs/runOverlay.ts); the card keeps exactly
-   that height so the column spacing can never be shorter than the cards it spaces. */
-.lw-canvas .activity-ent { height: 90px; min-height: 90px; overflow: hidden; }
 
 /* ---------- agent marks (lib/story/mark.ts) ----------
    Gold weft over graphite warp is the agent's identity. Blue appears only while the record says the

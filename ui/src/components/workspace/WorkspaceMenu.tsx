@@ -19,8 +19,7 @@ interface WorkspaceMenuProps {
 /**
  * The ☰ menu, in the same corner of Home, a team's page and an agent's page. On a team's page it
  * holds only what has no other control there (ADR 0043): All teams is the brand, Organize and its
- * undo are in the view bar, the full trace is in the run's heading, and a routine runs from its
- * schedule. Home also links some of the same places in context (All agents, the guide). Past work is in each team's chat (ADR 0051), which retired the run history list. Its open state lives here rather than in the workspace, so opening and closing it
+ * undo are in the view bar, and a routine runs from its schedule. Home also links some of the same places in context (All agents, the guide). Past work is in each team's chat (ADR 0051), which retired the run history list. Its open state lives here rather than in the workspace, so opening and closing it
  * re-renders the menu alone.
  */
 export function WorkspaceMenu({ runView = false, onMemory, more = [], screen }: WorkspaceMenuProps) {

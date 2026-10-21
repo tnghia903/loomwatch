@@ -16,11 +16,8 @@ export interface CanvasActions {
   mode: ExecutionMode
   stepById: ReadonlyMap<string, PipelineStep>
   nodeNames: ReadonlyMap<string, string>
-  /** TNG-113: an evidence card opens the activity panel; the output node toggles provenance. */
-  inspectEvidence?: (id: string | null) => void
+  /** Details' "What was recorded": every record behind the run, in the provenance panel. */
   toggleProvenance?: () => void
-  /** §3.4: `[ Reuse ]` on a failed response node copies the run's prompt back into the composer. */
-  reusePrompt?: () => void
   /** Opens what an agent was given: the handover it received and the memory packet it was supplied. */
   inspectHandover?: (agentId: string | null) => void
   /**
@@ -28,8 +25,6 @@ export interface CanvasActions {
    * focuses the one editor rather than opening another.
    */
   focusComposer?: () => void
-  /** §15.2.3: fans one agent's evidence beside it, folding whichever agent was fanned before. */
-  toggleEvidenceFan?: (agentId: string) => void
   /** Brief entries this team supplies, so a card only claims "reads the brief" when there is one. */
   briefCount?: number
   /** The team-level `memory.deliverAs`, which a per-agent override may narrow. */

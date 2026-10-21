@@ -79,7 +79,6 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .delivery-response { border:1px solid var(--color-hairline); border-radius:7px; padding:28px; background:var(--color-panel); font-size:15px; line-height:1.65; white-space:normal; }
 .delivery-response h1 { font-family:var(--font-serif); font-size:39px; line-height:1.13; letter-spacing:-1px; font-weight:500; margin-top:0; padding-bottom:23px; border-bottom:1px solid var(--color-hairline); }
 .delivery-response h2,.delivery-response h3 { font-family:var(--font-serif); font-size:20px; font-weight:500; }
-.delivery-shown .lw-composer { left:calc(60.7% + 30px); right:30px; bottom:21px; width:auto; transform:none; border:1px solid var(--color-hairline); border-radius:8px; }
 .delivery-shown .lw-composer-notices { left:calc(60.7% + 30px); right:30px; width:auto; transform:none; bottom:calc(var(--lw-composer-height,150px) + 33px); }
 .build-workspace-heading { position:absolute; top:64px; left:0; right:0; min-height:112px; padding:24px 30px; display:flex; align-items:center; justify-content:space-between; gap:18px; border-bottom:1px solid var(--color-hairline); background:var(--workspace-glass); z-index:30; }
 .build-workspace-heading h1 { display:inline; font-size:28px; font-weight:620; letter-spacing:-.6px; }
@@ -88,8 +87,6 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
 .build-workspace-heading .build-undelivered { display:flex; align-items:center; gap:10px; flex-wrap:wrap; color:var(--color-ink-2); }
 .build-workspace-actions { display:flex; gap:8px; }
 .build-workspace .lw-canvas { top:176px; }
-.build-workspace .story-output { border:1px solid var(--color-ok); background:var(--workspace-glass); border-radius:7px; }
-.build-workspace .story-output .rt-body { font-size:12px; font-style:normal; }
 .build-workspace .build-outcome { display:none; }
 /* Docked under the Build heading, so its height is whatever is left beneath it. The shared
    `.lw-shell .lw-inspector` max-height measures from the top inset and keeps a composer clear
@@ -115,7 +112,7 @@ button.delivery-output-badge.tone-look:hover { background:var(--color-accent-tin
  .lw-shell .workspace-view-tabs button { min-width:60px; }
  .delivery-shown .delivery-lane { display:flex; flex-direction:column; overflow:auto; bottom:calc(var(--lw-composer-height,150px) + 28px); }
  .delivery-shown .delivery-work { overflow:visible; }
- .delivery-shown .lw-composer,.delivery-shown .lw-composer-notices { left:14px; right:14px; width:auto; }
+ .delivery-shown .lw-composer-notices { left:14px; right:14px; width:auto; }
  .build-workspace-heading { padding:18px; flex-wrap:wrap; }
  .build-workspace-heading h1 { font-size:24px; }
  .build-workspace .lw-canvas { top:220px; }

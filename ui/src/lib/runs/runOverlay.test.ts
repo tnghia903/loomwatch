@@ -1,27 +1,7 @@
-// TNG89_INTERACTION.md §15 acceptance rows 40–43.
-//
-// This file replaces `storyLayout.test.ts`. Two of that file's three cases pinned the causal
-// column §15 retires — "keeps a forty-event agent to two rows" and "moves only an overridden
-// agent … while keeping story anchors stable" both asserted a layout function that positioned
-// every agent, which no longer exists: agents are at `doc.nodes` positions in every state. Its
-// first case, the evidence fold, is kept verbatim below because that contract did not change.
+// TNG89_INTERACTION.md §15 acceptance rows 40–42.
 import { describe, expect, it } from 'vitest'
 
-import { causalOrder, DOCK, dockAnchors, fanEvidence, helperPositions, historicalRunPositions, visibleEvidence } from './runOverlay'
-
-describe('the fold', () => {
-  it('shows up to eight cards per agent and folds the rest into one overflow slot', () => {
-    const ids = Array.from({ length: 30 }, (_, index) => `e${index}`)
-    expect(visibleEvidence(ids.slice(0, 8))).toEqual({ shown: ids.slice(0, 8), hidden: 0 })
-    expect(visibleEvidence(ids)).toEqual({ shown: ids.slice(0, 7), hidden: 23 })
-  })
-
-  it('folding is a disclosure with a count, so the hidden cards are still counted (row 43)', () => {
-    const ids = Array.from({ length: 40 }, (_, index) => `e${index}`)
-    const { shown, hidden } = visibleEvidence(ids)
-    expect(shown.length + hidden).toBe(ids.length)
-  })
-})
+import { causalOrder, DOCK, dockAnchors, helperPositions, historicalRunPositions } from './runOverlay'
 
 describe('the docked anchors', () => {
   it('docks the Prompt left of the entrypoint and the Output right of the terminal stage (row 42)', () => {
@@ -38,11 +18,9 @@ describe('the docked anchors', () => {
     expect(anchors.output.x).toBeGreaterThan(terminal.x)
   })
 
-  it('keeps the Run card under the Prompt and the schedule card above it, in one dock column', () => {
+  it('keeps the schedule card above the Prompt, in one dock column', () => {
     const anchors = dockAnchors({ x: 0, y: 0 }, { x: 600, y: 0 })
-    expect(anchors.run.x).toBe(anchors.prompt.x)
     expect(anchors.schedule.x).toBe(anchors.prompt.x)
-    expect(anchors.run.y).toBeGreaterThanOrEqual(anchors.prompt.y + DOCK.promptH + 32)
     expect(anchors.schedule.y).toBeLessThan(anchors.prompt.y)
   })
 
@@ -58,30 +36,6 @@ describe('the docked anchors', () => {
     const anchors = dockAnchors(entry, entry)
     expect(anchors.prompt.x).toBe(entry.x - DOCK.gap)
     expect(anchors.output.x).toBe(entry.x + DOCK.gap)
-  })
-})
-
-describe('the evidence fan', () => {
-  it('derives every card from its agent, so the fan cannot displace a configured node (row 40)', () => {
-    const ids = ['a', 'b', 'c']
-    const base = fanEvidence({ x: 100, y: 100 }, ids)
-    const moved = fanEvidence({ x: 340, y: 180 }, ids)
-
-    for (const id of ids) {
-      expect(moved.shown[id]).toEqual({ x: base.shown[id].x + 240, y: base.shown[id].y + 80 })
-      // Every card sits below its agent card, clear of the left-to-right spine.
-      expect(base.shown[id].y).toBeGreaterThan(100)
-    }
-  })
-
-  it('puts the overflow card after the visible ones, and only when there is overflow', () => {
-    expect(fanEvidence({ x: 0, y: 0 }, ['one']).more).toBeNull()
-    const ids = Array.from({ length: 40 }, (_, index) => `e${index}`)
-    const fan = fanEvidence({ x: 0, y: 0 }, ids)
-    expect(Object.keys(fan.shown)).toHaveLength(DOCK.maxVisible - 1)
-    expect(fan.more?.hidden).toBe(40 - (DOCK.maxVisible - 1))
-    expect(fan.more!.y).toBeGreaterThanOrEqual(fan.shown.e0.y)
-    expect(fan.shown.e39).toBeUndefined()
   })
 })
 

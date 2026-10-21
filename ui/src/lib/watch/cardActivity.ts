@@ -6,7 +6,7 @@ import { eventText, type Evidence, type RunEvent } from './events'
 import { thoughtLine, workPhase } from './workPhase'
 
 /**
- * What an agent's card on the Full trace shows of its work: what its figure acts out, the one thing
+ * What an agent's card in a run's Details shows of its work: what its figure acts out, the one thing
  * it is doing now by name, and a tray of everything it has used so far, one mark per kind. Its web
  * marks open the pages it read and what it searched. All of it comes from the run's own record, up
  * to the replay cursor, so a finished run can be scrubbed through as it happened.

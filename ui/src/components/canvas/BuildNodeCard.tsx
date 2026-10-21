@@ -1,22 +1,20 @@
 import { useStore, type NodeProps } from '@xyflow/react'
 import { createElement } from 'react'
-import { Bot, Box, Circle, FileText, Folder, Inbox, NotebookText, Puzzle, Wrench } from 'lucide-react'
+import { Bot, Box, Circle, FileText, Folder, NotebookText, Puzzle, Wrench } from 'lucide-react'
 import { KIND_LABEL } from '../../lib/composer-layout/types'
 import { chosenIsFile } from '../../lib/knowledge/chosen'
 import { middleTruncate } from '../../lib/format'
 import type { OutputNode } from '../../lib/runs/graph'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
-import type { AgentConfig, AgentStatus, CapabilityRef } from '../../lib/team-file/types'
+import type { AgentConfig, CapabilityRef } from '../../lib/team-file/types'
 import { modelLabelForAgent, splitModelSelector } from '../../lib/models'
 import { allowedSummary } from '../../lib/team-file/allow'
 import { workFolder } from '../../lib/team-file/workFolder'
-import { StatusGlyph } from '../ui/glyphs'
 import { useCanvasActions } from './CanvasActionsContext'
 import { CardPorts } from './CardPorts'
 import type { CapabilityNode } from './capabilityNode'
 import { roleGlyph } from './roleGlyph'
 import { depthForZoom, storyLine } from '../../lib/story/depth'
-import { markLabel, markState } from '../../lib/story/mark'
 import { effortWord } from '../../lib/ai/efforts'
 import { FigureStill } from '../agents/FigureStill'
 import { useAgentFigure } from '../agents/figureContext'
@@ -40,50 +38,38 @@ function cx(...classes: Array<string | false | null | undefined>): string {
 }
 
 /**
- * The one agent card, drawn in the Build canvas anatomy: icon, model, name, role.
- *
- * The Run canvas ("Full trace") draws the same card rather than a second one — a run shows the
- * team the operator composed, so it must be recognisably the same object. What a run adds is
- * layered under the identity row: the projected task state and the routes into this
- * agent's evidence and its context packet. Nothing here is ever written back to the team file.
+ * The one agent card, drawn in the Workflow canvas anatomy: icon, model, name, role. A run is not
+ * drawn here: what each agent did is read in the team's chat and its Details.
  */
 export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
-  const { editable = true, stepById, inspectHandover, toggleEvidenceFan, dropTargetId } = useCanvasActions()
-  const { agent, runtime } = data
+  const { editable = true, stepById, dropTargetId } = useCanvasActions()
+  const { agent } = data
   // It wears the figure it wears in Your agents, so the same agent looks the same everywhere.
   const figure = useAgentFigure(agent)
   const step = stepById.get(id)
   // Semantic zoom: the extra Story and Trace content exists only at that depth, so nothing hidden
   // is ever announced twice (lib/story/depth.ts).
   const depth = useStore((store) => depthForZoom(store.transform[2]))
-  // Paused on a permission request it put to you (ADR 0040) is waiting, as a review stop is.
-  const status: AgentStatus = data.waiting || (runtime?.status === 'running' && runtime.taskState === 'WAITING') ? 'waiting' : runtime?.status ?? agent.status ?? 'idle'
 
-  // A review stop is a person, not a process: no harness, no model — a question and
-  // the way to answer it (docs/TEAM_MEMORY.md "operator as a node").
-  if (agent.kind === 'operator' || data.waiting) {
+  // A review stop is a person, not a process: no harness, no model — the decision it pauses
+  // for (docs/TEAM_MEMORY.md "operator as a node").
+  if (agent.kind === 'operator') {
+    const status = agent.status ?? 'idle'
     return (
-      <article className={cx('build-node kind-operator', `st-${status}`, selected && 'selected')} aria-label={`${agent.name}, ${data.waiting?.question ?? agent.role}`}>
+      <article className={cx('build-node kind-operator', `st-${status}`, selected && 'selected')} aria-label={`${agent.name}, ${agent.role}`}>
         {step && <span className="step" aria-hidden="true">{step.step}</span>}
         <div className="build-node-body">
           <div className="build-node-row">
-            <span className="build-node-icon mark-holder"><AgentMark id={agent.id} name="You" operator state={data.waiting ? 'waiting' : markState(runtime)} animate={runtime?.watching === true || Boolean(data.waiting)} /></span>
+            <span className="build-node-icon mark-holder"><AgentMark id={agent.id} name="You" operator /></span>
             <div>
               <span className="node-kind">You</span>
-              <strong className="node-name">{agent.kind === 'operator' && agent.name !== 'You' ? `You · ${agent.name}` : agent.name}</strong>
-              <small title={data.waiting?.question ?? agent.role}>{data.waiting?.question ?? agent.role}</small>
-              {depth === 'story' && <p className="depth-story-line">{storyLine(agent, data.waiting ? { status: 'waiting', task: '' } : runtime)}</p>}
+              <strong className="node-name">{agent.name !== 'You' ? `You · ${agent.name}` : agent.name}</strong>
+              <small title={agent.role}>{agent.role}</small>
+              {depth === 'story' && <p className="depth-story-line">{storyLine(agent)}</p>}
             </div>
           </div>
-          {data.waiting ? (
-            <>
-              <span className="build-node-task"><b>Waiting</b><span className="task-text">since {new Date(data.waiting.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {data.waiting.parkNote}</span></span>
-              <button type="button" className="btn btn-primary nodrag build-node-answer" onClick={(event) => { event.stopPropagation(); data.onAnswer?.() }}>Answer</button>
-            </>
-          ) : (
-            <span className="build-node-task"><span className="task-text">{status === 'succeeded' ? 'Decision received' : 'Pauses for your decision'}</span></span>
-          )}
-          {data.instructionNote && !runtime && !data.waiting && <p className="build-node-instruction-note">{data.instructionNote}</p>}
+          <span className="build-node-task"><span className="task-text">{status === 'succeeded' ? 'Decision received' : 'Pauses for your decision'}</span></span>
+          {data.instructionNote && <p className="build-node-instruction-note">{data.instructionNote}</p>}
         </div>
         <CardPorts connectIn={editable} connectOut={editable} />
       </article>
@@ -91,8 +77,6 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   }
 
   const model = data.modelLabel ?? modelLabelForAgent(agent)
-  const eventCount = runtime?.eventCount ?? 0
-  const givenNotes = runtime?.givenNotes ?? 0
   // The job the instructions describe, when they name one; a generic agent keeps the robot.
   const named = roleGlyph(`${agent.name} ${agent.role}`)
   // A folder chosen for it, which nothing connected changes (ADR 0042, lib/team-file/workFolder.ts).
@@ -100,63 +84,17 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
   const chosenFolder = folder.kind === 'chosen' ? folder : null
   return (
     <article
-      className={cx('build-node kind-harness', runtime && 'has-run', runtime && `st-${status}`, selected && 'selected', dropTargetId === id && 'drop-target')}
-      // While a run is shown the node wrapper already carries the run's own accessible name,
-      // so labelling the card too would announce the same agent twice.
-      aria-label={runtime ? undefined : [agent.name, model, agent.role, data.instructionNote].filter(Boolean).join(', ')}
+      className={cx('build-node kind-harness', selected && 'selected', dropTargetId === id && 'drop-target')}
+      aria-label={[agent.name, model, agent.role, data.instructionNote].filter(Boolean).join(', ')}
     >
       {step && <span className="step" aria-hidden="true">{step.step}</span>}
       <div className="build-node-body">
         <div className="build-node-row">
           <span className="build-node-icon figure-holder"><FigureStill className="build-node-figure" figure={figure} alt="" draggable={false} /><span className="mark-badge" aria-hidden="true">{createElement(named === Circle ? Bot : named, { size: 9 })}</span></span>
-          <div><span className="node-kind">{model}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent, runtime)}</p>}</div>
-          {runtime && <StatusGlyph status={status} />}
+          <div><span className="node-kind">{model}</span><strong className="node-name">{agent.name}</strong><small title={agent.role}>{agent.role || 'Select to set a role'}</small>{depth === 'story' && <p className="depth-story-line">{storyLine(agent)}</p>}</div>
         </div>
         {/* LoomWatch changed these instructions, or could not, after a removal (ADR 0059). */}
-        {data.instructionNote && !runtime && <p className="build-node-instruction-note">{data.instructionNote}</p>}
-        {runtime && (
-          <>
-            <span className="build-node-task"><b>{runtime.ownerLabel} · {markLabel(markState(runtime), runtime.openCalls)}</b><span className="task-text">{runtime.task}</span></span>
-            {(eventCount > 0 || givenNotes > 0 || runtime.received || runtime.hasPacket) && (
-              <span className="build-node-chips">
-                {/* Supplied, counted from this agent's own stored packet. Never "knows" or "has read". */}
-                {givenNotes > 0 && (
-                  <span className="mem-chip" title="Notebook entries in this agent's opening prompt. Supplied is not followed — open “What it was given” for the reason each was selected.">
-                    given {givenNotes} note{givenNotes === 1 ? '' : 's'}
-                  </span>
-                )}
-                {/* §15.2.3: evidence folds to a count here and fans for one agent at a time. */}
-                {eventCount > 0 && toggleEvidenceFan && (
-                  <button
-                    type="button"
-                    className={cx('nodrag handover-chip', runtime.fanned && 'on')}
-                    aria-expanded={runtime.fanned === true}
-                    aria-label={`${eventCount} event${eventCount === 1 ? '' : 's'} from ${runtime.ownerLabel}; ${runtime.fanned ? 'fold' : 'fan'} its evidence`}
-                    onClick={(event) => { event.stopPropagation(); toggleEvidenceFan(agent.id) }}
-                  >
-                    {eventCount} event{eventCount === 1 ? '' : 's'}{runtime.openCalls ? ' · open' : ''}
-                  </button>
-                )}
-                {/* The packet inspector opens for any agent the run stored a packet for, not only for
-                    a stage that was handed something — the entrypoint has a packet and had no predecessor. */}
-                {(runtime.received || runtime.hasPacket) && inspectHandover && (
-                  <button
-                    type="button"
-                    className="nodrag handover-chip"
-                    title="Show what this agent was supplied at the start of its session"
-                    onClick={(event) => { event.stopPropagation(); inspectHandover(agent.id) }}
-                  >
-                    <Inbox size={11} aria-hidden="true" />
-                    What it was given
-                  </button>
-                )}
-              </span>
-            )}
-            <span className="build-node-meta">
-              <span className="model" dir="ltr">{agent.model ? middleTruncate(agent.model) : '—'}</span>
-            </span>
-          </>
-        )}
+        {data.instructionNote && <p className="build-node-instruction-note">{data.instructionNote}</p>}
         {/* Trace depth: what the agent panel would tell, without opening it (ADR 0039): its model,
             what it may do without asking, what it is given and a folder chosen for it. The id stays in
             the panel's header and the command in the team file. Hidden by CSS at the other depths,
@@ -166,7 +104,6 @@ export function BuildAgentCard({ id, data, selected }: NodeProps<AgentNode>) {
           <dt>Allowed</dt><dd>{allowedSummary(agent)}</dd>
           <dt>Given</dt><dd>{givenLine(agent)}</dd>
           {chosenFolder && <><dt>Works in</dt><dd title={chosenFolder.path}>{chosenFolder.name}</dd></>}
-          {runtime && <><dt>Events</dt><dd>{eventCount}{runtime.openCalls ? ` · ${runtime.openCalls} still open` : ''}</dd></>}
         </dl>}
       </div>
       {data.isEntrypoint && <span className="primary-chip">Start</span>}

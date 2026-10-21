@@ -16,11 +16,7 @@
 .delivery-response { font-size:16px; padding:34px 36px; }
 .delivery-response h2 { font-size:24px; }
 .delivery-heading h1 { display:flex; align-items:center; gap:14px; }
-.delivery-heading>.btn { min-height:42px; padding-inline:17px; font-size:12px; }
-.delivery-shown .prototype-composer { min-height:50px!important; height:auto; padding:8px 10px 8px 15px; display:flex; align-items:center; flex-wrap:nowrap; gap:12px; border-radius:6px; }
 .prototype-composer>.mode-chip,.prototype-composer .comp-act>.iconbtn:not(.prototype-send),.prototype-composer .comp-note:not(.err):not(.block) { display:none; }
-.delivery-shown .lw-composer.prototype-composer .comp-mid { min-width:0; min-height:0; flex:1; order:0; padding:0; }
-.delivery-shown .lw-composer.prototype-composer .comp-note:not(.err):not(.block) { display:none; }
 .prototype-composer .comp-mid textarea { padding:5px 0; min-height:24px; font-size:12px; }
 .prototype-composer .comp-act { margin:0; padding:0; border:0; }
 .composer-message-icon { color:var(--quiet); }

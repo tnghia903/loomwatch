@@ -335,10 +335,11 @@ Each agent in a run gets a `TeamBusConnection` that says which agent it is. The 
 bus's tools beside the agent's built-in ones. A call goes from `TeamBusConnection::call` to
 `TeamBus::call_tool` as a direct function call, with no network in between. Authorship, scope and
 lineage come from the connection, never from a tool argument, so an agent cannot act as another.
-The bus records each call itself, as a `Team Bus: <tool>` tool call, and the observed edges are
-drawn from those records.
+The bus records each call itself, as a `Team Bus: <tool>` tool call. The team's chat shows those
+records as what the agents said to each other, and Details' timeline marks them; they are not
+drawn on the canvas.
 
-| Tool | Meaning | Edge drawn |
+| Tool | Meaning | Recorded as |
 |---|---|---|
 | `roster()` | Who's on the team, their roles, models and live status | none — discovery |
 | `dispatch(agent, task)` | Fire-and-forget assignment (team mode only) | A → B · delegation |
@@ -397,7 +398,7 @@ Which mode applies is decided by whether the user drew edges between nodes.
 | Orchestrator | The backend | The entrypoint agent |
 | Execution | Topological order, deterministic | Decided at runtime |
 | Team Bus | Restricted — sequencing isn't the agent's call | Fully exposed |
-| Observed edges | *Verify* the design; deviation is an anomaly | *Discover* what emerged |
+| Recorded delegations | *Verify* the design | *Discover* what emerged |
 
 Drawn edges fix the macro sequence, but an agent may still recruit helpers within its own step,
 with a per-node lock available to forbid it.
@@ -412,8 +413,9 @@ with a per-node lock available to forbid it.
 - Dragging a job or an agent onto the canvas instantiates an agent node. Its name, role, model
   (from the OpenRouter catalogue), working folder and what it may do without asking are set on
   the node.
-- **Two edge layers render together:** configured edges (solid, drawn by the user, real
-  constraints) and observed edges (animated, derived from Team Bus events).
+- **The canvas draws configured edges** (solid, drawn by the user, real constraints). What the
+  agents asked and handed each other in a run is read in the team's chat and its Details, not
+  drawn here.
 - **The canvas is a visual editor over YAML on disk.** Team design stays diffable and
   reviewable. The canvas is not the source of truth; the files are. See
   [TEAM_CONFIG.md](TEAM_CONFIG.md).

@@ -233,19 +233,9 @@ export function useRunController({ doc, session, history, activeRunId, record, w
     await launch(prompt, null, doc.currentRevision(), { fromCheckpointId: checkpointId })
   }, [composerText, doc, launch, projectionPrompt, record?.prompt, starting])
 
-  // §3.4: `[ Reuse ]` on the failed response node copies the run's original prompt back
-  // into the composer — the prompt survives on the Prompt node (§12.2), so this is a
-  // missing route, not lost data.
-  const reusePrompt = useCallback(() => {
-    const prompt = record?.prompt ?? projectionPrompt ?? ''
-    if (!prompt) return
-    setComposerText(prompt)
-    document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus()
-  }, [record?.prompt, projectionPrompt])
-
   return {
     composerText, setComposerText, pendingPrompt, starting, startError, setStartError, answerSending, retryOf,
-    submit, stop, sendAnswer, replyToAgent, retry, followUp, startFromCheckpoint, reusePrompt,
+    submit, stop, sendAnswer, replyToAgent, retry, followUp, startFromCheckpoint,
     teamReview: heldStart?.review ?? null, trustAndRun, dismissReview,
   }
 }

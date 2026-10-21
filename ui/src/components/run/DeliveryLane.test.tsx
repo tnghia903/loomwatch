@@ -36,11 +36,9 @@ const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
     prompt: 'Research LoomWatch',
     attempt: 15,
     phase: 'succeeded',
-    branch: 'Initial run',
     elapsed: '2m 53s',
     mode: 'replay',
     pipeline: true,
-    onTrace: vi.fn(),
     agents: [
       {
         id: 'designer',
@@ -58,24 +56,12 @@ const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
       },
     ],
     evidenceByAgent: new Map(),
-    ownerLabels: new Map(),
     projection: projectRun([]),
-    selectedEvidenceId: null,
     onInspectEvidence: vi.fn(),
     onSelectAgent: vi.fn(),
     output: {
       text: '# Market report\n\n| Finding | Impact |\n|---|---|\n| Clear results | Faster review |',
-      phase: 'succeeded',
-      phaseText: 'Answered',
       producer: 'designer',
-      producerLabel: 'Designer',
-      mode: 'replay',
-      streaming: false,
-      pending: false,
-      strip: null,
-      compact: false,
-      expanded: false,
-      terminal: true,
     },
     ...overrides,
   }
@@ -102,10 +88,9 @@ describe('Delivery Lane', () => {
     const slip = screen.getByRole('region', { name: 'Run receipt' })
     expect(within(slip).getByRole('heading', { level: 1, name: 'Finished' })).toBeInTheDocument()
     expect(within(slip).getByText('Run 15')).toBeInTheDocument()
-    // ...so the heading above the record says neither again, and keeps only its action.
+    // ...so no heading above the record says either again.
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.queryByText('2m 53s', { selector: '.delivery-took' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Full trace' })).toBeInTheDocument()
   })
   // Option A of the trace sketches: one row from your request to the team's answer. Its ends say
   // where the work starts and ends, not the words again (ADR 0051): those are read in the chat.
@@ -275,8 +260,6 @@ describe('Delivery Lane', () => {
     expect(screen.getByRole('button', { name: 'Inspect claude-design: Given in full' })).toBeInTheDocument()
   })
 
-  // ADR 0043: the receipt's See every event and the answer's own Full trace link did what the
-  // heading's Full trace does, and Request a change only focused the box that is already there.
   // Field report (2026-10-04): a team with no required skill showed "0/0 required loaded" and
   // "Loading evidence and output quality are separate checks.", which told a newcomer nothing.
   it('counts required skills only when the team has some', () => {
@@ -295,11 +278,11 @@ describe('Delivery Lane', () => {
     expect(screen.queryByText(/separate checks/)).toBeNull()
   })
 
-  it('opens the full trace from one button, with no second way to the same place', () => {
-    const { props } = setup()
-    expect(screen.getAllByRole('button', { name: /Full trace|See every event/ })).toHaveLength(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Full trace' }))
-    expect(props.onTrace).toHaveBeenCalledOnce()
+  // The run is read here and in the chat; it is no longer drawn on a canvas of its own.
+  it('offers no full trace, and no second way to what the record already shows', () => {
+    setup()
+    expect(screen.queryByRole('button', { name: /Full trace|See every event/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /What was recorded/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Request a change' })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Inspect handoff/ })).toBeNull()
   })

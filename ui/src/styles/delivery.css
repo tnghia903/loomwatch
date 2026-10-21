@@ -37,23 +37,6 @@
   gap: 16px;
   margin-bottom: 26px;
 }
-.delivery-heading-acts {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-}
-/* A finished run's outcome is stamped on its receipt, so the heading keeps only its actions: a
-   toolbar line over the sheet, not a band holding a button. */
-.delivery-heading.receipted,
-.delivery-shown .delivery-heading.receipted {
-  height: auto;
-  min-height: 0;
-  justify-content: flex-end;
-  padding: 14px 0 0;
-  margin-bottom: 10px;
-  border-bottom: 0;
-}
 .delivery-eyebrow {
   text-transform: uppercase;
   font-size: 11px;
@@ -169,18 +152,6 @@
   background: var(--color-accent-tint);
   box-shadow: inset 0 0 0 1px var(--color-accent);
   color: var(--color-ink);
-}
-.workspace-view-tabs .trace-back {
-  border-left: 1px solid var(--color-hairline);
-  border-radius: 0;
-  font-size: 11px;
-  color: var(--color-accent);
-}
-.delivery-shown .lw-lifecycle {
-  display: none;
-}
-.delivery-shown .lw-composer {
-  max-width: calc(100% - 32px);
 }
 @media (max-width: 1050px) {
   .delivery-work {
@@ -380,19 +351,6 @@
     top: 64px;
     bottom: 0;
   }
-  .delivery-shown .lw-composer {
-    left: 60%;
-    right: 0;
-    bottom: 0;
-    transform: none;
-    width: 40%;
-    max-width: none;
-    border-radius: 0;
-    border-right: 0;
-    border-bottom: 0;
-    background: var(--color-panel-solid);
-    box-shadow: none;
-  }
   .delivery-shown .lw-composer-notices {
     left: 60%;
     right: 0;
@@ -434,7 +392,6 @@
   }
 }
 @media (min-width: 768px) and (max-width: 1050px) {
-  .delivery-shown .lw-composer,
   .delivery-shown .lw-composer-notices {
     left: 52.38%;
     width: 47.62%;
@@ -502,35 +459,6 @@
   .build-outcome {
     display: none;
   }
-}
-
-/* A narrow result column always gives the request its own row. */
-.delivery-shown .lw-composer {
-  flex-wrap: wrap;
-  padding: var(--sp-2);
-  gap: var(--sp-2);
-}
-.delivery-shown .lw-composer .comp-mid {
-  order: -1;
-  flex: 1 0 100%;
-  padding: var(--sp-2);
-  box-sizing: border-box;
-  min-height: 76px;
-}
-.delivery-shown .lw-composer .comp-note {
-  display: block;
-  line-height: 1.4;
-}
-.delivery-shown .lw-composer .mode-chip {
-  min-height: 36px;
-  padding: 0 var(--sp-2);
-  border-right: 0;
-}
-.delivery-shown .lw-composer .comp-act {
-  margin-left: auto;
-  padding: 0;
-  flex-wrap: wrap;
-  max-width: 100%;
 }
 
 .capability-agent-option {
