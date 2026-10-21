@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cascaded } from '../test/cascade'
+import { cascaded, heightOf, PHONE, px } from '../test/cascade'
 import Connections from './Connections'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -82,6 +82,31 @@ describe('Notion is one of the tools (ADR 0070)', () => {
     // With the card held to the section's width, a word with no break in it (an address in a
     // call's description) would run past the card's edge unless it wraps too.
     expect(cascaded(card.querySelector('details ul') as HTMLElement, 'overflow-wrap')).toBe('anywhere')
+  })
+
+  it('keeps the page list usable from the keyboard and on a phone', async () => {
+    daemon({ tools: [notionTool], pages: [page] })
+    render(<Connections />)
+    const card = (await screen.findByRole('list', { name: 'Connected tools' })).querySelector('li') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: 'Choose a page' }))
+    const row = await within(card).findByRole('button', { name: page.title })
+    // The list scrolls, so it cuts off whatever reaches past it, and it has no padding at the
+    // sides: the ring a keyboard user follows has to stay inside the row.
+    row.setAttribute('data-focus-visible', '')
+    const [ring] = (cascaded(row, ['outline', 'outline-width']) ?? '').split(' ')
+    expect(px(ring) + px(cascaded(row, 'outline-offset'))).toBeLessThanOrEqual(0)
+    expect(heightOf(row, PHONE)).toBeGreaterThanOrEqual(44)
+    // A line above and below, so a wrapped title cut off by the scroll reads as more list.
+    expect(cascaded(within(card).getByRole('list', { name: 'Notion pages' }), ['border-block', 'border']) ?? 'none').toMatch(/--color-hairline/)
+  })
+
+  it('draws no lines around a page list with nothing in it', async () => {
+    daemon({ tools: [notionTool], pages: [] })
+    render(<Connections />)
+    const card = (await screen.findByRole('list', { name: 'Connected tools' })).querySelector('li') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: 'Choose a page' }))
+    expect(await within(card).findByText(/No pages found/)).toBeInTheDocument()
+    expect(cascaded(within(card).getByRole('list', { name: 'Notion pages' }), ['border-block', 'border'])).toBeNull()
   })
 
   it('says what removing Notion stops', async () => {

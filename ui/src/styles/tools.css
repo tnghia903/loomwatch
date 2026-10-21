@@ -68,3 +68,9 @@
 /* A page's whole title, wrapped, as the canvas's page picker shows it: two pages can start alike. */
 .notion-answers .pop-row { padding-block: 6px; }
 .notion-answers .pop-row .name { white-space: normal; overflow-wrap: anywhere; }
+/* The list scrolls, so it cuts off whatever reaches past it: the keyboard's ring sits inside its
+   row. A line above and below gives the list edges, so a wrapped title cut off there reads as
+   more list, not a page of its own. */
+.notion-answers .pop-list:not(:empty) { padding-block: var(--sp-1); border-block: 1px solid var(--color-hairline); }
+.notion-answers .pop-row:focus-visible { outline-offset: -2px; }
+@media (max-width: 767px) { .notion-answers .pop-row { min-height: 44px; } }

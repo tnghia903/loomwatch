@@ -30,4 +30,13 @@ describe('the stylesheet cascade the tests run', () => {
     expect(cascaded(element, 'min-height', PHONE, rules)).toBe('44px')
     expect(cascaded(element, 'color', DESKTOP, rules)).toBe('navy')
   })
+
+  it('applies a keyboard-focus rule only to an element marked as reached by keyboard', () => {
+    const rules = rulesOf(':where(button):focus-visible { outline-offset: 2px } .x:focus-visible { outline-offset: -2px }')
+    const element = document.createElement('button')
+    element.className = 'x'
+    expect(cascaded(element, 'outline-offset', DESKTOP, rules)).toBeNull()
+    element.setAttribute('data-focus-visible', '')
+    expect(cascaded(element, 'outline-offset', DESKTOP, rules)).toBe('-2px')
+  })
 })
