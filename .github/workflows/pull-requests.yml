@@ -1,8 +1,8 @@
 name: Pull requests
 
-# CI for the pull requests a maintainer doesn't check on their own computer: one from a fork, whose
-# code is a stranger's, and Dependabot's. They run ci.yml as main does. A maintainer's own branches
-# run nothing here: they are checked with scripts/ci-local.sh before they merge (docs/CI.md).
+# Runs ci.yml on every pull request, as main does. Standard GitHub-hosted runners are free for a
+# public repository, so this costs nothing, and it keeps going while the author's computer sleeps.
+# scripts/ci-local.sh is a quicker check to run first, when you want one (docs/CI.md).
 #
 # Keep the trigger `pull_request`: a fork's run gets a read-only token and no secrets, and a
 # first-time contributor's run waits for a maintainer to approve it. Never `pull_request_target`,
@@ -21,7 +21,4 @@ permissions:
 jobs:
   ci:
     name: CI
-    if: >-
-      github.event.pull_request.head.repo.full_name != github.repository
-      || github.event.pull_request.user.login == 'dependabot[bot]'
     uses: ./.github/workflows/ci.yml

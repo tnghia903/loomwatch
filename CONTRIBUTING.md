@@ -71,7 +71,7 @@ out of credit. Each of these addresses, too, is taken only on this computer.
 
 ## Before you open a pull request
 
-CI runs on your pull request, on Linux and Windows, and its **CI result** check says whether
+CI runs on your pull request, on Linux and Windows, and its **CI / CI result** check says whether
 everything passed. If this is your first pull request here, a maintainer approves the run before it
 starts. Run the same checks on your computer first, which is quicker than waiting for CI
 ([docs/CI.md](docs/CI.md)):

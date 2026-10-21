@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# CI's checks for a branch, run on this computer. A maintainer's pull request runs nothing on
-# GitHub: their branch is checked here before it merges, and CI runs on main once it has
-# (docs/CI.md). From anywhere in the checkout:
+# CI's checks for a branch, run on this computer: a quicker check before pushing, when you want
+# one. Every pull request runs the full CI on GitHub anyway (docs/CI.md). From anywhere in the
+# checkout:
 #
 #   scripts/ci-local.sh
 #
 # Every check runs even when one before it failed, except those that build the daemon, which
 # embeds the ui/dist the Frontend build makes. A check this computer can't run says why and is left
-# to CI on main. Ends with a summary, and exits non-zero when any check failed.
+# to CI. Ends with a summary, and exits non-zero when any check failed.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
@@ -96,7 +96,7 @@ else
 fi
 
 # Compiles everything Windows-only but runs none of it: the tests, the packed release and the
-# installer run in CI's Windows job on main.
+# installer run in CI's Windows job.
 if ! rustup target list --installed 2>/dev/null | grep -qx x86_64-pc-windows-gnu \
   || ! command -v x86_64-w64-mingw32-gcc >/dev/null; then
   skip "Windows: Clippy" "needs brew install mingw-w64 and rustup target add x86_64-pc-windows-gnu"
@@ -123,7 +123,7 @@ fi
 
 printf '\n==> Summary\n'
 printf '  %s\n' "${results[@]}"
-printf '  CI on main also runs these on Linux and Windows, and checks new dependencies for known\n'
+printf '  CI on GitHub also runs these on Linux and Windows, and checks new dependencies for known\n'
 printf '  vulnerabilities.\n'
 if [ "$failed" = 1 ]; then
   printf '\nA check failed.\n'
