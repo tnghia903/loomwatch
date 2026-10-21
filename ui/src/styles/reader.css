@@ -46,15 +46,18 @@
 .rd-failed p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--color-ink-2); }
 .rd-more { margin: 12px 0 0; }
 
+/* Every view leaves the left margin for the faces of the parts asked about: FileReader sets them 32px
+   left of the page's own padding, so less than 40px puts a face over the first words or numbers. */
+
 /* Code, data and plain text: by line, the numbers drawn beside and never marked with the words. */
-.tc-document .tc-document-page:is(.rd-as-code, .rd-as-text) { max-width: none; padding: 18px 22px 96px 12px; font-size: 13px; }
+.tc-document .tc-document-page:is(.rd-as-code, .rd-as-text) { max-width: none; padding: 18px 22px 96px 40px; font-size: 13px; }
 .rd-lines { margin: 0; padding: 0; counter-reset: line; background: none; border: 0; font: 12.5px/1.7 var(--font-mono); color: var(--color-ink); white-space: pre; tab-size: 4; }
 .rd-lines .rd-line { position: relative; display: block; padding-left: calc(var(--rd-gutter, 3ch) + 20px); white-space: pre-wrap; overflow-wrap: anywhere; }
 .rd-lines .rd-line::before { counter-increment: line; content: counter(line); position: absolute; left: 0; width: var(--rd-gutter, 3ch); text-align: right; color: var(--color-ink-3); opacity: .55; user-select: none; }
 .rd-lines .rd-line:hover::before { opacity: 1; color: var(--color-accent); }
 
 /* A table as a sheet: its header stays as you scroll, numbers sit right, rows are counted. */
-.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
+.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px 40px; }
 .rd-table-wrap { max-width: 100%; overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel-solid); }
 .rd-as-table .rd-table-wrap { overflow: visible; max-width: none; }
 .rd-table { min-width: 100%; border-collapse: separate; border-spacing: 0; counter-reset: row; font: 13px/1.45 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
@@ -97,6 +100,8 @@
 .rd-pin:hover:not(:disabled), .rd-pin:focus-visible { scale: 1.12; box-shadow: 0 0 0 2px var(--color-accent), 0 4px 12px color-mix(in srgb, var(--lw-ink-950) 20%, transparent); }
 .rd-pin:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .rd-pin:disabled { cursor: default; }
+/* In a ring, the figure fills it (loom.css draws a plain one at the slot's own size). */
+:is(.rd-pin, .rd-ask) .chat-avatar > .chat-avatar-figure { inset: -20%; width: 140%; height: 140%; max-width: none; }
 
 /* ---------- The ask bubble: the agent leans in over the words you marked ---------- */
 .rd-ask {
@@ -114,6 +119,23 @@
 .rd-ask-quick { padding: 0 13px; color: color-mix(in srgb, var(--color-ground) 78%, transparent) !important; }
 .rd-ask-quick::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: color-mix(in srgb, var(--color-ground) 22%, transparent); }
 .rd-ask .rd-ask-face { box-shadow: 0 0 0 2px var(--lw-gold-400); background-color: var(--color-panel-solid); }
+/* The rest of the team, smaller, after the actions: press one and it is the one asked. */
+.rd-ask-others { position: relative; display: inline-flex; align-items: center; gap: 2px; padding: 0 3px 0 6px; }
+.rd-ask-others::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: color-mix(in srgb, var(--color-ground) 22%, transparent); }
+.rd-ask .rd-ask-other { width: 28px; height: 32px; justify-content: center; padding: 0; }
+.rd-ask-other .chat-avatar { background-color: var(--color-panel-solid); opacity: .72; transition: opacity var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out); }
+.rd-ask .rd-ask-other:hover, .rd-ask .rd-ask-other:focus-visible { background: none; }
+.rd-ask-other:hover .chat-avatar, .rd-ask-other:focus-visible .chat-avatar { opacity: 1; translate: 0 -2px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--lw-gold-400) 70%, transparent); }
+/* A big team: the rest are counted, and the count opens everyone with what each is for. */
+.rd-ask .rd-ask-more { min-width: 30px; height: 24px; margin-left: 2px; padding: 0 7px; justify-content: center; background: color-mix(in srgb, var(--color-ground) 16%, transparent); color: var(--color-ground); font: 650 11.5px/1 var(--font-sans); font-variant-numeric: tabular-nums; }
+.rd-ask .rd-ask-more[aria-expanded='true'] { background: var(--lw-gold-400); color: var(--lw-ink-950); }
+.rd-ask.listing { flex-wrap: wrap; width: 316px; max-width: calc(100% - 16px); border-radius: 18px; }
+.rd-ask-list { flex: 1 0 100%; display: grid; gap: 1px; max-height: 236px; margin: 4px 0 0; padding: 5px 0 1px; overflow-y: auto; overscroll-behavior: contain; list-style: none; border-top: 1px solid color-mix(in srgb, var(--color-ground) 18%, transparent); scrollbar-color: color-mix(in srgb, var(--color-ground) 30%, transparent) transparent; }
+.rd-ask .rd-ask-list button { display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; row-gap: 1px; align-items: center; width: 100%; height: auto; padding: 6px 10px 6px 6px; border-radius: 12px; text-align: left; white-space: normal; }
+.rd-ask-list .chat-avatar { grid-row: span 2; background-color: var(--color-panel-solid); }
+.rd-ask-who { display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 600 13px/1.3 var(--font-sans); }
+.rd-ask-who i { font: 500 11px/1 var(--font-sans); font-style: normal; color: var(--lw-gold-400); white-space: nowrap; }
+.rd-ask-job { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/1.35 var(--font-sans); color: color-mix(in srgb, var(--color-ground) 68%, transparent); }
 
 /* ---------- The tip, until the first part is asked about ---------- */
 .rd-hint {
@@ -151,8 +173,13 @@
 .agent-file { position: relative; }
 .agent-file .rd { position: relative; inset: auto; flex: 1; min-height: 0; margin-top: var(--sp-3); border-top: 1px solid var(--color-hairline); background: transparent; }
 .agent-file .rd .rd-scroll.tc-document { position: absolute; inset: 0; flex: none; }
-.agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px; }
-.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px; }
+.agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px 40px; }
+.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px 40px; }
+
+/* A narrow pane draws a document 20px in from each side (team-chat.css); the faces still need theirs. */
+@container (max-width: 560px) {
+  .tc-document .tc-document-page:is(.rd-as-markdown, .rd-as-document) { padding-left: 40px; }
+}
 
 @container details (max-width: 560px) {
   .rd-bar { padding-left: 14px; }

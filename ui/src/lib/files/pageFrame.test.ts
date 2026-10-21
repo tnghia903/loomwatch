@@ -48,6 +48,31 @@ describe('a web page in the reader', () => {
     expect(besidePath('C:\\w\\page.html', './a.png')).toBe('C:\\w\\a.png')
   })
 
+  it('lets go of the marked words on Escape, which reaches the page and not the reader', async () => {
+    const sent: { type?: string; text?: string }[] = []
+    vi.spyOn(window, 'postMessage').mockImplementation((message: unknown) => { sent.push(message as { type?: string; text?: string }) })
+    // jsdom lays nothing out: the marked words are somewhere.
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 10, bottom: 30, left: 5, right: 80 }) })
+    try {
+      document.body.innerHTML = '<p>Sales grew 12% in Q3.</p>'
+      new Function(PAGE_BRIDGE)()
+      document.dispatchEvent(new Event('pointerdown'))
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector('p')!.firstChild!)
+      document.getSelection()!.addRange(range)
+      document.dispatchEvent(new Event('pointerup'))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(sent.at(-1)).toMatchObject({ lw: 'reader', type: 'selection', text: 'Sales grew 12% in Q3.' })
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      expect(String(document.getSelection())).toBe('')
+      expect(sent.at(-1)).toMatchObject({ lw: 'reader', type: 'selection', text: '' })
+    } finally {
+      delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect
+      vi.restoreAllMocks()
+    }
+  })
+
   it('takes only well-formed messages from the page’s script', () => {
     expect(pageMessage({ lw: 'reader', type: 'ready' })).toEqual({ type: 'ready' })
     expect(pageMessage({ lw: 'reader', type: 'selection', text: 'Sales', rect: { top: 1, bottom: 2, left: 3, right: 4 } })).toEqual({ type: 'selection', text: 'Sales', rect: { top: 1, bottom: 2, left: 3, right: 4 } })

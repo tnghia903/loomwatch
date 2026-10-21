@@ -216,6 +216,8 @@ pub struct Replied {
     pub named: String,
     /// Its words, already cut to what an agent is handed.
     pub text: String,
+    /// It is a part of a file the operator marked in the reader (ADR 0077), not a message.
+    pub of_file: bool,
 }
 
 impl Replied {
@@ -355,6 +357,19 @@ async fn run_loaded_team(
             lineage,
         ))
         .await
+    }
+}
+
+/// Whether this turn is a question about a part of a file (ADR 0077).
+fn about_a_part(lineage: &RunLineage) -> bool {
+    lineage.reply.as_ref().is_some_and(|reply| reply.of_file)
+}
+
+/// ADR 0077: the one agent asked about a part of a file answers it, or asks the teammate whose job
+/// the answer is, so this run's bus lets it ask any teammate. Every other run's bus is as it was.
+fn let_the_part_asked_ask_teammates(bus: &TeamBus, lineage: &RunLineage) {
+    if let Some(only) = lineage.only.as_deref().filter(|_| about_a_part(lineage)) {
+        bus.lets_ask_teammates(only);
     }
 }
 
@@ -530,7 +545,11 @@ async fn run_team_mode(
     .await?;
     let task = NodeTask {
         place: if lineage.only.is_some() {
-            Some(orientation::for_one_agent(team, agent))
+            Some(orientation::for_one_agent(
+                team,
+                agent,
+                about_a_part(lineage),
+            ))
         } else {
             orientation::for_lead(team, agent)
         },
@@ -587,6 +606,7 @@ async fn run_team_mode(
     if let Some(home) = home {
         bus.offer_helpers(home);
     }
+    let_the_part_asked_ask_teammates(&bus, lineage);
     let connection = bus.connection(&agent.id).await?;
     let model_selector = agent.model_selector();
     // A team-mode run has no stage boundary: its entrypoint is one long turn, so the last turn of
@@ -677,6 +697,7 @@ async fn run_pipeline_mode(
         lineage.operator.clone(),
     )?;
     let _teardown = bus.abort_on_drop();
+    let_the_part_asked_ask_teammates(&bus, lineage);
 
     // Boxed for the same reason `run` boxes this function: the stages' loop holds every stage's
     // handed material, live sessions and check rounds, and on Windows its future is over Clippy's
@@ -867,7 +888,11 @@ async fn run_pipeline_nodes(
             node_prompt.ask_offer = ask_offer(team, agent_id, &bus.open_agents().await);
         }
         node_prompt.place = if lineage.only.is_some() {
-            Some(orientation::for_one_agent(team, agent))
+            Some(orientation::for_one_agent(
+                team,
+                agent,
+                about_a_part(lineage),
+            ))
         } else {
             orientation::for_stage(team, agent, order, index, &responder)
         };
@@ -8458,6 +8483,32 @@ mod tests {
         assert!(at("## Reading the request") < at("## Task"));
     }
 
+    /// ADR 0077: a turn is about a part of a file when what it replies to is one, whoever asked.
+    #[test]
+    fn a_turn_is_about_a_part_of_a_file_when_its_reply_is_one() {
+        let part = Replied {
+            named: "A part of report.md from Writer (work 3f2a9c1e), in the file /w/report.md"
+                .to_owned(),
+            text: "Sales grew 12%.".to_owned(),
+            of_file: true,
+        };
+        let asked = RunLineage {
+            only: Some("write".to_owned()),
+            reply: Some(part.clone()),
+            ..RunLineage::default()
+        };
+        assert!(about_a_part(&asked));
+        let message = RunLineage {
+            reply: Some(Replied {
+                of_file: false,
+                ..part
+            }),
+            ..asked
+        };
+        assert!(!about_a_part(&message));
+        assert!(!about_a_part(&RunLineage::default()));
+    }
+
     /// ADR 0051: what the operator's request replies to sits straight above the task, quoted, as
     /// source material; words the agent already has above are pointed to, not handed twice.
     #[test]
@@ -8467,6 +8518,7 @@ mod tests {
         let replied = Replied {
             named: "Researcher's handover to Writer (work 3f2a9c1e)".to_owned(),
             text: "Three stories.\n\nAll sourced.".to_owned(),
+            of_file: false,
         };
         let fresh = NodeTask {
             reply: Some(replied.clone()),

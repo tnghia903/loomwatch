@@ -21,7 +21,8 @@ export function useBenchFile() {
     close: useCallback(() => setReading(null), []),
     chat,
     passages,
-    askInChat: useCallback((reply: ReplyTo, words?: string) => setAsk({ reply, words, at: Date.now() }), []),
+    // An agent's own chat has one agent to ask: the one the part is from.
+    askInChat: useCallback((reply: ReplyTo, words: string | undefined) => setAsk({ reply, words, at: Date.now() }), []),
     showAsked: useCallback((passage: AskedPassage) => {
       if (passage.runId) setReveal({ runId: passage.runId, id: `answer:${passage.runId}`, at: Date.now() })
     }, []),

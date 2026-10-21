@@ -1,4 +1,4 @@
-import type { ChatItem, ChatMessage, ReplyTo } from '../chat/client'
+import type { ChatItem, ChatMessage, ChatTarget, ReplyTo } from '../chat/client'
 
 /**
  * A part of a file marked in the reader and asked about (ADR 0077). It goes to the chat as a reply
@@ -57,12 +57,13 @@ export interface AskedPassage {
  * Every part of a file asked about in a chat, oldest first: in messages that started work, in
  * notes sent into it, and in notes on their own. A message still on its way counts too.
  */
-export function askedPassages(items: readonly ChatItem[], pending: readonly { text: string; replyTo?: ReplyTo | null }[] = []): AskedPassage[] {
+export function askedPassages(items: readonly ChatItem[], pending: readonly { text: string; replyTo?: ReplyTo | null; to?: ChatTarget }[] = []): AskedPassage[] {
   const found: AskedPassage[] = []
-  const add = (message: Pick<ChatMessage, 'text' | 'replyTo'> & { id?: string }, runId: string | null) => {
+  const add = (message: Pick<ChatMessage, 'text' | 'replyTo'> & { id?: string; agentId?: string | null }, runId: string | null) => {
     const reply = message.replyTo
     if (reply?.kind !== 'passage' || !reply.file) return
-    found.push({ file: reply.file, text: reply.text, from: reply.from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null })
+    // Asked of one agent, it is that agent's face beside the part, whoever made the file.
+    found.push({ file: reply.file, text: reply.text, from: message.agentId ?? reply.from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null })
   }
   // The chat holds its items newest first.
   for (const item of [...items].reverse()) {
@@ -72,7 +73,7 @@ export function askedPassages(items: readonly ChatItem[], pending: readonly { te
       for (const note of item.notes) add(note, item.run.runId)
     }
   }
-  for (const message of pending) add(message, null)
+  for (const message of pending) add({ ...message, agentId: message.to?.kind === 'agent' ? message.to.agent : null }, null)
   return found
 }
 

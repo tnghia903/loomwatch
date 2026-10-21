@@ -80,9 +80,10 @@ interface TeamChatProps {
   onStartTeamTaken?: () => void
   /**
    * A part of a file marked in the reader beside the chat (ADR 0077): the box takes it as a reply
-   * to write about, or — with `words` — it is sent at once. `at` tells one ask from the next.
+   * to write about, or — with `words` — it is sent at once, to `agent` (the agent who made the file
+   * unless another was chosen). `at` tells one ask from the next.
    */
-  ask?: { reply: ReplyTo; words?: string; at: number } | null
+  ask?: { reply: ReplyTo; words?: string; agent?: string; at: number } | null
   /** The parts of files asked about in this chat, and the one in the box now, whenever they change. */
   onPassages?: (asked: AskedPassage[], asking: string | null) => void
   /**
@@ -474,8 +475,9 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     },
   }
   // Reply under something said: the box takes it as the message being answered, addressed with
-  // the @ of whoever said it, so it goes to that agent as any @ does (ADR 0051).
-  const startReply = (reply: ReplyTo) => {
+  // the @ of whoever said it (or `to`, a teammate asked about a part of a file instead), so it goes
+  // to that agent as any @ does (ADR 0051).
+  const startReply = (reply: ReplyTo, to?: string) => {
     const answers = decision !== null && reply.runId === decision.runId && reply.from === decision.from
       && (decision.kind === 'question' ? reply.kind === 'question' && reply.to === null : reply.kind === 'handover')
     if (answers) {
@@ -485,19 +487,20 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       return
     }
     setReplyTo(replyOf(reply))
-    const author = members.find((agent) => agent.id === reply.from)
+    const author = members.find((agent) => agent.id === (to ?? reply.from))
     if (author && !soloAgent) setDraft((text) => withMention(text, author, agents))
     setMentioned((count) => count + 1)
   }
   // A part marked in the reader: written about in the box, as a reply is, or sent at once with
-  // the words its button says ("Explain"), to the agent it is asked of. A box that cannot send
-  // shows why with the part in it.
+  // the words its button says ("Explain"), to the agent it is asked of. That agent answers it, or
+  // asks the teammate whose job it is (ADR 0077). A box that cannot send shows why with the part
+  // in it.
   const asked = useRef<number | null>(null)
   const takeAsk = useRef<(next: NonNullable<typeof ask>) => void>(() => {})
   useEffect(() => {
     takeAsk.current = (next) => {
-      const author = members.find((agent) => agent.id === next.reply.from)
-      if (!next.words || blocked || !author) { startReply(next.reply); return }
+      const author = members.find((agent) => agent.id === (next.agent ?? next.reply.from))
+      if (!next.words || blocked || !author) { startReply(next.reply, author?.id); return }
       const text = soloAgent ? next.words : withMention(next.words, author, agents)
       void send(text, { kind: 'agent', agent: author.id }, false, undefined, replyOf(next.reply))
     }
