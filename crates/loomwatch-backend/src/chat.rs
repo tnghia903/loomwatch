@@ -1788,6 +1788,10 @@ struct SendMessage {
     /// The message this one replies to, as the operator saw it when they pressed Reply.
     #[serde(default)]
     reply_to: Option<ReplyTo>,
+    /// Work to start as sent, never answered in the chat instead ([`answer_instead`]): the first
+    /// run's Send (ADR 0075), where every answer is a run's.
+    #[serde(default)]
+    work: bool,
 }
 
 /// Where a message goes, decided from who it is addressed to and who is working right now.
@@ -1970,7 +1974,9 @@ async fn send_message(
     }
     // "hi @team" asks for no work: the agent it would have started says hello back, and the
     // message stays a note rather than sending the team off to do its standing job.
-    answer_instead(&state, &team, &mut decided, text, &mut message).await;
+    if !request.work {
+        answer_instead(&state, &team, &mut decided, text, &mut message).await;
+    }
     match decided {
         Decided::TeamNote | Decided::Note { .. } => {
             store

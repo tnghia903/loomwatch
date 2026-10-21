@@ -54,6 +54,9 @@ beforeEach(() => {
     if (url.startsWith('/api/team?')) return json({ error: 'not found' }, 404)
     if (url === '/api/team') return json({ ...JSON.parse(String(init?.body)), revision: 'r1' })
     if (url === '/api/chat/messages') {
+      // As the daemon may with any message that reads as a question: answered in the chat, no run,
+      // unless it is sent as work.
+      if (!JSON.parse(String(init?.body)).work) return json({ route: 'team_note', message: { id: 'note-1', route: 'team_note' } })
       started += 1
       const runId = `run-${started}`
       runs.records.set(runId, { runId, status: 'running' })
@@ -116,6 +119,18 @@ describe('The first run', () => {
     await waitFor(() => expect(sent('/api/chat/messages')).toHaveLength(1))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(String(sent('/api/team', 'PUT')[0].yaml)).toContain('anthropic:claude-opus-5-5')
+  })
+
+  it('works on a plain question as on any request: it starts work, and the answer shows', async () => {
+    render(<FirstRun onLookAround={vi.fn()} onDone={vi.fn()} />)
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/ai')).toBe(true))
+    await ask('Explain how compound interest works')
+    await waitFor(() => expect(sent('/api/chat/messages')).toHaveLength(1))
+    expect(await screen.findByText('Writing your answer…')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+    settle('run-1', { status: 'succeeded', reply: 'Interest earns interest.' })
+    expect(await screen.findByText('Interest earns interest.')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Tell my agents about me' })).toBeInTheDocument()
   })
 
   it('shows the first answer, takes what the person tells about themselves, and answers the same request again for them', async () => {

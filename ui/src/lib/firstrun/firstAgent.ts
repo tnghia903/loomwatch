@@ -25,7 +25,11 @@ export function firstAgentNow(): AgentDraft {
   return { ...FIRST_AGENT, model, effort }
 }
 
-/** Start one piece of work for the first agent, and the run it started. */
+/**
+ * Start one piece of work for the first agent, and the run it started. It is sent as work, so the
+ * daemon never answers it in the chat instead, as it may a plain question: the first run shows a
+ * run's answer, and the same request made for the person after it needs a run to read About you.
+ */
 export async function askFirstAgent(text: string): Promise<RunRecord> {
   const path = joinUnderRoot(await benchFolder(), `${FIRST_CHAT}.yaml`)
   let revision: string | null = null
@@ -38,6 +42,7 @@ export async function askFirstAgent(text: string): Promise<RunRecord> {
     to: { kind: 'agent', agent: chatAgentId(FIRST_CHAT) },
     expectedRevision: saved.revision ?? null,
     startKey: newStartKey(),
+    work: true,
   })
   if (!sent.run) throw new Error('Your first agent didn’t start. Try again.')
   return sent.run

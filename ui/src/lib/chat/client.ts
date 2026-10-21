@@ -128,6 +128,8 @@ export interface SendOptions {
   startKey?: string
   /** The message this one replies to. */
   replyTo?: ReplyTo | null
+  /** Work to start as sent: never answered in the chat instead, however it reads (the first run's Send). */
+  work?: boolean
   signal?: AbortSignal
 }
 
@@ -157,7 +159,7 @@ export async function fetchChatPage(teamPath: string, before?: string | null, li
   return readRun<ChatPage>(response)
 }
 
-export async function sendChatMessage({ teamPath, text, to, now, expectedRevision, startKey, replyTo, signal }: SendOptions): Promise<SendResult> {
+export async function sendChatMessage({ teamPath, text, to, now, expectedRevision, startKey, replyTo, work, signal }: SendOptions): Promise<SendResult> {
   const response = await daemonFetch('/api/chat/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -169,6 +171,7 @@ export async function sendChatMessage({ teamPath, text, to, now, expectedRevisio
       ...(expectedRevision ? { expectedRevision } : {}),
       ...(startKey ? { startKey } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(work ? { work } : {}),
     }),
     signal,
     cache: 'no-store',
