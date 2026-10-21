@@ -139,9 +139,14 @@ try {
   Check (-not $ai.openrouter.connected) 'no OpenRouter key is kept yet'
 
   # The offline demo, copied in as a developer would: Researcher (LoomWatch's offline demo model)
-  # hands over, the review stop waits for an answer, Writer acts on it.
+  # hands over, the review stop waits for an answer, Writer acts on it. Copied in after the start,
+  # it runs once approved, as the app asks the first time.
   Copy-Item -LiteralPath (Join-Path $repo 'examples\operator-stop.yaml') -Destination $teams
-  $started = Invoke-RestMethod -Method Post -Uri "$url/api/runs" -ContentType 'application/json' -Body (@{ teamPath = 'operator-stop.yaml'; prompt = 'Prepare a short getting-started guide for new users.' } | ConvertTo-Json)
+  $demoBody = @{ teamPath = 'operator-stop.yaml'; prompt = 'Prepare a short getting-started guide for new users.' } | ConvertTo-Json
+  $demoReview = Invoke-RestMethod -Method Post -Uri "$url/api/runs" -ContentType 'application/json' -Body $demoBody -SkipHttpErrorCheck -StatusCodeVariable demoStatus
+  Check ($demoStatus -eq 409 -and $demoReview.code -eq 'team_needs_review') "the demo team copied in waits for approval ($demoStatus)"
+  Invoke-RestMethod -Method Post -Uri "$url/api/team/approve" -ContentType 'application/json' -Body (@{ teamPath = 'operator-stop.yaml'; teamRevision = $demoReview.teamRevision } | ConvertTo-Json) | Out-Null
+  $started = Invoke-RestMethod -Method Post -Uri "$url/api/runs" -ContentType 'application/json' -Body $demoBody
   $runId = $started.runId
   Check ([bool]$runId) "the demo run starts ($runId)"
   $waiting = Wait-Until {
