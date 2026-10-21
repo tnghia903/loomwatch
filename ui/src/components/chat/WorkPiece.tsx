@@ -18,7 +18,7 @@ import { fileRefsIn, filesTouched, withFolderPaths } from '../../lib/files/fileR
 import { FileOriginContext } from '../../lib/files/reader'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
-import type { Bubble, Party } from '../../lib/story/conversation'
+import { expectsAnswer, type Bubble, type Party } from '../../lib/story/conversation'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import { OPERATOR_ID, type TeamMessage } from '../../lib/watch/messages'
 import type { AutoRan } from '../../lib/watch/events'
@@ -88,8 +88,6 @@ interface WorkPieceProps {
   onRun: (run: RunRecord) => void
   /** Who has the work while this piece runs, each time that changes: what the chat's header shows. */
   onBaton?: (runId: string, baton: Baton | null) => void
-  /** Who of this piece's agents is typing now (lib/watch/workPhase.ts), for the message box to say. */
-  onTyping?: (runId: string, typing: readonly string[]) => void
   /** This piece's line, which says who has the work: the header shows its pill while it is out of view. */
   onLine?: (runId: string, element: HTMLElement | null) => void
   onTryAgain: (item: Work) => void
@@ -117,7 +115,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, approveFilled = true, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onTyping, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, approveFilled = true, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -196,16 +194,16 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
   const checked = [...(team.configs?.values() ?? [])].some((config) => config.checks === run.responder)
   const streamed = live && !checked ? responder?.reply ?? '' : ''
   const answer = isTerminalRun(record.status) ? record.reply ?? '' : streamed
-  // Whoever is writing now (lib/watch/workPhase.ts), its figure typing at the bench: the message
-  // box says so while it types.
+  // Whoever is writing now (lib/watch/workPhase.ts), its figure typing at the bench, is typing in
+  // the chat too: its face and a bubble of dots under the work. Not twice: the answer coming in, or
+  // a reply the talk shows it owes, already says so.
   const now = useNow(live)
   // A helper writes to its agent, not to you: only the agent types in the chat.
-  const typing = (live ? record.working ?? [] : []).filter((id) => !helperOf(id) && workPhase(session.events, id, now) === 'typing')
-  const typingKey = typing.join('\n')
+  const typing = (live ? record.working ?? [] : [])
+    .filter((id) => !helperOf(id) && workPhase(session.events, id, now) === 'typing')
+    .filter((id) => !(id === run.responder && answer.trim()) && !(open && owesReply(session.projection.messages, id, resolve)))
   // The helpers its agent brought in (ADR 0079), read off the piece's own record.
   const helpers = useMemo(() => helpersOf(session.events, session.projection.evidence), [session.events, session.projection.evidence])
-  useEffect(() => { onTyping?.(run.runId, typingKey ? typingKey.split('\n') : []) }, [onTyping, run.runId, typingKey])
-  useEffect(() => () => onTyping?.(run.runId, []), [onTyping, run.runId])
   // The files the answer names, for its tools: a scan of the whole text, so once per answer. An
   // agent names a file from its own folder ("./guide.html"); what it read or wrote, else where it
   // works, says which.
@@ -455,6 +453,10 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
       )}
       {unasked.length > 0 && <PermissionPrompt inline team={crew} run={{ runId: run.runId, permissionRequests: unasked }} onAlwaysAllow={onAlwaysAllow} onDecide={pin} />}
       {stops.length > 0 && <SpendStopCard inline run={{ runId: run.runId, spendStops: stops }} onDecide={pin} onRun={onRun} />}
+      {/* Who is writing is read off the events too: it is news only once their first page is in. */}
+      <AppearContext.Provider value={news && painted && talkSettled}>
+        {typing.map((id) => <Writing key={`typing:${id}`} id={id} at={session.events.findLast((event) => event.agentId === id && event.kind === 'message')?.ts} name={name} hue={hue} />)}
+      </AppearContext.Provider>
 
       <FileOriginContext.Provider value={fileOrigin}>
       <Outcome tour={newest} run={record} answer={answer} touched={touched} folder={folder} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
@@ -486,6 +488,29 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
       {error && <p className="chat-failed" role="alert">{error}</p>}
     </li>
     </AppearContext.Provider>
+  )
+}
+
+/**
+ * Whether the talk shows `agent` owing a reply (lib/story/conversation.ts), drawn as its dots. An
+ * open ask names the agent as it was written; `resolve` finds it as the bus will.
+ */
+function owesReply(messages: readonly TeamMessage[], agent: string, resolve: (written: string | null) => string | null): boolean {
+  // The talk leaves out what was carried over from the work this follows.
+  return messages.some((message) => message.state === 'pending' && !message.reply && !message.carried && expectsAnswer(message.kind) && resolve(message.to) === agent)
+}
+
+/** An agent writing now: its face, its name, and a bubble of dots that says so; it rises in only as news. */
+function Writing({ id, at, name, hue }: { id: string; at: string | undefined; name: (id: string) => string; hue: (id: string) => number }) {
+  const appear = useAppear()
+  return (
+    <div className={`chat-msg tc-typing${appear ? ' tc-appear' : ''}`} role="status" aria-label={`${name(id)} is writing`}>
+      <span className="chat-gutter"><AgentFace id={id}><AvatarFace id={id} hue={hue(id)} size={28} text={initials(name(id))} /></AgentFace></span>
+      <div className="chat-stack">
+        <div className={`chat-meta hue-${hue(id)}`}><span className="chat-name">{name(id)}</span><time>{clockTime(at)}</time></div>
+        <div className="chat-bubble typing"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span><span className="chat-typing-word">{name(id)} is writing</span></div>
+      </div>
+    </div>
   )
 }
 
