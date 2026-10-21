@@ -115,7 +115,8 @@ tech news digest, and link every claim."_ Each stage starts when the one before 
 what the agents tell each other shows in the chat as they say it. A note you write while an agent
 works joins its next turn, each agent's status is said in words beside its face (_"Writing its
 reply"_, _"Waiting for you"_), and every handover lands on a **live timeline** in Details that you
-can drag back to replay.
+can drag back to replay. Paste a screenshot or drop files on the chat to send them with your words;
+drop a folder and it becomes a source for the team.
 
 </td>
 </tr>

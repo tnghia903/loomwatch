@@ -150,6 +150,7 @@ mod tests {
                 },
                 Message::User {
                     content: text.to_owned(),
+                    pictures: Vec::new(),
                 },
             ],
             outputs: BTreeMap::from([("big".to_owned(), "x".repeat(50_000))]),

@@ -451,7 +451,7 @@ async fn a_parked_session_resumes_with_its_whole_history() {
         .messages
         .iter()
         .filter_map(|message| match message {
-            Message::User { content } | Message::Assistant { content, .. } => {
+            Message::User { content, .. } | Message::Assistant { content, .. } => {
                 Some(session::without_date(content))
             }
             _ => None,
@@ -462,7 +462,7 @@ async fn a_parked_session_resumes_with_its_whole_history() {
     let dated = second
         .messages
         .iter()
-        .filter(|message| matches!(message, Message::User { content } if content.contains("\n\nToday is ")))
+        .filter(|message| matches!(message, Message::User { content, .. } if content.contains("\n\nToday is ")))
         .count();
     assert_eq!(dated, 2);
 }
@@ -500,7 +500,7 @@ async fn a_full_context_is_summarised_and_the_task_kept() {
     assert_eq!(requests[1].messages.len(), requests[0].messages.len() + 3);
     let after = &requests[2].messages;
     assert_eq!(after.len(), 2);
-    let Message::User { content } = &after[1] else {
+    let Message::User { content, .. } = &after[1] else {
         panic!("the summary should stand in for the conversation");
     };
     assert!(content.contains("Summary: listed the folder.") && content.contains("The task."));
@@ -542,7 +542,7 @@ async fn a_summary_written_as_a_tool_call_is_asked_for_again_without_tools() {
     assert_eq!(requests[1].server_tools, requests[0].server_tools);
     assert!(requests[0].server_tools.web_search);
     assert!(requests[2].tools.is_empty() && !requests[2].server_tools.web_search);
-    let Message::User { content } = &requests[3].messages[1] else {
+    let Message::User { content, .. } = &requests[3].messages[1] else {
         panic!("the summary should stand in for the conversation");
     };
     assert!(content.contains("Summary: listed the folder."));
@@ -1646,7 +1646,7 @@ async fn each_turn_is_dated_when_it_starts() {
         .messages
         .iter()
         .filter_map(|message| match message {
-            Message::User { content } => Some(content.as_str()),
+            Message::User { content, .. } => Some(content.as_str()),
             _ => None,
         })
         .collect();
@@ -1722,7 +1722,7 @@ async fn a_cut_summary_is_asked_for_again_and_the_brief_is_kept() {
     assert!(asked(2).contains("make this one shorter"), "{}", asked(2));
     let after = &requests[3].messages;
     assert_eq!(after.len(), 2);
-    let Message::User { content } = &after[1] else {
+    let Message::User { content, .. } = &after[1] else {
         panic!("the summary should stand in for the conversation");
     };
     assert!(content.contains("says 42%") && !content.contains("found https://example.com/a and"));
@@ -1760,7 +1760,7 @@ fn sent(request: &SeenRequest) -> usize {
         .iter()
         .map(|message| match message {
             Message::System { .. } => 0,
-            Message::User { content } | Message::Tool { content, .. } => content.len(),
+            Message::User { content, .. } | Message::Tool { content, .. } => content.len(),
             Message::Assistant {
                 content,
                 tool_calls,
@@ -2908,6 +2908,110 @@ async fn a_conversation_holds_no_more_picture_data_than_its_limit() {
         "{}",
         reads[1].0
     );
+}
+
+/// The pictures the first call's message carried when two were sent with the prompt.
+async fn sent_with_the_prompt(sees_pictures: bool, max_pictures: usize) -> Vec<String> {
+    let folder = Folder::new();
+    let shot = folder.0.join("shot.png");
+    let chart = folder.0.join("chart.png");
+    std::fs::write(&shot, crate::test_support::png(40, 20, false)).unwrap();
+    std::fs::write(&chart, crate::test_support::png(30, 30, false)).unwrap();
+    let demo = Demo::scripted(vec![Completion::text("Seen.")]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.sees_pictures = sees_pictures;
+    config.max_pictures = max_pictures;
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    // One that can't be read is left out; the words still name it.
+    let gone = folder.0.join("gone.png");
+    session
+        .prompt_showing("What is wrong here?", &[shot, gone, chart])
+        .await
+        .unwrap();
+    demo.requests()[0]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::User { content, pictures } if content.starts_with("What is wrong here?") => {
+                Some(
+                    pictures
+                        .iter()
+                        .map(|picture| picture.name.clone())
+                        .collect(),
+                )
+            }
+            _ => None,
+        })
+        .unwrap()
+}
+
+/// Pictures sent with the words count against the conversation's room as an opened one does: a
+/// second turn past the limit is shown none (ADR 0082).
+#[tokio::test]
+async fn pictures_sent_earlier_count_against_the_room() {
+    let folder = Folder::new();
+    let named = |name: &str, width| {
+        let path = folder.0.join(name);
+        std::fs::write(&path, crate::test_support::png(width, 20, false)).unwrap();
+        path
+    };
+    let (shot, chart, third) = (
+        named("shot.png", 40),
+        named("chart.png", 30),
+        named("third.png", 20),
+    );
+    let demo = Demo::scripted(vec![
+        Completion::text("Seen."),
+        Completion::text("Seen again."),
+    ]);
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.sees_pictures = true;
+    config.max_pictures = 2;
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    session
+        .prompt_showing("Look.", &[shot, chart])
+        .await
+        .unwrap();
+    session
+        .prompt_showing("And this one.", &[third])
+        .await
+        .unwrap();
+    let last = demo.requests().pop().unwrap();
+    let carried = last
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::User { content, pictures } if content.starts_with("And this one.") => {
+                Some(pictures.len())
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(carried, 0);
+}
+
+/// ADR 0082: pictures the operator sends go with the words to a model that sees pictures, as
+/// many as the conversation has room for, and to no other.
+#[tokio::test]
+async fn pictures_sent_with_a_prompt_go_with_its_words() {
+    assert_eq!(
+        sent_with_the_prompt(true, MAX_PICTURES).await,
+        ["shot.png", "chart.png"]
+    );
+    assert!(sent_with_the_prompt(false, MAX_PICTURES).await.is_empty());
+    assert_eq!(sent_with_the_prompt(true, 1).await, ["shot.png"]);
 }
 
 /// A session kept before tool results could hold pictures reads back the same, and one without

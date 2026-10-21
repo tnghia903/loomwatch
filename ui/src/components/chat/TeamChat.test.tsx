@@ -728,19 +728,49 @@ describe("an agent's face", () => {
 })
 
 describe('a piece of work', () => {
-  // lib/watch/workPhase.ts: while its own words come in, its figure types at the bench and the
-  // message box says it is typing; while it thinks or uses a tool, it doesn't.
-  it('says who is typing while its words come in, and not while it thinks', async () => {
+  // lib/watch/workPhase.ts: while its own words come in, its figure types at the bench and in the
+  // chat, its face and a bubble of dots under the work; while it thinks or uses a tool, it doesn't.
+  it('shows who is typing in the chat while its words come in, and not while it thinks', async () => {
     const event = (kind: string, payload: Record<string, unknown>) => ({ id: `e-${kind}`, sessionId: 'run-1', agentId: 'researcher', seq: 1, ts: new Date().toISOString(), kind, payload })
     said.events = [event('message', { role: 'agent', content: { text: 'Looking at' } })]
-    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'] }), request: message({}), notes: [] }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], responder: 'writer' }), request: message({}), notes: [] }]
     renderChat()
-    expect(await screen.findByText('Researcher is typing')).toHaveAttribute('role', 'status')
+    const typing = await within(screen.getByRole('log')).findByRole('status', { name: 'Researcher is writing' })
+    expect(typing.closest('.tc-piece')).toHaveAttribute('data-run', 'run-1')
+    // Opening the chat mid-run draws it still: it rises in only when it is news (ADR 0051).
+    expect(typing).not.toHaveClass('tc-appear')
+    // Its face, its name over a bubble of dots that says so in words.
+    expect(typing.querySelector('.chat-gutter')).not.toBeNull()
+    expect(typing.querySelector('.chat-meta .chat-name')).toHaveTextContent('Researcher')
+    expect(typing.querySelector('.chat-bubble.typing .chat-dots')).not.toBeNull()
+    expect(typing.querySelector('.chat-bubble.typing')).toHaveTextContent('Researcher is writing')
+    // Said in the chat, not over the message box.
+    expect(screen.getByRole('textbox').closest('form')).not.toHaveTextContent(/writing|typing/)
     cleanup()
     said.events = [event('thought', { role: 'thought', content: { text: 'Which stories matter' } })]
     renderChat()
     expect(await within(screen.getByRole('log')).findByText(/is working/)).toBeInTheDocument()
-    expect(screen.queryByText(/is typing/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: /is writing/ })).not.toBeInTheDocument()
+  })
+
+  // The answer coming in, or the dots of a reply the talk shows it owes, already show it writing:
+  // no second bubble of dots.
+  it('shows no typing bubble where the chat already shows the agent writing', async () => {
+    const event = (kind: string, payload: Record<string, unknown>) => ({ id: `e-${kind}`, sessionId: 'run-1', agentId: 'researcher', seq: 1, ts: new Date().toISOString(), kind, payload })
+    said.events = [event('message', { role: 'agent', content: { text: 'Three stories lead today' } })]
+    said.agents = [{ id: 'researcher', reply: 'Three stories lead today', taskState: 'STREAMING' }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'], responder: 'researcher' }), request: message({}), notes: [] }]
+    renderChat()
+    expect(await within(screen.getByRole('log')).findByText('Three stories lead today')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: /is writing/ })).not.toBeInTheDocument()
+    cleanup()
+    // An open ask names the agent as the writer wrote it.
+    said.agents = []
+    said.messages = [{ id: 'a1', kind: 'ask', from: 'writer', to: 'Researcher', handedBy: null, text: 'Which outlet?', context: null, eventId: 'a1', evidenceId: null, seq: 1, ts: new Date().toISOString(), offsetMs: 0, state: 'pending', error: null, reply: null, carried: false }]
+    page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'] }), request: message({}), notes: [] }]
+    renderChat()
+    expect(await within(screen.getByRole('log')).findByText('Which outlet?')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: /is writing/ })).not.toBeInTheDocument()
   })
 
   it('asks for your review with buttons: Approve needs no words, Send back needs them', async () => {
