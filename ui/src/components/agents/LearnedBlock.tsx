@@ -1,5 +1,5 @@
 import { Lightbulb, X } from 'lucide-react'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { fetchLessons, learnedFrom, tellAllAgents, undoLesson, undoTellAllAgents, type AgentLessons, type Lesson, type LessonsOf } from '../../lib/lessons/client'
 import { TELL_ALL, TellAllAsk } from '../you/TellAllAsk'
@@ -28,9 +28,10 @@ export function LearnedBlock({ of, name, readOnly = false }: { of: LessonsOf; na
   // The Tell all my agents button last pressed, for the focus to go back to.
   const asked = useRef<HTMLButtonElement | null>(null)
   // A change that takes away the button pressed sends the keyboard here, by element id: Undo on the
-  // line under the list after Tell all my agents, the lesson's own button after that Undo.
+  // line under the list after Tell all my agents, the lesson's own button after that Undo. A layout
+  // effect moves it in the same change, so the keyboard is never left on the page in between.
   const focusNext = useRef<string | null>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const id = focusNext.current
     if (!id) return
     focusNext.current = null
