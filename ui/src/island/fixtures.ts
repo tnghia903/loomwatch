@@ -1,4 +1,6 @@
-// Run records for the island's tests: a team at work, asking, done or stopped.
+// Run records for the island's tests: a team at work, asking, done or stopped; and a message its
+// agents answer in the chat.
+import type { NoteAnswering } from '../lib/chat/client'
 import type { PermissionRequest, RunRecord, WaitingOn } from '../lib/runs/client'
 
 const T0 = Date.parse('2026-10-22T10:00:00Z')
@@ -47,4 +49,22 @@ export function permission(id: string, agent = 'writer', changes: Partial<Permis
 
 export function question(node = 'writer', text = 'Which city should the trip start from?'): WaitingOn {
   return { node, name: 'Writer', kind: 'question', since: iso(2), question: text, park: 'none', parkNote: '', sendBackAvailable: false, questionId: 'q1' }
+}
+
+/** A message the writer is answering in the chat; `said` makes it answered, at `finishedAt`. */
+export function answering(id: string, changes: Partial<NoteAnswering> = {}): NoteAnswering {
+  return {
+    messageId: id,
+    teamPath: 'trip.yaml',
+    teamName: 'Trip planner',
+    agentNames: { writer: 'Writer' },
+    answers: { waiting: ['writer'], said: [] },
+    createdAt: iso(0),
+    finishedAt: null,
+    ...changes,
+  }
+}
+
+export function said(text: string, from = 'writer', minutes = 1) {
+  return { from, text, at: iso(minutes) }
 }

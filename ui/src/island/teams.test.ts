@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { at, iso, permission, question, run } from './fixtures'
+import { answering, at, iso, permission, question, run, said } from './fixtures'
 import { firstLine, momentsBetween, teamsNow, tucked, workedFor } from './teams'
 
 const none = new Set<string>()
@@ -60,6 +60,39 @@ describe('what the island shows of each team', () => {
     expect(firstLine('---\n- one hotel')).toBe('one hotel')
     expect(firstLine('a'.repeat(200))).toHaveLength(120)
     expect(firstLine(null)).toBe('')
+  })
+})
+
+describe('agents answering a message in the chat', () => {
+  // "Explain" on a part of a file is mostly answered in the chat, where nothing runs.
+  it('shows the agent answering at work, then its answer while that is news, opening the chat', () => {
+    const [writing] = teamsNow([], 0, none, nobody, [answering('m1')])
+    expect(writing).toMatchObject({ runId: 'm1', teamName: 'Trip planner', moment: 'work', agent: 'writer', agentName: 'Writer', agents: ['writer'], startedAt: iso(0), asks: [], result: null, chat: true, link: '/?path=trip.yaml&view=chat' })
+    const answered = answering('m1', { answers: { waiting: [], said: [said('**Every item** keeps one number.\nMore')] }, finishedAt: iso(1) })
+    const [done] = teamsNow([], at(0), none, nobody, [answered])
+    expect(done).toMatchObject({ runId: 'm1', moment: 'done', agent: 'writer', result: 'Every item keeps one number.', chat: true })
+    // Not news: answered before the island watched, or looked at.
+    expect(teamsNow([], at(2), none, nobody, [answered])).toEqual([])
+    expect(teamsNow([], 0, new Set(['m1']), nobody, [answered])).toEqual([])
+    // Nobody had anything to add: nothing to show.
+    expect(teamsNow([], 0, none, nobody, [answering('m2', { answers: { waiting: [], said: [] }, finishedAt: iso(1) })])).toEqual([])
+  })
+
+  it('stands among the runs by what it is doing', () => {
+    const teams = teamsNow([run('asking', { permissionRequests: [permission('p1')] }), run('working', { startedAt: iso(2), working: ['researcher'] })], 0, none, nobody, [answering('m1', { createdAt: iso(1) })])
+    expect(teams.map((team) => team.runId)).toEqual(['asking', 'm1', 'working'])
+  })
+
+  it('pops out when an agent starts answering and when the answer comes, with no handover between agents answering together', () => {
+    const both = { agentNames: { researcher: 'Researcher', writer: 'Writer' } }
+    const one = teamsNow([], 0, none, nobody, [answering('m1', { ...both, answers: { waiting: ['researcher', 'writer'], said: [] } })])
+    expect(momentsBetween([], one)).toEqual([{ kind: 'start', runId: 'm1', key: 'researcher' }])
+    const two = teamsNow([], 0, none, nobody, [answering('m1', { ...both, answers: { waiting: ['writer'], said: [said('Hi!', 'researcher')] } })])
+    expect(two[0].agent).toBe('writer')
+    expect(momentsBetween(one, two)).toEqual([])
+    const three = teamsNow([], 0, none, nobody, [answering('m1', { ...both, answers: { waiting: [], said: [said('Hi!', 'researcher'), said('Hello.')] }, finishedAt: iso(2) })])
+    expect(three[0]).toMatchObject({ agent: 'researcher', result: 'Hi!' })
+    expect(momentsBetween(two, three)).toEqual([{ kind: 'done', runId: 'm1', key: 'm1' }])
   })
 })
 

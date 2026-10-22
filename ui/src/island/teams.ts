@@ -1,10 +1,13 @@
 // What the island at the notch shows of each team (ADR 0083): one entry per run that is busy or
-// has news, what it is doing, which agent to draw, and what to say. Pure: from the run records.
+// has news, and per message its agents answer in the chat themselves, what it is doing, which agent
+// to draw, and what to say. Pure: from the run records and those messages.
+import type { NoteAnswering } from '../lib/chat/client'
 import { historyRunUrl } from '../lib/runs/history'
 import type { RunRecord } from '../lib/runs/client'
 import { plainRunError } from '../lib/runs/errors'
 import { answerableAtAGlance } from '../lib/runs/permissionRequests'
 import { ticketsFrom, type Ticket } from '../lib/story/needsYou'
+import { teamHref } from '../lib/team-file/teamHref'
 
 /** A question, a stop or a result first; work last (`URGENCY`). */
 export type Moment = 'ask' | 'fail' | 'done' | 'work'
@@ -12,6 +15,7 @@ export type Moment = 'ask' | 'fail' | 'done' | 'work'
 export const URGENCY: Record<Moment, number> = { ask: 0, fail: 1, done: 2, work: 3 }
 
 export interface TeamNow {
+  /** The run, or the message in the chat its agents are answering. */
   runId: string
   teamPath: string
   teamName: string
@@ -30,28 +34,33 @@ export interface TeamNow {
   result: string | null
   /** Where the run opens in `LoomWatch`. */
   link: string
+  /** Agents answering a message in the team's chat themselves (ADR 0076): nothing runs, nobody
+      hands over, and it opens the chat. */
+  chat: boolean
 }
 
 const LIVE = new Set(['queued', 'starting', 'running'])
 
 /**
- * Every run the island shows, most urgent first. A finished or stopped run is shown only while it
- * is news: it ended after the island started watching (`since`) and you have not looked yet
- * (`seen`). A cancelled run is never news. `lastAgent` remembers who last worked on a run, for the
- * moments between one agent's turn and the next.
+ * Every run the island shows, and every message its agents answer in the chat (`notes`), most
+ * urgent first. A finished or stopped run, or an answer, is shown only while it is news: it ended
+ * after the island started watching (`since`) and you have not looked yet (`seen`). A cancelled run
+ * is never news. `lastAgent` remembers who last worked on a run, for the moments between one
+ * agent's turn and the next.
  */
 export function teamsNow(
   records: readonly RunRecord[],
   since: number,
   seen: ReadonlySet<string>,
   lastAgent: ReadonlyMap<string, string>,
+  notes: readonly NoteAnswering[] = [],
 ): TeamNow[] {
   const names = new Map(records.flatMap((record) => (record.teamName ? [[record.teamPath, record.teamName] as const] : [])))
   const teams: TeamNow[] = []
   for (const record of records) {
     const live = LIVE.has(record.status)
     const ended = record.status === 'succeeded' || record.status === 'failed'
-    if (!live && !(ended && isNews(record, since, seen))) continue
+    if (!live && !(ended && isNews(record.runId, record.finishedAt, since, seen))) continue
     const asks = live ? ticketsFrom([record], names, new Set()).filter((ticket) => ticket.kind !== 'failed') : []
     const moment: Moment = live ? (asks.length ? 'ask' : 'work') : record.status === 'succeeded' ? 'done' : 'fail'
     const agent = agentOf(record, moment, asks[0], lastAgent)
@@ -68,15 +77,47 @@ export function teamsNow(
       quick: live ? (record.permissionRequests ?? []).filter(answerableAtAGlance).map((request) => `${record.runId}:permission:${request.id}`) : [],
       result: moment === 'done' ? firstLine(record.reply) || 'The answer is ready.' : moment === 'fail' ? (record.error ? plainRunError(record.error).split('\n')[0] : '') || 'Something went wrong before it finished.' : null,
       link: historyRunUrl({ id: record.runId, teamPath: record.teamPath }),
+      chat: false,
     })
+  }
+  for (const note of notes) {
+    const answering = noteNow(note, since, seen)
+    if (answering) teams.push(answering)
   }
   const started = (team: TeamNow) => Date.parse(team.startedAt ?? '') || 0
   return teams.sort((a, b) => URGENCY[a.moment] - URGENCY[b.moment] || started(a) - started(b))
 }
 
-function isNews(record: RunRecord, since: number, seen: ReadonlySet<string>): boolean {
-  const finished = Date.parse(record.finishedAt ?? '')
-  return Number.isFinite(finished) && finished >= since && !seen.has(record.runId)
+function isNews(id: string, finishedAt: string | null | undefined, since: number, seen: ReadonlySet<string>): boolean {
+  const finished = Date.parse(finishedAt ?? '')
+  return Number.isFinite(finished) && finished >= since && !seen.has(id)
+}
+
+/**
+ * A message its agents answer in the chat: at work while any of them writes, then done, with the
+ * first answer's opening, while that is news. When none of them had anything to add, there is
+ * nothing to show.
+ */
+function noteNow(note: NoteAnswering, since: number, seen: ReadonlySet<string>): TeamNow | null {
+  const { waiting, said } = note.answers
+  const live = waiting.length > 0
+  if (!live && !(said.length && isNews(note.messageId, note.finishedAt, since, seen))) return null
+  const agent = live ? waiting[0] : said[0].from
+  return {
+    runId: note.messageId,
+    teamPath: note.teamPath,
+    teamName: note.teamName || teamFromPath(note.teamPath),
+    moment: live ? 'work' : 'done',
+    agent,
+    agentName: note.agentNames[agent] || agent,
+    agents: Object.keys(note.agentNames),
+    startedAt: note.createdAt,
+    asks: [],
+    quick: [],
+    result: live ? null : firstLine(said[0].text) || 'The answer is ready.',
+    link: teamHref(note.teamPath, 'chat'),
+    chat: true,
+  }
 }
 
 function agentOf(record: RunRecord, moment: Moment, ask: Ticket | undefined, lastAgent: ReadonlyMap<string, string>): string | null {
@@ -134,7 +175,9 @@ export function momentsBetween(before: readonly TeamNow[] | null, after: readonl
       pops.push({ kind: team.moment, runId: team.runId, key: team.runId })
     } else if (team.moment === 'work' && team.agent) {
       if (!was) pops.push({ kind: 'start', runId: team.runId, key: team.agent })
-      else if (was.agent && was.agent !== team.agent) pops.push({ kind: 'handover', runId: team.runId, key: team.agent })
+      // Agents answering in the chat answer at the same time: when one is done, the next was
+      // already writing, and nothing was handed over.
+      else if (!team.chat && was.agent && was.agent !== team.agent) pops.push({ kind: 'handover', runId: team.runId, key: team.agent })
     }
   }
   return pops

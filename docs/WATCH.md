@@ -183,6 +183,7 @@ always has its archive; a router built without one (tests) answers 503.
 | `POST /api/runs` | Start a run; `202 Accepted` with the run record |
 | `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the Mac menu bar, the island at a MacBook's notch and the Windows notification-area menu read |
 | `GET /api/runs/{id}` | One run record, or 404 |
+| `GET /api/chat/answering` | The messages agents are answering in the team chat themselves, where no run starts (a greeting, or a quick question such as **Explain** on a part of a file), and those answered in the last hour, oldest first; `?finishedWithin=<seconds>` keeps the ones still being answered and those answered in that many seconds. Each answer is cut to its first 400 characters. Kept in memory for an hour; a restart clears it. The island at a MacBook's notch reads it beside `GET /api/runs` |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 
 Request body:

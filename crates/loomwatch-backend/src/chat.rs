@@ -21,7 +21,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
 use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::JsonRejection;
@@ -163,6 +163,92 @@ pub struct NoteAnswer {
     pub from: String,
     pub text: String,
     pub at: String,
+}
+
+/// A message its agents are answering in the chat themselves ([`answer_instead`]), as
+/// `GET /api/chat/answering` reports it: while they write, and for an hour after. Nothing runs, so
+/// the run list never has it; the island at a `MacBook`'s notch reads this beside the runs, to show
+/// those agents at work and then their answer (ADR 0083).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteAnswering {
+    /// The message's id in the chat.
+    pub message_id: String,
+    pub team_path: String,
+    /// The team file's `name`, as a run keeps it; `None` for a team without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_name: Option<String>,
+    /// Each answering agent's name by id.
+    pub agent_names: BTreeMap<String, String>,
+    /// Who is still writing, and the opening of what each said
+    /// ([`crate::runs::reply_preview`]).
+    pub answers: NoteAnswers,
+    pub created_at: String,
+    /// When the last of them finished; `None` while any is still writing.
+    pub finished_at: Option<String>,
+}
+
+/// How long an answered message stays in [`NotesAnswering`]: the hour the island asks about.
+const ANSWERED_KEPT: chrono::TimeDelta = chrono::TimeDelta::hours(1);
+
+/// The messages being answered in the chat, and those answered in the last hour. In memory, as
+/// the runs under way are: a daemon that stops, stops their answers too.
+#[derive(Debug, Clone, Default)]
+struct NotesAnswering(Arc<std::sync::Mutex<BTreeMap<String, NoteAnswering>>>);
+
+impl NotesAnswering {
+    /// Where the agents answering `message` stand now. Messages answered over an hour ago go.
+    fn keep(&self, message: &ChatMessage, team: &TeamConfig, answers: &NoteAnswers) {
+        let mut answers = answers.clone();
+        for said in &mut answers.said {
+            crate::runs::reply_preview(&mut said.text);
+        }
+        let names = crate::runs::agent_names(team);
+        let agent_names = answers
+            .waiting
+            .iter()
+            .chain(answers.said.iter().map(|said| &said.from))
+            .filter_map(|id| Some((id.clone(), names.get(id)?.clone())))
+            .collect();
+        let cutoff = Utc::now() - ANSWERED_KEPT;
+        let mut notes = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        notes.retain(|_, note| answered_since(note, cutoff));
+        let finished_at = notes
+            .get(&message.id)
+            .and_then(|note| note.finished_at.clone())
+            .or_else(|| answers.waiting.is_empty().then(now));
+        notes.insert(
+            message.id.clone(),
+            NoteAnswering {
+                message_id: message.id.clone(),
+                team_path: message.team_path.clone(),
+                team_name: crate::runs::team_name(team),
+                agent_names,
+                answers,
+                created_at: message.created_at.clone(),
+                finished_at,
+            },
+        );
+    }
+
+    /// The messages still being answered and those answered at or after `cutoff`, oldest first.
+    fn since(&self, cutoff: Option<DateTime<Utc>>) -> Vec<NoteAnswering> {
+        let notes = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut kept: Vec<NoteAnswering> = notes
+            .values()
+            .filter(|note| cutoff.is_none_or(|cutoff| answered_since(note, cutoff)))
+            .cloned()
+            .collect();
+        kept.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        kept
+    }
+}
+
+/// Whether `note` is still being answered, or was answered at or after `cutoff`.
+fn answered_since(note: &NoteAnswering, cutoff: DateTime<Utc>) -> bool {
+    note.finished_at
+        .as_deref()
+        .is_none_or(|at| DateTime::parse_from_rfc3339(at).is_ok_and(|at| at >= cutoff))
 }
 
 /// What kind of message a reply answers, as the chat named it when the operator pressed Reply.
@@ -1549,6 +1635,7 @@ struct ChatState {
     archive: Option<EventArchive>,
     teams_root: PathBuf,
     registry: RunRegistry,
+    answering: NotesAnswering,
 }
 
 /// The chat's routes. Loopback-only and never cached, like run control.
@@ -1567,12 +1654,36 @@ pub fn router(archive: Option<EventArchive>, teams_root: PathBuf, registry: RunR
         .route("/api/chat/messages/{id}/start", post(start_from_note))
         .route("/api/chat/continue", post(continue_team))
         .route("/api/chat/reactions", post(react))
+        .route("/api/chat/answering", get(answering))
         .route_layer(middleware::from_fn(local_evidence))
         .with_state(ChatState {
             archive,
             teams_root,
             registry,
+            answering: NotesAnswering::default(),
         })
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnsweringQuery {
+    /// `finishedWithin=<seconds>`: the messages answered in that many seconds as well, as
+    /// `GET /api/runs` takes it.
+    finished_within: Option<u64>,
+}
+
+/// `GET /api/chat/answering`: every message its agents are answering in the chat themselves, and
+/// those answered in the last hour or in `finishedWithin` seconds, oldest first
+/// ([`NoteAnswering`]). The island at the notch reads it beside the runs (ADR 0083).
+async fn answering(
+    State(state): State<ChatState>,
+    Query(query): Query<AnsweringQuery>,
+) -> Json<Vec<NoteAnswering>> {
+    let cutoff = query.finished_within.and_then(|seconds| {
+        chrono::TimeDelta::try_seconds(i64::try_from(seconds).ok()?)
+            .and_then(|window| Utc::now().checked_sub_signed(window))
+    });
+    Json(state.answering.since(cutoff))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2419,15 +2530,7 @@ async fn answer_instead(
     *decided = Decided::TeamNote;
     tokio::spawn(answer_together(
         store,
-        Answering {
-            archive: state.archive.clone(),
-            teams_root: state.teams_root.clone(),
-            team: team.clone(),
-            whole_team,
-            task: task.to_owned(),
-            context,
-            newest_work,
-        },
+        Answering::new(state, team, whole_team, task, context, newest_work),
         message.clone(),
     ));
 }
@@ -2442,6 +2545,30 @@ struct Answering {
     context: crate::intent::Context,
     /// The newest finished work in the conversation, whose agents remember what they said there.
     newest_work: Option<String>,
+    /// Where `GET /api/chat/answering` sees them at work.
+    notes: NotesAnswering,
+}
+
+impl Answering {
+    fn new(
+        state: &ChatState,
+        team: &TeamConfig,
+        whole_team: bool,
+        task: &str,
+        context: crate::intent::Context,
+        newest_work: Option<String>,
+    ) -> Self {
+        Self {
+            archive: state.archive.clone(),
+            teams_root: state.teams_root.clone(),
+            team: team.clone(),
+            whole_team,
+            task: task.to_owned(),
+            context,
+            newest_work,
+            notes: state.answering.clone(),
+        }
+    }
 }
 
 /// Every agent `message` is waiting on answers it, each on its own model, all at the same time;
@@ -2458,6 +2585,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
         .map(str::to_owned);
     let answering = Arc::new(answering);
     let mut answers = message.answers.clone().unwrap_or_default();
+    answering.notes.keep(&message, &answering.team, &answers);
     let mut replies = tokio::task::JoinSet::new();
     for id in answers.waiting.clone() {
         let answering = answering.clone();
@@ -2514,6 +2642,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
                 at: now(),
             });
         }
+        answering.notes.keep(&message, &answering.team, &answers);
         if let Err(error) = store.set_answers(&message.id, &answers).await {
             eprintln!("loomwatchd: could not keep an agent's answer in the chat: {error}");
         }
@@ -2521,6 +2650,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
     // An answer whose task panicked never reported its agent: nobody is still writing.
     if !answers.waiting.is_empty() {
         answers.waiting.clear();
+        answering.notes.keep(&message, &answering.team, &answers);
         if let Err(error) = store.set_answers(&message.id, &answers).await {
             eprintln!("loomwatchd: could not keep an agent's answer in the chat: {error}");
         }
@@ -3520,6 +3650,7 @@ mod tests {
                 task: "hi @team".to_owned(),
                 context: crate::intent::Context::default(),
                 newest_work: None,
+                notes: NotesAnswering::default(),
             },
             message.clone(),
         )
@@ -3547,6 +3678,118 @@ mod tests {
                 .contains("Researcher is reading it too")
         );
         let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// **An agent answering in the chat is seen at work, as a run's agents are (ADR 0083).**
+    /// "Explain" on a part of a file is mostly answered in the chat, and nothing runs, so the
+    /// island at the notch never saw it. `GET /api/chat/answering` lists the message while its
+    /// agent writes, with the agent's name, and then the opening of its answer and when it ended.
+    #[tokio::test]
+    async fn a_message_answered_in_the_chat_is_listed_while_its_agent_writes_and_after() {
+        use crate::agent::{Completion, Demo};
+        let pool = crate::db::Db::temp().await;
+        let store = ChatStore::new(pool.clone());
+        let answer = "Every item keeps one number. ".repeat(40);
+        let (demo, hold) = Demo::held(vec![Completion::text(&answer)]);
+        let mut team = team();
+        team.agents[0].model = crate::engine::demo_model(demo);
+        let mut message = note(
+            "2026-10-06T02:00:00.000Z",
+            "@Researcher Explain this part in plain words.",
+            None,
+        );
+        message.answers = Some(NoteAnswers {
+            waiting: vec!["researcher".to_owned()],
+            said: Vec::new(),
+        });
+        store.insert(&message).await.expect("insert");
+        let folder = std::env::temp_dir().join(format!("loomwatch-answering-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        let state = ChatState {
+            archive: Some(EventArchive::new(pool.clone())),
+            teams_root: folder.clone(),
+            registry: RunRegistry::durable(RunStore::new(pool)),
+            answering: NotesAnswering::default(),
+        };
+        let listed = |seconds: u64| {
+            let state = state.clone();
+            async move {
+                let query = AnsweringQuery {
+                    finished_within: Some(seconds),
+                };
+                answering(State(state), Query(query)).await.0
+            }
+        };
+        // Handed over as `answer_instead` hands it, from the chat's own state.
+        let answered = tokio::spawn(answer_together(
+            store.clone(),
+            Answering::new(
+                &state,
+                &team,
+                false,
+                "Explain this part in plain words.",
+                crate::intent::Context::default(),
+                None,
+            ),
+            message.clone(),
+        ));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.waiting() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the researcher starts writing");
+
+        let writing = listed(3600).await;
+        assert_eq!(writing.len(), 1, "{writing:?}");
+        assert_eq!(writing[0].message_id, message.id);
+        assert_eq!(writing[0].team_path, "news.yaml");
+        assert_eq!(writing[0].team_name.as_deref(), Some("News desk"));
+        assert_eq!(writing[0].answers.waiting, ["researcher"]);
+        assert_eq!(
+            writing[0].agent_names.get("researcher").map(String::as_str),
+            Some("Researcher")
+        );
+        assert_eq!(writing[0].finished_at, None, "still writing");
+        assert_eq!(
+            listed(0).await.len(),
+            1,
+            "a message still being answered is listed whatever the window"
+        );
+
+        hold.release(1);
+        tokio::time::timeout(Duration::from_secs(10), answered)
+            .await
+            .expect("the answer ends")
+            .expect("the answer's task");
+        let done = listed(3600).await;
+        assert_eq!(done.len(), 1, "{done:?}");
+        assert!(done[0].answers.waiting.is_empty(), "{done:?}");
+        assert!(done[0].finished_at.is_some(), "{done:?}");
+        assert_eq!(done[0].answers.said[0].from, "researcher");
+        assert_eq!(
+            done[0].answers.said[0].text,
+            answer.chars().take(400).collect::<String>(),
+            "the opening of what it said"
+        );
+        // The chat keeps the whole answer.
+        let kept = store.get(&message.id).await.expect("read").expect("kept");
+        assert_eq!(kept.answers.expect("answers").said[0].text, answer.trim());
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// The route is mounted, loopback-only like the rest of the chat, and lists nothing when no
+    /// message is being answered.
+    #[tokio::test]
+    async fn the_answering_route_answers_with_a_list() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let rig = rig(pool, &dir);
+        assert_eq!(
+            page_at(&rig.app, "/api/chat/answering?finishedWithin=3600").await,
+            json!([])
+        );
     }
 
     // -----------------------------------------------------------------------------------------

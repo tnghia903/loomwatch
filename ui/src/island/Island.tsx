@@ -162,6 +162,14 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
   )
 }
 
+/** What a result says: "Trip planner is done" or "Trip planner stopped"; "Writer answered in Trip
+    planner" for an answer in the chat, where the team did no work. */
+function resultWords(team: TeamNow): string {
+  if (team.moment === 'fail') return `${team.teamName} stopped`
+  if (team.chat) return `${team.agentName ?? 'The team'} answered in ${team.teamName}`
+  return `${team.teamName} is done`
+}
+
 /** A finished or stopped run's result, sliding out below the agent that did the work. */
 function Slip({ island, onPointerEnter, onPointerLeave }: { island: IslandState; onPointerEnter: (event: ReactPointerEvent) => void; onPointerLeave: (event: ReactPointerEvent) => void }) {
   const shown = island.shown && (island.shown.pop.kind === 'done' || island.shown.pop.kind === 'fail') ? island.shown : null
@@ -176,7 +184,7 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
   return (
     <>
       <div className="island-words">
-        <small>{team.moment === 'fail' ? `${team.teamName} stopped` : `${team.teamName} is done`}</small>
+        <small>{resultWords(team)}</small>
         <p>{team.result}</p>
       </div>
       <div className="island-acts">
@@ -242,10 +250,11 @@ function List({ island }: { island: IslandState }) {
   )
 }
 
-/** "Writer is working · 4 min", or "Writer just started". */
+/** "Writer is working · 4 min", or "Writer just started"; "Writer is answering" in the chat. */
 function working(team: TeamNow, now: number): ReactNode {
   const who = team.agentName ?? 'The team'
   const time = workedFor(team.startedAt, now, 'long')
+  if (team.chat) return time ? <>{who} is answering <span className="island-nowrap">· {time}</span></> : `${who} is answering`
   if (!time) return `${who} just started`
   return <>{who} is working <span className="island-nowrap">· {time}</span></>
 }
@@ -261,7 +270,7 @@ function label(island: IslandState): string {
   const { asks } = island.tucked
   if (asks) return asks === 1 ? 'LoomWatch: 1 thing needs you' : `LoomWatch: ${asks} things need you`
   const result = island.teams.find((team) => team.moment === 'done' || team.moment === 'fail')
-  if (result) return `LoomWatch: ${result.teamName} ${result.moment === 'fail' ? 'stopped' : 'is done'}`
+  if (result) return `LoomWatch: ${resultWords(result)}`
   const busy = island.teams.filter((team) => team.moment === 'work').length
   if (busy) return busy === 1 ? 'LoomWatch: 1 team is working' : `LoomWatch: ${busy} teams are working`
   return 'LoomWatch'

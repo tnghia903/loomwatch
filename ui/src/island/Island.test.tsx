@@ -1,11 +1,14 @@
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { NoteAnswering } from '../lib/chat/client'
 import type { RunRecord } from '../lib/runs/client'
-import { permission, run } from './fixtures'
+import { answering, at, iso, permission, run, said } from './fixtures'
 import { Island } from './Island'
 
 let runs: RunRecord[] = []
+let notes: NoteAnswering[] = []
+let noteReads = 0
 const posted: { url: string; body: unknown }[] = []
 const toApp: unknown[] = []
 
@@ -14,12 +17,20 @@ function json(body: unknown, status = 200): Response {
 }
 
 beforeEach(() => {
+  // The fixtures' runs start at 10:00 on 2026-10-22: the page's clock starts there too, and moves on.
+  vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true, now: at(0) })
   runs = []
+  notes = []
+  noteReads = 0
   posted.length = 0
   toApp.length = 0
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/runs?')) return json(runs)
+    if (url.startsWith('/api/chat/answering?')) {
+      noteReads += 1
+      return json(notes)
+    }
     if (url === '/api/jobs') return json({ jobs: [] })
     if (url.startsWith('/api/team?')) return json({ path: 'trip.yaml', yaml: 'name: Trip planner\nagents:\n  - id: researcher\n  - id: writer\n', revision: 'sha256:x' })
     if (init?.method === 'POST') {
@@ -34,6 +45,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   delete window.webkit
   delete window.loomwatchIsland
@@ -147,4 +159,37 @@ describe('the island page', () => {
     fireEvent.click(container.querySelector('.island-list')!.querySelector<HTMLElement>('[aria-label="More"]')!)
     expect(toApp.at(-1)).toMatchObject({ kind: 'menu' })
   })
+
+  it('lists an agent answering in the chat, where no run is', async () => {
+    notes = [
+      answering('m1'),
+      answering('m2', { teamPath: 'digest.yaml', teamName: 'Weekly digest', agentNames: { checker: 'Checker' }, answers: { waiting: ['checker'], said: [] }, createdAt: iso(-4) }),
+    ]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    await waitFor(() => expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('tucked'))
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    expect([...container.querySelectorAll('.island-row')].map((row) => row.textContent)).toEqual(['Weekly digestChecker is answering · 4 min', 'Trip plannerWriter is answering'])
+  })
+
+  it('peeks out with the agent that starts answering in the chat, then slides out its answer, which opens the chat', async () => {
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    const island = container.querySelector('.island')!
+    // The island has had its first look: what starts after it pops out.
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    notes = [answering('m1')]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
+    expect(container.querySelector('.island-slot.is-on')?.getAttribute('data-agent')).toBe('writer')
+    notes = [answering('m1', { answers: { waiting: [], said: [said('Every item keeps one number.')] }, finishedAt: new Date().toISOString() })]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('done'), { timeout: 5000 })
+    const slip = within(container.querySelector<HTMLElement>('.island-slip')!)
+    // One agent answered a question: the team did no work, as the chat says under the answer.
+    expect(slip.getByText('Writer answered in Trip planner')).toBeTruthy()
+    expect(container.querySelector('.island-shape')?.getAttribute('aria-label')).toBe('LoomWatch: Writer answered in Trip planner')
+    expect(slip.getByText('Every item keeps one number.')).toBeTruthy()
+    fireEvent.click(slip.getByRole('button', { name: 'See answer' }))
+    expect(toApp).toContainEqual({ kind: 'open', link: '/?path=trip.yaml&view=chat' })
+  }, 15_000)
 })

@@ -438,24 +438,33 @@ impl RunRecord {
             working: Vec::new(),
             queued_notes: Vec::new(),
             auto_mode: team.permissions.mode == crate::config::PermissionMode::Auto,
-            team_name: Some(team.name.trim())
-                .filter(|name| !name.is_empty())
-                .map(str::to_owned),
-            agent_names: team
-                .agents
-                .iter()
-                .map(|agent| {
-                    let name = agent.name.trim();
-                    let name = if name.is_empty() { &agent.id } else { name };
-                    (agent.id.clone(), name.to_owned())
-                })
-                .collect(),
+            team_name: team_name(team),
+            agent_names: agent_names(team),
             spend: Some(crate::spend::RunSpend::for_team(team)),
             spend_stops: Vec::new(),
             next_try_at: None,
             try_again_after: None,
         })
     }
+}
+
+/// The team file's `name`, as a run keeps it ([`RunRecord::team_name`]): `None` when it has none.
+pub(crate) fn team_name(team: &TeamConfig) -> Option<String> {
+    Some(team.name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+}
+
+/// Each agent's name by id, its id when it has none ([`RunRecord::agent_names`]).
+pub(crate) fn agent_names(team: &TeamConfig) -> BTreeMap<String, String> {
+    team.agents
+        .iter()
+        .map(|agent| {
+            let name = agent.name.trim();
+            let name = if name.is_empty() { &agent.id } else { name };
+            (agent.id.clone(), name.to_owned())
+        })
+        .collect()
 }
 
 fn now() -> String {
@@ -3777,7 +3786,7 @@ fn finished_since(run: &RunRecord, cutoff: chrono::DateTime<Utc>) -> bool {
 const REPLY_PREVIEW_CHARS: usize = 400;
 
 /// `reply` cut to its first [`REPLY_PREVIEW_CHARS`] characters.
-fn reply_preview(reply: &mut String) {
+pub(crate) fn reply_preview(reply: &mut String) {
     if let Some((end, _)) = reply.char_indices().nth(REPLY_PREVIEW_CHARS) {
         reply.truncate(end);
     }

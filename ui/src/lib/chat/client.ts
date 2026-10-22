@@ -74,6 +74,29 @@ export interface NoteAnswer {
 }
 
 /**
+ * A message its agents are answering in the chat themselves, in any team (`chat::NoteAnswering`):
+ * while they write, and for an hour after. Nothing runs for it, so the run list never has it.
+ */
+export interface NoteAnswering {
+  messageId: string
+  teamPath: string
+  teamName?: string
+  /** Each answering agent's name by id. */
+  agentNames: Record<string, string>
+  /** Who is still writing, and the opening of what each said. */
+  answers: NoteAnswers
+  createdAt: string
+  /** When the last of them finished; `null` while any is still writing. */
+  finishedAt: string | null
+}
+
+/** The messages being answered in the chat, and those answered in the last `seconds`, oldest first. */
+export async function fetchNotesAnswering(seconds: number, signal?: AbortSignal): Promise<NoteAnswering[]> {
+  const response = await daemonFetch(`/api/chat/answering?finishedWithin=${seconds}`, { signal, cache: 'no-store' })
+  return readRun<NoteAnswering[]>(response)
+}
+
+/**
  * Past this, an agent still "writing" an answer is not: the daemon gives each answer two minutes,
  * and one that stopped with the daemon never reports back.
  */
