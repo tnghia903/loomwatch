@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../lib/runs/client'
-import { answering, at, failed, iso, OUT_OF_CREDITS, permission, run, said } from './fixtures'
+import { answering, at, failed, iso, maya, OUT_OF_CREDITS, permission, pinnedChat, run, said } from './fixtures'
+import type { TeamRequest } from '../lib/runs/teamRequests'
+import { pinnedNow } from './pinned'
 import { initialIsland, islandReducer, viewOf, type IslandAction, type IslandState } from './state'
+import { tucked } from './teams'
 import { ISLAND_WAITS } from './waits'
 
 function play(steps: [number, IslandAction][], start = initialIsland(at(0), true)): IslandState {
@@ -107,10 +110,14 @@ describe('the island, moment by moment', () => {
     expect(viewOf(s)).toBe('tucked')
   })
 
-  it('without a notch, it shows only while a question or a result has dropped', () => {
+  it('without a notch, it rests at the middle of the menu bar as at a notch; over a full-screen app, only what drops out shows', () => {
     const noNotch: IslandAction = { type: 'app', message: { kind: 'place', notch: null, menuBar: 24 } }
-    expect(viewOf(play([[at(0), noNotch], [at(0), runs()]]))).toBe('hidden')
+    expect(viewOf(play([[at(0), noNotch], [at(0), runs()]]))).toBe('rest')
     let s = play([[at(0), noNotch], [at(0), runs()], [at(1), runs(run('a', { working: ['researcher'] }))]])
+    expect(viewOf(s)).toBe('work')
+    s = islandReducer(s, { type: 'tick', now: at(1) + ISLAND_WAITS.start })
+    expect(viewOf(s)).toBe('tucked')
+    s = islandReducer(s, { type: 'app', message: { kind: 'fullScreen', on: true }, now: at(2) })
     expect(viewOf(s)).toBe('hidden')
     s = islandReducer(s, { type: 'runs', records: [run('a', { permissionRequests: [permission('p1')] })], now: at(2) })
     expect(viewOf(s)).toBe('ask')
@@ -145,3 +152,106 @@ describe('the island, moment by moment', () => {
     expect(s.teams?.map((team) => [team.runId, team.moment])).toEqual([['m2', 'work']])
   })
 })
+
+describe('writing to the agent pinned to the notch', () => {
+  const pinned: IslandAction = { type: 'pinned', pinned: pinnedNow('maya', [maya]) }
+
+  it('keeps the list open wherever the pointer goes, until a click lands elsewhere', () => {
+    let s = play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(1), { type: 'compose', on: true }]])
+    expect([viewOf(s), s.composing]).toEqual(['list', true])
+    s = islandReducer(s, { type: 'pointerOnIsland', over: false, now: at(1) })
+    expect(viewOf(islandReducer(s, { type: 'closeList', now: at(2) }))).toBe('list')
+    s = islandReducer(s, { type: 'app', message: { kind: 'clickOutside' }, now: at(2) })
+    expect([viewOf(s), s.composing]).toEqual(['rest', false])
+  })
+
+  it('opens the list to write when the app’s menu asks, but only to an agent that is pinned', () => {
+    expect(viewOf(play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(1), { type: 'app', message: { kind: 'compose' } }]]))).toBe('list')
+    const none = play([[at(0), placed], [at(0), runs()], [at(1), { type: 'app', message: { kind: 'compose' } }], [at(1), { type: 'compose', on: true }]])
+    expect([viewOf(none), none.composing]).toEqual(['rest', false])
+  })
+
+  it('names its work as the agent, opening its chat, and leaves every team as it was', () => {
+    const working = runs(pinnedChat('c1', { working: ['maya'] }), run('r1', { working: ['writer'] }))
+    const s = play([[at(0), placed], [at(0), pinned], [at(0), working]])
+    const shown = (state: IslandState) => state.teams?.map((team) => [team.teamName, team.link, Boolean(team.pinned)])
+    expect(shown(s)).toEqual([['Maya', '/agents/maya?view=chat', true], ['Trip planner', '/?path=trip.yaml&run=r1', false]])
+    // Unpinned, its chat is a team like any other again.
+    expect(shown(islandReducer(s, { type: 'pinned', pinned: null, now: at(1) }))?.[0]).toEqual(['Maya · chat', '/?path=.jobs%2F.bench%2Fmaya.yaml&run=c1', false])
+  })
+})
+
+describe('the pinned agent’s slot, crew and requests for your teams', () => {
+  const pinned: IslandAction = { type: 'pinned', pinned: pinnedNow('maya', [maya]) }
+  const pdf = new File(['%PDF'], 'Lease 2027.pdf', { type: 'application/pdf' })
+  const request = (changes: Partial<TeamRequest> = {}): TeamRequest => ({
+    id: 'tr1',
+    askedBy: { runId: 'c1', agent: 'maya', chatPath: '.jobs/.bench/maya.yaml' },
+    team: { path: 'trip.yaml', name: 'Trip planner' },
+    request: 'Plan three gentle days in Đà Lạt',
+    status: 'waiting',
+    runId: null,
+    problem: null,
+    createdAt: iso(1),
+    finishedAt: null,
+    ...changes,
+  })
+
+  it('opens as a slot while something is dragged near, over whatever was out, only with an agent pinned', () => {
+    const near: IslandAction = { type: 'app', message: { kind: 'drag', near: true } }
+    expect(viewOf(play([[at(0), placed], [at(0), runs()], [at(1), near]]))).toBe('rest')
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), runs(run('a', { permissionRequests: [permission('p1')] }))]])
+    expect(viewOf(s)).toBe('ask')
+    s = islandReducer(s, { ...near, now: at(1) + 500 })
+    expect(viewOf(s)).toBe('slot')
+    s = islandReducer(s, { type: 'app', message: { kind: 'drag', near: false }, now: at(1) + 900 })
+    expect(viewOf(s)).not.toBe('slot')
+  })
+
+  it('stays open for a drop that comes after the button is up: the drag’s own events close it', () => {
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), { type: 'app', message: { kind: 'drag', near: true } }], [at(1), { type: 'dragOver', over: true }]])
+    s = islandReducer(s, { type: 'app', message: { kind: 'drag', near: false }, now: at(1) + 100 })
+    expect(viewOf(s)).toBe('slot')
+    s = islandReducer(s, { type: 'drop', intake: { files: [pdf], link: null, text: null }, now: at(1) + 200 })
+    expect(viewOf(s)).toBe('list')
+  })
+
+  it('keeps what was dropped in the box, open to write, until it goes with a message', () => {
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), { type: 'dragOver', over: true }]])
+    expect(viewOf(s)).toBe('slot')
+    s = islandReducer(s, { type: 'drop', intake: { files: [pdf], link: null, text: null }, now: at(1) + 100 })
+    expect([viewOf(s), s.composing, s.intake?.files[0]?.name, s.dragOver]).toEqual(['list', true, 'Lease 2027.pdf', false])
+    s = islandReducer(s, { type: 'intakeDone', now: at(2) })
+    expect(s.intake).toBeNull()
+  })
+
+  it('asks you to start one of your teams on the gold line, as a question, and counts it', () => {
+    const s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), { type: 'runs', records: [], requests: [request()] }]])
+    expect([viewOf(s), s.pop.out?.pop.key]).toEqual(['ask', 'team:tr1'])
+    expect(s.teams?.[0]).toMatchObject({ pinned: true, moment: 'ask', teamName: 'Maya' })
+    expect(tucked(s.teams ?? []).asks).toBe(1)
+  })
+
+  it('shows the team it started as its crew, hides what it said meanwhile, and gives you its answer, not the crew’s', () => {
+    const asked = pinnedChat('c1', { status: 'succeeded', working: [], reply: 'I asked Trip planner.', finishedAt: iso(2) })
+    const started = request({ status: 'started', runId: 'crew1' })
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(3), { type: 'runs', records: [asked, run('crew1', { working: ['researcher'] })], requests: [started] }]])
+    expect(s.teams?.map((team) => [team.runId, team.crewFor ?? null])).toEqual([['crew1', 'Maya']])
+    // The crew finished: its answer goes to Maya, who starts a new turn; only hers comes to you.
+    s = islandReducer(s, { type: 'runs', records: [asked, run('crew1', { status: 'succeeded', reply: 'Day 1…', finishedAt: iso(4) }), pinnedChat('c2', { working: ['maya'], startedAt: iso(4) })], requests: [request({ status: 'done', runId: 'crew1', finishedAt: iso(4) })], now: at(4) })
+    expect(s.teams?.map((team) => team.runId)).toEqual(['c2'])
+    // A crew that stopped stays, as a stop.
+    s = islandReducer(s, { type: 'runs', records: [asked, run('crew1', { status: 'failed', error: 'boom', finishedAt: iso(5) })], requests: [request({ status: 'failed', runId: 'crew1', finishedAt: iso(5) })], now: at(5) })
+    expect(s.teams?.map((team) => [team.runId, team.moment])).toEqual([['crew1', 'fail']])
+  })
+
+  it('says why a team you pressed Start on could not start, as a stop, until you look', () => {
+    const refused = request({ status: 'failed', problem: 'Open Trip planner in LoomWatch and press Run once: it changed outside LoomWatch.', finishedAt: iso(2) })
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(2), { type: 'runs', records: [], requests: [refused] }]])
+    expect(s.teams?.map((team) => [team.teamName, team.moment, team.result, team.link])).toEqual([['Trip planner', 'fail', 'Open Trip planner in LoomWatch and press Run once: it changed outside LoomWatch.', '/?path=trip.yaml']])
+    expect([viewOf(s), s.pop.out?.pop.kind]).toEqual(['fail', 'fail'])
+    s = islandReducer(s, { type: 'opened', runId: 'team-request:tr1', now: at(3) })
+    expect(s.teams).toEqual([])
+  })
+})
+

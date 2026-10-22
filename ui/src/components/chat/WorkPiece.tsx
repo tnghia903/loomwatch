@@ -4,7 +4,7 @@ import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState
 import { AppearContext, useAppear } from '../../lib/chat/appear'
 import { agentResolver, batonWords, passesOf, useBaton, type Baton } from '../../lib/chat/baton'
 import { useFollow } from '../../lib/chat/follow'
-import type { ChatItem, ChatMessage, ReplyTo } from '../../lib/chat/client'
+import { handedBackText, type ChatItem, type ChatMessage, type HandedBack, type ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
 import { clockTime, listNames, took } from '../../lib/chat/format'
@@ -36,6 +36,9 @@ import { AnswerTools } from './AnswerTools'
 import { Helpers } from './Helpers'
 import { AgentFace } from './AgentFace'
 import { AvatarFace } from '../agents/AvatarFace'
+import { FigureStill } from '../agents/FigureStill'
+import { agentFigure, figureFor } from '../../lib/library/figures'
+import { useSavedJobs } from '../../lib/library/jobs'
 import { Appearing, Swap } from './Appearing'
 import type { Lesson } from '../../lib/lessons/client'
 import { Learned } from './Learned'
@@ -285,8 +288,9 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   // and your own words — and tell the team next time. The agents' faces are receipts read from the
   // record: whoever took the work up looks up at what it was handed.
   const checks = useMemo(() => checkReactions(session.projection.messages), [session.projection.messages])
-  const reactOn = (target: string, about: string, agents: readonly AgentReaction[], { what, mine = false, own = mine }: { what?: ReactionAbout; mine?: boolean; own?: boolean } = {}) => (said: ReactNode) => (
-    <Reactions yours={yoursOn(item.reactions, target)} agents={agents} about={about} name={name} hue={hue} mine={mine} own={own} onReact={onReact && ((face) => onReact(run.runId, target, face, what))}>{said}</Reactions>
+  // `shown`: the agents' faces only, with no tray for yours.
+  const reactOn = (target: string, about: string, agents: readonly AgentReaction[], { what, mine = false, own = mine, shown = false }: { what?: ReactionAbout; mine?: boolean; own?: boolean; shown?: boolean } = {}) => (said: ReactNode) => (
+    <Reactions yours={yoursOn(item.reactions, target)} agents={agents} about={about} name={name} hue={hue} mine={mine} own={own} onReact={shown ? undefined : onReact && ((face) => onReact(run.runId, target, face, what))}>{said}</Reactions>
   )
   const isYou = (id: string | undefined) => id === OPERATOR_ID || (id !== undefined && team.operators.has(id))
   const talkReacts = (bubble: Bubble, said: ReactNode) => {
@@ -345,8 +349,12 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
   return (
     <AppearContext.Provider value={news && painted}>
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
-      <Request run={run} request={request} flash={saidFlash?.id === `request:${run.runId}`} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
-      {notes.map((note) => <Note key={note.id} note={note} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], { mine: true })} />)}
+      <Request run={run} request={request} flash={saidFlash?.id === `request:${run.runId}`} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={request?.handedBack
+        // A team's answer handed back: who took it up, not how long that took, which would read as
+        // the team's time; and no face of yours, which the chat would read as on your own words.
+        ? reactOn(targets.request, `${request.handedBack.teamName}'s answer`, onRequest.map(({ face, by, at }) => ({ face, by, at })), { shown: true })
+        : reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
+      {notes.map((note) => <Note key={note.id} note={note} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), note.handedBack ? `${note.handedBack.teamName}'s answer` : `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], note.handedBack ? { shown: true } : { mine: true })} />)}
       {tries && !tryingAgain(ended) && <div className="chat-notice tc-tries"><span>{tries}</span></div>}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
@@ -615,6 +623,7 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
       </div>
     )
   }
+  if (request?.handedBack) return <FromTeam message={request} handed={request.handedBack} said={`request:${run.runId}`} to={to} flash={flash} reactions={reactions} />
   return (
     <div className={`chat-msg mine${flash ? ' flash' : ''}`} data-said={`request:${run.runId}`}>
       <div className="chat-stack">
@@ -629,12 +638,47 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
   )
 }
 
+/**
+ * A team's work handed back to the agent that asked for it (ADR 0083, decision 10): the team's
+ * own words, under its name and the figure of its agent that answered, never as yours, whether it
+ * started the agent's turn or joined one as a note. Under it, who took it up.
+ */
+function FromTeam({ message, handed, said, to, flash, reactions, children }: { message: ChatMessage; handed: HandedBack; said: string; to: string; flash: boolean; reactions: (said: ReactNode) => ReactNode; children?: ReactNode }) {
+  const saved = useSavedJobs().jobs
+  const figure = handed.agent
+    ? agentFigure({ id: handed.agent, from: handed.fromAgent ? { agent: handed.fromAgent, version: 0 } : undefined }, saved)
+    : figureFor(handed.teamPath)
+  return (
+    <div className={`chat-msg tc-from-team${flash ? ' flash' : ''}`} data-said={said}>
+      <span className="chat-gutter">
+        <i className="chat-avatar hue-quiet has-figure" style={{ width: 28, height: 28 }} aria-hidden="true">
+          <FigureStill className="chat-avatar-figure" figure={figure} headOnly alt="" draggable={false} />
+        </i>
+      </span>
+      <div className="chat-stack">
+        <div className="chat-meta" title={`What ${to} asked ${handed.teamName}: “${handed.request}”`}>
+          <span className="chat-name hue-quiet">{handed.teamName}</span><span className="tc-to">to {to}</span><time>{clockTime(message.createdAt)}</time>
+        </div>
+        {reactions(<div className="chat-bubble"><div className="chat-text"><Markdown>{handedBackText(message.text, handed)}</Markdown></div></div>)}
+        {children}
+      </div>
+    </div>
+  )
+}
+
 /** A note you sent into this piece while an agent worked. */
 function Note({ note, flash = false, live, name, onShowReplied, reactions }: { note: ChatMessage; flash?: boolean; live: boolean; name: (id: string) => string; onShowReplied?: (reply: ReplyTo) => (() => void) | undefined; reactions: (said: ReactNode) => ReactNode }) {
   const appear = useAppear()
   const state = note.deliveredAt ? `${name(note.agentId ?? '')} took it in its next turn`
     : live ? note.now ? `Stopping ${name(note.agentId ?? '')}'s current step…` : `Waits for ${name(note.agentId ?? '')}'s current step to end`
       : 'The work ended before it was taken · kept for next time'
+  if (note.handedBack) {
+    return (
+      <FromTeam message={note} handed={note.handedBack} said={`note:${note.id}`} to={name(note.agentId ?? '')} flash={flash} reactions={reactions}>
+        <div className="chat-under"><Swap key={state}>{state}</Swap></div>
+      </FromTeam>
+    )
+  }
   return (
     <div className={`chat-msg mine tc-note${appear ? ' tc-appear' : ''}${note.deliveredAt ? ' taken' : ''}${flash ? ' flash' : ''}`} data-said={`note:${note.id}`}>
       <div className="chat-stack">

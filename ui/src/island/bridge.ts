@@ -12,6 +12,12 @@ export type FromApp =
   | { kind: 'away'; away: boolean }
   | { kind: 'fullScreen'; on: boolean }
   | { kind: 'clickOutside' }
+  /** ⌃⌥Space: open the message box to the pinned agent, with the keyboard the app has given the
+      panel; or, pressed again while it is open, put it away. */
+  | { kind: 'compose' }
+  /** Something (a file, a picture, text, a link) is being dragged near the island, or no longer
+      is: the island opens as a slot to take it. */
+  | { kind: 'drag'; near: boolean }
 
 export interface Area {
   x: number
@@ -26,6 +32,14 @@ export type ToApp =
   | { kind: 'areas'; rects: Area[] }
   | { kind: 'open'; link: string }
   | { kind: 'menu'; x: number; y: number }
+  /** Take the keyboard, for a message being written to the pinned agent, or give it back to
+      whatever had it. The panel takes it only while one is written. */
+  | { kind: 'keyboard'; on: boolean }
+  /** The agent pinned to the notch, by name, so ⌃⌥Space has a box to open; `null` when none is. */
+  | { kind: 'pinned'; name: string | null }
+  /** Put an answer on the clipboard, Copy on it: `text` for apps that take plain text, and `html`,
+      when there is one, formatted for apps that take it. */
+  | { kind: 'copy'; text: string; html: string | null }
 
 declare global {
   interface Window {
@@ -33,6 +47,11 @@ declare global {
     webkit?: { messageHandlers?: { island?: { postMessage(body: string): void } } }
   }
 }
+
+/** The shortcut that opens the box to the pinned agent from any app (`island::SHORTCUT_KEY`). */
+export const PINNED_SHORTCUT = '⌃⌥Space'
+/** The same, in words, for people who don't read ⌃ and ⌥. */
+export const PINNED_SHORTCUT_WORDS = 'Control-Option-Space'
 
 /** The page runs in the Mac app's panel at the notch. */
 export function inApp(): boolean {

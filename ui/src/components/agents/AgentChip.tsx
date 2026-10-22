@@ -1,6 +1,7 @@
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Pin } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
+import { PINNED_SHORTCUT, PINNED_SHORTCUT_WORDS } from '../../island/bridge'
 import { ChipDot, type ChipState } from '../ui/glyphs'
 
 export interface AgentChipProps {
@@ -13,6 +14,9 @@ export interface AgentChipProps {
   action?: ReactNode
   /** Take it out of My agents; absent for one not saved yet, which has nothing to take out. */
   onRemove?: () => void
+  /** Keep it at the notch on a Mac, to message from the top of the screen (ADR 0083), or take it
+      away; absent where there is no notch to keep it at. */
+  pin?: { pinned: boolean; onToggle: () => void }
 }
 
 /**
@@ -20,7 +24,7 @@ export interface AgentChipProps {
  * name, how it is kept, Save while there is something to save, and a menu for what is done to the
  * agent itself.
  */
-export function AgentChip({ name, state, detail, action, onRemove }: AgentChipProps) {
+export function AgentChip({ name, state, detail, action, onRemove, pin }: AgentChipProps) {
   const [open, setOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
   const chip = useRef<HTMLDivElement>(null)
@@ -35,16 +39,16 @@ export function AgentChip({ name, state, detail, action, onRemove }: AgentChipPr
     <>
       <ChipDot state={state} />
       <span className="chip-text">
-        <span className="chip-l1 t-body-m">{name}</span>
+        <span className="chip-l1 t-body-m">{pin?.pinned ? <><span className="chip-name">{name}</span><Pin className="chip-pin" size={12} aria-hidden="true" /></> : name}</span>
         <span className="chip-l2 t-meta">{detail}</span>
       </span>
     </>
   )
   return (
     <div ref={chip} style={{ position: 'relative', pointerEvents: 'auto' }}>
-      <div className={`e1 lw-chip ${ledger}`} style={{ position: 'relative' }} title={`${name} · ${detail}`}>
+      <div className={`e1 lw-chip ${ledger}`} style={{ position: 'relative' }} title={`${name}${pin?.pinned ? ' · pinned to the notch' : ''} · ${detail}`}>
         {onRemove
-          ? <button type="button" className="chip-open" onClick={() => { setOpen((value) => !value); setRemoving(false) }} aria-controls="agent-chip-pop" aria-expanded={open} aria-label={`${name}, ${detail}, open agent menu`}>{text}<span className="chev"><ChevronDown size={14} aria-hidden="true" /></span></button>
+          ? <button type="button" className="chip-open" onClick={() => { setOpen((value) => !value); setRemoving(false) }} aria-controls="agent-chip-pop" aria-expanded={open} aria-label={`${name}${pin?.pinned ? ', pinned to the notch' : ''}, ${detail}, open agent menu`}>{text}<span className="chev"><ChevronDown size={14} aria-hidden="true" /></span></button>
           : <span className="chip-open">{text}</span>}
         {action && <span className="chip-action">{action}</span>}
         <span className="ledger" aria-hidden="true" />
@@ -54,7 +58,10 @@ export function AgentChip({ name, state, detail, action, onRemove }: AgentChipPr
           <div className="pop-foot">
             {removing
               ? <span className="pop-inline t-meta" role="alertdialog" aria-label="Remove from My agents"><span>Remove it from My agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => { setOpen(false); onRemove() }}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></span>
-              : <span className="acts"><button type="button" className="link alert" onClick={() => setRemoving(true)}>Remove from My agents…</button></span>}
+              : <span className="acts">
+                {pin && <button type="button" className="link" title={pin.pinned ? undefined : `Message it with ${PINNED_SHORTCUT_WORDS} (${PINNED_SHORTCUT}) or from the top middle of your screen, without opening LoomWatch`} onClick={() => { setOpen(false); pin.onToggle() }}>{pin.pinned ? 'Unpin from the notch' : 'Pin to the notch'}</button>}
+                <button type="button" className="link alert" onClick={() => setRemoving(true)}>Remove from My agents…</button>
+              </span>}
           </div>
         </div>
       )}

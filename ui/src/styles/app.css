@@ -136,6 +136,11 @@ code, kbd, pre { font-family: var(--font-mono); }
 .lw-chip .chip-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .lw-chip .chip-l1 { color: var(--color-ink); display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lw-chip .chip-l2 { color: var(--color-ink-3); display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* An agent pinned to the notch (ADR 0083): a pin after its name, in the quiet ink of the line under it.
+   The line stays a row however the header sets it, so a long name ends in "…" and the pin stays. */
+.lw-chip .chip-l1:has(.chip-pin) { display: flex; align-items: center; gap: 4px; }
+.lw-chip .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lw-chip .chip-pin { display: inline-block; flex: none; color: var(--color-ink-3); }
 /* The arrow follows the team name, not the chip's far edge: in a wide chip it read as unrelated. */
 .lw-chip .chev { margin-left: calc(var(--sp-1) - var(--sp-3)); color: var(--color-ink-3); flex: none; display: grid; }
 .lw-chip .chip-action { display: flex; align-items: center; gap: var(--sp-2); flex: none; }

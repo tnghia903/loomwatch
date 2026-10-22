@@ -49,6 +49,9 @@ const SEWING_FRAMES: u8 = 8;
 const BLINK_EVERY: u32 = 20;
 /// How often the island hears whether the person is away and whether an app is full screen.
 const ISLAND_CHECK: Duration = Duration::from_secs(2);
+/// While the left button is held in another app, how often the island looks for something being
+/// dragged toward it: macOS stops telling other apps of the pointer once a drag of a file begins.
+const DRAG_CHECK: Duration = Duration::from_millis(50);
 
 enum UserEvent {
     Menu(MenuEvent),
@@ -205,7 +208,7 @@ pub fn run() -> Result<()> {
             }
             Event::UserEvent(UserEvent::Island(event)) => {
                 if let Some(island) = island.as_mut() {
-                    island.on(event, address.as_deref(), &island_menu, &mut bar);
+                    island.on(event, address.as_deref(), &island_menu);
                 }
             }
             Event::UserEvent(UserEvent::Status(text)) => items.status.set_text(text),
@@ -254,25 +257,35 @@ pub fn run() -> Result<()> {
 struct Island {
     panel: NotchPanel,
     next_check: Instant,
+    /// An agent is pinned to the notch, so ⌃⌥Space has a box to open.
+    pinned: bool,
+    /// The left button is held in another app: a drag of something may be under way.
+    pressing: bool,
 }
 
 impl Island {
-    /// Made once the app runs, on its main thread. Where it goes decides whether the menu bar face
-    /// stays.
+    /// Made once the app runs, on its main thread. The island is on every screen, so the menu bar
+    /// face stays out of the menu bar while it runs (ADR 0083).
     fn start(proxy: &EventLoopProxy<UserEvent>, bar: &mut Bar) -> Option<Self> {
         let mtm = MainThreadMarker::new()?;
         let proxy = proxy.clone();
         let mut panel = NotchPanel::new(mtm, move |event| {
             let _ = proxy.send_event(UserEvent::Island(event));
         });
-        bar.set_visible(panel.place(mtm));
+        panel.place(mtm);
+        bar.set_visible(false);
         Some(Self {
             panel,
             next_check: Instant::now(),
+            pinned: false,
+            pressing: false,
         })
     }
 
     fn tick(&mut self) {
+        if self.pressing {
+            self.pressing = self.panel.poll_drag();
+        }
         if let Some(mtm) = MainThreadMarker::new()
             && Instant::now() >= self.next_check
         {
@@ -281,13 +294,17 @@ impl Island {
         }
     }
 
-    const fn wakes_at(&self) -> Instant {
-        self.next_check
+    fn wakes_at(&self) -> Instant {
+        if self.pressing {
+            self.next_check.min(Instant::now() + DRAG_CHECK)
+        } else {
+            self.next_check
+        }
     }
 
     /// What the island's page, the pointer and the screens ask of the app. `origin` is
     /// `loomwatchd`'s address, once it answers.
-    fn on(&mut self, event: IslandEvent, origin: Option<&str>, menu: &Menu, bar: &mut Bar) {
+    fn on(&mut self, event: IslandEvent, origin: Option<&str>, menu: &Menu) {
         let panel = &mut self.panel;
         match event {
             IslandEvent::Page(FromPage::Ready) => panel.page_ready(),
@@ -298,11 +315,31 @@ impl Island {
                 }
             }
             IslandEvent::Page(FromPage::Menu { .. }) => panel.show_menu(menu),
+            IslandEvent::Page(FromPage::Keyboard { on: true }) => panel.take_keyboard(),
+            IslandEvent::Page(FromPage::Keyboard { on: false }) => panel.give_back_keyboard(),
+            IslandEvent::Page(FromPage::Pinned { name }) => self.pinned = name.is_some(),
+            IslandEvent::Page(FromPage::Copy { text, html }) => {
+                NotchPanel::copy(&text, html.as_deref());
+            }
+            // ⌃⌥Space opens the box to the pinned agent; with none pinned there is nothing to open.
+            IslandEvent::Shortcut => {
+                if self.pinned {
+                    panel.compose();
+                }
+            }
+            IslandEvent::PressStarted => {
+                self.pressing = true;
+                panel.press_started();
+            }
+            IslandEvent::PressEnded => {
+                self.pressing = false;
+                panel.press_ended();
+            }
             IslandEvent::Pointer => panel.pointer(),
             IslandEvent::ClickOutside => panel.click_outside(),
             IslandEvent::Screens => {
                 if let Some(mtm) = MainThreadMarker::new() {
-                    bar.set_visible(panel.place(mtm));
+                    panel.place(mtm);
                 }
             }
         }

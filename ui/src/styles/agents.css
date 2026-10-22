@@ -34,6 +34,8 @@
 .agent-badge.compact .agent-badge-figure { width: 84px; height: 84px; }
 .agent-badge-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .agent-badge-who strong { font: 600 15px/1.25 var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+/* Kept at the notch (ADR 0083): a pin after the name, in the quiet ink of the lines under it. */
+.agent-badge-pin { display: inline-block; margin-left: 6px; vertical-align: -1px; color: var(--color-ink-3); }
 .agent-badge-does { font-size: 13px; color: var(--color-ink-2); }
 .agent-badge-app { color: var(--color-ink-3); overflow-wrap: anywhere; }
 .agent-badge-row { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: var(--sp-2); align-items: baseline; font-size: 12.5px; color: var(--color-ink-2); }

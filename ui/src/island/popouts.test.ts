@@ -4,7 +4,7 @@ import { advance, arrive, NOTHING_OUT, tuckNow, tuckOnClick, wakesAt, type Circu
 import type { Pop } from './teams'
 import { ISLAND_WAITS } from './waits'
 
-const calm: Circumstances = { now: 0, away: false, fullScreen: false, teamsAtWork: 1, notch: true, pointer: false }
+const calm: Circumstances = { now: 0, away: false, fullScreen: false, teamsAtWork: 1, pointer: false }
 const start: Pop = { kind: 'start', runId: 'a', key: 'researcher' }
 const handover: Pop = { kind: 'handover', runId: 'a', key: 'writer' }
 const ask: Pop = { kind: 'ask', runId: 'a', key: 'a:permission:p1' }
@@ -48,15 +48,15 @@ describe('popping out and tucking away', () => {
     expect(wakesAt(back)).toBe(3_600_000 + ISLAND_WAITS.ask)
   })
 
-  it('with more than one team at work, over a full-screen app, or without a notch, a start or a handover stays tucked', () => {
-    for (const c of [{ teamsAtWork: 2 }, { fullScreen: true }, { notch: false }]) {
+  it('with more than one team at work, or over a full-screen app, a start or a handover stays tucked', () => {
+    for (const c of [{ teamsAtWork: 2 }, { fullScreen: true }]) {
       expect(bring(arrive(NOTHING_OUT, [start, handover], { ...calm, ...c }), c).out).toBeNull()
     }
     // A question still pops out, and a stop; a result does too, except over a full-screen app.
     expect(bring(arrive(NOTHING_OUT, [ask], { ...calm, fullScreen: true })).out?.pop).toEqual(ask)
     const fail: Pop = { kind: 'fail', runId: 'a', key: 'a' }
     expect(bring(arrive(NOTHING_OUT, [fail], { ...calm, fullScreen: true })).out?.pop).toEqual(fail)
-    expect(bring(arrive(NOTHING_OUT, [done], { ...calm, notch: false }), { notch: false }).out?.pop).toEqual(done)
+    expect(bring(arrive(NOTHING_OUT, [done], calm)).out?.pop).toEqual(done)
     expect(bring(arrive(NOTHING_OUT, [done], { ...calm, fullScreen: true })).out).toBeNull()
   })
 

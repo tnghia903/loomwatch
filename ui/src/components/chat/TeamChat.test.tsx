@@ -6,6 +6,7 @@ import { PASS_BEAT_MS } from '../../lib/chat/baton'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
 import { clockTime } from '../../lib/chat/format'
 import type { Lesson } from '../../lib/lessons/client'
+import { figureFor, figureStill } from '../../lib/library/figures'
 import type { RunRecord } from '../../lib/runs/client'
 import { FileReaderContext } from '../../lib/files/reader'
 import type { TeamMessage } from '../../lib/watch/messages'
@@ -172,6 +173,56 @@ describe('the team’s chat', () => {
     expect(within(log).getByRole('button', { name: 'Hide what they said' })).toHaveAttribute('aria-expanded', 'true')
     // The chat speaks the team's words: no "run", "session" or "stage" (those live in Details).
     expect(screen.getByRole('region', { name: 'News desk chat' }).textContent).not.toMatch(/\b(run|runs|session|stage|stages)\b/i)
+  })
+
+  // ADR 0083, decision 10: a team's answer handed back to the agent that asked for it is the team's.
+  it('shows a team’s handed-back answer as the team’s, with its figure and its formatting, never as yours', async () => {
+    const heading = 'Trip planner’s answer to “Plan 3 gentle days in Đà Lạt”:'
+    const handedBack = { teamPath: 'trips.yaml', teamName: 'Trip planner', agent: 'planner', fromAgent: null, request: 'Plan 3 gentle days in Đà Lạt', heading }
+    page = [{
+      kind: 'work',
+      run: run({ runId: 'turn', onlyAgent: 'writer', responder: 'writer', agentIds: ['writer'], reply: 'Here is the plan.' }),
+      request: message({ route: 'agent', agentId: 'writer', runId: 'turn', text: `${heading}\n\n**Day 1:** the lake.`, handedBack }),
+      notes: [],
+    }]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    const said = (await within(log).findByText('Trip planner')).closest<HTMLElement>('.chat-msg')!
+    expect(said).not.toHaveClass('mine')
+    expect(within(said).getByText('to Writer')).toBeInTheDocument()
+    expect(within(log).queryByText(/^You → /)).toBeNull()
+    // The team's own words, formatted, without the line that tells the agent whose answer it is.
+    await waitFor(() => expect(said.querySelector('strong')?.textContent).toBe('Day 1:'))
+    expect(said.textContent).not.toContain('**')
+    expect(said.textContent).not.toContain('answer to')
+    // The figure of its agent that answered.
+    expect(said.querySelector('.chat-avatar img')?.getAttribute('src')).toBe(figureStill(figureFor('planner')))
+    // Who took it up shows under it, but not how long: that would read as the team's time. No
+    // face of yours goes on it.
+    expect(within(said).getByRole('button', { name: 'Writer worked on this' })).toBeInTheDocument()
+    expect(within(said).queryByRole('button', { name: /^React to/ })).toBeNull()
+    // The agent's answer to it is still its own.
+    expect(within(log).getByText('Here is the plan.')).toBeInTheDocument()
+  })
+
+  it('shows a team’s word that joined the agent’s turn as a note as the team’s too, with when it was taken', async () => {
+    const heading = 'Trip planner stopped before it finished “Plan Friday”:'
+    const handedBack = { teamPath: 'trips.yaml', teamName: 'Trip planner', agent: 'planner', fromAgent: null, request: 'Plan Friday', heading }
+    page = [{
+      kind: 'work',
+      run: run({ runId: 'turn', onlyAgent: 'writer', responder: 'writer', agentIds: ['writer'], reply: 'Trip planner stopped, so here is a plan of mine.' }),
+      request: message({ route: 'agent', agentId: 'writer', runId: 'turn', text: '@Writer plan Friday' }),
+      notes: [message({ id: 'n-team', route: 'note', agentId: 'writer', runId: 'turn', text: `${heading} It was stopped.`, handedBack, deliveredAt: '2026-10-06T02:03:00.000Z', createdAt: '2026-10-06T02:02:00.000Z' })],
+    }]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    const said = (await within(log).findByText('Trip planner')).closest<HTMLElement>('.chat-msg')!
+    expect(said).not.toHaveClass('mine')
+    expect(within(log).queryByText(/^Note → /)).toBeNull()
+    await waitFor(() => expect(within(said).getByText('It was stopped.')).toBeInTheDocument())
+    expect(said.textContent).not.toContain('stopped before it finished')
+    expect(within(said).getByText('Writer took it in its next turn')).toBeInTheDocument()
+    expect(within(said).queryByRole('button', { name: /^React to/ })).toBeNull()
   })
 
   // ADR 0051: the answer lives in the chat only, so what its record says about it sits under it.

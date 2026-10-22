@@ -6,6 +6,7 @@ import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
 import { figureFor } from '../../lib/library/figures'
 import { useSavedJobs, versionOf } from '../../lib/library/jobs'
+import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import { agentPresence } from '../../lib/rail/presence'
@@ -128,6 +129,7 @@ function AgentTemplates({ team }: { team: string | null }) {
 function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
   const { uses, own } = useAgentUses()
+  const { pinned } = usePinnedAgent()
   const usage = useMemo(() => {
     const byAgent = new Map<string, { teams: number; scheduled: number; behind: number }>()
     for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0, behind: 0 })
@@ -169,7 +171,7 @@ function AgentsList() {
             {jobs.map((job) => (
               <li key={job.id}>
                 <button type="button" className="home-card agent-card" onClick={() => open(`/agents/${encodeURIComponent(job.id)}`)}>
-                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} />
+                  <AgentBadge compact markId={job.id} figure={figureFor(job.id, job.figure)} draft={draftFromJob(job)} usedIn={usage.get(job.id)} pinned={pinned === job.id} />
                 </button>
               </li>
             ))}

@@ -1,6 +1,7 @@
 // Run records for the island's tests: a team at work, asking, done or stopped; and a message its
 // agents answer in the chat.
 import type { NoteAnswering } from '../lib/chat/client'
+import type { SavedJob } from '../lib/library/jobs'
 import type { PermissionRequest, RunRecord, WaitingOn } from '../lib/runs/client'
 
 const T0 = Date.parse('2026-10-22T10:00:00Z')
@@ -76,3 +77,26 @@ export function failed(error: string, from = 'writer', minutes = 1) {
 
 /** What a run that stopped for used-up OpenRouter credit says (`agent::AgentError`). */
 export const OUT_OF_CREDITS = 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'
+
+/** Maya, one of My agents, pinned to the notch in the tests that pin one. */
+export const maya: SavedJob = {
+  id: 'maya',
+  file: '.jobs/maya.yaml',
+  name: 'Maya',
+  instructions: 'Help me with my day.',
+  model: 'anthropic/claude-sonnet-4.5',
+  figure: { kind: 'spool', color: 'sage' },
+}
+
+/** A run in Maya's own chat. */
+export function pinnedChat(id: string, changes: Partial<RunRecord> = {}): RunRecord {
+  return run(id, {
+    teamPath: '.jobs/.bench/maya.yaml',
+    teamName: 'Maya · chat',
+    entrypoint: 'maya',
+    responder: 'maya',
+    agentIds: ['maya'],
+    agentNames: { maya: 'Maya' },
+    ...changes,
+  })
+}

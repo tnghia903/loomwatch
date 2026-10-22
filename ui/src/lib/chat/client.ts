@@ -45,6 +45,34 @@ export interface ChatMessage {
   answers?: NoteAnswers | null
   /** Files sent with it (ADR 0082). Absent when there were none. */
   files?: ChatFile[]
+  /** A team's work handed back to the agent that asked for it: shown as that team's, not yours. */
+  handedBack?: HandedBack | null
+}
+
+/**
+ * A team's work handed back to the agent pinned to the notch, which asked for it (ADR 0083,
+ * decision 10, the daemon's `chat::HandedBack`). Only LoomWatch sends one.
+ */
+export interface HandedBack {
+  /** The team's file, relative to the teams root. */
+  teamPath: string
+  teamName: string
+  /** Its agent whose answer it is, by its id in the team file. */
+  agent: string | null
+  /** That agent's link to Your agents, whose figure it then wears. */
+  fromAgent: string | null
+  /** What the team was asked. */
+  request: string
+  /** The words before what the chat shows (the team's answer, or why it stopped or didn't start),
+      which tell the agent whose words follow and hold what is for it alone. `null`: the chat shows
+      the whole message. */
+  heading: string | null
+}
+
+/** What the chat shows of a team's handed-back message: its answer or its reason, without the
+    words before it that are for the agent. */
+export function handedBackText(text: string, handed: HandedBack): string {
+  return handed.heading && text.startsWith(handed.heading) ? text.slice(handed.heading.length).trim() : text
 }
 
 /** A file pasted or dropped into the chat, as the daemon keeps it beside the team (`chat_files::ChatFile`). */
