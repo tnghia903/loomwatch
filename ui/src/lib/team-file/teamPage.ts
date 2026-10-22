@@ -2,14 +2,10 @@ import { useEffect, useState } from 'react'
 
 import { markMovedInPlace, pageIsHeld } from './inPlace'
 import { handOverTeam, readTeam } from './useTeamDocument'
-import type { TeamView } from './useTeamList'
+
+export { teamHref } from './teamHref'
 
 const OPEN = 'loomwatch:open-team'
-
-/** A team's address, on one of its views. Workflow is the address with no `view`. */
-export function teamHref(path: string, view: TeamView = 'workflow'): string {
-  return `/?path=${encodeURIComponent(path)}${view === 'workflow' ? '' : `&view=${view}`}`
-}
 
 /**
  * Go to a team's page. While a team page (or Home) is showing, the move is made in place: the

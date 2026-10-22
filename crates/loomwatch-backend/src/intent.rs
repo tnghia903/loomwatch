@@ -29,15 +29,19 @@ use crate::agent::OFFLINE_MODEL;
 use crate::ai::ModelRef;
 use crate::archive::EventArchive;
 use crate::config::{AgentConfig, TeamConfig};
-use crate::engine::{AgentRun, EventLog, TeamSessionContext};
+use crate::engine::{AgentRun, AppReportedError, EventLog, TeamSessionContext};
 
 /// Past this many characters a message is taken as work without reading it first: a message this
 /// long spells out a job, and reading it would only make it wait.
 pub(crate) const MAX_READ_CHARS: usize = 600;
 /// The message's send waits this long for the read at most; past it, the workflow starts.
 const READ_LIMIT: Duration = Duration::from_secs(20);
-/// One agent's answer may take this long; past it, that agent says nothing.
+/// One agent's answer may take this long; past it, that agent did not answer ([`TOO_SLOW`]).
 const REPLY_LIMIT: Duration = Duration::from_secs(120);
+/// Why an agent did not answer, when it took longer than [`REPLY_LIMIT`].
+const TOO_SLOW: &str = "The answer took over two minutes, so LoomWatch stopped waiting. Try again.";
+/// Why an agent did not answer, when its turn could not even start.
+const NOT_STARTED: &str = "LoomWatch couldn't start the answer. Try again.";
 /// An answer is a chat message: past this it is cut in the middle, as handed text is.
 const MAX_ANSWER_CHARS: usize = 4_000;
 /// How much of each agent's instructions the read sees: an agent's job is said at the top.
@@ -100,8 +104,8 @@ pub(crate) async fn read(
         &[],
     );
     match tokio::time::timeout(READ_LIMIT, turn).await {
-        Ok(Some(reply)) => talkers(&reply, addressed),
-        Ok(None) | Err(_) => None,
+        Ok(Ok(reply)) => talkers(&reply, addressed),
+        Ok(Err(_)) | Err(_) => None,
     }
 }
 
@@ -112,9 +116,20 @@ pub(crate) struct OwnWords {
     pub(crate) text: String,
 }
 
+/// What an agent answering in the chat came back with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Reply {
+    /// Its answer.
+    Said(String),
+    /// It had nothing to add: it said PASS, or nothing at all. It stays silent.
+    Passed,
+    /// Its turn failed, so it could not answer: why, in the words a run that stopped shows
+    /// ([`crate::agent::AgentError`]), for the person to read under their message.
+    Failed(String),
+}
+
 /// `agent`'s own answer to `message`, as itself in the team's chat: one turn on its own model with
-/// no tools, remembering what it said last in the newest work. `None` when it has nothing to add,
-/// or its turn failed.
+/// no tools, remembering what it said last in the newest work.
 pub(crate) async fn reply(
     archive: Option<&EventArchive>,
     teams_root: &Path,
@@ -123,13 +138,16 @@ pub(crate) async fn reply(
     context: &Context,
     own: Option<&OwnWords>,
     lessons: &[String],
-) -> Option<String> {
+) -> Reply {
+    let Some(archive) = archive else {
+        return Reply::Failed(NOT_STARTED.to_owned());
+    };
     let agent = addressed.speaker;
     let instructions = own_instructions(addressed.team, agent);
     let prompt = reply_prompt(addressed, message.trim(), context, own);
     let model = agent.model_selector();
     let turn = one_turn(
-        archive?,
+        archive,
         teams_root,
         &agent.id,
         &instructions,
@@ -137,15 +155,28 @@ pub(crate) async fn reply(
         &prompt,
         lessons,
     );
-    let answer = tokio::time::timeout(REPLY_LIMIT, turn).await.ok()??;
+    reply_of(tokio::time::timeout(REPLY_LIMIT, turn).await.ok())
+}
+
+/// What an answer's turn came to: `None` when it ran out of time.
+fn reply_of(turn: Option<Result<String, String>>) -> Reply {
+    let answer = match turn {
+        None => return Reply::Failed(TOO_SLOW.to_owned()),
+        Some(Err(why)) => return Reply::Failed(why),
+        Some(Ok(answer)) => answer,
+    };
     let answer = answer.trim();
     let passed = answer
         .trim_matches(|c: char| !c.is_alphanumeric())
         .eq_ignore_ascii_case(PASS);
-    (!answer.is_empty() && !passed).then(|| crate::cap_middle_text(answer, MAX_ANSWER_CHARS))
+    if answer.is_empty() || passed {
+        Reply::Passed
+    } else {
+        Reply::Said(crate::cap_middle_text(answer, MAX_ANSWER_CHARS))
+    }
 }
 
-/// One turn with no tools, recorded as a session of its own, or `None` when it failed.
+/// One turn with no tools, recorded as a session of its own: its reply, or why it failed.
 async fn one_turn(
     archive: &EventArchive,
     teams_root: &Path,
@@ -154,19 +185,19 @@ async fn one_turn(
     model: &str,
     prompt: &str,
     lessons: &[String],
-) -> Option<String> {
+) -> Result<String, String> {
     let workspace = match crate::control::prepare_workspace(teams_root) {
         Ok(workspace) => workspace,
         Err(error) => {
             eprintln!("warning: the chat could not answer a message: {error}");
-            return None;
+            return Err(NOT_STARTED.to_owned());
         }
     };
     // An agent answering as itself keeps to what it learned (ADR 0078); the reader learned nothing.
     let mut spec = crate::control::ask_spec(workspace);
     spec.lessons = lessons.to_vec();
     let mut process = AgentRun::spawn(&spec)
-        .ok()?
+        .map_err(|_| NOT_STARTED.to_owned())?
         .without_tools()
         .with_instructions(instructions);
     let context = TeamSessionContext {
@@ -184,12 +215,21 @@ async fn one_turn(
         .run_session_with_bus(agent_id, model, prompt, context)
         .await
     {
-        Ok(outcome) => Some(outcome.reply),
+        Ok(outcome) => Ok(outcome.reply),
         Err(error) => {
             eprintln!("warning: the chat could not answer a message: {error:#}");
-            None
+            Err(failure_words(&error))
         }
     }
+}
+
+/// Why a turn failed, as a run that stopped says it: the agent's own stop in the person's words
+/// when there is one (out of credits, a refused key), or else the error as it is.
+fn failure_words(error: &anyhow::Error) -> String {
+    error
+        .chain()
+        .find_map(<dyn std::error::Error>::downcast_ref::<AppReportedError>)
+        .map_or_else(|| format!("{error:#}"), |reported| reported.message.clone())
 }
 
 /// A model that never calls a real one: the offline demo, or a test's scripted `demo/…` stand-in.
@@ -674,7 +714,10 @@ mod tests {
             &["When greeting, say what you work on.".to_owned()],
         )
         .await;
-        assert_eq!(said.as_deref(), Some("Hi! I write enterprise RAG briefs."));
+        assert_eq!(
+            said,
+            Reply::Said("Hi! I write enterprise RAG briefs.".to_owned())
+        );
         let asked = researcher.requests();
         assert_eq!(asked.len(), 1);
         assert!(asked[0].prompt().contains("Fact checker is reading it too"));
@@ -700,7 +743,116 @@ mod tests {
             &[],
         )
         .await;
-        assert_eq!(passed, None, "PASS is silence");
+        assert_eq!(passed, Reply::Passed, "PASS is silence");
         Ok(())
+    }
+
+    /// **An agent whose turn fails says it could not answer, and why; one with nothing to add
+    /// stays silent.** Out of credits, the words are the ones a run that stopped shows, which the
+    /// app turns into its button; a provider's own error is kept as it said it.
+    #[tokio::test]
+    async fn an_answer_that_fails_says_why_where_pass_says_nothing() -> anyhow::Result<()> {
+        use crate::agent::{AgentError, Demo};
+        let folder =
+            Folder(std::env::temp_dir().join(format!("loomwatch-intent-{}", Uuid::new_v4())));
+        std::fs::create_dir_all(&folder.0)?;
+        let archive = EventArchive::open(&folder.0.join("loomwatch.db")).await?;
+        let mut team = team();
+        team.agents[0].model = crate::engine::demo_model(Demo::failing_first(
+            1,
+            || AgentError::OutOfCredits(crate::ai::Source::OpenRouter),
+            |_| None,
+        ));
+        let (provider_down, _) = scripted(None);
+        team.agents[1].model = provider_down;
+        let answer = async |agent: usize| {
+            let addressed = Addressed {
+                team: &team,
+                speaker: &team.agents[agent],
+                whole_team: true,
+            };
+            reply(
+                Some(&archive),
+                &folder.0,
+                &addressed,
+                "hi @team",
+                &Context::default(),
+                None,
+                &[],
+            )
+            .await
+        };
+        assert_eq!(
+            answer(0).await,
+            Reply::Failed(AgentError::OutOfCredits(crate::ai::Source::OpenRouter).to_string())
+        );
+        match answer(1).await {
+            Reply::Failed(why) => assert!(why.contains("the provider is down"), "{why}"),
+            other => panic!("a provider error is a failure: {other:?}"),
+        }
+        Ok(())
+    }
+
+    /// With nothing to record its turn in, an agent can't answer, and says so.
+    #[tokio::test]
+    async fn an_answer_that_cannot_start_says_so() {
+        let team = team();
+        let addressed = Addressed {
+            team: &team,
+            speaker: &team.agents[0],
+            whole_team: true,
+        };
+        let said = reply(
+            None,
+            Path::new("."),
+            &addressed,
+            "hi @team",
+            &Context::default(),
+            None,
+            &[],
+        )
+        .await;
+        assert_eq!(said, Reply::Failed(NOT_STARTED.to_owned()));
+    }
+
+    /// The agent's own stop is said in its words, whatever wraps it; anything else as it is.
+    #[test]
+    fn a_failed_turn_is_said_in_the_stops_own_words() {
+        let stopped = anyhow::Error::new(AppReportedError::stopped(
+            &crate::agent::AgentError::OutOfCredits(crate::ai::Source::OpenRouter),
+        ))
+        .context("the chat's answer failed");
+        assert_eq!(
+            failure_words(&stopped),
+            "Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try \
+             again."
+        );
+        let other = anyhow::anyhow!("the record could not be written").context("opening a session");
+        assert_eq!(
+            failure_words(&other),
+            "opening a session: the record could not be written"
+        );
+    }
+
+    /// An answer that ran out of time did not answer; an empty one, or PASS in any dress, had
+    /// nothing to add; anything else is the answer.
+    #[test]
+    fn a_turn_comes_to_an_answer_silence_or_why_not() {
+        assert_eq!(reply_of(None), Reply::Failed(TOO_SLOW.to_owned()));
+        assert_eq!(
+            reply_of(Some(Err("OpenRouter reported an error: busy".to_owned()))),
+            Reply::Failed("OpenRouter reported an error: busy".to_owned())
+        );
+        for nothing in ["", "  ", "PASS", "**pass**", "`PASS`."] {
+            assert_eq!(
+                reply_of(Some(Ok(nothing.to_owned()))),
+                Reply::Passed,
+                "{nothing:?}"
+            );
+        }
+        assert_eq!(
+            reply_of(Some(Ok(" Hello! \n".to_owned()))),
+            Reply::Said("Hello!".to_owned())
+        );
     }
 }

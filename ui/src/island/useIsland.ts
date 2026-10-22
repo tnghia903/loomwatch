@@ -3,6 +3,7 @@
 // all means is `islandReducer`'s business.
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 
+import { fetchNotesAnswering } from '../lib/chat/client'
 import { agentFigure, figureFor, type FigureChoice } from '../lib/library/figures'
 import { fetchJobs, type SavedJob } from '../lib/library/jobs'
 import { crewOf, type CrewAgent } from '../lib/rail/teamCrews'
@@ -53,10 +54,12 @@ export function useIsland(): Island {
   const [said, setSaid] = useState<{ ticket: string; text: string } | null>(null)
   const [nudge, setNudge] = useState(false)
 
-  // What the teams are doing, every couple of seconds. While `loomwatchd` doesn't answer, the
-  // island keeps what it last knew.
+  // What the teams are doing, every couple of seconds: their runs, and the messages their agents
+  // answer in the chat, which no run has. While `loomwatchd` doesn't answer, the island keeps what
+  // it last knew.
   const read = useCallback(() => {
-    fetchRecentRuns(FINISHED_WITHIN_SECONDS).then((records) => dispatch({ type: 'runs', records }), () => {})
+    Promise.all([fetchRecentRuns(FINISHED_WITHIN_SECONDS), fetchNotesAnswering(FINISHED_WITHIN_SECONDS).catch(() => null)])
+      .then(([records, notes]) => dispatch({ type: 'runs', records, notes }), () => {})
   }, [])
   useEffect(() => {
     read()

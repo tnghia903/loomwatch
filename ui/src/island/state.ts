@@ -1,6 +1,7 @@
 // The island's state, and every change to it (ADR 0083). Pure: what the teams are doing, what the
 // Mac app says, where the pointer is, and what is out below the notch, moved on by one action at a
 // time. `useIsland` only reads the runs, keeps the timers and draws what this says.
+import type { NoteAnswering } from '../lib/chat/client'
 import type { RunRecord } from '../lib/runs/client'
 import type { FromApp } from './bridge'
 import { advance, arrive, next, NOTHING_OUT, tuckNow, tuckOnClick, type Circumstances, type PopState } from './popouts'
@@ -28,6 +29,8 @@ export interface IslandState {
   /** `null` until the first reading. */
   teams: TeamNow[] | null
   records: readonly RunRecord[]
+  /** Messages the agents answer in the chat themselves: no run has them. */
+  notes: readonly NoteAnswering[]
   /** Results you have looked at. */
   seen: ReadonlySet<string>
   /** Who last worked on each run, for the moments between turns. */
@@ -43,7 +46,9 @@ export interface IslandState {
 }
 
 export type IslandAction =
-  | { type: 'runs'; records: readonly RunRecord[] }
+  /** What the teams are doing. Without `notes` (they could not be read this time), the island
+      keeps those it last knew. */
+  | { type: 'runs'; records: readonly RunRecord[]; notes?: readonly NoteAnswering[] | null }
   | { type: 'app'; message: FromApp }
   | { type: 'tick' }
   | { type: 'pointerOnIsland'; over: boolean }
@@ -60,6 +65,7 @@ export function initialIsland(now: number, inApp: boolean): IslandState {
     since: now,
     teams: null,
     records: [],
+    notes: [],
     seen: new Set(),
     lastAgent: new Map(),
     app: { placed: !inApp, notch: BROWSER_NOTCH, menuBar: BROWSER_NOTCH.height, away: false, fullScreen: false },
@@ -78,9 +84,10 @@ export function islandReducer(state: IslandState, action: IslandAction & { now: 
     case 'runs': {
       const lastAgent = new Map(s.lastAgent)
       for (const record of action.records) if (record.working?.[0]) lastAgent.set(record.runId, record.working[0])
-      const teams = teamsNow(action.records, s.since, s.seen, lastAgent)
+      const notes = action.notes ?? s.notes
+      const teams = teamsNow(action.records, s.since, s.seen, lastAgent, notes)
       const moments = momentsBetween(s.teams, teams)
-      s = { ...s, records: action.records, lastAgent, teams }
+      s = { ...s, records: action.records, notes, lastAgent, teams }
       if (moments.length) s = { ...s, pop: arrive(s.pop, moments, circumstances(s)) }
       break
     }
@@ -136,7 +143,7 @@ function seeResults(s: IslandState, which: (team: TeamNow) => boolean): IslandSt
   const results = (s.teams ?? []).filter((team) => (team.moment === 'done' || team.moment === 'fail') && which(team)).map((team) => team.runId)
   if (!results.length) return s
   const seen = new Set([...s.seen, ...results])
-  return { ...s, seen, teams: teamsNow(s.records, s.since, seen, s.lastAgent) }
+  return { ...s, seen, teams: teamsNow(s.records, s.since, seen, s.lastAgent, s.notes) }
 }
 
 /** Tuck away, hold and bring out, as the time and the circumstances say; remember what is out. */

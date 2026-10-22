@@ -64,6 +64,17 @@ export interface NoteAnswers {
   waiting: string[]
   /** What each said, in the order they finished. An agent with nothing to add says nothing. */
   said: NoteAnswer[]
+  /** Agents that could not answer, their turn having failed, and why. Not one with nothing to
+      add: that one is in neither list. */
+  failed?: NoteFailure[]
+}
+
+/** An agent that could not answer (`chat::NoteFailure`). */
+export interface NoteFailure {
+  from: string
+  /** Why, in the words a run that stopped shows: `plainRunError` and `problemAction` read them. */
+  error: string
+  at: string
 }
 
 /** What one agent said back (`chat::NoteAnswer`). */
@@ -71,6 +82,29 @@ export interface NoteAnswer {
   from: string
   text: string
   at: string
+}
+
+/**
+ * A message its agents are answering in the chat themselves, in any team (`chat::NoteAnswering`):
+ * while they write, and for an hour after. Nothing runs for it, so the run list never has it.
+ */
+export interface NoteAnswering {
+  messageId: string
+  teamPath: string
+  teamName?: string
+  /** Each answering agent's name by id. */
+  agentNames: Record<string, string>
+  /** Who is still writing, the opening of what each said, and who could not answer and why. */
+  answers: NoteAnswers
+  createdAt: string
+  /** When the last of them finished; `null` while any is still writing. */
+  finishedAt: string | null
+}
+
+/** The messages being answered in the chat, and those answered in the last `seconds`, oldest first. */
+export async function fetchNotesAnswering(seconds: number, signal?: AbortSignal): Promise<NoteAnswering[]> {
+  const response = await daemonFetch(`/api/chat/answering?finishedWithin=${seconds}`, { signal, cache: 'no-store' })
+  return readRun<NoteAnswering[]>(response)
 }
 
 /**

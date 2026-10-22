@@ -41,6 +41,7 @@ import type { Lesson } from '../../lib/lessons/client'
 import { Learned } from './Learned'
 import { Reactions } from './Reactions'
 import { Spool } from './Spool'
+import { StatusGlyph } from '../ui/glyphs'
 import { ReplyQuote } from './ReplyQuote'
 import { SaidText } from './SaidText'
 
@@ -80,6 +81,9 @@ interface WorkPieceProps {
   /** False while the chat waits on you for something newer, a review or a question: then this
    *  Approve is a gold ring, and the newest one's is the screen's one gold fill (DESIGN_LANGUAGE §8). */
   approveFilled?: boolean
+  /** This piece's stop is the newest one LoomWatch knows how to fix, and nothing waits on you: its
+   *  fix is the screen's one gold fill. Otherwise a gold ring (DESIGN_LANGUAGE §8). */
+  fixFilled?: boolean
   /** A message the record beside the chat asked to show — the timeline's "Read the message". */
   reveal?: { id: string; at: number } | null
   team: TeamView
@@ -122,7 +126,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, approveFilled = true, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, approveFilled = true, fixFilled = false, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -481,7 +485,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
       </AppearContext.Provider>
 
       <FileOriginContext.Provider value={fileOrigin}>
-      <Outcome tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} answer={answer} touched={touched} folder={folder} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
+      <Outcome tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} fixFilled={fixFilled} answer={answer} touched={touched} folder={folder} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -669,31 +673,33 @@ interface AnswerProps {
   children: ReactNode
 }
 
-function Outcome({ tries, onTryAgain, onDetails, ...answer }: AnswerProps & { tries: string | null; onTryAgain: () => void; onDetails: () => void }) {
+function Outcome({ tries, fixFilled, onTryAgain, onDetails, ...answer }: AnswerProps & { tries: string | null; fixFilled: boolean; onTryAgain: () => void; onDetails: () => void }) {
   // The schedule tries again by itself: no stop to act on, only when.
   if (tries) return <Appearing className="chat-notice tc-tries" role="status"><span>{tries}</span></Appearing>
-  if (answer.run.status === 'failed' || answer.run.status === 'cancelled') return <Stopped run={answer.run} name={answer.name} onTryAgain={onTryAgain} onDetails={onDetails} />
+  if (answer.run.status === 'failed' || answer.run.status === 'cancelled') return <Stopped run={answer.run} name={answer.name} fixFilled={fixFilled} onTryAgain={onTryAgain} onDetails={onDetails} />
   if (!answer.answer.trim()) return null
   return <Answer {...answer} />
 }
 
-/** Where to fix a stop LoomWatch named: a plan's limit, used-up credit, a source not connected. */
-function FixIt({ message }: { message: string | null }) {
+/** Where to fix a stop LoomWatch named: a plan's limit, used-up credit, a source not connected. A
+    gold fill on the newest such stop (`filled`), a gold ring on any other. */
+export function FixIt({ message, filled }: { message: string | null; filled: boolean }) {
   const action = problemAction(message)
   if (!action) return null
+  const className = `btn ${filled ? 'btn-primary' : 'btn-ring'}`
   return action.external
-    ? <a className="btn btn-primary" href={action.href} target="_blank" rel="noreferrer">{action.label}</a>
-    : <a className="btn btn-primary" href={action.href}>{action.label}</a>
+    ? <a className={className} href={action.href} target="_blank" rel="noreferrer">{action.label}</a>
+    : <a className={className} href={action.href}>{action.label}</a>
 }
 
 /** The work stopped: in plain words, with the way to try again. */
-function Stopped({ run, name, onTryAgain, onDetails }: { run: RunRecord; name: (id: string) => string; onTryAgain: () => void; onDetails: () => void }) {
+function Stopped({ run, name, fixFilled, onTryAgain, onDetails }: { run: RunRecord; name: (id: string) => string; fixFilled: boolean; onTryAgain: () => void; onDetails: () => void }) {
   if (run.status === 'failed') {
     return (
       <Appearing className="tc-stopped bad" role="status">
-        <p><b>The work stopped.</b> {run.error ? plainRunError(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : run.errorCode === 'missing_canonical_response' ? `${name(run.responder)} finished without an answer.` : 'Its record says why.'}</p>
+        <p><b><StatusGlyph status="failed" size={10} />The work stopped.</b> {run.error ? plainRunError(run.error.split('\n')[0], new Map(run.agentIds.map((id) => [id, { name: name(id) }]))) : run.errorCode === 'missing_canonical_response' ? `${name(run.responder)} finished without an answer.` : 'Its record says why.'}</p>
         <div className="tc-acts">
-          <FixIt message={run.error} />
+          <FixIt message={run.error} filled={fixFilled} />
           <button type="button" className="btn" onClick={onTryAgain}><RotateCcw size={13} aria-hidden="true" />Try again</button>
           <button type="button" className="btn" onClick={onDetails}>See what happened</button>
         </div>

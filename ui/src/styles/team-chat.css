@@ -406,7 +406,10 @@
 .tc-stopped { display: grid; gap: 8px; margin: 10px 0 2px 42px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--color-hairline); background: var(--color-panel-solid); font-size: 13px; color: var(--color-ink-2); }
 .tc-stopped p { margin: 0; }
 .tc-stopped.bad { border-color: color-mix(in srgb, var(--color-alert) 55%, transparent); }
-.tc-stopped.bad b { color: var(--color-alert); }
+/* The words in ink: the red on the dark card reads at APCA Lc 44. The red edge and the failed
+   glyph carry the colour. */
+.tc-stopped.bad b { color: var(--color-ink); }
+.tc-stopped.bad b svg { display: inline-block; margin-right: 5px; vertical-align: -1px; }
 .tc-continue { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0 0 42px; }
 /* What the agents learned from your feedback on the work (ADR 0078): a quiet line each, with Undo. */
 .tc-learned { display: grid; gap: 4px; margin: 8px 0 0 42px; }
@@ -431,6 +434,8 @@
 /* "hi @team", answered by the agents themselves instead of started: your message, then each one's reply. */
 .tc-answered-note { margin-top: 12px; }
 .tc-said-back { margin-top: 8px; }
+/* An agent that could not answer stands where its reply would. */
+.tc-said-failed .tc-stopped { margin-top: 8px; }
 /* Who is typing now, under the work it types for. */
 .tc-typing { margin-top: 10px; }
 .tc-said-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 10px; margin: 4px 4px 6px 46px; font-size: 11.5px; color: var(--color-ink-3); }

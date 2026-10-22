@@ -456,8 +456,9 @@ with a per-node lock available to forbid it.
 open a browser, with no Electron. On a Mac, `LoomWatch.app` is only a launcher. It starts
 `loomwatchd`, opens LoomWatch in the browser and stays in the menu bar or, on a MacBook, in the
 notch (ADR 0083). There a see-through panel over the notch shows `island.html`, a second page of
-the same build, which reads the runs and answers a permission with the app's own API calls; the
-panel only places the page and tells it where the pointer is. It is the one module in the
+the same build. With the app's own API calls it reads the runs and the messages agents answer in
+the chat without starting a run (`GET /api/chat/answering`), and answers a permission; the panel
+only places the page and tells it where the pointer is. It is the one module in the
 workspace that calls `AppKit` directly (`crates/loomwatch-app/src/notch_panel.rs`).
 
 - **Stack:** React + Vite + [React Flow](https://reactflow.dev) for the canvas, served by `axum`;
