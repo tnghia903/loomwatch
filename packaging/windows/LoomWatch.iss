@@ -1,7 +1,7 @@
 ; LoomWatch-windows-setup.exe: installs LoomWatch for the person running it, with no administrator
 ; needed, the way LoomWatch.app is dragged to Applications on a Mac. Built by
-; scripts/package-windows-app.ps1 with Inno Setup 6 from the files of loomwatch-windows-x86_64.zip,
-; so both ways of installing put the same files in place.
+; scripts/package-windows-app.ps1 with Inno Setup 6 from the files scripts/package-release.sh
+; gathers in loomwatch-windows-x86_64.zip.
 ;
 ; It puts LoomWatch in %LOCALAPPDATA%\Programs\LoomWatch, adds it to the Start menu, and opens it.
 ; Running a newer one over it is how LoomWatch is updated: it asks the running LoomWatch to quit
@@ -59,6 +59,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Put LoomWatch on the desktop"; Flags: unchecked
+
+[InstallDelete]
+; What versions 0.11.0 and older put here for the terminal install, which is gone: its installer
+; and the `loomwatch` command, whose update would look for files no release has any more.
+Type: files; Name: "{app}\install.ps1"
+Type: files; Name: "{app}\loomwatch.cmd"
+Type: filesandordirs; Name: "{app}\scripts"
 
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

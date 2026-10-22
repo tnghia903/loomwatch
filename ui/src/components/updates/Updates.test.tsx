@@ -1,13 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { offerUpdate, openUpdates, resetUpdateStatus, rollbackCommand, waitForRestart, type UpdateStatus } from '../../lib/updates/client'
+import { offerUpdate, openUpdates, resetUpdateStatus, waitForRestart, type UpdateStatus } from '../../lib/updates/client'
 import { UpdateBadge, Updates } from './Updates'
 
 const upToDate: UpdateStatus = {
   current: '0.1.5',
-  install: 'release',
-  command: '~/LoomWatch/app/loomwatch update',
+  // A copy of the source code, which is updated in its terminal.
+  install: 'source',
+  command: './loomwatch update',
   automatic: true,
   turnedOffBy: null,
   checkedAt: new Date().toISOString(),
@@ -92,12 +93,6 @@ describe('offerUpdate', () => {
     // A skipped version does not hide the next one.
     expect(offerUpdate({ ...newer, skipped: '0.1.5' })).toBe(true)
   })
-
-  it('names the rollback command beside the update command', () => {
-    expect(rollbackCommand('~/LoomWatch/app/loomwatch update')).toBe('~/LoomWatch/app/loomwatch rollback')
-    expect(rollbackCommand('loomwatch update')).toBe('loomwatch rollback')
-    expect(rollbackCommand(null)).toBeNull()
-  })
 })
 
 describe('Updates', () => {
@@ -124,12 +119,12 @@ describe('Updates', () => {
     // Release notes are Markdown from the network: no raw HTML, so no tracking pixel.
     expect(dialog.querySelector('img')).toBeNull()
     expect(within(dialog).getByRole('link', { name: /Read the release notes on GitHub/ })).toHaveAttribute('href', newer.latest?.url)
-    expect(within(dialog).getByText('~/LoomWatch/app/loomwatch update')).toBeInTheDocument()
-    expect(within(dialog).getByText('~/LoomWatch/app/loomwatch rollback')).toBeInTheDocument()
+    expect(within(dialog).getByText('./loomwatch update')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/rollback/)).toBeNull()
     expect(within(dialog).getByText(/press/)).toHaveTextContent('press Ctrl-C')
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Copy the command' }))
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('~/LoomWatch/app/loomwatch update'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('./loomwatch update'))
     // Nothing in the app installs it: no request beyond reading what the daemon found, and the
     // check opening LoomWatch makes.
     expect(fetchMock.mock.calls.every(([url, init]) => ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET' || url === '/api/updates/check')).toBe(true)
@@ -228,11 +223,11 @@ describe('Updates', () => {
     expect(screen.getByText(/Turned off on this computer by the LOOMWATCH_UPDATE_CHECK setting/)).toBeInTheDocument()
   })
 
-  it('sends a copy started another way to the release page', async () => {
+  it('tells a copy started another way to update it the way it was set up', async () => {
     serve({ ...newer, install: 'other', command: null })
     app()
     fireEvent.click(await screen.findByRole('button', { name: /Update available/ }))
-    expect(screen.getByText(/Download it from the release page above/)).toBeInTheDocument()
+    expect(screen.getByText('Update this copy the way you set it up.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Copy the command' })).toBeNull()
   })
 
@@ -244,10 +239,9 @@ describe('Updates', () => {
   })
 })
 
-/** A ready-built copy whose launcher starts it again: `./loomwatch` from this version on. */
-const supervised: UpdateStatus = { ...newer, canInstall: true, installError: null }
-/** LoomWatch.app where it can replace itself, as in Applications. */
+/** LoomWatch.app where it can replace itself, as in Applications: the one copy that updates itself. */
 const macApp: UpdateStatus = { ...newer, install: 'app', command: null, canInstall: true, installError: null, installBlocked: null }
+const supervised = macApp
 const FROM_THE_DMG = 'LoomWatch can’t update itself while it runs from the disk image. Drag LoomWatch to Applications and open it from there, and the next update is one click.'
 const OLD_START = '2026-10-07T08:00:00.000Z'
 const NEW_START = '2026-10-07T08:02:00.000Z'
@@ -268,11 +262,10 @@ async function openOn(status: UpdateStatus) {
 }
 
 describe('Update and restart', () => {
-  it('is offered only when the launcher can start LoomWatch again', async () => {
+  it('is offered only when the app can replace itself', async () => {
     let dialog = await openOn(supervised)
     expect(within(dialog).getByRole('button', { name: 'Update and restart' })).toBeInTheDocument()
-    // The terminal's way stays beside it.
-    expect(within(dialog).getByText('~/LoomWatch/app/loomwatch update')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/loomwatch update/)).toBeNull()
     cleanup()
     resetUpdateStatus()
 

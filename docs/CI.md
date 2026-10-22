@@ -4,23 +4,23 @@ Every check runs on GitHub-hosted runners. CI's job is to prove that every pull 
 merges, and `main`, after it, builds, passes its tests on Linux and Windows and still produces a
 container image. `scripts/ci-local.sh` runs most of it on your computer first, when you want a
 quicker answer. Two workflows publish:
-**Pages** puts the landing page and the installer on https://loomwatch.github.io, and **Release**
-builds the ready-to-run program for a version tag.
+**Pages** puts the landing page and its guides on https://loomwatch.github.io, and **Release**
+builds the Mac and Windows apps for a version tag.
 
 ## Workflows
 
 | Workflow | Runs on | What it proves | Typical time |
 | --- | --- | --- | --- |
 | `ci.yml` — **Frontend**, then **Rust** | every pull request (`pull-requests.yml` calls it), every push to `main`, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite, each database test on a SQLite file of its own, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
-| `ci.yml` — **Windows** | the same, after Frontend | on a Windows runner: the PowerShell scripts parse and are ASCII, Clippy (`-D warnings`) and the full test suite; then the release zip and `LoomWatch-windows-setup.exe` are packed and `scripts/smoke-windows.ps1` tries both: the PowerShell install driven through the offline demo's review stop, an agent on a stand-in for OpenRouter (`scripts/mock-openrouter.py`) keeping its key in Credential Manager and running a `cmd.exe` command in its own folder, `LoomWatch.exe` (one at a time, `--quit`), and the installer installing, updating over a running LoomWatch, and uninstalling | 20–30 min |
-| `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the launcher and installer, and `scripts/test-update.sh`: `update`, `rollback` and `version` on an installed copy, with stand-ins for Docker, GitHub and the program | < 1 min |
+| `ci.yml` — **Windows** | the same, after Frontend | on a Windows runner: the PowerShell scripts parse and are ASCII, Clippy (`-D warnings`) and the full test suite; then the app's files are gathered (`scripts/package-release.sh`), `LoomWatch-windows-setup.exe` is built from them, and `scripts/smoke-windows.ps1` tries both: the program from those files driven through the offline demo's review stop, an agent on a stand-in for OpenRouter (`scripts/mock-openrouter.py`) keeping its key in Credential Manager and running a `cmd.exe` command in its own folder, `LoomWatch.exe` (one at a time, `--quit`), and the installer installing, updating over a running LoomWatch, and uninstalling | 20–30 min |
+| `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the source launcher (`./loomwatch`), the packing scripts and `scripts/ci-local.sh` | < 1 min |
 | `ci.yml` — **Dependency review** | the same, not by hand | comparing a pull request with its base, or `main` before and after a push: the change adds no dependency with a known vulnerability of moderate severity or worse (`Cargo.lock`, `ui/pnpm-lock.yaml`) | < 1 min |
 | `ci.yml` — **CI result** | after the jobs above | every job above passed: the one answer to read for a run | seconds |
 | `pull-requests.yml` | every pull request | runs `ci.yml`; a newer push to the pull request cancels the older run | seconds, then `ci.yml` |
 | `container.yml` — **Build image** | a pull request or push to `main` that changes the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
 | `actionlint.yml` | a pull request or push to `main` that changes `.github/workflows/`, by hand | the workflow files themselves are valid | < 1 min |
-| `pages.yml` — **Publish** | a change to `site/`, `scripts/install.sh`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
-| `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` for macOS (one universal program, on macOS), Linux x86_64/arm64 (on Ubuntu 22.04) and Windows x86_64, packs each with `scripts/package-release.sh`, builds `LoomWatch-macos.dmg` and `LoomWatch-windows-setup.exe` (Inno Setup, from Chocolatey), and, for a tag, attaches them to a **draft** release. Run by hand, it only builds the files | ~15 min |
+| `pages.yml` — **Publish** | a change to `site/`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
+| `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` and the app around it for macOS (universal programs, on macOS) and Windows x86_64, packs `LoomWatch-macos.dmg` (`scripts/package-macos-app.sh`) and `LoomWatch-windows-setup.exe` (Inno Setup, from Chocolatey, from the files `scripts/package-release.sh` gathers), and, for a tag, attaches them and a `.sha256` for each to a **draft** release. Run by hand, it only builds the files | ~15 min |
 
 ```
 pull request / push to main
@@ -28,7 +28,7 @@ pull request / push to main
         ▼
    Frontend ───ui/dist──▶ Rust (fmt → clippy → test) ──────────────────┐
                     └───▶ Windows (clippy → test → pack → smoke) ──────┤
-   Launcher (shellcheck → update/rollback test) ───────────────────────┼──▶ CI result
+   Launcher (shellcheck) ──────────────────────────────────────────────┼──▶ CI result
    Dependency review (base and head of the change) ────────────────────┘
 ```
 
@@ -72,7 +72,7 @@ of each check: passed, failed, or skipped and why. It exits non-zero when any ch
 computer stops it when it sleeps; `caffeinate -i scripts/ci-local.sh` keeps a Mac awake while it
 runs, unless the lid closes.
 
-- **Launcher**: ShellCheck and `scripts/test-update.sh`.
+- **Launcher**: ShellCheck.
 - **Workflows**: actionlint, when it is installed (`brew install actionlint`).
 - **Frontend**: install, lint, build and tests, exactly as the job runs them.
 - **Rust**: `cargo fmt`, Clippy and the full test suite. These need the Frontend build, since the
@@ -88,15 +88,9 @@ Dependency review reads GitHub's dependency graph, so it runs only on GitHub.
 
 No check needs a database server: each database test makes a SQLite file of its own.
 
-`scripts/test-update.sh` touches nothing outside its scratch folder: Docker, GitHub and the program
-are stand-ins on its `PATH`. The stand-in program also plays the app's **Update and restart**: it
-names a release and exits with 75, and the checks follow the launcher through the update and the
-restart. It cannot prove the real program's `backup` and the restored file; for a change to how
-`update` saves or `rollback` restores the run history, also try it on a release trial (step 3
-below): stop the trial, run its `loomwatch update`, add a row to `_sqlx_migrations` in its
-`.loomwatch/loomwatch.db` with a newer version (`sqlite3`), and run `loomwatch rollback`. For a
-change to Update and restart, serve two releases and a stand-in for GitHub's answer
-(`LOOMWATCH_UPDATE_URL`) and click it in the trial's page.
+The source launcher (`./loomwatch`, and `loomwatch.cmd` on Windows) has no test beyond ShellCheck
+and the PowerShell parse. Try a change to its `update` in a scratch clone of the repository, with
+`LOOMWATCH_BACKUP_DIR` and `LOOMWATCH_STATE_DIR` in scratch folders.
 
 The Mac app's Update and restart (`crates/loomwatch-app/src/update.rs`) is tested with a local file
 server and disk images built from stand-in bundles (`cargo test -p loomwatch-app`, on a Mac). For a
@@ -111,56 +105,57 @@ and `LOOMWATCH_PORT`. The app hands every `LOOMWATCH_` setting on to the version
 
 ## Making a release
 
-The installer (`curl -fsSL https://loomwatch.github.io/install.sh | bash`) always downloads the
-newest **published** release, so a release is drafted first and published only after its files
-have been tried.
+The download buttons on the landing page and every app's **Update and restart** take the newest
+**published** release, so a release is drafted first and published only after its files have been
+tried.
 
-1. Set `version` in `crates/loomwatch-backend/Cargo.toml` (the app reports it in Send feedback),
-   build once so `Cargo.lock` follows, and push that commit to `main`. Tag it once CI on `main`
-   has passed on that commit.
+1. Set `version` in `crates/loomwatch-backend/Cargo.toml` (the app reports it in Send feedback)
+   and `crates/loomwatch-app/Cargo.toml`, build once so `Cargo.lock` follows, and push that commit
+   to `main`. Tag it once CI on `main` has passed on that commit.
 2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. The Release workflow
-   checks the tag matches the version and drafts the release with `loomwatch-macos-universal.tar.gz`,
-   `loomwatch-linux-x86_64.tar.gz`, `loomwatch-linux-arm64.tar.gz`, `loomwatch-windows-x86_64.zip`,
-   `LoomWatch-macos.dmg`, `LoomWatch-windows-setup.exe` and a `.sha256` for each.
-3. Try the draft with the real installer, apart from the LoomWatch installed on this computer:
+   checks the tag matches the version and drafts the release with `LoomWatch-macos.dmg`,
+   `LoomWatch-windows-setup.exe` and a `.sha256` for each.
+3. Try the draft's Mac app, apart from the LoomWatch installed on this computer. From the
+   checkout:
 
    ```sh
-   gh release download v0.2.0 -D /tmp/lw-release
-   python3 -m http.server -d /tmp/lw-release 8765 &
-   export LOOMWATCH_DOWNLOAD_BASE=http://127.0.0.1:8765 LOOMWATCH_APP_DIR=/tmp/lw-try/app \
-     LOOMWATCH_TEAMS_ROOT=/tmp/lw-try/teams LOOMWATCH_PORT=3320 \
-     LOOMWATCH_STATE_DIR=/tmp/lw-try/state LOOMWATCH_KEY_STORE=file
-   bash scripts/install.sh
+   mkdir -p /tmp/lw-release /tmp/lw-try/teams
+   gh release download v0.2.0 -D /tmp/lw-release -p 'LoomWatch-macos.dmg*'
+   (cd /tmp/lw-release && shasum -a 256 -c LoomWatch-macos.dmg.sha256)
+   hdiutil attach -nobrowse -readonly -mountpoint /tmp/lw-release/disk /tmp/lw-release/LoomWatch-macos.dmg
+   cp -R /tmp/lw-release/disk/LoomWatch.app /tmp/lw-try/
+   hdiutil detach /tmp/lw-release/disk
+   lipo -info /tmp/lw-try/LoomWatch.app/Contents/MacOS/loomwatchd
+   cp examples/operator-stop.yaml /tmp/lw-try/teams/
+   LOOMWATCH_STATE_DIR=/tmp/lw-try/state LOOMWATCH_KEY_STORE=file LOOMWATCH_UPDATE_CHECK=off \
+     /tmp/lw-try/LoomWatch.app/Contents/MacOS/loomwatchd serve \
+     --teams-root /tmp/lw-try/teams --listen 127.0.0.1:3320
    ```
 
+   `lipo` names both `x86_64` and `arm64`, and http://127.0.0.1:3320/api/about the new version.
+   Run the offline demo team in http://127.0.0.1:3320 and look for what the release changes.
    Everything the trial keeps is in `/tmp/lw-try`, and the installed app's state folder and
    Keychain items are left as they were:
 
-   - A copy installed anywhere but `~/LoomWatch/app` keeps its run history in its own folder
-     (`/tmp/lw-try/app/.loomwatch/loomwatch.db`).
-   - `LOOMWATCH_STATE_DIR` puts the rest of its state (approved team files, skills, what
-     Connections shows) in `/tmp/lw-try/state` instead of `~/Library/Application Support/LoomWatch`.
+   - `LOOMWATCH_STATE_DIR` puts the run history (`loomwatch.db`) and the rest of the state
+     (approved team files, skills, what Connections shows) in `/tmp/lw-try/state` instead of
+     `~/Library/Application Support/LoomWatch`.
    - `LOOMWATCH_KEY_STORE=file` keeps an OpenRouter key, a Claude key, a ChatGPT sign-in and
      connected tools' sign-ins, Notion's among them, in private files in that folder (`keys.json`,
      `plans.json`, `tool-credentials.json`). The Keychain items `LoomWatch.OpenRouter`,
      `LoomWatch.Plans`, `LoomWatch.Tools` and the old `LoomWatch.Notion` are never read or written,
      so the trial starts with nothing connected.
+   - `LOOMWATCH_UPDATE_CHECK=off` keeps it from asking GitHub for a newer release.
 
-   The launcher passes both settings on to `loomwatchd`. Without them a trial reads and writes the
-   installed app's state folder and Keychain items. They are exported so that starting the trial
-   again from the same terminal (`/tmp/lw-try/app/loomwatch`) uses them too. Stop it with Ctrl-C,
-   then stop the file server, remove the trial and clear its settings:
-
-   ```sh
-   kill %1
-   rm -rf /tmp/lw-try /tmp/lw-release
-   unset LOOMWATCH_DOWNLOAD_BASE LOOMWATCH_APP_DIR LOOMWATCH_TEAMS_ROOT LOOMWATCH_PORT \
-     LOOMWATCH_STATE_DIR LOOMWATCH_KEY_STORE
-   ```
+   This runs the program inside the app without the app around it: the menu bar, the notch and
+   Update and restart need the app itself, opened as the paragraph on the Mac app's Update and
+   restart above says. The **Windows** job has already tried the Windows setup, built from the same
+   commit. Stop the trial with Ctrl-C and remove it: `rm -rf /tmp/lw-try /tmp/lw-release`.
 4. Edit the notes, then publish: `gh release edit v0.2.0 --draft=false`. Write the notes for the
    people using LoomWatch: every copy on an older version shows them in its **Update available**
    dialog within a day (ADR 0052), as Markdown without images. Say when a release changes how the
-   run history is stored, since going back from it means putting back the copy `update` saved.
+   run history is stored, since going back from it means putting back the copy Update and restart
+   saved.
 
 ## Repository settings (not in code)
 

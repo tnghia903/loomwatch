@@ -442,7 +442,9 @@ fn supervise(
     loop {
         // One LoomWatch per run history: one started from a terminal on another port holds it.
         if history_in_use(&paths.state) {
-            say("Already running in a terminal window: stop it there, then open LoomWatch again");
+            say(
+                "Already running in a terminal window: stop it there, then quit and reopen LoomWatch",
+            );
             return;
         }
         let Some(port) = free_port() else {

@@ -57,7 +57,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # The launcher and installer are what an update runs on every operator's computer (ADR 0052).
+  # The scripts that run LoomWatch from source and pack its apps.
   launcher:
     name: Launcher
     runs-on: ubuntu-latest
@@ -68,9 +68,7 @@ jobs:
           persist-credentials: false
       # ShellCheck comes with the runner image.
       - name: ShellCheck
-        run: shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh scripts/ci-local.sh
-      - name: Update and rollback
-        run: scripts/test-update.sh
+        run: shellcheck loomwatch scripts/package-release.sh scripts/package-macos-app.sh scripts/ci-local.sh
 
   # The archive is SQLite: every database test makes a file of its own, so this job needs no
   # database service.
@@ -104,10 +102,10 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-  # Windows: the same checks, then the packed release and its installer tried the ways a person
-  # uses them by scripts/smoke-windows.ps1: the terminal install driven through the offline demo,
-  # LoomWatch.exe, and LoomWatch-windows-setup.exe. The archive is SQLite, so it needs no database
-  # service either.
+  # Windows: the same checks, then the app's files and its installer tried the ways a person uses
+  # them by scripts/smoke-windows.ps1: the program driven through the offline demo, LoomWatch.exe,
+  # and LoomWatch-windows-setup.exe. The archive is SQLite, so it needs no database service
+  # either.
   windows:
     name: Windows
     needs: frontend
@@ -126,9 +124,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # Windows PowerShell 5.1, which the launcher and installers are written for, must read them:
-      # every one parses, and is ASCII (5.1 reads a file without a byte-order mark in the local code
-      # page).
+      # Windows PowerShell 5.1, which the launcher and the packing scripts are written for, must read
+      # them: every one parses, and is ASCII (5.1 reads a file without a byte-order mark in the local
+      # code page).
       - name: PowerShell scripts parse
         shell: powershell
         run: |
@@ -147,7 +145,7 @@ jobs:
         run: cargo test --workspace --locked --no-fail-fast
       # Run even when a test failed: whether LoomWatch installs and runs on Windows is worth
       # knowing on its own. The job fails either way.
-      - name: Pack
+      - name: Gather the app's files
         if: ${{ !cancelled() && steps.clippy.outcome == 'success' }}
         shell: bash
         run: |

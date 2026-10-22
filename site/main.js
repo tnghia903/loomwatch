@@ -2683,13 +2683,6 @@
   })
   setOs(/\bwin/i.test(navigator.userAgentData?.platform || navigator.userAgent) ? 'windows' : 'mac')
 
-  $$('.get-term').forEach((term) => $('[data-copy]', term).addEventListener('click', async (event) => {
-    const button = event.currentTarget
-    const text = $$('.cmd', term).map((c) => c.textContent).join('\n')
-    try { await navigator.clipboard.writeText(text); button.textContent = 'Copied' } catch { button.textContent = 'Select and copy' }
-    window.setTimeout(() => { button.textContent = 'Copy' }, 1600)
-  }))
-
   const SCREENS = {
     home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
     agents: { w: 2880, h: 1600, alt: "LoomWatch's agent workbench for Writer, version 1: a sentence saying Writer thinks with Claude Opus 5.5, has one skill and asks before it may act, a mint-green figure at its desk with labels for its keys, its skills, the model it thinks with, its job and its tray, and on the right the blocks that make it, starting with Name and Instructions with a check of what good instructions say.", cap: 'An agent on its workbench: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },

@@ -5,7 +5,7 @@
 Please report security problems privately, not in a public issue or discussion: use
 [Report a vulnerability](https://github.com/tnghia903/loomwatch/security/advisories/new) on
 GitHub. Say what an attacker can do, the steps to reproduce it, and the LoomWatch version
-(`~/LoomWatch/app/VERSION`, or the commit of your copy of the source).
+(**Check for updates…** in ⌘K shows it, or the commit of your copy of the source).
 
 LoomWatch is a small open-source project. You will get a first answer within a week, usually
 sooner. A fix for a confirmed problem ships as a new release, and the advisory credits you unless

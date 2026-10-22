@@ -1,8 +1,7 @@
 # Builds LoomWatch-windows-setup.exe, the installer people download and open on Windows, from the
-# packed release (scripts/package-release.sh windows-x86_64 ...), so both ways of installing put
-# the same files in place.
+# files scripts/package-release.sh windows-x86_64 ... gathers.
 #
-#   scripts/package-windows-app.ps1 -Zip dist\loomwatch-windows-x86_64.zip -Out dist
+#   scripts/package-windows-app.ps1 -Zip build\loomwatch-windows-x86_64.zip -Out dist
 #
 # writes Out\LoomWatch-windows-setup.exe and its .sha256. Needs Inno Setup 6 (ISCC.exe): on
 # PATH, in its usual folder, or installed with `choco install innosetup` (GitHub's Windows runners

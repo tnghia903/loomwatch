@@ -1,14 +1,12 @@
 name: Release
 
-# Builds the ready-to-run LoomWatch that https://loomwatch.github.io/install.sh (and, on Windows,
-# install.ps1) downloads: one macOS program for Apple silicon and Intel Macs, Linux programs for
-# x86_64 and arm64, and a Windows program for x86_64, each packed by scripts/package-release.sh
-# with a checksum. The macOS job also builds LoomWatch-macos.dmg, the LoomWatch.app people download
-# and open (scripts/package-macos-app.sh), and the Windows job LoomWatch-windows-setup.exe, which
-# installs LoomWatch for the person running it (scripts/package-windows-app.ps1). A version tag
-# such as v0.1.0 puts them on a DRAFT
-# GitHub release; publish it by hand once its files have been tried, because the installer always
-# fetches the newest published release. Run it by hand to build the files without a release.
+# Builds the two ways people get LoomWatch, each with a checksum: LoomWatch-macos.dmg, the
+# LoomWatch.app for Apple silicon and Intel Macs (scripts/package-macos-app.sh), and
+# LoomWatch-windows-setup.exe, which installs LoomWatch for the person running it
+# (scripts/package-windows-app.ps1, from the files scripts/package-release.sh gathers). The apps'
+# Update and restart downloads them too. A version tag such as v0.1.0 puts them on a DRAFT GitHub
+# release; publish it by hand once its files have been tried, because the apps always take the
+# newest published release. Run it by hand to build the files without a release.
 on:
   push:
     tags: ["v*"]
@@ -94,8 +92,6 @@ jobs:
             target/x86_64-apple-darwin/release/loomwatchd
           lipo -info build/loomwatchd
           build/loomwatchd --help >/dev/null
-      - name: Pack
-        run: scripts/package-release.sh macos-universal build/loomwatchd dist
       - name: Build the app for Apple silicon and Intel
         run: |
           cargo build --release --locked -p loomwatch-app --target aarch64-apple-darwin
@@ -147,44 +143,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  linux:
-    name: Linux (${{ matrix.platform }})
-    needs: ui
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Built on the older Ubuntu LTS so the program also runs on distributions with an older
-          # glibc, Ubuntu 22.04 and Debian 12 among them.
-          - platform: linux-x86_64
-            runner: ubuntu-22.04
-          - platform: linux-arm64
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    env:
-      PLATFORM: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ui-dist
-          path: ui/dist
-      - name: Build
-        run: cargo build --release --locked --bin loomwatchd
-      - name: Pack
-        run: |
-          target/release/loomwatchd --help >/dev/null
-          scripts/package-release.sh "$PLATFORM" target/release/loomwatchd dist
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-${{ matrix.platform }}
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 7
-
   windows:
     name: Windows
     needs: ui
@@ -204,16 +162,17 @@ jobs:
           path: ui/dist
       - name: Build
         run: cargo build --release --locked --bin loomwatchd --bin LoomWatch
-      - name: Pack
+      # The files the installer puts in place, gathered in build/: not a release file of their own.
+      - name: Gather the app's files
         shell: bash
         run: |
           target/release/loomwatchd.exe --help >/dev/null
-          scripts/package-release.sh windows-x86_64 target/release/loomwatchd.exe dist target/release/LoomWatch.exe
+          scripts/package-release.sh windows-x86_64 target/release/loomwatchd.exe build target/release/LoomWatch.exe
       # Unsigned until a code-signing certificate is set up: Windows then asks people once, in a
       # "Windows protected your PC" box (More info, then Run anyway).
       - name: Build the installer
         shell: pwsh
-        run: scripts/package-windows-app.ps1 -Zip dist/loomwatch-windows-x86_64.zip -Out dist
+        run: scripts/package-windows-app.ps1 -Zip build/loomwatch-windows-x86_64.zip -Out dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-windows-x86_64
@@ -224,7 +183,7 @@ jobs:
   draft:
     name: Draft the release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, linux, windows]
+    needs: [macos, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
