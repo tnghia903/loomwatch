@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { lookupFile, openFile, type FileLookup } from './client'
+import { lookupFile, openFile, type FileFacts, type FileLookup } from './client'
 
 /** What the daemon knows about `path`; `null` while it is being asked. */
 export function useFileLookup(path: string): FileLookup | null {
@@ -11,6 +11,26 @@ export function useFileLookup(path: string): FileLookup | null {
     return () => { current = false }
   }, [path])
   return answer?.path === path ? answer.lookup : null
+}
+
+const NONE: ReadonlyArray<{ path: string; facts: FileFacts }> = []
+
+/** The files among `paths` that are on this computer, in their order; `null` while they are asked. */
+export function useFilesFound(paths: readonly string[]): ReadonlyArray<{ path: string; facts: FileFacts }> | null {
+  const key = paths.join('\n')
+  const [answer, setAnswer] = useState<{ key: string; found: Array<{ path: string; facts: FileFacts }> } | null>(null)
+  useEffect(() => {
+    if (!key) return
+    let current = true
+    const asked = key.split('\n')
+    void Promise.all(asked.map((path) => lookupFile(path))).then((lookups) => {
+      if (!current) return
+      setAnswer({ key, found: lookups.flatMap((lookup, at) => (lookup.state === 'found' && lookup.facts.exists && !lookup.facts.isDir ? [{ path: asked[at], facts: lookup.facts }] : [])) })
+    })
+    return () => { current = false }
+  }, [key])
+  if (!key) return NONE
+  return answer?.key === key ? answer.found : null
 }
 
 /** Open, show in folder, copy — and one line saying how it went, for a `role=status` region. */

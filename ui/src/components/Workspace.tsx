@@ -68,7 +68,7 @@ import { BuildResourceInspector } from './canvas/BuildResourceInspector'
 import { NotionPagePicker } from './canvas/NotionPagePicker'
 import { BuildInspector } from './canvas/BuildInspector'
 import { ComponentPalette } from './library/ComponentPalette'
-import { BookOpenText, MessageSquareText, MessagesSquare, Network, UserRound, X } from 'lucide-react'
+import { MessageSquareText, MessagesSquare, Network, UserRound, X } from 'lucide-react'
 import { Composer, type ComposerState } from './composer/Composer'
 import { RoutineNote } from './composer/RoutineNote'
 import { CAPABILITY_DRAG_MIME, CONNECTION_DRAG_MIME, LIBRARY_DRAG_MIME } from './library'
@@ -83,11 +83,13 @@ import { DeliveryLane } from './run/DeliveryLane'
 import { AnswerDocument } from './chat/AnswerDocument'
 import { FileReader } from './reader/FileReader'
 import { ChatResizer } from './chat/ChatResizer'
+import { PaneTabs } from './chat/PaneTabs'
 import { TeamChat, type Prepared } from './chat/TeamChat'
 import type { TeamView } from './chat/WorkPiece'
 import type { ReplyTo } from '../lib/chat/client'
 import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
-import { isDocument } from '../lib/chat/document'
+import { describeDocument, isDocument } from '../lib/chat/document'
+import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, type MadeTab, type PaneTab } from '../lib/chat/paneTabs'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
 import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
@@ -137,14 +139,15 @@ import type { CardActions } from './ask/AskCards'
 import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './ask/useAskActions'
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
 import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-file/sendBack'
-import { filesTouched } from '../lib/files/fileRefs'
+import { fileRefsIn, filesTouched, filesWritten, workspaceAgent } from '../lib/files/fileRefs'
 import type { AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
 import { goToTeam } from '../lib/team-file/teamPage'
 import { openTeam, type TeamView as TeamTab } from '../lib/team-file/useTeamList'
 import type { LeaveGuard } from './rail/CrewRail'
 import { showTeamRail } from './rail/teamRailStore'
-import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
+import { FileOriginContext, FileReaderContext, readerFormat, type FileToRead } from '../lib/files/reader'
+import { useFilesFound } from '../lib/files/useFile'
 
 // The Workflow canvas: the team as it is configured. A run is read in the team's chat and its
 // Details, never drawn here. The Output card is the planned one: the canvas holds no answer.
@@ -1574,16 +1577,59 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const wide = useWideScreen()
   const [detailsFollow, setDetailsFollow] = useState(() => !initialRunId)
   const [newestPiece, setNewestPiece] = useState<string | null>(null)
-  // The pane beside the chat shows one piece at a time: its answer, read as a document, or its
-  // record. A long answer is the document; a short one is read in the chat and has no Answer tab.
-  // `null` is the pane's own choice: following the newest work, a finished document is what you
-  // would read next, while work in progress shows its record.
-  const [paneTab, setPaneTab] = useState<'answer' | 'details' | 'file' | null>(null)
-  const paneDocument = useMemo(() => detailsOpen && isDocument(responseText), [detailsOpen, responseText])
-  // ADR 0077: a file an answer names, read in the pane as a tab of its own until it is closed, so
-  // following newer work changes the Answer and Details tabs and leaves the file where it is.
+  // The pane beside the chat shows one thing at a time (lib/chat/paneTabs.ts): the piece's record,
+  // or something it made — each file its answer names, and a long answer read as a document. The
+  // chat keeps the answer short; a short one is read there and has no tab. `null` is the pane's own
+  // choice: following the newest work, the first thing it made once it is finished, while work in
+  // progress shows its record.
+  const [paneTab, setPaneTab] = useState<PaneTab | null>(null)
+  // ADR 0077: a file read in the pane stays a tab of its own until it is closed, so following newer
+  // work leaves it where it is.
   const [reading, setReading] = useState<FileToRead | null>(null)
-  const shownTab = paneTab === 'file' && reading ? 'file' : paneDocument && (paneTab ?? (detailsFollow && session.terminal ? 'answer' : 'details')) === 'answer' ? 'answer' : 'details'
+  const [closedTabs, setClosedTabs] = useState<ReadonlySet<string>>(() => new Set())
+  const reopen = useCallback((runId: string | null, tab: PaneTab) => setClosedTabs((closed) => {
+    if (!closed.has(closedKey(runId, tab))) return closed
+    const open = new Set(closed)
+    open.delete(closedKey(runId, tab))
+    return open
+  }), [])
+  const answerResponder = record?.responder ?? null
+  const answerBy = nodeNames.get(answerResponder ?? '') ?? 'The team'
+  const paneAnswer = useMemo(() => (detailsOpen && isDocument(responseText) ? { title: describeDocument(responseText).title, hint: `${answerBy}’s answer` } : null), [detailsOpen, responseText, answerBy])
+  // The files its finished answer names that the reader reads and that are on this computer: the
+  // files its answer's cards in the chat offer to Read.
+  const responderFolder = responderAgent?.folder ?? null
+  const namedFiles = useMemo(() => (detailsOpen && session.terminal ? fileRefsIn(responseText, touchedFiles, responderFolder).filter((path) => readerFormat(path) !== null) : []), [detailsOpen, session.terminal, responseText, touchedFiles, responderFolder])
+  const foundFiles = useFilesFound(namedFiles)
+  const writtenFiles = useMemo(() => new Set(filesWritten(projection.evidence)), [projection.evidence])
+  const paneTabs = useMemo(() => madeTabs({
+    runId: activeRunId,
+    files: (foundFiles ?? []).map(({ path, facts }) => {
+      const maker = workspaceAgent(facts.folder)?.agent
+      return {
+        // Asked of the agent whose workspace holds it, else the one whose answer named it, as its card is.
+        file: { path, runId: activeRunId, from: maker && askable.includes(maker) ? maker : answerResponder },
+        label: baseName(path),
+        kind: facts.kind,
+        // Made by the work (written, or in an agent's own folder), and not code.
+        lead: (writtenFiles.has(path) || maker !== undefined) && readerFormat(path) !== 'code',
+      }
+    }),
+    answer: paneAnswer,
+    kept: reading && { file: reading, label: baseName(reading.path) },
+    closed: closedTabs,
+  }), [activeRunId, foundFiles, writtenFiles, askable, answerResponder, paneAnswer, reading, closedTabs])
+  // Its record stays on screen until what it made is known, so the pane moves once; work that
+  // stopped or failed keeps its record on screen, where that is said.
+  const shownTab = shownPaneTab(paneTab, paneTabs, detailsFollow, session.terminal && record?.status === 'succeeded' && foundFiles !== null)
+  const shownFile = paneTabs.find((made) => made.tab === shownTab)?.file ?? null
+  const shownFileRef = useRef(shownFile)
+  useEffect(() => { shownFileRef.current = shownFile })
+  // Following newer work changes the record and what it made, and leaves the file on screen.
+  const keepShownFile = useCallback(() => {
+    const file = shownFileRef.current
+    if (file) { setReading(file); setPaneTab(fileTab(file.path)) } else setPaneTab(null)
+  }, [])
   const closeDetails = useCallback(() => { setDetailsFollow(false); closeRun(); setRunSetup(true) }, [closeRun])
   const openDetails = useCallback((runId: string) => {
     if (detailsOpen && activeRunId === runId && shownTab === 'details') { closeDetails(); return }
@@ -1594,29 +1640,34 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const openAnswer = useCallback((runId: string) => {
     if (detailsOpen && activeRunId === runId && shownTab === 'answer') { closeDetails(); return }
     setDetailsFollow(runId === newestPiece)
+    reopen(runId, 'answer')
     setPaneTab('answer')
     if (activeRunId !== runId || !detailsOpen) showRun(runId)
-  }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun])
-  const keepFile = (tab: 'answer' | 'details' | 'file' | null) => (tab === 'file' ? tab : null)
+  }, [detailsOpen, activeRunId, shownTab, closeDetails, newestPiece, showRun, reopen])
   const followNewest = useCallback((runId: string | null) => {
     setNewestPiece(runId)
-    if (runId && detailsFollow && wide && runId !== activeRunId) { setPaneTab(keepFile); showRun(runId) }
-  }, [detailsFollow, wide, activeRunId, showRun])
+    if (runId && detailsFollow && wide && runId !== activeRunId) { keepShownFile(); showRun(runId) }
+  }, [detailsFollow, wide, activeRunId, showRun, keepShownFile])
   const followStarted = useCallback((runId: string) => {
     setDetailsFollow(true)
-    setPaneTab(keepFile)
+    keepShownFile()
     if (wide) showRun(runId)
-  }, [wide, showRun])
+  }, [wide, showRun, keepShownFile])
   const readHere = useCallback((file: FileToRead) => {
-    setReading(file)
-    setPaneTab('file')
     const runId = file.runId ?? activeRunId ?? newestPiece
+    reopen(runId, fileTab(file.path))
+    setReading(file)
+    setPaneTab(fileTab(file.path))
     if (runId && (runId !== activeRunId || !detailsOpen)) {
       setDetailsFollow(runId === newestPiece)
       showRun(runId)
     }
-  }, [activeRunId, newestPiece, detailsOpen, showRun])
-  const closeFile = useCallback(() => { setReading(null); setPaneTab(null) }, [])
+  }, [activeRunId, newestPiece, detailsOpen, showRun, reopen])
+  const closeTab = useCallback((made: MadeTab) => {
+    if (!made.kept) setClosedTabs((closed) => new Set(closed).add(closedKey(activeRunId, made.tab)))
+    if (made.file && made.file.path === reading?.path) setReading(null)
+    if (made.tab === shownTab) setPaneTab(afterClosing(paneTabs, made.tab))
+  }, [activeRunId, reading, shownTab, paneTabs])
   // What is marked in the file goes to the chat; on a narrow screen the pane covers the chat, so it
   // steps aside for the message box and the file waits in its tab.
   const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; agent: string; at: number } | null>(null)
@@ -1630,7 +1681,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     if (passage.runId) setChatReveal({ runId: passage.runId, id: `answer:${passage.runId}`, at: Date.now() })
   }, [])
   // Files the answer in the pane names are read and asked about as its responder's work.
-  const answerResponder = record?.responder ?? null
   const answerOrigin = useMemo(() => (activeRunId && answerResponder ? { runId: activeRunId, from: answerResponder } : null), [activeRunId, answerResponder])
   const allowAlways = useCallback((agentId: string, what: AlwaysAllowed) => {
     const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
@@ -2456,26 +2506,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           {detailsOpen && (
             <aside className="tc-details" aria-label="Details of this piece of work">
               <header className="tc-details-head">
-                {paneDocument || reading ? (
-                  <div className="tc-pane-tabs" role="tablist" aria-label="Show">
-                    {paneDocument && <button type="button" role="tab" id="tc-pane-answer" aria-selected={shownTab === 'answer'} aria-controls="tc-pane-body" onClick={() => setPaneTab('answer')}>Answer</button>}
-                    <button type="button" role="tab" id="tc-pane-details" aria-selected={shownTab === 'details'} aria-controls="tc-pane-body" onClick={() => setPaneTab('details')}>Details</button>
-                    {reading && (
-                      <span className="tc-pane-file">
-                        <button type="button" role="tab" id="tc-pane-file" aria-selected={shownTab === 'file'} aria-controls="tc-pane-body" onClick={() => setPaneTab('file')} title={reading.path}>
-                          <BookOpenText size={13} aria-hidden="true" /><span>{baseName(reading.path)}</span>
-                        </button>
-                        <button type="button" className="tc-pane-file-close" onClick={closeFile} aria-label={`Close ${baseName(reading.path)}`} title="Close"><X size={11} aria-hidden="true" /></button>
-                      </span>
-                    )}
-                  </div>
-                ) : <span className="tc-pane-title">Details</span>}
-                <h2>{shownTab === 'file' ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
+                {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
+                <h2>{shownFile ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
                 <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setReading(null) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>
-              <div className="tc-details-body" id="tc-pane-body" role={paneDocument || reading ? 'tabpanel' : undefined} aria-labelledby={paneDocument || reading ? `tc-pane-${shownTab}` : undefined}>
-                {shownTab === 'file' && reading ? (
-                  <FileReader key={reading.path} file={reading} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable} role={(id) => agentRoles.get(id) ?? ''}
+              <div className="tc-details-body" id="tc-pane-body" role={paneTabs.length ? 'tabpanel' : undefined} aria-labelledby={paneTabs.length ? paneTabId(paneTabs, shownTab) : undefined}>
+                {shownFile ? (
+                  <FileReader key={shownFile.path} file={shownFile} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable} role={(id) => agentRoles.get(id) ?? ''}
                     onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} onShowAsked={showAsked} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>

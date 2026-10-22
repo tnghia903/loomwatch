@@ -162,11 +162,18 @@
 .tc-replying.passage .tc-replying-quote { justify-self: start; max-width: 100%; padding: 0 4px; border-radius: 3px; background: var(--rd-mark, color-mix(in srgb, var(--lw-gold-400) 26%, transparent)); color: var(--color-ink-2); }
 .tc-replying.passage { --rd-mark: color-mix(in srgb, var(--lw-gold-400) 26%, transparent); }
 
-/* The file's tab in the pane beside the chat, with its own close. */
-.tc-pane-file { display: inline-flex; align-items: center; min-width: 0; }
-.tc-pane-tabs .tc-pane-file > button[role='tab'] { display: inline-flex; align-items: center; gap: 5px; max-width: 190px; padding-right: 6px; }
-.tc-pane-file > button[role='tab'] span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tc-pane-tabs .tc-pane-file-close { display: grid; place-items: center; width: 18px; height: 18px; margin: 0 2px 0 -1px; padding: 0; border-radius: 4px; color: var(--color-ink-3); }
+/* A tab for each thing the work made, in the pane beside the chat, with its own close inside it:
+   the one on screen is ringed whole, its close included. */
+.tc-pane-file { display: inline-flex; flex: 0 1 auto; align-items: center; min-width: 112px; border-radius: 5px; transition: background-color var(--t-quick) var(--ease-out); }
+.tc-pane-file.shown { background: var(--color-accent-tint); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.tc-pane-tabs .tc-pane-file > button[role='tab'] { display: inline-flex; flex: 0 1 auto; align-items: center; min-width: 0; gap: 5px; max-width: 190px; padding-left: 10px; padding-right: 6px; }
+.tc-pane-tabs .tc-pane-file > button[role='tab'][aria-selected='true'] { background: transparent; box-shadow: none; }
+.tc-pane-file > button[role='tab'] svg { flex: none; }
+/* A narrowed name gives way before its extension, so the kind of file stays said. */
+.tc-pane-label { display: inline-flex; min-width: 0; white-space: nowrap; }
+.tc-pane-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tc-pane-ext { flex: none; }
+.tc-pane-tabs .tc-pane-file-close { display: grid; flex: none; place-items: center; width: 18px; height: 18px; margin: 0 5px 0 -1px; padding: 0; border-radius: 4px; color: var(--color-ink-3); }
 .tc-pane-tabs .tc-pane-file-close:hover { background: var(--color-hairline); color: var(--color-ink); }
 
 /* Over an agent's bench: the reader fills what the long answer would. */
