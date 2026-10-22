@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
 import { safeFileStem } from '../files/paths'
+import { movedInPlace } from '../team-file/inPlace'
 import type { AgentAllow, AgentConfig } from '../team-file/types'
 import type { FigureChoice } from './figures'
 import type { AgentRead } from './reads'
@@ -238,9 +239,12 @@ export interface SavedJobsState {
 const NO_JOBS: SavedJob[] = []
 const NO_PROBLEMS: JobProblem[] = []
 
+let lastList: JobList | null = null
+
 /** The saved jobs, reloaded whenever any part of the page saves or removes one. */
 export function useSavedJobs(): SavedJobsState {
-  const [list, setList] = useState<JobList | null>(null)
+  // A team page that moved in place starts from the list it last read, so figures keep their looks.
+  const [list, setList] = useState<JobList | null>(() => (movedInPlace() ? lastList : null))
   const [available, setAvailable] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [generation, setGeneration] = useState(0)
@@ -250,6 +254,7 @@ export function useSavedJobs(): SavedJobsState {
     fetchJobs().then(
       (result) => {
         if (cancelled) return
+        lastList = result
         setAvailable(result !== null)
         setList(result)
         setError(null)

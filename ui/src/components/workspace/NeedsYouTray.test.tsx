@@ -34,6 +34,22 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
   })
 })
 
+// Another team's run opens as the team rail opens a team: in place, where a team page follows the address.
+describe('Open run', () => {
+  it('opens that team’s run in place', () => {
+    const opened = vi.fn((event: Event) => event.preventDefault())
+    window.addEventListener('loomwatch:open-team', opened)
+    try {
+      render(<NeedsYouTray tickets={[ticket]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^Open run/ }))
+      expect((opened.mock.calls[0]?.[0] as CustomEvent<string> | undefined)?.detail).toBe('/?path=research.yaml&run=r1')
+    } finally {
+      window.removeEventListener('loomwatch:open-team', opened)
+    }
+  })
+})
+
 // ADR 0043: the run on screen asks with its own answer box and permission card, so its ticket in
 // the tray says where to answer instead of offering the same buttons again; it still counts.
 describe('a ticket for the run on screen', () => {

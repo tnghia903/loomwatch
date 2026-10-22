@@ -437,6 +437,12 @@ open a browser, with no Electron. On a Mac, `LoomWatch.app` is only a launcher. 
 
 - **Stack:** React + Vite + [React Flow](https://reactflow.dev) for the canvas, served by `axum`;
   `rust-embed` bakes the built `dist/` into `loomwatchd`, so the binary is self-contained.
+- **Teams open in place:** going to another team (the team rail, Home, Back and Forward) changes
+  the address without a page load (`ui/src/lib/team-file/teamPage.ts`). The next team's file is
+  read first, then the team's own part of the page, canvas included, starts fresh under a new
+  React key, as it would on a load. The page frame, the team rail and the app's own data (what
+  waits on you, the teams, your saved agents, the schema's checker) stay. With changes not saved,
+  the move is a page load, so the browser asks first.
 - **Look and feel:** eye-catching and minimal. Few primary surfaces, one obvious action per
   screen, progressive disclosure of everything else. A run is drawn as Prompt → Run → agents →
   evidence → Output, projected from archived events, never from prose.

@@ -111,18 +111,24 @@ export function CrewRail({ label, items, find, none, add, go, leave, className =
   const showTip = (text: string, anchor: Element) => { if (!pending && !finding) setTip({ text, ...placeBeside(anchor, rail.current, true) }) }
 
   const closeLeave = () => { setPending(null); setSaving(false) }
+  // Its box goes as the page moves; the keyboard goes to the one picked, which a page moved in place keeps.
+  const goFromBox = (href: string) => {
+    setPending(null)
+    go(href)
+    const picked = [...scroller.current?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? []].find((link) => link.getAttribute('href') === href)
+    picked?.focus()
+  }
   const keep = async () => {
     if (!pending) return
     setSaving(true)
     const saved = await pending.guard.save().catch(() => false)
     setSaving(false)
-    if (saved) { setPending(null); go(pending.href) }
+    if (saved) goFromBox(pending.href)
   }
   const drop = async () => {
     if (!pending) return
     await pending.guard.discard?.()
-    setPending(null)
-    go(pending.href)
+    goFromBox(pending.href)
   }
 
   const leaveRef = useRef<HTMLDivElement>(null)

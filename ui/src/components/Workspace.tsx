@@ -140,9 +140,10 @@ import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-fi
 import { filesTouched } from '../lib/files/fileRefs'
 import type { AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
-import type { TeamView as TeamTab } from '../lib/team-file/useTeamList'
+import { goToTeam } from '../lib/team-file/teamPage'
+import { openTeam, type TeamView as TeamTab } from '../lib/team-file/useTeamList'
 import type { LeaveGuard } from './rail/CrewRail'
-import { TeamRail } from './rail/TeamRail'
+import { showTeamRail } from './rail/teamRailStore'
 import { FileOriginContext, FileReaderContext, type FileToRead } from '../lib/files/reader'
 
 // The Workflow canvas: the team as it is configured. A run is read in the team's chat and its
@@ -2188,11 +2189,16 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const railTab: TeamTab = runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'
   const unsavedTeam = ['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)
   const [leavingTo, setLeavingTo] = useState<string | null>(null)
-  useEffect(() => { if (leavingTo && !unsavedTeam) window.location.assign(leavingTo) }, [leavingTo, unsavedTeam])
+  useEffect(() => { if (leavingTo && !unsavedTeam) goToTeam(leavingTo) }, [leavingTo, unsavedTeam])
   const { save: saveTeam, reloadFromDisk } = doc
   const leaveTeam = useCallback((): LeaveGuard | null => (unsavedTeam
     ? { save: saveTeam, problem: doc.isValid ? null : 'It has problems to fix before it can be saved.', discard: async () => { await reloadFromDisk() } }
     : null), [unsavedTeam, saveTeam, reloadFromDisk, doc.isValid])
+  // The page frame draws the rail (FrameTeamRail), so it stays while teams change in place beside it.
+  useLayoutEffect(() => {
+    showTeamRail(railTeam ? { open: railTeam, runs: needsYou.records, savedJobs, view: railTab, go: setLeavingTo, onNewTeam: openNewTeam, leave: leaveTeam } : null)
+  }, [railTeam, needsYou.records, savedJobs, railTab, openNewTeam, leaveTeam])
+  useLayoutEffect(() => () => showTeamRail(null), [])
   const toggleLibrary = useCallback(() => window.dispatchEvent(new Event('loomwatch:toggle-library')), [])
   const actions = useMemo<CommandAction[]>(() => [
     { label: 'Ask LoomWatch…', shortcut: '⌘J', icon: MessageSquareText, run: () => askFor() },
@@ -2265,7 +2271,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       }
       case 'open': {
         const team = matchTeam(intent.query, needsYou.teams)
-        return { dialect, label: team ? `Open ${team.name}` : `No team matches “${intent.query}”`, detail: team?.path, disabled: !team, run: () => { if (team) window.location.assign(`/?path=${encodeURIComponent(team.path)}`) } }
+        return { dialect, label: team ? `Open ${team.name}` : `No team matches “${intent.query}”`, detail: team?.path, disabled: !team, run: () => { if (team) openTeam(team.path) } }
       }
       case 'run':
         return { dialect, label: `Run: “${intent.request}”`, detail: doc.path ? 'Puts it in the request box so you can check it, then press Enter' : 'Open a team first', disabled: !doc.path, run: () => { setComposerText(intent.request); window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('.lw-composer textarea')?.focus(), 0) } }
@@ -2412,8 +2418,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     <SavedAgentsContext.Provider value={savedJobs}>
     <TeamFiguresContext.Provider value={agentFigures}>
     <CanvasActionsContext.Provider value={canvasActions}>
-      <div className="lw-railed">
-      {railTeam && <TeamRail open={railTeam} runs={needsYou.records} savedJobs={savedJobs} view={railTab} go={setLeavingTo} onNewTeam={openNewTeam} leave={leaveTeam} />}
       <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {deliveryShown ? (
           <FileReaderContext.Provider value={readHere}>
@@ -2609,7 +2613,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch, your teams" title="Your teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
+          {/* Home opens in place, as another team does; a click that asks for a new tab gets one. */}
+          <a className="delivery-brand" href="/" aria-label="LoomWatch, your teams" title="Your teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}
+            onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); goToTeam('/') }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
           <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>
           <nav className="workspace-view-tabs" aria-label="Workspace view" data-tour="view-tabs">
@@ -2898,7 +2904,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         {compareOpen && doc.externalChange && (
           <YamlSheet title="Disk ↔ in-memory YAML" yaml={unifiedYamlDiff(doc.externalChange.diskYaml, doc.yamlPreview)} onClose={() => setCompareOpen(false)} footer={<ConflictSheetFooter onKeepMine={doc.keepMine} onUseDisk={() => void doc.useDisk()} />} />
         )}
-      </div>
       </div>
     </CanvasActionsContext.Provider>
     </TeamFiguresContext.Provider>

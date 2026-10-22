@@ -5,6 +5,7 @@ import { decideRunRequest, fetchProposal, reportProposalOutcome, type Proposal }
 import { proposalChanges, type ProposalChanges } from '../../lib/ask/proposal'
 import type { ProposalCard, ReviewNoteCard, RunRequestCard } from '../../lib/ask/thread'
 import { newStartKey, startRun, type RunRecord } from '../../lib/runs/client'
+import { goToTeam } from '../../lib/team-file/teamPage'
 import type { useTeamDocument } from '../../lib/team-file/useTeamDocument'
 
 type TeamDocumentApi = ReturnType<typeof useTeamDocument>
@@ -281,7 +282,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
         applyRecord(record)
         showRun(record.runId)
       } else {
-        window.location.assign(teamUrl(card.file, { run: record.runId }))
+        goToTeam(teamUrl(card.file, { run: record.runId }))
       }
     } catch (caught) {
       setCardError({ id: card.id, message: caught instanceof Error ? caught.message : String(caught) })
@@ -304,7 +305,7 @@ export function useAskActions({ doc, conversationId, activeRunId, waiting, toBui
 
   const openRun = useCallback((runId: string, file: string) => {
     if (sameTeamFile(doc.path, file)) showRun(runId)
-    else window.location.assign(teamUrl(file, { run: runId }))
+    else goToTeam(teamUrl(file, { run: runId }))
   }, [doc.path, showRun])
 
   /**

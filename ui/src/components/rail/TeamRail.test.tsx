@@ -74,6 +74,22 @@ describe('TeamRail', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(3)
   })
 
+  // The rail stays while teams change beside it (App.tsx). A team is left in place only once it is
+  // saved, so the one just left is shown as it was on screen until the folder is read again.
+  it('shows the team just left as it was on screen while the folder is read again', async () => {
+    const same = { runs: [], savedJobs: [], view: 'chat' as const, go: vi.fn(), onNewTeam: vi.fn(), leave: () => null }
+    const blog = { path: '/Users/ana/LoomWatch/teams/blog.yaml', name: 'Blog post', agents: [{ id: 'researcher', name: 'Researcher' }, { id: 'writer', name: 'Writer' }, { id: 'editor', name: 'Editor' }] }
+    const view = render(<TeamRail open={blog} {...same} />)
+    const nav = screen.getByRole('navigation', { name: 'Your teams' })
+    await within(nav).findByRole('link', { name: 'Blog post' })
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+    view.rerender(<TeamRail open={{ path: '/Users/ana/LoomWatch/teams/trip.yaml', name: 'Trip planner', agents: [{ id: 'planner', name: 'Planner' }] }} {...same} />)
+    expect(linkTo(nav, 'trip.yaml')).toHaveAttribute('aria-current', 'page')
+    // Its file as first read had two agents; the team on screen had three.
+    expect(linkTo(nav, 'blog.yaml').querySelector('.crew-team')).toHaveClass('n3')
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/teams')
+  })
+
   it('names the open team as it is on screen, before it is saved', async () => {
     const { nav } = rail({ open: { path: 'blog.yaml', name: 'Blog post (draft)', agents: [] } })
     expect(await within(nav).findByRole('link', { name: 'Blog post (draft)' })).toHaveAttribute('aria-current', 'page')

@@ -3,11 +3,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { keepIfSame } from '../keepIfSame'
 import { answerPermission, answerRun, answerSpend, fetchRuns, type PermissionDecision, type RunRecord, type SpendDecision } from '../runs/client'
 import { teamDisplayName } from '../team-file/client'
+import { movedInPlace } from '../team-file/inPlace'
 import { useTeamList } from '../team-file/useTeamList'
 import { useLoomMarkState } from './loomMark'
 import { ticketsFrom, type Ticket } from './needsYou'
 
 const DISMISSED_KEY = 'loomwatch.needsYou.dismissed'
+
+let lastRecords: RunRecord[] = []
 
 function loadDismissed(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? '[]') as string[]) } catch { return new Set() }
@@ -21,7 +24,8 @@ function loadDismissed(): Set<string> {
  * lib/story/loomMark.ts).
  */
 export function useNeedsYou() {
-  const [records, setRecords] = useState<RunRecord[]>([])
+  // A team page that moved in place starts from the last poll, so the tray, the mark and the tab don't blink.
+  const [records, setRecords] = useState<RunRecord[]>(() => (movedInPlace() ? lastRecords : []))
   const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed)
   const [error, setError] = useState<string | null>(null)
   const { teams } = useTeamList()
@@ -32,6 +36,7 @@ export function useNeedsYou() {
     try {
       const runs = await fetchRuns(signal)
       if (signal?.aborted || mine !== generation.current) return
+      lastRecords = runs
       setRecords((previous) => keepIfSame(previous, runs))
       setError(null)
     } catch (caught) {

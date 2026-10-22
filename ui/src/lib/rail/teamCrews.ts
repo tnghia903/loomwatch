@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { parse } from 'yaml'
 
 import { fetchTeamFile, fetchTeamsDiscovery, teamDisplayName, teamSummaries } from '../team-file/client'
@@ -33,16 +33,25 @@ export function byName(teams: readonly TeamCrew[]): TeamCrew[] {
 /**
  * Every team in the teams folder with its agents, read from the team files, for the team rail.
  * `teams` is `null` until read. A file that is not a team is left out: Home lists it to be fixed.
+ * Read again each time `again` changes (the team on screen), keeping the list shown meanwhile and
+ * reading only the files changed since: the folder's list says when each one last changed.
  */
-export function useTeamCrews(): { root: string | null; teams: TeamCrew[] | null } {
+export function useTeamCrews(again?: unknown): { root: string | null; teams: TeamCrew[] | null } {
   const [found, setFound] = useState<{ root: string | null; teams: TeamCrew[] | null }>({ root: null, teams: null })
+  const known = useRef(new Map<string, { modifiedAt: string; crew: ReturnType<typeof crewOf> }>())
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
         const discovery = await fetchTeamsDiscovery()
         const listed = teamSummaries(discovery).filter((team) => !team.problem)
-        const read = await Promise.allSettled(listed.map(async (team) => ({ team, crew: crewOf((await fetchTeamFile(team.path)).yaml) })))
+        const read = await Promise.allSettled(listed.map(async (team) => {
+          const kept = known.current.get(team.path)
+          if (kept && team.modifiedAt && kept.modifiedAt === team.modifiedAt) return { team, crew: kept.crew }
+          const crew = crewOf((await fetchTeamFile(team.path)).yaml)
+          if (team.modifiedAt) known.current.set(team.path, { modifiedAt: team.modifiedAt, crew })
+          return { team, crew }
+        }))
         const teams = read.flatMap((result) => {
           if (result.status !== 'fulfilled' || !result.value.crew) return []
           const { team, crew } = result.value
@@ -50,10 +59,10 @@ export function useTeamCrews(): { root: string | null; teams: TeamCrew[] | null 
         })
         if (!cancelled) setFound({ root: discovery.root, teams: byName(teams) })
       } catch {
-        if (!cancelled) setFound({ root: null, teams: [] })
+        if (!cancelled) setFound((current) => (current.teams ? current : { root: null, teams: [] }))
       }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [again])
   return found
 }

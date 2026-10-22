@@ -109,6 +109,8 @@
    button in the header's row, and the page beside it. */
 .lw-railed { --lw-rail-w: 72px; display: flex; width: 100%; height: 100%; }
 .lw-railed > .lw-shell { flex: 1; min-width: 0; }
+/* The same frame on Home and while a team opens, with no rail: it adds nothing to the layout. */
+.lw-frame { display: contents; }
 /* An agent's page: the team header's own parts in a 64 px bar, then the page, which scrolls. */
 .agent-frame-root { position: absolute; inset: 0; background: var(--color-ground); color: var(--color-ink); }
 .agent-frame { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
