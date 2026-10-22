@@ -12,10 +12,11 @@ const STAGE_FAILURE = /^pipeline node ([^:\s]+) failed/
 
 /**
  * The agent a failed run stopped at: the one its error names, or the only one it ran. `null` when
- * the run didn't fail, or its error names nobody, since a guess would mark the wrong agent.
+ * the run didn't fail, or the schedule is trying it again, or its error names nobody, since a guess
+ * would mark the wrong agent.
  */
-export function failedAgent(run: { status: string; error: string | null; onlyAgent?: string | null; agentIds: readonly string[] }): string | null {
-  if (run.status !== 'failed') return null
+export function failedAgent(run: { status: string; error: string | null; onlyAgent?: string | null; agentIds: readonly string[]; nextTryAt?: string | null }): string | null {
+  if (run.status !== 'failed' || run.nextTryAt) return null
   const error = run.error?.trim() ?? ''
   const named = STAGE_FAILURE.exec(error)?.[1] ?? SPAWN_FAILURE.exec(error)?.[1]
   if (named) return named

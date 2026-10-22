@@ -230,6 +230,8 @@ The backend is `loomwatchd`, a single binary the user runs locally. Its job:
 - **Skills:** LoomWatch's own skills folder, and installing skills into it (`skills_store.rs`,
   `marketplace.rs`, `skills_api.rs`)
 - **Ask LoomWatch:** an assistant that builds and runs teams (`control/`)
+- **Schedules:** runs a team at its `schedule` time and tries again a run that couldn't reach its
+  AI source (`schedule.rs`)
 - **Event archive:** one SQLite file, the durable and unbounded history
 - **UI host:** serves the single-page web UI (static assets), a WebSocket for live events, and a
   REST surface (see §5)
@@ -273,6 +275,24 @@ launcher saves one before every update. Versions before 0.5 kept the history in 
 Docker; 0.5.0 is the last release that copies such a history into the file. `loomwatchd` runs as a native process. The container
 image (`Dockerfile`, `docker-compose.yml`) runs the same binary, with the state folder on a
 volume. There the keys are in `keys.json` and `plans.json`.
+
+### Schedules
+
+`schedule.rs` keeps the routines in memory. Every 30 s it rescans the teams root and starts each
+team whose `schedule` time has come, through the same `runs::launch` as `POST /api/runs`. A
+follower task watches each run it started to the end, for its delivery.
+
+A computer that wakes at a routine's time often has no network for its first seconds. A turn that
+can't reach its AI source fails with `AgentError::Network`, which `engine` carries as an
+`AppReportedError` marked `unreachable`, and the run is recorded with
+`errorCode: "source_unreachable"`. Each timed run, and each try of one, is launched knowing the next
+wait in `schedule.retryAfterMinutes` (1, 2, 5, 10 and 30 minutes by default), so the registry puts
+`nextTryAt` on the run in the same step that marks it failed: no reader sees the stop alone. The
+follower then gives the routine that try to make, and the first tick after its time starts it: a
+new run with the same prompt, whose `retryOfRunId` names the run before it, so the tries read as one
+job. A source that answered (a refused key, no credit, a plan's limit) is not tried again, and
+neither is a run started with Run now: those need the person. The routine's own next time, Run now,
+or pausing the routine lets a waiting try go.
 
 ### Permissions
 

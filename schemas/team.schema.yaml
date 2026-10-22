@@ -420,6 +420,20 @@ $defs:
           Where this routine's answer goes. Overrides the team's top-level `deliver` for scheduled
           runs; the default title here is "{{team}} — {{date}}", one page a day.
         $ref: "#/$defs/Deliver"
+      retryAfterMinutes:
+        description: >-
+          When a timed run fails because it couldn't reach its AI source (the network not back
+          yet just after the computer woke, say), wait this many minutes and try again from the
+          start: one new try per entry, each named as a retry of the one before. The next timed
+          run, "run now" or pausing the routine stops waiting. An empty list never tries again;
+          "run now" is never tried again by itself.
+        type: array
+        maxItems: 20
+        items:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        default: [1, 2, 5, 10, 30]
 
   Deliver:
     type: object

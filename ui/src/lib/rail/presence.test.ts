@@ -32,6 +32,10 @@ describe('presenceOf', () => {
     expect(presenceOf([run('ok', { createdAt: '2026-10-20T01:00:00Z' }), run('broke', { status: 'failed', createdAt: '2026-10-20T02:00:00Z' })])).toBe('failed')
     expect(presenceOf([run('was-asking', { status: 'succeeded', waitingOn: stop })])).toBe('ready')
   })
+
+  it('rests while the schedule waits to try a run again that couldn’t reach its AI', () => {
+    expect(presenceOf([run('waking', { status: 'failed', trigger: 'schedule', nextTryAt: '2026-10-20T03:01:00Z' })])).toBe('ready')
+  })
 })
 
 describe('benchChatId', () => {

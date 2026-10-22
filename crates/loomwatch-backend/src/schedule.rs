@@ -5,6 +5,10 @@
 //! times only when a schedule changed or fired, and starts due routines through exactly
 //! the path `POST /api/runs` uses ([`runs::launch`]). Fires missed while the daemon was
 //! down are skipped; a routine whose previous run is still live is skipped, not queued.
+//!
+//! A timed fire that could not reach its AI source (`errorCode: "source_unreachable"`), as in
+//! the first seconds after a computer wakes, is tried again from the start after each wait in
+//! `schedule.retryAfterMinutes`, each try a retry of the one before.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -74,6 +78,20 @@ struct Entry {
     last_fired_at: Option<String>,
     last_delivery: Option<Delivery>,
     problem: Option<Problem>,
+    /// The try this routine waits to make, after its last one could not reach its AI source.
+    retry: Option<Retry>,
+}
+
+/// A timed fire whose last try could not reach its AI source, waiting to be tried again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Retry {
+    /// The try that could not reach its source: the next is a retry of it.
+    of: String,
+    /// The words that try was given, so every try is the same job.
+    prompt: String,
+    /// Tries made so far, the timed fire included.
+    tries: usize,
+    at: DateTime<Utc>,
 }
 
 impl Entry {
@@ -92,6 +110,7 @@ impl Entry {
             last_fired_at: None,
             last_delivery: None,
             problem: message.map(Problem::Parse),
+            retry: None,
         };
         if let Some(schedule) = schedule {
             entry.copy_fields(&schedule, None);
@@ -145,6 +164,7 @@ impl Entry {
         key: &str,
         now: DateTime<Utc>,
         is_live: impl Fn(&str) -> bool,
+        fire: Fire,
     ) -> Result<FirePlan, String> {
         let Some(schedule) = &self.schedule else {
             return Err(self.problem.as_ref().map_or_else(
@@ -164,7 +184,69 @@ impl Entry {
                 .notion_title
                 .as_deref()
                 .map(|title| schedule.expand(title, &self.team_name, now)),
+            fire,
         })
+    }
+
+    /// How long to wait before trying again a run of this routine that made `tries` tries with
+    /// the ones before it (`None`: one never tried again by itself), should it not reach its AI
+    /// source; `None` when it would not be tried again.
+    fn wait_after(&self, tries: Option<usize>) -> Option<chrono::Duration> {
+        if !self.enabled {
+            return None;
+        }
+        self.schedule.as_ref()?.retry_wait(tries?)
+    }
+
+    /// The try to wait for after `record`, a finished try that made `tries` tries with the ones
+    /// before it, when it could not reach its AI source and the routine still has tries left. It
+    /// is due when the run said as it ended ([`runs::RunRecord::next_try_at`]).
+    fn retry_after(&self, record: &RunRecord, tries: Option<usize>) -> Option<Retry> {
+        let unreachable = record.status == RunStatus::Failed
+            && record.error_code.as_deref() == Some(runs::SOURCE_UNREACHABLE);
+        if !unreachable {
+            return None;
+        }
+        self.wait_after(tries)?;
+        let at = DateTime::parse_from_rfc3339(record.next_try_at.as_deref()?).ok()?;
+        Some(Retry {
+            of: record.run_id.clone(),
+            prompt: record.prompt.clone(),
+            tries: tries?,
+            at: at.with_timezone(&Utc),
+        })
+    }
+}
+
+/// What started a fire, which decides whether a try that could not reach its AI source is tried
+/// again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Fire {
+    /// The routine's time came.
+    Timed,
+    /// Try number `tries` of a timed fire (the fire itself was the first), from the start, after
+    /// the try `of` could not reach its AI source.
+    Again { of: String, tries: usize },
+    /// "Run now": whoever pressed it is there to try again.
+    ByHand,
+}
+
+impl Fire {
+    /// How many tries this one makes with the ones before it; `None` for one never tried again.
+    const fn tries(&self) -> Option<usize> {
+        match self {
+            Self::Timed => Some(1),
+            Self::Again { tries, .. } => Some(*tries),
+            Self::ByHand => None,
+        }
+    }
+
+    /// The try this one tries again.
+    fn retry_of(&self) -> Option<&str> {
+        match self {
+            Self::Again { of, .. } => Some(of),
+            Self::Timed | Self::ByHand => None,
+        }
     }
 }
 
@@ -175,6 +257,7 @@ struct FirePlan {
     prompt: String,
     /// Expanded Notion page title; `None` when the routine delivers nowhere.
     title: Option<String>,
+    fire: Fire,
 }
 
 /// What one tick decided: routines to launch, and routines skipped with the reason.
@@ -186,8 +269,9 @@ struct Due {
 
 /// Select every enabled entry whose fire time has passed, advance its `next_at`, and
 /// expand its templates. A disabled entry's fire time is advanced without firing so a
-/// later re-enable does not fire immediately. `is_live` answers whether a run id is
-/// still non-terminal.
+/// later re-enable does not fire immediately. An entry whose time has not come but whose
+/// wait to try again is over is tried again, with the words its last try had. `is_live`
+/// answers whether a run id is still non-terminal.
 fn collect_due(
     entries: &mut BTreeMap<String, Entry>,
     now: DateTime<Utc>,
@@ -198,17 +282,29 @@ fn collect_due(
         let Some(schedule) = entry.schedule.clone() else {
             continue;
         };
-        let Some(next_at) = entry.next_at else {
+        let timed = entry.next_at.is_some_and(|next_at| next_at <= now);
+        let planned = if timed {
+            entry.next_at = schedule.next_fire(now).ok().flatten();
+            if !entry.enabled {
+                continue;
+            }
+            // Its own time wins over a try still waiting, which its launch lets go.
+            entry.plan(key, now, &is_live, Fire::Timed)
+        } else if entry.enabled
+            && let Some(retry) = entry.retry.take_if(|retry| retry.at <= now)
+        {
+            let fire = Fire::Again {
+                of: retry.of,
+                tries: retry.tries + 1,
+            };
+            entry.plan(key, now, &is_live, fire).map(|plan| FirePlan {
+                prompt: retry.prompt,
+                ..plan
+            })
+        } else {
             continue;
         };
-        if next_at > now {
-            continue;
-        }
-        entry.next_at = schedule.next_fire(now).ok().flatten();
-        if !entry.enabled {
-            continue;
-        }
-        match entry.plan(key, now, &is_live) {
+        match planned {
             Ok(plan) => {
                 due.plans.push(plan);
             }
@@ -380,12 +476,13 @@ fn display_name(name: &str, path: &Path) -> String {
 }
 
 /// Apply a scan to the map: scheduled files are adopted, broken ones keep or gain an
-/// entry with `problem`, everything else is dropped.
+/// entry with `problem`, everything else is dropped. Returns the tries that no longer get
+/// tried again, because their routine was paused, broke or went.
 fn reconcile(
     entries: &mut BTreeMap<String, Entry>,
     scanned: Vec<(String, Scanned)>,
     now: DateTime<Utc>,
-) {
+) -> Vec<String> {
     let mut keep = Vec::new();
     for (key, outcome) in scanned {
         match outcome {
@@ -420,7 +517,17 @@ fn reconcile(
             Scanned::Unscheduled => {}
         }
     }
-    entries.retain(|key, _| keep.contains(key));
+    let mut dropped = Vec::new();
+    entries.retain(|key, entry| {
+        let kept = keep.contains(key);
+        if (!kept || !entry.enabled || entry.schedule.is_none())
+            && let Some(retry) = entry.retry.take()
+        {
+            dropped.push(retry.of);
+        }
+        kept
+    });
+    dropped
 }
 
 /// One routine as `GET /api/schedules` reports it.
@@ -444,6 +551,9 @@ pub struct ScheduleSnapshot {
     pub last_delivery: Option<Delivery>,
     pub deliver: Option<DeliverSnapshot>,
     pub problem: Option<String>,
+    /// When the routine tries its last run again, after it could not reach its AI source; RFC
+    /// 3339 UTC. Tried within a tick (30 s) of it.
+    pub next_try_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -513,11 +623,14 @@ impl Scheduler {
         Self::with_publisher(Publisher::disconnected())
     }
 
-    /// Rescan the teams root and fold the result into the map.
-    fn rescan(&self, teams_root: &Path, now: DateTime<Utc>) {
+    /// Rescan the teams root and fold the result into the map. A try that no longer gets tried
+    /// again stops saying when it would be.
+    fn rescan(&self, registry: &RunRegistry, teams_root: &Path, now: DateTime<Utc>) {
         let scanned = scan(teams_root);
         let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
-        reconcile(&mut entries, scanned, now);
+        for run_id in reconcile(&mut entries, scanned, now) {
+            let _known = registry.set_next_try(&run_id, None);
+        }
     }
 
     /// One scheduler tick: rescan, then fire everything due.
@@ -528,7 +641,7 @@ impl Scheduler {
         teams_root: &Path,
         now: DateTime<Utc>,
     ) {
-        self.rescan(teams_root, now);
+        self.rescan(registry, teams_root, now);
         let due = {
             let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
             collect_due(&mut entries, now, |run_id| {
@@ -545,9 +658,25 @@ impl Scheduler {
         }
     }
 
+    /// Start a planned fire, and say on the try it tries again, if any, that the wait is over.
+    fn launch(
+        &self,
+        plan: FirePlan,
+        registry: &RunRegistry,
+        archive: &EventArchive,
+        teams_root: &Path,
+    ) -> Result<RunRecord, ApiError> {
+        let tried_again = plan.fire.retry_of().map(str::to_owned);
+        let result = self.start(plan, registry, archive, teams_root);
+        if let Some(run_id) = tried_again {
+            let _known = registry.set_next_try(&run_id, None);
+        }
+        result
+    }
+
     /// Start a planned fire through `runs::launch`, record it on the entry, and follow
     /// the run to deliver its reply.
-    fn launch(
+    fn start(
         &self,
         plan: FirePlan,
         registry: &RunRegistry,
@@ -566,6 +695,12 @@ impl Scheduler {
             eprintln!("schedule: {}: not started: {problem}", plan.key);
             return Err(ApiError::new(StatusCode::CONFLICT, problem));
         }
+        let again_after = self
+            .entries
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&plan.key)
+            .and_then(|entry| entry.wait_after(plan.fire.tries()));
         let result = runs::launch(
             registry,
             Some(archive.clone()),
@@ -573,6 +708,10 @@ impl Scheduler {
             Path::new(&plan.key),
             &plan.prompt,
             RunTrigger::Schedule,
+            runs::Tries {
+                retry_of: plan.fire.retry_of(),
+                again_after,
+            },
         );
         {
             let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
@@ -586,6 +725,11 @@ impl Scheduler {
                         if matches!(entry.problem, Some(Problem::Fire(_))) {
                             entry.problem = None;
                         }
+                        // A new run, whatever started it, is the routine's run now: an earlier
+                        // try waiting to be tried again no longer is.
+                        if let Some(retry) = entry.retry.take() {
+                            let _known = registry.set_next_try(&retry.of, None);
+                        }
                     }
                     Err(error) => entry.problem = Some(Problem::Fire(error.message.clone())),
                 }
@@ -594,9 +738,13 @@ impl Scheduler {
         match &result {
             Ok(record) => {
                 println!(
-                    "schedule: fired {} as run {}{}",
+                    "schedule: fired {} as run {}{}{}",
                     plan.key,
                     record.run_id,
+                    match &plan.fire {
+                        Fire::Again { of, tries } => format!(" (try {tries}, again after {of})"),
+                        Fire::Timed | Fire::ByHand => String::new(),
+                    },
                     plan.title
                         .as_deref()
                         .map_or_else(String::new, |title| format!(
@@ -608,6 +756,7 @@ impl Scheduler {
                     registry.clone(),
                     plan.key,
                     record.run_id.clone(),
+                    plan.fire.tries(),
                 ));
             }
             Err(error) => eprintln!("schedule: {}: launch refused: {}", plan.key, error.message),
@@ -616,20 +765,37 @@ impl Scheduler {
     }
 
     /// Store a finished run's status and delivery on its entry, if it is still that
-    /// entry's latest run.
+    /// entry's latest run, and when it could not reach its AI source and has tries left, when it
+    /// is tried again: on the routine and on the run. `tries` is how many tries the run made with
+    /// the ones before it; `None` for one never tried again by itself.
     fn record_outcome(
         &self,
+        registry: &RunRegistry,
         key: &str,
-        run_id: &str,
-        status: RunStatus,
-        delivery: Option<Delivery>,
+        record: &RunRecord,
+        tries: Option<usize>,
     ) {
         let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
-        if let Some(entry) = entries.get_mut(key)
-            && entry.last_run_id.as_deref() == Some(run_id)
-        {
-            entry.last_status = Some(status);
-            entry.last_delivery = delivery;
+        let Some(entry) = entries.get_mut(key) else {
+            return;
+        };
+        if entry.last_run_id.as_deref() != Some(record.run_id.as_str()) {
+            return;
+        }
+        entry.last_status = Some(record.status);
+        entry.last_delivery.clone_from(&record.delivery);
+        entry.retry = entry.retry_after(record, tries);
+        if entry.retry.is_none() && record.next_try_at.is_some() {
+            // Paused while it ran, say: the routine won't try it again after all.
+            let _known = registry.set_next_try(&record.run_id, None);
+        }
+        if let Some(retry) = &entry.retry {
+            println!(
+                "schedule: {key}: run {} couldn't reach its AI source; trying again at {} (try {})",
+                retry.of,
+                stamp(retry.at),
+                retry.tries + 1
+            );
         }
     }
 
@@ -670,6 +836,7 @@ impl Scheduler {
                     notion: NotionSnapshot { title },
                 }),
                 problem: entry.problem.as_ref().map(|p| p.message().to_owned()),
+                next_try_at: entry.retry.as_ref().map(|retry| stamp(retry.at)),
             })
             .collect()
     }
@@ -677,12 +844,14 @@ impl Scheduler {
 
 /// Wait for a scheduled run to finish and, when the run publishes its reply (it succeeded and
 /// was launched with a delivery title), for that delivery; then record the outcome on the
-/// routine. The run registry does the publishing, exactly as for a run started by hand.
+/// routine, which tries the run again when it could not reach its AI source. The run registry
+/// does the publishing, exactly as for a run started by hand.
 async fn deliver_when_finished(
     scheduler: Scheduler,
     registry: RunRegistry,
     key: String,
     run_id: String,
+    tries: Option<usize>,
 ) {
     let mut finished_at: Option<tokio::time::Instant> = None;
     let record = loop {
@@ -701,7 +870,7 @@ async fn deliver_when_finished(
             None => return,
         }
     };
-    scheduler.record_outcome(&key, &run_id, record.status, record.delivery);
+    scheduler.record_outcome(&registry, &key, &record, tries);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -752,7 +921,9 @@ async fn list_schedules(
         return Err(archive_disabled());
     }
     // A schedule saved a moment ago should be visible now, not after the next tick.
-    state.scheduler.rescan(&state.teams_root, Utc::now());
+    state
+        .scheduler
+        .rescan(&state.registry, &state.teams_root, Utc::now());
     Ok(Json(state.scheduler.snapshot(&state.registry)))
 }
 
@@ -788,7 +959,9 @@ async fn run_now(
         )
     })?;
     let now = Utc::now();
-    state.scheduler.rescan(&state.teams_root, now);
+    state
+        .scheduler
+        .rescan(&state.registry, &state.teams_root, now);
     let plan = {
         let entries = state
             .scheduler
@@ -802,12 +975,17 @@ async fn run_now(
             ));
         };
         entry
-            .plan(&key, now, |run_id| {
-                state
-                    .registry
-                    .get(run_id)
-                    .is_some_and(|record| !record.status.is_terminal())
-            })
+            .plan(
+                &key,
+                now,
+                |run_id| {
+                    state
+                        .registry
+                        .get(run_id)
+                        .is_some_and(|record| !record.status.is_terminal())
+                },
+                Fire::ByHand,
+            )
             .map_err(|problem| {
                 let status = if entry.schedule.is_none() {
                     StatusCode::UNPROCESSABLE_ENTITY
@@ -854,6 +1032,7 @@ mod tests {
             prompt: prompt.to_owned(),
             enabled: true,
             deliver,
+            retry_after_minutes: crate::config::DEFAULT_RETRY_AFTER_MINUTES.to_vec(),
         }
     }
 
@@ -1051,6 +1230,7 @@ mod tests {
                 key: "due.yaml".into(),
                 prompt: "Friday 2026-09-11 for Due team".into(),
                 title: Some("T 2026-09-11".into()),
+                fire: Fire::Timed,
             }]
         );
         assert_eq!(
@@ -1464,4 +1644,496 @@ mod tests {
         assert!(unconnected_source(&root, "team.yaml", &[crate::ai::Source::ChatGpt]).is_none());
         let _ = fs::remove_dir_all(&root);
     }
+
+    /// What a stand-in source says when it can't be reached, as `ChatGPT`'s sign-in did the
+    /// morning the network was not back yet.
+    fn unreachable() -> crate::agent::AgentError {
+        crate::agent::AgentError::Network(
+            crate::ai::Source::ChatGpt,
+            "couldn't renew the sign-in with ChatGPT".to_owned(),
+        )
+    }
+
+    /// A routine's agent whose first `times` requests can't reach its source, and that answers
+    /// "the brief" after.
+    fn waking(times: usize) -> String {
+        crate::engine::demo_model(crate::agent::Demo::failing_first(
+            times,
+            unreachable,
+            |_| Some(crate::agent::Completion::text("the brief")),
+        ))
+    }
+
+    /// A finished scheduled run of a one-agent team, as the follower sees it: `next_try_at` is when
+    /// its end said it is tried again.
+    fn finished(
+        run_id: &str,
+        status: RunStatus,
+        code: Option<&str>,
+        next_try_at: Option<&str>,
+    ) -> RunRecord {
+        let team = TeamConfig::parse(&scheduled_team_yaml(crate::agent::OFFLINE_MODEL, DAILY))
+            .expect("a valid routine");
+        let mut record = RunRecord::queued(
+            "brief.yaml".to_owned(),
+            "the words the first try had".to_owned(),
+            &team,
+            RunTrigger::Schedule,
+        )
+        .expect("a record");
+        run_id.clone_into(&mut record.run_id);
+        record.status = status;
+        record.error_code = code.map(str::to_owned);
+        record.next_try_at = next_try_at.map(str::to_owned);
+        record
+    }
+
+    /// A routine waiting to make the try after `try-1`, due at `due_at`: the entries, and the try.
+    fn waiting_for_a_try(due_at: &str) -> (BTreeMap<String, Entry>, ScheduleConfig, Retry) {
+        let mut entries = BTreeMap::new();
+        let waits = ScheduleConfig {
+            retry_after_minutes: vec![1, 5],
+            ..schedule("0 8 * * *", "{{date}} brief", None)
+        };
+        reconcile(
+            &mut entries,
+            vec![("brief.yaml".into(), scheduled("Brief", waits.clone()))],
+            utc("2026-09-10T23:00:00Z"),
+        );
+        let waiting = Retry {
+            of: "try-1".into(),
+            prompt: "the words the first try had".into(),
+            tries: 1,
+            at: utc(due_at),
+        };
+        (entries, waits, waiting)
+    }
+
+    /// Only a timed fire, or a try of one, that could not reach its AI source is tried again, after
+    /// each wait in turn and then no more, at the time its run said as it ended.
+    #[test]
+    fn a_try_that_could_not_reach_its_source_is_tried_again_after_each_wait() {
+        let due_at = "2026-09-11T00:04:20.000Z";
+        let (mut entries, _, waiting) = waiting_for_a_try(due_at);
+        let entry = entries.get_mut("brief.yaml").unwrap();
+
+        // What each run is told at launch: how long its routine waits to try it again.
+        assert_eq!(
+            entry.wait_after(Some(1)),
+            Some(chrono::Duration::minutes(1))
+        );
+        assert_eq!(
+            entry.wait_after(Some(2)),
+            Some(chrono::Duration::minutes(5)),
+            "the second wait is the second entry"
+        );
+        assert_eq!(
+            entry.wait_after(Some(3)),
+            None,
+            "two waits, three tries, then no more"
+        );
+        assert_eq!(
+            entry.wait_after(None),
+            None,
+            "\"Run now\" is never tried again by itself"
+        );
+
+        // The routine waits for the try its run said, as it ended, would come.
+        let unreachable = finished(
+            "try-1",
+            RunStatus::Failed,
+            Some(runs::SOURCE_UNREACHABLE),
+            Some(due_at),
+        );
+        assert_eq!(entry.retry_after(&unreachable, Some(1)), Some(waiting));
+        assert_eq!(
+            entry.retry_after(&unreachable, Some(3)),
+            None,
+            "no tries left"
+        );
+        assert_eq!(entry.retry_after(&unreachable, None), None, "by hand");
+        for (status, code) in [
+            (RunStatus::Failed, Some(APP_ERROR_CODE)),
+            (RunStatus::Failed, None),
+            (RunStatus::Succeeded, None),
+            (RunStatus::Cancelled, None),
+        ] {
+            assert_eq!(
+                entry.retry_after(&finished("try-1", status, code, Some(due_at)), Some(1)),
+                None,
+                "{status:?} {code:?}"
+            );
+        }
+        entry.enabled = false;
+        assert_eq!(
+            entry.wait_after(Some(1)),
+            None,
+            "a paused routine tries nothing"
+        );
+        assert_eq!(entry.retry_after(&unreachable, Some(1)), None);
+    }
+
+    /// When its wait is over a try runs with the words it had. The routine's own time wins over a
+    /// try still waiting, and pausing the routine lets the try go.
+    #[test]
+    fn a_waiting_try_runs_with_its_words_unless_its_routine_comes_first() {
+        let due_at = "2026-09-11T00:04:20.000Z";
+        let (mut entries, waits, waiting) = waiting_for_a_try(due_at);
+        let entry = entries.get_mut("brief.yaml").unwrap();
+
+        // Waiting: nothing is due a second early; once due, the try runs with the words it had, as
+        // a retry of the try before it, and is no longer waiting.
+        entry.next_at = Some(utc("2026-09-12T00:00:00Z"));
+        entry.retry = Some(waiting.clone());
+        let early = collect_due(&mut entries, utc("2026-09-11T00:04:19Z"), |_| false);
+        assert_eq!(early, Due::default());
+        let due = collect_due(&mut entries, utc(due_at), |_| false);
+        assert_eq!(
+            due.plans,
+            [FirePlan {
+                key: "brief.yaml".into(),
+                prompt: "the words the first try had".into(),
+                title: None,
+                fire: Fire::Again {
+                    of: "try-1".into(),
+                    tries: 2,
+                },
+            }]
+        );
+        assert_eq!(entries["brief.yaml"].retry, None);
+        assert_eq!(
+            entries["brief.yaml"].next_at,
+            Some(utc("2026-09-12T00:00:00Z")),
+            "a try does not move the routine's own time"
+        );
+
+        // The routine's own time comes before the wait is over: it fires as itself.
+        let entry = entries.get_mut("brief.yaml").unwrap();
+        entry.retry = Some(Retry {
+            at: utc("2026-09-12T00:00:30Z"),
+            ..waiting.clone()
+        });
+        let due = collect_due(&mut entries, utc("2026-09-12T00:00:05Z"), |_| false);
+        assert_eq!(due.plans.len(), 1, "{due:?}");
+        assert_eq!(due.plans[0].fire, Fire::Timed);
+        assert_eq!(due.plans[0].prompt, "2026-09-12 brief");
+
+        // Paused, the routine lets its waiting try go, and says which one.
+        entries.get_mut("brief.yaml").unwrap().retry = Some(waiting);
+        let paused = ScheduleConfig {
+            enabled: false,
+            ..waits
+        };
+        let dropped = reconcile(
+            &mut entries,
+            vec![("brief.yaml".into(), scheduled("Brief", paused))],
+            utc("2026-09-11T00:03:30Z"),
+        );
+        assert_eq!(dropped, ["try-1"]);
+        assert_eq!(entries["brief.yaml"].retry, None);
+        let due = collect_due(&mut entries, utc("2026-09-11T00:10:00Z"), |_| false);
+        assert_eq!(due, Due::default());
+    }
+
+    /// A routine paused while its run was going won't try that run again, though the run said as it
+    /// ended that it would be: the routine takes that back, on the run too.
+    #[test]
+    fn a_routine_paused_while_its_run_went_takes_back_the_next_try() {
+        let scheduler = Scheduler::disconnected();
+        let registry = RunRegistry::default();
+        let mut entries = BTreeMap::new();
+        reconcile(
+            &mut entries,
+            vec![(
+                "brief.yaml".into(),
+                scheduled(
+                    "Brief",
+                    ScheduleConfig {
+                        enabled: false,
+                        ..schedule("0 8 * * *", "brief", None)
+                    },
+                ),
+            )],
+            utc("2026-09-11T00:00:00Z"),
+        );
+        entries.get_mut("brief.yaml").unwrap().last_run_id = Some("try-1".into());
+        *scheduler.entries.write().unwrap() = entries;
+        let ended = finished(
+            "try-1",
+            RunStatus::Failed,
+            Some(runs::SOURCE_UNREACHABLE),
+            Some("2026-09-11T00:04:20.000Z"),
+        );
+        registry.insert(ended.clone());
+
+        scheduler.record_outcome(&registry, "brief.yaml", &ended, Some(1));
+        assert_eq!(registry.get("try-1").unwrap().next_try_at, None);
+        assert_eq!(scheduler.entries.read().unwrap()["brief.yaml"].retry, None);
+        assert_eq!(scheduler.snapshot(&registry)[0].next_try_at, None);
+    }
+
+    /// Waits until the routine's follower has recorded `run_id`'s end on the routine.
+    async fn followed(scheduler: &Scheduler, key: &str, run_id: &str) {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                {
+                    let entries = scheduler.entries.read().unwrap();
+                    let entry = &entries[key];
+                    if entry.last_run_id.as_deref() == Some(run_id)
+                        && entry.last_status.is_some_and(RunStatus::is_terminal)
+                    {
+                        return;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the routine recorded how its run ended in time");
+    }
+
+    /// Fires the routine at `key` as if its time had just come, and gives back the run it started.
+    /// Every routine's own time is then put out of the way of the tries, whatever the time of day
+    /// the test runs at.
+    fn fire(
+        scheduler: &Scheduler,
+        registry: &RunRegistry,
+        archive: &EventArchive,
+        root: &Path,
+        key: &str,
+    ) -> RunRecord {
+        let now = Utc::now();
+        let later = utc("2099-01-01T00:00:00Z");
+        scheduler.rescan(registry, root, now);
+        for (routine, entry) in scheduler.entries.write().unwrap().iter_mut() {
+            entry.next_at = Some(if routine == key {
+                now - chrono::Duration::seconds(1)
+            } else {
+                later
+            });
+        }
+        scheduler.tick(registry, archive, root, now);
+        let mut entries = scheduler.entries.write().unwrap();
+        let entry = entries.get_mut(key).unwrap();
+        entry.next_at = Some(later);
+        registry
+            .get(entry.last_run_id.as_deref().expect("the routine fired"))
+            .expect("its run is registered")
+    }
+
+    /// The morning the network was not back yet: the routine's run could not reach its AI source,
+    /// so the routine said when it would try again, on itself and on the run; tried again then,
+    /// from the start with the same words, as a retry of that run; waited longer the second time;
+    /// and the third try answered and stopped the waiting.
+    #[tokio::test]
+    async fn a_routine_tries_again_after_its_run_could_not_reach_its_source() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let model = waking(2);
+        fs::write(
+            dir.0.join("brief.yaml"),
+            scheduled_team_yaml(
+                &model,
+                "  cron: \"0 8 * * 1-5\"\n  prompt: \"{{weekday}} brief for {{team}}\"\n  retryAfterMinutes: [1, 5]\n",
+            ),
+        )
+        .unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let scheduler = Scheduler::disconnected();
+        let root = dir.0.clone();
+        let key = "brief.yaml";
+
+        let mut tries = vec![fire(&scheduler, &registry, &archive, &root, key)];
+        assert_eq!(tries[0].retry_of_run_id, None);
+        for (wait, try_number) in [(60, 2), (300, 3)] {
+            let failed = tries.last().unwrap().clone();
+            // The moment it reads as stopped, it also says when it is tried again: no reader
+            // ever sees a stop to act on.
+            let ended = wait_for(&registry, &failed.run_id, |r| r.status.is_terminal()).await;
+            assert!(ended.next_try_at.is_some(), "said as it ended: {ended:?}");
+            followed(&scheduler, key, &failed.run_id).await;
+            let failed = registry.get(&failed.run_id).unwrap();
+            assert_eq!(failed.status, RunStatus::Failed, "{failed:?}");
+            assert_eq!(failed.error_code.as_deref(), Some(runs::SOURCE_UNREACHABLE));
+            let at = failed
+                .next_try_at
+                .clone()
+                .expect("the run says when it is tried again");
+            let listed = scheduler.snapshot(&registry);
+            assert_eq!(listed[0].next_try_at.as_deref(), Some(at.as_str()));
+            assert_eq!(listed[0].last_status, Some(RunStatus::Failed));
+            assert_eq!(listed[0].problem, None, "a try to come is not a problem");
+            let waited = utc(&at) - utc(failed.finished_at.as_deref().unwrap());
+            assert_eq!(
+                waited.num_seconds(),
+                wait,
+                "try {try_number} waits {wait} s, not {waited}"
+            );
+
+            // Nothing a second early; at its time, the next try.
+            scheduler.tick(
+                &registry,
+                &archive,
+                &root,
+                utc(&at) - chrono::Duration::seconds(1),
+            );
+            assert_eq!(
+                scheduler.snapshot(&registry)[0].last_run_id.as_deref(),
+                Some(failed.run_id.as_str())
+            );
+            scheduler.tick(&registry, &archive, &root, utc(&at));
+            let next = registry
+                .get(
+                    scheduler.snapshot(&registry)[0]
+                        .last_run_id
+                        .as_deref()
+                        .unwrap(),
+                )
+                .unwrap();
+            assert_ne!(next.run_id, failed.run_id, "try {try_number} is a new run");
+            assert_eq!(
+                next.retry_of_run_id.as_deref(),
+                Some(failed.run_id.as_str())
+            );
+            assert_eq!(next.trigger, RunTrigger::Schedule);
+            assert_eq!(next.prompt, tries[0].prompt, "every try is the same job");
+            assert_eq!(
+                registry.get(&failed.run_id).unwrap().next_try_at,
+                None,
+                "tried again: no longer waiting"
+            );
+            tries.push(next);
+        }
+
+        let last = tries.last().unwrap();
+        followed(&scheduler, key, &last.run_id).await;
+        let answered = registry.get(&last.run_id).unwrap();
+        assert_eq!(answered.status, RunStatus::Succeeded, "{answered:?}");
+        assert_eq!(answered.reply.as_deref(), Some("the brief"));
+        assert_eq!(answered.next_try_at, None);
+        let listed = scheduler.snapshot(&registry);
+        assert_eq!(listed[0].next_try_at, None);
+        assert_eq!(listed[0].last_status, Some(RunStatus::Succeeded));
+        let wire = serde_json::to_value(&listed[0]).unwrap();
+        assert_eq!(wire["nextTryAt"], Value::Null);
+    }
+
+    /// "Run now" keeps what it always did: a run that could not reach its source is the person's to
+    /// try again. A timed run refused for its key is not tried again either, and a routine paused
+    /// while its run waits lets the wait go, on the run too.
+    #[tokio::test]
+    async fn only_a_timed_run_that_could_not_reach_its_source_is_tried_again() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let refused = crate::engine::demo_model(crate::agent::Demo::failing_first(
+            1,
+            || crate::agent::AgentError::KeyRefused(crate::ai::Source::OpenRouter),
+            |_| Some(crate::agent::Completion::text("the brief")),
+        ));
+        let routine = |model: &str, enabled: bool| {
+            scheduled_team_yaml(
+                model,
+                &format!("  cron: \"0 8 * * *\"\n  prompt: brief\n  enabled: {enabled}\n"),
+            )
+        };
+        fs::write(dir.0.join("byhand.yaml"), routine(&waking(1), true)).unwrap();
+        fs::write(dir.0.join("refused.yaml"), routine(&refused, true)).unwrap();
+        fs::write(dir.0.join("paused.yaml"), routine(&waking(1), true)).unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let scheduler = Scheduler::disconnected();
+        let root = dir.0.clone();
+        let app = router(
+            scheduler.clone(),
+            registry.clone(),
+            Some(archive.clone()),
+            root.clone(),
+        );
+
+        let response = app
+            .oneshot(post_json(
+                "/api/schedules/run",
+                &json!({"teamPath": "byhand.yaml"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let by_hand: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
+        followed(&scheduler, "byhand.yaml", &by_hand.run_id).await;
+        let by_hand = registry.get(&by_hand.run_id).unwrap();
+        assert_eq!(
+            by_hand.error_code.as_deref(),
+            Some(runs::SOURCE_UNREACHABLE)
+        );
+        assert_eq!(by_hand.next_try_at, None);
+
+        let refused = fire(&scheduler, &registry, &archive, &root, "refused.yaml");
+        followed(&scheduler, "refused.yaml", &refused.run_id).await;
+        let refused = registry.get(&refused.run_id).unwrap();
+        assert_eq!(refused.error_code.as_deref(), Some(APP_ERROR_CODE));
+        assert_eq!(refused.next_try_at, None);
+
+        let waiting = fire(&scheduler, &registry, &archive, &root, "paused.yaml");
+        followed(&scheduler, "paused.yaml", &waiting.run_id).await;
+        assert!(registry.get(&waiting.run_id).unwrap().next_try_at.is_some());
+        fs::write(dir.0.join("paused.yaml"), routine(&waking(0), false)).unwrap();
+        scheduler.rescan(&registry, &root, Utc::now());
+        assert_eq!(registry.get(&waiting.run_id).unwrap().next_try_at, None);
+
+        let listed = scheduler.snapshot(&registry);
+        assert_eq!(listed.len(), 3);
+        assert!(
+            listed.iter().all(|routine| routine.next_try_at.is_none()),
+            "{listed:?}"
+        );
+        assert!(
+            scheduler
+                .entries
+                .read()
+                .unwrap()
+                .values()
+                .all(|entry| entry.retry.is_none())
+        );
+    }
+
+    /// "Run now" while a try waits starts the routine afresh: the waiting try goes, on the routine and
+    /// on the run it would have tried again. (The routine's own time does the same, through the same
+    /// launch.)
+    #[tokio::test]
+    async fn run_now_lets_a_waiting_try_go() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        fs::write(
+            dir.0.join("brief.yaml"),
+            scheduled_team_yaml(&waking(1), "  cron: \"0 8 * * *\"\n  prompt: brief\n"),
+        )
+        .unwrap();
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let scheduler = Scheduler::disconnected();
+        let root = dir.0.clone();
+        let waiting = fire(&scheduler, &registry, &archive, &root, "brief.yaml");
+        followed(&scheduler, "brief.yaml", &waiting.run_id).await;
+        assert!(registry.get(&waiting.run_id).unwrap().next_try_at.is_some());
+        assert!(scheduler.snapshot(&registry)[0].next_try_at.is_some());
+
+        let response = router(scheduler.clone(), registry.clone(), Some(archive), root)
+            .oneshot(post_json(
+                "/api/schedules/run",
+                &json!({"teamPath": "brief.yaml"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let by_hand: RunRecord = serde_json::from_value(json_body(response).await).unwrap();
+        assert_eq!(by_hand.retry_of_run_id, None, "a run of its own, not a try");
+        assert_eq!(registry.get(&waiting.run_id).unwrap().next_try_at, None);
+        assert_eq!(scheduler.entries.read().unwrap()["brief.yaml"].retry, None);
+        assert_eq!(scheduler.snapshot(&registry)[0].next_try_at, None);
+        wait_for(&registry, &by_hand.run_id, |r| r.status.is_terminal()).await;
+    }
+
+    /// What a run whose source answered "no" is recorded with.
+    const APP_ERROR_CODE: &str = "app_error";
 }

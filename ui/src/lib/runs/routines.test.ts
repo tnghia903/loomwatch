@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
-import { describeNextFire, scheduleForPath, type RunRecord, type ScheduleEntry } from './client'
+import { describeNextFire, routineRunKey, scheduleForPath, useRefreshOnRoutineRun, type RunRecord, type ScheduleEntry } from './client'
 import { mergeHistory } from './history'
 import type { SessionSummary } from '../watch/events'
 
@@ -73,5 +74,39 @@ describe('routines in the UI', () => {
     expect(published.sub).toContain('published to Notion')
     expect(failed.sub).toContain('delivery failed')
     expect(manual.sub).not.toContain('routine')
+  })
+})
+
+describe('routineRunKey', () => {
+  // The routines are read once a minute; the open team's routine is read again when its run starts
+  // or ends, so "trying again in 1m" shows as the try waits, not a minute on.
+  it('changes when the routine’s newest run starts and when it ends, and for nothing else', () => {
+    const fired = record({ runId: 't1', trigger: 'schedule', status: 'running', finishedAt: null })
+    const going = routineRunKey([fired], entry)
+    const ended = routineRunKey([{ ...fired, status: 'failed' }], entry)
+    expect(going).not.toBeNull()
+    expect(ended).not.toBe(going)
+    const reworded: RunRecord = { ...fired, status: 'failed', error: 'other words' }
+    expect(routineRunKey([reworded], entry)).toBe(ended)
+    const tryAgain = routineRunKey([record({ runId: 't2', trigger: 'schedule', status: 'queued' }), { ...fired, status: 'failed' }], entry)
+    expect(tryAgain).not.toBe(ended)
+    expect(routineRunKey([record({ runId: 'm1', trigger: 'manual' }), { ...fired, status: 'failed' }], entry)).toBe(ended)
+    expect(routineRunKey([record({ runId: 'o1', trigger: 'schedule', teamPath: 'other.yaml' })], entry)).toBeNull()
+    expect(routineRunKey([fired], null)).toBeNull()
+  })
+})
+
+describe('useRefreshOnRoutineRun', () => {
+  it('reads the routines again as the routine’s run starts and ends, and not on every new list', () => {
+    const refresh = vi.fn()
+    const fired = record({ runId: 't1', trigger: 'schedule', status: 'running', finishedAt: null })
+    const { rerender } = renderHook(({ records }) => useRefreshOnRoutineRun(records, entry, refresh), { initialProps: { records: [] as RunRecord[] } })
+    expect(refresh).not.toHaveBeenCalled()
+    rerender({ records: [fired] })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    rerender({ records: [{ ...fired }] })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    rerender({ records: [{ ...fired, status: 'failed' }] })
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
 })

@@ -411,6 +411,23 @@ pub struct ScheduleConfig {
     pub enabled: bool,
     #[serde(default)]
     pub deliver: Option<DeliverConfig>,
+    /// The minutes to wait before each new try of a timed fire that could not reach its AI
+    /// source, one try per entry: as many tries as entries. Empty never tries again.
+    #[serde(default = "default_retry_after_minutes")]
+    pub retry_after_minutes: Vec<u32>,
+}
+
+/// A timed fire that could not reach its AI source tries again after 1, 2, 5, 10 and 30 minutes:
+/// a network that is slow to come back after the computer wakes, or out for a while, still gets
+/// the day's run.
+pub const DEFAULT_RETRY_AFTER_MINUTES: [u32; 5] = [1, 2, 5, 10, 30];
+/// The most tries `schedule.retryAfterMinutes` may list.
+const MAX_RETRIES: usize = 20;
+/// The longest one wait may be: a day.
+const MAX_RETRY_MINUTES: u32 = 24 * 60;
+
+fn default_retry_after_minutes() -> Vec<u32> {
+    DEFAULT_RETRY_AFTER_MINUTES.to_vec()
 }
 
 /// Where a run's canonical reply goes once the run succeeds: a routine's (`schedule.deliver`)
@@ -1139,7 +1156,27 @@ impl ScheduleConfig {
         {
             bail!("schedule.deliver.notion.title must not be empty");
         }
+        if self.retry_after_minutes.len() > MAX_RETRIES {
+            bail!("schedule.retryAfterMinutes may list at most {MAX_RETRIES} waits");
+        }
+        if self
+            .retry_after_minutes
+            .iter()
+            .any(|minutes| !(1..=MAX_RETRY_MINUTES).contains(minutes))
+        {
+            bail!(
+                "each wait in schedule.retryAfterMinutes must be from 1 to {MAX_RETRY_MINUTES} minutes"
+            );
+        }
         Ok(())
+    }
+
+    /// How long to wait before trying a timed fire again once its first `tries` tries could not
+    /// reach their AI source; `None` once it has had all its tries.
+    #[must_use]
+    pub fn retry_wait(&self, tries: usize) -> Option<chrono::Duration> {
+        let minutes = *self.retry_after_minutes.get(tries.checked_sub(1)?)?;
+        Some(chrono::Duration::minutes(i64::from(minutes)))
     }
 
     /// The parsed cron schedule, in the `cron` crate's own numbering.
@@ -2548,6 +2585,55 @@ edges:
         );
     }
 
+    /// A routine tries a run that couldn't reach its AI source again after 1, 2, 5, 10 and 30
+    /// minutes unless it says otherwise; `[]` never tries again, and a wait the schedule can't keep
+    /// is refused before anything runs.
+    #[test]
+    fn a_routine_waits_before_each_new_try_as_it_says() {
+        let waits = |yaml: &str| {
+            scheduled_team(&format!("  cron: \"0 8 * * *\"\n  prompt: go\n{yaml}"))
+                .map(|team| team.schedule.unwrap())
+        };
+        let default = waits("").unwrap();
+        assert_eq!(default.retry_after_minutes, [1, 2, 5, 10, 30]);
+        let minutes = |schedule: &ScheduleConfig, tries| {
+            schedule.retry_wait(tries).map(|wait| wait.num_minutes())
+        };
+        assert_eq!(minutes(&default, 0), None, "no try made, none to wait for");
+        assert_eq!(minutes(&default, 1), Some(1));
+        assert_eq!(minutes(&default, 5), Some(30));
+        assert_eq!(
+            minutes(&default, 6),
+            None,
+            "five waits, six tries, then no more"
+        );
+        let never = waits("  retryAfterMinutes: []\n").unwrap();
+        assert_eq!(minutes(&never, 1), None);
+        assert_eq!(
+            minutes(&waits("  retryAfterMinutes: [3, 1440]\n").unwrap(), 2),
+            Some(1440)
+        );
+
+        for (yaml, said) in [
+            (
+                "  retryAfterMinutes: [0]\n",
+                "each wait in schedule.retryAfterMinutes must be from 1 to 1440 minutes",
+            ),
+            (
+                "  retryAfterMinutes: [1441]\n",
+                "each wait in schedule.retryAfterMinutes must be from 1 to 1440 minutes",
+            ),
+            (
+                "  retryAfterMinutes: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]\n",
+                "schedule.retryAfterMinutes may list at most 20 waits",
+            ),
+        ] {
+            let error = waits(yaml).expect_err(yaml);
+            assert_eq!(error.to_string(), said, "{yaml}");
+        }
+        assert!(waits("  retryAfterMinutes: [-1]\n").is_err(), "not a wait");
+    }
+
     #[test]
     fn next_fire_and_templates_follow_the_schedule_zone() {
         let schedule = scheduled_team(
@@ -2668,6 +2754,7 @@ edges:
                 prompt: "go".to_owned(),
                 enabled: true,
                 deliver: None,
+                retry_after_minutes: Vec::new(),
             }
             .describe()
         };

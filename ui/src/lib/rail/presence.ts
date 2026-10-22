@@ -27,7 +27,8 @@ export function presenceOf(runs: readonly RunRecord[]): Presence {
   if (live.some(asksYou)) return 'waiting'
   if (live.length > 0) return 'working'
   const newest = runs.reduce<RunRecord | null>((found, run) => (!found || found.createdAt < run.createdAt ? run : found), null)
-  return newest?.status === 'failed' ? 'failed' : 'ready'
+  // The schedule trying a run again is nothing to fix.
+  return newest?.status === 'failed' && !newest.nextTryAt ? 'failed' : 'ready'
 }
 
 /**

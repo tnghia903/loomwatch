@@ -4,6 +4,7 @@ import { plainRunError } from '../runs/errors'
 import { permissionSentence, permissionWhat } from '../runs/permissionRequests'
 import { dollars, openStops, stopActions, stopSentence } from '../runs/spend'
 import { checkStopLines } from './checkStop'
+import { triedAgain } from '../chat/tries'
 
 /**
  * The needs-you tray: every moment, across every team, where a team is waiting on the operator.
@@ -49,6 +50,9 @@ export function teamLabel(path: string, names: ReadonlyMap<string, string>): str
 
 export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<string, string>, dismissed: ReadonlySet<string>, now = Date.now()): Ticket[] {
   const tickets: Ticket[] = []
+  // A routine's run that couldn't reach its AI is the schedule's to try again, not yours: while it
+  // waits, and once a newer try has it.
+  const tried = triedAgain(records)
   for (const record of records) {
     const teamName = teamLabel(record.teamPath, names)
     for (const request of record.permissionRequests ?? []) {
@@ -101,7 +105,7 @@ export function ticketsFrom(records: readonly RunRecord[], names: ReadonlyMap<st
         context: (waiting.check ? [...checkStopLines(waiting.check), waiting.context?.trim() ?? ''].filter(Boolean).join('\n') : waiting.context?.trim()) || null,
         since: waiting.since,
       })
-    } else if (record.status === 'failed' && !dismissed.has(record.runId)) {
+    } else if (record.status === 'failed' && !record.nextTryAt && !tried.has(record.runId) && !dismissed.has(record.runId)) {
       const finished = Date.parse(record.finishedAt ?? record.createdAt)
       if (Number.isFinite(finished) && now - finished <= FAILED_WINDOW_MS) {
         tickets.push({

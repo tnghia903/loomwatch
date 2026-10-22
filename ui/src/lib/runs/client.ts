@@ -1,7 +1,7 @@
 // Thin wrapper over the daemon's run-control surface (crates/loomwatch-backend/src/runs.rs,
 // docs/decisions/0008-run-control-api.md). A run's `runId` doubles as the archive
 // `sessionId`, so the evidence stream at /api/session/stream can be opened immediately.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { daemonFetch } from '../daemonFetch'
 import { keepIfSame } from '../keepIfSame'
@@ -35,6 +35,8 @@ export interface ScheduleEntry {
   lastDelivery: Delivery | null
   deliver: { notion?: { title: string } } | null
   problem: string | null
+  /** When the routine tries its last run again, after it couldn't reach its AI source. */
+  nextTryAt?: string | null
 }
 
 /**
@@ -193,6 +195,12 @@ export interface RunRecord {
    * reload — unlike the React `Map` the workspace still keeps for retries.
    */
   retryOfRunId?: string | null
+  /**
+   * When the schedule tries this run again, for a scheduled run that couldn't reach its AI source
+   * (`errorCode: 'source_unreachable'`). The try is a new run whose `retryOfRunId` names this one.
+   * Live only: gone once that try starts, or once the schedule won't try.
+   */
+  nextTryAt?: string | null
   /** The team's chat this run belongs to (ADR 0051): its file's `id`, or `path:<path>`. */
   teamKey?: string
   /**
@@ -522,6 +530,24 @@ export function useSchedules() {
   }, [generation])
   const refresh = useCallback(() => setGeneration((value) => value + 1), [])
   return { ...state, refresh }
+}
+
+/**
+ * The routine's newest run and whether it has ended, as one key: it changes when that run starts and
+ * when it ends, which is when the routine has news (it fired; it will try again). Runs come newest
+ * first, as the history lists them. `null` with no routine, or no run of it yet.
+ */
+export function routineRunKey(records: readonly Pick<RunRecord, 'runId' | 'status' | 'teamPath' | 'trigger'>[], routine: Pick<ScheduleEntry, 'teamPath'> | null): string | null {
+  const newest = routine ? records.find((record) => record.trigger === 'schedule' && record.teamPath === routine.teamPath) : null
+  return newest ? `${newest.runId}:${isTerminalRun(newest.status) ? 'ended' : 'going'}` : null
+}
+
+/** Reads the routines again when the open team's routine's run starts or ends ([`routineRunKey`]). */
+export function useRefreshOnRoutineRun(records: readonly Pick<RunRecord, 'runId' | 'status' | 'teamPath' | 'trigger'>[], routine: Pick<ScheduleEntry, 'teamPath'> | null, refresh: () => void) {
+  const key = useMemo(() => routineRunKey(records, routine), [records, routine])
+  useEffect(() => {
+    if (key) refresh()
+  }, [key, refresh])
 }
 
 /** Match a routine to the open document: the API path is relative to the teams root. */

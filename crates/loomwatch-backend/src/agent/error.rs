@@ -104,6 +104,14 @@ impl AgentError {
         };
         Some(Problem::new(kind, source))
     }
+
+    /// Whether the source could not be reached at all: nothing it decided, so the same request may
+    /// go through a little later, as one sent the moment a computer wakes does once its network is
+    /// back.
+    #[must_use]
+    pub const fn is_unreachable(&self) -> bool {
+        matches!(self, Self::Network(..))
+    }
 }
 
 /// The company a source's calls go to, as an error names it.

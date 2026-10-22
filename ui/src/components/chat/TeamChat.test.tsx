@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PASS_BEAT_MS } from '../../lib/chat/baton'
 import type { ChatItem, ChatMessage } from '../../lib/chat/client'
+import { clockTime } from '../../lib/chat/format'
 import type { Lesson } from '../../lib/lessons/client'
 import type { RunRecord } from '../../lib/runs/client'
 import { FileReaderContext } from '../../lib/files/reader'
@@ -15,10 +16,10 @@ import type { TeamView } from './WorkPiece'
 
 // The pieces read their own record and events only while live or shown; a still session here,
 // saying what the agents said when a test gives it messages.
-const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[] }))
+const said = vi.hoisted(() => ({ messages: [] as TeamMessage[], read: false, agents: [] as unknown[], events: [] as unknown[], record: null as RunRecord | null }))
 vi.mock('../../lib/runs/useRunSession', () => ({
   useRunSession: (runId: string | null) => ({
-    record: null, applyRecord: vi.fn(), missing: false, events: runId && said.events.length > 0 ? said.events : runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
+    record: said.record && said.record.runId === runId ? said.record : null, applyRecord: vi.fn(), missing: false, events: runId && said.events.length > 0 ? said.events : runId && (said.read || said.messages.length > 0) ? [{ id: 'e0' }] : [], error: null, connected: false,
     projection: { agents: runId ? said.agents : [], evidence: [], messages: runId ? said.messages : [], delegations: [], attention: [], coverage: {}, prompt: null, promptAgentId: null, phase: said.read ? 'succeeded' : 'queued' },
     latest: null, cursor: null, setCursor: vi.fn(), lastSeq: -1, mode: 'replay', terminal: true, evidenceComplete: true,
   }),
@@ -62,6 +63,7 @@ beforeEach(() => {
   said.agents = []
   said.events = []
   said.read = false
+  said.record = null
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'news', teamPath: 'news.yaml', items: [...page].reverse(), more: false }), { status: 200 })
@@ -920,6 +922,91 @@ describe('a piece of work', () => {
     expect(await screen.findByText('The work stopped.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@team today’s digest', to: { kind: 'team' } } }))
+  })
+
+  // 2026-10-22: the weekday brief fired as the Mac woke, before its network was back, and stopped
+  // at once. The schedule tries such a run again by itself, and its tries read as one piece.
+  const unreachable = 'pipeline node writer failed: LoomWatch couldn\'t reach ChatGPT: couldn\'t renew the sign-in with ChatGPT'
+  const tried = (runId: string, createdAt: string, overrides: Partial<RunRecord> = {}): Extract<ChatItem, { kind: 'work' }> => ({
+    kind: 'work', request: null, notes: [],
+    run: run({ runId, sessionId: runId, createdAt, trigger: 'schedule', status: 'failed', reply: null, error: unreachable, errorCode: 'source_unreachable', ...overrides }),
+  })
+
+  it('says when the schedule tries again a run that couldn’t reach its AI, with no stop to act on', async () => {
+    const at = '2026-10-06T02:01:00.000Z'
+    page = [tried('try-1', '2026-10-06T02:00:00.000Z', { nextTryAt: at })]
+    renderChat()
+    const line = await screen.findByText(`Trying again at ${clockTime(at)} · couldn’t reach ChatGPT at ${clockTime('2026-10-06T02:00:00.000Z')}`)
+    expect(line.closest('[role="status"]')).not.toBeNull()
+    expect(screen.queryByText('The work stopped.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  // The run's own record, read each second, sees the end before the chat's page does: the stop it
+  // ends with already says when it is tried again, so no stop to act on ever shows.
+  it('says the schedule tries again as soon as the run’s own record has ended', async () => {
+    const at = '2026-10-06T02:01:00.000Z'
+    const ended = tried('try-1', '2026-10-06T02:00:00.000Z', { nextTryAt: at })
+    page = [{ ...ended, run: { ...ended.run, status: 'running', error: null, errorCode: null, nextTryAt: null, finishedAt: null } }]
+    said.record = ended.run
+    // Everything the chat ever puts on screen, kept, so a stop shown for one render is still seen.
+    const seen: string[] = []
+    const watching = new MutationObserver((changes) => {
+      for (const change of changes) for (const node of [...change.addedNodes, ...change.removedNodes]) seen.push(node.textContent ?? '')
+    })
+    watching.observe(document.body, { childList: true, subtree: true })
+    renderChat()
+    expect(await screen.findByText(`Trying again at ${clockTime(at)} · couldn’t reach ChatGPT at ${clockTime('2026-10-06T02:00:00.000Z')}`)).toBeInTheDocument()
+    watching.disconnect()
+    expect(seen.join('\n')).not.toContain('The work stopped.')
+  })
+
+  // The other way round: the run's own record is not read again once it has ended, so once the
+  // chat's page has the end, the page is the fresher copy. The routine was paused while the try
+  // waited, say: the next page read takes "Trying again" away, whatever the run's record still says.
+  it('keeps to the chat’s page once it has read the run’s end again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const at = '2026-10-06T02:01:00.000Z'
+      const ended = tried('try-1', '2026-10-06T02:00:00.000Z', { nextTryAt: at })
+      page = [ended]
+      said.record = ended.run
+      renderChat()
+      expect(await screen.findByText(new RegExp(`^Trying again at ${clockTime(at)}`))).toBeInTheDocument()
+      page = [tried('try-1', '2026-10-06T02:00:00.000Z')]
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+      expect(await screen.findByText('The work stopped.')).toBeInTheDocument()
+      expect(screen.queryByText(/^Trying again at/)).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a routine’s tries at one job once, at its newest try, with one line for the tries before it', async () => {
+    page = [
+      tried('try-1', '2026-10-06T02:00:00.000Z'),
+      tried('try-2', '2026-10-06T02:01:00.000Z', { retryOfRunId: 'try-1' }),
+      tried('try-3', '2026-10-06T02:06:00.000Z', { retryOfRunId: 'try-2', status: 'succeeded', reply: 'The brief.', error: null, errorCode: null }),
+    ]
+    renderChat()
+    expect(await screen.findByText(`Tried again · couldn’t reach ChatGPT at ${clockTime('2026-10-06T02:00:00.000Z')} and ${clockTime('2026-10-06T02:01:00.000Z')}`)).toBeInTheDocument()
+    expect(screen.getAllByText('The schedule')).toHaveLength(1)
+    expect(document.querySelectorAll('li[data-run]')).toHaveLength(1)
+    expect(document.querySelector('li[data-run]')).toHaveAttribute('data-run', 'try-3')
+    expect(screen.queryByText('The work stopped.')).not.toBeInTheDocument()
+    expect(screen.getByText('The brief.')).toBeInTheDocument()
+  })
+
+  it('keeps the stop and its Try again once the schedule has no tries left', async () => {
+    page = [
+      tried('try-1', '2026-10-06T02:00:00.000Z'),
+      tried('try-2', '2026-10-06T02:01:00.000Z', { retryOfRunId: 'try-1' }),
+    ]
+    renderChat()
+    expect(await screen.findByText('The work stopped.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    expect(screen.getByText(`Tried again · couldn’t reach ChatGPT at ${clockTime('2026-10-06T02:00:00.000Z')}`)).toBeInTheDocument()
+    expect(document.querySelectorAll('li[data-run]')).toHaveLength(1)
   })
 
   // 2026-10-14: Codex refused a stage's model on a ChatGPT sign-in. The chat names the stage as the

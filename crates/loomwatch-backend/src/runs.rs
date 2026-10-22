@@ -21,7 +21,7 @@ use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::{SecondsFormat, Utc};
+use chrono::{SecondsFormat, SubsecRound, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -52,6 +52,9 @@ const PROTOCOL_FAILURE: &str = "protocol_failure";
 /// A turn that could not finish, said in the operator's words (`engine::AppReportedError`): the
 /// `OpenRouter` key was refused, the account is out of credits, or no key is set.
 const APP_ERROR: &str = "app_error";
+/// A turn that could not reach its AI source at all ([`crate::agent::AgentError::is_unreachable`]),
+/// as in the first seconds after a computer wakes: a scheduled run tries again a little later.
+pub(crate) const SOURCE_UNREACHABLE: &str = "source_unreachable";
 const SPAWN_FAILED: &str = "spawn_failed";
 /// The run stopped at its spool (ADR 0068): as a failure's code when a scheduled run had nobody to
 /// ask, and as the stop reason whenever a run ended there.
@@ -282,6 +285,25 @@ pub struct RunRecord {
     /// 0068). Live only, like `permission_requests`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spend_stops: Vec<crate::spend::SpendStop>,
+    /// When the schedule tries this run again, for a scheduled run that could not reach its AI
+    /// source (`errorCode: "source_unreachable"`). The try is a new run whose `retry_of_run_id`
+    /// names this one; this clears once it starts, or once the schedule won't try. Live only, like
+    /// `permission_requests`: the scheduler that would try again is in memory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_try_at: Option<String>,
+    /// How long the schedule waits to try this run again if it can't reach its AI source, fixed at
+    /// launch for a routine's timed run with tries left: the run's end says when (`next_try_at`)
+    /// as it says it failed. Not shown or stored.
+    #[serde(skip)]
+    pub try_again_after: Option<chrono::Duration>,
+}
+
+/// What the schedule says about a run it starts: the run it tries again from the start, and how
+/// long it waits to try this one again if it can't reach its AI source.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Tries<'a> {
+    pub(crate) retry_of: Option<&'a str>,
+    pub(crate) again_after: Option<chrono::Duration>,
 }
 
 /// A note sent to an agent at work, waiting for its current turn to end (ADR 0051).
@@ -430,6 +452,8 @@ impl RunRecord {
                 .collect(),
             spend: Some(crate::spend::RunSpend::for_team(team)),
             spend_stops: Vec::new(),
+            next_try_at: None,
+            try_again_after: None,
         })
     }
 }
@@ -744,6 +768,8 @@ pub(crate) fn decode_run(row: &sqlx::sqlite::SqliteRow) -> Result<StoredRun, sql
                 .try_get::<Option<Value>, _>("spend")?
                 .and_then(|spend| serde_json::from_value(spend).ok()),
             spend_stops: Vec::new(),
+            next_try_at: None,
+            try_again_after: None,
         },
         start_key: row.try_get("start_key")?,
         start_fingerprint: row.try_get("start_fingerprint")?,
@@ -1163,8 +1189,19 @@ impl RunRegistry {
         exit_code: Option<i32>,
         event_count: Option<usize>,
     ) -> bool {
+        let unreachable = error_code.as_deref() == Some(SOURCE_UNREACHABLE);
         self.advance(run_id, RunStatus::Failed, |record| {
-            record.finished_at = Some(now());
+            let ended = Utc::now();
+            record.finished_at = Some(ended.to_rfc3339_opts(SecondsFormat::Millis, true));
+            // Said as it ends, so nobody reads that it stopped without reading that it is tried
+            // again. To the millisecond, as it is shown, so the time shown is the time it is due.
+            if unreachable && let Some(wait) = record.try_again_after {
+                record.next_try_at = Some(
+                    (ended + wait)
+                        .trunc_subsecs(3)
+                        .to_rfc3339_opts(SecondsFormat::Millis, true),
+                );
+            }
             record.error = error;
             record.error_code = error_code;
             record.stop_reason = stop_reason;
@@ -1452,6 +1489,20 @@ impl RunRegistry {
         match inner.runs.get_mut(run_id) {
             Some(entry) => {
                 entry.record.delivery = Some(delivery);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Say when the schedule tries a finished run again, or `None` once it won't wait for that any
+    /// more. Allowed on terminal records, like [`Self::set_delivery`]. `false` only when the run is
+    /// unknown.
+    pub(crate) fn set_next_try(&self, run_id: &str, at: Option<String>) -> bool {
+        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
+        match inner.runs.get_mut(run_id) {
+            Some(entry) => {
+                entry.record.next_try_at = at;
                 true
             }
             None => false,
@@ -2760,9 +2811,10 @@ async fn stored_prompt_section(
 
 /// Validate a start request and launch the run: the one path every run takes, whether an
 /// operator posted it or the scheduler fired it. `team_path` is resolved against
-/// `teams_root` exactly as `POST /api/runs` resolves its body. Errors map to the
-/// handler's statuses: 400 (blank or oversized prompt, not a regular file), 403 (outside
-/// the root), 404 (missing), 422 (team validation), 503 (no archive).
+/// `teams_root` exactly as `POST /api/runs` resolves its body. `tries` is what the schedule says
+/// about a run it starts after a run that could not reach its AI source, or before one that may
+/// not. Errors map to the handler's statuses: 400 (blank or oversized prompt, not a regular file),
+/// 403 (outside the root), 404 (missing), 422 (team validation), 503 (no archive).
 ///
 /// # Errors
 ///
@@ -2774,9 +2826,10 @@ pub(crate) fn launch(
     team_path: &Path,
     prompt: &str,
     trigger: RunTrigger,
+    tries: Tries<'_>,
 ) -> Result<RunRecord, ApiError> {
     let approvals = registry.approvals();
-    let prepared = prepare_run(
+    let mut prepared = prepare_run(
         archive,
         teams_root,
         team_path,
@@ -2786,6 +2839,8 @@ pub(crate) fn launch(
         approvals.as_deref(),
     )
     .map_err(LaunchError::into_api_error)?;
+    prepared.record.retry_of_run_id = tries.retry_of.map(str::to_owned);
+    prepared.record.try_again_after = tries.again_after;
     let record = prepared.record.clone();
     let run_id = record.run_id.clone();
     registry.insert(record);
@@ -3672,11 +3727,16 @@ fn classify_failure_code(
     if spawn_context {
         return SPAWN_FAILED;
     }
-    if error
+    // The outermost one is what stopped the run.
+    if let Some(reported) = error
         .chain()
-        .any(<dyn std::error::Error>::is::<crate::engine::AppReportedError>)
+        .find_map(<dyn std::error::Error>::downcast_ref::<crate::engine::AppReportedError>)
     {
-        return APP_ERROR;
+        return if reported.unreachable {
+            SOURCE_UNREACHABLE
+        } else {
+            APP_ERROR
+        };
     }
     let protocol_marker =
         crash_message.is_some_and(|message| message.contains("session execution failed"));
@@ -5812,6 +5872,35 @@ pub(crate) mod tests {
             ),
             APP_ERROR
         );
+
+        // A source that could not be reached decided nothing, so it has a code of its own; a
+        // source that answered "no" is still the app's error.
+        let stopped = |error: crate::agent::AgentError| {
+            anyhow::Error::new(crate::engine::AppReportedError::stopped(&error))
+                .context("pipeline node brief-writer failed")
+        };
+        let unreachable = stopped(crate::agent::AgentError::Network(
+            crate::ai::Source::ChatGpt,
+            "couldn't renew the sign-in with ChatGPT".to_owned(),
+        ));
+        assert_eq!(
+            classify_failure_code(&unreachable, false, None),
+            SOURCE_UNREACHABLE
+        );
+        for answered in [
+            crate::agent::AgentError::KeyRefused(crate::ai::Source::OpenRouter),
+            crate::agent::AgentError::SignInAgain,
+            crate::agent::AgentError::OutOfCredits(crate::ai::Source::Anthropic),
+            crate::agent::AgentError::PlanLimit,
+            crate::agent::AgentError::Stalled(crate::ai::Source::OpenRouter),
+        ] {
+            let said = answered.to_string();
+            assert_eq!(
+                classify_failure_code(&stopped(answered), false, None),
+                APP_ERROR,
+                "{said}"
+            );
+        }
     }
 
     /// A list's preview keeps a reply's opening whole characters, and leaves a short one alone.
@@ -6103,6 +6192,7 @@ pub(crate) mod tests {
             Path::new("mine.yaml"),
             "hi",
             RunTrigger::Schedule,
+            Tries::default(),
         )
         .expect_err("no archive in this test");
         assert_eq!(mine.status, StatusCode::SERVICE_UNAVAILABLE);
@@ -6113,6 +6203,7 @@ pub(crate) mod tests {
             Path::new("downloaded.yaml"),
             "hi",
             RunTrigger::Schedule,
+            Tries::default(),
         )
         .expect_err("an unapproved team is refused");
         assert_eq!(downloaded.status, StatusCode::CONFLICT);
@@ -7445,6 +7536,76 @@ pub(crate) mod tests {
         assert_eq!(points[0].done, "Basic costs 139,000 VND.");
     }
 
+    /// A run whose agent could not reach its AI source fails with a code that says so, which is
+    /// what a schedule tries again on; a retry launched after it names it, and runs from the start.
+    #[tokio::test]
+    async fn a_run_that_cannot_reach_its_source_says_so_and_a_retry_names_it() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        let model = demo_model(Demo::failing_first(
+            1,
+            || {
+                crate::agent::AgentError::Network(
+                    crate::ai::Source::ChatGpt,
+                    "couldn't renew the sign-in with ChatGPT".to_owned(),
+                )
+            },
+            |_| Some(Completion::text("the brief")),
+        ));
+        dir.write_team("brief.yaml", &model);
+        let archive = EventArchive::new(pool);
+        let registry = RunRegistry::default();
+        let start = |tries: Tries<'_>| {
+            launch(
+                &registry,
+                Some(archive.clone()),
+                &dir.0,
+                Path::new("brief.yaml"),
+                "Thursday brief",
+                RunTrigger::Schedule,
+                tries,
+            )
+            .expect("launched")
+        };
+
+        let first = start(Tries {
+            retry_of: None,
+            again_after: Some(chrono::Duration::minutes(2)),
+        });
+        assert_eq!(first.retry_of_run_id, None);
+        let failed = wait_for(&registry, &first.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(failed.status, RunStatus::Failed, "{failed:?}");
+        assert_eq!(failed.error_code.as_deref(), Some(SOURCE_UNREACHABLE));
+        assert!(
+            failed
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("LoomWatch couldn't reach ChatGPT")),
+            "{failed:?}"
+        );
+        // When it is tried again is said in the same step as that it stopped: no reader sees one
+        // without the other.
+        let ended =
+            chrono::DateTime::parse_from_rfc3339(failed.finished_at.as_deref().unwrap()).unwrap();
+        let next =
+            chrono::DateTime::parse_from_rfc3339(failed.next_try_at.as_deref().unwrap()).unwrap();
+        assert_eq!(next - ended, chrono::Duration::minutes(2));
+
+        let again = start(Tries {
+            retry_of: Some(&first.run_id),
+            again_after: None,
+        });
+        assert_eq!(
+            again.retry_of_run_id.as_deref(),
+            Some(first.run_id.as_str())
+        );
+        let done = wait_for(&registry, &again.run_id, |r| r.status.is_terminal()).await;
+        assert_eq!(done.status, RunStatus::Succeeded, "{done:?}");
+        assert_eq!(done.reply.as_deref(), Some("the brief"));
+        assert_eq!(done.prompt, "Thursday brief");
+        assert_eq!(done.next_try_at, None, "it answered: nothing to try again");
+    }
+
     /// A scheduled run has nobody to ask: at its spool it stops, says so, and keeps its
     /// checkpoint.
     #[tokio::test]
@@ -7461,6 +7622,7 @@ pub(crate) mod tests {
             Path::new("spool.yaml"),
             "go",
             RunTrigger::Schedule,
+            Tries::default(),
         )
         .expect("launched");
         let done = wait_for(&registry, &run.run_id, |r| r.status.is_terminal()).await;
