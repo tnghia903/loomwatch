@@ -12,6 +12,9 @@
 //!   `tool_choice: none`;
 //! - reasoning returned encrypted (`include`), and every output item sent back exactly as it came,
 //!   so the model keeps its reasoning across tool calls;
+//! - web search results returned too (`include`) and handed back after their step as the output
+//!   of a `web_results` call, because the API ignores them in an item sent back (checked live on
+//!   2026-10-22);
 //! - `prompt_cache_key`, so a session's calls share a cache;
 //! - none of the fields plan usage refuses: no `temperature`, `max_output_tokens`, `metadata`,
 //!   `user` or `truncation`.
@@ -40,6 +43,10 @@ const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const MAX_ERROR_BYTES: usize = 64 * 1024;
 /// The namespace `LoomWatch`'s tools are offered in, as plan usage asks.
 const NAMESPACE: &str = "loomwatch";
+/// The call whose output hands a step's web results back to the model ([`web_results`]).
+const WEB_RESULTS: &str = "web_results";
+/// The longest call id the Responses API takes.
+const CALL_ID_MAX: usize = 64;
 
 /// Where an access token comes from: the sign-in with `ChatGPT`, which renews it.
 pub trait PlanAccess: Send + Sync + Debug {
@@ -228,7 +235,13 @@ fn body(request: &ChatRequest<'_>, model: &str, known: Option<&ChatGptModel>) ->
         reasoning["effort"] = json!(effort);
     }
     body.insert("reasoning".into(), reasoning);
-    body.insert("include".into(), json!(["reasoning.encrypted_content"]));
+    // A web search's results come back too, so they can go back in on the next call.
+    let include = if request.server_tools.any() {
+        json!(["reasoning.encrypted_content", "web_search_call.results"])
+    } else {
+        json!(["reasoning.encrypted_content"])
+    };
+    body.insert("include".into(), include);
     Value::Object(body)
 }
 
@@ -304,6 +317,7 @@ fn input(history: &[Message]) -> Vec<Value> {
             } => match native {
                 Some(native) if native.source == Source::ChatGpt && !native.items.is_empty() => {
                     items.extend(native.items.iter().cloned());
+                    items.extend(web_results(&native.items));
                 }
                 _ => {
                     if !content.is_empty() {
@@ -327,6 +341,122 @@ fn input(history: &[Message]) -> Vec<Value> {
         }
     }
     items
+}
+
+/// What a step's web searches found, handed back after that step's items as the output of a
+/// `web_results` call (ADR 0084). The Responses API shows a search's results only inside the response that
+/// ran it and ignores them in an item sent back, so after any other tool call, or on the next
+/// message, the model saw its searches and nothing they found. A tool's output, not a message:
+/// words from a web page keep a tool's weight, never an instruction's. Searches recorded before
+/// `LoomWatch` asked for their results have none to hand back.
+fn web_results(items: &[Value]) -> Vec<Value> {
+    let found: Vec<(&str, String)> = items
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("web_search_call"))
+        .filter_map(|item| Some((item.get("id")?.as_str()?, web_result_text(item)?)))
+        .collect();
+    let Some((first, _)) = found.first() else {
+        return Vec::new();
+    };
+    // A call id is at most 64 characters; a search's id differs from its step's others at the end.
+    let tail: String = first.chars().rev().take(CALL_ID_MAX - 4).collect();
+    let call_id = format!("web_{}", tail.chars().rev().collect::<String>());
+    let text = found
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    vec![
+        json!({
+            "type": "function_call",
+            "call_id": call_id,
+            "name": WEB_RESULTS,
+            "namespace": NAMESPACE,
+            "arguments": "{}",
+        }),
+        json!({
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": format!("What your web searches above found:\n\n{text}"),
+        }),
+    ]
+}
+
+/// One web search and what it found, in plain text; `None` when it carries no results field.
+fn web_result_text(item: &Value) -> Option<String> {
+    let results = match item.get("results")? {
+        Value::Array(results) => results.as_slice(),
+        _ => &[],
+    };
+    let action = |key: &str| {
+        item.pointer(&format!("/action/{key}"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+    };
+    let mut text = match action("type") {
+        Some("open_page") => format!("Opened {}", action("url").unwrap_or("a page")),
+        Some("find_in_page") => format!(
+            "Looked for \"{}\" in {}",
+            action("pattern").unwrap_or_default(),
+            action("url").unwrap_or("a page")
+        ),
+        _ => {
+            let queries: Vec<&str> = item
+                .pointer("/action/queries")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            match (queries.is_empty(), action("query")) {
+                (false, _) => format!("Searched the web for: {}", queries.join("; ")),
+                (true, Some(query)) => format!("Searched the web for: {query}"),
+                (true, None) => "Searched the web".to_owned(),
+            }
+        }
+    };
+    if item.get("status").and_then(Value::as_str) == Some("failed") {
+        text.push_str("\nIt failed.");
+    } else if results.is_empty() {
+        text.push_str("\nNothing came back.");
+    }
+    for result in results {
+        let field = |key: &str| result.get(key).and_then(Value::as_str).unwrap_or_default();
+        text.push_str("\n\n");
+        for line in [field("title"), field("url")] {
+            if !line.trim().is_empty() {
+                text.push_str(line.trim());
+                text.push('\n');
+            }
+        }
+        text.push_str(plain(field("snippet")).trim());
+    }
+    Some(text)
+}
+
+/// `text` without the private-use citation marks `OpenAI` writes into results. A mark around a
+/// link (`cite`, U+E202, `3†words†site`) keeps the link's words; any other mark goes.
+fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('\u{e200}') {
+        out.push_str(&rest[..start]);
+        let mark = &rest[start + '\u{e200}'.len_utf8()..];
+        let Some(end) = mark.find('\u{e201}') else {
+            rest = mark;
+            break;
+        };
+        if let Some(words) = mark[..end]
+            .split('\u{e202}')
+            .nth(1)
+            .and_then(|reference| reference.split('†').nth(1))
+        {
+            out.push_str(words);
+        }
+        rest = &mark[end + '\u{e201}'.len_utf8()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A request the plan refused, and what it means.
@@ -596,7 +726,7 @@ fn finish(message: Assembled) -> Completion {
                     "tool_name": if reading { "web_fetch" } else { "web_search" },
                     "tool_call_id": text_of(item, "id"),
                     "arguments": action.to_string(),
-                    "result": "",
+                    "result": web_result_text(item).unwrap_or_default(),
                 }));
             }
             _ => {}
@@ -817,6 +947,123 @@ mod tests {
             body(&summary, "gpt-6.1-sol", Some(&sol()))["tool_choice"],
             "none"
         );
+    }
+
+    /// Web results are asked for only when the web search tool is offered.
+    #[test]
+    fn web_results_are_asked_for_with_the_web_tool() {
+        let history = [Message::User {
+            content: "What's new?".into(),
+            pictures: Vec::new(),
+        }];
+        let web = ChatRequest {
+            server_tools: ServerTools {
+                web_search: true,
+                ..ServerTools::default()
+            },
+            ..request(&history, &[])
+        };
+        assert_eq!(
+            body(&web, "gpt-6.1-sol", Some(&sol()))["include"],
+            json!(["reasoning.encrypted_content", "web_search_call.results"])
+        );
+        assert_eq!(
+            body(&request(&history, &[]), "gpt-6.1-sol", Some(&sol()))["include"],
+            json!(["reasoning.encrypted_content"])
+        );
+    }
+
+    /// Each kind of web call says what it did, and what came back: nothing, a failure, or the
+    /// results. A search recorded before results were asked for hands nothing back rather than
+    /// claiming it found nothing, and a step with no web calls adds nothing.
+    #[test]
+    fn a_steps_web_results_go_back_as_one_calls_output() {
+        let call = |id: &str, action: Value, results: Option<Value>| {
+            let mut item = json!({"type": "web_search_call", "id": id, "status": "completed",
+                                  "action": action});
+            if let Some(results) = results {
+                item["results"] = results;
+            }
+            item
+        };
+        let opened = call(
+            "ws_2",
+            json!({"type": "open_page", "url": "https://openai.com/news/"}),
+            Some(
+                json!([{"type": "text_result", "title": "OpenAI News", "url": "https://openai.com/news/",
+                         "snippet": "L0: \u{e200}cite\u{e202}0\u{2020}Skip to main content\u{e201} L1: News"}]),
+            ),
+        );
+        let empty = call(
+            "ws_3",
+            json!({"type": "search", "query": "LoomWatch"}),
+            Some(json!([])),
+        );
+        let mut failed = call(
+            "ws_4",
+            json!({"type": "find_in_page", "url": "https://example.com/", "pattern": "Oct"}),
+            Some(Value::Null),
+        );
+        failed["status"] = json!("failed");
+        let before = call("ws_1", json!({"type": "search", "query": "old"}), None);
+        let items = [
+            json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "enc", "summary": []}),
+            before.clone(),
+            opened,
+            empty,
+            failed,
+        ];
+        let back = web_results(&items);
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0]["call_id"], back[1]["call_id"]);
+        assert_eq!(back[0]["call_id"], "web_ws_2");
+        assert_eq!(
+            back[1]["output"],
+            "What your web searches above found:\n\n\
+             Opened https://openai.com/news/\n\n\
+             OpenAI News\n\
+             https://openai.com/news/\n\
+             L0: Skip to main content L1: News\n\n\
+             Searched the web for: LoomWatch\n\
+             Nothing came back.\n\n\
+             Looked for \"Oct\" in https://example.com/\n\
+             It failed."
+        );
+        assert!(web_results(&[before]).is_empty());
+        assert!(web_results(&[json!({"type": "message", "id": "msg_1"})]).is_empty());
+    }
+
+    /// A call id is at most 64 characters; a long search id keeps its end, where the searches of
+    /// one step differ.
+    #[test]
+    fn a_web_results_call_id_fits_the_limit() {
+        let id = format!("ws_{}{}", "0".repeat(40), "a1b2c3d4e5f6a7b8c9d0");
+        let item = json!({"type": "web_search_call", "id": id, "status": "completed",
+                          "action": {"type": "search", "query": "q"}, "results": []});
+        let call_id = web_results(&[item])[0]["call_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(call_id.len() <= CALL_ID_MAX, "{call_id}");
+        assert!(call_id.starts_with("web_") && call_id.ends_with("a1b2c3d4e5f6a7b8c9d0"));
+    }
+
+    /// A citation mark around a link keeps the link's words; any other mark goes, and a mark left
+    /// open loses only its opening sign.
+    #[test]
+    fn citation_marks_leave_plain_words() {
+        assert_eq!(
+            plain("\u{e200}cite\u{e202}turn0news12\u{e201} Published today."),
+            " Published today."
+        );
+        assert_eq!(
+            plain(
+                "* \u{e200}cite\u{e202}7\u{2020}Docs(opens in a new window)\u{2020}developers.openai.com\u{e201} L8"
+            ),
+            "* Docs(opens in a new window) L8"
+        );
+        assert_eq!(plain("a \u{e200}cite and more"), "a cite and more");
+        assert_eq!(plain("no marks"), "no marks");
     }
 
     #[test]

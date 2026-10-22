@@ -3588,6 +3588,97 @@ async fn a_chatgpt_plan_search_between_messages_leaves_the_first_out_of_the_repl
     assert_eq!(last_written(&session), said);
 }
 
+/// A plan's web search shows what it found only inside the response that ran it, and the Responses
+/// API ignores the results in an item sent back. So the search found nothing on the model's next
+/// call, after another tool or a later message: a morning brief came back empty. The results go
+/// back in after the step's own items, as the output of a `web_results` call, without `OpenAI`'s
+/// private citation marks; and the record says what the search found instead of nothing.
+#[tokio::test]
+async fn a_chatgpt_plan_search_is_still_seen_after_another_tool_call() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "hello").unwrap();
+    let search = json!({"type": "web_search_call", "id": "ws_1", "status": "completed",
+        "action": {"type": "search", "query": "OpenAI news", "queries": ["OpenAI news"]},
+        "results": [{"type": "text_result", "title": "OpenAI models are coming to Google Cloud",
+            "url": "https://openai.com/news/google-cloud/",
+            "snippet": "\u{e200}cite\u{e202}turn0news1\u{e201} [wordlim: 100] Published Oct 21, 2026. \u{e200}cite\u{e202}3\u{2020}Read more\u{2020}openai.com\u{e201}"}]});
+    let call = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file",
+                      "namespace": "loomwatch", "arguments": "{\"path\":\"notes.md\"}", "status": "completed"});
+    let first = events(&[
+        json!({"type": "response.output_item.added", "item": {"type": "web_search_call"}}),
+        item_done(&search),
+        item_done(&call),
+        completed(100, 0, 14),
+    ]);
+    let answer = json!({"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": "Google Cloud.", "annotations": []}]});
+    let second = events(&[
+        json!({"type": "response.output_item.added", "item": {"type": "message"}}),
+        json!({"type": "response.output_text.delta", "delta": "Google Cloud."}),
+        item_done(&answer),
+        completed(140, 100, 5),
+    ]);
+    let (stand, base) = stand(vec![first, second]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut config = SessionConfig::new(
+        "session-1",
+        "writer",
+        folder.0.clone(),
+        "chatgpt:gpt-6.1-sol",
+    );
+    config.tools = ToolSet::all(true);
+    let mut session = Session::open(
+        config,
+        plan(&base, Arc::new(FixedToken::default())),
+        sink.clone(),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    let end = session.prompt("What's new at OpenAI?").await.unwrap();
+    assert_eq!(end.reply, "Google Cloud.");
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    assert_eq!(
+        bodies[0]["include"],
+        json!(["reasoning.encrypted_content", "web_search_call.results"])
+    );
+    let input = bodies[1]["input"].as_array().unwrap();
+    assert_eq!(input[1], search);
+    assert_eq!(input[2], call);
+    let call_id = input[3]["call_id"].clone();
+    assert_eq!(
+        input[3],
+        json!({"type": "function_call", "call_id": call_id, "name": "web_results",
+               "namespace": "loomwatch", "arguments": "{}"})
+    );
+    assert_eq!(
+        input[4],
+        json!({"type": "function_call_output", "call_id": call_id, "output":
+            "What your web searches above found:\n\n\
+             Searched the web for: OpenAI news\n\n\
+             OpenAI models are coming to Google Cloud\n\
+             https://openai.com/news/google-cloud/\n\
+             [wordlim: 100] Published Oct 21, 2026. Read more"})
+    );
+    assert_eq!(input[5]["type"], "function_call_output");
+    assert_eq!(input[5]["call_id"], "call_1");
+
+    let found = sink
+        .all()
+        .iter()
+        .find(|update| {
+            update["sessionUpdate"] == "tool_call_update" && update["toolCallId"] == "ws_1"
+        })
+        .and_then(|update| update.pointer("/content/0/content/text"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        found.contains("OpenAI models are coming to Google Cloud"),
+        "{found}"
+    );
+}
+
 /// The same on `OpenRouter`'s chat completions, were its own search to arrive as a reasoning entry
 /// between the words, the shape its docs give. Not seen live: on 2026-10-20 neither its own search
 /// (for GLM) nor Claude's sent any entry there, so nothing splits on that route yet. More of a
