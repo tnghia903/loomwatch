@@ -2987,7 +2987,13 @@ pub(crate) fn compose_prompt(
 /// What `## The message this replies to` says: the message quoted, or — when its words are already
 /// above, as the agent's own answer it is asked to change or a handover it is given again — where
 /// they are, so a long answer is not handed twice.
+///
+/// A part of a file is always quoted (ADR 0077): its words are what say which part was meant, and
+/// finding them somewhere in a longer section above does not say where.
 fn replied_section(reply: &Replied, task: &NodeTask) -> String {
+    if reply.of_file {
+        return reply.quoted();
+    }
     let words = reply.text.trim();
     let output = if task.own_previous_output {
         OWN_OUTPUT_HEADING
@@ -8561,6 +8567,44 @@ mod tests {
             composed.text
         );
         assert_eq!(composed.text.matches("All sourced.").count(), 1);
+    }
+
+    /// ADR 0077: a part of a file marked in the reader is quoted even when the same words are in
+    /// the agent's own answer above, or the agent cannot tell which part it is asked about.
+    #[test]
+    fn a_part_of_a_file_is_quoted_even_when_its_words_are_already_above() {
+        let agent = pipeline_agent("tutor", OFFLINE);
+        let part = Replied {
+            named: "A part of lesson.html from Tutor (work 7626163b), in the file /w/lesson.html"
+                .to_owned(),
+            text: "Markov-chain".to_owned(),
+            of_file: true,
+        };
+        let task = NodeTask {
+            reply: Some(part),
+            previous_output: Some(
+                "The lesson: SASRec beat Markov-chain and RNN baselines.".to_owned(),
+            ),
+            own_previous_output: true,
+            ..NodeTask::goal("bold this text")
+        };
+        let composed = compose_prompt(&agent, &memory::ContextPacket::default(), &task);
+        let replied = composed
+            .sections
+            .iter()
+            .find(|section| section.kind == memory::PromptSectionKind::ReplyTo)
+            .expect("a reply section");
+        assert_eq!(
+            replied.text,
+            "A part of lesson.html from Tutor (work 7626163b), in the file /w/lesson.html:\n> Markov-chain"
+        );
+        assert!(
+            composed.text.ends_with(
+                "in the file /w/lesson.html:\n> Markov-chain\n\n## Task\nbold this text"
+            ),
+            "{}",
+            composed.text
+        );
     }
 
     /// ADR 0062: `## Done when` sits directly under the role, as standing configuration, and an
