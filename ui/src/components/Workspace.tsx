@@ -13,7 +13,7 @@ import type { CapabilityRef, ScheduleConfig } from '../lib/team-file/types'
 import { newSchedule } from '../lib/team-file/schedule'
 import type { TeamNotionPage, TeamSource } from './library/ComponentPalette'
 import { PALETTE_WIDTH, clampPaletteWidth } from '../lib/library/paletteWidth'
-import { approveTeam, isTerminalRun, runScheduleNow, scheduleForPath, useSchedules, type TeamReview } from '../lib/runs/client'
+import { approveTeam, isTerminalRun, runScheduleNow, scheduleForPath, useRefreshOnRoutineRun, useSchedules, type TeamReview } from '../lib/runs/client'
 import { ownerLabelFor } from '../lib/runs/graph'
 import { modelLabelForAgent } from '../lib/models'
 import { causalOrder, DOCK } from '../lib/runs/runOverlay'
@@ -426,6 +426,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // What the run's agents read or wrote: the answer names files from an agent's own folder.
   const touchedFiles = useMemo(() => filesTouched(projection.evidence), [projection.evidence])
   const routine = useMemo(() => scheduleForPath(schedules.entries, doc.path), [schedules.entries, doc.path])
+  // A routine's run starting and ending is when it has news, such as when it tries again: read the
+  // routines then, not at the next minute.
+  useRefreshOnRoutineRun(history.records, routine, schedules.refresh)
   // The registry knows the canonical responder for its own runs; history falls back to the document.
   const responderId = record?.responder ?? responderFromDoc
   // The team as one sentence above the Build canvas (lib/story/teamSentence.ts).

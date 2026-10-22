@@ -29,6 +29,8 @@ export interface ScheduleConfig {
   prompt: string
   enabled?: boolean
   deliver?: DeliverConfig
+  /** Minutes to wait before each new try of a timed run that couldn't reach its AI source. */
+  retryAfterMinutes?: number[]
 }
 
 export type AgentStatus =

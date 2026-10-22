@@ -46,6 +46,15 @@ pub struct Record {
     /// finish.
     #[serde(default)]
     spend_stops: Vec<SpendStop>,
+    /// `schedule` for a routine's run.
+    #[serde(default)]
+    trigger: String,
+    /// The run this one tries again from the start.
+    #[serde(default)]
+    retry_of_run_id: Option<String>,
+    /// When the schedule tries this run again, after it couldn't reach its AI source.
+    #[serde(default)]
+    next_try_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,6 +153,9 @@ pub enum Ended {
     Failed,
     /// Stopped by someone, which needs nobody's attention.
     Cancelled,
+    /// Couldn't reach its AI source, and the schedule tries it again soon: nobody needs to do
+    /// anything yet.
+    TryingAgain,
 }
 
 impl Ended {
@@ -161,7 +173,14 @@ impl Ended {
             Self::Finished => "finished",
             Self::Failed => "stopped with an error",
             Self::Cancelled => "stopped",
+            Self::TryingAgain => "couldn't connect, trying again soon",
         }
+    }
+
+    /// Whether the face tells of it until you look: not a run stopped by someone, nor one the
+    /// schedule tries again.
+    pub const fn is_news(self) -> bool {
+        matches!(self, Self::Finished | Self::Failed)
     }
 }
 
@@ -197,9 +216,9 @@ impl Progress {
             .map(|(run, ended)| (run.as_str(), *ended))
     }
 
-    /// Whether `run` is one of the runs that ended within the window.
-    pub fn has_ended(&self, run: &str) -> bool {
-        self.ended.contains_key(run)
+    /// How `run` ended, when it is one of the runs that ended within the window.
+    pub fn how_ended(&self, run: &str) -> Option<Ended> {
+        self.ended.get(run).copied()
     }
 
     /// The menu's rows: a heading over each part that has lines, or one line saying all is quiet.
@@ -254,6 +273,12 @@ impl Progress {
 pub fn progress(runs: &[Record], now: DateTime<Utc>) -> Progress {
     let mut progress = Progress::default();
     let mut finished: Vec<(DateTime<Utc>, Line)> = Vec::new();
+    // Runs the schedule tried again: the newer try says how that job went.
+    let tried_again: BTreeSet<&str> = runs
+        .iter()
+        .filter(|run| run.trigger == "schedule")
+        .filter_map(|run| run.retry_of_run_id.as_deref())
+        .collect();
     for run in runs {
         let team = team_label(run);
         let line = |text: String| Line {
@@ -262,6 +287,14 @@ pub fn progress(runs: &[Record], now: DateTime<Utc>) -> Progress {
             text: format!("{team}: {text}"),
         };
         if let Some(how) = Ended::from_status(&run.status) {
+            if tried_again.contains(run.run_id.as_str()) {
+                continue;
+            }
+            let how = if how == Ended::Failed && run.next_try_at.is_some() {
+                Ended::TryingAgain
+            } else {
+                how
+            };
             progress.ended.insert(run.run_id.clone(), how);
             if let Some(at) = run.finished_at.as_deref().and_then(parse) {
                 let words = how.words();
@@ -497,8 +530,68 @@ mod tests {
             0,
             "nothing ended between two reads"
         );
-        assert!(after.has_ended("rx") && !before.has_ended("r1"));
+        assert_eq!(after.how_ended("rx"), Some(Ended::Cancelled));
+        assert_eq!(before.how_ended("r1"), None);
         assert_eq!(after.summary(), "LoomWatch");
+    }
+
+    /// A routine's run that couldn't reach its AI waits for the schedule to try it again: it is
+    /// not "stopped with an error". Once tried again, the newer try speaks for that job.
+    #[test]
+    fn a_routine_run_the_schedule_tries_again_is_not_an_error() {
+        let waiting = progress(
+            &runs(json!([
+                {"runId": "t1", "teamPath": "brief.yaml", "teamName": "Weekday AI brief",
+                 "status": "failed", "trigger": "schedule", "createdAt": "2026-10-17T09:58:00.000Z",
+                 "finishedAt": "2026-10-17T09:58:07.000Z", "nextTryAt": "2026-10-17T09:59:07.000Z"}
+            ])),
+            now(),
+        );
+        assert_eq!(
+            texts(&waiting.finished),
+            ["Weekday AI brief: couldn't connect, trying again soon · 1 min ago"]
+        );
+        assert_eq!(waiting.how_ended("t1"), Some(Ended::TryingAgain));
+        assert!(!Ended::TryingAgain.is_news());
+
+        let answered = progress(
+            &runs(json!([
+                {"runId": "t2", "teamPath": "brief.yaml", "teamName": "Weekday AI brief",
+                 "status": "succeeded", "trigger": "schedule", "retryOfRunId": "t1",
+                 "createdAt": "2026-10-17T09:59:08.000Z", "finishedAt": "2026-10-17T09:59:40.000Z"},
+                {"runId": "t1", "teamPath": "brief.yaml", "teamName": "Weekday AI brief",
+                 "status": "failed", "trigger": "schedule", "createdAt": "2026-10-17T09:58:00.000Z",
+                 "finishedAt": "2026-10-17T09:58:07.000Z"}
+            ])),
+            now(),
+        );
+        assert_eq!(
+            texts(&answered.finished),
+            ["Weekday AI brief: finished · just now"]
+        );
+        assert_eq!(answered.how_ended("t1"), None);
+
+        // Your own Try again of it is yours: the run you tried again still stopped with an error.
+        let yours = progress(
+            &runs(json!([
+                {"runId": "t2", "teamPath": "brief.yaml", "status": "running", "trigger": "manual",
+                 "retryOfRunId": "t1", "createdAt": "2026-10-17T09:59:08.000Z", "working": ["a"]},
+                {"runId": "t1", "teamPath": "brief.yaml", "status": "failed", "trigger": "schedule",
+                 "createdAt": "2026-10-17T09:58:00.000Z", "finishedAt": "2026-10-17T09:58:07.000Z"}
+            ])),
+            now(),
+        );
+        assert_eq!(yours.how_ended("t1"), Some(Ended::Failed));
+
+        // The last try, with none to come, is an error like any other.
+        let gave_up = progress(
+            &runs(json!([
+                {"runId": "t1", "teamPath": "brief.yaml", "status": "failed", "trigger": "schedule",
+                 "createdAt": "2026-10-17T09:58:00.000Z", "finishedAt": "2026-10-17T09:58:07.000Z"}
+            ])),
+            now(),
+        );
+        assert_eq!(gave_up.how_ended("t1"), Some(Ended::Failed));
     }
 
     #[test]

@@ -12,7 +12,10 @@ export interface RoutineNoteProps {
  * which was retired because nothing else in it was something an operator needed to see.
  */
 export function RoutineNote({ schedule, onRunNow, busy }: RoutineNoteProps) {
-  const when = schedule.enabled ? `${schedule.describe} · next ${describeNextFire(schedule.nextAt)}` : 'paused'
+  // A run that couldn't reach its AI source is tried again soon: that comes before the next time.
+  const again = schedule.nextTryAt ? describeNextFire(schedule.nextTryAt) : null
+  const next = again ? `trying again ${again === 'due now' ? 'now' : again}` : `next ${describeNextFire(schedule.nextAt)}`
+  const when = schedule.enabled ? `${schedule.describe} · ${next}` : 'paused'
   const lastRan = schedule.lastFiredAt
     ? `Last ran ${new Date(schedule.lastFiredAt).toLocaleString()}${schedule.lastStatus ? ` (${schedule.lastStatus})` : ''}.`
     : 'Has not run yet.'

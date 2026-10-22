@@ -51,6 +51,16 @@ describe('RoutineNote', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Last delivery to Notion failed: Notion is not connected.')
   })
 
+  it('says the routine tries its run again soon, after it couldn’t reach its AI, and calls that no problem', () => {
+    const soon = new Date(Date.now() + 2 * 60_000).toISOString()
+    render(<RoutineNote schedule={{ ...routine, lastStatus: 'failed', nextTryAt: soon }} onRunNow={vi.fn()} busy={false} />)
+    expect(screen.getByText('Routine: daily at 08:00 Asia/Singapore · trying again in 2m · delivers to Notion')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    cleanup()
+    render(<RoutineNote schedule={{ ...routine, lastStatus: 'failed', nextTryAt: new Date(Date.now() - 1000).toISOString() }} onRunNow={vi.fn()} busy={false} />)
+    expect(screen.getByText(/· trying again now ·/)).toBeInTheDocument()
+  })
+
   it('holds the button while a run is starting', () => {
     render(<RoutineNote schedule={routine} onRunNow={vi.fn()} busy />)
     expect(screen.getByRole('button', { name: 'Starting…' })).toBeDisabled()

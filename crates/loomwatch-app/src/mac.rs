@@ -587,11 +587,20 @@ impl Face {
         self.news.extend(
             after
                 .ended_since(before)
-                .filter(|(_, how)| *how != Ended::Cancelled)
+                .filter(|(_, how)| how.is_news())
                 .map(|(run, how)| (run.to_owned(), how)),
         );
-        // News lasts as long as the menu lists the run.
-        self.news.retain(|run, _| after.has_ended(run));
+        // News lasts as long as the menu lists the run, as it ended by now: a run that stopped is
+        // no longer news once the schedule is trying it again.
+        self.news.retain(
+            |run, how| match after.how_ended(run).filter(|now| now.is_news()) {
+                Some(now) => {
+                    *how = now;
+                    true
+                }
+                None => false,
+            },
+        );
     }
 
     /// The menu was opened. Returns whether there was news to put away.
@@ -1622,5 +1631,31 @@ mod tests {
         let cancelled = progress_of(record("cancelled", &[]));
         face.update(&working, &cancelled, now);
         assert_eq!(face.picture(), Picture::Asleep);
+    }
+
+    /// A routine's run that couldn't reach its AI is not shown in red while the schedule tries it
+    /// again, even when the menu first read it a moment before the schedule said so.
+    #[test]
+    fn a_run_the_schedule_tries_again_is_not_shown_stopped() {
+        let working = progress_of(record("running", &["a"]));
+        let at = chrono::Utc::now().to_rfc3339();
+        let retrying = progress_of(serde_json::json!([{"runId": "r", "teamPath": "t.yaml",
+            "status": "failed", "trigger": "schedule", "createdAt": at, "finishedAt": at,
+            "nextTryAt": at}]));
+        let now = Instant::now();
+
+        let mut face = Face::default();
+        face.update(&working, &retrying, now);
+        assert_eq!(face.picture(), Picture::Asleep);
+
+        let mut face = Face::default();
+        face.update(&working, &progress_of(record("failed", &[])), now);
+        assert_eq!(face.picture(), Picture::Stopped);
+        face.update(&progress_of(record("failed", &[])), &retrying, now);
+        assert_eq!(
+            face.picture(),
+            Picture::Asleep,
+            "it is being tried again: no longer news"
+        );
     }
 }

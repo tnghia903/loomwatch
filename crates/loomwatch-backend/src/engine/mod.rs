@@ -105,6 +105,9 @@ impl<'a> BoundaryTurn<'a> {
 pub(crate) struct AppReportedError {
     pub(crate) message: String,
     pub(crate) problem: Option<Problem>,
+    /// The source could not be reached ([`AgentError::is_unreachable`]): a scheduled run tries
+    /// again a little later.
+    pub(crate) unreachable: bool,
 }
 
 impl AppReportedError {
@@ -112,6 +115,16 @@ impl AppReportedError {
         Self {
             message: message.into(),
             problem: None,
+            unreachable: false,
+        }
+    }
+
+    /// The agent's own stop, in its words.
+    pub(crate) fn stopped(error: &AgentError) -> Self {
+        Self {
+            message: error.to_string(),
+            problem: error.problem(),
+            unreachable: error.is_unreachable(),
         }
     }
 
@@ -291,11 +304,7 @@ fn plan_provider() -> Result<Provider, AppReportedError> {
         return Err(missing());
     }
     if !status.plan_use {
-        let off = AgentError::PlanUseOff;
-        return Err(AppReportedError {
-            message: off.to_string(),
-            problem: off.problem(),
-        });
+        return Err(AppReportedError::stopped(&AgentError::PlanUseOff));
     }
     let provider = ChatGptPlan::new(ai.chatgpt_access(), ai.chatgpt_api(), status.models).map_err(
         |error| {
@@ -326,6 +335,7 @@ fn not_connected(source: Source) -> AppReportedError {
     AppReportedError {
         message: message.to_owned(),
         problem: Some(Problem::new(ProblemKind::NotConnected, source)),
+        unreachable: false,
     }
 }
 
@@ -855,10 +865,7 @@ impl AgentRun {
                 Ok(recorder.reply.take())
             }
             Err(error) => {
-                let failed = AppReportedError {
-                    message: error.to_string(),
-                    problem: error.problem(),
-                };
+                let failed = AppReportedError::stopped(&error);
                 recorder.reply.clear();
                 recorder
                     .append(

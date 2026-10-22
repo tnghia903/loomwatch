@@ -657,6 +657,7 @@ async fn start_run(control: &Control, caller: &Caller, arguments: &Value) -> Res
         Path::new(&file),
         &request,
         crate::runs::RunTrigger::Manual,
+        crate::runs::Tries::default(),
     )
     .map_err(|error| error.message)?;
     control.inner.registry.persist_quietly(&record.run_id).await;

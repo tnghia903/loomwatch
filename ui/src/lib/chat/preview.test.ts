@@ -15,6 +15,7 @@ describe('chatPreview', () => {
     expect(chatPreview([run({ status: 'running', finishedAt: null, reply: null })], 'news.yaml')?.line).toBe('Working on: today’s digest')
     expect(chatPreview([run({ status: 'running', finishedAt: null, waitingOn: { node: 'x', name: 'x', kind: 'question', since: '', question: '', park: 'none', parkNote: '', sendBackAvailable: false } })], 'news.yaml')?.line).toBe('Waiting for you')
     expect(chatPreview([run({ status: 'failed', reply: null })], 'news.yaml')?.line).toBe('Stopped: today’s digest')
+    expect(chatPreview([run({ status: 'failed', reply: null, nextTryAt: '2026-10-06T02:05:00.000Z' })], 'news.yaml')?.line).toBe('Trying again soon: today’s digest')
     expect(chatPreview([run({})], 'other.yaml')).toBeNull()
   })
 

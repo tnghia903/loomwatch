@@ -50,10 +50,15 @@ struct Script {
     fail: Option<(String, String)>,
     /// The requests refused as too long for the model, before any reply is used up.
     too_long: Option<Arc<Picks>>,
+    /// How many requests are still to fail, and what with, before any reply is used up.
+    failing: Option<(AtomicUsize, Arc<MakeError>)>,
 }
 
 /// Which requests [`Demo::responder_holding`] holds, or [`Demo::limited`] refuses.
 type Picks = dyn Fn(&SeenRequest) -> bool + Send + Sync;
+
+/// What [`Demo::failing_first`] fails with.
+type MakeError = dyn Fn() -> AgentError + Send + Sync;
 
 /// Where [`Demo::held`] keeps its requests until a test lets them through.
 #[derive(Debug)]
@@ -236,6 +241,24 @@ impl Demo {
         }
     }
 
+    /// [`Demo::responder`], with its first `times` requests failing with what `error` makes, as a
+    /// source that can't be reached yet, or that refuses the key. A failed request is kept with
+    /// the others.
+    #[must_use]
+    pub fn failing_first(
+        times: usize,
+        error: impl Fn() -> AgentError + Send + Sync + 'static,
+        respond: impl Fn(&SeenRequest) -> Option<Completion> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            script: Some(Arc::new(Script {
+                respond: Some(Arc::new(respond)),
+                failing: Some((AtomicUsize::new(times), Arc::new(error))),
+                ..Script::default()
+            })),
+        }
+    }
+
     /// Every request the scripted demo has been sent, oldest first. Empty for [`Demo::offline`].
     #[must_use]
     pub fn requests(&self) -> Vec<SeenRequest> {
@@ -283,6 +306,15 @@ impl Demo {
                 }
                 if script.too_long.as_ref().is_some_and(|picks| picks(&seen)) {
                     return Err(AgentError::ContextTooLong.into());
+                }
+                if let Some((left, error)) = &script.failing
+                    && left
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                            left.checked_sub(1)
+                        })
+                        .is_ok()
+                {
+                    return Err(error().into());
                 }
                 let scripted = script
                     .replies

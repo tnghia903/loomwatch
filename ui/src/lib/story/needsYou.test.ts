@@ -34,6 +34,22 @@ describe('ticketsFrom', () => {
     expect(tickets).toEqual([])
   })
 
+  // 2026-10-22: a routine's run that couldn't reach its AI is the schedule's to try again. It is not
+  // yours while it waits, nor once a newer try has it; the last try, with none to come, is.
+  it('leaves out a routine’s try the schedule tries again', () => {
+    const unreachable = { status: 'failed' as const, trigger: 'schedule' as const, errorCode: 'source_unreachable', error: 'LoomWatch couldn\'t reach ChatGPT: the connection failed' }
+    const tickets = ticketsFrom([
+      run('t1', { ...unreachable, finishedAt: '2026-10-01T03:30:00Z' }),
+      run('t2', { ...unreachable, retryOfRunId: 't1', finishedAt: '2026-10-01T03:31:00Z', nextTryAt: '2026-10-01T03:33:00Z' }),
+    ], names, new Set(), NOW)
+    expect(tickets).toEqual([])
+    const gaveUp = ticketsFrom([
+      run('t1', { ...unreachable, finishedAt: '2026-10-01T03:30:00Z' }),
+      run('t2', { ...unreachable, retryOfRunId: 't1', finishedAt: '2026-10-01T03:31:00Z' }),
+    ], names, new Set(), NOW)
+    expect(gaveUp.map((ticket) => [ticket.kind, ticket.runId])).toEqual([['failed', 't2']])
+  })
+
   it('turns each permission request into its own ticket, ahead of failures (ADR 0040)', () => {
     const request = (id: string, since: string) => ({ id, agent: 'researcher', name: 'Researcher', title: 'Web search', kind: 'fetch', switch: 'web' as const, detail: 'model cards 2019', since, expiresAt: '2026-10-01T04:10:00Z' })
     const tickets = ticketsFrom([

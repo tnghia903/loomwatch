@@ -38,6 +38,7 @@ import { Learned } from './Learned'
 import { ReplyQuote } from './ReplyQuote'
 import { ChatFiles } from './ChatFiles'
 import { WorkPiece, type TeamView } from './WorkPiece'
+import { earlierTries, triedAgain } from '../../lib/chat/tries'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
 export type Prepared = { ok: true; revision: string | null } | { ok: false; error: string }
@@ -185,6 +186,11 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const [showJump, setShowJump] = useState(false)
   const restore = useRef<number | null>(null)
   const runs = useMemo(() => new Map(chat.items.flatMap((item) => (item.kind === 'work' ? [[item.run.runId, item.run] as const] : []))), [chat.items])
+  // A routine's tries at one job read as one piece, at its newest try (lib/chat/tries.ts).
+  const shownItems = useMemo(() => {
+    const folded = triedAgain(runs.values())
+    return chat.items.filter((item) => item.kind !== 'work' || !folded.has(item.run.runId))
+  }, [chat.items, runs])
   const continuedFrom = useMemo(() => new Set(chat.items.flatMap((item) => (item.kind === 'work' && item.run.followsRunId && !item.run.onlyAgent ? [item.run.followsRunId] : []))), [chat.items])
 
   // What the team is waiting on you for: the newest open review or question, which the box below
@@ -751,7 +757,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
         )}
         <FindScopeContext.Provider value>
         <ol className="tc-log" role="log" aria-label="Messages" hidden={search.showing}>
-          {chat.items.map((item, index, list) => {
+          {shownItems.map((item, index, list) => {
             const at = item.kind === 'work' ? item.run.createdAt : item.message.createdAt
             const previous = list[index - 1]
             const newDay = !previous || dayKey(previous.kind === 'work' ? previous.run.createdAt : previous.message.createdAt) !== dayKey(at)
@@ -759,7 +765,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
               <Fragment key={item.kind === 'work' ? item.run.runId : item.message.id}>
                 {newDay && <li className="tc-day" aria-hidden="true"><span>{dayLabel(at)}</span></li>}
                 {item.kind === 'work'
-                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
+                  ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
                   : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteShown?.id === item.message.id ? noteShown.at : null} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}

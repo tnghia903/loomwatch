@@ -241,6 +241,13 @@ Response (`202 Accepted`):
 - The registry is in memory: a daemon restart forgets `GET /api/runs`, while the archive
   keeps every event and `GET /api/sessions` still lists the session with its `prompt`.
 - `trigger` is `manual` for `POST /api/runs` and `schedule` for routine runs (below).
+  A run whose agent lost its way to its AI source (no network, the provider's address didn't
+  answer, or the connection dropped part way) fails with `errorCode: "source_unreachable"`; one the
+  source answered with a refusal (a refused key, no credit, a plan's limit) is `app_error`.
+  `retryOfRunId` names the run this one tries again from the start. `nextTryAt` is set on a
+  scheduled run that could not reach its source when its routine will try it again (below), in the
+  same step as `failed`, so no reader sees the stop without it; it clears once that try starts or
+  won't come, and is live only.
   `deliverTitle` is present when the run will publish its answer once it succeeds: the team's
   top-level `deliver`, or a routine's `schedule.deliver`. It is fixed at launch and not
   stored. `delivery` stays `null` until a delivery is decided, automatically after such a run
@@ -311,6 +318,7 @@ schedule:
   deliver:                      # optional
     notion:
       title: "AI, tech & business news — {{date}}"   # optional, default "{{team}} — {{date}}"
+  retryAfterMinutes: [1, 2, 5, 10, 30]   # optional, this is the default; [] never tries again
 ```
 
 - **Templates** in `prompt` and `title`: `{{date}}` → `YYYY-MM-DD`, `{{weekday}}` →
@@ -322,8 +330,17 @@ schedule:
 - **Cron** uses the standard 5-field numbering (`0` or `7` = Sunday, so `1-5` is Mon–Fri;
   names such as `Mon-Fri` work too). A 6/7-field expression is handed to the `cron` crate
   as written, where `1` = Sunday. `@daily`-style shorthands are accepted.
-- **Validation** happens in `TeamConfig::parse`: a bad expression, unknown zone or blank
-  prompt is a 422 from `PUT /api/team` and `POST /api/runs`, and the schema
+- **Trying again**: a timed run that fails with `errorCode: "source_unreachable"`, as one that
+  fires in the first seconds after the computer wakes, before its network is back, is tried again
+  from the start after each wait in `retryAfterMinutes` in turn: one new run per entry, with the
+  same prompt and `trigger: "schedule"`, whose `retryOfRunId` names the try before it. At most 20
+  waits of 1 to 1,440 minutes each. Each try starts the work over and pays for what it uses, under
+  the team's spend limit; a try that lost its connection part way pays again for what it had
+  done. Only that failure is tried again: a refused key, an ended sign-in, no credit or a plan's
+  limit needs the person, and so does a run started with "Run now". The routine's next time, "Run
+  now" or pausing the routine stops the wait, as does removing its `schedule` block.
+- **Validation** happens in `TeamConfig::parse`: a bad expression, unknown zone, blank
+  prompt or a wait out of range is a 422 from `PUT /api/team` and `POST /api/runs`, and the schema
   (`$defs.Schedule`) rejects unknown keys.
 
 The scheduler is in memory. Every 30 s it rescans the teams root (hidden directories and a
@@ -332,8 +349,9 @@ only when its cron or timezone changed or it fired, and starts every enabled rou
 time has passed through the same path as `POST /api/runs`. Fires missed while the daemon was down are skipped — `nextAt` is
 computed from "now" at start. A routine whose previous scheduled run is still live skips
 that fire and reports `problem: previous scheduled run <id> is still running`. A file whose
-schedule does not parse stays listed with `problem` set and no `nextAt`. Nothing about a
-routine (last run, last delivery) survives a restart.
+schedule does not parse stays listed with `problem` set and no `nextAt`. A try waiting to be made
+is listed as `nextTryAt` and started by the first tick at or after it, so within 30 s. Nothing
+about a routine (last run, last delivery, a try still to come) survives a restart.
 
 Endpoints, behind the same loopback-only boundary as run control (503 without the archive):
 
@@ -361,14 +379,23 @@ delivery can be tested without waiting for the clock. One routine as listed:
   "lastFiredAt": "2026-09-11T00:00:03.412Z",
   "lastDelivery": { "target": "notion", "status": "published", "url": "https://www.notion.so/…", "pageId": "…", "message": "Published \"AI, tech & business news — 2026-09-11\".", "deliveredAt": "2026-09-11T00:06:40.001Z" },
   "deliver": { "notion": { "title": "AI, tech & business news — {{date}}" } },
-  "problem": null
+  "problem": null,
+  "nextTryAt": null
 }
 ```
 
 `describe` is a human summary for the simple shapes (daily, weekdays, weekends, one
 weekday, hourly) and the cron text otherwise; `timezone` is `null` when the daemon's local
 zone applies; `nextAt` is RFC 3339 UTC; `lastStatus` is read live from the run registry;
-`deliver` is `null` when the routine delivers nowhere.
+`deliver` is `null` when the routine delivers nowhere; `nextTryAt` is when the routine tries its
+last run again, `null` when it isn't waiting to.
+
+The team chat shows a routine's tries at one job as one piece, at its newest try: while it waits,
+the try says when the schedule tries again, in place of the stop and its Try again; the try after it
+has one line for the tries before it. A try the schedule will try, or has tried, again is not in
+Needs you, its agent's face does not glow red, the team list says "Trying again soon", and the menu
+bar says "couldn't connect, trying again soon" rather than "stopped with an error". The last try,
+with none to come, is a stop like any other.
 
 **Delivery** happens only for routine runs (timed or "Run now") that `succeeded` with a
 non-empty reply while `deliver.notion` is configured; manual runs are never delivered. The

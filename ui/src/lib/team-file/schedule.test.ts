@@ -37,6 +37,18 @@ describe('normalizeSchedule', () => {
       .toEqual({ notion: {} })
   })
 
+  it('keeps the waits before a timed run is tried again, and drops a list the schema rejects', () => {
+    const loaded: ScheduleConfig = { cron: '0 8 * * *', prompt: 'x', retryAfterMinutes: [1, 2, 5] }
+    const saved = normalizeSchedule({ cron: '30 9 * * 1-5', prompt: 'x' }, loaded)
+    expect(saved.retryAfterMinutes).toEqual([1, 2, 5])
+    expect(Object.keys(saved)).toEqual(['cron', 'prompt', 'retryAfterMinutes'])
+    expect(normalizeSchedule({ cron: '0 8 * * *', prompt: 'x' }, { ...loaded, retryAfterMinutes: [] }).retryAfterMinutes).toEqual([])
+    for (const waits of [[0], [1.5], [1441], ['1'], Array.from({ length: 21 }, () => 1), 'often']) {
+      expect(normalizeSchedule({ cron: '0 8 * * *', prompt: 'x' }, { ...loaded, retryAfterMinutes: waits } as unknown as ScheduleConfig)).not.toHaveProperty('retryAfterMinutes')
+    }
+    expect(unsupportedScheduleKeys(loaded)).toEqual([])
+  })
+
   it('trims, and omits an empty timezone instead of writing an empty string', () => {
     expect(normalizeSchedule({ cron: ' 0 8 * * * ', timezone: '   ', prompt: '  Digest.  ' }, null))
       .toEqual({ cron: '0 8 * * *', prompt: 'Digest.' })

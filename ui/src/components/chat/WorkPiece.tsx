@@ -8,6 +8,7 @@ import type { ChatItem, ChatMessage, ReplyTo } from '../../lib/chat/client'
 import { describeDocument, documentSize, isDocument } from '../../lib/chat/document'
 import { helperOf, helpersOf, nameWithHelpers, wearerOf, whoWorks } from '../../lib/chat/helpers'
 import { clockTime, listNames, took } from '../../lib/chat/format'
+import { triesLine, tryingAgain } from '../../lib/chat/tries'
 import { checkReactions, talkReactions, targets, yoursOn, type AgentReaction, type Face, type ReactionAbout } from '../../lib/chat/reactions'
 import { answerRun, cancelRun, isTerminalRun, stopHelper, type RunRecord } from '../../lib/runs/client'
 import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors'
@@ -64,10 +65,14 @@ export interface TeamView {
 
 type Work = Extract<ChatItem, { kind: 'work' }>
 
+const NO_TRIES: readonly RunRecord[] = []
+
 interface WorkPieceProps {
   item: Work
   /** The run this one follows, when the chat has it: how "Continue with the team" is told apart. */
   followed: RunRecord | null
+  /** The routine's earlier tries at this same job, oldest first, folded into this piece. */
+  earlier?: readonly RunRecord[]
   /** Whether the team already continued from this piece, which retires its Continue. */
   continuedFrom: boolean
   /** The newest piece in the chat: its talk is shown, and the getting-started guide points here. */
@@ -117,7 +122,7 @@ interface WorkPieceProps {
  * shows who is working; past work keeps its answer in view and its talk a click away. Details opens
  * the full record — stages, timeline, receipt — beside the chat.
  */
-export function WorkPiece({ item, newest = false, approveFilled = true, reveal = null, followed, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
+export function WorkPiece({ item, newest = false, approveFilled = true, reveal = null, followed, earlier = NO_TRIES, continuedFrom, team, draft, detailsOpen, answerOpen, onDetails, onOpenAnswer, onRun, onBaton, onLine, onTryAgain, onContinue, onDecided, onAlwaysAllow, onOpenFinding, onReply, onShowReplied, onReact, onUndoLesson, onTellAllLesson }: WorkPieceProps) {
   const { run, request, notes } = item
   const live = !isTerminalRun(run.status)
   // What the agents said is shown where the work is happening — the newest piece, and any piece
@@ -171,6 +176,10 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
   const hue = (id: string) => team.hues.get(wearerOf(id)) ?? 1
   // The session polls its own run every second; the chat page is the fallback between reads.
   const record = session.record?.runId === run.runId ? session.record : run
+  // Whether the schedule tries it again is said as the run ends. The session's copy sees the end
+  // first; once the chat's copy has seen it too, that one is kept fresh, as when the try starts.
+  const ended = isTerminalRun(run.status) ? run : record
+  const tries = triesLine(ended, earlier)
   // And the chat hears it, so the header's presence and the message box's label agree with this
   // piece rather than trailing it by a page read.
   const fresh = session.record?.runId === run.runId ? session.record : null
@@ -334,6 +343,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
     <li ref={piece} className={`tc-piece${live ? ' live' : ''}${newest ? ' newest' : ''}${detailsOpen ? ' in-details' : ''}${appear ? ' tc-appear-soft' : ''}`} data-run={run.runId}>
       <Request run={run} request={request} flash={saidFlash?.id === `request:${run.runId}`} continuedFrom={continued ? name(run.startAt ?? '') : null} name={name} solo={team.solo} onShowReplied={onShowReplied} reactions={reactOn(targets.request, run.trigger === 'schedule' ? "the schedule's request" : 'your request', onRequest, { mine: run.trigger !== 'schedule', own: true })} />
       {notes.map((note) => <Note key={note.id} note={note} flash={saidFlash?.id === `note:${note.id}`} live={live} name={name} onShowReplied={onShowReplied} reactions={reactOn(targets.note(note.id), `your note to ${name(note.agentId ?? '')}`, note.deliveredAt && note.agentId ? [{ face: 'seen', by: note.agentId, at: note.deliveredAt }] : [], { mine: true })} />)}
+      {tries && !tryingAgain(ended) && <div className="chat-notice tc-tries"><span>{tries}</span></div>}
 
       <div ref={lineRef} className="tc-talk" data-tour={newest ? 'stages' : undefined}>
         {/* Done, the faces on your request say who worked on it; the line says only what is still happening. */}
@@ -471,7 +481,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, reveal =
       </AppearContext.Provider>
 
       <FileOriginContext.Provider value={fileOrigin}>
-      <Outcome tour={newest} run={record} answer={answer} touched={touched} folder={folder} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
+      <Outcome tour={newest} run={record} tries={tryingAgain(ended) ? tries : null} answer={answer} touched={touched} folder={folder} streaming={streaming} name={name} hue={hue} open={answerOpen} flash={answerFlash !== null} solo={Boolean(team.solo)} reactions={reactOn(targets.answer, `${name(record.responder)}'s answer`, [])} onOpen={() => onOpenAnswer(run.runId)} onTryAgain={() => onTryAgain(item)} onDetails={() => onDetails(run.runId)}>
         <AnswerTools
           run={record}
           answer={answer}
@@ -659,7 +669,9 @@ interface AnswerProps {
   children: ReactNode
 }
 
-function Outcome({ onTryAgain, onDetails, ...answer }: AnswerProps & { onTryAgain: () => void; onDetails: () => void }) {
+function Outcome({ tries, onTryAgain, onDetails, ...answer }: AnswerProps & { tries: string | null; onTryAgain: () => void; onDetails: () => void }) {
+  // The schedule tries again by itself: no stop to act on, only when.
+  if (tries) return <Appearing className="chat-notice tc-tries" role="status"><span>{tries}</span></Appearing>
   if (answer.run.status === 'failed' || answer.run.status === 'cancelled') return <Stopped run={answer.run} name={answer.name} onTryAgain={onTryAgain} onDetails={onDetails} />
   if (!answer.answer.trim()) return null
   return <Answer {...answer} />

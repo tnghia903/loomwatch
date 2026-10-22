@@ -131,7 +131,10 @@ depend on the document as a whole:
 - An optional `schedule` block (`$defs.Schedule`) turns the team into a routine: `cron`
   must parse (standard 5-field form with `0`/`7` = Sunday, or the 6/7-field seconds form),
   `timezone` must be an IANA zone when present, and `prompt` must not be blank. Loaders
-  reject the document otherwise. See `WATCH.md` → *Routines*.
+  reject the document otherwise. `retryAfterMinutes` (default `[1, 2, 5, 10, 30]`) is the waits
+  before each new try of a timed run that couldn't reach its AI source, as one that starts before
+  the network is back after the computer wakes. It allows at most 20 waits of 1 to 1,440 minutes;
+  `[]` never tries again. The schedule editor keeps it as written. See `WATCH.md` → *Routines*.
 - An optional top-level `deliver` block (`$defs.Deliver`) sends every successful run's answer
   somewhere besides the Run view, whoever started the run. Today that is `notion: {title?}`, a new
   child page of the page chosen on the Notion tool's card in Connections. The default title is

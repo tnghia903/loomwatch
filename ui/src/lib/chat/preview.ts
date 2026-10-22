@@ -28,6 +28,7 @@ export function chatPreview(records: readonly RunRecord[], teamPath: string): Ch
   if (newest.status === 'queued' || newest.status === 'starting' || newest.status === 'running') {
     return { at, line: `Working on: ${firstLine(newest.prompt)}`, live: true }
   }
+  if (newest.status === 'failed' && newest.nextTryAt) return { at, line: `Trying again soon: ${firstLine(newest.prompt)}`, live: false }
   if (newest.status === 'failed') return { at, line: `Stopped: ${firstLine(newest.prompt)}`, live: false }
   if (newest.status === 'cancelled') return { at, line: `You stopped: ${firstLine(newest.prompt)}`, live: false }
   return { at, line: firstLine(newest.reply ?? '') || firstLine(newest.prompt), live: false }

@@ -632,7 +632,9 @@ your runs. Turn it off in the **Check for updates** window, or for good on this 
 the copy of the run history.
 
 To stop one run, click **Stop** beside the request box. Closing the browser tab does not stop LoomWatch or
-its runs. Scheduled teams run only while LoomWatch is running and the computer is awake. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
+its runs. Scheduled teams run only while LoomWatch is running and the computer is awake. If a scheduled run can't
+reach its AI, often just after the computer wakes, LoomWatch tries it again by itself, up to five more times within the
+hour. Each try starts the work over, and costs what it uses. For scheduled runs and optional Notion delivery, see [Routines](docs/WATCH.md#routines) and
 [Notion setup](docs/NOTION.md).
 
 ### Remove LoomWatch
@@ -1197,6 +1199,7 @@ it came from.
 | "Anthropic refused the Claude API key" | The key was deleted or mistyped. Make a new one in the Claude Console, in the organization linked to your Claude plan, and paste it into **Your Claude API credit** in **Connections…**. A key starting `sk-ant-oat` is a Claude sign-in, which LoomWatch can't use. |
 | "Your Claude API credit is used up" | It comes back when your plan renews. Until then, add credits in the Claude Console, or choose the agent a model paid another way. **Usage…** in the ☰ menu shows what LoomWatch spent. |
 | "LoomWatch has reached a usage limit on your ChatGPT plan" | Click **Manage usage** to see your plan's limit and LoomWatch's share of it. Wait until the plan's limit resets, raise LoomWatch's share there, or choose the agent a model paid another way. |
+| "LoomWatch couldn't reach ChatGPT" (or OpenRouter, Anthropic) | This computer was offline, or that company didn't answer. Check the internet, then click **Try again**. A scheduled run tries again by itself first. |
 | "LoomWatch's sign-in with ChatGPT has ended" | Click **Continue with ChatGPT** on **Your ChatGPT plan** in **Connections…**. |
 | "This ChatGPT account can't share its plan with apps" | Only ChatGPT Plus and Pro plans can. Choose the agent a model on your Claude credit or OpenRouter. |
 | "You signed in with ChatGPT but didn't allow LoomWatch to use your plan" | Click **Turn on plan use** on **Your ChatGPT plan** in **Connections…**, and allow it on ChatGPT's page. |

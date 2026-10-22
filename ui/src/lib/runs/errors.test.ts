@@ -40,6 +40,10 @@ describe('failedAgent', () => {
     expect(failedAgent(failed(null, { agentIds: ['writer'] }))).toBe('writer')
   })
 
+  it('is nobody while the schedule waits to try the run again', () => {
+    expect(failedAgent({ ...failed('pipeline node gatherer failed: LoomWatch couldn\'t reach ChatGPT: the connection failed'), nextTryAt: '2026-10-22T00:04:20Z' })).toBeNull()
+  })
+
   it('is nobody when the run didn’t fail, or its error names no one among many', () => {
     expect(failedAgent({ ...failed('pipeline node gatherer failed: boom'), status: 'cancelled' })).toBeNull()
     expect(failedAgent(failed('protocol failure: session execution failed'))).toBeNull()
