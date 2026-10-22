@@ -342,7 +342,7 @@ describe('the team’s chat', () => {
       message: message({ id: 'hi-5', text: '@Writer explain', route: 'team_note', runId: null, agentId: 'writer', answers: { waiting: [], said: [{ from: 'writer', text: 'Sure.', at: '2026-10-06T02:00:02.000Z' }] } }),
     }]
     const { rerender, props } = renderChat()
-    const note = (await screen.findByText('@Writer explain')).closest('li')!
+    const note = (await screen.findByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@Writer explain')).closest('li')!
     expect(note).not.toHaveClass('flash')
     rerender(<TeamChat {...props} reveal={{ runId: '', id: 'note:hi-5', at: 1 }} />)
     await waitFor(() => expect(note).toHaveClass('flash'))
@@ -355,7 +355,7 @@ describe('the team’s chat', () => {
     HTMLElement.prototype.scrollTo = scrolled as unknown as typeof HTMLElement.prototype.scrollTo
     try {
       const { rerender, props } = renderChat()
-      await screen.findByText('@Writer explain')
+      await screen.findByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@Writer explain')
       scrolled.mockClear()
       rerender(<TeamChat {...props} reveal={{ runId: '', id: 'pending', at: 2 }} />)
       await waitFor(() => expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' })))
