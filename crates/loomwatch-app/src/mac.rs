@@ -2,6 +2,10 @@
 //! doing. While agents work its stitch sews round and the menu names who is working; when something
 //! needs you its mouth opens and the menu bar counts what waits.
 //!
+//! On a `MacBook` the teams live in the notch instead (ADR 0083): an island that pops out when
+//! something happens and tucks into the menu bar beside the camera (`crate::island`,
+//! `crate::notch_panel`). The face stays for any screen without a notch.
+//!
 //! It also updates itself: Update and restart in the app has `loomwatchd` stop for it, and it puts
 //! the new release's `LoomWatch.app` in its own place and opens that (`crate::update`).
 
@@ -15,12 +19,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use objc2::MainThreadMarker;
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
+use crate::island::{self, FromPage};
+use crate::notch_panel::{IslandEvent, NotchPanel};
 use crate::progress::{self, Ended, Mood, Progress, Row};
 use crate::update;
 
@@ -40,6 +47,8 @@ const POLL: Duration = Duration::from_secs(2);
 const FRAME: Duration = Duration::from_millis(125);
 const SEWING_FRAMES: u8 = 8;
 const BLINK_EVERY: u32 = 20;
+/// How often the island hears whether the person is away and whether an app is full screen.
+const ISLAND_CHECK: Duration = Duration::from_secs(2);
 
 enum UserEvent {
     Menu(MenuEvent),
@@ -53,6 +62,8 @@ enum UserEvent {
     Opened,
     /// The new version is open, after Update and restart: this one goes.
     Quit,
+    /// Something for the island at the notch.
+    Island(IslandEvent),
 }
 
 /// Where everything is.
@@ -142,6 +153,7 @@ pub fn run() -> Result<()> {
     event_loop.set_activation_policy(ActivationPolicy::Accessory);
     let proxy = event_loop.create_proxy();
     forward_events(&proxy);
+    let island_proxy = proxy.clone();
 
     let (items, menu) = Items::new(&paths)?;
     let mut bar = Bar::new(&menu);
@@ -151,7 +163,10 @@ pub fn run() -> Result<()> {
         let watched = Arc::clone(&watched);
         std::thread::spawn(move || watch_runs(&watched, &proxy));
     }
+    // The same menu, shown where the island is right-clicked.
+    let island_menu = menu.clone();
     let mut menu = Some(menu);
+    let mut island: Option<Island> = None;
     let mut address: Option<String> = None;
     let mut open_when_ready = !background;
 
@@ -162,8 +177,14 @@ pub fn run() -> Result<()> {
                 if let Some(menu) = menu.take() {
                     bar.build(menu);
                 }
+                island = Island::start(&island_proxy, &mut bar);
             }
-            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => bar.tick(),
+            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
+                bar.tick();
+                if let Some(island) = island.as_mut() {
+                    island.tick();
+                }
+            }
             // Opened again from Applications or Spotlight while running: show it.
             Event::Reopen { .. } => match &address {
                 Some(url) => open_in_browser(url),
@@ -177,7 +198,15 @@ pub fn run() -> Result<()> {
                     open_in_browser(&url);
                     open_when_ready = false;
                 }
+                if let Some(island) = island.as_mut() {
+                    island.panel.load(&url);
+                }
                 address = Some(url);
+            }
+            Event::UserEvent(UserEvent::Island(event)) => {
+                if let Some(island) = island.as_mut() {
+                    island.on(event, address.as_deref(), &island_menu, &mut bar);
+                }
             }
             Event::UserEvent(UserEvent::Status(text)) => items.status.set_text(text),
             Event::UserEvent(UserEvent::Progress(next)) => bar.show(next),
@@ -199,13 +228,7 @@ pub fn run() -> Result<()> {
                         None => open_when_ready = true,
                     }
                 } else if event.id == *items.at_login.id() {
-                    if let Some(bundle) = &paths.bundle {
-                        let wanted = !login_item::enabled();
-                        if let Err(error) = login_item::set(wanted, bundle) {
-                            eprintln!("LoomWatch: start at login: {error:#}");
-                        }
-                    }
-                    items.at_login.set_checked(login_item::enabled());
+                    items.switch_start_at_login(&paths);
                 } else if event.id == *items.log.id() {
                     let _ = Command::new("/usr/bin/open").arg(&paths.log).status();
                 } else if event.id == *items.quit.id() {
@@ -217,11 +240,73 @@ pub fn run() -> Result<()> {
             }
             _ => {}
         }
-        // Sleep until something happens, or until the face next moves.
-        *control_flow = bar
-            .wakes_at()
+        // Sleep until something happens, the face next moves or the island next checks.
+        *control_flow = [bar.wakes_at(), island.as_ref().map(Island::wakes_at)]
+            .into_iter()
+            .flatten()
+            .min()
             .map_or(ControlFlow::Wait, ControlFlow::WaitUntil);
     })
+}
+
+/// The island at the notch (ADR 0083), and when it next checks whether the person is away and an
+/// app is full screen.
+struct Island {
+    panel: NotchPanel,
+    next_check: Instant,
+}
+
+impl Island {
+    /// Made once the app runs, on its main thread. Where it goes decides whether the menu bar face
+    /// stays.
+    fn start(proxy: &EventLoopProxy<UserEvent>, bar: &mut Bar) -> Option<Self> {
+        let mtm = MainThreadMarker::new()?;
+        let proxy = proxy.clone();
+        let mut panel = NotchPanel::new(mtm, move |event| {
+            let _ = proxy.send_event(UserEvent::Island(event));
+        });
+        bar.set_visible(panel.place(mtm));
+        Some(Self {
+            panel,
+            next_check: Instant::now(),
+        })
+    }
+
+    fn tick(&mut self) {
+        if let Some(mtm) = MainThreadMarker::new()
+            && Instant::now() >= self.next_check
+        {
+            self.panel.tick(mtm);
+            self.next_check = Instant::now() + ISLAND_CHECK;
+        }
+    }
+
+    const fn wakes_at(&self) -> Instant {
+        self.next_check
+    }
+
+    /// What the island's page, the pointer and the screens ask of the app. `origin` is
+    /// `loomwatchd`'s address, once it answers.
+    fn on(&mut self, event: IslandEvent, origin: Option<&str>, menu: &Menu, bar: &mut Bar) {
+        let panel = &mut self.panel;
+        match event {
+            IslandEvent::Page(FromPage::Ready) => panel.page_ready(),
+            IslandEvent::Page(FromPage::Areas { rects }) => panel.set_areas(rects),
+            IslandEvent::Page(FromPage::Open { link }) => {
+                if let Some(url) = origin.and_then(|origin| island::app_address(origin, &link)) {
+                    open_in_browser(&url);
+                }
+            }
+            IslandEvent::Page(FromPage::Menu { .. }) => panel.show_menu(menu),
+            IslandEvent::Pointer => panel.pointer(),
+            IslandEvent::ClickOutside => panel.click_outside(),
+            IslandEvent::Screens => {
+                if let Some(mtm) = MainThreadMarker::new() {
+                    bar.set_visible(panel.place(mtm));
+                }
+            }
+        }
+    }
 }
 
 /// Clicks on the menu and on the menu-bar item, as events on the app's loop.
@@ -279,12 +364,25 @@ impl Items {
         ])?;
         Ok((items, menu))
     }
+
+    /// Start at login, switched the other way.
+    fn switch_start_at_login(&self, paths: &Paths) {
+        if let Some(bundle) = &paths.bundle {
+            let wanted = !login_item::enabled();
+            if let Err(error) = login_item::set(wanted, bundle) {
+                eprintln!("LoomWatch: start at login: {error:#}");
+            }
+        }
+        self.at_login.set_checked(login_item::enabled());
+    }
 }
 
 /// The menu-bar item, and what it shows of the teams' work: the face, the count of what waits on
 /// you beside it, a tooltip, and the menu's rows under the status line.
 struct Bar {
     tray: Option<TrayIcon>,
+    /// Whether the face is wanted: not when every screen has a notch for the island.
+    visible: bool,
     faces: Faces,
     face: Face,
     shown: Progress,
@@ -295,6 +393,7 @@ impl Bar {
     fn new(menu: &Menu) -> Self {
         Self {
             tray: None,
+            visible: true,
             faces: Faces::draw(),
             face: Face::default(),
             shown: Progress::default(),
@@ -311,6 +410,15 @@ impl Bar {
             .build()
             .map_err(|error| eprintln!("LoomWatch: no menu-bar item: {error}"))
             .ok();
+        self.set_visible(self.visible);
+    }
+
+    /// Show the face in the menu bar, or take it out while the island at the notch does its work.
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+        if let Some(tray) = &self.tray {
+            let _ = tray.set_visible(visible);
+        }
     }
 
     fn show(&mut self, next: Progress) {

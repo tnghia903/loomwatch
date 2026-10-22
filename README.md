@@ -420,10 +420,12 @@ you built, then add, connect and rename agents to match. To run a team on a sche
    (about 30 MB, for Apple silicon and Intel Macs) and open it.
 2. Drag **LoomWatch** to **Applications**, then open it from Applications.
 
-LoomWatch opens in your browser, where your first agent asks what to make first. It keeps an icon
-in the menu bar: **Open LoomWatch**, **Start at login**, **Show log** and **Quit LoomWatch**. There is no
-window to keep open; closing the browser tab leaves LoomWatch running until you quit it from the
-menu bar. Then follow [Try your first run](#try-your-first-run).
+LoomWatch opens in your browser, where your first agent asks what to make first. On a MacBook it
+then waits in the black notch around the camera at the top of the screen: point at it to see your
+teams, and click **⋯** there for **Open LoomWatch**, **Start at login**, **Show log** and **Quit
+LoomWatch**. On other Macs it keeps an icon in the menu bar with the same menu, and a question
+still drops from the top of the screen. There is no window to keep open; closing the browser tab
+leaves LoomWatch running until you quit it. Then follow [Try your first run](#try-your-first-run).
 
 > [!NOTE]
 > LoomWatch is not notarized by Apple yet, so the first time you open it macOS may say it can't
@@ -545,7 +547,7 @@ history into the file. Update to it first and start it once, with
 
 Started from Terminal, keep that window open while you use LoomWatch, and press
 <kbd>Ctrl</kbd>+<kbd>C</kbd> in it to stop LoomWatch. The Mac app needs no window: quit it from its
-menu-bar icon. Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it). The Windows app is
+menu (on a MacBook, point at the notch and click ⋯; on other Macs, click its menu-bar icon). Its log is in `~/Library/Logs/LoomWatch` (**Show log** opens it). The Windows app is
 the same beside the clock, with its log in `%LOCALAPPDATA%\LoomWatch\Logs`.
 
 Already used LoomWatch from Terminal? The Mac app uses the same teams and the same run history
@@ -585,7 +587,8 @@ The Mac app can't replace itself while it runs from the disk image or from Downl
 folder your account can't change; the window then says so and shows the steps to do it by hand:
 download the new
 [LoomWatch-macos.dmg](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg),
-quit LoomWatch from its menu-bar icon, drag the new one to Applications and choose **Replace**. On
+quit LoomWatch from its menu (point at the notch and click ⋯, or click its menu-bar icon), drag
+the new one to Applications and choose **Replace**. On
 Windows, the steps are to download the new
 [LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)
 and open it; it closes LoomWatch, puts the new version in its place, and opens it again. Versions
@@ -634,7 +637,8 @@ its runs. Scheduled teams run only while LoomWatch is running and the computer i
 
 ### Remove LoomWatch
 
-**The Mac app:** turn off **Start at login** in its menu, choose **Quit LoomWatch**, and drag
+**The Mac app:** in its menu (point at the notch and click ⋯, or click its menu-bar icon), turn
+off **Start at login**, choose **Quit LoomWatch**, and drag
 LoomWatch from Applications to the Trash. Your teams and history stay where steps 4 and 5 below
 say; delete those folders, and `~/Library/Logs/LoomWatch`, to leave nothing behind. **The Windows
 app:** remove LoomWatch in **Settings › Apps › Installed apps** (it quits LoomWatch first and turns

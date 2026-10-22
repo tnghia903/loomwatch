@@ -94,9 +94,10 @@ function sentence(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-/** Where the Mac or Windows app's icon, and its Show log, are. */
-function appIconPlace(): string {
-  return isWindows() ? 'beside the clock' : 'in the menu bar'
+/** Where the Mac or Windows app's menu, with Show log and Quit, is: on a MacBook under the
+    notch's ⋯ (ADR 0083), elsewhere on its icon. */
+function appMenu(): string {
+  return isWindows() ? 'the menu of LoomWatch’s icon beside the clock' : 'LoomWatch’s menu (point at the notch and click ⋯, or click its icon in the menu bar)'
 }
 
 function headline(status: UpdateStatus | null, checking: boolean, progress: InstallProgress): string {
@@ -131,14 +132,14 @@ function Progress({ progress, app }: { progress: Exclude<InstallProgress, { phas
         <p role="alert" className="up-error">
           LoomWatch {progress.version} was started again instead of {progress.to}. {progress.error
             ? sentence(progress.error)
-            : app ? `Show log, in the menu of LoomWatch’s icon ${appIconPlace()}, says why.` : 'The terminal window running LoomWatch says why.'}
+            : app ? `Show log, in ${appMenu()}, says why.` : 'The terminal window running LoomWatch says why.'}
         </p>
       )
     case 'lost':
       return (
         <p role="alert" className="up-error">
           LoomWatch didn’t answer for ten minutes after it stopped to install {progress.to}. {app
-            ? `Click LoomWatch’s icon ${appIconPlace()} and choose Show log, or open LoomWatch again.`
+            ? `Open ${appMenu()} and choose Show log, or open LoomWatch again.`
             : 'Look in the terminal window running it.'}
         </p>
       )
@@ -385,7 +386,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                 ) : (
                   <ol>
                     <li>Download <strong>LoomWatch-macos.dmg</strong> from the release page above and open it.</li>
-                    <li>Quit LoomWatch: click its icon in the menu bar, then <strong>Quit LoomWatch</strong>.</li>
+                    <li>Quit LoomWatch: point at the notch and click ⋯, or click its icon in the menu bar, then <strong>Quit LoomWatch</strong>.</li>
                     <li>Drag LoomWatch to Applications and choose <strong>Replace</strong>, then open it again. Your teams and history stay.</li>
                   </ol>
                 )}

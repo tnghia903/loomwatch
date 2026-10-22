@@ -174,7 +174,7 @@ always has its archive; a router built without one (tests) answers 503.
 | Route | Result |
 |---|---|
 | `POST /api/runs` | Start a run; `202 Accepted` with the run record |
-| `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the Mac menu bar and the Windows notification-area menu read |
+| `GET /api/runs` | Every run since the daemon started, newest first; `?preview=true` cuts each `reply` to its first 400 characters, which is what the browser's lists read; `?finishedWithin=<seconds>` keeps the runs still under way and those that finished in that many seconds, which is what the Mac menu bar, the island at a MacBook's notch and the Windows notification-area menu read |
 | `GET /api/runs/{id}` | One run record, or 404 |
 | `POST /api/runs/{id}/cancel` | Abort a live run: 200 with the record; 409 with the record when it already finished; 404 when unknown |
 
