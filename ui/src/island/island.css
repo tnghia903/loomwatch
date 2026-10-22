@@ -1,0 +1,250 @@
+/* The island at the notch (ADR 0083): Peek. The page fills the Mac app's see-through panel; only
+   the island and what drops out of it are drawn, always in the notch's black, so the page is in
+   the dark theme whatever the app's. Sizes follow the notch: --notch-w and --bar (its height) come
+   from the app, --ear from how many teams are tucked beside it. Motion is the design's table,
+   with its spring for the island growing and figures popping out. */
+
+html, body, #island { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+.island, .island *, .island *::before, .island *::after { box-sizing: border-box; }
+body {
+  font: 400 13px/18px var(--font-sans);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+.island {
+  /* A figure peeking out below the notch, and one tucked beside it. */
+  --fig: calc(var(--bar) * 2.2);
+  --head: calc(var(--bar) * 1.06);
+  --edge: 0 0 0 1px var(--color-hairline);
+  --shadow: 0 10px 24px color-mix(in srgb, var(--color-black) 30%, transparent);
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* A figure's state is its glow, as the app draws it (blue at work, gold waiting for you, green
+   done, red stopped), and its pose, as the team rail holds it, so no state is colour alone: it
+   breathes while working, leans in to ask, sits down when done, and slumps, greyed, when stopped.
+   The glow is on the figure's holder and the picture is masked to the figure, so the glow follows
+   the figure and not the picture's square edge. */
+.island [data-moment="work"] { --glow: var(--color-live); }
+.island [data-moment="ask"] { --glow: var(--color-accent); }
+.island [data-moment="done"] { --glow: var(--color-ok); }
+.island [data-moment="fail"] { --glow: var(--color-alert); }
+.island .glow { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2.5px var(--glow)); }
+.island .glow[data-moment="work"] { animation: island-breathe var(--t-breathe) ease-in-out infinite; }
+.island .glow[data-moment="fail"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2.5px var(--glow)); }
+.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure) > :is(img, .figure-still) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  -webkit-mask-image: radial-gradient(closest-side, var(--color-black) 78%, transparent);
+  mask-image: radial-gradient(closest-side, var(--color-black) 78%, transparent);
+}
+.island .figure-still { position: relative; }
+.island .figure-still > img, .island .figure-still > .worn-overlay, .island .figure-still > .worn-overlay > img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+}
+.island .figure-still > .worn-overlay { pointer-events: none; }
+/* A figure is a picture, but not one to drag out of the notch. */
+.island img { -webkit-user-drag: none; }
+
+/* ---- The shape: the notch, grown ---- */
+.island-shape {
+  --w: var(--notch-w);
+  --h: var(--bar);
+  --r: calc(var(--bar) * .3);
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--w);
+  height: var(--h);
+  translate: -50% 0;
+  pointer-events: auto;
+  outline: none;
+  transition: width var(--t-spring) var(--ease-spring), height var(--t-spring) var(--ease-spring), opacity var(--t-quick) var(--ease-out);
+}
+.island-shape:focus-visible .island-body { box-shadow: inset 0 0 0 2px var(--color-accent); }
+/* Where it meets the top of the screen it flows out of the bezel, as the notch does. */
+.island-shape::before, .island-shape::after { content: ""; position: absolute; top: 0; width: 8px; height: 8px; }
+.island-shape::before { left: -8px; background: radial-gradient(circle at 0 100%, transparent 7.5px, var(--color-black) 8px); }
+.island-shape::after { right: -8px; background: radial-gradient(circle at 100% 100%, transparent 7.5px, var(--color-black) 8px); }
+.island-body {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--color-black);
+  border-radius: 0 0 var(--r) var(--r);
+  transition: border-radius var(--t-move) var(--ease-out);
+}
+
+.island[data-view="tucked"] .island-shape { --w: calc(var(--notch-w) + 2 * var(--ear)); }
+.island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-shape {
+  --w: calc(var(--notch-w) + 24px);
+  --h: calc(var(--bar) + var(--fig) * .66);
+  --r: calc(var(--bar) * .7);
+}
+.island[data-view="ask"] .island-shape { --h: calc(var(--bar) + 10px); --r: calc(var(--bar) * .38); }
+.island[data-view="list"] .island-shape {
+  --w: max(calc(var(--notch-w) + 2 * var(--ear)), 480px);
+  --h: var(--list-h, calc(var(--bar) + 120px));
+  --r: 26px;
+}
+.island[data-view="hidden"] .island-shape { --w: 120px; --h: 0px; opacity: 0; pointer-events: none; }
+
+/* ---- Popping out: the agent at work peeks up below the notch ---- */
+.island-balcony { position: absolute; top: var(--bar); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; }
+/* The list fills the island: whoever peeked last is not drawn over it. */
+.island[data-view="list"] .island-balcony { visibility: hidden; }
+.island-slot { position: absolute; inset: 0; translate: 0 calc(var(--fig) * 1.15); transition: translate var(--t-move) var(--ease-in); }
+.island-slot > * { transform-origin: 50% 90%; }
+.island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on {
+  translate: 0 0;
+  transition: translate var(--t-spring) var(--ease-spring) var(--t-quick);
+}
+.island[data-view="work"] .island-slot.is-on > * { animation: island-bob calc(var(--t-breathe) / 2) ease-in-out infinite; }
+.island[data-view="done"] .island-slot.is-on > * { animation: island-hop var(--t-settle) var(--ease-spring) var(--t-entrance) 2; }
+.island[data-view="fail"] .island-slot.is-on > * { rotate: 8deg; translate: 0 3px; transition: rotate var(--t-move) var(--ease-out) var(--t-entrance), translate var(--t-move) var(--ease-out) var(--t-entrance); }
+
+/* ---- A question drops on a gold line; a result slides out as a slip ---- */
+.island-drop { position: absolute; inset: 0; clip-path: inset(var(--bar) 0 0 0); pointer-events: none; }
+.island-hang {
+  position: absolute;
+  top: calc(var(--bar) + 10px);
+  left: 50%;
+  width: 340px;
+  height: calc(var(--fig) * 1.72 + 200px);
+  margin-left: -170px;
+  translate: 0 -420px;
+  transition: translate var(--t-move) var(--ease-in);
+}
+.island[data-view="ask"] .island-hang { translate: 0 0; transition: translate var(--t-settle) var(--ease-spring) var(--t-quick); }
+.island-swing { position: absolute; inset: 0; transform-origin: 50% 0; }
+.island[data-view="ask"] .island-swing { animation: island-swing calc(var(--t-flow) * 2) var(--ease-out) var(--t-settle) 1 both; }
+.island-line { position: absolute; top: 0; left: 50%; width: 2.5px; height: calc(var(--fig) * .85); margin-left: -1.25px; background: var(--color-accent); }
+.island-hang-figure { position: absolute; top: calc(var(--fig) * .64); left: 50%; width: var(--fig); height: var(--fig); margin-left: calc(var(--fig) / -2); }
+.island-card {
+  position: absolute;
+  top: calc(var(--fig) * 1.72);
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 12px 16px;
+  background: var(--color-black);
+  border-radius: 18px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent), var(--shadow);
+}
+.island[data-view="ask"] .island-card { pointer-events: auto; }
+.island-slip {
+  position: absolute;
+  top: calc(var(--bar) + var(--fig) * .66 + 8px);
+  left: 50%;
+  width: 350px;
+  margin-left: -175px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px 12px 16px;
+  background: var(--color-black);
+  border-radius: 18px;
+  box-shadow: var(--edge), var(--shadow);
+  translate: 0 -60px;
+  opacity: 0;
+  transition: translate var(--t-move) var(--ease-in), opacity var(--t-quick) var(--ease-in);
+}
+.island:is([data-view="done"], [data-view="fail"]) .island-slip {
+  translate: 0 0;
+  opacity: 1;
+  pointer-events: auto;
+  transition: translate var(--t-spring) var(--ease-spring) var(--t-move), opacity var(--t-quick) var(--ease-out) var(--t-move);
+}
+
+/* ---- Tucked into the menu bar beside the camera ---- */
+.island-ear { position: absolute; top: 0; height: var(--bar); width: var(--ear); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+.island-ear-left { left: 0; }
+.island-ear-right { right: 0; }
+.island[data-view="tucked"] .island-ear { opacity: 1; transition-delay: var(--t-quick); }
+.island-heads { position: relative; height: var(--bar); }
+.island-head { position: absolute; top: calc(var(--bar) * -.1); width: var(--head); height: var(--head); translate: 0 var(--bar); transition: translate var(--t-spring) var(--ease-spring) var(--t-quick), rotate var(--t-move) var(--ease-out); }
+.island[data-view="tucked"] .island-head { translate: 0 0; }
+.island[data-view="tucked"] .island-head[data-moment="ask"] { rotate: -8deg; }
+.island[data-view="tucked"] .island-head[data-moment="done"] { translate: 0 3px; }
+.island[data-view="tucked"] .island-head[data-moment="fail"] { rotate: 8deg; translate: 0 3px; }
+.island.is-nudging .island-head[data-moment="ask"] > * { animation: island-nudge var(--t-settle) var(--ease-spring); }
+.island-more { margin-left: 4px; font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.island-count { font: 700 13px/18px var(--font-sans); color: var(--color-accent); font-variant-numeric: tabular-nums; }
+.island-time { font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
+.island-slip-mark { position: relative; width: 10px; height: 13px; border-radius: 2px; background: var(--color-ink); rotate: -8deg; }
+.island-slip-mark::after { content: ""; position: absolute; top: 3px; left: 2px; right: 2px; height: 5px; border-block: 1.5px solid var(--color-black); }
+
+/* ---- Words and answers ---- */
+.island-words { display: grid; gap: 2px; min-width: 0; }
+.island-words small { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.island-words p { margin: 0; font: 500 14px/20px var(--font-sans); color: var(--color-ink); overflow-wrap: anywhere; }
+.island-words .island-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island-words .island-problem { color: var(--color-alert); }
+.island-words .island-said { color: var(--color-ink); }
+/* A long question shows four lines on its card and one in the list; LoomWatch has it whole. */
+.island-ask { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; }
+.island-row .island-ask { -webkit-line-clamp: 1; line-clamp: 1; }
+.island-slip p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.island-acts { display: flex; gap: 8px; justify-content: flex-end; }
+.island-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 28%, transparent);
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--color-ink);
+  font: 600 13px/18px var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--t-instant) var(--ease-out), background-color var(--t-instant) var(--ease-out);
+}
+.island-button:hover { border-color: var(--color-ink); }
+.island-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.island-button.is-primary { border-color: var(--color-accent-fill); background: var(--color-accent-fill); color: var(--color-accent-on-fill); }
+.island-button:disabled { opacity: .5; cursor: default; }
+.island-more-button { padding-inline: 10px; letter-spacing: .08em; }
+.island-nowrap { white-space: nowrap; }
+
+/* ---- Pointing at the notch: one row per team ---- */
+.island-list { position: absolute; top: calc(var(--bar) + 4px); left: 18px; right: 18px; display: grid; animation: island-rise var(--t-entrance) var(--ease-out) var(--t-quick) both; }
+.island-row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 8px; align-items: center; padding-block: 7px; }
+.island-row + .island-row { border-top: 1px solid var(--color-hairline); }
+.island-row-figures { position: relative; height: 38px; }
+.island-row-figure { position: absolute; top: 0; width: 38px; height: 38px; }
+/* The rest of the team stands a step behind the one acting, in its own colours. */
+.island-row-figure.is-behind > * { scale: .78; transform-origin: 50% 100%; }
+.island-quiet { margin: 6px 0; font: 500 13px/18px var(--font-sans); color: var(--color-ink-2); }
+.island-list-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 6px 0 4px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+
+@keyframes island-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 6px var(--glow)); } }
+@keyframes island-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
+@keyframes island-hop { 0%, 70%, 100% { translate: 0 0; } 35% { translate: 0 -12px; } }
+@keyframes island-swing { 0% { rotate: 0deg; } 18% { rotate: 2.4deg; } 42% { rotate: -1.5deg; } 68% { rotate: .7deg; } 100% { rotate: 0deg; } }
+@keyframes island-nudge { 0%, 100% { translate: 0 0; } 40% { translate: 0 -6px; } }
+@keyframes island-rise { from { opacity: 0; translate: 0 -6px; } to { opacity: 1; translate: 0 0; } }
+
+/* Reduced motion: every moment still shows, and still says what it is by pose and words, but
+   nothing travels, loops or grows. The island and what drops out of it appear where they belong. */
+@media (prefers-reduced-motion: reduce) {
+  .island *, .island *::before, .island *::after { animation: none !important; }
+  .island-shape { transition: opacity var(--t-quick) var(--ease-out); }
+  .island-body { transition: none; }
+  .island-hang, .island-slip, .island-slot, .island-head { translate: 0 0; transition: opacity var(--t-quick) var(--ease-out); }
+  .island-slot > *, .island-head { transition: opacity var(--t-quick) var(--ease-out) !important; }
+  .island-hang { opacity: 0; }
+  .island[data-view="ask"] .island-hang { opacity: 1; }
+  .island-slot, .island-head { opacity: 0; }
+  .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on, .island[data-view="tucked"] .island-head { opacity: 1; }
+}

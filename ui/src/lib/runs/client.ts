@@ -452,6 +452,15 @@ export async function fetchRuns(signal?: AbortSignal): Promise<RunRecord[]> {
 }
 
 /**
+ * The runs still under way and those that finished in the last `seconds`, each `reply` cut to its
+ * opening: what the island at the notch reads (ADR 0083), as the Mac menu bar does.
+ */
+export async function fetchRecentRuns(seconds: number, signal?: AbortSignal): Promise<RunRecord[]> {
+  const response = await daemonFetch(`/api/runs?preview=true&finishedWithin=${seconds}`, { signal, cache: 'no-store' })
+  return readRun<RunRecord[]>(response)
+}
+
+/**
  * Follow one run's registry record. Polls while the run is non-terminal; a run the daemon
  * no longer knows (restart) resolves to `null` and the caller falls back to archive evidence.
  */

@@ -1,11 +1,24 @@
 // How a permission request reads to a person (ADR 0040): who wants to do what, in the words of the
 // switch that would have allowed it, and when it gives up waiting.
-import type { PermissionRequest } from './client'
+import type { PermissionDecision, PermissionRequest } from './client'
 
 const WANTS: Record<string, string> = {
   web: 'use the web',
   commands: 'run a command',
   edits: 'change a file',
+}
+
+/** What an answer did, in the words the tray and the island at the notch say once it is sent. */
+export const PERMISSION_SAID: Record<PermissionDecision, string> = { edit: 'Allowed as you changed it.', answer: 'Your answer was sent.', allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
+
+/**
+ * Whether a request can be answered with one tap, away from its full card: the island at the notch
+ * offers Allow and Deny only for these (ADR 0083). A command can't be judged from one line, and
+ * the ones Auto mode still asks about are the risky ones, so they, and a request that offers an
+ * edit, open their run instead.
+ */
+export function answerableAtAGlance(request: Pick<PermissionRequest, 'switch' | 'kind' | 'auto' | 'edit'>): boolean {
+  return request.switch !== 'commands' && request.kind !== 'execute' && !request.auto && !request.edit
 }
 
 /** "Researcher wants to use the web" — the sentence a card or ticket leads with. */

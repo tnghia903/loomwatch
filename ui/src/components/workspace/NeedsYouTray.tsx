@@ -2,6 +2,7 @@ import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
+import { PERMISSION_SAID } from '../../lib/runs/permissionRequests'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 import { goToTeam } from '../../lib/team-file/teamPage'
@@ -23,7 +24,6 @@ interface NeedsYouTrayProps {
 
 const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: 'Stopped' }
 
-const PERMISSION_SAID: Record<PermissionDecision, string> = { edit: 'Allowed as you changed it.', answer: 'Your answer was sent.', allow_once: 'Allowed once.', allow_run: 'Allowed for the rest of the run.', allow_team: 'Allowed for the whole team, for the rest of the run.', deny: 'Denied. The agent carries on without it.' }
 
 // Tickets the bell has already rung for, kept for the tab's session: Home, a team and an agent are
 // separate pages, and each page's tray starts empty until its first poll, so a tray's own memory

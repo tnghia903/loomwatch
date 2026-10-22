@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
@@ -14,6 +15,11 @@ export default defineConfig({
     // install; just above it, the warning means the bundle really grew.
     chunkSizeWarningLimit: 650,
     rolldownOptions: {
+      // The app, and the island the Mac app shows at the notch (ADR 0083).
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        island: fileURLToPath(new URL('./island.html', import.meta.url)),
+      },
       output: {
         // Libraries change far less often than the app: give the big ones their own long-lived,
         // content-hashed chunks so an app update does not make the browser re-download them.

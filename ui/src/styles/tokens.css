@@ -201,6 +201,9 @@
 
   --ease-out:    cubic-bezier(.2, 0, 0, 1);
   --ease-in:     cubic-bezier(.4, 0, 1, 1);
+  /* The island at the notch growing, a figure popping up, a question dropping (ADR 0083): a
+     spring's small overshoot, as the notch's own animations have. Never under reduced motion. */
+  --ease-spring: cubic-bezier(.32, 1.36, .5, 1);
   --t-instant:   90ms;
   --t-quick:    160ms;
   --t-move:     240ms;
@@ -208,6 +211,7 @@
   --t-flow:    1400ms;
   --t-breathe: 2400ms;
   --t-settle:   900ms;
+  --t-spring:   560ms;
   --t-caret:    530ms;   /* half a caret's breath (an editor's 1.06 s blink), and how long it holds after new text */
 }
 

@@ -21,6 +21,12 @@ mod windows;
 // and without the face's moods by the Windows one.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod progress;
+// The island at the notch (ADR 0083): where it goes and what passes between the panel and its
+// page, tested everywhere; and the panel itself, on a Mac.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod island;
+#[cfg(target_os = "macos")]
+mod notch_panel;
 // Update and restart: the app downloading the next release and putting it in its own place.
 mod update;
 
