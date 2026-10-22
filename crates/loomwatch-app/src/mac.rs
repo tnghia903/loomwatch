@@ -318,7 +318,9 @@ impl Island {
             IslandEvent::Page(FromPage::Keyboard { on: true }) => panel.take_keyboard(),
             IslandEvent::Page(FromPage::Keyboard { on: false }) => panel.give_back_keyboard(),
             IslandEvent::Page(FromPage::Pinned { name }) => self.pinned = name.is_some(),
-            IslandEvent::Page(FromPage::Copy { text }) => NotchPanel::copy(&text),
+            IslandEvent::Page(FromPage::Copy { text, html }) => {
+                NotchPanel::copy(&text, html.as_deref());
+            }
             // ⌃⌥Space opens the box to the pinned agent; with none pinned there is nothing to open.
             IslandEvent::Shortcut => {
                 if self.pinned {

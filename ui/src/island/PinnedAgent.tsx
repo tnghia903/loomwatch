@@ -55,17 +55,25 @@ export function IntakeJobs({ island }: { island: Island }) {
 /**
  * The pinned agent's answer, as any answer on the island: who answered, its opening lines, Copy and
  * See answer. Most of the time that is all. Pointed at, a gold tear line along its bottom says it
- * can be taken: dragged into any app, a paper copy of the whole answer comes away and lands there
- * as text. Once taken, it has been seen and leaves the island.
+ * can be taken: dragged into any app, a paper copy of the whole answer comes away and lands there.
+ * Copy and a drag carry the whole answer, formatted for apps that take formatting and as plain
+ * text, links with their addresses, for the rest; until it is read whole, neither takes it. Once
+ * taken, it has been seen and leaves the island.
  */
 export function AnswerSlip({ island, team }: { island: Island; team: TeamNow }) {
-  const whole = plainText(island.answerOf(team) ?? team.result)
+  const answer = island.answerOf(team)
+  const whole = plainText(answer?.text ?? team.result)
   const paper = useRef<HTMLDivElement>(null)
   const [tearingNow, setTearingNow] = useState(false)
   const onDragStart = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!answer) {
+      event.preventDefault()
+      return
+    }
     setTearing(true)
     setTearingNow(true)
-    event.dataTransfer.setData('text/plain', whole)
+    event.dataTransfer.setData('text/plain', answer.plain)
+    if (answer.html) event.dataTransfer.setData('text/html', answer.html)
     event.dataTransfer.effectAllowed = 'copy'
     if (paper.current) event.dataTransfer.setDragImage?.(paper.current, 24, 16)
   }
@@ -75,7 +83,7 @@ export function AnswerSlip({ island, team }: { island: Island; team: TeamNow }) 
     if (event.dataTransfer.dropEffect !== 'none') island.took(team)
   }
   return (
-    <div className={`island-answer${tearingNow ? ' is-tearing' : ''}`} draggable onDragStart={onDragStart} onDragEnd={onDragEnd} title="Drag it into any app">
+    <div className={`island-answer${tearingNow ? ' is-tearing' : ''}${answer ? '' : ' is-reading'}`} draggable={answer !== null} onDragStart={onDragStart} onDragEnd={onDragEnd} title={answer ? 'Drag it into any app' : undefined}>
       <div className="island-words">
         <small>{team.teamName} answered</small>
         {/* Its opening lines, read without the blank lines between paragraphs. */}
@@ -83,7 +91,7 @@ export function AnswerSlip({ island, team }: { island: Island; team: TeamNow }) 
       </div>
       <div className="island-acts">
         {island.copied ? <small className="island-sent" role="status">Copied.</small> : (
-          <button type="button" className="island-button" onClick={() => island.copy(whole)}>Copy</button>
+          <button type="button" className="island-button" disabled={!answer} onClick={() => { if (answer) island.copy(answer) }}>Copy</button>
         )}
         <button type="button" className="island-button" onClick={() => island.open(team)}>See answer</button>
       </div>

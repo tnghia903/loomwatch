@@ -178,8 +178,13 @@ pub enum FromPage {
     Keyboard { on: bool },
     /// The agent pinned to the notch, by name, or none.
     Pinned { name: Option<String> },
-    /// Put `text` on the clipboard: Copy on an answer.
-    Copy { text: String },
+    /// Put an answer on the clipboard, Copy on it: `text` for apps that take plain text, and
+    /// `html`, when there is one, formatted for apps that take it.
+    Copy {
+        text: String,
+        #[serde(default)]
+        html: Option<String>,
+    },
 }
 
 impl FromPage {
@@ -410,9 +415,19 @@ mod tests {
             Some(FromPage::Pinned { name: None })
         );
         assert_eq!(
-            FromPage::parse(r#"{"kind":"copy","text":"Rent rises 4%."}"#),
+            FromPage::parse(r#"{"kind":"copy","text":"Rent rises 4%.","html":null}"#),
             Some(FromPage::Copy {
-                text: "Rent rises 4%.".into()
+                text: "Rent rises 4%.".into(),
+                html: None
+            })
+        );
+        assert_eq!(
+            FromPage::parse(
+                r#"{"kind":"copy","text":"Rent rises 4% (https://x.vn)","html":"<p>Rent rises <a href=\"https://x.vn\">4%</a></p>"}"#
+            ),
+            Some(FromPage::Copy {
+                text: "Rent rises 4% (https://x.vn)".into(),
+                html: Some(r#"<p>Rent rises <a href="https://x.vn">4%</a></p>"#.into())
             })
         );
         assert_eq!(FromPage::parse(r#"{"kind":"launch"}"#), None);

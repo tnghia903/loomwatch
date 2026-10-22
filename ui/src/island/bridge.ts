@@ -37,8 +37,9 @@ export type ToApp =
   | { kind: 'keyboard'; on: boolean }
   /** The agent pinned to the notch, by name, so ⌃⌥Space has a box to open; `null` when none is. */
   | { kind: 'pinned'; name: string | null }
-  /** Put `text` on the clipboard: Copy on an answer. */
-  | { kind: 'copy'; text: string }
+  /** Put an answer on the clipboard, Copy on it: `text` for apps that take plain text, and `html`,
+      when there is one, formatted for apps that take it. */
+  | { kind: 'copy'; text: string; html: string | null }
 
 declare global {
   interface Window {

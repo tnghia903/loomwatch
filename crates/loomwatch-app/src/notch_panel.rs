@@ -20,9 +20,9 @@ use objc2_app_kit::{
     NSApplication, NSApplicationDidChangeScreenParametersNotification,
     NSApplicationPresentationOptions, NSAutoresizingMaskOptions, NSBackingStoreType, NSColor,
     NSEvent, NSEventMask, NSMainMenuWindowLevel, NSPanel, NSPasteboard, NSPasteboardNameDrag,
-    NSPasteboardTypeString, NSResponder, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior,
-    NSWindowStyleMask, NSWorkspace, NSWorkspaceActiveSpaceDidChangeNotification,
-    NSWorkspaceDidActivateApplicationNotification,
+    NSPasteboardTypeHTML, NSPasteboardTypeString, NSResponder, NSScreen, NSView, NSWindow,
+    NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
+    NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
 };
 use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSNumber, NSObject, NSObjectNSKeyValueCoding,
@@ -297,10 +297,15 @@ impl NotchPanel {
         }
     }
 
-    /// Copy on an answer: its words on the clipboard, as any app's Copy puts them.
-    pub fn copy(text: &str) {
+    /// Copy on an answer: on the clipboard as any app's Copy puts it, formatted (`html`) for an
+    /// app that pastes formatting, such as Mail, Notes or Pages, and as plain `text` for the rest.
+    pub fn copy(text: &str, html: Option<&str>) {
         let board = NSPasteboard::generalPasteboard();
         board.clearContents();
+        if let Some(html) = html {
+            // SAFETY: `NSPasteboardTypeHTML` is `AppKit`'s own constant.
+            board.setString_forType(&NSString::from_str(html), unsafe { NSPasteboardTypeHTML });
+        }
         // SAFETY: `NSPasteboardTypeString` is `AppKit`'s own constant.
         board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
     }

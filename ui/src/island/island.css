@@ -286,7 +286,9 @@ body {
 .island-row .island-answer { grid-column: 2 / -1; }
 .island-answer .island-words p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; white-space: pre-line; }
 .island-answer::after { content: ""; position: absolute; left: -4px; right: -4px; bottom: -6px; border-top: 1.5px dashed var(--color-accent); opacity: 0; transition: opacity var(--t-quick) var(--ease-out); pointer-events: none; }
-.island-answer:hover::after, .island-answer.is-tearing::after { opacity: .85; }
+.island-answer:not(.is-reading):hover::after, .island-answer.is-tearing::after { opacity: .85; }
+/* Until it is read whole, it can't be taken: no hand, no tear line. */
+.island-answer.is-reading { cursor: default; }
 .island-slip.is-answer { grid-template-columns: minmax(0, 1fr); }
 .island-answer .island-paper-copy { position: fixed; left: -2000px; top: 0; width: 260px; display: grid; gap: 4px; padding: 10px 12px 14px; border-radius: 3px; background: var(--color-ink); color: var(--color-black); pointer-events: none; }
 .island-answer .island-paper-copy small { font: 600 11px/14px var(--font-sans); color: color-mix(in srgb, var(--color-black) 55%, var(--color-ink)); }

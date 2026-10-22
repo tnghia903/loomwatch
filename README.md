@@ -432,9 +432,9 @@ To keep one of your agents at hand, open it in **My agents**, click its name at 
 **Pin to the notch**. Then press **⌃⌥Space** (Control-Option-Space) in any app, or point at the
 notch, and write to it. Drag a file, a picture, a link or some text to the notch to hand it over:
 the notch opens to take it, offers a few jobs that fit, and you can say your own. Its answer shows
-at the notch: **Copy** it, or drag it into any app. It can ask one of your teams to do part of the
-work; that team only starts when you press **Start**, and that run costs what any run of the team
-costs.
+at the notch: **Copy** it, or drag it into any app, and it keeps its headings, lists and links where
+that app takes formatting. It can ask one of your teams to do part of the work; that team only
+starts when you press **Start**, and that run costs what any run of the team costs.
 
 > [!NOTE]
 > LoomWatch is not notarized by Apple yet, so the first time you open it macOS may say it can't

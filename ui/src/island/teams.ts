@@ -174,16 +174,32 @@ export function firstLine(reply: string | null | undefined): string {
 }
 
 /**
- * An answer as plain text, for reading at the notch and for taking into another app: its lines
- * without Markdown's marks, links as their words.
+ * An answer as plain text, for reading at the notch: its lines without Markdown's marks, links as
+ * their words.
  */
 export function plainText(reply: string | null | undefined): string {
+  return unmarked(reply, (words) => words)
+}
+
+/**
+ * An answer as plain text, for an app that takes no formatting: as {@link plainText}, but each
+ * link keeps its address after its words, so a pasted answer still leads to its sources.
+ */
+export function copyText(reply: string | null | undefined): string {
+  return unmarked(reply, (words, address) => (!words || words === address ? address : `${words} (${address})`))
+}
+
+/** `reply`'s lines without Markdown's marks, a link said by `link(words, address)`. */
+function unmarked(reply: string | null | undefined, link: (words: string, address: string) => string): string {
   return (reply ?? '')
     .split('\n')
+    // A code block keeps its lines and loses its fences.
+    .filter((line) => !/^\s*(```|~~~)/.test(line))
     .map((line) => line
       .replace(/^\s*(#{1,6}\s+|>\s*)/, '')
       .replace(/^(\s*)[-*+]\s+/, '$1• ')
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/!?\[([^\]]*)\]\(\s*<?([^)\s>]*)>?(?:\s+["'][^"']*["'])?\s*\)/g, (_link, words: string, address: string) => link(words, address))
+      .replace(/<(https?:\/\/[^>\s]+)>/g, '$1')
       .replace(/(\*\*|__|`)/g, '')
       .replace(/(^|\s)[*_]([^*_\n]+)[*_](?=\s|[.,;:!?]|$)/g, '$1$2'))
     .filter((line, index, lines) => !/^-{3,}$/.test(line.trim()) && !(line.trim() === '' && lines[index - 1]?.trim() === ''))

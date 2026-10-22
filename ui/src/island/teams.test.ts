@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { answering, at, failed, iso, OUT_OF_CREDITS, permission, question, run, said } from './fixtures'
-import { firstLine, momentsBetween, teamsNow, tucked, workedFor } from './teams'
+import { copyText, firstLine, momentsBetween, plainText, teamsNow, tucked, workedFor } from './teams'
 
 const none = new Set<string>()
 const nobody = new Map<string, string>()
@@ -53,6 +53,12 @@ describe('what the island shows of each team', () => {
       permission('edit', 'writer', { switch: 'web', edit: { field: 'url', value: 'https://x.test' } }),
     ] })], 0, none, nobody)
     expect(team.quick).toEqual(['a:permission:web'])
+  })
+
+  it('reads an answer as plain text at the notch, and copies it with its links’ addresses', () => {
+    const answer = '## Sources\n\nRent rises [4%](https://x.vn/rent "the notice") in **May**.\n\n```\nnew: 9.4m\n```\n\n- See <https://x.vn/faq>\n- [https://x.vn](https://x.vn)'
+    expect(plainText(answer)).toBe('Sources\n\nRent rises 4% in May.\n\nnew: 9.4m\n\n• See https://x.vn/faq\n• https://x.vn')
+    expect(copyText(answer)).toBe('Sources\n\nRent rises 4% (https://x.vn/rent) in May.\n\nnew: 9.4m\n\n• See https://x.vn/faq\n• https://x.vn')
   })
 
   it('takes the first line of an answer as its words, without the Markdown', () => {

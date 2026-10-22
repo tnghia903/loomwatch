@@ -18,13 +18,23 @@ import type { Intake } from './intake'
 import { pinnedNow, pinnedWorking, sendToPinned, type PinnedNow } from './pinned'
 import { wakesAt } from './popouts'
 import { initialIsland, islandReducer, viewOf, type IslandAction, type IslandState, type IslandViewName } from './state'
-import { tucked, type TeamNow, type Tucked } from './teams'
+import { copyText, tucked, type TeamNow, type Tucked } from './teams'
 import { ISLAND_WAITS } from './waits'
 
 const NO_TEAMS: TeamNow[] = []
 
 /** How far back the island looks for finished runs: an hour, as the menu bar does. */
 const FINISHED_WITHIN_SECONDS = 60 * 60
+
+/** A finished answer of the pinned agent, read whole: what its card shows, and what it carries away. */
+export interface WholeAnswer {
+  /** As it was written, in Markdown. */
+  text: string
+  /** For an app that takes no formatting: links keep their addresses. */
+  plain: string
+  /** Formatted, for an app that takes it; `null` when it couldn't be made. */
+  html: string | null
+}
 
 export interface Island {
   view: IslandViewName
@@ -69,10 +79,11 @@ export interface Island {
   drop: (intake: Intake) => void
   dragOver: (over: boolean) => void
   clearIntake: () => void
-  /** The whole answer of a finished turn of the pinned agent, once read: what its slip prints. */
-  answerOf: (team: TeamNow) => string | null
+  /** The whole answer of a finished turn of the pinned agent, once read: what its card shows, and
+      what Copy and a drag carry. `null` until then, when neither can take it. */
+  answerOf: (team: TeamNow) => WholeAnswer | null
   /** Copy an answer; and an answer torn off into another app, which has been seen. */
-  copy: (text: string) => void
+  copy: (answer: WholeAnswer) => void
   copied: boolean
   took: (team: TeamNow) => void
   /** Start one of your teams on what the pinned agent asked it, or say not now. */
@@ -198,6 +209,19 @@ export function useIsland(): Island {
     giveBack()
   }, [giveBack])
   useEffect(() => { if (!listOpen) giveBack() }, [listOpen, giveBack])
+  // Escape while writing, wherever the keyboard is in the island (the box, a button reached from
+  // it, or nowhere once Copy has said "Copied."), puts it away and gives the keyboard back.
+  const composing = state.composing
+  useEffect(() => {
+    if (!composing) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      putAway()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [composing, putAway])
   const records = useRef(state.records)
   useEffect(() => { records.current = state.records })
   const intake = state.intake
@@ -228,7 +252,8 @@ export function useIsland(): Island {
 
   // The whole answer of each finished turn of the pinned agent, read once: the run's reply, or for
   // a message it answered in the chat, its answer there. The island's own reading is cut short.
-  const [answers, setAnswers] = useState<ReadonlyMap<string, string>>(() => new Map())
+  // It counts as read once it is ready to take away too: as plain text and formatted.
+  const [answers, setAnswers] = useState<ReadonlyMap<string, WholeAnswer>>(() => new Map())
   const reading = useRef(new Set<string>())
   useEffect(() => {
     for (const team of teams) {
@@ -240,15 +265,21 @@ export function useIsland(): Island {
           return note?.kind === 'note' ? note.message.answers?.said[0]?.text ?? null : null
         })
         : fetchRun(team.runId).then((record) => record.reply)
-      whole.then((text) => { if (text) setAnswers((was) => new Map(was).set(team.runId, text)) }, () => { reading.current.delete(team.runId) })
+      whole
+        .then(async (text) => {
+          if (!text) return
+          const html = await import('./answerHtml').then(({ answerHtml }) => answerHtml(text), () => null)
+          setAnswers((was) => new Map(was).set(team.runId, { text, plain: copyText(text), html }))
+        })
+        .catch(() => { reading.current.delete(team.runId) })
     }
   }, [teams])
   const answerOf = useCallback((team: TeamNow) => answers.get(team.runId) ?? null, [answers])
 
   const [copied, setCopied] = useState(false)
-  const copy = useCallback((text: string) => {
-    if (inApp()) tellApp({ kind: 'copy', text })
-    else void navigator.clipboard?.writeText(text).catch(() => {})
+  const copy = useCallback((answer: WholeAnswer) => {
+    if (inApp()) tellApp({ kind: 'copy', text: answer.plain, html: answer.html })
+    else void toClipboard(answer).catch(() => {})
     setCopied(true)
     window.setTimeout(() => setCopied(false), ISLAND_WAITS.sent)
   }, [])
@@ -358,6 +389,18 @@ export function useIsland(): Island {
  * The figures, as the app draws them: each team's agents from its file, each wearing its saved
  * agent's figure when it was placed from Your agents; one picked from its id otherwise.
  */
+/** Outside the Mac app: both kinds on the clipboard where the browser can, else the plain text. */
+async function toClipboard(answer: WholeAnswer): Promise<void> {
+  if (answer.html && typeof ClipboardItem === 'function' && navigator.clipboard?.write) {
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/plain': new Blob([answer.plain], { type: 'text/plain' }),
+      'text/html': new Blob([answer.html], { type: 'text/html' }),
+    })])
+    return
+  }
+  await navigator.clipboard?.writeText(answer.plain)
+}
+
 function useFigures(teams: readonly TeamNow[], saved: readonly SavedJob[], pinned: PinnedNow | null): (teamPath: string, agent: string | null) => FigureChoice {
   const [crews, setCrews] = useState<ReadonlyMap<string, readonly CrewAgent[]>>(() => new Map())
   const asked = useRef(new Set<string>())

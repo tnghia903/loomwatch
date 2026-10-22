@@ -54,7 +54,12 @@ export function Island() {
         aria-expanded={view === 'list'}
         onPointerEnter={onIsland(true)}
         onPointerLeave={onIsland(false)}
-        onClick={() => island.pointerOnIsland(true)}
+        onClick={(event) => {
+          // A press inside the open list (Copy, Start, Send, by mouse or keyboard) is not pointing
+          // at the island: the list stays only while the pointer is on it or a message is written.
+          if (event.target instanceof Element && event.target.closest('.island-list')) return
+          island.pointerOnIsland(true)
+        }}
         onKeyDown={(event) => {
           // Keys typed inside the list (the message to the pinned agent) are its own.
           if (event.target !== event.currentTarget) return
@@ -370,11 +375,13 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
           disabled={island.sending}
           onChange={(event) => island.setDraft(event.target.value)}
           onFocus={() => island.compose(true)}
-          onBlur={() => island.compose(false)}
+          // Tab to Copy, See answer or Start keeps the island writing, and the keyboard with it.
+          onBlur={(event) => {
+            if (event.relatedTarget instanceof Node && event.currentTarget.closest('.island-list')?.contains(event.relatedTarget)) return
+            island.compose(false)
+          }}
           onKeyDown={(event) => {
-            if (event.key !== 'Escape') return
-            event.currentTarget.blur()
-            island.putAway()
+            if (event.key === 'Escape') event.currentTarget.blur()
           }}
         />
         <button type="submit" className="island-button" disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? 'Send note' : 'Send'}</button>

@@ -7,6 +7,7 @@ import type { TeamRequest } from '../lib/runs/teamRequests'
 import type { RunRecord } from '../lib/runs/client'
 import { answering, at, failed, iso, maya, OUT_OF_CREDITS, permission, pinnedChat, run, said } from './fixtures'
 import { Island } from './Island'
+import { setTearing } from './tearing'
 
 let runs: RunRecord[] = []
 let notes: NoteAnswering[] = []
@@ -22,6 +23,8 @@ const posted: { url: string; body: unknown }[] = []
 const wrote: { path: string; yaml: string; precondition: string | null }[] = []
 const messages: Record<string, unknown>[] = []
 const toApp: unknown[] = []
+/** While set, reading one run whole waits for it. */
+let holdRunReads: Promise<void> | null = null
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -45,6 +48,9 @@ beforeEach(() => {
   wrote.length = 0
   messages.length = 0
   toApp.length = 0
+  holdRunReads = null
+  // A test that failed mid-drag leaves no tear in progress for the next.
+  setTearing(false)
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/runs?')) return json(runs)
@@ -68,6 +74,7 @@ beforeEach(() => {
       return json({ name, path: `/teams/.jobs/.bench/files/${name}`, bytes: 10, picture: false })
     }
     if (url.startsWith('/api/runs/') && !init?.method) {
+      if (holdRunReads) await holdRunReads
       const record = runs.find((each) => url === `/api/runs/${each.runId}`)
       return record ? json(record) : json({ error: 'gone' }, 404)
     }
@@ -391,26 +398,74 @@ describe('the agent pinned to the notch', () => {
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
     // It peeks out wearing the figure it wears in My agents.
     expect(container.querySelector('.island-slot.is-on img')?.getAttribute('src')).toContain('spool-sage')
-    const whole = 'You have two meetings today.\n\n- 10:00 budget review\n- 12:30 lunch with Sam'
+    const whole = 'You have two meetings today.\n\n- 10:00 [budget review](https://cal.example/b)\n- 12:30 lunch with **Sam**'
+    let letRead = () => {}
+    holdRunReads = new Promise((done) => { letRead = done })
     runs = [pinnedChat('c1', { status: 'succeeded', working: [], reply: whole, finishedAt: new Date().toISOString() })]
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('done'), { timeout: 5000 })
-    const plain = 'You have two meetings today.\n\n• 10:00 budget review\n• 12:30 lunch with Sam'
+    const shown = 'You have two meetings today.\n• 10:00 budget review\n• 12:30 lunch with Sam'
+    const plain = 'You have two meetings today.\n\n• 10:00 budget review (https://cal.example/b)\n• 12:30 lunch with Sam'
     const card = container.querySelector<HTMLElement>('.island-slip.is-answer .island-answer')!
     const slip = within(card)
     expect(slip.getAllByText('Maya answered')).toHaveLength(2)
+    // Until it is read whole, nothing takes it: only its first line is known yet.
+    expect(slip.getByRole('button', { name: 'Copy' })).toBeDisabled()
+    expect(card.getAttribute('draggable')).toBe('false')
+    const early: Record<string, string> = {}
+    fireEvent.dragStart(card, { dataTransfer: { setData: (type: string, value: string) => { early[type] = value }, setDragImage: () => {}, effectAllowed: 'all' } })
+    expect(early).toEqual({})
+    letRead()
     // The whole answer, read whole, as plain text: not only its first line, and no Markdown marks.
-    await waitFor(() => expect(card.querySelector('.island-words p')?.textContent).toBe(plain.replace(/\n{2,}/g, '\n')))
+    await waitFor(() => expect(card.querySelector('.island-words p')?.textContent).toBe(shown))
+    await waitFor(() => expect(slip.getByRole('button', { name: 'Copy' })).toBeEnabled())
+    expect(card.getAttribute('draggable')).toBe('true')
+    // Copy: formatted for apps that take it, and plain, links keeping their addresses, for the rest.
     fireEvent.click(slip.getByRole('button', { name: 'Copy' }))
-    expect(toApp).toContainEqual({ kind: 'copy', text: plain })
-    // Torn off: its words go with the drag, and once dropped somewhere it has been seen.
+    const copied = toApp.find((message) => (message as { kind: string }).kind === 'copy') as { text: string; html: string }
+    expect(copied.text).toBe(plain)
+    expect(copied.html).toContain('<a href="https://cal.example/b">budget review</a>')
+    expect(copied.html).toContain('<strong>Sam</strong>')
+    // Torn off: the same two go with the drag, and once dropped somewhere it has been seen.
     const carried: Record<string, string> = {}
     let image: Element | null = null
     fireEvent.dragStart(card, { dataTransfer: { setData: (type: string, value: string) => { carried[type] = value }, setDragImage: (element: Element) => { image = element }, effectAllowed: 'all' } })
-    expect(carried['text/plain']).toBe(plain)
+    expect(carried).toEqual({ 'text/plain': plain, 'text/html': copied.html })
     expect(image).toBe(card.querySelector('.island-paper-copy'))
     fireEvent.dragEnd(card, { dataTransfer: { dropEffect: 'copy' } })
     await waitFor(() => expect(island.getAttribute('data-view')).not.toBe('done'))
     expect(container.querySelector('.island-ear-right')?.getAttribute('data-right')).not.toBe('slip')
+  }, 15_000)
+
+  it('lets the keyboard reach Copy from the box, keeping it until Escape', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    const island = container.querySelector('.island')!
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    runs = [pinnedChat('c1', { status: 'succeeded', working: [], reply: 'Take the **8:10** train.', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() })]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('done'), { timeout: 5000 })
+    // ⌃⌥Space: the box has the keyboard; Shift-Tab goes back to the answer's Copy.
+    tellPage({ kind: 'compose' })
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    const field = await row.findByRole('textbox', { name: 'Message Maya' })
+    await waitFor(() => expect(document.activeElement).toBe(field))
+    const copy = row.getByRole('button', { name: 'Copy' })
+    await waitFor(() => expect(copy).toBeEnabled())
+    fireEvent.blur(field, { relatedTarget: copy })
+    copy.focus()
+    await act(async () => { await new Promise((done) => setTimeout(done, 900)) })
+    expect(island.getAttribute('data-view')).toBe('list')
+    expect(toApp).not.toContainEqual({ kind: 'keyboard', on: false })
+    fireEvent.click(copy)
+    expect(toApp).toContainEqual(expect.objectContaining({ kind: 'copy', text: 'Take the 8:10 train.' }))
+    // Escape away from the box (Copy has made way for "Copied."), not only in it, gives the
+    // keyboard back.
+    expect(row.getByRole('status')).toHaveTextContent('Copied.')
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    expect(toApp.at(-1)).toEqual({ kind: 'keyboard', on: false })
+    await waitFor(() => expect(island.getAttribute('data-view')).not.toBe('list'))
   }, 15_000)
 
   it('opens its answer in its chat', async () => {
