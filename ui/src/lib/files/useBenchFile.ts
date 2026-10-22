@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 
 import type { ReplyTo } from '../chat/client'
-import type { AskedPassage } from './passage'
+import { askedInChat, type AskedPassage } from './passage'
 import type { FileToRead } from './reader'
 
 /**
@@ -24,7 +24,8 @@ export function useBenchFile() {
     // An agent's own chat has one agent to ask: the one the part is from.
     askInChat: useCallback((reply: ReplyTo, words: string | undefined) => setAsk({ reply, words, at: Date.now() }), []),
     showAsked: useCallback((passage: AskedPassage) => {
-      if (passage.runId) setReveal({ runId: passage.runId, id: `answer:${passage.runId}`, at: Date.now() })
+      const shown = askedInChat(passage)
+      if (shown) setReveal({ ...shown, at: Date.now() })
     }, []),
   }
 }

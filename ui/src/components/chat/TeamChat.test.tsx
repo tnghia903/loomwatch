@@ -234,7 +234,7 @@ describe('the team’s chat', () => {
     fireEvent.change(box(), { target: { value: '@team today’s digest' } })
     fireEvent.keyDown(box(), { key: 'Enter' })
     expect(await screen.findByText('Sending…')).toBeInTheDocument()
-    expect(within(screen.getByRole('log')).getByText('@team today’s digest')).toBeInTheDocument()
+    expect(within(screen.getByRole('log')).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@team today’s digest')).toBeInTheDocument()
     expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { teamPath: 'news.yaml', to: { kind: 'team' }, expectedRevision: 'sha256:1' } })
     await act(async () => {
       release(new Response(JSON.stringify({ route: 'team', message: message({}), run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'] }) }), { status: 202 }))
@@ -415,6 +415,46 @@ describe('the team’s chat', () => {
     expect(goldFilled()).toEqual(['Approve'])
   })
 
+  it('an agent’s answer in the chat reads as its Markdown draws, as the answer of work does', async () => {
+    page = [{
+      kind: 'note',
+      message: message({ id: 'md-1', text: '@Writer what is a Markov chain?', route: 'team_note', runId: null, agentId: 'writer', answers: { waiting: [], said: [{ from: 'writer', text: '**Markov chain** here means:\n\n- your last pick\n- nothing before it', at: '2026-10-06T02:00:02.000Z' }] } }),
+    }]
+    renderChat()
+    const bold = await screen.findByText('Markov chain', { selector: 'strong' })
+    const bubble = bold.closest('.chat-bubble')!
+    expect(within(bubble as HTMLElement).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['your last pick', 'nothing before it'])
+    expect(bubble).not.toHaveTextContent('**')
+  })
+
+  it('shows a note and the answers under it when asked from outside the chat, as the reader’s answer does', async () => {
+    page = [{
+      kind: 'note',
+      message: message({ id: 'hi-5', text: '@Writer explain', route: 'team_note', runId: null, agentId: 'writer', answers: { waiting: [], said: [{ from: 'writer', text: 'Sure.', at: '2026-10-06T02:00:02.000Z' }] } }),
+    }]
+    const { rerender, props } = renderChat()
+    const note = (await screen.findByText('@Writer explain')).closest('li')!
+    expect(note).not.toHaveClass('flash')
+    rerender(<TeamChat {...props} reveal={{ runId: '', id: 'note:hi-5', at: 1 }} />)
+    await waitFor(() => expect(note).toHaveClass('flash'))
+  })
+
+  it('shows a message that was not sent, from outside the chat, at the bottom where Try again is', async () => {
+    page = [{ kind: 'note', message: message({ id: 'hi-6', text: '@Writer explain', route: 'team_note', runId: null, agentId: 'writer' }) }]
+    const scrolled = vi.fn()
+    const had = HTMLElement.prototype.scrollTo
+    HTMLElement.prototype.scrollTo = scrolled as unknown as typeof HTMLElement.prototype.scrollTo
+    try {
+      const { rerender, props } = renderChat()
+      await screen.findByText('@Writer explain')
+      scrolled.mockClear()
+      rerender(<TeamChat {...props} reveal={{ runId: '', id: 'pending', at: 2 }} />)
+      await waitFor(() => expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' })))
+    } finally {
+      HTMLElement.prototype.scrollTo = had
+    }
+  })
+
   it('a hello one agent answered offers to start that agent', async () => {
     page = [{
       kind: 'note',
@@ -423,6 +463,31 @@ describe('the team’s chat', () => {
     renderChat()
     expect(await screen.findByText('You → Writer')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start Writer on this' })).toBeInTheDocument()
+  })
+
+  // An @mention in your words is the agent's chip, its name in the agent's colour; @team is bold words.
+  it('draws each @mention in your message as its agent’s chip', async () => {
+    page = [
+      { kind: 'note', message: message({ id: 'note-1', text: 'cc @Researcher and @team', route: 'team_note', runId: null, createdAt: '2026-10-05T05:00:00.000Z' }) },
+      { kind: 'work', run: run({ onlyAgent: 'writer' }), request: message({ text: '@Writer bold this text', route: 'agent', agentId: 'writer' }), notes: [message({ id: 'n-2', route: 'note', agentId: 'writer', text: 'and @researcher’s source (@Writer too)', createdAt: '2026-10-06T02:02:00.000Z' })] },
+    ]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    const said = (words: string) => within(log).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === words)
+    // The @ stays in the words, for copying and screen readers; the chip shows the agent's own name.
+    const request = await waitFor(() => said('@Writer bold this text'))
+    const writer = request.querySelector('.tc-mention')
+    expect(writer).toHaveClass('hue-2')
+    expect(writer?.querySelector('.tc-mention-face')).toHaveAttribute('aria-hidden', 'true')
+    expect(writer?.querySelector('.tc-mention-name')).toHaveTextContent('@Writer')
+    const note = said('cc @Researcher and @team')
+    expect(note.querySelector('.tc-mention')).toHaveClass('hue-1')
+    expect(note.querySelector('.tc-mention-team')).toHaveTextContent('@team')
+    expect(note.querySelectorAll('.tc-mention')).toHaveLength(1)
+    // A line never breaks between a chip and the letters or bracket touching it.
+    const keep = [...said('and @Researcher’s source (@Writer too)').querySelectorAll('.tc-mention-keep')]
+    expect(keep.map((group) => group.textContent)).toEqual(['@Researcher’s', '(@Writer'])
+    expect(keep.map((group) => group.querySelector('.tc-mention')?.className)).toEqual(['tc-mention hue-1', 'tc-mention hue-2'])
   })
 
   it('an empty chat suggests an @team first message, and starts nothing until you send it', async () => {
@@ -1273,6 +1338,15 @@ describe('one agent’s own chat', () => {
     expect(props.prepare).toHaveBeenCalledTimes(1)
   })
 
+  // In one agent's own chat an @ goes nowhere, so it is drawn as you wrote it.
+  it('draws no @mention chips', async () => {
+    page = [{ kind: 'work', run: run({ onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'] }), request: message({ text: '@Ada sum it up for @team', route: 'agent', agentId: 'ada' }), notes: [] }]
+    renderSolo()
+    const log = await screen.findByRole('log')
+    await waitFor(() => expect(within(log).getByText('@Ada sum it up for @team')).toHaveClass('chat-text'))
+    expect(log.querySelector('.tc-mention, .tc-mention-team')).toBeNull()
+  })
+
   it('makes a message a note for its turn while it works, without saving the agent again', async () => {
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'], working: ['ada'] }), request: message({ text: 'sum up the report', route: 'agent', agentId: 'ada' }), notes: [] }]
     answer = () => new Response(JSON.stringify({ route: 'note', message: message({ id: 'n-1', text: 'only the first half', route: 'note', agentId: 'ada' }) }), { status: 200 })
@@ -1442,7 +1516,11 @@ describe('asking about a part of a file', () => {
     page = [{ kind: 'work', run: run({ runId: 'run-2' }), request: message({ id: 'm-2', runId: 'run-2', text: '@Writer why?', replyTo: part }), notes: [] }]
     const onPassages = vi.fn()
     renderChat({ onPassages })
-    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([{ file: '/w/market.md', text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2' }], null))
+    // With what came of it: the answer of the work the question started.
+    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([{
+      file: '/w/market.md', text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2', onItsOwn: false,
+      answer: { state: 'said', by: 'writer', text: '# Digest\nThe chip story.', at: '2026-10-06T02:04:00.000Z' },
+    }], null))
     // The quote under the message says what it asked about.
     expect(await screen.findByLabelText('Replying to a part of market.md from Writer')).toHaveTextContent('Sales grew 12% in Q3.')
   })

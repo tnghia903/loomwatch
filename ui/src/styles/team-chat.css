@@ -255,6 +255,27 @@
 }
 .tc-to { font-size: 11.5px; color: var(--color-ink-3); }
 .tc-plain { white-space: pre-wrap; }
+/* An @mention in your words is the agent's chip, as in the team's sentence (.story-name, loom.css):
+   its figure's head and its name in its colour on the gold tint, with the same touch of ink, sized
+   to the message's line. @team is the words' own, in bold. A message still sending is faded, too
+   faint for a colour, so its chips keep ink until it lands. The chip is laid out inline, not as a
+   flex box, so its words read in line with the message's: "@Writer", not "@", a break, "Writer".
+   A message with a chip takes a little more line, so chips on lines above each other keep apart. */
+.chat-text.tc-plain:has(.tc-mention) { line-height: 24px; }
+.tc-mention-keep { white-space: nowrap; }
+.tc-mention {
+  display: inline-block; max-width: calc(100% - 2px); height: 22px; margin: 0 1px; padding: 0 8px 0 3px;
+  overflow: hidden; vertical-align: middle; text-overflow: ellipsis; white-space: nowrap;
+  border-radius: 99px; font: 600 12.5px/20px var(--font-sans);
+  color: color-mix(in srgb, var(--hue) 94%, var(--color-ink));
+  background: var(--color-accent-tint); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+.tc-mention-face { display: inline-block; width: 20px; height: 20px; margin-right: 4px; vertical-align: top; }
+.tc-mention .tc-mention-face > * { display: inline-block; width: 100%; height: 100%; vertical-align: top; object-fit: contain; }
+/* The @ is unseen but stays in the words, for screen readers. */
+.tc-mention-at { display: inline-block; width: 0; overflow: hidden; vertical-align: top; }
+.tc-mention-team { font-weight: 600; }
+.tc-pending:not(.failed) .tc-mention { color: var(--color-ink); }
 .tc-schedule { display: inline-grid; place-items: center; }
 
 /* The talk between the agents, folded to one line. It reads like a message: its words in the text

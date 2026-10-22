@@ -1,4 +1,7 @@
-import type { ChatItem, ChatMessage, ChatTarget, ReplyTo } from '../chat/client'
+import { quoteLine } from '../chat/reply'
+import { stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../chat/client'
+import type { RunRecord } from '../runs/client'
+import { plainRunError } from '../runs/errors'
 
 /**
  * A part of a file marked in the reader and asked about (ADR 0077). It goes to the chat as a reply
@@ -51,30 +54,88 @@ export interface AskedPassage {
   runId: string | null
   /** Your message, by the chat's id, when the chat has one for it. */
   messageId: string | null
+  /** Your message started no work: what came of it is under it in the chat, not in a piece of work. */
+  onItsOwn: boolean
+  /** What came of asking, for the reader to show beside the part. */
+  answer: PassageAnswer
 }
+
+/** What came of asking about a part, as the reader shows it beside the part. */
+export type PassageAnswer =
+  /** Your message is on its way. */
+  | { state: 'sending' }
+  /** The agent is writing its answer in the chat. */
+  | { state: 'writing'; by: string }
+  /** Your message started work, or went into work under way, and it is not done. */
+  | { state: 'working'; by: string }
+  /** What came back: the agent's answer in the chat, or the answer of the work. */
+  | { state: 'said'; by: string; text: string; at: string | null }
+  /** The work stopped before it answered: what went wrong. */
+  | { state: 'failed'; by: string; text: string }
+  /** Your message did not reach the daemon: the chat has it, with Try again. */
+  | { state: 'unsent' }
+  /**
+   * Nothing came back, and why: you stopped the work, the message was a note for the team's next
+   * work, the agent asked had nothing to add, or its answer never came.
+   */
+  | { state: 'none'; why: 'stopped' | 'note' | 'passed' | 'lost' }
+
+const LIVE_RUN = new Set(['queued', 'starting', 'running'])
 
 /**
  * Every part of a file asked about in a chat, oldest first: in messages that started work, in
  * notes sent into it, and in notes on their own. A message still on its way counts too.
  */
-export function askedPassages(items: readonly ChatItem[], pending: readonly { text: string; replyTo?: ReplyTo | null; to?: ChatTarget }[] = []): AskedPassage[] {
+export function askedPassages(items: readonly ChatItem[], pending: readonly { text: string; replyTo?: ReplyTo | null; to?: ChatTarget; state?: 'sending' | 'failed' }[] = [], now = Date.now()): AskedPassage[] {
   const found: AskedPassage[] = []
-  const add = (message: Pick<ChatMessage, 'text' | 'replyTo'> & { id?: string; agentId?: string | null }, runId: string | null) => {
+  const add = (message: Pick<ChatMessage, 'text' | 'replyTo'> & { id?: string; agentId?: string | null }, runId: string | null, answer: (asked: string) => PassageAnswer, onItsOwn = false) => {
     const reply = message.replyTo
     if (reply?.kind !== 'passage' || !reply.file) return
     // Asked of one agent, it is that agent's face beside the part, whoever made the file.
-    found.push({ file: reply.file, text: reply.text, from: message.agentId ?? reply.from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null })
+    const from = message.agentId ?? reply.from
+    found.push({ file: reply.file, text: reply.text, from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null, onItsOwn, answer: answer(from) })
   }
   // The chat holds its items newest first.
   for (const item of [...items].reverse()) {
-    if (item.kind === 'note') add(item.message, item.message.runId ?? null)
+    if (item.kind === 'note') add(item.message, item.message.runId ?? null, (from) => noteAnswer(item.message, from, now), true)
     else {
-      if (item.request) add(item.request, item.run.runId)
-      for (const note of item.notes) add(note, item.run.runId)
+      const answer = (from: string) => workAnswer(item.run, from)
+      if (item.request) add(item.request, item.run.runId, answer)
+      for (const note of item.notes) add(note, item.run.runId, answer)
     }
   }
-  for (const message of pending) add({ ...message, agentId: message.to?.kind === 'agent' ? message.to.agent : null }, null)
+  for (const message of pending) add({ ...message, agentId: message.to?.kind === 'agent' ? message.to.agent : null }, null, () => (message.state === 'failed' ? { state: 'unsent' } : { state: 'sending' }))
   return found
+}
+
+/** Where the chat shows what came of asking (TeamChat's `reveal`): the answer of its work, or your message with the answers under it. */
+export function askedInChat(passage: AskedPassage): { runId: string; id: string } | null {
+  // Not sent: it waits at the bottom of the chat, with Try again.
+  if (passage.answer.state === 'unsent') return { runId: '', id: 'pending' }
+  if (passage.answer.state === 'sending') return null
+  if (passage.onItsOwn) return passage.messageId ? { runId: '', id: `note:${passage.messageId}` } : null
+  return passage.runId ? { runId: passage.runId, id: `answer:${passage.runId}` } : null
+}
+
+/** A message that started no work: the asked agent's own answer in the chat, or the first one's when it was asked of everyone. */
+function noteAnswer(message: ChatMessage, from: string, now: number): PassageAnswer {
+  if (!message.answers) return { state: 'none', why: 'note' }
+  const said = message.answers.said.find((answer) => answer.from === from) ?? (message.agentId ? undefined : message.answers.said[0])
+  if (said) return { state: 'said', by: said.from, text: said.text, at: said.at }
+  const writing = stillAnswering(message, now)
+  const by = writing.includes(from) ? from : message.agentId ? null : writing[0]
+  if (by) return { state: 'writing', by }
+  // Still waited on, but too long ago to be writing: the answer never came.
+  return { state: 'none', why: message.answers.waiting.length > 0 ? 'lost' : 'passed' }
+}
+
+/** A message that started work or went into it: that work's answer, once it is done. */
+function workAnswer(run: RunRecord, from: string): PassageAnswer {
+  const by = run.responder || run.onlyAgent || from
+  if (LIVE_RUN.has(run.status)) return { state: 'working', by: run.working?.[0] ?? by }
+  if (run.status === 'failed') return { state: 'failed', by, text: (run.error ? plainRunError(run.error).split('\n')[0] : '') || 'It stopped before it answered.' }
+  if (run.status === 'succeeded' && run.reply?.trim()) return { state: 'said', by, text: run.reply, at: run.finishedAt }
+  return { state: 'none', why: run.status === 'cancelled' ? 'stopped' : 'lost' }
 }
 
 /**
@@ -148,4 +209,118 @@ export function bubblePlace(
   const below = above < 4
   const top = (below ? marked.bottom - view.top + gap : marked.top - view.top - size.height - gap) + scroll.top
   return { top, left, below }
+}
+
+/**
+ * Where an answer sits beside the part it answers, in the view's own coordinates: under the part,
+ * centred on it, inside the view; over it when there is more room there. `arrow` is how far into
+ * the answer its point is, so it still points at the part when the answer is held inside the view.
+ * `null` while the part is scrolled out of sight.
+ */
+export function answerPlace(
+  part: { top: number; bottom: number; left: number; right: number },
+  view: { top: number; left: number; width: number; height: number },
+  size: { width: number; height: number },
+  gap = 10,
+): { top: number; left: number; above: boolean; arrow: number } | null {
+  if (part.bottom < view.top || part.top > view.top + view.height) return null
+  const edge = 8
+  const centre = (part.left + part.right) / 2 - view.left
+  const left = Math.max(edge, Math.min(view.width - size.width - edge, centre - size.width / 2))
+  const below = view.top + view.height - part.bottom - gap
+  const over = part.top - view.top - gap
+  const above = below < size.height && over > below
+  const top = above ? part.top - view.top - gap - size.height : part.bottom - view.top + gap
+  return {
+    top: Math.max(edge, Math.min(view.height - size.height - edge, top)),
+    left,
+    above,
+    arrow: Math.max(18, Math.min(size.width - 18, centre - left)),
+  }
+}
+
+type Box = { top: number; bottom: number; left: number; right: number }
+
+/**
+ * A part's lines on screen, one box each, top to bottom: the boxes a range gives for each piece of
+ * text it spans, joined where they sit on the same line. Empty boxes (a line break, an empty
+ * element) are left out.
+ */
+export function partLines(rects: readonly Box[]): Box[] {
+  const lines: Box[] = []
+  for (const rect of [...rects].filter((box) => box.right - box.left > 0.5 && box.bottom - box.top > 0.5).sort((a, b) => a.top - b.top || a.left - b.left)) {
+    const middle = (rect.top + rect.bottom) / 2
+    const line = lines.find((box) => middle > box.top && middle < box.bottom)
+    if (line) {
+      line.top = Math.min(line.top, rect.top)
+      line.bottom = Math.max(line.bottom, rect.bottom)
+      line.left = Math.min(line.left, rect.left)
+      line.right = Math.max(line.right, rect.right)
+    } else lines.push({ ...rect })
+  }
+  return lines
+}
+
+/** The box round all of a part's lines: what its answer points at. */
+export function partBox(lines: readonly Box[]): Box | null {
+  if (lines.length === 0) return null
+  return {
+    top: Math.min(...lines.map((line) => line.top)),
+    bottom: Math.max(...lines.map((line) => line.bottom)),
+    left: Math.min(...lines.map((line) => line.left)),
+    right: Math.max(...lines.map((line) => line.right)),
+  }
+}
+
+/** How a part asked about looks, from what came of asking and whether you have read its answer. */
+export type PartLook = 'busy' | 'waiting' | 'read' | 'failed'
+
+export function partLook(answer: PassageAnswer, read: boolean): PartLook {
+  if (answer.state === 'sending' || answer.state === 'writing' || answer.state === 'working') return 'busy'
+  if (answer.state === 'failed' || answer.state === 'unsent') return 'failed'
+  return answer.state === 'said' && !read ? 'waiting' : 'read'
+}
+
+/** Who a part's bubble shows: the agent answering, or the one asked while nobody is yet. */
+export function bubbleAgent(passage: AskedPassage): string {
+  return 'by' in passage.answer ? passage.answer.by : passage.from
+}
+
+/** A part's words as a label quotes them: its first line, cut with an ellipsis past `most` characters. */
+function quoted(passage: AskedPassage, most = 60): string {
+  const line = quoteLine(passage.text)
+  return `“${line.length > most ? `${line.slice(0, most - 1).trimEnd()}…` : line}”`
+}
+
+/** What a part's bubble says to a screen reader: its state; being a button that opens says the rest. */
+export function bubbleLabel(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
+  const who = name(bubbleAgent(passage))
+  const about = quoted(passage)
+  if (passage.answer.state === 'unsent') return `Your question about ${about} wasn't sent`
+  if (look === 'busy') return `${who} is answering your question about ${about}`
+  if (look === 'waiting') return `New answer from ${who} about ${about}`
+  if (look === 'failed') return `${who} stopped before answering about ${about}`
+  if (passage.answer.state === 'none') return `No answer from ${who} about ${about}`
+  return `${who}'s answer about ${about}`
+}
+
+/** What a part's bubble says on hover: your words, after what the bubble's look means. */
+export function bubbleTitle(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
+  const words = yourWords(passage.asked, name(passage.from))
+  const state = passage.answer.state
+  const said = state === 'unsent' ? 'Not sent'
+    : state === 'sending' ? 'Sending your question'
+      : state === 'writing' || state === 'working' ? `${name(bubbleAgent(passage))} ${state === 'writing' ? 'is writing' : 'is working'}`
+        : look === 'waiting' ? 'New answer'
+          : look === 'failed' ? 'Stopped' : ''
+  return [said, words].filter(Boolean).join(' · ')
+}
+
+/** Your words without the @ they were sent with: "@Writer why?" is "why?". */
+export function yourWords(asked: string, agent: string): string {
+  const text = asked.trim()
+  for (const address of [`@${agent}`, '@team']) {
+    if (text.toLowerCase().startsWith(address.toLowerCase())) return text.slice(address.length).trim()
+  }
+  return text
 }

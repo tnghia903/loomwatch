@@ -22,7 +22,7 @@ import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
-import { AgentFacesContext, type AgentFaces } from '../../lib/chat/faces'
+import { AgentFacesContext, ChatMentionsContext, type AgentFaces, type ChatMentions } from '../../lib/chat/faces'
 import { batonWords, sameBaton, type Baton } from '../../lib/chat/baton'
 import { usePieceLine } from '../../lib/chat/pieceLine'
 import { AgentFace } from './AgentFace'
@@ -32,6 +32,7 @@ import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { ChatFind } from './ChatFind'
 import { FoundText } from './FoundText'
+import { SaidText } from './SaidText'
 import { Appearing, Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
@@ -39,6 +40,7 @@ import { Learned } from './Learned'
 import { ReplyQuote } from './ReplyQuote'
 import { ChatFiles } from './ChatFiles'
 import { FixIt, WorkPiece, type TeamView } from './WorkPiece'
+import { Markdown } from '../ui/Markdown'
 import { earlierTries, triedAgain, tryingAgain } from '../../lib/chat/tries'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
@@ -264,6 +266,16 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     atBottom.current = true
     setShowJump(false)
   }
+  // A message not sent waits at the bottom of the chat, with Try again: shown from the reader there.
+  useEffect(() => {
+    if (shown?.id !== 'pending') return
+    const frame = requestAnimationFrame(() => {
+      scroller.current?.scrollTo?.({ top: scroller.current.scrollHeight, behavior: 'smooth' })
+      atBottom.current = true
+      setShowJump(false)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [shown])
   // What waits on you comes into view as it arrives, even within a moment of your last click;
   // answering is following the work again (lib/chat/follow.ts).
   const follow = useMemo<ChatFollow>(() => ({
@@ -487,6 +499,8 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       setMentioned((count) => count + 1)
     },
   }
+  // An @mention in a message shows as its agent's chip (SaidText); in one agent's own chat an @ goes nowhere.
+  const mentions = useMemo<ChatMentions | null>(() => (team.solo ? null : { agents, hue: (id) => team.hues.get(id) ?? 1 }), [agents, team.hues, team.solo])
   // Reply under something said: the box takes it as the message being answered, addressed with
   // the @ of whoever said it (or `to`, a teammate asked about a part of a file instead), so it goes
   // to that agent as any @ does (ADR 0051).
@@ -548,6 +562,9 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // A found line opened (ADR 0081): the chat goes back to its piece, reading earlier pages until it
   // is there, and shows the line in it with the words lit.
   const [noteShown, setNoteShown] = useState<{ id: string; at: number } | null>(null)
+  // A note shown from outside the chat (`note:<id>`: the answers under it, from the reader), or by a search, whichever was last.
+  const revealedNote = shown?.id.startsWith('note:') ? { id: shown.id.slice('note:'.length), at: shown.at } : null
+  const noteFlash = revealedNote && (!noteShown || revealedNote.at > noteShown.at) ? revealedNote : noteShown
   const [opening, setOpening] = useState<{ piece: FoundPiece; passage: FoundPassage | null } | null>(null)
   const [landingMissed, setLandingMissed] = useState(false)
   const openFound = (piece: FoundPiece, passage: FoundPassage | null) => {
@@ -616,6 +633,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     <AppearContext.Provider value={settled && !search.showing}>
     <FollowContext.Provider value={follow}>
     <AgentFacesContext.Provider value={faces}>
+    <ChatMentionsContext.Provider value={mentions}>
     <section className={`tc${dropping ? ' dropping' : ''}`} aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}
       onDragEnter={(event) => {
         if (!carriesFiles(event.dataTransfer) || blocked) return
@@ -771,7 +789,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
-                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteShown?.id === item.message.id ? noteShown.at : null} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
+                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
             )
           })}
@@ -821,6 +839,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       />
       {line.flight && <BatonFlight key={line.flight.id} flight={line.flight} holding={holding} onDone={line.done} />}
     </section>
+    </ChatMentionsContext.Provider>
     </AgentFacesContext.Provider>
     </FollowContext.Provider>
     </AppearContext.Provider>
@@ -993,7 +1012,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             {yours(<div className="chat-bubble">
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
               {message.files && <ChatFiles files={message.files} />}
-              <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
+              <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
             </div>)}
           </div>
         </li>
@@ -1002,7 +1021,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             {face(said.from)}
             <div className="chat-stack">
               <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
-              {reactOn(targets.reply(said.from), `${name(said.from)}'s reply`)(<div className="chat-bubble"><div className="chat-text tc-plain"><FoundText text={said.text} /></div></div>)}
+              {reactOn(targets.reply(said.from), `${name(said.from)}'s reply`)(<div className="chat-bubble"><div className="chat-text"><Markdown>{said.text}</Markdown></div></div>)}
             </div>
           </li>
         ))}
@@ -1040,7 +1059,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
         {yours(<div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
           {message.files && <ChatFiles files={message.files} />}
-          <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
+          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
         </div>)}
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>
@@ -1094,7 +1113,7 @@ function Pending({ message, name, onRetry, onEdit, onDismiss }: { message: Pendi
         <div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} />}
           <ChatFiles files={message.files} />
-          <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
+          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
         </div>
         {message.state === 'failed' && (
           <div className="chat-under tc-pending-acts">

@@ -99,8 +99,15 @@ else its long answer. Code, and files it only read, wait as tabs; work that stop
 record on screen. Each tab has its own ×, and closing the one on screen shows the next; a tab
 closed stays closed for that work until **Read** on the file's card (or **Open** on the answer's)
 brings it back in its place. Past the pane's width the tabs scroll under **Details**, which stays
-put. A file on screen stays when newer work starts, so a part asked about is seen changed. Drag the
-edge between the chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
+put. A file on screen stays when newer work starts, so a part asked about is seen changed. Mark
+any words in a file to ask about them (ADR 0077): **Ask** puts them in the message box, **Explain**
+asks at once. The answer opens beside the words: first the agent writing, then its answer,
+formatted as in the chat. If the work changed those words, the answer opens at the top of the file,
+and stays in the chat. Each part asked about keeps a marker stroke and, after it, a bubble with the
+face of the agent asked: it types while the agent works and shows a gold dot until you open the
+answer here (remembered in this browser). The bubble or the marked words open the answer again;
+Esc or × closes it. A web page the agent made is marked the same way. Drag the edge between the
+chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.
 What matches shows in place of the chat, best first; a line opens the chat at that message with

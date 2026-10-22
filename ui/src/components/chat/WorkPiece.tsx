@@ -43,7 +43,7 @@ import { Reactions } from './Reactions'
 import { Spool } from './Spool'
 import { StatusGlyph } from '../ui/glyphs'
 import { ReplyQuote } from './ReplyQuote'
-import { FoundText } from './FoundText'
+import { SaidText } from './SaidText'
 
 
 /** The team as the chat draws it. */
@@ -622,7 +622,7 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
         {reactions(<div className="chat-bubble">
           {request?.replyTo && <ReplyQuote reply={request.replyTo} name={name} onShow={onShowReplied?.(request.replyTo)} />}
           {request?.files && <ChatFiles files={request.files} />}
-          <div className="chat-text tc-plain"><FoundText text={text} /></div>
+          <div className="chat-text tc-plain"><SaidText text={text} /></div>
         </div>)}
       </div>
     </div>
@@ -642,7 +642,7 @@ function Note({ note, flash = false, live, name, onShowReplied, reactions }: { n
         {reactions(<div className="chat-bubble">
           {note.replyTo && <ReplyQuote reply={note.replyTo} name={name} onShow={onShowReplied?.(note.replyTo)} />}
           {note.files && <ChatFiles files={note.files} />}
-          <div className="chat-text tc-plain"><FoundText text={note.text} /></div>
+          <div className="chat-text tc-plain"><SaidText text={note.text} /></div>
         </div>)}
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
       </div>
