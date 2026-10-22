@@ -324,6 +324,46 @@ describe('the team’s chat', () => {
     expect(screen.queryByRole('status', { name: 'Writer is writing' })).not.toBeInTheDocument()
   })
 
+  it('an agent’s answer in the chat reads as its Markdown draws, as the answer of work does', async () => {
+    page = [{
+      kind: 'note',
+      message: message({ id: 'md-1', text: '@Writer what is a Markov chain?', route: 'team_note', runId: null, agentId: 'writer', answers: { waiting: [], said: [{ from: 'writer', text: '**Markov chain** here means:\n\n- your last pick\n- nothing before it', at: '2026-10-06T02:00:02.000Z' }] } }),
+    }]
+    renderChat()
+    const bold = await screen.findByText('Markov chain', { selector: 'strong' })
+    const bubble = bold.closest('.chat-bubble')!
+    expect(within(bubble as HTMLElement).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['your last pick', 'nothing before it'])
+    expect(bubble).not.toHaveTextContent('**')
+  })
+
+  it('shows a note and the answers under it when asked from outside the chat, as the reader’s answer does', async () => {
+    page = [{
+      kind: 'note',
+      message: message({ id: 'hi-5', text: '@Writer explain', route: 'team_note', runId: null, agentId: 'writer', answers: { waiting: [], said: [{ from: 'writer', text: 'Sure.', at: '2026-10-06T02:00:02.000Z' }] } }),
+    }]
+    const { rerender, props } = renderChat()
+    const note = (await screen.findByText('@Writer explain')).closest('li')!
+    expect(note).not.toHaveClass('flash')
+    rerender(<TeamChat {...props} reveal={{ runId: '', id: 'note:hi-5', at: 1 }} />)
+    await waitFor(() => expect(note).toHaveClass('flash'))
+  })
+
+  it('shows a message that was not sent, from outside the chat, at the bottom where Try again is', async () => {
+    page = [{ kind: 'note', message: message({ id: 'hi-6', text: '@Writer explain', route: 'team_note', runId: null, agentId: 'writer' }) }]
+    const scrolled = vi.fn()
+    const had = HTMLElement.prototype.scrollTo
+    HTMLElement.prototype.scrollTo = scrolled as unknown as typeof HTMLElement.prototype.scrollTo
+    try {
+      const { rerender, props } = renderChat()
+      await screen.findByText('@Writer explain')
+      scrolled.mockClear()
+      rerender(<TeamChat {...props} reveal={{ runId: '', id: 'pending', at: 2 }} />)
+      await waitFor(() => expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' })))
+    } finally {
+      HTMLElement.prototype.scrollTo = had
+    }
+  })
+
   it('a hello one agent answered offers to start that agent', async () => {
     page = [{
       kind: 'note',
@@ -1385,7 +1425,11 @@ describe('asking about a part of a file', () => {
     page = [{ kind: 'work', run: run({ runId: 'run-2' }), request: message({ id: 'm-2', runId: 'run-2', text: '@Writer why?', replyTo: part }), notes: [] }]
     const onPassages = vi.fn()
     renderChat({ onPassages })
-    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([{ file: '/w/market.md', text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2' }], null))
+    // With what came of it: the answer of the work the question started.
+    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([{
+      file: '/w/market.md', text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2', onItsOwn: false,
+      answer: { state: 'said', by: 'writer', text: '# Digest\nThe chip story.', at: '2026-10-06T02:04:00.000Z' },
+    }], null))
     // The quote under the message says what it asked about.
     expect(await screen.findByLabelText('Replying to a part of market.md from Writer')).toHaveTextContent('Sales grew 12% in Q3.')
   })

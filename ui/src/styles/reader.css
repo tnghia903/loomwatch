@@ -5,7 +5,9 @@
    with the agent's face in the margin.
    --------------------------------------------------------------------------- */
 
-.rd { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: var(--color-ground); --rd-mark: color-mix(in srgb, var(--lw-gold-400) 26%, transparent); }
+.rd { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: var(--color-ground); --rd-mark: color-mix(in srgb, var(--lw-gold-400) 26%, transparent);
+  /* The edge of what an agent says about a part (its bubble and its answer): the marker's gold. */
+  --rd-edge: color-mix(in srgb, var(--color-accent) 40%, var(--color-accent-tint)); }
 
 /* ---------- The bar: what the file is, who made it, and its own app a click away ---------- */
 .rd-bar { position: relative; flex: none; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px 12px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-panel); }
@@ -38,26 +40,21 @@
 /* The workspace turns text selection off; the reader is for marking words, so its page turns it on. */
 .rd-page { position: relative; user-select: text; -webkit-user-select: text; }
 .rd-page ::selection { background: color-mix(in srgb, var(--lw-gold-400) 42%, transparent); color: var(--color-ink); }
-::highlight(lw-read-asked) { background-color: color-mix(in srgb, var(--lw-gold-400) 24%, transparent); }
 ::highlight(lw-read-asking) { background-color: color-mix(in srgb, var(--lw-gold-400) 46%, transparent); }
-::highlight(lw-read-focus) { background-color: color-mix(in srgb, var(--lw-gold-400) 68%, transparent); color: var(--color-ink); }
 .rd-loading, .rd-empty { margin: 40px auto; max-width: 720px; padding: 0 40px; color: var(--color-ink-3); font-size: 13px; }
 .rd-failed { max-width: 520px; margin: 48px auto; padding: 16px 18px; border: 1px solid var(--color-hairline); border-left: 3px solid var(--color-alert); border-radius: 8px; background: var(--color-panel-solid); }
 .rd-failed p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--color-ink-2); }
 .rd-more { margin: 12px 0 0; }
 
-/* Every view leaves the left margin for the faces of the parts asked about: FileReader sets them 32px
-   left of the page's own padding, so less than 40px puts a face over the first words or numbers. */
-
 /* Code, data and plain text: by line, the numbers drawn beside and never marked with the words. */
-.tc-document .tc-document-page:is(.rd-as-code, .rd-as-text) { max-width: none; padding: 18px 22px 96px 40px; font-size: 13px; }
+.tc-document .tc-document-page:is(.rd-as-code, .rd-as-text) { max-width: none; padding: 18px 22px 96px 12px; font-size: 13px; }
 .rd-lines { margin: 0; padding: 0; counter-reset: line; background: none; border: 0; font: 12.5px/1.7 var(--font-mono); color: var(--color-ink); white-space: pre; tab-size: 4; }
 .rd-lines .rd-line { position: relative; display: block; padding-left: calc(var(--rd-gutter, 3ch) + 20px); white-space: pre-wrap; overflow-wrap: anywhere; }
 .rd-lines .rd-line::before { counter-increment: line; content: counter(line); position: absolute; left: 0; width: var(--rd-gutter, 3ch); text-align: right; color: var(--color-ink-3); opacity: .55; user-select: none; }
 .rd-lines .rd-line:hover::before { opacity: 1; color: var(--color-accent); }
 
 /* A table as a sheet: its header stays as you scroll, numbers sit right, rows are counted. */
-.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px 40px; }
+.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
 .rd-table-wrap { max-width: 100%; overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel-solid); }
 .rd-as-table .rd-table-wrap { overflow: visible; max-width: none; }
 .rd-table { min-width: 100%; border-collapse: separate; border-spacing: 0; counter-reset: row; font: 13px/1.45 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
@@ -88,20 +85,70 @@
 .rd-picture img { max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 4px color-mix(in srgb, var(--lw-ink-950) 8%, transparent), 0 16px 40px color-mix(in srgb, var(--lw-ink-950) 14%, transparent); }
 .rd-media { display: block; width: calc(100% - 48px); max-width: 720px; margin: 40px auto; }
 
-/* ---------- The faces in the margin: a part you asked about, and who you asked ---------- */
-.rd-pins { position: absolute; top: 0; width: 26px; height: 0; }
-.rd-pin {
-  position: absolute; left: 0; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%;
-  background: var(--color-panel-solid); box-shadow: 0 0 0 1.5px var(--color-accent), 0 2px 6px color-mix(in srgb, var(--lw-ink-950) 16%, transparent);
-  cursor: pointer; translate: 0 -3px; transition: scale var(--t-quick) var(--ease-out), box-shadow var(--t-quick) var(--ease-out);
+/* ---------- The parts asked about: a marker stroke on the words, the agent's bubble after them ----------
+   lib/files/partMarks.ts wraps each part's words in .rd-mark and leaves a .rd-slot after the last
+   word, so the bubble sits in the line and the line makes room for it. FileReader sets each part's
+   look on both: busy, waiting, read or failed; on-dark, fresh, lit. A web page draws the same in
+   itself (pageFrame.ts PAGE_BRIDGE): keep the two alike. The stroke is a tint, never a fill: the
+   part open or pointed at is told by a line under it, not by more gold. */
+.rd-mark {
+  --rd-a: 58%;
+  --rd-stroke: linear-gradient(100deg, color-mix(in srgb, var(--color-marker) var(--rd-a), transparent), color-mix(in srgb, var(--color-marker-deep) calc(var(--rd-a) * .7), transparent) 60%, color-mix(in srgb, var(--color-marker) var(--rd-a), transparent)) no-repeat 0 62% / 100% 74%;
+  margin: 0 -2px; padding: 0 2px; border-radius: 3px 9px 4px 10px / 8px 4px 10px 3px; cursor: pointer;
+  background: var(--rd-stroke);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
 }
-/* A short stitch from the face to the words it is about. */
-.rd-pin::after { content: ''; position: absolute; top: 50%; left: calc(100% + 2px); width: 7px; border-top: 1.5px dashed var(--color-accent); }
-.rd-pin:hover:not(:disabled), .rd-pin:focus-visible { scale: 1.12; box-shadow: 0 0 0 2px var(--color-accent), 0 4px 12px color-mix(in srgb, var(--lw-ink-950) 20%, transparent); }
-.rd-pin:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.rd-pin:disabled { cursor: default; }
+.rd-mark:is(.read, .failed) { --rd-a: 36%; }
+.rd-mark.on-dark { --rd-a: 30%; }
+.rd-mark.on-dark:is(.read, .failed) { --rd-a: 18%; }
+.rd-mark.lit { box-shadow: inset 0 -2px 0 var(--color-accent); }
+/* At work on it: a light runs along the stroke. */
+.rd-mark.busy { background: linear-gradient(100deg, transparent 0 35%, color-mix(in srgb, var(--color-paper) 70%, transparent) 50%, transparent 65%) no-repeat 0 62% / 250% 74%, var(--rd-stroke); }
+.rd-mark.on-dark.busy { background: linear-gradient(100deg, transparent 0 35%, color-mix(in srgb, var(--color-marker) 40%, transparent) 50%, transparent 65%) no-repeat 0 62% / 250% 74%, var(--rd-stroke); }
+
+/* The agent's bubble, in the line after the words: the way to the answer. Round, washed with the
+   marker's gold and edged in it, in the lightness of the page under it (owner: a light file keeps a
+   light bubble in the dark theme), a little above the words it follows and clear of the line above:
+   lifted by the text's own size. */
+.rd-slot { display: inline-block; margin: 0 2px 0 9px; line-height: 0; text-indent: 0; vertical-align: middle; translate: 0 -0.4em; -webkit-user-select: none; user-select: none; }
+.rd-bubble {
+  --glow: transparent;
+  --rd-b: var(--color-bubble-light); --rd-b-edge: var(--color-bubble-light-edge); --rd-b-ink: var(--color-bubble-light-ink); --rd-b-ink-2: var(--color-bubble-light-ink-2);
+  --rd-b-gold: var(--color-bubble-light-gold); --rd-b-live: var(--color-bubble-light-live); --rd-b-alert: var(--color-bubble-light-alert);
+  position: relative; display: inline-flex; align-items: center; gap: 3px; height: 22px; margin: 0; padding: 0 7px 0 2px; border: 0; border-radius: 999px;
+  background: var(--rd-b); color: var(--rd-b-ink); font: 600 11px/1 var(--font-sans); white-space: nowrap; cursor: pointer; vertical-align: middle;
+  box-shadow: 0 0 0 1px var(--rd-b-edge), 0 3px 10px color-mix(in srgb, var(--color-black) 16%, transparent);
+}
+.rd-slot.on-dark .rd-bubble {
+  --rd-b: var(--color-bubble-dark); --rd-b-edge: var(--color-bubble-dark-edge); --rd-b-ink: var(--color-bubble-dark-ink); --rd-b-ink-2: var(--color-bubble-dark-ink-2);
+  --rd-b-gold: var(--color-bubble-dark-gold); --rd-b-live: var(--color-bubble-dark-live); --rd-b-alert: var(--color-bubble-dark-alert);
+}
+/* A hand's worth to press on a small bubble. */
+.rd-bubble::after { content: ''; position: absolute; inset: -11px -8px; }
+/* Its point at the words (PartBubble.tsx BubblePoint): the bubble's colour over its edge where the
+   point leaves the circle, and the edge carried on along the point's two outer sides. */
+.rd-bubble-point { position: absolute; left: -5px; top: 13px; width: 10px; height: 7px; overflow: visible; pointer-events: none; }
+.rd-bubble-point-fill { fill: var(--rd-b); }
+.rd-bubble-point-edge { fill: none; stroke: var(--rd-b-edge); stroke-width: 1px; stroke-linejoin: round; stroke-linecap: round; }
+.rd-bubble:is(.read, .failed) { padding-right: 2px; }
+.rd-bubble:hover, .rd-bubble:focus-visible, .rd-slot.lit .rd-bubble { scale: 1.08; }
+.rd-bubble .rd-bubble-face { flex: none; }
+.rd-bubble .rd-bubble-face.has-figure { background-color: transparent; }
+.rd-bubble .chat-dots { gap: 3px; }
+.rd-bubble .chat-dots i { width: 4px; height: 4px; background: var(--rd-b-ink-2); }
+.rd-bubble-new { width: 7px; height: 7px; border-radius: 50%; background: var(--rd-b-gold); }
+/* Stopped: a cross beside the tilted figure, so it is never told by colour alone. */
+.rd-bubble .rd-bubble-stop { flex: none; margin-right: 3px; color: var(--rd-b-alert); }
+.rd-bubble.failed { padding-right: 0; }
+/* The figure's glow is its state, as everywhere: blue at work, gold when its answer waits, red stopped. */
+.rd-bubble.busy { --glow: var(--rd-b-live); }
+.rd-bubble.waiting { --glow: var(--rd-b-gold); }
+.rd-bubble.failed { --glow: var(--rd-b-alert); }
+:is(.rd-bubble, .rd-answer):is(.busy, .waiting, .failed) :is(.rd-bubble-face, .rd-answer-face) .chat-avatar-figure { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
+:is(.rd-bubble, .rd-answer).failed :is(.rd-bubble-face, .rd-answer-face) .chat-avatar-figure { rotate: 8deg; translate: 0 2px; filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
+
 /* In a ring, the figure fills it (loom.css draws a plain one at the slot's own size). */
-:is(.rd-pin, .rd-ask) .chat-avatar > .chat-avatar-figure { inset: -20%; width: 140%; height: 140%; max-width: none; }
+:is(.rd-bubble, .rd-ask, .rd-answer) .chat-avatar > .chat-avatar-figure { inset: -20%; width: 140%; height: 140%; max-width: none; }
 
 /* ---------- The ask bubble: the agent leans in over the words you marked ---------- */
 .rd-ask {
@@ -136,6 +183,51 @@
 .rd-ask-who { display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 600 13px/1.3 var(--font-sans); }
 .rd-ask-who i { font: 500 11px/1 var(--font-sans); font-style: normal; color: var(--lw-gold-400); white-space: nowrap; }
 .rd-ask-job { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/1.35 var(--font-sans); color: color-mix(in srgb, var(--color-ground) 68%, transparent); }
+
+/* ---------- The answer, beside the part it answers ----------
+   The screen's own panel, washed with the marker's gold and edged in it (owner's pick, option C of
+   three): it belongs to the marked words by colour as well as by its point. A tint, never a fill. */
+.rd-answer {
+  --glow: transparent;
+  position: absolute; z-index: 5; display: flex; flex-direction: column; box-sizing: border-box; width: min(360px, calc(100% - 16px));
+  border-radius: 14px; background: var(--color-accent-tint); color: var(--color-ink); box-shadow: 0 0 0 1px var(--rd-edge), var(--e2-shadow);
+}
+.rd-answer.busy { --glow: var(--color-live); }
+.rd-answer.waiting { --glow: var(--color-accent-fill); }
+.rd-answer.failed { --glow: var(--color-alert); }
+/* Its point, at the part: on its top edge under the part, on its bottom edge over it, edged as it is. */
+.rd-answer::before { content: ''; position: absolute; top: -5px; left: var(--rd-arrow, 50%); width: 10px; height: 10px; border-radius: 2px 0 0 0; background: inherit; box-shadow: -1px -1px 0 var(--rd-edge); transform: translateX(-50%) rotate(45deg); }
+.rd-answer.above::before { top: auto; bottom: -5px; border-radius: 0 0 2px 0; box-shadow: 1px 1px 0 var(--rd-edge); }
+.rd-answer.gone::before { display: none; }
+.rd-answer-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 6px 6px 10px; }
+.rd-answer-head b { overflow: hidden; font: 600 13px/1.2 var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
+.rd-answer-state { flex: none; color: var(--color-ink-2); font: 400 12px/1.2 var(--font-sans); }
+/* The agent is its figure alone, its state the figure's glow, as on its bubble. */
+.rd-answer .rd-answer-face { flex: none; }
+.rd-answer .rd-answer-face.has-figure { background-color: transparent; }
+.rd-answer-acts { display: flex; flex: none; gap: 2px; margin-left: auto; }
+.rd-answer-acts button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--color-ink-2); cursor: pointer; transition: background-color var(--t-quick) var(--ease-out); }
+.rd-answer-acts button:hover, .rd-answer-acts button:focus-visible { background: var(--color-hairline); color: var(--color-ink); }
+/* Your words, as a comment's: quiet, under the face of the agent answering them. */
+.rd-answer-asked {
+  display: -webkit-box; margin: 0 14px 6px; padding-left: 8px; overflow: hidden; border-left: 2px solid var(--rd-edge);
+  color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+/* The part is gone from the file: said on a line of its own, in the answer's own words' colour. */
+.rd-answer-gone { margin: 0 14px 6px; font: 400 12.5px/1.4 var(--font-sans); }
+.rd-answer-body { min-height: 0; padding: 2px 14px 12px; overflow-y: auto; overscroll-behavior: contain; font-size: 13.5px; line-height: 1.5; -webkit-user-select: text; user-select: text;
+  scrollbar-color: color-mix(in srgb, var(--color-ink) 30%, transparent) transparent; }
+.rd-answer-body .chat-dots { padding: 6px 0 2px; }
+.rd-answer-body .chat-dots i { background: var(--color-ink-2); }
+.rd-answer-note { margin: 0; color: var(--color-ink-2); }
+/* With no answer to read, the way on, in words. */
+.rd-answer-chat { margin: 8px 0 0; padding: 0; border: 0; background: none; color: inherit; font: 600 12.5px/1.4 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.rd-answer .chat-text ::selection { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+/* A finger's worth to press where the pointer is a finger. */
+@media (pointer: coarse) {
+  .rd-answer-acts button { width: 44px; height: 44px; }
+  .rd-answer-chat { padding: 10px 0; }
+}
 
 /* ---------- The tip, until the first part is asked about ---------- */
 .rd-hint {
@@ -180,13 +272,8 @@
 .agent-file { position: relative; }
 .agent-file .rd { position: relative; inset: auto; flex: 1; min-height: 0; margin-top: var(--sp-3); border-top: 1px solid var(--color-hairline); background: transparent; }
 .agent-file .rd .rd-scroll.tc-document { position: absolute; inset: 0; flex: none; }
-.agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px 40px; }
-.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px 40px; }
-
-/* A narrow pane draws a document 20px in from each side (team-chat.css); the faces still need theirs. */
-@container (max-width: 560px) {
-  .tc-document .tc-document-page:is(.rd-as-markdown, .rd-as-document) { padding-left: 40px; }
-}
+.agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px; }
+.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px; }
 
 @container details (max-width: 560px) {
   .rd-bar { padding-left: 14px; }
@@ -199,7 +286,16 @@
   .rd.updated .rd-bar::after { animation: rd-stitch 1.2s var(--ease-out) both; }
   .rd-ask { animation: rd-ask-in 220ms cubic-bezier(.34, 1.45, .64, 1) both; }
   .rd-ask .rd-ask-face { animation: rd-lean-in 460ms cubic-bezier(.34, 1.56, .64, 1) 40ms both; }
-  .rd-pin { animation: rd-pin-in 380ms cubic-bezier(.34, 1.56, .64, 1) both; }
+  /* Asked just now: the stroke sweeps on and the bubble pops up after it; while the agent works,
+     a light runs along the stroke. */
+  .rd-mark.fresh { animation: rd-sweep var(--t-spring) var(--ease-out) both; }
+  .rd-mark.busy { animation: rd-shine var(--t-flow) linear infinite; }
+  .rd-mark.fresh.busy { animation: rd-sweep var(--t-spring) var(--ease-out) both, rd-shine var(--t-flow) linear var(--t-spring) infinite; }
+  .rd-bubble { transition: scale var(--t-quick) var(--ease-out); }
+  .rd-slot.fresh .rd-bubble { animation: rd-bubble-in var(--t-spring) var(--ease-spring) 200ms both; }
+  .rd-bubble-new { animation: rd-new-in var(--t-spring) var(--ease-spring) both; }
+  .rd-answer { animation: rd-answer-in var(--t-move) var(--ease-out) both; }
+  .rd-answer.above { animation-name: rd-answer-in-above; }
   .rd-hint { animation: rd-hint-in 420ms var(--ease-out) 600ms both; }
   .rd-hint mark { animation: rd-mark-sweep 2.8s var(--ease-out) 900ms infinite; }
 }
@@ -207,6 +303,16 @@
 @keyframes rd-ask-in { from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(.84); } }
 /* The face comes up from behind the bubble's edge, tilted, and settles: it leans in to look. */
 @keyframes rd-lean-in { 0% { opacity: 0; transform: translateY(9px) rotate(-16deg) scale(.6); } 55% { opacity: 1; transform: translateY(-2px) rotate(7deg) scale(1.06); } 100% { transform: none; } }
-@keyframes rd-pin-in { from { opacity: 0; scale: .4; } }
+@keyframes rd-sweep { from { background-size: 0% 74%; } }
+/* With motion reduced, a busy part keeps its plain stroke and its dots stand still, full strength. */
+@media (prefers-reduced-motion: reduce) {
+  .rd-mark.busy, .rd-mark.on-dark.busy { background: var(--rd-stroke); }
+  .rd-bubble .chat-dots i, .rd-answer-body .chat-dots i { opacity: 1; }
+}
+@keyframes rd-shine { from { background-position: 100% 62%, 0 62%; } to { background-position: -150% 62%, 0 62%; } }
+@keyframes rd-bubble-in { from { opacity: 0; scale: .3; } }
+@keyframes rd-new-in { from { scale: 0; } }
+@keyframes rd-answer-in { from { opacity: 0; translate: 0 -6px; } }
+@keyframes rd-answer-in-above { from { opacity: 0; translate: 0 6px; } }
 @keyframes rd-hint-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
 @keyframes rd-mark-sweep { 0% { background-size: 0% 100%; } 30%, 85% { background-size: 100% 100%; } 100% { background-size: 100% 100%; } }

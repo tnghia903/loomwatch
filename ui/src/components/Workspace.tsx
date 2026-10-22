@@ -140,7 +140,7 @@ import { proposalSource, sameTeamFile, teamFileForAsk, useAskActions } from './a
 import { answeringAgent, isCheckerRole } from '../lib/library/checker'
 import { sendBackFields, sendBackOf, type SendBackSetting } from '../lib/team-file/sendBack'
 import { fileRefsIn, filesTouched, filesWritten, workspaceAgent } from '../lib/files/fileRefs'
-import type { AskedPassage } from '../lib/files/passage'
+import { askedInChat, type AskedPassage } from '../lib/files/passage'
 import { baseName } from '../lib/files/paths'
 import { goToTeam } from '../lib/team-file/teamPage'
 import { openTeam, type TeamView as TeamTab } from '../lib/team-file/useTeamList'
@@ -1678,8 +1678,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null }>({ asked: [], asking: null })
   const takePassages = useCallback((asked: AskedPassage[], asking: string | null) => setPassages({ asked, asking }), [])
   const showAsked = useCallback((passage: AskedPassage) => {
-    if (passage.runId) setChatReveal({ runId: passage.runId, id: `answer:${passage.runId}`, at: Date.now() })
-  }, [])
+    const shown = askedInChat(passage)
+    if (!shown) return
+    setChatReveal({ ...shown, at: Date.now() })
+    // On a narrow screen the pane covers the chat: it steps aside, as it does for Ask.
+    if (!wide) closeDetails()
+  }, [wide, closeDetails])
   // Files the answer in the pane names are read and asked about as its responder's work.
   const answerOrigin = useMemo(() => (activeRunId && answerResponder ? { runId: activeRunId, from: answerResponder } : null), [activeRunId, answerResponder])
   const allowAlways = useCallback((agentId: string, what: AlwaysAllowed) => {

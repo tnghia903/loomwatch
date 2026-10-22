@@ -95,6 +95,9 @@
   /* A produced document drawn as a sheet of paper (FileCard): paper in both themes. */
   --color-paper:          var(--lw-paper-0);
   --color-paper-rule:     var(--lw-paper-200);
+  /* The marker stroke on words asked about in a file: a tint, never a fill. */
+  --color-marker:          var(--lw-gold-200);
+  --color-marker-deep:     var(--lw-gold-400);
   --color-white:          #ffffff;
   --color-black:          #000000;
   --color-transparent:    transparent;
@@ -169,6 +172,23 @@
    TIER 3 — COMPONENT ALIASES. Identical in both themes.
    --------------------------------------------------------------------------- */
 :root {
+  /* A part's bubble in a file wears the lightness of the page under it, whatever the app's theme
+     (reader.css .rd-bubble): the marker's gold wash, edged in gold, with that lightness's marks. */
+  --color-bubble-light:        var(--lw-gold-tint-light);
+  --color-bubble-light-edge:   color-mix(in srgb, var(--lw-gold-600) 40%, var(--lw-gold-tint-light));
+  --color-bubble-light-ink:    var(--lw-ink-950);
+  --color-bubble-light-ink-2:  var(--lw-stone-700);
+  --color-bubble-light-gold:   var(--lw-gold-600);
+  --color-bubble-light-live:   var(--lw-blue-700);
+  --color-bubble-light-alert:  var(--lw-red-600);
+  --color-bubble-dark:         var(--lw-gold-tint-dark);
+  --color-bubble-dark-edge:    color-mix(in srgb, var(--lw-gold-200) 40%, var(--lw-gold-tint-dark));
+  --color-bubble-dark-ink:     var(--lw-bone-100);
+  --color-bubble-dark-ink-2:   var(--lw-graphite-400);
+  --color-bubble-dark-gold:    var(--lw-gold-400);
+  --color-bubble-dark-live:    var(--lw-blue-300);
+  --color-bubble-dark-alert:   var(--lw-red-400);
+
   --lw-node-fill:        var(--color-panel-solid);
   --lw-node-border:      var(--color-hairline);
   --lw-node-border-hover: color-mix(in srgb, var(--color-ink-3) 40%, transparent);
