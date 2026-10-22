@@ -444,7 +444,18 @@ mod tests {
         let elsewhere = db.path().with_file_name("other.db");
         let _other = claim(&elsewhere)?;
         drop(first);
-        let _again = claim(db.path())?;
+        // A program another test starts while the claim is held keeps a copy of the lock until it
+        // has started, so the lock may come free a moment after the claim goes (CI, 2026-10-22).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let _again = loop {
+            match claim(db.path()) {
+                Ok(again) => break again,
+                Err(_) if std::time::Instant::now() < deadline => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         Ok(())
     }
 
