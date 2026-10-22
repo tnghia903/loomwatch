@@ -567,8 +567,11 @@
 .stage-now > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .stage-now.doing { width: fit-content; padding: 3px 10px 3px 8px; border: 1px solid var(--color-live); border-radius: var(--r-full); background: var(--color-live-tint); }
 .stage-now.doing svg { flex: none; color: var(--color-live); }
-.stage-now.thought { position: relative; width: fit-content; max-width: calc(100% - 10px); padding: 5px 11px; margin-left: 10px; border: 1px solid var(--color-hairline); border-radius: 14px; background: var(--color-panel); }
-.stage-now.thought::before { content: ""; position: absolute; left: -9px; top: -3px; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--color-hairline); background: var(--color-panel); }
+/* The bubble floats over the card; its tail is two dots coming up from the figure under it. */
+.stage-now.thought { position: relative; width: fit-content; min-width: 48px; padding: 5px 11px; border: 1px solid var(--color-hairline); border-radius: 14px; background: var(--color-panel); }
+.stage-now.thought::before, .stage-now.thought::after { content: ""; position: absolute; border-radius: 50%; background: var(--color-warp); }
+.stage-now.thought::before { left: 25px; top: calc(100% + 3px); width: 7px; height: 7px; }
+.stage-now.thought::after { left: 33px; top: calc(100% + 11px); width: 4px; height: 4px; }
 /* The tray: one mark per kind it used, its count beside it; the words are in the label. */
 .stage-tray { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .stage-mark { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; min-width: 32px; justify-content: center; padding: 0 8px; border: 1px solid var(--color-hairline); border-radius: var(--r-sm); background: transparent; color: var(--color-ink-2); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
@@ -634,15 +637,26 @@
    Your request, each agent's card and the team's answer in one row, joined by the lines the work
    moves along; what an agent is at floats over its card, its skills hang under it. The row scrolls
    on its own when the team is wider than the pane; on a phone it stands in a column. */
-.team-flow { overflow-x: auto; padding: 2px 2px 10px; }
+.team-flow {
+  --flow-card-w: 248px;
+  --flow-above: 48px;
+  /* A figure, or the review step's mark, stands in a slot this tall at the card's top. */
+  --flow-figure: 46px;
+  /* The middle of that slot: what floats over the card, the card's border and top padding, half the slot. */
+  --flow-line-y: calc(var(--flow-above) + 1px + 16px + var(--flow-figure) / 2);
+  overflow-x: auto; padding: 2px 2px 10px;
+}
 .flow-row { display: flex; align-items: flex-start; width: max-content; min-width: 100%; }
 .flow-node { display: flex; align-items: flex-start; }
-/* The ends have nothing floating over them: they start where the agents' cards start. */
-.flow-end { padding-top: 44px; }
+/* The ends have nothing floating over them: they start where the agents' cards start. The card moves
+   down, not the node, so the line into the answer stays level with the others. */
+.flow-end > .flow-card { margin-top: var(--flow-above); }
 .flow-column { display: grid; min-width: 0; }
-.flow-above { height: 44px; max-width: 220px; display: flex; align-items: flex-end; padding-bottom: 8px; }
+.flow-above { height: var(--flow-above); max-width: var(--flow-card-w); display: flex; align-items: flex-end; padding-bottom: 8px; }
 .flow-above .stage-now { margin: 0; }
-.flow-card { width: 220px; display: grid; gap: 8px; padding: 10px 12px 12px; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-md); box-shadow: var(--e1-shadow); transition: border-color var(--t-settle), box-shadow var(--t-settle); }
+/* Room for the thought's tail between the bubble and the card. */
+.flow-above .stage-now.thought { margin-bottom: 8px; }
+.flow-card { width: var(--flow-card-w); display: grid; gap: 12px; padding: 16px; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); border-radius: var(--r-md); box-shadow: var(--e1-shadow); transition: border-color var(--t-settle), box-shadow var(--t-settle); }
 .flow-request, .flow-answer { width: 136px; }
 .flow-agent.working { border-color: color-mix(in srgb, var(--color-live) 55%, transparent); }
 .flow-agent.selected { border-color: var(--color-accent-dim); }
@@ -651,25 +665,28 @@
 .flow-answer strong.flow-text { font-size: 13px; line-height: 18px; font-weight: 550; color: var(--color-ink); }
 .flow-answer.done { border-color: var(--color-ok); }
 .flow-answer { position: relative; }
-.flow-answer-mark { position: absolute; top: 10px; right: 10px; color: var(--color-ink-3); }
+.flow-answer-mark { position: absolute; top: 16px; right: 16px; color: var(--color-ink-3); }
 .flow-muted { color: var(--color-ink-3); }
-.flow-who { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.flow-who { display: grid; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
 .flow-who:focus-visible { outline: 2px solid var(--color-live); outline-offset: 3px; border-radius: var(--r-xs); }
-.flow-names { display: grid; gap: 2px; min-width: 0; }
-.flow-names strong { font: 550 15px/20px var(--font-sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
-.flow-names .delivery-status { font: inherit; letter-spacing: inherit; }
+/* A status too long to sit beside the figure ("Stopped with a problem") takes the next row whole,
+   under the figure, in line with the model and the name. */
+.flow-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin-bottom: 8px; }
+.flow-top .stage-figure { height: var(--flow-figure); align-items: center; }
+.flow-top .delivery-status { font: 500 10.5px/14px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+.flow-who strong { font: 550 15px/20px var(--font-sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .flow-said { margin: 0; font-size: 11.5px; line-height: 16px; color: var(--color-ink-2); overflow-wrap: anywhere; }
 .flow-card-link { justify-self: start; font-size: 12px; }
 .flow-card .stage-tray { margin-top: 0; }
 
-/* The line the work moves along, at the height of the cards' names. A send-back leaves a dashed
+/* The line the work moves along, at the height of the cards' figures. A send-back leaves a dashed
    arc under it; the work itself is a sheet sliding along it, once, while the run is watched. */
 .flow-link { position: relative; flex: none; width: 44px; align-self: stretch; }
-.flow-line { position: absolute; left: 0; right: 0; top: 78px; border-top: 1.5px solid var(--color-warp); transition: border-color var(--t-settle); }
+.flow-line { position: absolute; left: 0; right: 0; top: var(--flow-line-y); border-top: 1.5px solid var(--color-warp); transition: border-color var(--t-settle); }
 .flow-link.passing .flow-line, .flow-link[data-pass="on"] .flow-line { border-top-color: var(--color-live); }
 .flow-link[data-pass="back"] .flow-line { border-top-color: var(--color-accent); }
-.flow-back { position: absolute; left: 6px; right: 6px; top: 92px; height: 22px; border: 1.5px dashed var(--color-accent-dim); border-top: 0; border-radius: 0 0 14px 14px; }
-.flow-link .handoff-sheet { position: absolute; left: 50%; top: 69px; width: 12px; height: 15px; margin-left: -6px; border: 1px solid var(--color-paper-rule); border-radius: 2px; background: var(--color-paper); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-ink) 25%, transparent); opacity: 0; }
+.flow-back { position: absolute; left: 6px; right: 6px; top: calc(var(--flow-line-y) + 14px); height: 22px; border: 1.5px dashed var(--color-accent-dim); border-top: 0; border-radius: 0 0 14px 14px; }
+.flow-link .handoff-sheet { position: absolute; left: 50%; top: calc(var(--flow-line-y) - 9px); width: 12px; height: 15px; margin-left: -6px; border: 1px solid var(--color-paper-rule); border-radius: 2px; background: var(--color-paper); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-ink) 25%, transparent); opacity: 0; }
 @media (prefers-reduced-motion: no-preference) {
   .flow-link[data-pass="on"] .handoff-sheet { animation: handoff-sheet-on var(--t-flow) var(--ease-out) both; }
   .flow-link[data-pass="back"] .handoff-sheet { animation: handoff-sheet-back var(--t-flow) var(--ease-out) both; }
@@ -699,9 +716,9 @@
   .team-flow { overflow: visible; }
   .flow-row { flex-direction: column; align-items: stretch; width: auto; }
   .flow-node { flex-direction: column; align-items: stretch; }
-  .flow-end { padding-top: 0; }
+  .flow-end > .flow-card { margin-top: 0; }
   .flow-card, .flow-request, .flow-answer { width: 100%; }
-  .flow-above { height: auto; max-width: none; padding: 0 0 6px; }
+  .flow-above { height: auto; max-width: none; padding: 0 0 8px; }
   .flow-above:empty { display: none; }
   .flow-link { width: auto; height: 28px; align-self: stretch; }
   .flow-line { top: 0; bottom: 0; left: 50%; right: auto; border-top: 0; border-left: 1.5px solid var(--color-warp); }
