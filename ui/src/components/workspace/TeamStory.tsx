@@ -1,6 +1,6 @@
 import { CalendarClock, Wand2 } from 'lucide-react'
 
-import { type FigureChoice } from '../../lib/library/figures'
+import { figureHue, type FigureChoice } from '../../lib/library/figures'
 import { FigureStill } from '../agents/FigureStill'
 import { sentenceText, type SentencePart } from '../../lib/story/teamSentence'
 import { AgentMark } from '../ui/AgentMark'
@@ -20,7 +20,8 @@ interface TeamStoryProps {
  * The team, said as one sentence above the canvas.
  *
  * Every name is a button into that agent's settings, so the sentence is a way to navigate as well
- * as a summary; hovering a name shows the id and model an expert would look for.
+ * as a summary; hovering a name shows the id and model an expert would look for. Each name wears its
+ * agent's colour, as it does in the chat.
  */
 export function TeamStory({ parts, onAgent, onSchedule, onConnect, figures }: TeamStoryProps) {
   if (parts.length === 0) return null
@@ -32,7 +33,7 @@ export function TeamStory({ parts, onAgent, onSchedule, onConnect, figures }: Te
           if (part.kind === 'agent') {
             const figure = part.operator ? undefined : figures?.get(part.id)
             return (
-              <button key={index} type="button" className={`story-name ${part.operator ? 'you' : ''}`} aria-label={part.operator ? 'You, the review step' : part.name} title={part.title} onClick={() => onAgent(part.id)}>
+              <button key={index} type="button" className={`story-name ${part.operator ? 'you' : figure ? `hue-${figureHue(figure)}` : ''}`} aria-label={part.operator ? 'You, the review step' : part.name} title={part.title} onClick={() => onAgent(part.id)}>
                 {figure ? <span className="story-face" aria-hidden="true"><FigureStill figure={figure} headOnly alt="" /></span> : <AgentMark id={part.id} size={14} operator={part.operator} />}
                 {part.name}
               </button>

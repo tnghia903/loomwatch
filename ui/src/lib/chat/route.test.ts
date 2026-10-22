@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../runs/client'
-import { destination, findMention, mentionChoices, mentionQuery, withMention, type ChatAgent } from './route'
+import { destination, findMention, mentionChoices, mentionQuery, mentionsIn, withMention, type ChatAgent } from './route'
 
 const agents: ChatAgent[] = [
   { id: 'researcher', name: 'Researcher' },
@@ -32,6 +32,19 @@ describe('findMention', () => {
 
   it('never addresses a review step: that is you', () => {
     expect(findMention('@Your review approve it', agents)).toBeNull()
+  })
+})
+
+describe('mentionsIn', () => {
+  it('finds every @mention in order, each where its name is written', () => {
+    const text = '@News Writer and @researcher, then (@team) — not me@team.com or @Your review'
+    const found = mentionsIn(text, agents)
+    expect(found.map((mention) => text.slice(mention.start, mention.end))).toEqual(['@News Writer', '@researcher', '@team'])
+    expect(found.map((mention) => mention.target)).toEqual([{ kind: 'agent', agent: 'writer' }, { kind: 'agent', agent: 'researcher' }, { kind: 'team' }])
+  })
+
+  it('finds none in words without one', () => {
+    expect(mentionsIn('no mention here', agents)).toEqual([])
   })
 })
 
