@@ -12,10 +12,13 @@ import { BLANK_DRAFT, blankDraft, draftChanged, draftFromJob, draftFromPreset, s
 import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
 import { JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobSpec, type SavedJob } from '../../lib/library/jobs'
+import { usePinnedAgent } from '../../lib/library/pinned'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import type { TeamKnowledge } from '../../lib/library/teamDraft'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
 import { relativeTime } from '../../lib/format'
+import { isMac } from '../../lib/platform'
+import { PINNED_SHORTCUT_WORDS } from '../../island/bridge'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LeaveGuard } from '../rail/CrewRail'
 import type { ChipState } from '../ui/glyphs'
@@ -79,6 +82,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   const [teamView, setTeamView] = useState<AgentView>('build')
   const view: AgentView = inTeam ? teamView : asked
   const { jobs, available, loaded } = useSavedJobs()
+  const pinned = usePinnedAgent()
   const ai = useAiStatus()
   const saved = useMemo(() => (id ? jobs.find((job) => job.id === id) ?? null : null), [jobs, id])
   const [base, setBase] = useState<AgentDraft | null>(null)
@@ -180,6 +184,21 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   })
   useEffect(() => () => { if (leaveRef) leaveRef.current = null }, [leaveRef])
 
+  // What pinning did, said where a save is: where to find the agent now, or that it didn't work.
+  const [pinSaid, setPinSaid] = useState<{ ok: boolean; text: string } | null>(null)
+  async function togglePin(agent: string, name: string) {
+    const pinning = pinned.pinned !== agent
+    const before = pinning && pinned.pinned ? jobs.find((job) => job.id === pinned.pinned)?.name ?? null : null
+    try {
+      await pinned.pin(pinning ? agent : null)
+      // The line under the name says what pinning did now, not the last save.
+      if (save.kind === 'saved') setSave({ kind: 'idle' })
+      setPinSaid({ ok: true, text: pinning ? `Pinned${before ? ` in place of ${before}` : ''}. Press ${PINNED_SHORTCUT_WORDS} in any app, or point at the top middle of your screen, to message ${name}.` : 'Unpinned.' })
+    } catch {
+      setPinSaid({ ok: false, text: pinning ? `Couldn’t pin ${name}. Try again.` : `Couldn’t unpin ${name}. Try again.` })
+    }
+  }
+
   async function doRemove() {
     if (!saved) return
     try { await removeJob(saved.id); navigate('/agents') } catch (failed) { setSave({ kind: 'error', message: failed instanceof Error ? failed.message : String(failed) }); setRemoving(false) }
@@ -263,14 +282,16 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     // The name chip says how it is kept, as a team's does: the dot, a line under the name, and Save
     // beside it while there is something to save.
     const state: ChipState = save.kind === 'saving' ? 'saving' : save.kind === 'error' ? 'failed' : problem ? 'incomplete' : !saved ? 'new' : changed ? 'dirty' : save.kind === 'saved' ? 'saved' : 'clean'
+    // A saved agent can be kept at the notch of a Mac (ADR 0083): only the island there shows it.
+    const pin = saved && isMac() ? { pinned: pinned.pinned === saved.id, onToggle: () => void togglePin(saved.id, name) } : undefined
     const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
     return (
       <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
-        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => void doRemove() : undefined} />, bar.chip)}
+        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => void doRemove() : undefined} pin={pin} />, bar.chip)}
         {bar.tabs && createPortal(<AgentViewTabs view={view} onView={showView} tour inBar />, bar.tabs)}
         <h1 className="visually-hidden">{name}</h1>
         {/* The way back to a team, and what a save did. Always there, so a save is announced. */}
-        <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid}</span></div>
+        <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>))}</span></div>
         {bench}
         {side}
       </div>

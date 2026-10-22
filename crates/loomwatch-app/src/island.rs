@@ -5,7 +5,9 @@
 //! and tucks away, and answers a permission with the same calls the browser makes. The app only
 //! places the panel over the notch, lets clicks through everywhere but the island itself, and
 //! tells the page where the pointer is, whether the person is away, and whether an app is full
-//! screen. Kept apart from `AppKit` so it is the same, and tested, everywhere.
+//! screen. The panel never takes the keyboard, except while a message to the agent pinned to the
+//! notch is written (decision 9), and then only because the page asked. Kept apart from `AppKit`
+//! so it is the same, and tested, everywhere.
 
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +48,7 @@ impl Rect {
         self.y + self.height
     }
 
-    fn contains(&self, x: f64, y: f64) -> bool {
+    pub fn contains(&self, x: f64, y: f64) -> bool {
         x >= self.x && x < self.max_x() && y >= self.y && y < self.max_y()
     }
 }
@@ -92,21 +94,40 @@ pub fn notch_from(safe_top: f64, left: Rect, right: Rect) -> Option<Notch> {
         .then_some(notch)
 }
 
-/// Where the island lives: around the notch of the first screen that has one; otherwise at the
-/// top of the main screen (`screens[0]`, the one with the menu bar in Displays settings), where it
-/// drops from the middle of the menu bar only for a question or a result.
-pub fn island_screen(screens: &[Screen]) -> Option<&Screen> {
+/// Where the island lives: on the screen the pointer is on, around its notch, or at the middle of
+/// its menu bar where it has none, so every screen has it; with the pointer on none of them, the
+/// main screen (`screens[0]`, the one with the menu bar in Displays settings).
+pub fn island_screen(screens: &[Screen], pointer: (f64, f64)) -> Option<&Screen> {
     screens
         .iter()
-        .find(|screen| screen.notch.is_some())
+        .find(|screen| screen.frame.contains(pointer.0, pointer.1))
         .or_else(|| screens.first())
 }
 
-/// The menu bar face stays wherever a screen has no notch to hold the island: an iMac, a Mac mini,
-/// an external screen beside a `MacBook`.
-pub fn menu_bar_face_shows(screens: &[Screen]) -> bool {
-    screens.iter().any(|screen| screen.notch.is_none())
+/// How far from the middle of the top of a screen, and how far down, something dragged is near
+/// enough to the island for it to open and take it.
+pub const DROP_REACH: Size = Size {
+    width: 260.0,
+    height: 180.0,
+};
+
+/// Whether something dragged to (`x`, `y`) on screen is near enough to the island on `screen` to
+/// drop into it.
+pub fn near_island(screen: &Screen, x: f64, y: f64) -> bool {
+    let mid_x = screen.notch.map_or_else(
+        || screen.frame.x + screen.frame.width / 2.0,
+        |notch| notch.mid_x(),
+    );
+    screen.frame.contains(x, y)
+        && (x - mid_x).abs() <= DROP_REACH.width
+        && screen.frame.max_y() - y <= DROP_REACH.height
 }
+
+/// The shortcut that opens the box to write to the pinned agent, from any app: ⌃⌥Space. As
+/// `RegisterEventHotKey` takes it: the Space key's code, and Carbon's control and option bits.
+/// The app's pages write it as `PINNED_SHORTCUT` (ui/src/island/bridge.ts).
+pub const SHORTCUT_KEY: u32 = 49;
+pub const SHORTCUT_MODIFIERS: u32 = 0x1000 | 0x0800;
 
 /// The panel's frame on `screen`: hanging from its top edge, centred on the notch, or on the
 /// screen without one.
@@ -152,6 +173,13 @@ pub enum FromPage {
     Open { link: String },
     /// A right-click on the island at (`x`, `y`) in the panel: the app's menu.
     Menu { x: f64, y: f64 },
+    /// A message to the pinned agent is being written: the panel takes the keyboard; or it is
+    /// sent, put away or left, and the keyboard goes back to whatever had it.
+    Keyboard { on: bool },
+    /// The agent pinned to the notch, by name, or none.
+    Pinned { name: Option<String> },
+    /// Put `text` on the clipboard: Copy on an answer.
+    Copy { text: String },
 }
 
 impl FromPage {
@@ -186,6 +214,11 @@ pub enum ToPage {
     FullScreen { on: bool },
     /// A click somewhere other than the island.
     ClickOutside,
+    /// ⌃⌥Space was pressed: open the box to write to the pinned agent, or put it away. The panel
+    /// has the keyboard already when it opens.
+    Compose,
+    /// Something is being dragged near the island, so it opens to take it; or no longer is.
+    Drag { near: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -263,20 +296,37 @@ mod tests {
     }
 
     #[test]
-    fn the_island_lives_at_the_notch_and_the_face_stays_where_a_screen_has_none() {
-        // A MacBook on its own: the island, and no face in the menu bar.
-        assert_eq!(island_screen(&[macbook()]), Some(&macbook()));
-        assert!(!menu_bar_face_shows(&[macbook()]));
-        // With a screen beside it, even one listed first: the island stays at the notch, and the
-        // face comes back for the other screen's menu bar.
+    fn the_island_is_on_the_screen_the_pointer_is_on_notch_or_not() {
+        // The pointer on the MacBook: the island at its notch.
         let both = [external(ABOVE), macbook()];
-        assert_eq!(island_screen(&both), Some(&macbook()));
-        assert!(menu_bar_face_shows(&both));
-        // No notch anywhere (an iMac, or a MacBook closed on a desk): the main screen, and the face.
-        let imac = [external(ABOVE)];
-        assert_eq!(island_screen(&imac), Some(&imac[0]));
-        assert!(menu_bar_face_shows(&imac));
-        assert_eq!(island_screen(&[]), None);
+        assert_eq!(island_screen(&both, (700.0, 500.0)), Some(&macbook()));
+        // On the screen above it, which has no notch: the island moves there.
+        assert_eq!(
+            island_screen(&both, (700.0, 1500.0)),
+            Some(&external(ABOVE))
+        );
+        // Between screens, or nowhere a screen is: the main screen.
+        assert_eq!(
+            island_screen(&both, (-900.0, -900.0)),
+            Some(&external(ABOVE))
+        );
+        assert_eq!(island_screen(&[], (0.0, 0.0)), None);
+    }
+
+    #[test]
+    fn something_dragged_near_the_top_middle_of_the_screen_is_near_the_island() {
+        let mac = macbook();
+        // Just under the notch, and a little to one side.
+        assert!(near_island(&mac, 756.0, 960.0));
+        assert!(near_island(&mac, 756.0 + 250.0, 820.0));
+        // Too far down, too far aside, or on another screen.
+        assert!(!near_island(&mac, 756.0, 700.0));
+        assert!(!near_island(&mac, 200.0, 960.0));
+        assert!(!near_island(&mac, 756.0, 1500.0));
+        // A screen without a notch: around the middle of its top.
+        let above = external(ABOVE);
+        assert!(near_island(&above, 756.0, 2040.0));
+        assert!(!near_island(&above, 1600.0, 2040.0));
     }
 
     #[test]
@@ -345,6 +395,26 @@ mod tests {
             FromPage::parse(r#"{"kind":"open","link":"/"}"#),
             Some(FromPage::Open { link: "/".into() })
         );
+        assert_eq!(
+            FromPage::parse(r#"{"kind":"keyboard","on":true}"#),
+            Some(FromPage::Keyboard { on: true })
+        );
+        assert_eq!(
+            FromPage::parse(r#"{"kind":"pinned","name":"Maya"}"#),
+            Some(FromPage::Pinned {
+                name: Some("Maya".into())
+            })
+        );
+        assert_eq!(
+            FromPage::parse(r#"{"kind":"pinned","name":null}"#),
+            Some(FromPage::Pinned { name: None })
+        );
+        assert_eq!(
+            FromPage::parse(r#"{"kind":"copy","text":"Rent rises 4%."}"#),
+            Some(FromPage::Copy {
+                text: "Rent rises 4%.".into()
+            })
+        );
         assert_eq!(FromPage::parse(r#"{"kind":"launch"}"#), None);
         assert_eq!(FromPage::parse("not json"), None);
     }
@@ -366,6 +436,14 @@ mod tests {
         assert_eq!(
             ToPage::ClickOutside.script(),
             r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"clickOutside"})"#
+        );
+        assert_eq!(
+            ToPage::Compose.script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"compose"})"#
+        );
+        assert_eq!(
+            ToPage::Drag { near: true }.script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"drag","near":true})"#
         );
     }
 

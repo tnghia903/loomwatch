@@ -2104,6 +2104,65 @@ fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Say `text` to `agent` in its team's chat, as `LoomWatch` passing something on: a team's answer
+/// to what the agent pinned to the notch asked of it (ADR 0083, decision 9, `crate::team_requests`).
+///
+/// It goes exactly as a message from the person to that agent goes, through
+/// [`send_message`]: archived in the chat, starting the agent's work, or joining its turn as a note
+/// while it works. It is always work, never answered in the chat instead. With
+/// `only_while_working` it goes only as a note to a turn still at work, and otherwise not at all.
+/// `start_key` makes a repeat start nothing twice.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn tell_agent(
+    registry: &RunRegistry,
+    archive: Option<EventArchive>,
+    teams_root: &Path,
+    team_path: &str,
+    agent: &str,
+    text: &str,
+    only_while_working: bool,
+    start_key: Option<String>,
+) -> Result<(), String> {
+    let state = ChatState {
+        archive,
+        teams_root: teams_root.to_owned(),
+        registry: registry.clone(),
+        answering: NotesAnswering::default(),
+    };
+    let to = Target::Agent {
+        agent: agent.to_owned(),
+    };
+    if only_while_working {
+        let (relative, team) =
+            open_team(&state.teams_root, team_path).map_err(|error| error.message)?;
+        let live = state
+            .registry
+            .live_runs_of(&team.chat_key(&relative), &relative);
+        if !matches!(decide(Some(&to), &live), Decided::Note { .. }) {
+            return Ok(());
+        }
+    }
+    let request = SendMessage {
+        team_path: team_path.to_owned(),
+        text: text.to_owned(),
+        to: Some(to),
+        now: false,
+        expected_revision: None,
+        start_key,
+        reply_to: None,
+        work: true,
+        files: Vec::new(),
+    };
+    let response = send_message(State(state), Ok(Json(request)))
+        .await
+        .map_err(|error| error.message)?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("the chat refused it ({})", response.status()))
+    }
+}
+
 /// `POST /api/chat/messages`: route one message by the rule, and do what the route says.
 #[allow(clippy::too_many_lines)]
 async fn send_message(

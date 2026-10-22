@@ -1423,6 +1423,30 @@ impl TeamBus {
                 self.start_helper(session, token, event_log, arguments)
                     .await
             }
+            "my_teams" => {
+                let desk = self.front_desk_of(session)?;
+                let teams = tokio::task::spawn_blocking(move || {
+                    crate::team_requests::teams(&desk.teams_root)
+                })
+                .await
+                .context("listing the person's teams stopped")?;
+                Ok(json!({
+                    "teams": teams.iter().map(|(team, config)| json!({
+                        "file": team.path,
+                        "name": team.name,
+                        "agents": config
+                            .agents
+                            .iter()
+                            .filter(|agent| !agent.is_operator())
+                            .map(|agent| json!({
+                                "name": shown_name(agent),
+                                "does": crate::orientation::role_summary(&agent.role),
+                            }))
+                            .collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>()
+                }))
+            }
+            "ask_team" => self.ask_team(session, event_log, arguments).await,
             "dispatch" => {
                 let target = self.resolve(&required_string(arguments, "agent")?)?;
                 let task = required_string(arguments, "task")?;
@@ -3141,6 +3165,9 @@ pub(crate) struct BusSeat {
     /// How many helpers it may have at work at once: the agent working alone, in a run that
     /// offers them (ADR 0079). `0` for everyone else.
     pub(crate) helpers: u32,
+    /// The agent pinned to the notch, in its own chat, with a person to confirm: it may ask the
+    /// person's teams (ADR 0083, decision 9).
+    pub(crate) front_desk: bool,
 }
 
 impl TeamBus {
@@ -3184,7 +3211,79 @@ impl TeamBus {
             operator: self.state.operator.is_some() && !copy,
             conversation: conversation && !copy,
             helpers,
+            front_desk: !copy
+                && !holder.helper
+                && !holder.answering
+                && self.state.operator.is_some()
+                && crate::pinned::front_desk(&self.state.team_path, &holder.agent_id).is_some(),
         }
+    }
+
+    /// Where the person's teams are, when the agent behind `session` is the one pinned to the
+    /// notch, in its own chat, with a person to confirm (ADR 0083, decision 9). Refused for anyone
+    /// else, so a harness that cached an older list of tools can't ask a team either.
+    fn front_desk_of(&self, session: &AgentSession) -> Result<crate::pinned::FrontDesk> {
+        if crate::helpers::lead_of(&session.agent_id).is_none()
+            && !session.answering
+            && self.state.operator.is_some()
+            && let Some(desk) = crate::pinned::front_desk(&self.state.team_path, &session.agent_id)
+        {
+            return Ok(desk);
+        }
+        Err(refused(
+            "not_front_desk",
+            "only the agent pinned to the notch, in its own chat, may ask the person's teams"
+                .to_owned(),
+        ))
+    }
+
+    /// `ask_team`: record the request for the person to Start or decline, and return at once.
+    async fn ask_team(
+        &self,
+        session: &AgentSession,
+        event_log: &EventLog,
+        arguments: &Value,
+    ) -> Result<Value> {
+        let desk = self.front_desk_of(session)?;
+        let file = required_string(arguments, "team")?;
+        let request = required_string(arguments, "request")?;
+        let root = desk.teams_root.clone();
+        let teams = tokio::task::spawn_blocking(move || crate::team_requests::teams(&root))
+            .await
+            .context("listing the person's teams stopped")?;
+        let wanted = file.trim_start_matches("./");
+        let Some((team, _)) = teams
+            .into_iter()
+            .find(|(team, _)| team.path == wanted || team.name.eq_ignore_ascii_case(wanted))
+        else {
+            return Err(refused(
+                "not_a_team",
+                format!("{file:?} is not one of the person's teams: call my_teams for their files"),
+            ));
+        };
+        let asked = crate::team_requests::ask(
+            crate::team_requests::AskedBy {
+                run_id: event_log.session_id().to_owned(),
+                agent: session.agent_id.clone(),
+                chat_path: desk.chat_path.clone(),
+            },
+            team.clone(),
+            &request,
+        )
+        .map_err(|reason| refused("not_asked", reason))?;
+        let who = crate::you::told_in(&desk.teams_root)
+            .and_then(|you| you.name)
+            .unwrap_or_else(|| "the person".to_owned());
+        Ok(json!({
+            "asked": true,
+            "id": asked.id,
+            "team": team.name,
+            "note": format!(
+                "Asked {who} to start {name} on this. Nothing runs until they press Start under \
+                 the notch. When {name} finishes, its answer comes to you here in your chat.",
+                name = team.name
+            ),
+        }))
     }
 }
 
@@ -3293,6 +3392,11 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
             ),
         ));
     }
+    // ADR 0083, decision 9: the agent pinned to the notch may ask the person's teams, each
+    // started only when they press Start.
+    if seat.front_desk {
+        tools.extend(front_desk_tools());
+    }
     if seat.notebook {
         tools.extend(memory_tool_definitions());
     }
@@ -3308,6 +3412,42 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     }
     tools
 }
+
+/// `my_teams` and `ask_team`: the agent pinned to the notch, in its own chat, may ask the person's
+/// teams, each started only when they press Start (ADR 0083, decision 9).
+fn front_desk_tools() -> [Value; 2] {
+    [
+        tool(
+            "my_teams",
+            MY_TEAMS_DESCRIPTION,
+            &json!({"type": "object", "additionalProperties": false}),
+        ),
+        tool(
+            "ask_team",
+            ASK_TEAM_DESCRIPTION,
+            &two_strings(
+                "team",
+                "The team's file, as my_teams lists it",
+                "request",
+                "What the team should do, in full: what you were asked, what you already know \
+                     and what to send back. The team sees none of this conversation.",
+            ),
+        ),
+    ]
+}
+
+/// What `my_teams` is for (ADR 0083, decision 9).
+const MY_TEAMS_DESCRIPTION: &str = "List the person's teams: each one's file, its name, and its \
+     agents with what each does. Use it to see whether one of them is made for what you were asked.";
+
+/// What `ask_team` is for (ADR 0083, decision 9): when to use it, and what happens after.
+const ASK_TEAM_DESCRIPTION: &str = "Ask one of the person's teams to do a job it is made for, \
+     when it will clearly do it better than you alone: their Trip planner for a trip, their \
+     Research desk for a sourced report. The person sees your request and decides; nothing runs \
+     until they press Start. It returns at once: tell them in one sentence what you asked and \
+     why, then end your turn. The team's answer comes to you in this chat when it finishes, and \
+     you then write them their answer from it. When no team is clearly made for the job, answer \
+     yourself.";
 
 /// `start_helper` (ADR 0079): the part's title the person reads, then the brief in its two halves.
 fn start_helper_tool() -> Value {
@@ -3655,6 +3795,7 @@ mod tests {
                 operator: true,
                 conversation: true,
                 helpers: 4,
+                front_desk: true,
             };
             for tool in offered_tools(&seat) {
                 let text = tool.to_string();
@@ -7038,8 +7179,9 @@ mod tests {
             operator: true,
             conversation: false,
             helpers: 0,
+            front_desk: false,
         };
-        let cases: [(&str, BusSeat, &[&str]); 12] = [
+        let cases: [(&str, BusSeat, &[&str]); 13] = [
             (
                 "one agent, team mode",
                 seat(TeamBusMode::Team, 0, false),
@@ -7129,6 +7271,15 @@ mod tests {
                     ..seat(TeamBusMode::Pipeline, 0, false)
                 },
                 &["start_helper", "ask_user"],
+            ),
+            (
+                "the agent pinned to the notch, in its own chat",
+                BusSeat {
+                    helpers: 4,
+                    front_desk: true,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &["start_helper", "ask_user", "my_teams", "ask_team"],
             ),
         ];
         for (what, seat, expected) in cases {

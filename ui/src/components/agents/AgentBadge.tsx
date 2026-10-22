@@ -1,4 +1,4 @@
-import { Check, FilePen, Globe, SquareTerminal } from 'lucide-react'
+import { Check, FilePen, Globe, Pin, SquareTerminal } from 'lucide-react'
 
 import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { AgentDraft } from '../../lib/library/draft'
@@ -22,6 +22,8 @@ export interface AgentBadgeProps {
   effortName?: string
   /** Teams that use it, how many of those run on a schedule, and how many have an update ready. */
   usedIn?: { teams: number; scheduled: number; behind: number }
+  /** Kept at the notch of a Mac, to message from the top of the screen (ADR 0083). */
+  pinned?: boolean
   compact?: boolean
 }
 
@@ -30,7 +32,7 @@ export interface AgentBadgeProps {
  * right now — what it carries, and where it is used. It is the staff badge of the design notes:
  * an access card with an "after hours" rule, because a scheduled team has nobody to answer.
  */
-export function AgentBadge({ markId, figure, draft, modelName, effortName, usedIn, compact = false }: AgentBadgeProps) {
+export function AgentBadge({ markId, figure, draft, modelName, effortName, usedIn, pinned = false, compact = false }: AgentBadgeProps) {
   const scheduled = (usedIn?.scheduled ?? 0) > 0
   const asks = ALLOW_SWITCHES.filter(({ key }) => !draft.allow[key])
   const name = draft.name.trim() || 'New agent'
@@ -41,7 +43,7 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
           ? <FigureStill className="agent-badge-figure" figure={figure} alt={`${name}, a ${figureWords(figure)}`} width={compact ? 84 : 92} height={compact ? 84 : 92} loading="lazy" decoding="async" />
           : <AgentMark id={markId} name={name} size={compact ? 26 : 34} animate={false} />}
         <div className="agent-badge-who">
-          <strong>{name}</strong>
+          <strong>{name}{pinned && <Pin className="agent-badge-pin" size={13} role="img" aria-label="pinned to the notch"><title>Pinned to the notch</title></Pin>}</strong>
           {draft.does.trim() && <span className="agent-badge-does">{draft.does.trim()}</span>}
           <span className="agent-badge-app t-mono-sm">{modelName || modelNameFromId(draft.model)}{effortName ? ` · ${effortName.toLowerCase()} effort` : ''}</span>
         </div>

@@ -578,6 +578,11 @@ fn job_file(teams_root: &Path, id: &str) -> PathBuf {
     teams_root.join(JOBS_DIR).join(format!("{id}.yaml"))
 }
 
+/// Whether `id` is one of My agents now: a saved job's file, not a removed one.
+pub(crate) fn exists(teams_root: &Path, id: &str) -> bool {
+    is_job_id(id) && job_file(teams_root, id).is_file()
+}
+
 fn relative(id: &str) -> String {
     format!("{JOBS_DIR}/{id}.yaml")
 }

@@ -35,10 +35,12 @@ body {
 .island [data-moment="ask"] { --glow: var(--color-accent); }
 .island [data-moment="done"] { --glow: var(--color-ok); }
 .island [data-moment="fail"] { --glow: var(--color-alert); }
+/* The agent pinned to the notch, free for a message. */
+.island [data-moment="ready"] { --glow: var(--color-ok); }
 .island .glow { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2.5px var(--glow)); }
 .island .glow[data-moment="work"] { animation: island-breathe var(--t-breathe) ease-in-out infinite; }
 .island .glow[data-moment="fail"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2.5px var(--glow)); }
-.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure) > :is(img, .figure-still) {
+.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-slot-eyes, .island-stage-figure) > :is(img, .figure-still) {
   display: block;
   width: 100%;
   height: 100%;
@@ -95,6 +97,9 @@ body {
   --r: 26px;
 }
 .island[data-view="hidden"] .island-shape { --w: 120px; --h: 0px; opacity: 0; pointer-events: none; }
+/* Something dragged near: the island opens as a slot, wide and deep enough to let go of it well
+   below the top edge, where macOS would open Mission Control instead. */
+.island[data-view="slot"] .island-shape { --w: calc(var(--notch-w) + 160px); --h: calc(var(--bar) + 64px); --r: 24px; }
 
 /* ---- Popping out: the agent at work peeks up below the notch ---- */
 .island-balcony { position: absolute; top: var(--bar); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; }
@@ -226,6 +231,80 @@ body {
 /* The rest of the team stands a step behind the one acting, in its own colours. */
 .island-row-figure.is-behind > * { scale: .78; transform-origin: 50% 100%; }
 .island-quiet { margin: 6px 0; font: 500 13px/18px var(--font-sans); color: var(--color-ink-2); }
+/* The agent pinned to the notch: its figure, what it is doing, and a box to message it. The box
+   takes the line beside the figure while it is free, and the line under what it is doing. */
+.island-compose { grid-column: 2 / -1; display: flex; gap: 8px; align-items: center; min-width: 0; }
+.island-field {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 40%, transparent);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  color: var(--color-ink);
+  font: 400 13px/18px var(--font-sans);
+  text-overflow: ellipsis;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  outline: none;
+  transition: border-color var(--t-instant) var(--ease-out);
+}
+.island-field::placeholder { color: var(--color-ink-2); }
+.island-field:hover { border-color: color-mix(in srgb, var(--color-ink) 60%, transparent); }
+.island-field:focus { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }
+.island-field:disabled { opacity: .5; }
+.island-sent { grid-column: 2 / -1; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.island-sent-failed { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.island-sent-failed .island-problem { display: flex; gap: 6px; align-items: baseline; color: var(--color-ink); }
+.island-sent-failed .island-problem i { font-style: normal; font-weight: 700; color: var(--color-alert); }
+/* ---- The pinned agent's slot: a gold lip, and its eyes just over it ---- */
+.island-slot-open { position: absolute; inset: 0; pointer-events: none; }
+.island-slot-eyes { position: absolute; left: calc(50% - 26px); bottom: 2px; width: 52px; height: 52px; animation: island-rise var(--t-entrance) var(--ease-out) both; }
+.island-slot-lip { position: absolute; left: 18px; right: 18px; bottom: 6px; height: 3px; border-radius: 3px; background: var(--color-accent); box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 70%, transparent); }
+
+/* ---- What went in, and the jobs that fit it ---- */
+.island-intake { grid-column: 2 / -1; display: grid; gap: 8px; min-width: 0; }
+.island-intake-what { display: inline-flex; align-items: center; gap: 6px; justify-self: start; max-width: 100%; padding: 4px 6px 4px 10px; border-radius: 8px; background: color-mix(in srgb, var(--color-ink) 10%, transparent); font: 500 12px/16px var(--font-sans); }
+.island-intake-what > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island-intake-remove { flex: none; width: 20px; height: 20px; border: 0; border-radius: var(--r-full); background: transparent; color: var(--color-ink-2); font: 600 14px/1 var(--font-sans); cursor: pointer; }
+.island-intake-remove:hover { color: var(--color-ink); }
+.island-intake-remove:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.island-jobs { display: flex; flex-wrap: wrap; gap: 6px; }
+.island-chip { min-height: 28px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--color-ink) 28%, transparent); border-radius: var(--r-full); background: transparent; color: var(--color-ink); font: 600 12px/16px var(--font-sans); cursor: pointer; transition: border-color var(--t-instant) var(--ease-out); }
+.island-chip:hover { border-color: var(--color-ink); }
+.island-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.island-chip.is-likely { border-color: var(--color-accent); color: var(--color-accent); }
+.island-chip:disabled { opacity: .5; cursor: default; }
+
+/* ---- The pinned agent's answer: an answer like any other, which can be taken into another app.
+   Pointed at, a gold tear line runs along its bottom; dragged, a paper copy of the whole answer
+   comes away with the pointer. ---- */
+.island-answer { position: relative; display: grid; gap: 10px; min-width: 0; cursor: grab; }
+.island-answer:active { cursor: grabbing; }
+.island-row .island-answer { grid-column: 2 / -1; }
+.island-answer .island-words p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; white-space: pre-line; }
+.island-answer::after { content: ""; position: absolute; left: -4px; right: -4px; bottom: -6px; border-top: 1.5px dashed var(--color-accent); opacity: 0; transition: opacity var(--t-quick) var(--ease-out); pointer-events: none; }
+.island-answer:hover::after, .island-answer.is-tearing::after { opacity: .85; }
+.island-slip.is-answer { grid-template-columns: minmax(0, 1fr); }
+.island-answer .island-paper-copy { position: fixed; left: -2000px; top: 0; width: 260px; display: grid; gap: 4px; padding: 10px 12px 14px; border-radius: 3px; background: var(--color-ink); color: var(--color-black); pointer-events: none; }
+.island-answer .island-paper-copy small { font: 600 11px/14px var(--font-sans); color: color-mix(in srgb, var(--color-black) 55%, var(--color-ink)); }
+.island-answer .island-paper-copy p { display: block; margin: 0; max-height: 320px; overflow: hidden; font: 400 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-line-clamp: unset; line-clamp: unset; }
+/* Its requests for a team can be read whole in its row before Start. */
+.island-pinned .island-ask { -webkit-line-clamp: 4; line-clamp: 4; }
+
+/* ---- The team the pinned agent started, at work on a gold line ---- */
+.island-stage { grid-column: 1 / -1; display: grid; gap: 6px; padding-top: 4px; }
+.island-stage > small { font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
+.island-stage-line { position: relative; display: grid; grid-template-columns: repeat(var(--crew), minmax(0, 1fr)); gap: 6px; padding-top: 10px; border-top: 2px solid var(--color-accent); }
+.island-stage-bead { position: absolute; top: -6px; left: calc((var(--at) + .5) / var(--crew) * 100%); width: 10px; height: 10px; translate: -50% 0; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 10px var(--color-accent); transition: left var(--t-move) var(--ease-out); }
+.island-stage-member { display: grid; justify-items: center; gap: 2px; min-width: 0; text-align: center; }
+.island-stage-figure { width: 40px; height: 40px; }
+.island-stage-figure[data-moment="rest"] { opacity: .6; }
+.island-stage-member b { font: 600 11px/14px var(--font-sans); color: var(--color-ink); }
+.island-stage-member em { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/14px var(--font-sans); font-style: normal; color: var(--color-live); }
+
 .island-list-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 6px 0 4px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 
 @keyframes island-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 6px var(--glow)); } }
@@ -239,6 +318,7 @@ body {
    nothing travels, loops or grows. The island and what drops out of it appear where they belong. */
 @media (prefers-reduced-motion: reduce) {
   .island *, .island *::before, .island *::after { animation: none !important; }
+  .island-stage-bead { transition: none; }
   .island-shape { transition: opacity var(--t-quick) var(--ease-out); }
   .island-body { transition: none; }
   .island-hang, .island-slip, .island-slot, .island-head { translate: 0 0; transition: opacity var(--t-quick) var(--ease-out); }

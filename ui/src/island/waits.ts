@@ -20,8 +20,12 @@ export const ISLAND_WAITS = {
   nudge: 5 * 60_000,
   /** How long an answer's "Allowed once." shows before its card goes. */
   said: 1_200,
+  /** How long "Sent to <agent>." shows under the message box. */
+  sent: 2_500,
   /** How long the list stays open after the pointer leaves it. */
   closeList: 700,
+  /** After a drag near the island is let go of elsewhere, how long the slot waits for its drop. */
+  dropSettle: 1_500,
   /** How often the island reads what the teams are doing. */
   poll: 2_000,
 } as const

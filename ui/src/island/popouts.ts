@@ -32,8 +32,6 @@ export interface Circumstances {
   fullScreen: boolean
   /** Teams at work right now: with more than one, starts and handovers stay tucked. */
   teamsAtWork: number
-  /** The screen has a notch. Without one, only questions and results drop. */
-  notch: boolean
   /** The pointer is on what is out. */
   pointer: boolean
 }
@@ -49,7 +47,7 @@ function wait(kind: PopKind): number {
 
 /** Whether `pop` may pop out at all, here and now. */
 export function pops(pop: Pop, c: Circumstances): boolean {
-  if (pop.kind === 'start' || pop.kind === 'handover') return c.notch && !c.fullScreen && c.teamsAtWork <= 1
+  if (pop.kind === 'start' || pop.kind === 'handover') return !c.fullScreen && c.teamsAtWork <= 1
   if (pop.kind === 'done') return !c.fullScreen
   return true
 }

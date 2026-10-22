@@ -1,12 +1,16 @@
 // The island at the notch, drawn (ADR 0083): Peek. The agent at work peeks out below the notch; a
 // question drops down on a gold line; a result slides out as a slip; then it all tucks into the
 // menu bar beside the camera, one figure per busy team. Pointing at the notch opens the list.
-import { useLayoutEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 
 import { FigureStill } from '../components/agents/FigureStill'
+import { figureFor } from '../lib/library/figures'
 import type { Ticket } from '../lib/story/needsYou'
 import { inApp, tellApp, type Area } from './bridge'
-import { workedFor, type TeamNow } from './teams'
+import { intakeFrom } from './intake'
+import { AnswerSlip, CrewStage, IntakeJobs, Slot, TeamAskBody } from './PinnedAgent'
+import { isTearing } from './tearing'
+import { teamAskKey, workedFor, type TeamNow } from './teams'
 import { useIsland, type Island as IslandState } from './useIsland'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
@@ -52,6 +56,8 @@ export function Island() {
         onPointerLeave={onIsland(false)}
         onClick={() => island.pointerOnIsland(true)}
         onKeyDown={(event) => {
+          // Keys typed inside the list (the message to the pinned agent) are its own.
+          if (event.target !== event.currentTarget) return
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
             island.pointerOnIsland(view !== 'list')
@@ -61,8 +67,31 @@ export function Island() {
           event.preventDefault()
           tellApp({ kind: 'menu', x: event.clientX, y: event.clientY })
         }}
+        // Anything dropped onto the island goes to the pinned agent: the slot opens as it comes.
+        onDragEnter={(event) => {
+          if (!island.pinned || isTearing()) return
+          event.preventDefault()
+          island.dragOver(true)
+        }}
+        onDragOver={(event) => {
+          if (!island.pinned || isTearing()) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={(event) => {
+          if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+          island.dragOver(false)
+        }}
+        onDrop={(event) => {
+          if (!island.pinned || isTearing()) return
+          event.preventDefault()
+          island.dragOver(false)
+          const intake = intakeFrom(event.dataTransfer)
+          if (intake) island.drop(intake)
+        }}
       >
         <div className="island-body">
+        {view === 'slot' && <Slot island={island} />}
         <Balcony island={island} />
         <div className="island-ear island-ear-left" aria-hidden="true">
           <span className="island-heads" style={{ width: headsWidth }}>
@@ -107,11 +136,23 @@ function Balcony({ island }: { island: IslandState }) {
 /** A question, dropped on a gold line, held by the agent that asks it. */
 function Hang({ island, onPointerEnter, onPointerLeave }: { island: IslandState; onPointerEnter: (event: ReactPointerEvent) => void; onPointerLeave: (event: ReactPointerEvent) => void }) {
   const shown = island.shown?.pop.kind === 'ask' ? island.shown : null
-  const ticket = shown?.team.asks.find((ask) => ask.id === shown.pop.key) ?? shown?.team.asks[0] ?? null
+  // The pinned agent asking to start one of your teams hangs on the same gold line.
+  const teamAsk = shown ? shown.team.teamAsks?.find((request) => teamAskKey(request) === shown.pop.key) ?? null : null
+  const ticket = teamAsk ? null : shown?.team.asks.find((ask) => ask.id === shown.pop.key) ?? shown?.team.asks[0] ?? null
   return (
     <div className="island-hang" aria-hidden={island.view !== 'ask'} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
       <div className="island-swing">
         <i className="island-line" />
+        {shown && teamAsk && (
+          <>
+            <span className="island-hang-figure glow" data-moment="ask">
+              <FigureStill figure={island.figure(shown.team.teamPath, shown.team.agent)} alt="" />
+            </span>
+            <div className="island-card" role="group" aria-label={`${shown.team.teamName} wants ${teamAsk.team.name} to do this: ${teamAsk.request}`}>
+              <TeamAskBody island={island} request={teamAsk} first />
+            </div>
+          </>
+        )}
         {shown && ticket && (
           <>
             <span className="island-hang-figure glow" data-moment="ask">
@@ -164,15 +205,21 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
 
 /** What a result says: "Trip planner is done" or "Trip planner stopped"; "Writer answered in Trip
     planner" for an answer in the chat, where the team did no work, or "Writer didn't answer" ("Trip
-    planner didn't answer" when three or more didn't). */
+    planner didn't answer" when three or more didn't); "Maya answered" from the agent pinned to the
+    notch, and "Trip planner didn't start" for a team it asked that couldn't. */
 function resultWords(team: TeamNow): string {
-  if (team.chat) return team.moment === 'fail' ? `${team.agentName ?? team.teamName} didn’t answer` : `${team.agentName ?? 'The team'} answered in ${team.teamName}`
+  if (team.didNotStart) return `${team.teamName} didn’t start`
+  if (team.chat && team.moment === 'fail') return `${team.agentName ?? team.teamName} didn’t answer`
   if (team.moment === 'fail') return `${team.teamName} stopped`
+  if (team.pinned) return `${team.teamName} answered`
+  if (team.chat) return `${team.agentName ?? 'The team'} answered in ${team.teamName}`
   return `${team.teamName} is done`
 }
 
-/** Where a result's button goes: why a run stopped, an answer, or the chat an agent didn't answer in. */
+/** Where a result's button goes: why a run stopped, an answer, the chat an agent didn't answer in,
+    or a team the pinned agent asked that didn't start. */
 function resultButton(team: TeamNow): string {
+  if (team.didNotStart) return `Open ${team.teamName}`
   if (team.moment !== 'fail') return 'See answer'
   return team.chat ? 'Open chat' : 'See why'
 }
@@ -180,9 +227,11 @@ function resultButton(team: TeamNow): string {
 /** A finished or stopped run's result, sliding out below the agent that did the work. */
 function Slip({ island, onPointerEnter, onPointerLeave }: { island: IslandState; onPointerEnter: (event: ReactPointerEvent) => void; onPointerLeave: (event: ReactPointerEvent) => void }) {
   const shown = island.shown && (island.shown.pop.kind === 'done' || island.shown.pop.kind === 'fail') ? island.shown : null
+  // The pinned agent's answer can also be taken away into another app.
+  const answer = shown?.team.pinned && shown.team.moment === 'done'
   return (
-    <div className="island-slip" aria-hidden={island.view !== 'done' && island.view !== 'fail'} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
-      {shown && <ResultBody island={island} team={shown.team} />}
+    <div className={`island-slip${answer ? ' is-answer' : ''}`} aria-hidden={island.view !== 'done' && island.view !== 'fail'} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+      {shown && (answer ? <AnswerSlip island={island} team={shown.team} /> : <ResultBody island={island} team={shown.team} />)}
     </div>
   )
 }
@@ -201,11 +250,15 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
   )
 }
 
-/** Pointing at the notch: one row per team, questions first. */
+/** Pointing at the notch: the agent pinned to it, then one row per team, questions first. */
 function List({ island }: { island: IslandState }) {
-  const rows = island.teams.slice(0, LIST_ROWS)
-  const more = island.teams.length - rows.length
-  const firstPermission = rows.flatMap((team) => team.asks.filter((ask) => team.quick.includes(ask.id)))[0]?.id
+  const pinnedWork = island.pinned ? island.teams.find((team) => team.pinned) ?? null : null
+  // A team the pinned agent started works on its stage, in its row; a question from it stays a row.
+  const crews = island.teams.filter((team) => team.crewFor && team.moment === 'work')
+  const teams = island.teams.filter((team) => !team.pinned && !(team.crewFor && team.moment === 'work'))
+  const rows = teams.slice(0, LIST_ROWS)
+  const more = teams.length - rows.length
+  const firstPermission = [...(pinnedWork ? [pinnedWork] : []), ...rows].flatMap((team) => team.asks.filter((ask) => team.quick.includes(ask.id)))[0]?.id
   // The island grows to the list's height, which only the drawn list knows.
   const list = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -214,7 +267,8 @@ function List({ island }: { island: IslandState }) {
   })
   return (
     <div ref={list} className="island-list">
-      {rows.length === 0 && <p className="island-quiet">Nothing is running</p>}
+      {island.pinned && <PinnedRow island={island} work={pinnedWork} crews={crews} firstPermission={firstPermission} />}
+      {rows.length === 0 && !island.pinned && <p className="island-quiet">Nothing is running</p>}
       {rows.map((team) => (
         <div key={team.runId} className="island-row" data-moment={team.moment}>
           <span className="island-row-figures" aria-hidden="true" data-moment={team.moment}>
@@ -253,6 +307,85 @@ function List({ island }: { island: IslandState }) {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The agent pinned to the notch: what it is doing, if anything, and a box to message it. A message
+ * starts its work, or joins it as a note while it works; its answer slides out as any team's does.
+ */
+function PinnedRow({ island, work, crews, firstPermission }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined }) {
+  const pinned = island.pinned!
+  const field = useRef<HTMLInputElement>(null)
+  // Writing began without the box, from ⌃⌥Space or a drop, and the app gave the panel the
+  // keyboard: the box takes it. Only then; pointing at the notch never does.
+  const writing = island.composing
+  useEffect(() => {
+    if (writing && document.activeElement !== field.current) field.current?.focus()
+  }, [writing])
+  const moment = work?.moment ?? 'ready'
+  // While it works, a message is a note it reads after its current step, as its Chat tab says; the
+  // box shows the short form, and the whole of it is its name and tooltip.
+  const to = island.intake ? 'Or say what to do' : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
+  const toWhole = island.pinnedWorking && !island.intake ? `${to} · after its current step` : to
+  const teamAsk = work?.teamAsks?.[0]
+  return (
+    <div className="island-row island-pinned" data-moment={moment}>
+      <span className="island-row-figures" aria-hidden="true">
+        <span className="island-row-figure glow" data-moment={moment}>
+          <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
+        </span>
+      </span>
+      {teamAsk ? (
+        <TeamAskBody island={island} request={teamAsk} first={!firstPermission} />
+      ) : work?.moment === 'ask' && work.asks[0] ? (
+        <AskBody island={island} team={work} ticket={work.asks[0]} first={work.asks[0].id === firstPermission} />
+      ) : work?.moment === 'work' ? (
+        <div className="island-words">
+          <p>{working(work, island.now)}</p>
+        </div>
+      ) : work?.moment === 'done' ? (
+        <AnswerSlip island={island} team={work} />
+      ) : work ? (
+        <ResultBody island={island} team={work} />
+      ) : null}
+      {crews.map((crew) => <CrewStage key={crew.runId} island={island} crew={crew} />)}
+      <IntakeJobs island={island} />
+      <form
+        className="island-compose"
+        onSubmit={(event) => {
+          event.preventDefault()
+          island.send()
+        }}
+      >
+        <input
+          ref={field}
+          className="island-field"
+          value={island.draft}
+          placeholder={to}
+          aria-label={toWhole}
+          title={toWhole}
+          maxLength={4000}
+          disabled={island.sending}
+          onChange={(event) => island.setDraft(event.target.value)}
+          onFocus={() => island.compose(true)}
+          onBlur={() => island.compose(false)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return
+            event.currentTarget.blur()
+            island.putAway()
+          }}
+        />
+        <button type="submit" className="island-button" disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? 'Send note' : 'Send'}</button>
+      </form>
+      {island.sent?.ok && <small className="island-sent" role="status">{island.sent.text}</small>}
+      {island.sent && !island.sent.ok && (
+        <div className="island-sent island-sent-failed">
+          <small className="island-problem" role="alert"><i aria-hidden="true">×</i><span>{island.sent.text}</span></small>
+          <button type="button" className="island-button" onClick={island.openPinned}>Open chat</button>
+        </div>
+      )}
     </div>
   )
 }

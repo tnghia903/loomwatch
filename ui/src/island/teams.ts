@@ -7,6 +7,7 @@ import { historyRunUrl } from '../lib/runs/history'
 import type { RunRecord } from '../lib/runs/client'
 import { plainRunError } from '../lib/runs/errors'
 import { answerableAtAGlance } from '../lib/runs/permissionRequests'
+import type { TeamRequest } from '../lib/runs/teamRequests'
 import { ticketsFrom, type Ticket } from '../lib/story/needsYou'
 import { teamHref } from '../lib/team-file/teamHref'
 
@@ -28,6 +29,8 @@ export interface TeamNow {
   agentName: string | null
   /** The run's agents, in order, for the list's row. */
   agents: readonly string[]
+  /** Their names, by id, as the run has them. */
+  names?: Readonly<Record<string, string>>
   startedAt: string | null
   /** What waits for you on this run, oldest first: permissions, questions, reviews, spend stops. */
   asks: Ticket[]
@@ -40,6 +43,14 @@ export interface TeamNow {
   /** Agents answering a message in the team's chat themselves (ADR 0076): nothing runs, nobody
       hands over, and it opens the chat. */
   chat: boolean
+  /** The agent pinned to the notch, at work in its own chat (`withPinned`). */
+  pinned?: boolean
+  /** The pinned agent's requests for one of your teams, waiting for Start or Not now. */
+  teamAsks?: readonly TeamRequest[]
+  /** A team the pinned agent started for you, by the agent's name: its crew. */
+  crewFor?: string
+  /** A team you pressed Start on that could not start: `result` says why. */
+  didNotStart?: boolean
 }
 
 const LIVE = new Set(['queued', 'starting', 'running'])
@@ -75,6 +86,7 @@ export function teamsNow(
       agent,
       agentName: agent ? record.agentNames?.[agent] || agent : null,
       agents: record.agentIds,
+      names: record.agentNames,
       startedAt: record.startedAt,
       asks,
       quick: live ? (record.permissionRequests ?? []).filter(answerableAtAGlance).map((request) => `${record.runId}:permission:${request.id}`) : [],
@@ -161,6 +173,24 @@ export function firstLine(reply: string | null | undefined): string {
   return ''
 }
 
+/**
+ * An answer as plain text, for reading at the notch and for taking into another app: its lines
+ * without Markdown's marks, links as their words.
+ */
+export function plainText(reply: string | null | undefined): string {
+  return (reply ?? '')
+    .split('\n')
+    .map((line) => line
+      .replace(/^\s*(#{1,6}\s+|>\s*)/, '')
+      .replace(/^(\s*)[-*+]\s+/, '$1• ')
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/(\*\*|__|`)/g, '')
+      .replace(/(^|\s)[*_]([^*_\n]+)[*_](?=\s|[.,;:!?]|$)/g, '$1$2'))
+    .filter((line, index, lines) => !/^-{3,}$/.test(line.trim()) && !(line.trim() === '' && lines[index - 1]?.trim() === ''))
+    .join('\n')
+    .trim()
+}
+
 /** What popped out of the island, or waits to. */
 export type PopKind = 'start' | 'handover' | 'ask' | 'done' | 'fail'
 
@@ -182,6 +212,9 @@ export function momentsBetween(before: readonly TeamNow[] | null, after: readonl
     const was = before?.find((candidate) => candidate.runId === team.runId)
     for (const ask of team.asks) {
       if (!was?.asks.some((old) => old.id === ask.id)) pops.push({ kind: 'ask', runId: team.runId, key: ask.id })
+    }
+    for (const ask of team.teamAsks ?? []) {
+      if (!was?.teamAsks?.some((old) => old.id === ask.id)) pops.push({ kind: 'ask', runId: team.runId, key: teamAskKey(ask) })
     }
     if (!before) continue
     if ((team.moment === 'done' || team.moment === 'fail') && was?.moment !== team.moment) {
@@ -211,8 +244,11 @@ export interface Tucked {
 
 export const HEADS = 3
 
+/** A pinned agent's team request, as the island queues it beside the questions. */
+export const teamAskKey = (request: Pick<TeamRequest, 'id'>): string => `team:${request.id}`
+
 export function tucked(teams: readonly TeamNow[]): Tucked {
-  const asks = teams.reduce((sum, team) => sum + team.asks.length, 0)
+  const asks = teams.reduce((sum, team) => sum + team.asks.length + (team.teamAsks?.length ?? 0), 0)
   const right = asks ? 'count' : teams.some((team) => team.moment === 'done' || team.moment === 'fail') ? 'slip' : teams.length === 1 && teams[0].moment === 'work' ? 'time' : 'none'
   return { heads: teams.slice(0, HEADS), more: Math.max(0, teams.length - HEADS), asks, right }
 }

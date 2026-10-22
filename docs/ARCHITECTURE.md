@@ -454,12 +454,27 @@ with a per-node lock available to forbid it.
 
 `loomwatchd` serves a single-page web UI and a WebSocket for live events: you run the daemon and
 open a browser, with no Electron. On a Mac, `LoomWatch.app` is only a launcher. It starts
-`loomwatchd`, opens LoomWatch in the browser and stays in the menu bar or, on a MacBook, in the
-notch (ADR 0083). There a see-through panel over the notch shows `island.html`, a second page of
-the same build. With the app's own API calls it reads the runs and the messages agents answer in
-the chat without starting a run (`GET /api/chat/answering`), and answers a permission; the panel
-only places the page and tells it where the pointer is. It is the one module in the
-workspace that calls `AppKit` directly (`crates/loomwatch-app/src/notch_panel.rs`).
+`loomwatchd`, opens LoomWatch in the browser and stays in the notch (ADR 0083): a see-through panel
+at the top middle of whichever screen the pointer is on, around the camera on a MacBook, shows
+`island.html`, a second page of the same build. With the app's own API calls it reads the runs and
+the messages agents answer in the chat without starting a run (`GET /api/chat/answering`), and
+answers a permission; the panel places the page, tells it where the pointer is, and takes the
+pointer only over what the page reports. One of My agents can be pinned to the notch
+(`GET`/`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`):
+- the island's list opens with a box to message it, and ⌃⌥Space (a Carbon hot key) opens it from
+  any app; the message goes into that agent's own chat (`.jobs/.bench/<id>.yaml`, written as the
+  agent is saved), as its Chat tab would send it, with anything dropped onto the notch as the
+  chat's attachments. The panel takes the keyboard only while that message is written, without
+  bringing `LoomWatch` to the front;
+- a drag of a file, text or a link near the top is noticed by the drag pasteboard changing while
+  the button is held (macOS sends other apps no pointer events once a drag begins, so the app
+  checks every 50 ms then), and the whole panel takes the pointer so the drop lands in the page;
+- the pinned agent may ask one of the person's teams to do part of a job (`my_teams`, `ask_team`
+  on the Team Bus, `team_requests.rs`): the request waits at `GET /api/team-requests` until the
+  person presses Start (`POST /api/team-requests/{id}`), the team runs as any run, and its answer
+  is sent back into the agent's chat, which starts the agent's next turn.
+
+`notch_panel.rs` is the one module in the workspace that calls `AppKit` directly.
 
 - **Stack:** React + Vite + [React Flow](https://reactflow.dev) for the canvas, served by `axum`;
   `rust-embed` bakes the built `dist/` into `loomwatchd`, so the binary is self-contained.
