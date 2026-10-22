@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fileLabel, fileNoun, filePathFrom, filePathFromLink, fileRefsIn, filesTouched, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
+import { fileLabel, fileNoun, filePathFrom, filePathFromLink, fileRefsIn, filesTouched, filesWritten, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
 
 const REPORT = '/Users/me/loomwatch/teams/.loomwatch/launch-plan/writer/market-research-report.docx'
 
@@ -109,6 +109,15 @@ describe('fileRefsIn', () => {
       { locations: [{ path: '/a/guide.html' }, { path: 'relative.md' }] },
       {},
     ])).toEqual(['/a/guide.html'])
+  })
+
+  it('collects the files a run wrote: not those it read, nor writes refused or failed', () => {
+    expect(filesWritten([
+      { toolKind: 'edit', status: 'succeeded', locations: [{ path: '/a/page.html' }] },
+      { toolKind: 'read', status: 'succeeded', locations: [{ path: '/a/input.md' }] },
+      { toolKind: 'edit', status: 'failed', locations: [{ path: '/a/broken.md' }] },
+      { toolKind: 'edit', status: 'succeeded', declined: 'denied', locations: [{ path: '/a/denied.md' }] },
+    ])).toEqual(['/a/page.html'])
   })
 
   it('writes resolved names out as paths only where it resolved them', () => {

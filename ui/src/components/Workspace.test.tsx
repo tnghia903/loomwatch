@@ -204,28 +204,126 @@ describe('Workspace', () => {
     expect(screen.getByRole('region', { name: /chat$/ })).toBeInTheDocument()
   })
 
-  // ADR 0051: a long answer is a document. Following the newest work, the pane beside the chat opens
-  // on it once it is finished; its record is the other tab, and the card in the chat opens it again.
-  it('opens a finished long answer on its Answer tab beside the chat, with its record a tab away', async () => {
-    const fallback = globalThis.fetch
-    const report = `# Market brief\n\n${'The market moved again today. '.repeat(40)}`
-    const finished = { ...runRecord, runId: 'run-2', sessionId: 'run-2', status: 'succeeded', finishedAt: at(60), reply: report }
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-      if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items: [{ kind: 'work', run: finished, request: null, notes: [] }] }), { status: 200 })
-      if (url.includes('/api/runs/run-2')) return new Response(JSON.stringify(finished), { status: 200 })
-      return fallback(input, init)
-    }))
-    renderWorkspace()
-    fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
-    const pane = await screen.findByRole('complementary', { name: 'Details of this piece of work' })
-    await waitFor(() => expect(within(pane).getByRole('tab', { name: 'Answer' })).toHaveAttribute('aria-selected', 'true'))
-    expect(await within(pane).findByRole('heading', { name: 'Market brief', level: 1 })).toBeInTheDocument()
-    fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
-    expect(within(pane).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Market brief, .* Open$/ }))
-    expect(within(pane).getByRole('tab', { name: 'Answer' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('button', { name: /^Market brief, .* Showing beside the chat$/ })).toHaveAttribute('aria-pressed', 'true')
+  describe('what a piece of work made, as tabs beside the chat', () => {
+    const MADE = '/teams/.loomwatch/demo/researcher/market.md'
+    const GONE = '/teams/.loomwatch/demo/researcher/draft.md'
+    // The person's own file, in a folder the team was given: named by the answer, not made by it.
+    const OWN = '/teams/sales/q3.md'
+    // Code the work wrote: a tab, but not what the pane opens on.
+    const CODE = '/teams/.loomwatch/demo/researcher/make_chart.py'
+    /** The chat holds `items`; `market.md` is on this computer, `draft.md` is not. */
+    function serve(items: unknown[], runs: Array<{ runId: string }>, sent: (body: Record<string, unknown>) => unknown = () => null) {
+      const fallback = globalThis.fetch
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const path = new URLSearchParams(url.split('?')[1] ?? '').get('path')
+        if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items }), { status: 200 })
+        if (url === '/api/chat/messages') return new Response(JSON.stringify(sent(JSON.parse(String(init?.body)))), { status: 200 })
+        if (url.startsWith('/api/files/stat?')) return new Response(JSON.stringify({ path, name: path?.split('/').pop(), exists: path === MADE || path === OWN || path === CODE, isDir: false, sizeBytes: 40, modifiedAt: null, kind: 'markdown', folder: path === OWN ? 'sales' : '.loomwatch/demo/researcher', openable: true }), { status: 200 })
+        if (url.startsWith('/api/files/read?')) return new Response(JSON.stringify({ path, name: 'market.md', kind: 'markdown', text: '# West region\n\nSales rose in the west.', extracted: false, truncated: false, sizeBytes: 40, modifiedAt: null }), { status: 200 })
+        const run = runs.find((each) => url.includes(`/api/runs/${each.runId}`))
+        if (run && !url.includes('/checkpoints')) return new Response(JSON.stringify(run), { status: 200 })
+        return fallback(input, init)
+      }))
+    }
+    const finished = (runId: string, reply: string) => ({ ...runRecord, runId, sessionId: runId, status: 'succeeded', finishedAt: at(60), reply })
+    const work = (run: unknown) => ({ kind: 'work', run, request: null, notes: [] })
+    const openPane = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Run team' }))
+      return screen.findByRole('complementary', { name: 'Details of this piece of work' })
+    }
+
+    // The owner: "auto add artifacts tab here so that user can quickly refer to it. Remove the
+    // Answer tab." Following the newest work, the pane opens on the first thing it made once done.
+    it('adds each file the answer names as a tab, opens the first when the work is done, and has no Answer tab', async () => {
+      const run = finished('run-2', `Done. The brief is in \`${MADE}\`, and the draft was \`${GONE}\`.`)
+      serve([work(run)], [run])
+      renderWorkspace()
+      const pane = await openPane()
+      const tab = await within(pane).findByRole('tab', { name: 'market.md' })
+      await waitFor(() => expect(tab).toHaveAttribute('aria-selected', 'true'))
+      expect(await within(pane).findByRole('heading', { name: 'West region' })).toBeInTheDocument()
+      expect(within(pane).getByRole('tabpanel')).toHaveAttribute('aria-labelledby', tab.id)
+      // A short answer is read in the chat; a file no longer on this computer is no tab.
+      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'market.md'])
+      fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
+      expect(within(pane).getByRole('main', { name: 'Run workspace' })).toBeInTheDocument()
+    })
+
+    it('keeps a closed tab closed for that work, until Read opens it again in its place', async () => {
+      const run = finished('run-2', `# Market brief\n\nThe brief is in \`${MADE}\`.\n\n${'The market moved again today. '.repeat(40)}`)
+      serve([work(run)], [run])
+      renderWorkspace()
+      const pane = await openPane()
+      const tabs = () => within(pane).getAllByRole('tab').map((each) => each.textContent)
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
+      // As a browser does, the next tab takes its place.
+      fireEvent.click(within(pane).getByRole('button', { name: 'Close market.md' }))
+      expect(tabs()).toEqual(['Details', 'Market brief'])
+      expect(within(pane).getByRole('tab', { name: 'Market brief' })).toHaveAttribute('aria-selected', 'true')
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(tabs()).toEqual(['Details', 'Market brief'])
+      fireEvent.click(await screen.findByRole('button', { name: 'Read market.md here' }))
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
+      expect(tabs()).toEqual(['Details', 'market.md', 'Market brief'])
+    })
+
+    // A long answer stays a short card in the chat and is read here, named by its own title.
+    it('reads a long answer as a tab named by its title, after the files, opened again from its card', async () => {
+      const report = `# Market brief\n\nThe brief is in \`${MADE}\`.\n\n${'The market moved again today. '.repeat(40)}`
+      const run = finished('run-2', report)
+      serve([work(run)], [run])
+      renderWorkspace()
+      const pane = await openPane()
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
+      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'market.md', 'Market brief'])
+      expect(within(pane).queryByRole('tab', { name: 'Answer' })).not.toBeInTheDocument()
+      fireEvent.click(within(pane).getByRole('tab', { name: 'Market brief' }))
+      expect(await within(pane).findByRole('heading', { name: 'Market brief', level: 1 })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /^Market brief, .* Showing beside the chat$/ })).toHaveAttribute('aria-pressed', 'true')
+      expect(within(pane).getByRole('tab', { name: 'Market brief' })).toHaveAttribute('title', 'Reviewer’s answer')
+      fireEvent.click(within(pane).getByRole('button', { name: 'Close Market brief' }))
+      expect(within(pane).queryByRole('tab', { name: 'Market brief' })).not.toBeInTheDocument()
+      expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
+      fireEvent.click(screen.getByRole('button', { name: /^Market brief, .* Open$/ }))
+      expect(within(pane).getByRole('tab', { name: 'Market brief' })).toHaveAttribute('aria-selected', 'true')
+    })
+
+    // A newcomer's reading: the pane should land on the result, not on a file the work only read.
+    it('opens by itself only on what the work made; a file it only named waits as a tab', async () => {
+      const run = finished('run-2', `Done. I read \`${OWN}\`, wrote \`${CODE}\` and \`${MADE}\`.`)
+      serve([work(run)], [run])
+      renderWorkspace()
+      const pane = await openPane()
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
+      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'q3.md', 'make_chart.py', 'market.md'])
+    })
+
+    it('keeps the record on screen when the work stopped, with what it named a tab away', async () => {
+      const run = { ...finished('run-2', `Partly done: \`${MADE}\`.`), status: 'failed', error: 'The model stopped answering.' }
+      serve([work(run)], [run])
+      renderWorkspace()
+      const pane = await openPane()
+      await within(pane).findByRole('tab', { name: 'market.md' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(within(pane).getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
+      expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'false')
+    })
+
+    // ADR 0077: asking about a part of the file starts new work; the file stays where it is.
+    it('leaves the file on screen when newer work starts from the chat', async () => {
+      const run = finished('run-2', `Done. The brief is in \`${MADE}\`.`)
+      const next = { ...runRecord, runId: 'run-3', sessionId: 'run-3', status: 'running', reply: null }
+      serve([work(run)], [run, next], (body) => ({ route: 'team', run: next, message: { id: 'm-3', teamKey: 'demo', teamPath: 'demo.yaml', text: body.text, createdAt: at(70), route: 'team', runId: 'run-3', agentId: null, deliveredAt: null, now: false } }))
+      renderWorkspace()
+      const pane = await openPane()
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message the team' }), { target: { value: '@team Make the west part shorter' } })
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start' })) })
+      await waitFor(() => expect(window.location.search).toContain('run=run-3'))
+      expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
+      expect(within(pane).getByRole('heading', { name: 'West region' })).toBeInTheDocument()
+    })
   })
 
   // A run opened by link is the chat with that piece's Details beside it; the Run tab comes back

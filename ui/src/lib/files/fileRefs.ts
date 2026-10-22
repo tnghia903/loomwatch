@@ -55,6 +55,11 @@ export function filesTouched(evidence: readonly { locations?: readonly { path: s
   return [...found]
 }
 
+/** The files a run's agents wrote or changed: what their edit calls name, of those that went through. */
+export function filesWritten(evidence: readonly { toolKind?: string | null; status?: string; declined?: string; locations?: readonly { path: string }[] }[]): string[] {
+  return filesTouched(evidence.filter((item) => item.toolKind === 'edit' && !item.declined && item.status !== 'failed' && item.status !== 'rejected'))
+}
+
 export function extensionOf(path: string): string {
   return EXTENSION.exec(baseName(path))?.[1]?.toLowerCase() ?? ''
 }
