@@ -42,6 +42,15 @@ const continuesWord = (char: string | undefined) => char !== undefined && /[\p{L
  * longest name wins where two would match ("@News Writer" over "@News"). `null` when there is none.
  */
 export function findMention(text: string, agents: readonly ChatAgent[]): Mention | null {
+  return mentions(text, agents).next().value ?? null
+}
+
+/** Every @mention in `text`, in order, read as `findMention` reads the first: for drawing each in its agent's colour. */
+export function mentionsIn(text: string, agents: readonly ChatAgent[]): Mention[] {
+  return [...mentions(text, agents)]
+}
+
+function* mentions(text: string, agents: readonly ChatAgent[]): Generator<Mention, void> {
   const candidates: { word: string; target: Exclude<ChatTarget, null> }[] = [{ word: TEAM, target: { kind: 'team' } }]
   for (const agent of agents) {
     if (agent.operator) continue
@@ -56,11 +65,11 @@ export function findMention(text: string, agents: readonly ChatAgent[]): Mention
     for (const candidate of candidates) {
       const word = candidate.word.toLowerCase()
       if (lower.startsWith(word, at + 1) && !continuesWord(text[at + 1 + word.length])) {
-        return { target: candidate.target, start: at, end: at + 1 + word.length }
+        yield { target: candidate.target, start: at, end: at + 1 + word.length }
+        break
       }
     }
   }
-  return null
 }
 
 /**

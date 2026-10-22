@@ -22,7 +22,7 @@ import { failedAgent } from '../../lib/runs/errors'
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
-import { AgentFacesContext, type AgentFaces } from '../../lib/chat/faces'
+import { AgentFacesContext, ChatMentionsContext, type AgentFaces, type ChatMentions } from '../../lib/chat/faces'
 import { batonWords, sameBaton, type Baton } from '../../lib/chat/baton'
 import { usePieceLine } from '../../lib/chat/pieceLine'
 import { AgentFace } from './AgentFace'
@@ -31,6 +31,7 @@ import { BatonFlight } from './BatonFlight'
 import { BatonPill } from './BatonPill'
 import { ChatFind } from './ChatFind'
 import { FoundText } from './FoundText'
+import { SaidText } from './SaidText'
 import { Swap } from './Appearing'
 import { ChatComposer, type OpenDecision } from './ChatComposer'
 import { Reactions } from './Reactions'
@@ -484,6 +485,8 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       setMentioned((count) => count + 1)
     },
   }
+  // An @mention in a message shows as its agent's chip (SaidText); in one agent's own chat an @ goes nowhere.
+  const mentions = useMemo<ChatMentions | null>(() => (team.solo ? null : { agents, hue: (id) => team.hues.get(id) ?? 1 }), [agents, team.hues, team.solo])
   // Reply under something said: the box takes it as the message being answered, addressed with
   // the @ of whoever said it (or `to`, a teammate asked about a part of a file instead), so it goes
   // to that agent as any @ does (ADR 0051).
@@ -613,6 +616,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     <AppearContext.Provider value={settled && !search.showing}>
     <FollowContext.Provider value={follow}>
     <AgentFacesContext.Provider value={faces}>
+    <ChatMentionsContext.Provider value={mentions}>
     <section className={`tc${dropping ? ' dropping' : ''}`} aria-label={`${teamName} chat`} data-tour="chat" data-newest-run={newestRun ?? undefined}
       onDragEnter={(event) => {
         if (!carriesFiles(event.dataTransfer) || blocked) return
@@ -818,6 +822,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       />
       {line.flight && <BatonFlight key={line.flight.id} flight={line.flight} holding={holding} onDone={line.done} />}
     </section>
+    </ChatMentionsContext.Provider>
     </AgentFacesContext.Provider>
     </FollowContext.Provider>
     </AppearContext.Provider>
@@ -990,7 +995,7 @@ function TeamNote({ message, reactions, lessons, name, hue, flash = null, onShow
             {yours(<div className="chat-bubble">
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
               {message.files && <ChatFiles files={message.files} />}
-              <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
+              <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
             </div>)}
           </div>
         </li>
@@ -1029,7 +1034,7 @@ function TeamNote({ message, reactions, lessons, name, hue, flash = null, onShow
         {yours(<div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
           {message.files && <ChatFiles files={message.files} />}
-          <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
+          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
         </div>)}
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>
@@ -1049,7 +1054,7 @@ function Pending({ message, name, onRetry, onEdit, onDismiss }: { message: Pendi
         <div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} />}
           <ChatFiles files={message.files} />
-          <div className="chat-text tc-plain"><FoundText text={message.text} /></div>
+          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
         </div>
         {message.state === 'failed' && (
           <div className="chat-under tc-pending-acts">

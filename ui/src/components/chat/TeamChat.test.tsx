@@ -234,7 +234,7 @@ describe('the team’s chat', () => {
     fireEvent.change(box(), { target: { value: '@team today’s digest' } })
     fireEvent.keyDown(box(), { key: 'Enter' })
     expect(await screen.findByText('Sending…')).toBeInTheDocument()
-    expect(within(screen.getByRole('log')).getByText('@team today’s digest')).toBeInTheDocument()
+    expect(within(screen.getByRole('log')).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@team today’s digest')).toBeInTheDocument()
     expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { teamPath: 'news.yaml', to: { kind: 'team' }, expectedRevision: 'sha256:1' } })
     await act(async () => {
       release(new Response(JSON.stringify({ route: 'team', message: message({}), run: run({ status: 'running', reply: null, finishedAt: null, working: ['researcher'] }) }), { status: 202 }))
@@ -332,6 +332,31 @@ describe('the team’s chat', () => {
     renderChat()
     expect(await screen.findByText('You → Writer')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start Writer on this' })).toBeInTheDocument()
+  })
+
+  // An @mention in your words is the agent's chip, its name in the agent's colour; @team is bold words.
+  it('draws each @mention in your message as its agent’s chip', async () => {
+    page = [
+      { kind: 'note', message: message({ id: 'note-1', text: 'cc @Researcher and @team', route: 'team_note', runId: null, createdAt: '2026-10-05T05:00:00.000Z' }) },
+      { kind: 'work', run: run({ onlyAgent: 'writer' }), request: message({ text: '@Writer bold this text', route: 'agent', agentId: 'writer' }), notes: [message({ id: 'n-2', route: 'note', agentId: 'writer', text: 'and @researcher’s source (@Writer too)', createdAt: '2026-10-06T02:02:00.000Z' })] },
+    ]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    const said = (words: string) => within(log).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === words)
+    // The @ stays in the words, for copying and screen readers; the chip shows the agent's own name.
+    const request = await waitFor(() => said('@Writer bold this text'))
+    const writer = request.querySelector('.tc-mention')
+    expect(writer).toHaveClass('hue-2')
+    expect(writer?.querySelector('.tc-mention-face')).toHaveAttribute('aria-hidden', 'true')
+    expect(writer?.querySelector('.tc-mention-name')).toHaveTextContent('@Writer')
+    const note = said('cc @Researcher and @team')
+    expect(note.querySelector('.tc-mention')).toHaveClass('hue-1')
+    expect(note.querySelector('.tc-mention-team')).toHaveTextContent('@team')
+    expect(note.querySelectorAll('.tc-mention')).toHaveLength(1)
+    // A line never breaks between a chip and the letters or bracket touching it.
+    const keep = [...said('and @Researcher’s source (@Writer too)').querySelectorAll('.tc-mention-keep')]
+    expect(keep.map((group) => group.textContent)).toEqual(['@Researcher’s', '(@Writer'])
+    expect(keep.map((group) => group.querySelector('.tc-mention')?.className)).toEqual(['tc-mention hue-1', 'tc-mention hue-2'])
   })
 
   it('an empty chat suggests an @team first message, and starts nothing until you send it', async () => {
@@ -1180,6 +1205,15 @@ describe('one agent’s own chat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { teamPath: 'ada.yaml', text: 'sum up the report', to: { kind: 'agent', agent: 'ada' }, expectedRevision: 'sha256:1' } }))
     expect(props.prepare).toHaveBeenCalledTimes(1)
+  })
+
+  // In one agent's own chat an @ goes nowhere, so it is drawn as you wrote it.
+  it('draws no @mention chips', async () => {
+    page = [{ kind: 'work', run: run({ onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'] }), request: message({ text: '@Ada sum it up for @team', route: 'agent', agentId: 'ada' }), notes: [] }]
+    renderSolo()
+    const log = await screen.findByRole('log')
+    await waitFor(() => expect(within(log).getByText('@Ada sum it up for @team')).toHaveClass('chat-text'))
+    expect(log.querySelector('.tc-mention, .tc-mention-team')).toBeNull()
   })
 
   it('makes a message a note for its turn while it works, without saving the agent again', async () => {
