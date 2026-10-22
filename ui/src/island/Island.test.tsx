@@ -17,8 +17,10 @@ function json(body: unknown, status = 200): Response {
 }
 
 beforeEach(() => {
-  // The fixtures' runs start at 10:00 on 2026-10-22: the page's clock starts there too, and moves on.
-  vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true, now: at(0) })
+  // The page reads the clock: hold it a few seconds after the sample runs started, on any day.
+  // Only the date is held, so the page's own timers and waitFor keep running.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(at(0) + 5_000)
   runs = []
   notes = []
   noteReads = 0

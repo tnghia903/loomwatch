@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { passageId, type AskedPassage } from '../../lib/files/passage'
+import { forgetAnswersRead } from '../../lib/files/answersRead'
+import { passageId, type AskedPassage, type PassageAnswer } from '../../lib/files/passage'
 import { EXPLAIN_WORDS, FileReader } from './FileReader'
 
 const REPORT = '/teams/.loomwatch/market/writer/market-report.md'
@@ -13,12 +14,15 @@ const read = (overrides: Record<string, unknown> = {}) => ({
 let answer: (url: string) => Promise<Response>
 
 beforeAll(() => {
-  // jsdom lays nothing out: every marked range sits in the same place.
+  // jsdom lays nothing out: every marked range sits in the same place, on a stage that holds it.
   Range.prototype.getBoundingClientRect = () => new DOMRect(120, 300, 160, 18)
   Range.prototype.getClientRects = () => [new DOMRect(120, 300, 160, 18)] as unknown as DOMRectList
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 800, 600))
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => [new DOMRect(120, 300, 160, 18)] as unknown as DOMRectList)
 })
 beforeEach(() => {
   window.localStorage.clear()
+  forgetAnswersRead()
   answer = (url) => (url.startsWith('/api/files/read')
     ? respond(200, read())
     : respond(200, { path: REPORT, name: 'market-report.md', exists: true, isDir: false, sizeBytes: 2048, modifiedAt: '2026-10-19T01:00:00Z', kind: 'markdown', folder: null, openable: true }))
@@ -31,9 +35,15 @@ const roles = new Map([['research', 'Find the sources.'], ['analyst', '## Number
 const renderReader = (props: Partial<Parameters<typeof FileReader>[0]> = {}) => {
   const onAsk = vi.fn()
   const onShowAsked = vi.fn()
-  render(<FileReader file={{ path: REPORT, runId: 'run-1', from: 'writer' }} name={(id) => names.get(id) ?? id} hue={() => 2} onAsk={onAsk} onShowAsked={onShowAsked} {...props} />)
-  return { onAsk, onShowAsked }
+  const reader = (more: Partial<Parameters<typeof FileReader>[0]>) => <FileReader file={{ path: REPORT, runId: 'run-1', from: 'writer' }} name={(id) => names.get(id) ?? id} hue={() => 2} onAsk={onAsk} onShowAsked={onShowAsked} {...props} {...more} />
+  const { rerender } = render(reader({}))
+  return { onAsk, onShowAsked, rerender: (more: Partial<Parameters<typeof FileReader>[0]>) => rerender(reader(more)) }
 }
+const SALES = 'Sales grew 12% in Q3.'
+const part = (answer: PassageAnswer, overrides: Partial<AskedPassage> = {}): AskedPassage => ({
+  file: REPORT, text: SALES, from: 'writer', asked: '@Writer Explain this part in plain words.', runId: 'run-1', messageId: 'n-1', onItsOwn: true, answer, ...overrides,
+})
+const answerCard = () => screen.queryByRole('region', { name: "Writer's answer to your question" })
 
 /** Marks `words` on the page as a person would: press, select, let go. */
 async function mark(words: string) {
@@ -146,13 +156,129 @@ describe('reading a file an agent made', () => {
     expect(screen.queryByText('Mark any words')).toBeNull()
   })
 
-  it('puts the face of the agent asked beside each part asked about, and shows the answer when pressed', async () => {
-    const asked: AskedPassage[] = [{ file: REPORT, text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2' }, { file: '/other.md', text: 'Costs fell.', from: 'writer', asked: 'x', runId: 'run-3', messageId: 'm-3' }]
+  it('marks each part asked about with a bubble from the agent asked, which opens its answer beside the part', async () => {
+    const said: PassageAnswer = { state: 'said', by: 'writer', text: 'It means **sales** went up.', at: '2026-10-19T01:05:00Z' }
+    const asked: AskedPassage[] = [part(said, { asked: '@Writer why?', runId: 'run-2', messageId: 'm-2', onItsOwn: false }), part(said, { file: '/other.md', text: 'Costs fell.', asked: 'x', runId: 'run-3', messageId: 'm-3' })]
     const { onShowAsked } = renderReader({ asked })
-    const face = await screen.findByRole('button', { name: 'You asked Writer about “Sales grew 12% in Q3.”: @Writer why? Show the answer' })
-    expect(screen.getAllByRole('button', { name: /^You asked/ })).toHaveLength(1)
-    fireEvent.click(face)
+    // An answer given before this browser kept count is one you have read.
+    const bubble = await screen.findByRole('button', { name: "Writer's answer about “Sales grew 12% in Q3.”" })
+    // On hover, what you asked, without the @ it was sent with.
+    expect(bubble).toHaveAttribute('title', 'why?')
+    expect(document.querySelectorAll('.rd-bubble')).toHaveLength(1)
+    // The part's words are marked in the text, and the bubble sits in the line right after them.
+    const marks = [...document.querySelectorAll('.rd-mark')]
+    expect(marks.map((mark) => mark.textContent)).toEqual([SALES])
+    expect(marks[0]).toHaveClass('read')
+    expect(marks[0].nextElementSibling).toHaveClass('rd-slot')
+    expect(marks[0].nextElementSibling).toContainElement(bubble)
+    expect(document.querySelector('.rd-pin')).toBeNull()
+    // A part asked about before the file was opened waits for its bubble to be pressed.
+    expect(answerCard()).toBeNull()
+    fireEvent.click(bubble)
+    const card = answerCard()!
+    expect(bubble).toHaveAttribute('aria-expanded', 'true')
+    // The answer reads as it does in the chat: its Markdown drawn, not its marks.
+    expect(await within(card).findByText('sales', { selector: 'strong' })).toBeInTheDocument()
+    expect(card).not.toHaveTextContent('**')
+    expect(onShowAsked).not.toHaveBeenCalled()
+    fireEvent.click(within(card).getByRole('button', { name: 'Show it in the chat' }))
     expect(onShowAsked).toHaveBeenCalledWith(asked[0])
+    // The bubble closes it again.
+    fireEvent.click(bubble)
+    expect(answerCard()).toBeNull()
+  })
+
+  it('shows the agent at work in the bubble, then a dot until the answer is read, here and next time', async () => {
+    const soon = new Date(Date.now() + 60_000).toISOString()
+    const { rerender } = renderReader({ asked: [part({ state: 'writing', by: 'writer' })] })
+    const look = () => document.querySelector('.rd-mark')!.className
+    expect(await screen.findByRole('button', { name: 'Writer is answering your question about “Sales grew 12% in Q3.”' })).toHaveAttribute('title', 'Writer is writing · Explain this part in plain words.')
+    expect(look()).toContain('busy')
+    expect(document.querySelector('.rd-bubble .chat-dots')).not.toBeNull()
+    rerender({ asked: [part({ state: 'said', by: 'writer', text: 'Up by twelve.', at: soon })] })
+    const waiting = screen.getByRole('button', { name: 'New answer from Writer about “Sales grew 12% in Q3.”' })
+    expect(waiting).toHaveAttribute('title', 'New answer · Explain this part in plain words.')
+    expect(look()).toContain('waiting')
+    expect(waiting.querySelector('.rd-bubble-new')).not.toBeNull()
+    fireEvent.click(waiting)
+    expect(answerCard()).toHaveTextContent('Up by twelve.')
+    expect(look()).toContain('read')
+    expect(document.querySelector('.rd-bubble-new')).toBeNull()
+    // Read is kept in this browser: opened again, the answer has no dot.
+    cleanup()
+    forgetAnswersRead()
+    renderReader({ asked: [part({ state: 'said', by: 'writer', text: 'Up by twelve.', at: soon })] })
+    expect(await screen.findByRole('button', { name: "Writer's answer about “Sales grew 12% in Q3.”" })).toBeInTheDocument()
+  })
+
+  it('opens the answer beside the part as the question is sent, and fills it in when the agent answers', async () => {
+    const { rerender } = renderReader()
+    await mark(SALES)
+    fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
+    expect(answerCard()).toBeNull()
+    // The chat says the question is on its way, then that the agent is writing, then what it said.
+    rerender({ asked: [part({ state: 'sending' }, { messageId: null })] })
+    expect(answerCard()).toHaveTextContent('Sending your question…')
+    expect(within(answerCard()!).getByLabelText('Sending your question')).toBeInTheDocument()
+    rerender({ asked: [part({ state: 'writing', by: 'writer' })] })
+    expect(answerCard()).toHaveTextContent('is writing')
+    expect(within(answerCard()!).getByLabelText('Writer is writing')).toBeInTheDocument()
+    rerender({ asked: [part({ state: 'said', by: 'writer', text: 'It means **sales** went up.', at: '2026-10-19T01:05:00Z' })] })
+    expect(await within(answerCard()!).findByText('sales', { selector: 'strong' })).toBeInTheDocument()
+    // Over the answer, what you asked, as a comment's words: without the @ it was sent with.
+    expect(answerCard()!.querySelector('.rd-answer-asked')).toHaveTextContent(/^You asked: Explain this part in plain words\.$/)
+  })
+
+  it('keeps the answer when the agent changed the words it was asked about, at the top of the file', async () => {
+    const { rerender } = renderReader()
+    await screen.findByText(SALES)
+    // You asked for the part to change; the work changed it, so the file no longer has those words.
+    rerender({ asked: [part({ state: 'sending' }, { text: 'Sales rose 12 percent.', asked: '@Writer say it shorter', messageId: null })] })
+    rerender({ asked: [part({ state: 'said', by: 'writer', text: 'Done: it is shorter now.', at: null }, { text: 'Sales rose 12 percent.', asked: '@Writer say it shorter', onItsOwn: false })] })
+    const card = answerCard()!
+    expect(card).toHaveTextContent('Done: it is shorter now.')
+    expect(card).toHaveClass('gone')
+    // Said on a line of its own, not folded into what you asked.
+    expect(card.querySelector('.rd-answer-asked')).toHaveTextContent(/^You asked: say it shorter$/)
+    expect(card.querySelector('.rd-answer-gone')).toHaveTextContent('The words you marked have changed.')
+    expect(card.style).toMatchObject({ top: '12px', visibility: '' })
+  })
+
+  it('opens a part’s answer from its lit words, and closes it on Esc or the close button', async () => {
+    renderReader({ asked: [part({ state: 'said', by: 'writer', text: 'Up by twelve.', at: '2026-10-19T01:05:00Z' })] })
+    await screen.findByRole('heading', { name: 'Market report', level: 1 })
+    document.getSelection()!.removeAllRanges()
+    // Away from the marked words: nothing.
+    fireEvent.click(screen.getByText('Costs fell.'))
+    expect(answerCard()).toBeNull()
+    const words = await waitFor(() => document.querySelector('.rd-mark')!)
+    fireEvent.click(words)
+    expect(answerCard()).toHaveTextContent('Up by twelve.')
+    // Esc closes the answer, and goes no further: the pane the file is in closes on Esc too.
+    const pane = vi.fn()
+    window.addEventListener('keydown', pane)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    window.removeEventListener('keydown', pane)
+    expect(answerCard()).toBeNull()
+    expect(pane).not.toHaveBeenCalled()
+    fireEvent.click(words)
+    fireEvent.click(within(answerCard()!).getByRole('button', { name: 'Close the answer' }))
+    expect(answerCard()).toBeNull()
+  })
+
+  it('says when the work stopped, or nothing came back', async () => {
+    const { rerender } = renderReader({ asked: [part({ state: 'failed', by: 'writer', text: 'The AI could not be reached.' })] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer stopped before answering about “Sales grew 12% in Q3.”' }))
+    expect(screen.getByRole('button', { name: 'Writer stopped before answering about “Sales grew 12% in Q3.”' })).toHaveAttribute('title', 'Stopped · Explain this part in plain words.')
+    expect(document.querySelector('.rd-mark')).toHaveClass('failed')
+    expect(answerCard()).toHaveTextContent('stopped')
+    expect(answerCard()).toHaveTextContent('The AI could not be reached.')
+    rerender({ asked: [part({ state: 'none', why: 'lost' })] })
+    expect(answerCard()).toHaveTextContent('No answer came back.')
+    rerender({ asked: [part({ state: 'none', why: 'passed' })] })
+    expect(answerCard()).toHaveTextContent('Writer had nothing to add.')
+    // With nothing to read, the way on is said in words.
+    expect(within(answerCard()!).getByRole('button', { name: 'Show it in the chat' })).toHaveTextContent('Show it in the chat')
   })
 
   it('says a document’s words are its text without its layout', async () => {
@@ -210,5 +336,44 @@ describe('a web page in the reader', () => {
     expect(frame.getAttribute('srcdoc')).toContain('<h1>Hello</h1>')
     fireEvent.click(screen.getByRole('tab', { name: 'Code' }))
     expect(await screen.findByText('<h1>Hello</h1>')).toBeInTheDocument()
+  })
+
+  it('opens a part’s answer when the page says its lit words were clicked, and places it where the page says the part is', async () => {
+    answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: '/w/site.html', name: 'site.html', kind: 'web', text: `<p>${SALES}</p>` })) : respond(404, {}))
+    renderReader({ file: { path: '/w/site.html', runId: 'run-1', from: 'writer' }, asked: [part({ state: 'said', by: 'writer', text: 'Up by twelve.', at: null }, { file: '/w/site.html' })] })
+    const frame = await waitFor(() => {
+      const element = document.querySelector('iframe')
+      if (!element?.contentWindow) throw new Error('no frame yet')
+      return element
+    })
+    const told = vi.spyOn(frame.contentWindow!, 'postMessage')
+    const fromPage = (data: Record<string, unknown>) => act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', ...data }, source: frame.contentWindow })) })
+    fromPage({ type: 'ready' })
+    // The page is told which parts to mark and how each looks: it marks them itself.
+    await waitFor(() => expect(told).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'marks', asking: null,
+      parts: [{ text: SALES, look: 'read', fresh: false, lit: false, open: false, label: "Writer's answer about “Sales grew 12% in Q3.”", title: 'Explain this part in plain words.', figure: null, initials: 'WR' }],
+    }), '*'))
+    expect(document.querySelector('.rd-mark, .rd-bubble')).toBeNull()
+    // It says where its parts are, so the answer opens beside the one clicked.
+    const at = (top: number) => ({ type: 'parts', parts: [{ text: SALES, rects: [{ top, bottom: top + 18, left: 100, right: 300 }], missing: false, dark: false }] })
+    fromPage(at(40))
+    fromPage({ type: 'open', text: SALES })
+    await waitFor(() => expect(told).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [expect.objectContaining({ lit: true, open: true })] }), '*'))
+    const card = answerCard()!
+    expect(card).toHaveTextContent('Up by twelve.')
+    // Under the part (the frame sits at 0,0 in jsdom), clear of it.
+    expect(Number.parseFloat(card.style.top)).toBeGreaterThan(58)
+    expect(card.style.visibility).toBe('')
+    // Escape pressed in the page closes it; the part's bubble opens it again.
+    fromPage({ type: 'escape' })
+    expect(answerCard()).toBeNull()
+    fromPage({ type: 'open', text: SALES })
+    expect(answerCard()).not.toBeNull()
+    // The page scrolled: the marks follow, and a part out of the frame's view has nothing to point at.
+    fromPage(at(-200))
+    expect(answerCard()).toBeNull()
+    fromPage(at(120))
+    expect(answerCard()).not.toBeNull()
   })
 })

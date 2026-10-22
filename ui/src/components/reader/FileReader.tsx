@@ -1,11 +1,19 @@
 import { ExternalLink, FolderOpen, X } from 'lucide-react'
-import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { ReplyTo } from '../../lib/chat/client'
 import { quoteLine } from '../../lib/chat/reply'
 import { baseName, extensionOf, fileLabel, fileTitle, formatBytes, withFolderPaths } from '../../lib/files/fileRefs'
 import { fileIcon } from '../../lib/files/icons'
-import { bubblePlace, findPassage, pageText, passageOf, passageReply, type AskedPassage } from '../../lib/files/passage'
+import { answerRead, markAnswerRead } from '../../lib/files/answersRead'
+import { markParts, type MarkedPart, type PartMarks } from '../../lib/files/partMarks'
+import type { PageMark, PagePart } from '../../lib/files/pageFrame'
+import { answerPlace, bubbleAgent, bubbleLabel, bubblePlace, bubbleTitle, findPassage, pageText, partBox, partLines, partLook, passageOf, passageReply, type AskedPassage } from '../../lib/files/passage'
+import { figureStill } from '../../lib/library/figures'
+import { wearerOf } from '../../lib/chat/helpers'
+import { TeamFiguresContext } from '../agents/figureContext'
+import { useFigurePictures } from './useFigurePictures'
 import { canMark, FileOriginContext, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
 import { useFileActions } from '../../lib/files/useFile'
 import { useFileText } from '../../lib/files/useFileText'
@@ -14,6 +22,8 @@ import { AvatarFace } from '../agents/AvatarFace'
 import { Markdown } from '../ui/Markdown'
 import { CodeView, DocumentView, TableView } from './formats'
 import { PageFrame, type Marked } from './PageFrame'
+import { PassageAnswer } from './PassageAnswer'
+import { PartBubble } from './PartBubble'
 
 export interface FileReaderProps {
   file: FileToRead
@@ -29,7 +39,7 @@ export interface FileReaderProps {
   asked?: readonly AskedPassage[]
   /** The part in the message box now, being asked about. */
   asking?: string | null
-  /** A face in the margin was pressed: show what came of asking. */
+  /** Show what came of asking about a part in the chat, where it is kept. */
   onShowAsked?: (passage: AskedPassage) => void
 }
 
@@ -41,21 +51,31 @@ const HINT_KEY = 'loomwatch.readerHint'
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
 const BUBBLE_GUESS = { width: 168, height: 40 }
+/** How long a part asked just now sweeps on and pops its bubble, before it is drawn as any other. */
+const FRESH_MS = 1_400
+/** The answer's size before it has been measured. */
+const ANSWER_GUESS = { width: 360, height: 96 }
 const NO_PASSAGES: readonly AskedPassage[] = []
 const NO_TEAM: readonly string[] = []
 /** Teammates' faces shown in the bubble beside the one asked; past this the rest are a list away. */
 const FACES_SHOWN = 3
-type Pin = { passage: AskedPassage; top: number }
+type Rect = Marked['rect']
+/** Where the parts asked about are on screen, the box of the file in view, and the slots their bubbles go in. */
+interface Measured { page: boolean; parts: readonly PagePart[]; view: Rect; slots: ReadonlyMap<string, HTMLElement> }
+const NO_SLOTS: ReadonlyMap<string, HTMLElement> = new Map()
+const sameMeasure = (a: Measured, b: Measured) => a.page === b.page && JSON.stringify([a.parts, a.view]) === JSON.stringify([b.parts, b.view])
+  && a.slots.size === b.slots.size && [...a.slots].every(([key, slot]) => b.slots.get(key) === slot)
 
 /**
  * A file an agent made, read inside LoomWatch beside the chat it came from (ADR 0077): a report as a
  * document, a web page as itself, a table as a sheet, code by line, a PDF's or Word file's words.
  *
  * Mark any words and the agent's own face leans in over them: Ask puts them in the message box as a
- * quote, addressed to that agent, and Explain asks for them in plain words at once. A part asked
- * about stays lit in the file, with the agent's face in the margin — press it to see the answer. The
- * file is read again whenever it changes on disk, so a part the agent was asked to change is seen
- * changed.
+ * quote, addressed to that agent, and Explain asks for them in plain words at once. The answer opens
+ * beside the part as it is sent, and fills in when the agent has answered. A part asked about stays
+ * lit in the file, with the agent's face in the margin: the face, or the lit words, open its answer
+ * again. The file is read again whenever it changes on disk, so a part the agent was asked to change
+ * is seen changed.
  */
 export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked = NO_PASSAGES, asking = null, onShowAsked }: FileReaderProps) {
   const { path, from } = file
@@ -176,13 +196,79 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     for (const passage of asked) if (passage.file === path) byText.set(passage.text, passage)
     return [...byText.values()]
   }, [asked, path])
+
+  // The answer to one part, open beside it: it opens as you send a question about a part of this
+  // file, and again from the part's bubble or its marked words. It steps aside while other words are marked.
+  const [answerFor, setAnswerFor] = useState<string | null>(null)
+  const answer = answerFor ? mine.find((passage) => passage.text === answerFor) ?? null : null
+  const sending = mine.filter((passage) => passage.answer.state === 'sending').map((passage) => passage.text)
+  const [seenSending, setSeenSending] = useState(sending)
+  // Parts asked about while the file is open: their stroke sweeps on.
+  const [fresh, setFresh] = useState<readonly string[]>([])
+  if (sending.join('\n') !== seenSending.join('\n')) {
+    setSeenSending(sending)
+    const sent = sending.find((text) => !seenSending.includes(text))
+    if (sent !== undefined) {
+      setAnswerFor(sent)
+      setFresh((texts) => [...texts, sent])
+    }
+  }
+  useEffect(() => {
+    if (fresh.length === 0) return
+    const timer = window.setTimeout(() => setFresh([]), FRESH_MS)
+    return () => window.clearTimeout(timer)
+  }, [fresh])
+  const answerShown = answer && !marked ? answer : null
+  // An answer opened beside its part has been read: its bubble loses its dot, here and next time.
+  const shownSaid = answerShown?.answer.state === 'said' ? answerShown : null
+  const [readHere, setReadHere] = useState<readonly AskedPassage[]>([])
+  if (shownSaid && !readHere.includes(shownSaid)) setReadHere((read) => [...read, shownSaid])
+  useEffect(() => {
+    if (shownSaid) markAnswerRead(shownSaid)
+  }, [shownSaid])
+  const isRead = (passage: AskedPassage) => readHere.some((read) => read.messageId === passage.messageId && read.text === passage.text && read.answer === passage.answer) || answerRead(passage)
+
+  // The parts asked about, marked in the file in place: their words wrapped in a marker stroke, and
+  // the agent's bubble in a slot after the last word, so the line makes room for it. The reader marks
+  // its own text (lib/files/partMarks.ts); a web page marks itself (pageFrame.ts) and says where its
+  // parts are. A part the file no longer has is `missing`.
+  const partTexts = useMemo(() => mine.map((passage) => passage.text), [mine])
+  const partsKey = partTexts.join('\u0000')
+  const [measured, setMeasured] = useState<Measured | null>(null)
+  const takeMeasured = useCallback((next: Measured) => setMeasured((current) => (current && sameMeasure(current, next) ? current : next)), [])
+  const takeParts = useCallback((parts: PagePart[], view: Rect) => takeMeasured({ page: true, parts, view, slots: NO_SLOTS }), [takeMeasured])
+  // What was measured in the view now on screen: the page's own report, or the text's.
+  const onScreen = measured && measured.page === (shown === 'page') ? measured : null
   const [focus, setFocus] = useState<string | null>(null)
-  const [pins, setPins] = useState<Pin[]>([])
-  // The same faces in the same places are no change, so laying them out again settles.
-  const placePins = useCallback((next: Pin[]) => setPins((current) => (
-    current.length === next.length && current.every((pin, index) => pin.passage === next[index].passage && pin.top === next[index].top) ? current : next
-  )), [])
-  const [pinsLeft, setPinsLeft] = useState(4)
+  const marks = useRef<PartMarks | null>(null)
+  const found = useRef<ReadonlySet<string>>(new Set())
+  const changes = useRef<MutationObserver | null>(null)
+  const measure = useCallback(() => {
+    const element = page.current
+    const scrolling = scroller.current
+    if (!element || !scrolling) return
+    const box = scrolling.getBoundingClientRect()
+    const dark = darkBehind(element)
+    const marked = marks.current?.parts ?? new Map<string, MarkedPart>()
+    takeMeasured({
+      page: false,
+      parts: partTexts.map((text) => ({
+        text,
+        rects: (marked.get(text)?.marks ?? []).flatMap((mark) => [...mark.getClientRects()].map((rect) => ({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }))),
+        missing: !found.current.has(text),
+        dark,
+      })),
+      // What is in view: the scroller less its scroll bars.
+      view: { top: box.top, left: box.left, right: box.left + (scrolling.clientWidth || box.width), bottom: box.top + (scrolling.clientHeight || box.height) },
+      slots: new Map([...marked].map(([key, part]) => [key, part.slot])),
+    })
+  }, [partTexts, takeMeasured])
+  // A click on marked words, with nothing marked now, opens their answer.
+  const openAt = (event: { target: EventTarget }) => {
+    if (document.getSelection()?.isCollapsed === false) return
+    const mark = event.target instanceof Element ? event.target.closest<HTMLElement>('.rd-mark') : null
+    if (mark?.dataset.part) setAnswerFor(mark.dataset.part)
+  }
   const [layout, setLayout] = useState(0)
   useEffect(() => {
     const element = page.current
@@ -191,41 +277,99 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     const again = () => { cancelAnimationFrame(pending); pending = requestAnimationFrame(() => setLayout((count) => count + 1)) }
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(again)
     resized?.observe(element)
-    // Markdown arrives a moment after the page: the parts are found once it has.
-    const changed = typeof MutationObserver === 'undefined' ? null : new MutationObserver(again)
+    // Markdown arrives a moment after the page: the parts are found once it has. A bubble drawn in
+    // its slot is no change to the file.
+    const inSlot = (node: Node) => Boolean((node instanceof Element ? node : node.parentElement)?.closest('.rd-slot'))
+    const changed = typeof MutationObserver === 'undefined' ? null : new MutationObserver((records) => { if (records.some((record) => !inSlot(record.target))) again() })
     changed?.observe(element, { childList: true, subtree: true, characterData: true })
-    return () => { cancelAnimationFrame(pending); resized?.disconnect(); changed?.disconnect() }
+    changes.current = changed
+    return () => { cancelAnimationFrame(pending); resized?.disconnect(); changed?.disconnect(); changes.current = null }
   }, [shown, text])
   useLayoutEffect(() => {
     const element = page.current
-    const scrolling = scroller.current
     const registry = typeof CSS !== 'undefined' ? (CSS as unknown as { highlights?: Map<string, unknown> }).highlights : undefined
     const lit = (key: string, ranges: Range[]) => {
       if (!registry || typeof Highlight === 'undefined') return
       if (ranges.length) registry.set(key, new Highlight(...ranges))
       else registry.delete(key)
     }
-    if (!element || !scrolling || shown === 'page' || !words) { placePins([]); return }
-    const text = pageText(element)
-    const found = mine.flatMap((passage) => {
-      const range = findPassage(text, passage.text)
-      return range ? [{ passage, range }] : []
+    if (shown === 'page' || !element || !words) return
+    const texts = partsKey ? partsKey.split('\u0000') : []
+    const ranges = texts.flatMap((key) => {
+      const range = findPassage(pageText(element), key)
+      return range ? [{ key, range }] : []
     })
-    lit('lw-read-asked', found.map((item) => item.range))
-    const askingRange = asking ? findPassage(text, asking) : null
+    found.current = new Set(ranges.map((part) => part.key))
+    const marked = markParts(ranges, { mark: 'rd-mark', slot: 'rd-slot' })
+    marks.current = marked
+    // Our own marks are no change to the file.
+    changes.current?.takeRecords()
+    measure()
+    const askingRange = asking ? findPassage(pageText(element), asking) : null
     lit('lw-read-asking', askingRange ? [askingRange] : [])
-    const focusRange = focus ? found.find((item) => item.passage.text === focus)?.range ?? null : null
-    lit('lw-read-focus', focusRange ? [focusRange] : [])
-    const top = scrolling.getBoundingClientRect().top - scrolling.scrollTop
-    let last = -Infinity
-    placePins(found
-      .map((item) => ({ passage: item.passage, top: (item.range.getClientRects()[0] ?? item.range.getBoundingClientRect()).top - top }))
-      .sort((a, b) => a.top - b.top)
-      .map((pin) => { last = Math.max(pin.top, last + 28); return { ...pin, top: last } }))
-    const padding = Number.parseFloat(getComputedStyle(element).paddingLeft) || 0
-    setPinsLeft(Math.max(2, element.offsetLeft + padding - 32))
-    return () => { lit('lw-read-asked', []); lit('lw-read-asking', []); lit('lw-read-focus', []) }
-  }, [mine, asking, focus, layout, shown, words, text, placePins])
+    return () => {
+      lit('lw-read-asking', [])
+      marks.current = null
+      marked.undo()
+      changes.current?.takeRecords()
+    }
+  }, [partsKey, asking, layout, shown, words, text, measure])
+
+  // How each part looks, from what came of asking: set on its marks and its slot as it changes.
+  const looks = new Map(mine.map((passage) => [passage.text, partLook(passage.answer, isRead(passage))]))
+  const dark = onScreen?.parts[0]?.dark ?? false
+  const lookOf = (text: string) => `${looks.get(text) ?? 'read'}${dark ? ' on-dark' : ''}${fresh.includes(text) ? ' fresh' : ''}${answerShown?.text === text || focus === text ? ' lit' : ''}`
+  useLayoutEffect(() => {
+    showLooks(marks.current, lookOf)
+    changes.current?.takeRecords()
+  })
+
+  const inView = onScreen?.view ?? null
+  const openPart = answerShown ? onScreen?.parts.find((part) => part.text === answerShown.text) ?? null : null
+  const answerLost = Boolean(openPart?.missing)
+  const answerPart = useMemo(() => {
+    const box = openPart && !openPart.missing ? partBox(partLines(openPart.rects)) : null
+    // Out of the view's sight, it has nothing to point at.
+    return box && inView && box.bottom > inView.top && box.top < inView.bottom ? box : null
+  }, [openPart, inView])
+
+  const card = useRef<HTMLElement>(null)
+  const [cardSize, setCardSize] = useState(ANSWER_GUESS)
+  const [answerAt, setAnswerAt] = useState<ReturnType<typeof answerPlace>>(null)
+  const [answerMax, setAnswerMax] = useState(320)
+  useLayoutEffect(() => {
+    const element = card.current
+    if (!element) return
+    const measured = { width: element.offsetWidth, height: element.offsetHeight }
+    if (measured.width && (measured.width !== cardSize.width || measured.height !== cardSize.height)) setCardSize(measured)
+  }, [answerShown, answerPart, answerAt, cardSize])
+  useLayoutEffect(() => {
+    const box = stage.current?.getBoundingClientRect()
+    if (box) setAnswerMax(Math.round(Math.max(140, Math.min(360, box.height * 0.5))))
+    setAnswerAt((current) => {
+      const next = !box ? null
+        : answerLost ? { top: 12, left: Math.max(8, (box.width - cardSize.width) / 2), above: false, arrow: 0 }
+          : answerPart ? answerPlace(answerPart, { top: box.top, left: box.left, width: box.width, height: box.height }, cardSize) : null
+      return JSON.stringify(current) === JSON.stringify(next) ? current : next
+    })
+  }, [answerPart, answerLost, cardSize])
+  useEffect(() => {
+    if (!answerShown) return
+    const away = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      const target = event.target as HTMLElement | null
+      // Escape in the message box is the message box's.
+      if (target?.closest?.('input, textarea, [contenteditable="true"]') && !card.current?.contains(target)) return
+      // It closes the answer, and only the answer: not the pane the file is read in too.
+      event.preventDefault()
+      event.stopPropagation()
+      setAnswerFor(null)
+    }
+    document.addEventListener('keydown', away)
+    return () => document.removeEventListener('keydown', away)
+  }, [answerShown])
+  const toggleAnswer = (text: string) => setAnswerFor((open) => (open === text ? null : text))
+  const closeAnswer = () => setAnswerFor(null)
 
   // The tip under a file, until a part of one has been asked about.
   const [hint, setHint] = useState(() => {
@@ -254,7 +398,33 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     modifiedAt ? `changed ${relativeTime(new Date(modifiedAt))}` : null,
   ].filter(Boolean).join(' · ')
   const origin = useMemo(() => (file.runId && from ? { runId: file.runId, from } : null), [file.runId, from])
-  const pageMarks = useMemo(() => ({ asked: mine.map((passage) => passage.text), asking, focus }), [mine, asking, focus])
+  // A web page marks its own parts (lib/files/pageFrame.ts), told how each looks and handed its
+  // agent's figure as a picture it can show.
+  const figures = useContext(TeamFiguresContext)
+  const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
+  const pictures = useFigurePictures(shown === 'page' ? mine.flatMap((passage) => { const figure = figureOf(bubbleAgent(passage)); return figure ? [figureStill(figure)] : [] }) : [])
+  const pageMarksSaid = JSON.stringify({
+    parts: mine.map((passage): PageMark => {
+      const by = bubbleAgent(passage)
+      const figure = figureOf(by)
+      const look = looks.get(passage.text) ?? 'read'
+      return {
+        text: passage.text, look, fresh: fresh.includes(passage.text), lit: answerShown?.text === passage.text || focus === passage.text, open: answerShown?.text === passage.text,
+        label: bubbleLabel(passage, look, name), title: bubbleTitle(passage, look, name),
+        // An agent with a figure shows nothing until its picture is in; one without shows its initials.
+        figure: figure ? pictures.get(figureStill(figure)) ?? null : null, initials: figure ? '' : initials(name(by)),
+      }
+    }),
+    asking,
+  })
+  const pageMarks = useMemo(() => JSON.parse(pageMarksSaid) as { parts: PageMark[]; asking: string | null }, [pageMarksSaid])
+  // The marks move with the text: measured again on the next frame after a scroll.
+  const scrolled = useRef(0)
+  const onScroll = () => {
+    if (marked) readSelection()
+    if (shown === 'page' || scrolled.current) return
+    scrolled.current = requestAnimationFrame(() => { scrolled.current = 0; measure() })
+  }
 
   let body: ReactNode
   if (content.error) body = <div className="rd-failed" role="alert"><p>{content.error}</p></div>
@@ -263,9 +433,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     ? <audio className="rd-media" controls src={rawFileUrl(path)} />
     : <video className="rd-media" controls src={rawFileUrl(path)} />
   else if (text === null) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
-  else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} onMarked={setMarked} cleared={cleared} />
+  else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={closeAnswer} cleared={cleared} />
   else body = (
-    <div ref={page} className={`tc-document-page rd-page rd-as-${shown}${shown === 'markdown' ? ' delivery-response' : ''}`}>
+    // Drawn afresh when the file changes, never updated around the marks in it (lib/files/partMarks.ts).
+    <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
       {shown === 'markdown' ? <Markdown>{withFolderPaths(text)}</Markdown>
         : shown === 'table' ? <TableView text={text} path={path} />
           : shown === 'document' ? <DocumentView text={text} />
@@ -308,22 +479,17 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         </p>
       )}
       <div ref={stage} className="rd-stage">
-        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}`} onScroll={() => { if (marked) readSelection() }}>
+        <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}`} onScroll={onScroll}>
           {body}
-          {pins.length > 0 && (
-            <div className="rd-pins" data-reader-chrome style={{ left: pinsLeft }}>
-              {pins.map(({ passage, top }) => (
-                <button key={passage.text} type="button" className="rd-pin" style={{ top }}
-                  onMouseEnter={() => setFocus(passage.text)} onMouseLeave={() => setFocus(null)} onFocus={() => setFocus(passage.text)} onBlur={() => setFocus(null)}
-                  onClick={() => onShowAsked?.(passage)} disabled={!onShowAsked || !passage.runId}
-                  aria-label={`You asked ${name(passage.from)} about “${quoteLine(passage.text).slice(0, 60)}”: ${sentence(passage.asked)} Show the answer`}
-                  title={`You asked ${name(passage.from)}: ${passage.asked}`}>
-                  <AvatarFace id={passage.from} hue={hue(passage.from)} size={22} fontSize={9} text={initials(name(passage.from))} />
-                </button>
-              ))}
-            </div>
-          )}
         </div>
+        {[...(onScreen?.slots ?? NO_SLOTS)].map(([text, slot]) => {
+          const passage = mine.find((item) => item.text === text)
+          return passage && createPortal(
+            <PartBubble passage={passage} look={looks.get(text) ?? 'read'} name={name} hue={hue} open={answerShown?.text === text}
+              onOpen={() => toggleAnswer(text)} onFocus={(on) => setFocus(on ? text : null)} />,
+            slot, text,
+          )
+        })}
         {askable && marked && place && from && askee && (
           <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the words you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
@@ -365,6 +531,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
             )}
           </div>
         )}
+        {answerShown && (answerPart || answerLost) && (
+          <PassageAnswer ref={card} passage={answerShown} name={name} hue={hue} place={answerAt} gone={answerLost} maxHeight={answerMax}
+            onClose={() => setAnswerFor(null)} onShowInChat={onShowAsked && (() => onShowAsked(answerShown))} />
+        )}
         {askable && hint && !marked && from && text !== null && (
           <p className="rd-hint" data-reader-chrome>
             <AvatarFace id={from} hue={hue(from)} size={20} fontSize={8} text={initials(name(from))} />
@@ -385,10 +555,23 @@ function roleLine(role: string): string {
   return line.length > 120 ? `${line.slice(0, 119).trimEnd()}…` : line
 }
 
-/** What was asked, ending as a sentence does: "why?" stays, "explain it" gets its stop. */
-function sentence(words: string): string {
-  const said = words.trim()
-  return /[.!?…]$/.test(said) ? said : `${said}.`
+/** How each marked part looks, on its marks and its slot. */
+function showLooks(marked: PartMarks | null, lookOf: (text: string) => string) {
+  for (const [text, part] of marked?.parts ?? []) {
+    const look = lookOf(text)
+    for (const mark of part.marks) mark.className = `rd-mark ${look}`
+    part.slot.className = `rd-slot ${look}`
+  }
+}
+
+/** Whether the page behind an element is dark: the first background on the way up that is not see-through. */
+function darkBehind(element: Element): boolean {
+  for (let at: Element | null = element; at; at = at.parentElement) {
+    const colour = /rgba?\(([^)]*)\)/.exec(getComputedStyle(at).backgroundColor)
+    const [red, green, blue, alpha = 1] = colour ? colour[1].split(',').map(Number.parseFloat) : []
+    if (colour && alpha > 0.5) return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255 < 0.45
+  }
+  return false
 }
 
 function initials(name: string): string {
