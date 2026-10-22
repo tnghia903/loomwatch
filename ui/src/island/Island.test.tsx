@@ -2,7 +2,7 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunRecord } from '../lib/runs/client'
-import { permission, run } from './fixtures'
+import { at, permission, run } from './fixtures'
 import { Island } from './Island'
 
 let runs: RunRecord[] = []
@@ -14,6 +14,10 @@ function json(body: unknown, status = 200): Response {
 }
 
 beforeEach(() => {
+  // The page reads the clock: hold it a few seconds after the sample runs started, on any day.
+  // Only the date is held, so the page's own timers and waitFor keep running.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(at(0) + 5_000)
   runs = []
   posted.length = 0
   toApp.length = 0
@@ -34,6 +38,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   delete window.webkit
   delete window.loomwatchIsland
