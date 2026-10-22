@@ -92,13 +92,15 @@ export function TeamFlow({ asked, stages, relay, answered, answerPass, planned, 
                 <div className="flow-above"><StageNow activity={stage.activity} /></div>
                 <article id={`delivery-stage-${stage.id}`} className={`flow-card flow-agent${stage.working ? ' working' : ''}${stage.selected ? ' selected' : ''}`} data-tour="stage">
                   <button type="button" className="flow-who" aria-pressed={stage.selected} onClick={() => onSelect(stage.id)}>
-                    <StageFigure phase={stage.phase} glow={stage.glow}>
-                      <AgentPortrait id={stage.id} name={stage.name} size={46} operator={stage.operator} state={stage.markState} events={stage.events} animate={animate} />
-                    </StageFigure>
-                    <span className="flow-names">
-                      <span className="flow-micro">{stage.model} · <span className={`delivery-status ${stage.statusClass}`}>{stage.status}</span></span>
-                      <strong>{stage.name}</strong>
+                    {/* The figure and how it is doing share a row, so the model and the name get the card's full width under them. */}
+                    <span className="flow-top">
+                      <StageFigure phase={stage.phase} glow={stage.glow}>
+                        <AgentPortrait id={stage.id} name={stage.name} size={46} operator={stage.operator} state={stage.markState} events={stage.events} animate={animate} />
+                      </StageFigure>
+                      <span className={`delivery-status ${stage.statusClass}`}>{stage.status}</span>
                     </span>
+                    <span className="flow-micro">{stage.model}</span>
+                    <strong>{stage.name}</strong>
                   </button>
                   <StageTray activity={stage.activity} skills={stage.skills} planned={planned} finished={finished} open={stage.open} onOpen={(kind) => onOpen(stage.id, kind)} />
                   {stage.activity.said && <p className="flow-said">{stage.activity.said}<span className="caret" aria-hidden="true" /></p>}
