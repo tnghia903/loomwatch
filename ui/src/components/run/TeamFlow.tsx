@@ -5,6 +5,7 @@ import type { WorkPhase } from '../../lib/library/figure'
 import type { CardActivity, UseKind } from '../../lib/watch/cardActivity'
 import { hadSkill } from '../../lib/runs/capabilityEvidence'
 import { AgentPortrait } from '../agents/AvatarFace'
+import { StatusGlyph } from '../ui/glyphs'
 import type { MarkState } from '../../lib/story/mark'
 import { StageFigure, StageNow, StageTray, type FigureGlow, type SkillSummary } from './StageActivity'
 
@@ -97,7 +98,8 @@ export function TeamFlow({ asked, stages, relay, answered, answerPass, planned, 
                       <StageFigure phase={stage.phase} glow={stage.glow}>
                         <AgentPortrait id={stage.id} name={stage.name} size={46} operator={stage.operator} state={stage.markState} events={stage.events} animate={animate} />
                       </StageFigure>
-                      <span className={`delivery-status ${stage.statusClass}`}>{stage.status}</span>
+                      {/* Stopped with a problem wears the failed mark, so its red is a shape, not words. */}
+                      <span className={`delivery-status ${stage.statusClass}`}>{stage.statusClass === 'status-failed' && <StatusGlyph status="failed" size={10} />}{stage.status}</span>
                     </span>
                     <span className="flow-micro">{stage.model}</span>
                     <strong>{stage.name}</strong>

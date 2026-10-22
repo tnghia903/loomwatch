@@ -4,6 +4,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent
 import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
+import { goToTeam } from '../../lib/team-file/teamPage'
 
 interface NeedsYouTrayProps {
   tickets: readonly Ticket[]
@@ -149,7 +150,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
       setBusy(null)
     }
   }
-  const openRun = (ticket: Ticket) => window.location.assign(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
+  const openRun = (ticket: Ticket) => goToTeam(historyRunUrl({ id: ticket.runId, teamPath: ticket.teamPath }))
   const startReply = (ticket: Ticket) => { setReplying(ticket.id); setDraft('') }
 
   // The run on screen already asks with its own answer box and permission card, so its ticket

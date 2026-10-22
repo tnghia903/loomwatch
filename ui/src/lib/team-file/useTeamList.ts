@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { fetchTeamsDiscovery, teamDisplayName, teamSummaries, type TeamSummary } from './client'
+import { movedInPlace } from './inPlace'
+import { goToTeam, teamHref } from './teamPage'
 
 /** A team's three views, in the order you work through them: its agents, its workflow, its chat. */
 export type TeamView = 'agents' | 'workflow' | 'chat'
 
-/**
- * Open a team by its path, on one of its views. A full navigation, so every per-team state starts
- * clean. Workflow is the address with no `view`.
- */
+/** Open a team by its path, on one of its views: in place where it can be (`teamPage.ts`). */
 export function openTeam(path: string, view: TeamView = 'workflow') {
-  window.location.assign(`/?path=${encodeURIComponent(path)}${view === 'workflow' ? '' : `&view=${view}`}`)
+  goToTeam(teamHref(path, view))
 }
 
 /**
@@ -25,13 +24,16 @@ export function teamViewFor(team: Pick<TeamSummary, 'agentCount' | 'problem'>, h
 /** How often a failed list asks again: the usual cause is a daemon that is being restarted. */
 const RETRY_MS = 5000
 
+let lastList: { teams: TeamSummary[]; trashed: string[] } | null = null
+
 /**
  * The teams in the teams folder, newest first. `null` while the first answer is pending. `trashed`
  * lists where deleted teams used to live, so a new team is never filed under one of their names.
  */
 export function useTeamList() {
-  const [teams, setTeams] = useState<TeamSummary[] | null>(null)
-  const [trashed, setTrashed] = useState<string[]>([])
+  // A team page that moved in place starts from the list it last read, and reads it again.
+  const [teams, setTeams] = useState<TeamSummary[] | null>(() => (movedInPlace() ? lastList?.teams ?? null : null))
+  const [trashed, setTrashed] = useState<string[]>(() => (movedInPlace() ? lastList?.trashed ?? [] : []))
   const [error, setError] = useState<string | null>(null)
   const [generation, setGeneration] = useState(0)
   useEffect(() => {
@@ -40,6 +42,7 @@ export function useTeamList() {
       .then((discovery) => {
         if (cancelled) return
         const sorted = [...teamSummaries(discovery)].sort((a, b) => (b.modifiedAt ?? '').localeCompare(a.modifiedAt ?? '') || teamDisplayName(a).localeCompare(teamDisplayName(b)))
+        lastList = { teams: sorted, trashed: discovery.trashed ?? [] }
         setTeams(sorted)
         setTrashed(discovery.trashed ?? [])
         setError(null)

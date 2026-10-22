@@ -8,6 +8,7 @@ import { nodeFromDrop } from '../library/nodeFromDrop'
 import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
 import { TeamFileModel, TeamFileParseError } from './document'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
+import { holdPage } from './inPlace'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
 import { pipelineOrder, type PipelineStep } from './pipelineOrder'
 import type { AgentAllow, AgentConfig, AllowSwitch, BriefEntryConfig, CapabilityRef, DeliverConfig, EdgeConfig, PermissionMode, ScheduleConfig, SpawnConfig, TeamDocument, TurnedOff } from './types'
@@ -206,6 +207,65 @@ function nodeFromAgent(
   }
 }
 
+/** A team file as the daemon gave it: its words, its revision, and the teams folder it is named under. */
+export interface TeamRead {
+  yaml: string
+  revision: string
+  root: string | null
+}
+
+/** Reads the team a `?path=` names, as its page does when it opens. */
+export async function readTeam(requestedPath: string): Promise<TeamRead> {
+  const [{ yaml, revision }, discovery] = await Promise.all([
+    fetchTeamFile(requestedPath),
+    isAbsolutePath(requestedPath) ? Promise.resolve(null) : fetchTeamsDiscovery(),
+  ])
+  return { yaml, revision: revision ?? await hashTeamYaml(yaml), root: discovery?.root ?? null }
+}
+
+/** What a team's page starts from once its file is read. Throws `TeamFileParseError` for a file that isn't a team. */
+function openedTeam(requestedPath: string, read: TeamRead) {
+  const model = TeamFileModel.parse(read.yaml)
+  const snapshot = model.snapshot()
+  const { agents, configured } = drawableParts(snapshot)
+  const positions = seededLayout(
+    agents.map((agent) => agent.id),
+    configured.map((edge) => ({ from: edge.from, to: edge.to })),
+    snapshot.id,
+  )
+  const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
+  return {
+    model,
+    snapshot,
+    read,
+    path: read.root !== null ? absoluteTeamPath(read.root, requestedPath) : requestedPath,
+    nodes: agents.map((agent) => nodeFromAgent(agent, positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint)),
+    edges: configured.map(edgeFromConfig),
+    readOnlyReason: schemaVersion === 1 ? null : `This file uses schema version ${String(schemaVersion)}. This build of LoomWatch understands version 1.`,
+  }
+}
+
+/**
+ * A team opened in place (`lib/team-file/teamPage.ts`) is read before its page is drawn, and the
+ * page starts from it, so it shows at once with no "Opening team…" between. The schema's checker
+ * comes along from the page before: it is the same for every team.
+ */
+let handedOver: { path: string; read: TeamRead } | null = null
+let lastValidator: TeamValidator | null = null
+export function handOverTeam(path: string, read: TeamRead | null) {
+  handedOver = read ? { path, read } : null
+}
+// Read as the page's state starts, which React may do twice for one page; the next move replaces it.
+function handedOverTeam(requestedPath: string | null) {
+  if (!handedOver || requestedPath === null || handedOver.path !== requestedPath) return null
+  try {
+    return { ...openedTeam(requestedPath, handedOver.read), validator: lastValidator }
+  } catch {
+    // Not a team after all: the page reads it again and says what is wrong, as on any load.
+    return null
+  }
+}
+
 /**
  * Owns the canvas's document lifecycle: load a team file named by `?path=`, keep React Flow
  * node/edge state and the CST-preserving `TeamFileModel` (TNG-53) in sync on every edit, and
@@ -219,33 +279,35 @@ function nodeFromAgent(
  * the configured teams root (§10.2).
  */
 export function useTeamDocument() {
+  const [opened] = useState(() => handedOverTeam(new URLSearchParams(window.location.search).get('path')))
   const saveInFlightRef = useRef(false)
-  const modelRef = useRef<TeamFileModel | null>(null)
-  const loadedRevisionRef = useRef<string | null>(null)
-  const [path, setPath] = useState<string | null>(null)
-  const [teamsRoot, setTeamsRoot] = useState<string | null>(null)
-  const [nodes, setNodes] = useState<AgentNode[]>([])
-  const [edges, setEdges] = useState<ConfiguredEdge[]>([])
-  const [entrypoint, setEntrypointState] = useState<string | null>(null)
-  const [teamSchedule, setTeamSchedule] = useState<ScheduleConfig | null>(null)
-  const [saveState, setSaveState] = useState<SaveState>('no-file')
+  const modelRef = useRef<TeamFileModel | null>(opened?.model ?? null)
+  const loadedRevisionRef = useRef<string | null>(opened?.read.revision ?? null)
+  const [path, setPath] = useState<string | null>(opened?.path ?? null)
+  const [teamsRoot, setTeamsRoot] = useState<string | null>(opened?.read.root ?? null)
+  const [nodes, setNodes] = useState<AgentNode[]>(opened?.nodes ?? [])
+  const [edges, setEdges] = useState<ConfiguredEdge[]>(opened?.edges ?? [])
+  const [entrypoint, setEntrypointState] = useState<string | null>(opened?.snapshot.entrypoint ?? null)
+  const [teamSchedule, setTeamSchedule] = useState<ScheduleConfig | null>(opened?.snapshot.schedule ?? null)
+  const [saveState, setSaveState] = useState<SaveState>(opened ? (opened.readOnlyReason ? 'read-only' : 'clean') : 'no-file')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<EdgeRefusal | null>(null)
   const [modeSwitchBanner, setModeSwitchBanner] = useState(false)
   const [pendingEdgeRemoval, setPendingEdgeRemoval] = useState<PendingEdgeRemoval | null>(null)
-  const [validator, setValidator] = useState<TeamValidator | null>(null)
-  const [schemaLoading, setSchemaLoading] = useState(true)
+  // A function, so handed to useState inside one: given bare, React would call it.
+  const [validator, setValidator] = useState<TeamValidator | null>(() => opened?.validator ?? null)
+  const [schemaLoading, setSchemaLoading] = useState(!opened?.validator)
   const [touchedFields, setTouchedFields] = useState<ReadonlySet<string>>(new Set())
   const [attemptedSave, setAttemptedSave] = useState(false)
-  const [documentSnapshot, setDocumentSnapshot] = useState<ReturnType<TeamFileModel['snapshot']> | null>(null)
-  const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null)
+  const [documentSnapshot, setDocumentSnapshot] = useState<ReturnType<TeamFileModel['snapshot']> | null>(opened?.snapshot ?? null)
+  const [readOnlyReason, setReadOnlyReason] = useState<string | null>(opened?.readOnlyReason ?? null)
   const [fileGone, setFileGone] = useState(false)
   const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null)
   const [externalChange, setExternalChange] = useState<ExternalChange | null>(null)
   const [diskNotice, setDiskNotice] = useState<string | null>(null)
-  const [yamlPreview, setYamlPreview] = useState('')
+  const [yamlPreview, setYamlPreview] = useState(opened?.read.yaml ?? '')
   /** The bytes last read from or written to disk, so the chip can state a magnitude (§9.1). */
-  const [loadedYaml, setLoadedYaml] = useState<string | null>(null)
+  const [loadedYaml, setLoadedYaml] = useState<string | null>(opened?.read.yaml ?? null)
   const isNewRef = useRef(false)
   const undoRef = useRef<HistoryEntry[]>([])
   const redoRef = useRef<HistoryEntry[]>([])
@@ -259,7 +321,8 @@ export function useTeamDocument() {
     if (saveState === 'error' && loadedYaml === null && !isNewRef.current) return
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
     window.addEventListener('beforeunload', warnBeforeLeaving)
-    return () => window.removeEventListener('beforeunload', warnBeforeLeaving)
+    const release = holdPage()
+    return () => { window.removeEventListener('beforeunload', warnBeforeLeaving); release() }
   }, [saveState, loadedYaml])
 
   const resetHistory = useCallback(() => {
@@ -441,82 +504,57 @@ export function useTeamDocument() {
     let cancelled = false
 
     async function load() {
-      if (!requestedPath) {
+      // A team handed over by an in-place open is on the page already.
+      if (requestedPath && !opened) {
+        let source: string | null = null
         try {
-          const schema = await fetchConfigSchema()
-          const nextValidator = await loadTeamValidator(schema)
-          if (!cancelled) setValidator(() => nextValidator)
-        } catch {
-          // Client validation is a courtesy; the daemon still validates every PUT.
-        } finally {
-          if (!cancelled) setSchemaLoading(false)
+          const read = await readTeam(requestedPath)
+          source = read.yaml
+          if (cancelled) {
+            return
+          }
+          const team = openedTeam(requestedPath, read)
+          modelRef.current = team.model
+          loadedRevisionRef.current = read.revision
+          isNewRef.current = false
+          if (read.root !== null) setTeamsRoot(read.root)
+          setPath(team.path)
+          setEntrypointState(team.snapshot.entrypoint)
+          setTeamSchedule(team.snapshot.schedule ?? null)
+          setNodes(team.nodes)
+          setEdges(team.edges)
+          setDocumentSnapshot(team.snapshot)
+          setYamlPreview(read.yaml)
+          setLoadedYaml(read.yaml)
+          resetHistory()
+          setFileGone(false)
+          if (team.readOnlyReason) {
+            setReadOnlyReason(team.readOnlyReason)
+            setSaveState('read-only')
+          } else {
+            setSaveState('clean')
+          }
+        } catch (error: unknown) {
+          if (cancelled) {
+            return
+          }
+          const message =
+            error instanceof TeamFileApiError || error instanceof TeamFileParseError
+              ? error.message
+              : String(error)
+          setSaveError(message)
+          if (error instanceof TeamFileParseError) {
+            setLoadFailure(parseFailure(error, source ?? ''))
+          }
+          setSaveState('error')
         }
-        return
-      }
-      let source: string | null = null
-      try {
-        const [{ yaml, revision }, discovery] = await Promise.all([
-          fetchTeamFile(requestedPath),
-          isAbsolutePath(requestedPath) ? Promise.resolve(null) : fetchTeamsDiscovery(),
-        ])
-        source = yaml
-        const loadedRevision = revision ?? await hashTeamYaml(yaml)
-        if (cancelled) {
-          return
-        }
-        const model = TeamFileModel.parse(yaml)
-        const snapshot = model.snapshot()
-        const { agents, configured } = drawableParts(snapshot)
-        const positions = seededLayout(
-          agents.map((agent) => agent.id),
-          configured.map((edge) => ({ from: edge.from, to: edge.to })),
-          snapshot.id,
-        )
-        modelRef.current = model
-        loadedRevisionRef.current = loadedRevision
-        isNewRef.current = false
-        if (discovery) setTeamsRoot(discovery.root)
-        setPath(discovery ? absoluteTeamPath(discovery.root, requestedPath) : requestedPath)
-        setEntrypointState(snapshot.entrypoint)
-        setTeamSchedule(snapshot.schedule ?? null)
-        setTeamSchedule(snapshot.schedule ?? null)
-        setNodes(
-          agents.map((agent) =>
-            nodeFromAgent(agent, positions[agent.id] ?? { x: 0, y: 0 }, agent.id === snapshot.entrypoint),
-          ),
-        )
-        setEdges(configured.map(edgeFromConfig))
-        setDocumentSnapshot(snapshot)
-        setYamlPreview(yaml)
-        setLoadedYaml(yaml)
-        resetHistory()
-        setFileGone(false)
-        const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
-        if (schemaVersion !== 1) {
-          const reason = `This file uses schema version ${String(schemaVersion)}. This build of LoomWatch understands version 1.`
-          setReadOnlyReason(reason)
-          setSaveState('read-only')
-        } else {
-          setSaveState('clean')
-        }
-      } catch (error: unknown) {
-        if (cancelled) {
-          return
-        }
-        const message =
-          error instanceof TeamFileApiError || error instanceof TeamFileParseError
-            ? error.message
-            : String(error)
-        setSaveError(message)
-        if (error instanceof TeamFileParseError) {
-          setLoadFailure(parseFailure(error, source ?? ''))
-        }
-        setSaveState('error')
       }
 
+      if (opened?.validator) return
       try {
         const schema = await fetchConfigSchema()
         const nextValidator = await loadTeamValidator(schema)
+        lastValidator = nextValidator
         if (!cancelled) setValidator(() => nextValidator)
       } catch {
         // Client validation is a courtesy; the daemon still validates every PUT.
@@ -528,7 +566,7 @@ export function useTeamDocument() {
     return () => {
       cancelled = true
     }
-  }, [resetHistory])
+  }, [resetHistory, opened])
 
   const applyDiskYaml = useCallback(
     async (yaml: string, notice?: string, revision?: string) => {

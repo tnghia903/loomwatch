@@ -6,6 +6,7 @@ import { useSavedJobs } from '../../lib/library/jobs'
 import { saveTeamFile } from '../../lib/team-file/client'
 import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
 import { agentsTeamYaml, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
+import { openTeam } from '../../lib/team-file/useTeamList'
 import { FigureStill } from '../agents/FigureStill'
 
 export interface NewTeamDialogProps {
@@ -57,7 +58,7 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false 
     try {
       const yaml = start === 'agents' ? agentsTeamYaml(picked, trimmed, teamIdForPath(path)) : templateTeamYaml(start, trimmed, undefined, teamIdForPath(path))
       await saveTeamFile(path, yaml, null)
-      window.location.assign(`/?path=${encodeURIComponent(path)}`)
+      openTeam(path)
     } catch (caught) {
       setBusy(null)
       setError(`The team couldn’t be saved. ${caught instanceof Error ? caught.message : String(caught)}`)

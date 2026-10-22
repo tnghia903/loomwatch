@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DeliveryLane, type DeliveryLaneProps } from './DeliveryLane'
 import { CanvasActionsContext } from '../canvas/CanvasActionsContext'
 import { createElement, type ComponentType, type ReactNode } from 'react'
+import { StatusGlyph } from '../ui/glyphs'
 
 vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -21,7 +22,8 @@ vi.mock('@xyflow/react', () => ({
 }))
 import { type Evidence, projectRun } from '../../lib/watch/events'
 import type { AgentRuntime } from '../../lib/runs/graph'
-import { appRules, cascaded, px, topLevel } from '../../test/cascade'
+import { appRules, background, cascaded, px, topLevel } from '../../test/cascade'
+import { apcaLc, THEMES, tokenColour, wcagRatio, type Theme } from '../../test/contrast'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
   const actions = {
     renameAgent: vi.fn(),
@@ -375,6 +377,50 @@ describe('Delivery Lane', () => {
       const status = within(stage('writer')).getByText('Waiting for you')
       expect(status).toHaveClass('status-waiting')
       expect(cascaded(status, 'color')).toBe('var(--color-accent)')
+    })
+
+    // "Stopped with a problem" was red words, which on the dark card pass 5.6:1 but read muddy (APCA
+    // Lc 43). The words are ink; the red is the pill's edge and the failed mark before them, so the
+    // status is never told by colour alone.
+    it('says a stage stopped with a problem in words that read in both themes, marked in red', () => {
+      const { container } = setup({ phase: 'failed', agents: agents('failed') })
+      const words = within(stage('writer')).getByText('Stopped with a problem')
+      // What the words sit on: the nearest box with a fill of its own, the card.
+      const fill = (element: Element) => { const value = background(element); return value && !/^(none|transparent)$/.test(value) ? value : null }
+      let under: Element | null = words
+      while (under && !fill(under)) under = under.parentElement
+      expect(under).toBe(stage('writer'))
+      // The app's dark shell sets its own card and ink (#17191C under the words), so each is measured.
+      const shells = ['', 'lw-shell', 'lw-railed']
+      const card = (theme: Theme) => tokenColour(fill(under!), theme, under!)
+      for (const shell of shells) {
+        container.className = shell
+        for (const theme of THEMES) {
+          const ink = tokenColour(cascaded(words, 'color'), theme, words)
+          expect(Math.abs(apcaLc(ink, card(theme))), `${shell} ${theme}`).toBeGreaterThanOrEqual(75)
+          expect(wcagRatio(ink, card(theme)), `${shell} ${theme}`).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+      // The red that means wrong, where a shape needs 3:1 on the card: the edge, and the failed mark
+      // the run's other views draw, a red disc with a ×, before the words.
+      const mark = words.firstElementChild as SVGSVGElement | null
+      expect(mark?.outerHTML).toBe(render(<StatusGlyph status="failed" size={10} />, { container: document.createElement('span') }).container.innerHTML)
+      expect(words.firstChild).toBe(mark)
+      // In line with them, where Tailwind's base would put an svg on a line of its own. (Spelled in
+      // parts: Tailwind reads test files for class names.)
+      expect(cascaded(mark!, 'display')).toBe(['inline', 'block'].join('-'))
+      const red = (value: string | null, theme: Theme) => tokenColour(value, theme, words) === tokenColour('var(--color-alert)', theme, words)
+      const edge = cascaded(words, ['border', 'border-color'])
+      for (const shell of shells) {
+        container.className = shell
+        for (const theme of THEMES) {
+          expect(red(edge, theme), `${shell} ${theme}`).toBe(true)
+          expect(red(mark!.style.color, theme), `${shell} ${theme}`).toBe(true)
+          expect(wcagRatio(tokenColour(mark!.style.color, theme, words), card(theme)), `${shell} ${theme}`).toBeGreaterThanOrEqual(3)
+        }
+      }
+      // Only the status a person must act on wears a mark; Done is its words and its glow.
+      expect(within(stage('researcher')).getByText('Done').querySelector('svg')).toBeNull()
     })
 
     it('settles once the stage finishes', () => {

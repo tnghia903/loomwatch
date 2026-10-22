@@ -11,11 +11,14 @@ import AboutYouPage from './components/you/AboutYouPage'
 import { Updates } from './components/updates/Updates'
 import { GettingStarted } from './components/tour/GettingStarted'
 import { Workspace } from './components/Workspace'
+import { FrameTeamRail } from './components/rail/TeamRail'
+import { useTeamRailShown } from './components/rail/teamRailStore'
 import { NeedsYouTray } from './components/workspace/NeedsYouTray'
 import { useAiStatus } from './lib/ai/useKeyStatus'
 import { connectedSources } from './lib/ai/sources'
 import { fetchCapabilities, SKILLS_CHANGED_EVENT, type CapabilityInventory } from './lib/library/client'
 import { useNeedsYou } from './lib/story/useNeedsYou'
+import { useTeamPage } from './lib/team-file/teamPage'
 import { useTheme } from './lib/theme'
 
 function useCapabilities() {
@@ -54,25 +57,34 @@ function Guide() {
   return <GettingStarted keyReady={ai !== null && connectedSources(ai).length > 0} keyLoading={ai === null} />
 }
 
-function Editor({ initialRunId }: { initialRunId: string | null }) {
+function Editor() {
   const capabilities = useCapabilities()
   const [, setDocumentOpen] = useState(() => new URLSearchParams(window.location.search).has('path'))
+  // Another team opens in place (lib/team-file/teamPage.ts): the frame and the rail stay, and the
+  // team's own part, canvas included, starts fresh under a new key, as on a page load.
+  const page = useTeamPage()
+  const railed = useTeamRailShown()
   return (
-    <ReactFlowProvider>
+    <>
       {/* Above Home and the workspace alike: the guide carries on across the page load a new team causes. */}
       <Guide />
       <Feedback />
       <Updates />
-      <Workspace
-        capabilityInventory={capabilities.inventory}
-        capabilitiesLoading={capabilities.loading}
-        capabilitiesError={capabilities.error}
-        capabilitiesScannedAt={capabilities.scannedAt}
-        onRetryCapabilities={capabilities.retry}
-        onDocumentOpen={() => setDocumentOpen(true)}
-        initialRunId={initialRunId}
-      />
-    </ReactFlowProvider>
+      <div className={railed ? 'lw-railed' : 'lw-frame'}>
+        <FrameTeamRail />
+        <ReactFlowProvider key={page.key}>
+          <Workspace
+            capabilityInventory={capabilities.inventory}
+            capabilitiesLoading={capabilities.loading}
+            capabilitiesError={capabilities.error}
+            capabilitiesScannedAt={capabilities.scannedAt}
+            onRetryCapabilities={capabilities.retry}
+            onDocumentOpen={() => setDocumentOpen(true)}
+            initialRunId={page.runId}
+          />
+        </ReactFlowProvider>
+      </div>
+    </>
   )
 }
 
@@ -121,16 +133,16 @@ export default function App() {
     return <Suspense fallback={<p className="t-meta" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Loading…</p>}><AboutYouPage /></Suspense>
   }
   // The old /watch route folds into the workspace: a session id opens that run in replay, and a
-  // bare /watch opens the team list, where each team's chat holds its past work (ADR 0051).
-  const params = new URLSearchParams(search)
+  // bare /watch opens the team list, where each team's chat holds its past work (ADR 0051). The
+  // workspace reads the run from the address.
   if (pathname === '/watch') {
+    const params = new URLSearchParams(search)
     const session = params.get('session')
     const next = new URLSearchParams()
     for (const [key, value] of params) if (key !== 'session') next.set(key, value)
     if (session) next.set('run', session)
     const query = next.toString()
     window.history.replaceState({}, '', query ? `/?${query}` : '/')
-    return <Editor initialRunId={session} />
   }
-  return <Editor initialRunId={params.get('run')} />
+  return <Editor />
 }

@@ -7,6 +7,8 @@ import type { RunEvent } from '../lib/watch/events'
 import type { AgentConfig } from '../lib/team-file/types'
 import { keys } from '../lib/platform'
 import { background, cascaded, DESKTOP, goldFilled, heightOf, isGoldFill, PHONE } from '../test/cascade'
+import { useTeamPage } from '../lib/team-file/teamPage'
+import { FrameTeamRail } from './rail/TeamRail'
 import { Workspace } from './Workspace'
 
 // The Run button shows its key as this computer writes it: ↵ on a Mac, Enter elsewhere.
@@ -61,7 +63,7 @@ const composerLayoutState = vi.hoisted(() => ({
   loadedFor: '/teams/demo.yaml' as string | null,
 }))
 
-vi.mock('../lib/team-file/useTeamDocument', () => ({ useTeamDocument: () => documentState, slugifyTeamName: (name: string) => name }))
+vi.mock('../lib/team-file/useTeamDocument', () => ({ useTeamDocument: () => documentState, slugifyTeamName: (name: string) => name, readTeam: async () => ({ yaml: '', revision: 'r1', root: '/teams' }), handOverTeam: () => {} }))
 vi.mock('../lib/watch/useSessionEvents', () => ({
   readArchive: vi.fn(async () => []),
   useSessionEvents: (sessionId: string) => ({ sessionId, events: sessionId ? sessionState.events : [], error: null, connected: true }),
@@ -103,8 +105,13 @@ const at = (seconds: number) => new Date(Date.UTC(2026, 8, 11, 0, 0, seconds)).t
 const event = (seq: number, kind: RunEvent['kind'], payload: RunEvent['payload'], agentId = 'researcher'): RunEvent => ({ id: `e${seq}`, sessionId: 'run-1', agentId, seq, ts: at(seq), kind, payload })
 const runRecord = { runId: 'run-1', sessionId: 'run-1', teamPath: 'demo.yaml', prompt: 'Summarise the repo', status: 'running', mode: 'pipeline', entrypoint: 'researcher', responder: 'reviewer', agentIds: ['researcher', 'reviewer'], createdAt: at(0), startedAt: at(0), finishedAt: null, error: null, exitCode: null, eventCount: null, reply: null }
 
+// The team rail is the page frame's (App.tsx), drawn as the workspace sets it.
+function workspaceTree(runId: string | null = null) {
+  return <><FrameTeamRail /><Workspace onDocumentOpen={vi.fn()} initialRunId={runId} /></>
+}
+
 function renderWorkspace(runId: string | null = null) {
-  return render(<Workspace onDocumentOpen={vi.fn()} initialRunId={runId} />)
+  return render(workspaceTree(runId))
 }
 
 /** Waits until a run the composer started is the one on screen. */
@@ -1554,6 +1561,36 @@ describe('the team rail', () => {
     expect(assign).toHaveBeenCalledWith('/?path=trip.yaml')
   })
 
+  // In the app the page follows the address in place (App.tsx): another team's part starts fresh
+  // under a new key, beside the frame's rail.
+  function TeamPageFrame() {
+    const page = useTeamPage()
+    return <><FrameTeamRail /><Workspace key={page.key} onDocumentOpen={vi.fn()} initialRunId={page.runId} /></>
+  }
+
+  it('opens another team in place, the rail staying with the keyboard on the team picked', async () => {
+    render(<TeamPageFrame />)
+    const rail = screen.getByRole('navigation', { name: 'Your teams' })
+    const trip = await within(rail).findByRole('link', { name: 'Trip' })
+    trip.focus()
+    fireEvent.click(trip)
+    await waitFor(() => expect(real.search).toBe('?path=trip.yaml'))
+    expect(assign).not.toHaveBeenCalled()
+    expect(screen.getByRole('navigation', { name: 'Your teams' })).toBe(rail)
+    expect(document.activeElement).toBe(trip)
+  })
+
+  it('goes Home in place from the LoomWatch mark', async () => {
+    render(<TeamPageFrame />)
+    const mark = screen.getByRole('link', { name: 'LoomWatch, your teams' })
+    // A click that asks for a new tab is left to the browser.
+    expect(fireEvent.click(mark, { metaKey: true })).toBe(true)
+    expect(real.search).toBe('?path=demo.yaml')
+    fireEvent.click(mark)
+    await waitFor(() => expect(`${real.pathname}${real.search}`).toBe('/'))
+    expect(assign).not.toHaveBeenCalled()
+  })
+
   it('asks before leaving changes, and opens the other team once they are saved', async () => {
     Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
     const view = renderWorkspace()
@@ -1561,11 +1598,13 @@ describe('the team rail', () => {
     expect(assign).not.toHaveBeenCalled()
     await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).getByRole('button', { name: 'Save first' })) })
     expect(documentState.save).toHaveBeenCalledOnce()
+    // Its box goes; the keyboard goes to the team picked, not to the page.
+    expect(document.activeElement).toHaveAttribute('href', '/?path=trip.yaml')
     // The page moves only once the team says it is saved, so the browser's own "Leave site?",
     // which asks while there are changes, never asks a second time.
     expect(assign).not.toHaveBeenCalled()
     Object.assign(documentState, { documentChipState: 'saved', saveState: 'saved' })
-    view.rerender(<Workspace onDocumentOpen={vi.fn()} initialRunId={null} />)
+    view.rerender(workspaceTree())
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
   })
 
@@ -1574,11 +1613,12 @@ describe('the team rail', () => {
     const view = renderWorkspace()
     fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Discard' })) })
+    expect(document.activeElement).toHaveAttribute('href', '/?path=trip.yaml')
     expect(documentState.reloadFromDisk).toHaveBeenCalledOnce()
     expect(documentState.save).not.toHaveBeenCalled()
     expect(assign).not.toHaveBeenCalled()
     Object.assign(documentState, { documentChipState: 'clean', saveState: 'clean' })
-    view.rerender(<Workspace onDocumentOpen={vi.fn()} initialRunId={null} />)
+    view.rerender(workspaceTree())
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=trip.yaml'))
   })
 

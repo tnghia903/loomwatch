@@ -73,8 +73,18 @@
 .delivery-status.status-succeeded {
   color: var(--color-ok);
 }
+/* Stopped with a problem is the status a person must read. Red words on the dark card pass 5.6:1 but
+   read muddy (APCA Lc 43), so the words are ink and the red is the pill's edge and the failed mark
+   before them, a red disc with a × (StatusGlyph). */
 .delivery-status.status-failed {
-  color: var(--color-alert);
+  color: var(--color-ink);
+  border-color: var(--color-alert);
+}
+/* In line with the words: Tailwind's base makes every svg a block. */
+.delivery-status.status-failed > svg {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -1px;
 }
 .delivery-status.status-partial {
   color: var(--color-accent);
