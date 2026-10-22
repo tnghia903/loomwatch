@@ -21,7 +21,7 @@ vi.mock('@xyflow/react', () => ({
 }))
 import { type Evidence, projectRun } from '../../lib/watch/events'
 import type { AgentRuntime } from '../../lib/runs/graph'
-import { cascaded } from '../../test/cascade'
+import { appRules, cascaded, px, topLevel } from '../../test/cascade'
 const setup = (overrides: Partial<DeliveryLaneProps> = {}) => {
   const actions = {
     renameAgent: vi.fn(),
@@ -97,7 +97,9 @@ describe('Delivery Lane', () => {
   it('lays the team out in one row from your request to the answer, without repeating either', () => {
     const { props } = setup()
     const row = screen.getByRole('list', { name: 'Team stages' })
-    expect(within(row).getAllByRole('listitem').map((item) => item.querySelector('.flow-micro')?.textContent)).toEqual(['Your request', expect.stringMatching(/Done|Finished|Ready|Not started/), 'The team’s answer'])
+    const items = within(row).getAllByRole('listitem')
+    expect([items[0], items[2]].map((item) => item.querySelector('.flow-micro')?.textContent)).toEqual(['Your request', 'The team’s answer'])
+    expect(items[1].querySelector('.delivery-status')).toHaveTextContent(/Done|Finished|Ready|Not started/)
     expect(row).toHaveTextContent('From you')
     expect(row).toHaveTextContent('In the chat')
     expect(row).not.toHaveTextContent(props.prompt)
@@ -105,6 +107,35 @@ describe('Delivery Lane', () => {
     cleanup()
     setup({ output: { ...props.output, text: '' } })
     expect(screen.getByRole('list', { name: 'Team stages' })).toHaveTextContent('Appears when the team is done.')
+  })
+
+  // A card had its model, its status and its name squeezed in beside the figure: a long model
+  // ("GPT-6.1 Sol · ChatGPT plan") wrapped, and the status pill ran into the name under it.
+  it('gives a card room: its status beside the figure, its model and name the full width under them', () => {
+    setup()
+    const card = within(screen.getByRole('list', { name: 'Team stages' })).getAllByRole('listitem')[1].querySelector('.flow-agent') as HTMLElement
+    const who = card.querySelector('.flow-who') as HTMLElement
+    const [top, model, name] = [...who.children] as HTMLElement[]
+    expect(top.querySelector('.stage-figure')).not.toBeNull()
+    expect(top.querySelector('.delivery-status')).toHaveTextContent(/Done|Finished|Ready|Not started/)
+    expect(model).toHaveClass('flow-micro')
+    expect(model.querySelector('.delivery-status')).toBeNull()
+    expect(name.tagName).toBe('STRONG')
+    // One under another, not beside the figure; a status too long for the top row takes the next one
+    // whole, starting under the figure. (Spelled in parts: Tailwind reads test files for class names.)
+    expect(cascaded(who, 'display')).toBe('grid')
+    expect(cascaded(top, ['flex', 'wrap'].join('-'))).toBe('wrap')
+    expect(cascaded(top, 'justify-content')).toBe('space-between')
+  })
+
+  // The line into the answer ran 44px under the others: the end's top padding pushed its line down too.
+  it('keeps every line the work moves along at one height, the answer’s too', () => {
+    setup()
+    const links = [...screen.getByRole('list', { name: 'Team stages' }).querySelectorAll('.flow-link')]
+    expect(links.length).toBeGreaterThan(1)
+    for (const link of links) expect(cascaded(link.closest('.flow-node') as HTMLElement, ['padding', 'padding-top'])).toBeNull()
+    // The lines meet the figures' middle: a figure and the review step's taller mark stand in one slot.
+    for (const figure of document.querySelectorAll('.flow-top .stage-figure')) expect(cascaded(figure, 'height')).toBe('var(--flow-figure)')
   })
 
   it('counts one stage and one page as one, not "1 stages" and "1 pages"', () => {
@@ -373,6 +404,22 @@ describe('Delivery Lane', () => {
       expect(within(stage('writer').closest('.flow-column')?.querySelector('.flow-above') as HTMLElement).getByText('Read example.com/brief')).toBeInTheDocument()
       expect((stage('researcher').querySelector('.stage-figure') as HTMLElement).dataset).toMatchObject({ glow: 'done' })
       expect((stage('researcher').querySelector('.stage-figure') as HTMLElement).dataset.phase).toBeUndefined()
+    })
+    // Its thought floats over its card, so the bubble's tail comes up from the figure under it: two
+    // dots below the bubble, the smaller one lower, nearer the figure. It used to leave the bubble's top.
+    it('trails a thought up from the figure under it', () => {
+      const dot = (which: 'before' | 'after') => Object.fromEntries(appRules
+        .filter((rule) => rule.media.length === 0 && topLevel(rule.selectors).includes(`.stage-now.thought::${which}`))
+        .flatMap((rule) => rule.body.split(';').map((declaration) => declaration.split(':').map((part) => part.trim())))
+        .filter(([property, value]) => property && value))
+      const below = (value: string) => Number(/^calc\(100% \+ (\d+)px\)$/.exec(value)?.[1] ?? NaN)
+      const [near, far] = [dot('before'), dot('after')]
+      expect(below(near.top)).toBeGreaterThan(0)
+      expect(below(far.top)).toBeGreaterThan(below(near.top) + px(near.height))
+      expect(px(far.width)).toBeLessThan(px(near.width))
+      // Inside the bubble's left edge, over the figure, not out to its side.
+      expect(px(near.left)).toBeGreaterThan(0)
+      expect(px(far.left)).toBeGreaterThan(0)
     })
     it('carries the work along the handoff arrow just as it passes on', () => {
       setup({ mode: 'live', phase: 'running', agents: agents('running'), ...handedOn() })
