@@ -154,6 +154,10 @@ pub struct NoteAnswers {
     pub waiting: Vec<String>,
     /// What each said, in the order they finished. An agent with nothing to add says nothing.
     pub said: Vec<NoteAnswer>,
+    /// Agents that could not answer, their turn having failed, and why. Not one with nothing to
+    /// add: that one is in neither list. Messages kept before there was this list have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<NoteFailure>,
 }
 
 /// What one agent said back.
@@ -162,6 +166,17 @@ pub struct NoteAnswers {
 pub struct NoteAnswer {
     pub from: String,
     pub text: String,
+    pub at: String,
+}
+
+/// An agent that could not answer ([`crate::intent::Reply::Failed`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteFailure {
+    pub from: String,
+    /// Why, in the words a run that stopped shows: the app puts them plainly, with the way to fix
+    /// it when there is one (out of credits, a refused key).
+    pub error: String,
     pub at: String,
 }
 
@@ -180,8 +195,8 @@ pub struct NoteAnswering {
     pub team_name: Option<String>,
     /// Each answering agent's name by id.
     pub agent_names: BTreeMap<String, String>,
-    /// Who is still writing, and the opening of what each said
-    /// ([`crate::runs::reply_preview`]).
+    /// Who is still writing, the opening of what each said ([`crate::runs::reply_preview`]), and
+    /// who could not answer and why.
     pub answers: NoteAnswers,
     pub created_at: String,
     /// When the last of them finished; `None` while any is still writing.
@@ -208,6 +223,7 @@ impl NotesAnswering {
             .waiting
             .iter()
             .chain(answers.said.iter().map(|said| &said.from))
+            .chain(answers.failed.iter().map(|failed| &failed.from))
             .filter_map(|id| Some((id.clone(), names.get(id)?.clone())))
             .collect();
         let cutoff = Utc::now() - ANSWERED_KEPT;
@@ -2519,7 +2535,7 @@ async fn answer_instead(
     }
     message.answers = Some(NoteAnswers {
         waiting: who,
-        said: Vec::new(),
+        ..NoteAnswers::default()
     });
     if let Err(error) = store.insert(message).await {
         eprintln!("loomwatchd: could not keep a message the agents were to answer: {error}");
@@ -2534,6 +2550,9 @@ async fn answer_instead(
         message.clone(),
     ));
 }
+
+/// Why an agent did not answer, when `LoomWatch` itself failed part way through its answer.
+const ANSWER_BROKE: &str = "Something went wrong in LoomWatch. Try again.";
 
 /// What the agents answering a message need, owned, for the background.
 struct Answering {
@@ -2599,7 +2618,7 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
             });
         replies.spawn(async move {
             let Some(speaker) = answering.team.agents.iter().find(|agent| agent.id == id) else {
-                return (id, None);
+                return (id, crate::intent::Reply::Passed);
             };
             let addressed = crate::intent::Addressed {
                 team: &answering.team,
@@ -2633,23 +2652,38 @@ async fn answer_together(store: ChatStore, answering: Answering, message: ChatMe
         });
     }
     while let Some(done) = replies.join_next().await {
-        let Ok((id, said)) = done else { continue };
+        let Ok((id, reply)) = done else { continue };
         answers.waiting.retain(|waiting| waiting != &id);
-        if let Some(text) = said {
-            answers.said.push(NoteAnswer {
+        match reply {
+            crate::intent::Reply::Said(text) => answers.said.push(NoteAnswer {
                 from: id,
                 text,
                 at: now(),
-            });
+            }),
+            // The person is told it could not answer, and why: silence would read as nothing to
+            // add.
+            crate::intent::Reply::Failed(error) => answers.failed.push(NoteFailure {
+                from: id,
+                error,
+                at: now(),
+            }),
+            crate::intent::Reply::Passed => {}
         }
         answering.notes.keep(&message, &answering.team, &answers);
         if let Err(error) = store.set_answers(&message.id, &answers).await {
             eprintln!("loomwatchd: could not keep an agent's answer in the chat: {error}");
         }
     }
-    // An answer whose task panicked never reported its agent: nobody is still writing.
+    // An answer whose task panicked never reported its agent: nobody is still writing, and those
+    // agents did not answer.
     if !answers.waiting.is_empty() {
-        answers.waiting.clear();
+        for id in std::mem::take(&mut answers.waiting) {
+            answers.failed.push(NoteFailure {
+                from: id,
+                error: ANSWER_BROKE.to_owned(),
+                at: now(),
+            });
+        }
         answering.notes.keep(&message, &answering.team, &answers);
         if let Err(error) = store.set_answers(&message.id, &answers).await {
             eprintln!("loomwatchd: could not keep an agent's answer in the chat: {error}");
@@ -3531,8 +3565,8 @@ mod tests {
             |at: &str, text: &str, to: Option<&str>, said: Vec<NoteAnswer>| ChatMessage {
                 route: Route::TeamNote,
                 answers: Some(NoteAnswers {
-                    waiting: Vec::new(),
                     said,
+                    ..NoteAnswers::default()
                 }),
                 ..note(at, text, to)
             };
@@ -3635,7 +3669,7 @@ mod tests {
         let mut message = note("2026-10-06T02:00:00.000Z", "hi @team", None);
         message.answers = Some(NoteAnswers {
             waiting: vec!["researcher".to_owned(), "writer".to_owned()],
-            said: Vec::new(),
+            ..NoteAnswers::default()
         });
         store.insert(&message).await.expect("insert");
         let folder = std::env::temp_dir().join(format!("loomwatch-together-{}", Uuid::new_v4()));
@@ -3680,6 +3714,166 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// **An agent whose turn fails says it could not answer, and why; one with nothing to add
+    /// stays silent.** Both said nothing before, so a note whose only agent ran out of credits
+    /// looked answered with nothing to add. The failure is kept on the note, for the chat to say,
+    /// and listed at `GET /api/chat/answering`, for the island at the notch. Notes kept before
+    /// there were failures still read.
+    #[tokio::test]
+    async fn an_agent_that_could_not_answer_is_kept_with_why_and_one_that_passed_is_not() {
+        use crate::agent::{AgentError, Completion, Demo};
+        let pool = crate::db::Db::temp().await;
+        let store = ChatStore::new(pool.clone());
+        let mut team = team();
+        team.agents[0].model = crate::engine::demo_model(Demo::failing_first(
+            1,
+            || AgentError::OutOfCredits(crate::ai::Source::OpenRouter),
+            |_| None,
+        ));
+        team.agents[1].model =
+            crate::engine::demo_model(Demo::scripted(vec![Completion::text("PASS")]));
+        let mut message = note("2026-10-06T02:00:00.000Z", "hi @team", None);
+        message.answers = Some(NoteAnswers {
+            waiting: vec!["researcher".to_owned(), "writer".to_owned()],
+            ..NoteAnswers::default()
+        });
+        store.insert(&message).await.expect("insert");
+        let folder = std::env::temp_dir().join(format!("loomwatch-failed-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        let state = ChatState {
+            archive: Some(EventArchive::new(pool.clone())),
+            teams_root: folder.clone(),
+            registry: RunRegistry::durable(RunStore::new(pool)),
+            answering: NotesAnswering::default(),
+        };
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            answer_together(
+                store.clone(),
+                Answering::new(
+                    &state,
+                    &team,
+                    true,
+                    "hi @team",
+                    crate::intent::Context::default(),
+                    None,
+                ),
+                message.clone(),
+            ),
+        )
+        .await
+        .expect("the answers end");
+
+        let out_of_credits = AgentError::OutOfCredits(crate::ai::Source::OpenRouter).to_string();
+        let kept = store.get(&message.id).await.expect("read").expect("kept");
+        let answers = kept.answers.expect("answers");
+        assert!(answers.waiting.is_empty(), "{answers:?}");
+        assert!(answers.said.is_empty(), "nobody answered: {answers:?}");
+        assert_eq!(
+            answers
+                .failed
+                .iter()
+                .map(|failed| (failed.from.as_str(), failed.error.as_str()))
+                .collect::<Vec<_>>(),
+            [("researcher", out_of_credits.as_str())],
+            "the writer had nothing to add, and is in neither list"
+        );
+
+        let listed = answering(
+            State(state.clone()),
+            Query(AnsweringQuery {
+                finished_within: Some(3600),
+            }),
+        )
+        .await
+        .0;
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert!(listed[0].finished_at.is_some(), "{listed:?}");
+        assert_eq!(listed[0].answers.failed[0].from, "researcher");
+        assert_eq!(listed[0].answers.failed[0].error, out_of_credits);
+        assert_eq!(
+            listed[0].agent_names.get("researcher").map(String::as_str),
+            Some("Researcher"),
+            "the island names who did not answer"
+        );
+        let shown = serde_json::to_value(&listed[0]).expect("json");
+        assert_eq!(
+            shown["answers"]["failed"][0]["error"],
+            json!(out_of_credits)
+        );
+
+        // A note kept before there were failures reads as one with none.
+        let old: NoteAnswers = serde_json::from_value(json!({
+            "waiting": [],
+            "said": [{"from": "writer", "text": "Hi!", "at": "2026-10-06T02:00:01.000Z"}],
+        }))
+        .expect("an old note's answers");
+        assert!(old.failed.is_empty());
+        assert_eq!(old.said[0].text, "Hi!");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// An answer that broke part way, in `LoomWatch` rather than at the model, never reported its
+    /// agent. That agent did not answer either: it is not left writing, and not taken for one with
+    /// nothing to add.
+    #[tokio::test]
+    async fn an_answer_that_broke_part_way_is_one_that_could_not_answer() {
+        use crate::agent::{Completion, Demo};
+        let pool = crate::db::Db::temp().await;
+        let store = ChatStore::new(pool.clone());
+        let mut team = team();
+        team.agents[0].model =
+            crate::engine::demo_model(Demo::scripted(vec![Completion::text("Hi!")]));
+        team.agents[1].model = crate::engine::demo_model(Demo::responder(|_| {
+            panic!("a bug part way through the writer's answer")
+        }));
+        let mut message = note("2026-10-06T02:00:00.000Z", "hi @team", None);
+        message.answers = Some(NoteAnswers {
+            waiting: vec!["researcher".to_owned(), "writer".to_owned()],
+            ..NoteAnswers::default()
+        });
+        store.insert(&message).await.expect("insert");
+        let folder = std::env::temp_dir().join(format!("loomwatch-broke-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        let state = ChatState {
+            archive: Some(EventArchive::new(pool.clone())),
+            teams_root: folder.clone(),
+            registry: RunRegistry::durable(RunStore::new(pool)),
+            answering: NotesAnswering::default(),
+        };
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            answer_together(
+                store.clone(),
+                Answering::new(
+                    &state,
+                    &team,
+                    true,
+                    "hi @team",
+                    crate::intent::Context::default(),
+                    None,
+                ),
+                message.clone(),
+            ),
+        )
+        .await
+        .expect("the answers end");
+        let answers = store
+            .get(&message.id)
+            .await
+            .expect("read")
+            .expect("kept")
+            .answers
+            .expect("answers");
+        assert!(answers.waiting.is_empty(), "{answers:?}");
+        assert_eq!(answers.said.len(), 1, "{answers:?}");
+        assert_eq!(answers.said[0].from, "researcher");
+        assert_eq!(answers.failed.len(), 1, "{answers:?}");
+        assert_eq!(answers.failed[0].from, "writer");
+        assert_eq!(answers.failed[0].error, ANSWER_BROKE);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
     /// **An agent answering in the chat is seen at work, as a run's agents are (ADR 0083).**
     /// "Explain" on a part of a file is mostly answered in the chat, and nothing runs, so the
     /// island at the notch never saw it. `GET /api/chat/answering` lists the message while its
@@ -3700,7 +3894,7 @@ mod tests {
         );
         message.answers = Some(NoteAnswers {
             waiting: vec!["researcher".to_owned()],
-            said: Vec::new(),
+            ..NoteAnswers::default()
         });
         store.insert(&message).await.expect("insert");
         let folder = std::env::temp_dir().join(format!("loomwatch-answering-{}", Uuid::new_v4()));
@@ -5256,12 +5450,12 @@ mod tests {
             .set_answers(
                 &id,
                 &NoteAnswers {
-                    waiting: Vec::new(),
                     said: vec![NoteAnswer {
                         from: "writer".to_owned(),
                         text: "Hi Colin, nice to meet you!".to_owned(),
                         at: now(),
                     }],
+                    ..NoteAnswers::default()
                 },
             )
             .await
@@ -5663,12 +5857,12 @@ mod tests {
             now: false,
             reply_to: None,
             answers: Some(NoteAnswers {
-                waiting: Vec::new(),
                 said: vec![NoteAnswer {
                     from: "writer".to_owned(),
                     text: "A very long list of everything that happened.".to_owned(),
                     at: now(),
                 }],
+                ..NoteAnswers::default()
             }),
             files: Vec::new(),
         };

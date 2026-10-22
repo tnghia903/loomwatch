@@ -163,11 +163,18 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
 }
 
 /** What a result says: "Trip planner is done" or "Trip planner stopped"; "Writer answered in Trip
-    planner" for an answer in the chat, where the team did no work. */
+    planner" for an answer in the chat, where the team did no work, or "Writer didn't answer" ("Trip
+    planner didn't answer" when three or more didn't). */
 function resultWords(team: TeamNow): string {
+  if (team.chat) return team.moment === 'fail' ? `${team.agentName ?? team.teamName} didn’t answer` : `${team.agentName ?? 'The team'} answered in ${team.teamName}`
   if (team.moment === 'fail') return `${team.teamName} stopped`
-  if (team.chat) return `${team.agentName ?? 'The team'} answered in ${team.teamName}`
   return `${team.teamName} is done`
+}
+
+/** Where a result's button goes: why a run stopped, an answer, or the chat an agent didn't answer in. */
+function resultButton(team: TeamNow): string {
+  if (team.moment !== 'fail') return 'See answer'
+  return team.chat ? 'Open chat' : 'See why'
 }
 
 /** A finished or stopped run's result, sliding out below the agent that did the work. */
@@ -188,7 +195,7 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
         <p>{team.result}</p>
       </div>
       <div className="island-acts">
-        <button type="button" className="island-button" onClick={() => island.open(team)}>{team.moment === 'fail' ? 'See why' : 'See answer'}</button>
+        <button type="button" className="island-button" onClick={() => island.open(team)}>{resultButton(team)}</button>
       </div>
     </>
   )

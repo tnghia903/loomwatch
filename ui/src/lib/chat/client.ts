@@ -64,6 +64,17 @@ export interface NoteAnswers {
   waiting: string[]
   /** What each said, in the order they finished. An agent with nothing to add says nothing. */
   said: NoteAnswer[]
+  /** Agents that could not answer, their turn having failed, and why. Not one with nothing to
+      add: that one is in neither list. */
+  failed?: NoteFailure[]
+}
+
+/** An agent that could not answer (`chat::NoteFailure`). */
+export interface NoteFailure {
+  from: string
+  /** Why, in the words a run that stopped shows: `plainRunError` and `problemAction` read them. */
+  error: string
+  at: string
 }
 
 /** What one agent said back (`chat::NoteAnswer`). */
@@ -83,7 +94,7 @@ export interface NoteAnswering {
   teamName?: string
   /** Each answering agent's name by id. */
   agentNames: Record<string, string>
-  /** Who is still writing, and the opening of what each said. */
+  /** Who is still writing, the opening of what each said, and who could not answer and why. */
   answers: NoteAnswers
   createdAt: string
   /** When the last of them finished; `null` while any is still writing. */

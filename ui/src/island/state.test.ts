@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunRecord } from '../lib/runs/client'
-import { answering, at, iso, permission, run, said } from './fixtures'
+import { answering, at, failed, iso, OUT_OF_CREDITS, permission, run, said } from './fixtures'
 import { initialIsland, islandReducer, viewOf, type IslandAction, type IslandState } from './state'
 import { ISLAND_WAITS } from './waits'
 
@@ -123,6 +123,18 @@ describe('the island, moment by moment', () => {
     expect(s.teams?.map((team) => team.runId)).toEqual(['m1'])
     s = islandReducer(s, { type: 'runs', records: [run('a', { working: ['researcher'] })], notes: null, now: at(1) + 2000 })
     expect(s.teams?.map((team) => team.runId)).toEqual(['a', 'm1'])
+  })
+
+  it('an agent that could not answer in the chat slides out as a stop, and leaves once opened', () => {
+    let s = play([[at(0), placed], [at(0), runs()], [at(1), { type: 'runs', records: [], notes: [answering('m1')] }]])
+    expect(viewOf(s)).toBe('work')
+    s = islandReducer(s, { type: 'tick', now: at(1) + ISLAND_WAITS.start })
+    const stopped = answering('m1', { answers: { waiting: [], said: [], failed: [failed(OUT_OF_CREDITS)] }, finishedAt: iso(2) })
+    s = islandReducer(s, { type: 'runs', records: [], notes: [stopped], now: at(2) })
+    expect(viewOf(s)).toBe('fail')
+    expect(s.shown?.team).toMatchObject({ runId: 'm1', moment: 'fail', chat: true, result: OUT_OF_CREDITS })
+    s = islandReducer(s, { type: 'opened', runId: 'm1', now: at(3) })
+    expect(s.teams).toEqual([])
   })
 
   it('an answer in the chat that was opened leaves; one still being written stays', () => {

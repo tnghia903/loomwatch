@@ -2,6 +2,7 @@
 // has news, and per message its agents answer in the chat themselves, what it is doing, which agent
 // to draw, and what to say. Pure: from the run records and those messages.
 import type { NoteAnswering } from '../lib/chat/client'
+import { listNames } from '../lib/chat/format'
 import { historyRunUrl } from '../lib/runs/history'
 import type { RunRecord } from '../lib/runs/client'
 import { plainRunError } from '../lib/runs/errors'
@@ -22,6 +23,8 @@ export interface TeamNow {
   moment: Moment
   /** The agent to draw: the one at work, the one asking, or the last one that worked. */
   agent: string | null
+  /** Its name. For agents that didn't answer in the chat, who didn't: one or two names, or `null`
+      for three or more. */
   agentName: string | null
   /** The run's agents, in order, for the list's row. */
   agents: readonly string[]
@@ -95,29 +98,39 @@ function isNews(id: string, finishedAt: string | null | undefined, since: number
 
 /**
  * A message its agents answer in the chat: at work while any of them writes, then done, with the
- * first answer's opening, while that is news. When none of them had anything to add, there is
- * nothing to show.
+ * first answer's opening, while that is news. When nobody answered because their turns failed, it
+ * stopped: who didn't answer, and why. When none of them had anything to add, there is nothing to
+ * show.
  */
 function noteNow(note: NoteAnswering, since: number, seen: ReadonlySet<string>): TeamNow | null {
   const { waiting, said } = note.answers
+  const failed = note.answers.failed ?? []
   const live = waiting.length > 0
-  if (!live && !(said.length && isNews(note.messageId, note.finishedAt, since, seen))) return null
-  const agent = live ? waiting[0] : said[0].from
+  if (!live && !((said.length || failed.length) && isNews(note.messageId, note.finishedAt, since, seen))) return null
+  // An answer is the news when there is one; the chat says who else didn't answer.
+  const moment: Moment = live ? 'work' : said.length ? 'done' : 'fail'
+  const agent = live ? waiting[0] : said[0]?.from ?? failed[0].from
   return {
     runId: note.messageId,
     teamPath: note.teamPath,
     teamName: note.teamName || teamFromPath(note.teamPath),
-    moment: live ? 'work' : 'done',
+    moment,
     agent,
-    agentName: note.agentNames[agent] || agent,
+    agentName: moment === 'fail' ? whoDidNotAnswer(note, failed.map((failure) => failure.from)) : note.agentNames[agent] || agent,
     agents: Object.keys(note.agentNames),
     startedAt: note.createdAt,
     asks: [],
     quick: [],
-    result: live ? null : firstLine(said[0].text) || 'The answer is ready.',
+    result: moment === 'done' ? firstLine(said[0].text) || 'The answer is ready.' : moment === 'fail' ? plainRunError(failed[0].error).split('\n')[0] || 'Something went wrong before it answered.' : null,
     link: teamHref(note.teamPath, 'chat'),
     chat: true,
   }
+}
+
+/** Who didn't answer, as the chat's card names them: one or two by name; for three or more, none,
+    and the team is named. */
+function whoDidNotAnswer(note: NoteAnswering, ids: readonly string[]): string | null {
+  return ids.length > 2 ? null : listNames(ids.map((id) => note.agentNames[id] || id))
 }
 
 function agentOf(record: RunRecord, moment: Moment, ask: Ticket | undefined, lastAgent: ReadonlyMap<string, string>): string | null {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { answering, at, iso, permission, question, run, said } from './fixtures'
+import { answering, at, failed, iso, OUT_OF_CREDITS, permission, question, run, said } from './fixtures'
 import { firstLine, momentsBetween, teamsNow, tucked, workedFor } from './teams'
 
 const none = new Set<string>()
@@ -76,6 +76,38 @@ describe('agents answering a message in the chat', () => {
     expect(teamsNow([], 0, new Set(['m1']), nobody, [answered])).toEqual([])
     // Nobody had anything to add: nothing to show.
     expect(teamsNow([], 0, none, nobody, [answering('m2', { answers: { waiting: [], said: [] }, finishedAt: iso(1) })])).toEqual([])
+  })
+
+  it('says an agent that could not answer stopped, and why, opening the chat; one with nothing to add says nothing', () => {
+    const stopped = answering('m1', { answers: { waiting: [], said: [], failed: [failed(OUT_OF_CREDITS)] }, finishedAt: iso(1) })
+    const [fail] = teamsNow([], at(0), none, nobody, [stopped])
+    expect(fail).toMatchObject({ runId: 'm1', moment: 'fail', agent: 'writer', agentName: 'Writer', result: OUT_OF_CREDITS, chat: true, link: '/?path=trip.yaml&view=chat' })
+    // A stop before the island watched, or one looked at, is not news either.
+    expect(teamsNow([], at(2), none, nobody, [stopped])).toEqual([])
+    expect(teamsNow([], 0, new Set(['m1']), nobody, [stopped])).toEqual([])
+    // It stands with the runs that stopped: before answers and work.
+    const teams = teamsNow([run('done', { status: 'succeeded', finishedAt: iso(1), reply: 'Day 1' })], at(0), none, nobody, [stopped, answering('m2')])
+    expect(teams.map((team) => [team.runId, team.moment])).toEqual([['m1', 'fail'], ['done', 'done'], ['m2', 'work']])
+    // An app's error it can't put plainly is said as it is, on its first line.
+    const [own] = teamsNow([], at(0), none, nobody, [answering('m3', { answers: { waiting: [], said: [], failed: [failed('OpenRouter reported an error: busy\nretry later')] }, finishedAt: iso(1) })])
+    expect(own.result).toBe('OpenRouter reported an error: busy')
+    // Two who didn't answer are named, as the chat names them; for three or more, the team is.
+    const both = { agentNames: { researcher: 'Researcher', writer: 'Writer' } }
+    const [two] = teamsNow([], at(0), none, nobody, [answering('m4', { ...both, answers: { waiting: [], said: [], failed: [failed(OUT_OF_CREDITS, 'researcher'), failed(OUT_OF_CREDITS)] }, finishedAt: iso(1) })])
+    expect(two).toMatchObject({ moment: 'fail', agent: 'researcher', agentName: 'Researcher and Writer' })
+    const all = { agentNames: { ...both.agentNames, checker: 'Checker' } }
+    const [three] = teamsNow([], at(0), none, nobody, [answering('m6', { ...all, answers: { waiting: [], said: [], failed: [failed(OUT_OF_CREDITS, 'researcher'), failed(OUT_OF_CREDITS), failed(OUT_OF_CREDITS, 'checker')] }, finishedAt: iso(1) })])
+    expect(three).toMatchObject({ moment: 'fail', agent: 'researcher', agentName: null })
+    // Someone answered: that is the news, and the chat says who else didn't.
+    const [answered] = teamsNow([], at(0), none, nobody, [answering('m5', { ...both, answers: { waiting: [], said: [said('Hi!', 'researcher')], failed: [failed(OUT_OF_CREDITS)] }, finishedAt: iso(1) })])
+    expect(answered).toMatchObject({ moment: 'done', agent: 'researcher', result: 'Hi!' })
+  })
+
+  it('pops out a stop when an agent answering in the chat could not answer', () => {
+    const writing = teamsNow([], 0, none, nobody, [answering('m1')])
+    const stopped = teamsNow([], 0, none, nobody, [answering('m1', { answers: { waiting: [], said: [], failed: [failed(OUT_OF_CREDITS)] }, finishedAt: iso(1) })])
+    expect(momentsBetween(writing, stopped)).toEqual([{ kind: 'fail', runId: 'm1', key: 'm1' }])
+    expect(tucked(stopped).right).toBe('slip')
   })
 
   it('stands among the runs by what it is doing', () => {

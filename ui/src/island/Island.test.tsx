@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NoteAnswering } from '../lib/chat/client'
 import type { RunRecord } from '../lib/runs/client'
-import { answering, at, iso, permission, run, said } from './fixtures'
+import { answering, at, failed, iso, OUT_OF_CREDITS, permission, run, said } from './fixtures'
 import { Island } from './Island'
 
 let runs: RunRecord[] = []
@@ -192,4 +192,50 @@ describe('the island page', () => {
     fireEvent.click(slip.getByRole('button', { name: 'See answer' }))
     expect(toApp).toContainEqual({ kind: 'open', link: '/?path=trip.yaml&view=chat' })
   }, 15_000)
+
+  it('slides out a stop when the agent answering in the chat could not answer, saying why, which opens the chat', async () => {
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    const island = container.querySelector('.island')!
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    notes = [answering('m1')]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
+    notes = [answering('m1', { answers: { waiting: [], said: [], failed: [failed(OUT_OF_CREDITS)] }, finishedAt: new Date().toISOString() })]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('fail'), { timeout: 5000 })
+    const slip = within(container.querySelector<HTMLElement>('.island-slip')!)
+    expect(slip.getByText('Writer didn’t answer')).toBeTruthy()
+    expect(slip.getByText(OUT_OF_CREDITS)).toBeTruthy()
+    expect(container.querySelector('.island-shape')?.getAttribute('aria-label')).toBe('LoomWatch: Writer didn’t answer')
+    expect(slip.queryByRole('button', { name: 'See why' })).toBeNull()
+    fireEvent.click(slip.getByRole('button', { name: 'Open chat' }))
+    expect(toApp).toContainEqual({ kind: 'open', link: '/?path=trip.yaml&view=chat' })
+  }, 15_000)
+
+  it('lists agents that could not answer by name, and the team when three or more didn’t', async () => {
+    const finishedAt = new Date(at(0) + 60_000).toISOString()
+    notes = [
+      answering('m1', {
+        agentNames: { researcher: 'Researcher', writer: 'Writer' },
+        answers: { waiting: [], said: [], failed: [failed(OUT_OF_CREDITS, 'researcher', 1), failed(OUT_OF_CREDITS, 'writer', 1)] },
+        finishedAt,
+      }),
+      answering('m2', {
+        teamPath: 'digest.yaml',
+        teamName: 'Weekly digest',
+        agentNames: { reader: 'Reader', checker: 'Checker', editor: 'Editor' },
+        answers: { waiting: [], said: [], failed: ['reader', 'checker', 'editor'].map((id) => failed(OUT_OF_CREDITS, id, 1)) },
+        createdAt: iso(-1),
+        finishedAt,
+      }),
+    ]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    await waitFor(() => expect(container.querySelector('.island')?.getAttribute('data-view')).not.toBe('rest'))
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    const [team, two] = [...container.querySelectorAll<HTMLElement>('.island-row')].map((row) => within(row))
+    expect(team.getByText('Weekly digest didn’t answer')).toBeTruthy()
+    expect(two.getByText('Researcher and Writer didn’t answer')).toBeTruthy()
+    expect(two.getByRole('button', { name: 'Open chat' })).toBeTruthy()
+  })
 })

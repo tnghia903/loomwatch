@@ -324,6 +324,97 @@ describe('the team’s chat', () => {
     expect(screen.queryByRole('status', { name: 'Writer is writing' })).not.toBeInTheDocument()
   })
 
+  it('an agent that could not answer says so and why, with the way to fix it; one with nothing to add stays silent', async () => {
+    const outOfCredits = 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'
+    page = [
+      {
+        kind: 'note',
+        message: message({
+          id: 'hi-5', text: 'hi @team', route: 'team_note', runId: null,
+          answers: {
+            waiting: [],
+            said: [],
+            failed: [
+              { from: 'researcher', error: outOfCredits, at: '2026-10-06T02:00:03.000Z' },
+              { from: 'writer', error: outOfCredits, at: '2026-10-06T02:00:03.000Z' },
+            ],
+          },
+        }),
+      },
+      {
+        kind: 'note',
+        message: message({
+          id: 'hi-6', text: '@Writer explain this part', route: 'team_note', runId: null, agentId: 'writer', createdAt: '2026-10-06T02:01:00.000Z',
+          answers: { waiting: [], said: [], failed: [{ from: 'writer', error: 'OpenRouter reported an error: upstream overloaded\nretry later', at: '2026-10-06T02:01:03.000Z' }] },
+        }),
+      },
+      {
+        kind: 'note',
+        message: message({ id: 'hi-7', text: '@Researcher thanks', route: 'team_note', runId: null, agentId: 'researcher', createdAt: '2026-10-06T02:02:00.000Z', answers: { waiting: [], said: [] } }),
+      },
+    ]
+    renderChat()
+    // Stopped by the same thing: one card, one way to fix it.
+    const both = (await screen.findByText('Researcher and Writer didn’t answer.')).closest('[role="status"]') as HTMLElement
+    expect(both).toHaveTextContent(outOfCredits)
+    // History is drawn still: the card rises in only when it arrives while you watch.
+    expect(both).not.toHaveClass('tc-appear')
+    expect(within(both).getByRole('link', { name: 'Add OpenRouter credits' })).toHaveAttribute('href', 'https://openrouter.ai/settings/credits')
+    expect(screen.getAllByRole('link', { name: 'Add OpenRouter credits' })).toHaveLength(1)
+    // A cause with no fix in LoomWatch is said as it is, on its first line, with no button.
+    const writer = screen.getByText('Writer didn’t answer.').closest('[role="status"]') as HTMLElement
+    expect(writer).toHaveTextContent('OpenRouter reported an error: upstream overloaded')
+    expect(writer).not.toHaveTextContent('retry later')
+    expect(within(writer).queryByRole('link')).not.toBeInTheDocument()
+    expect(writer.querySelector('.tc-acts')).toBeNull()
+    // The words in ink, after the failed glyph: the red edge carries the colour, which on the dark
+    // card reads at APCA Lc 44.
+    const words = within(both).getByText('Researcher and Writer didn’t answer.')
+    expect(cascaded(words, 'color')).toBe('var(--color-ink)')
+    expect(words.querySelector('svg')).not.toBeNull()
+    // In the line with the words: the app's reset makes every svg a block.
+    expect(cascaded(words.querySelector('svg')!, 'display')).toBe('inline-block')
+    expect(goldFilled()).toEqual(['Add OpenRouter credits'])
+    // Nothing to add is silence, as before; every note can still start its agents.
+    expect(screen.getAllByText(/didn’t answer/)).toHaveLength(2)
+    expect(screen.getAllByText('No work started')).toHaveLength(3)
+  })
+
+  // One gold fill per screen (DESIGN_LANGUAGE §8): the newest stop LoomWatch knows how to fix fills
+  // its way out, an older one's is a ring, and while a review waits its Approve is the fill.
+  it('fills only the newest stop’s way out, and none while a review waits on you', async () => {
+    const outOfCredits = 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'
+    const stopped: ChatItem = { kind: 'work', run: run({ runId: 'run-old', sessionId: 'run-old', status: 'failed', reply: null, error: `pipeline node writer failed: ${outOfCredits}`, errorCode: 'app_error', createdAt: '2026-10-06T02:00:00.000Z' }), request: message({ id: 'm-old', runId: 'run-old', text: '@team Moon facts' }), notes: [] }
+    const note: ChatItem = { kind: 'note', message: message({ id: 'hi-9', text: 'hi @team', route: 'team_note', runId: null, createdAt: '2026-10-06T02:05:00.000Z', answers: { waiting: [], said: [], failed: [{ from: 'writer', error: outOfCredits, at: '2026-10-06T02:05:03.000Z' }] } }) }
+    page = [stopped, note]
+    renderChat()
+    await waitFor(() => expect(screen.getAllByRole('link', { name: 'Add OpenRouter credits' })).toHaveLength(2))
+    const [older, newer] = screen.getAllByRole('link', { name: 'Add OpenRouter credits' })
+    expect(older.closest('[data-run]')).toHaveAttribute('data-run', 'run-old')
+    expect(isGoldFill(newer)).toBe(true)
+    expect(isGoldFill(older)).toBe(false)
+    expect(cascaded(older, 'border-color')).toBe('var(--color-accent)')
+    expect(goldFilled()).toEqual(['Add OpenRouter credits'])
+    // The stopped work's words wear the failed glyph too.
+    expect(older.closest('[role="status"]')?.querySelector('b svg')).not.toBeNull()
+
+    // The stopped work alone: its way out is the fill.
+    cleanup()
+    page = [stopped]
+    renderChat()
+    expect(await screen.findByRole('link', { name: 'Add OpenRouter credits' })).toBeInTheDocument()
+    expect(goldFilled()).toEqual(['Add OpenRouter credits'])
+
+    // A review waits on you: its Approve is the fill, and every way out a ring.
+    cleanup()
+    const waitingOn = { node: 'review', name: 'Your review', kind: 'review_stop' as const, since: '2026-10-06T02:07:00.000Z', question: 'Check it', context: 'Three stories', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true }
+    page = [stopped, note, { kind: 'work', run: run({ runId: 'run-new', sessionId: 'run-new', prompt: 'Mars facts', status: 'running', reply: null, finishedAt: null, createdAt: '2026-10-06T02:06:00.000Z', waitingOn }), request: message({ id: 'm-new', runId: 'run-new', text: '@team Mars facts', createdAt: '2026-10-06T02:06:00.000Z' }), notes: [] }]
+    renderChat()
+    expect(await screen.findByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Add OpenRouter credits' })).toHaveLength(2)
+    expect(goldFilled()).toEqual(['Approve'])
+  })
+
   it('a hello one agent answered offers to start that agent', async () => {
     page = [{
       kind: 'note',

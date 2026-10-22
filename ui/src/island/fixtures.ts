@@ -68,3 +68,11 @@ export function answering(id: string, changes: Partial<NoteAnswering> = {}): Not
 export function said(text: string, from = 'writer', minutes = 1) {
   return { from, text, at: iso(minutes) }
 }
+
+/** An agent that could not answer a message in the chat, and why. */
+export function failed(error: string, from = 'writer', minutes = 1) {
+  return { from, error, at: iso(minutes) }
+}
+
+/** What a run that stopped for used-up OpenRouter credit says (`agent::AgentError`). */
+export const OUT_OF_CREDITS = 'Your OpenRouter account is out of credits. Add credits at openrouter.ai, then try again.'
