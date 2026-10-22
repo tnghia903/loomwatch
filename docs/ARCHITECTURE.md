@@ -156,7 +156,8 @@ Completions), `agent/anthropic.rs` (the Messages API: thinking blocks replayed b
 the `thinking-binding-controls` beta as a safety net, and summaries sent with the same tools and
 `tool_choice: none`) or `agent/chatgpt.rs` (the Responses API as plan usage takes it: `store:
 false`, the system prompt in `instructions`, tools in a `loomwatch` namespace, reasoning items
-replayed). Each call's `Usage` says who paid (`paid_by`): a ChatGPT call costs $0 and counts against
+replayed; a web search's results, which the API shows only inside the response that ran it, handed
+back after their step as the output of a `web_results` call). Each call's `Usage` says who paid (`paid_by`): a ChatGPT call costs $0 and counts against
 the plan, and a Claude call is priced from the list prices OpenRouter's catalogue shows (or
 `agent::list_price`), marked `cost_estimated`. Spend limits count dollars only. A refusal comes back
 as a `Problem` (`not_connected`, `key_refused`, `out_of_credits`, `plan_limit`,
