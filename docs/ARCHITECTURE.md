@@ -472,7 +472,10 @@ pointer only over what the page reports. One of My agents can be pinned to the n
 - the pinned agent may ask one of the person's teams to do part of a job (`my_teams`, `ask_team`
   on the Team Bus, `team_requests.rs`): the request waits at `GET /api/team-requests` until the
   person presses Start (`POST /api/team-requests/{id}`), the team runs as any run, and its answer
-  is sent back into the agent's chat, which starts the agent's next turn.
+  is sent back into the agent's chat, which starts the agent's next turn. That message is stored
+  with `handed_back` (the team, its answering agent, the request and the words before the answer),
+  so the chat shows it as the team's, under its name and that agent's figure, not as the person's.
+  Only the daemon sets it: `POST /api/chat/messages` ignores one sent from a page.
 
 `notch_panel.rs` is the one module in the workspace that calls `AppKit` directly.
 

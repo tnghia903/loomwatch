@@ -144,6 +144,32 @@ pub struct ChatMessage {
     /// Files sent with it ([`crate::chat_files`], ADR 0082).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<ChatFile>,
+    /// A team's work handed back to the agent that asked for it: the chat shows it as that team's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handed_back: Option<HandedBack>,
+}
+
+/// A team's work handed back to the agent that asked for it (ADR 0083, decision 10): written into
+/// that agent's chat for it to answer from, and shown there as the team's, not the operator's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandedBack {
+    /// The team's file, relative to the teams root.
+    pub team_path: String,
+    pub team_name: String,
+    /// The team's agent whose answer it is, by its id in the team file.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// That agent's link to My agents (`from: {agent}`), so it wears the figure it wears there.
+    #[serde(default)]
+    pub from_agent: Option<String>,
+    /// What the team was asked.
+    pub request: String,
+    /// The words before what the chat shows (the team's answer, or why it stopped or didn't
+    /// start), which tell the agent whose words follow and hold what is for it alone. `None`: the
+    /// chat shows the whole message.
+    #[serde(default)]
+    pub heading: Option<String>,
 }
 
 /// The agents answering a message that needed no workflow, each for itself, at the same time.
@@ -418,8 +444,8 @@ impl ChatStore {
         sqlx::query(
             "INSERT INTO chat_messages
              (id, team_key, team_path, text, created_at, route, run_id, agent_id, delivered_at, now,
-              reply_to, answers, files)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              reply_to, answers, files, handed_back)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              ON CONFLICT (id) DO NOTHING",
         )
         .bind(&message.id)
@@ -448,6 +474,12 @@ impl ChatStore {
             (!message.files.is_empty())
                 .then(|| serde_json::to_value(&message.files).ok())
                 .flatten(),
+        )
+        .bind(
+            message
+                .handed_back
+                .as_ref()
+                .and_then(|handed| serde_json::to_value(handed).ok()),
         )
         .execute(self.db.writer())
         .await?;
@@ -947,6 +979,9 @@ pub(crate) fn decode_message(row: &sqlx::sqlite::SqliteRow) -> Result<ChatMessag
             .try_get::<Option<Value>, _>("files")?
             .and_then(|files| serde_json::from_value(files).ok())
             .unwrap_or_default(),
+        handed_back: row
+            .try_get::<Option<Value>, _>("handed_back")?
+            .and_then(|handed| serde_json::from_value(handed).ok()),
     })
 }
 
@@ -2003,6 +2038,9 @@ struct SendMessage {
     /// Files sent with it, by the paths their uploads answered with.
     #[serde(default)]
     files: Vec<SentFile>,
+    /// Set only by the daemon ([`tell_agent`]): a page cannot send a message as a team's.
+    #[serde(skip)]
+    handed_back: Option<HandedBack>,
 }
 
 /// Where a message goes, decided from who it is addressed to and who is working right now.
@@ -2107,11 +2145,11 @@ fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
 /// Say `text` to `agent` in its team's chat, as `LoomWatch` passing something on: a team's answer
 /// to what the agent pinned to the notch asked of it (ADR 0083, decision 9, `crate::team_requests`).
 ///
-/// It goes exactly as a message from the person to that agent goes, through
-/// [`send_message`]: archived in the chat, starting the agent's work, or joining its turn as a note
-/// while it works. It is always work, never answered in the chat instead. With
-/// `only_while_working` it goes only as a note to a turn still at work, and otherwise not at all.
-/// `start_key` makes a repeat start nothing twice.
+/// It goes as a message from the person to that agent goes, through [`send_message`]: archived
+/// in the chat, starting the agent's work, or joining its turn as a note while it works. It is
+/// always work, never answered in the chat instead. With `handed_back` the chat shows it as that
+/// team's, not as the person's. With `only_while_working` it goes only as a note to a turn still at
+/// work, and otherwise not at all. `start_key` makes a repeat start nothing twice.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn tell_agent(
     registry: &RunRegistry,
@@ -2120,6 +2158,7 @@ pub(crate) async fn tell_agent(
     team_path: &str,
     agent: &str,
     text: &str,
+    handed_back: Option<HandedBack>,
     only_while_working: bool,
     start_key: Option<String>,
 ) -> Result<(), String> {
@@ -2152,6 +2191,7 @@ pub(crate) async fn tell_agent(
         reply_to: None,
         work: true,
         files: Vec::new(),
+        handed_back,
     };
     let response = send_message(State(state), Ok(Json(request)))
         .await
@@ -2204,6 +2244,7 @@ async fn send_message(
         reply_to,
         answers: None,
         files,
+        handed_back: request.handed_back.clone(),
     };
     let mut decided = decide(request.to.as_ref(), &live);
     learn_from_words(
@@ -3382,6 +3423,7 @@ mod tests {
             reply_to: None,
             answers: None,
             files: Vec::new(),
+            handed_back: None,
         }
     }
 
@@ -4431,6 +4473,30 @@ mod tests {
             "{}",
             writer[0]
         );
+    }
+
+    /// ADR 0083, decision 10: only `LoomWatch` marks a message as a team's handed-back work. A page
+    /// that sends one marked so sends the person's own message.
+    #[tokio::test]
+    async fn a_page_cannot_send_a_message_as_a_teams() {
+        let pool = crate::db::Db::temp().await;
+        let dir = TeamsDir::new();
+        write_news_desk(&dir, FirstTurn::Answered);
+        let rig = rig(pool, &dir);
+        let (status, noted) = send(
+            &rig.app,
+            json!({"teamPath": "news.yaml", "text": "a plan for Friday", "handedBack": {
+                "teamPath": "trips.yaml", "teamName": "Trip planner", "agent": "planner",
+                "request": "Plan Friday", "heading": "Trip planner's answer to “Plan Friday”:"
+            }}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{noted}");
+        assert_eq!(noted["route"], "team_note", "{noted}");
+        assert!(noted["message"].get("handedBack").is_none(), "{noted}");
+        let id = noted["message"]["id"].as_str().unwrap();
+        let stored = rig.registry.chat_store().unwrap().get(id).await.unwrap();
+        assert_eq!(stored.map(|message| message.handed_back), Some(None));
     }
 
     #[tokio::test]
@@ -5924,6 +5990,7 @@ mod tests {
                 ..NoteAnswers::default()
             }),
             files: Vec::new(),
+            handed_back: None,
         };
         store.insert(&answered).await.unwrap();
         let (status, _) = send(

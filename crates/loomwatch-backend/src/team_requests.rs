@@ -310,20 +310,43 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
     })
     .unwrap_or(request);
     // The agent is told too, so it can answer the person itself; it alone hears the details.
-    let detail = detail
-        .map(|detail| format!(" ({detail})"))
-        .unwrap_or_default();
+    let (text, heading) = told_not_started(&failed, &problem, detail.as_deref());
     tell(
         state,
         &failed,
-        &format!(
-            "{} didn't start “{}”: {problem}{detail}",
-            failed.team.name, failed.request
-        ),
+        &text,
+        Some(handed_back(state, &failed, None, Some(heading))),
         true,
     )
     .await;
     failed
+}
+
+/// What the asking agent is told when `request`'s team could not start, and the words before
+/// what its chat shows of it: the problem in plain words, `detail` being for the agent alone.
+fn told_not_started(
+    request: &TeamRequest,
+    problem: &str,
+    detail: Option<&str>,
+) -> (String, String) {
+    let detail = detail
+        .map(|detail| format!(" ({detail})"))
+        .unwrap_or_default();
+    let heading = format!(
+        "{} didn't start “{}”{detail}:",
+        request.team.name, request.request
+    );
+    (format!("{heading} {problem}"), heading)
+}
+
+/// What the asking agent is told when `request`'s team stopped before it finished, and the words
+/// before the reason, which is what its chat shows.
+fn told_stopped(request: &TeamRequest, problem: &str) -> (String, String) {
+    let heading = format!(
+        "{} stopped before it finished “{}”:",
+        request.team.name, request.request
+    );
+    (format!("{heading} {problem}"), heading)
 }
 
 /// Not now: the asking agent hears it while its turn is still at work, and nothing otherwise.
@@ -333,6 +356,7 @@ async fn decline(state: &TeamRequestsState, request: &TeamRequest) {
         state,
         request,
         &format!("Don't ask {} for this now.", request.team.name),
+        None,
         true,
     )
     .await;
@@ -351,40 +375,28 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
     let Some(request) = get_request(&id) else {
         return;
     };
-    let (status, problem, text) = match &record {
+    // The agent reads whose answer follows; the chat shows the answer as the team's.
+    let (status, problem, text, heading) = match &record {
         Some(record) if record.status == RunStatus::Succeeded => {
             let answer = record.reply.as_deref().unwrap_or_default().trim();
             let answer = crate::cap_middle_text(answer, ANSWER_KEPT_CHARS);
+            let heading = format!("{}'s answer to “{}”:", request.team.name, request.request);
             (
                 Status::Done,
                 None,
-                format!(
-                    "{}'s answer to “{}”:\n\n{answer}",
-                    request.team.name, request.request
-                ),
+                format!("{heading}\n\n{answer}"),
+                Some(heading),
             )
         }
         Some(record) => {
             let problem = stopped_because(record.status, record.error.as_deref());
-            (
-                Status::Failed,
-                Some(problem.clone()),
-                format!(
-                    "{} stopped before it finished “{}”: {problem}",
-                    request.team.name, request.request
-                ),
-            )
+            let (text, heading) = told_stopped(&request, &problem);
+            (Status::Failed, Some(problem), text, Some(heading))
         }
         None => {
             let problem = "LoomWatch lost track of its run.".to_owned();
-            (
-                Status::Failed,
-                Some(problem.clone()),
-                format!(
-                    "{} stopped before it finished “{}”: {problem}",
-                    request.team.name, request.request
-                ),
-            )
+            let (text, heading) = told_stopped(&request, &problem);
+            (Status::Failed, Some(problem), text, Some(heading))
         }
     };
     let Some(request) = update(&id, |request| {
@@ -394,20 +406,57 @@ async fn hand_back(state: TeamRequestsState, id: String, run_id: String) {
     }) else {
         return;
     };
-    tell(&state, &request, &text, false).await;
+    let responder = record.as_ref().map(|record| record.responder.as_str());
+    let handed = handed_back(&state, &request, responder, heading);
+    tell(&state, &request, &text, Some(handed), false).await;
 }
 
-/// Why a team's run ended without an answer, in plain words.
+/// What the chat shows a message from `request`'s team as: the team, the agent of it that answers
+/// (`responder`, or the one its file names when no run says), and what it was asked, with `heading`
+/// the words before the team's own answer.
+fn handed_back(
+    state: &TeamRequestsState,
+    request: &TeamRequest,
+    responder: Option<&str>,
+    heading: Option<String>,
+) -> crate::chat::HandedBack {
+    let team = crate::config::TeamConfig::load(&state.teams_root.join(&request.team.path)).ok();
+    let agent = responder
+        .map(str::to_owned)
+        .or_else(|| team.as_ref().and_then(|team| team.responder_id().ok()));
+    let from_agent = team
+        .as_ref()
+        .zip(agent.as_deref())
+        .and_then(|(team, id)| team.agents.iter().find(|each| each.id == id))
+        .and_then(|each| each.from_agent.clone());
+    crate::chat::HandedBack {
+        team_path: request.team.path.clone(),
+        team_name: request.team.name.clone(),
+        agent,
+        from_agent,
+        request: request.request.clone(),
+        heading,
+    }
+}
+
+/// Why a team's run ended without an answer, in plain words, as a sentence of its own.
 fn stopped_because(status: RunStatus, error: Option<&str>) -> String {
     if status == RunStatus::Cancelled {
-        return "it was stopped.".to_owned();
+        return "It was stopped.".to_owned();
     }
     error
         .map(str::trim)
         .filter(|error| !error.is_empty())
         .map_or_else(
-            || "it failed without saying why.".to_owned(),
-            |error| first_line(error, 300),
+            || "It failed without saying why.".to_owned(),
+            |error| {
+                let line = first_line(error, 300);
+                let mut chars = line.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_uppercase().chain(chars).collect())
+                    .unwrap_or_default()
+            },
         )
 }
 
@@ -422,12 +471,14 @@ fn first_line(text: &str, limit: usize) -> String {
     }
 }
 
-/// Say `text` to the agent that asked, in its own chat. `only_while_working`: only as a note to a
-/// turn still at work, never starting a new one.
+/// Say `text` to the agent that asked, in its own chat; with `handed_back`, as the team's rather
+/// than the person's. `only_while_working`: only as a note to a turn still at work, never starting
+/// a new one.
 async fn tell(
     state: &TeamRequestsState,
     request: &TeamRequest,
     text: &str,
+    handed_back: Option<crate::chat::HandedBack>,
     only_while_working: bool,
 ) {
     if let Err(problem) = crate::chat::tell_agent(
@@ -437,6 +488,7 @@ async fn tell(
         &request.asked_by.chat_path,
         &request.asked_by.agent,
         text,
+        handed_back,
         only_while_working,
         Some(format!("team-request-{}-{:?}", request.id, request.status)),
     )
@@ -753,6 +805,46 @@ mod tests {
             "{}",
             handed.prompt
         );
+        // In her chat the answer is Trip planner's, not the person's: the team, its agent that
+        // answered, what it was asked, and the words before the answer. Her first message is the
+        // person's own.
+        let (status, page) = call(
+            &rig.chat,
+            "GET",
+            "/api/chat?teamPath=.jobs%2F.bench%2Fmaya.yaml",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        let request_of = |run_id: &str| {
+            page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["run"]["runId"] == run_id)
+                .map_or(Value::Null, |item| item["request"].clone())
+        };
+        let from_team = request_of(&handed.run_id);
+        assert_eq!(
+            from_team["handedBack"],
+            json!({
+                "teamPath": "trips.yaml",
+                "teamName": "Trip planner",
+                "agent": "planner",
+                "fromAgent": null,
+                "request": "Plan 3 gentle days in Đà Lạt",
+                "heading": "Trip planner's answer to “Plan 3 gentle days in Đà Lạt”:",
+            }),
+            "{from_team}"
+        );
+        assert_eq!(
+            from_team["text"],
+            "Trip planner's answer to “Plan 3 gentle days in Đà Lạt”:\n\nDay 1: the lake. Day 2: \
+             the train. Day 3: the market."
+        );
+        let yours = request_of(&first.run_id);
+        assert!(yours["text"].is_string(), "{page}");
+        assert!(yours.get("handedBack").is_none(), "{yours}");
         let done = asked_from(&first.run_id).remove(0);
         assert_eq!(
             (done.status, done.run_id.as_deref()),
@@ -873,6 +965,47 @@ mod tests {
                 .list()
                 .iter()
                 .all(|run| run.team_path != "trips.yaml")
+        );
+    }
+
+    /// ADR 0083, decision 10: when the team doesn't finish, the agent reads why, the details
+    /// included, and the chat shows only the reason, in plain words, after the heading.
+    #[test]
+    fn the_chat_shows_only_the_plain_reason_when_a_team_does_not_finish() {
+        let request = ask(
+            AskedBy {
+                run_id: Uuid::new_v4().to_string(),
+                agent: "maya".into(),
+                chat_path: ".jobs/.bench/maya.yaml".into(),
+            },
+            TeamRef {
+                path: "trips.yaml".into(),
+                name: "Trip planner".into(),
+            },
+            "Plan Friday",
+        )
+        .unwrap();
+        let shown = |text: &str, heading: &str| {
+            text.strip_prefix(heading).map(str::trim).map(str::to_owned)
+        };
+        let problem = "Trip planner can't run as it is. Open it in LoomWatch to see what to fix.";
+        let (text, heading) =
+            told_not_started(&request, problem, Some("agents[0].model is missing"));
+        assert_eq!(
+            text,
+            "Trip planner didn't start “Plan Friday” (agents[0].model is missing): Trip planner \
+             can't run as it is. Open it in LoomWatch to see what to fix."
+        );
+        assert_eq!(shown(&text, &heading).as_deref(), Some(problem));
+        let (text, heading) = told_stopped(&request, &stopped_because(RunStatus::Cancelled, None));
+        assert_eq!(shown(&text, &heading).as_deref(), Some("It was stopped."));
+        assert_eq!(
+            stopped_because(RunStatus::Failed, Some("timed out after 600s\nmore")),
+            "Timed out after 600s…"
+        );
+        assert_eq!(
+            stopped_because(RunStatus::Failed, None),
+            "It failed without saying why."
         );
     }
 
