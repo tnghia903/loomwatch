@@ -223,8 +223,10 @@ export class CrewScene {
       const meshes = dressFigure(root, member, wound, (item) => this.own(item))
       for (const mesh of meshes) {
         const role = mesh.userData.role as string
-        mesh.castShadow = role !== 'glint' && !mesh.name.endsWith('_face')
-        mesh.receiveShadow = role !== 'glint'
+        // The eyes' glints and the cheeks are painted on the face: they neither cast nor catch a shadow.
+        const decal = role === 'glint' || role === 'blush'
+        mesh.castShadow = !decal && !mesh.name.endsWith('_face')
+        mesh.receiveShadow = !decal
         mesh.userData.member = index
         mesh.userData.material = mesh.material
       }

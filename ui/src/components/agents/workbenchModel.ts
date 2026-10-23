@@ -146,8 +146,9 @@ export function benchMaterial(role: string, mesh: string, textures: { pegboard: 
     case 'graphite': return physical('#24242B', 0.55, 0.35)
     case 'shoe': return physical('#2B2B33', 0.55, 0.3)
     case 'pegboard': return mesh === 'pegboard_face' ? new MeshStandardMaterial({ map: textures.pegboard(), roughness: 0.9 }) : standard('#1C1C21', 0.8)
-    // The figure, soft to the touch as in its stills: matte, no clear coat, a little sheen. Its skin is
-    // coloured when it is dressed (wear), from the figure it wears.
+    // The figure, soft to the touch as in its stills: matte, no clear coat, a little sheen. The stills'
+    // flocked pile is left out here: its broad sheen deepens the bands the bench's shadows draw across
+    // the lathed heads. Its skin is coloured when it is dressed (wear), from the figure it wears.
     case 'skin': return soft('#E3A386')
     case 'skin_wound': return Object.assign(soft('#E3A386'), { bumpMap: textures.wound, bumpScale: 1.6 })
     case 'skin_deep': return soft('#C38C73')

@@ -26,16 +26,21 @@ const fig = gltf.scene.getObjectByName('figure')
 fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1)
 scene.add(fig); fig.rotation.y = cam.rot ?? 0; portrait(fig); scene.environmentIntensity = cam.env ?? 1; key.intensity = cam.key ?? 1.2; back.intensity = cam.back ?? 0; fill.intensity = cam.fill ?? 0
 const skin = new THREE.Color(color)
-const soft = (c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: cam.rough ?? 0.62, specularIntensity: 0.7, sheen: 0.35, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
+// Soft-touch under a short flocked pile, as the Blender stills: a velvet sheen, and the colour lifted
+// back to what the pile greys.
+// The colours in liftKeep are not lifted: butter, lifted, is the app's gold.
+const liftS = (cam.liftKeep ?? []).includes(color.toUpperCase()) ? 1 : (cam.liftS ?? 1)
+const lift = (c) => { const hsl = {}; new THREE.Color(c).getHSL(hsl); return new THREE.Color().setHSL(hsl.h, Math.min(1, hsl.s * liftS), hsl.l) }
+const pile = (c) => new THREE.MeshPhysicalMaterial({ color: lift(c), roughness: 0.9, specularIntensity: 0.7, sheen: 1, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
+const soft = (c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.62, specularIntensity: 0.7, sheen: 0.35, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
 fig.traverse((o) => {
   if (o.name.startsWith('head_')) o.visible = o.name === 'head_' + kind
   if (!o.isMesh) return
   const role = o.material.name
   const m = {
-    // Soft-touch, as the Blender stills: matte, no clear coat, a little sheen.
-    skin: () => soft(skin),
-    skin_wound: () => soft(skin),
-    skin_deep: () => soft(skin.clone().multiplyScalar(0.86)),
+    skin: () => pile(skin),
+    skin_wound: () => pile(skin),
+    skin_deep: () => pile(skin.clone().multiplyScalar(0.86)),
     blush: () => new THREE.MeshStandardMaterial({ color: '#F08A8A', roughness: 0.9, transparent: true, opacity: 0.55, depthWrite: false }),
     eye: () => new THREE.MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 }),
     glint: () => new THREE.MeshBasicMaterial({ color: '#FFFFFF' }),
@@ -48,6 +53,8 @@ fig.traverse((o) => {
     pin_c: () => new THREE.MeshPhysicalMaterial({ color: '#4A4A55', roughness: 0.3, clearcoat: 0.6 }),
   }[role]
   o.material = m ? m() : new THREE.MeshStandardMaterial({ color: '#888' })
+  // The scissors' flat blades catch the warm light full on, so their steel is darker than the bobbin's.
+  if (o.name.startsWith('scissors_blade') || o.name === 'scissors_pivot') o.material = new THREE.MeshStandardMaterial({ color: cam.blade ?? '#C9CCD2', roughness: cam.bladeRough ?? 0.3, metalness: 0.9 })
 })
 const camera = new THREE.PerspectiveCamera(cam.fov, 1, 0.01, 50)
 camera.position.set(cam.x ?? 0, cam.y, cam.z); camera.lookAt(cam.x ?? 0, cam.ty, 0)

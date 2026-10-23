@@ -727,8 +727,10 @@ export class WorkbenchScene {
       object.material = this.material(role, object.name)
       this.roles.set(object, role)
       const flat = object.name.endsWith('_face') || object.name.endsWith('_label') || object.name === 'job_sheet' || object.name === 'laptop_screen'
-      object.castShadow = role !== 'glint' && !flat
-      object.receiveShadow = role !== 'glint'
+      // The eyes' glints and the cheeks are painted on the face: they neither cast nor catch a shadow.
+      const decal = role === 'glint' || role === 'blush'
+      object.castShadow = !decal && !flat
+      object.receiveShadow = !decal
       this.pickables.push(object)
       this.disposables.push(object.geometry)
     })
