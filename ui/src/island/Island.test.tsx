@@ -9,7 +9,6 @@ import type { TeamRequest } from '../lib/runs/teamRequests'
 import type { RunRecord } from '../lib/runs/client'
 import { answering, at, failed, iso, maya, OUT_OF_CREDITS, permission, pinnedChat, run, said } from './fixtures'
 import { Island } from './Island'
-import { setTearing } from './tearing'
 
 let runs: RunRecord[] = []
 let notes: NoteAnswering[] = []
@@ -51,8 +50,6 @@ beforeEach(() => {
   messages.length = 0
   toApp.length = 0
   holdRunReads = null
-  // A test that failed mid-drag leaves no tear in progress for the next.
-  setTearing(false)
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/runs?')) return json(runs)
@@ -495,7 +492,7 @@ describe('the agent pinned to the notch', () => {
     expect(toApp).toContainEqual({ kind: 'open', link: '/agents/maya?view=chat' })
   }, 15_000)
 
-  it('shows its answer as any answer, which can be copied or torn off into another app whole', async () => {
+  it('shows its answer as any answer, which can be copied whole but not dragged out of the island', async () => {
     pinnedAgent = 'maya'
     jobs = [maya]
     const { container } = render(<Island />)
@@ -516,33 +513,29 @@ describe('the agent pinned to the notch', () => {
     const plain = 'You have two meetings today.\n\n• 10:00 budget review (https://cal.example/b)\n• 12:30 lunch with Sam'
     const card = container.querySelector<HTMLElement>('.island-slip.is-answer .island-answer')!
     const slip = within(card)
-    expect(slip.getAllByText('Maya answered')).toHaveLength(2)
-    // Until it is read whole, nothing takes it: only its first line is known yet.
+    expect(slip.getByText('Maya answered')).toBeTruthy()
+    // Until it is read whole, Copy is off: only its first line is known yet.
     expect(slip.getByRole('button', { name: 'Copy' })).toBeDisabled()
-    expect(card.getAttribute('draggable')).toBe('false')
-    const early: Record<string, string> = {}
-    fireEvent.dragStart(card, { dataTransfer: { setData: (type: string, value: string) => { early[type] = value }, setDragImage: () => {}, effectAllowed: 'all' } })
-    expect(early).toEqual({})
     letRead()
     // The whole answer, read whole, as plain text: not only its first line, and no Markdown marks.
     await waitFor(() => expect(card.querySelector('.island-words p')?.textContent).toBe(shown))
     await waitFor(() => expect(slip.getByRole('button', { name: 'Copy' })).toBeEnabled())
-    expect(card.getAttribute('draggable')).toBe('true')
     // Copy: formatted for apps that take it, and plain, links keeping their addresses, for the rest.
     fireEvent.click(slip.getByRole('button', { name: 'Copy' }))
     const copied = toApp.find((message) => (message as { kind: string }).kind === 'copy') as { text: string; html: string }
     expect(copied.text).toBe(plain)
     expect(copied.html).toContain('<a href="https://cal.example/b">budget review</a>')
     expect(copied.html).toContain('<strong>Sam</strong>')
-    // Torn off: the same two go with the drag, and once dropped somewhere it has been seen.
+    // Not dragged out: a drag of the card carries nothing, and one let go of elsewhere leaves the
+    // answer out.
+    expect(card.getAttribute('draggable')).not.toBe('true')
     const carried: Record<string, string> = {}
-    let image: Element | null = null
-    fireEvent.dragStart(card, { dataTransfer: { setData: (type: string, value: string) => { carried[type] = value }, setDragImage: (element: Element) => { image = element }, effectAllowed: 'all' } })
-    expect(carried).toEqual({ 'text/plain': plain, 'text/html': copied.html })
-    expect(image).toBe(card.querySelector('.island-paper-copy'))
+    fireEvent.dragStart(card, { dataTransfer: { setData: (type: string, value: string) => { carried[type] = value }, setDragImage: () => {}, effectAllowed: 'all' } })
+    expect(carried).toEqual({})
     fireEvent.dragEnd(card, { dataTransfer: { dropEffect: 'copy' } })
-    await waitFor(() => expect(island.getAttribute('data-view')).not.toBe('done'))
-    expect(container.querySelector('.island-ear-right')?.getAttribute('data-right')).not.toBe('slip')
+    await act(async () => {})
+    expect(island.getAttribute('data-view')).toBe('done')
+    expect(container.querySelector('.island-ear-right')?.getAttribute('data-right')).toBe('slip')
   }, 15_000)
 
   it('lets the keyboard reach Copy from the box, keeping it until Escape', async () => {

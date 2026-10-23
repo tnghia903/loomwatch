@@ -1,7 +1,7 @@
 // An answer of the pinned agent, formatted for another app (ADR 0083, decision 9): what Copy puts
-// on the clipboard and a drag carries beside the plain text, so a long answer keeps its headings,
-// lists, bold and working links when pasted into Mail, Notes or a document. Loaded once an answer
-// is read whole, so the island's own page stays small; it renders with the React already loaded.
+// on the clipboard beside the plain text, so a long answer keeps its headings, lists, bold and
+// working links when pasted into Mail, Notes or a document. Loaded once an answer is read whole,
+// so the island's own page stays small; it renders with the React already loaded.
 import { createElement } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'

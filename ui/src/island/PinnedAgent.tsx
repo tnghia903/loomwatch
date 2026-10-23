@@ -1,8 +1,7 @@
 // The agent pinned to the notch, drawn (ADR 0083, decisions 9 and 10): the slot that opens when
-// something is dragged near, what went in waiting for a job, its answer printed on a slip you tear
-// off into any app, its request to start one of your teams, and the team it started at work under
-// the notch as its crew.
-import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from 'react'
+// something is dragged near, what went in waiting for a job, its answer with Copy, its request to
+// start one of your teams, and the team it started at work under the notch as its crew.
+import { useEffect, useState } from 'react'
 import { parse } from 'yaml'
 
 import { FigureStill } from '../components/agents/FigureStill'
@@ -14,7 +13,6 @@ import { fetchTeamFile } from '../lib/team-file/client'
 import { useRunSession } from '../lib/runs/useRunSession'
 import { workPhase } from '../lib/watch/workPhase'
 import { intakeLabel, jobsFor, kindOf } from './intake'
-import { setTearing } from './tearing'
 import { plainText, type TeamNow } from './teams'
 import type { Island } from './useIsland'
 
@@ -54,36 +52,14 @@ export function IntakeJobs({ island }: { island: Island }) {
 
 /**
  * The pinned agent's answer, as any answer on the island: who answered, its opening lines, Copy and
- * See answer. Most of the time that is all. Pointed at, a gold tear line along its bottom says it
- * can be taken: dragged into any app, a paper copy of the whole answer comes away and lands there.
- * Copy and a drag carry the whole answer, formatted for apps that take formatting and as plain
- * text, links with their addresses, for the rest; until it is read whole, neither takes it. Once
- * taken, it has been seen and leaves the island.
+ * See answer. Copy takes the whole answer, formatted for apps that take formatting and as plain
+ * text, links with their addresses, for the rest; until it is read whole, Copy is off.
  */
 export function AnswerSlip({ island, team }: { island: Island; team: TeamNow }) {
   const answer = island.answerOf(team)
   const whole = plainText(answer?.text ?? team.result)
-  const paper = useRef<HTMLDivElement>(null)
-  const [tearingNow, setTearingNow] = useState(false)
-  const onDragStart = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!answer) {
-      event.preventDefault()
-      return
-    }
-    setTearing(true)
-    setTearingNow(true)
-    event.dataTransfer.setData('text/plain', answer.plain)
-    if (answer.html) event.dataTransfer.setData('text/html', answer.html)
-    event.dataTransfer.effectAllowed = 'copy'
-    if (paper.current) event.dataTransfer.setDragImage?.(paper.current, 24, 16)
-  }
-  const onDragEnd = (event: ReactDragEvent<HTMLDivElement>) => {
-    setTearing(false)
-    setTearingNow(false)
-    if (event.dataTransfer.dropEffect !== 'none') island.took(team)
-  }
   return (
-    <div className={`island-answer${tearingNow ? ' is-tearing' : ''}${answer ? '' : ' is-reading'}`} draggable={answer !== null} onDragStart={onDragStart} onDragEnd={onDragEnd} title={answer ? 'Drag it into any app' : undefined}>
+    <div className="island-answer">
       <div className="island-words">
         <small>{team.teamName} answered</small>
         {/* Its opening lines, read without the blank lines between paragraphs. */}
@@ -94,11 +70,6 @@ export function AnswerSlip({ island, team }: { island: Island; team: TeamNow }) 
           <button type="button" className="island-button" disabled={!answer} onClick={() => { if (answer) island.copy(answer) }}>Copy</button>
         )}
         <button type="button" className="island-button" onClick={() => island.open(team)}>See answer</button>
-      </div>
-      {/* What follows the pointer once it is torn off: the whole answer, on paper. */}
-      <div ref={paper} className="island-paper-copy" aria-hidden="true">
-        <small>{team.teamName} answered</small>
-        <p>{whole}</p>
       </div>
     </div>
   )

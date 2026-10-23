@@ -10,7 +10,6 @@ import type { Ticket } from '../lib/story/needsYou'
 import { inApp, tellApp, type Area } from './bridge'
 import { intakeFrom } from './intake'
 import { AnswerSlip, CrewStage, IntakeJobs, Slot, TeamAskBody } from './PinnedAgent'
-import { isTearing } from './tearing'
 import { teamAskKey, workedFor, type TeamNow } from './teams'
 import { useIsland, type Island as IslandState } from './useIsland'
 
@@ -80,12 +79,12 @@ export function Island() {
         }}
         // Anything dropped onto the island goes to the pinned agent: the slot opens as it comes.
         onDragEnter={(event) => {
-          if (!island.pinned || isTearing()) return
+          if (!island.pinned) return
           event.preventDefault()
           island.dragOver(true)
         }}
         onDragOver={(event) => {
-          if (!island.pinned || isTearing()) return
+          if (!island.pinned) return
           event.preventDefault()
           event.dataTransfer.dropEffect = 'copy'
         }}
@@ -94,7 +93,7 @@ export function Island() {
           island.dragOver(false)
         }}
         onDrop={(event) => {
-          if (!island.pinned || isTearing()) return
+          if (!island.pinned) return
           event.preventDefault()
           island.dragOver(false)
           const intake = intakeFrom(event.dataTransfer)
@@ -248,7 +247,7 @@ function resultButton(team: TeamNow): string {
 /** A finished or stopped run's result, sliding out below the agent that did the work. */
 function Slip({ island, onPointerEnter, onPointerLeave }: { island: IslandState; onPointerEnter: (event: ReactPointerEvent) => void; onPointerLeave: (event: ReactPointerEvent) => void }) {
   const shown = island.shown && (island.shown.pop.kind === 'done' || island.shown.pop.kind === 'fail') ? island.shown : null
-  // The pinned agent's answer can also be taken away into another app.
+  // The pinned agent's answer can also be copied whole.
   const answer = shown?.team.pinned && shown.team.moment === 'done'
   return (
     <div className={`island-slip${answer ? ' is-answer' : ''}`} aria-hidden={island.view !== 'done' && island.view !== 'fail'} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>

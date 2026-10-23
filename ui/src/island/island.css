@@ -284,21 +284,11 @@ body {
 .island-chip.is-likely { border-color: var(--color-accent); color: var(--color-accent); }
 .island-chip:disabled { opacity: .5; cursor: default; }
 
-/* ---- The pinned agent's answer: an answer like any other, which can be taken into another app.
-   Pointed at, a gold tear line runs along its bottom; dragged, a paper copy of the whole answer
-   comes away with the pointer. ---- */
-.island-answer { position: relative; display: grid; gap: 10px; min-width: 0; cursor: grab; }
-.island-answer:active { cursor: grabbing; }
+/* ---- The pinned agent's answer: an answer like any other, its opening lines and Copy. ---- */
+.island-answer { display: grid; gap: 10px; min-width: 0; }
 .island-row .island-answer { grid-column: 2 / -1; }
 .island-answer .island-words p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; white-space: pre-line; }
-.island-answer::after { content: ""; position: absolute; left: -4px; right: -4px; bottom: -6px; border-top: 1.5px dashed var(--color-accent); opacity: 0; transition: opacity var(--t-quick) var(--ease-out); pointer-events: none; }
-.island-answer:not(.is-reading):hover::after, .island-answer.is-tearing::after { opacity: .85; }
-/* Until it is read whole, it can't be taken: no hand, no tear line. */
-.island-answer.is-reading { cursor: default; }
 .island-slip.is-answer { grid-template-columns: minmax(0, 1fr); }
-.island-answer .island-paper-copy { position: fixed; left: -2000px; top: 0; width: 260px; display: grid; gap: 4px; padding: 10px 12px 14px; border-radius: 3px; background: var(--color-ink); color: var(--color-black); pointer-events: none; }
-.island-answer .island-paper-copy small { font: 600 11px/14px var(--font-sans); color: color-mix(in srgb, var(--color-black) 55%, var(--color-ink)); }
-.island-answer .island-paper-copy p { display: block; margin: 0; max-height: 320px; overflow: hidden; font: 400 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-line-clamp: unset; line-clamp: unset; }
 /* Its requests for a team can be read whole in its row before Start. */
 .island-pinned .island-ask { -webkit-line-clamp: 4; line-clamp: 4; }
 

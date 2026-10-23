@@ -430,8 +430,8 @@ To keep one of your agents at hand, open it in **My agents**, click its name at 
 (Control-Option-Space) in any app, or point at the notch, and write to it. Both need **Show at the
 notch** turned on. Drag a file, a picture, a link or some text to the notch to hand it over:
 the notch opens to take it, offers a few jobs that fit, and you can say your own. Its answer shows
-at the notch: **Copy** it, or drag it into any app, and it keeps its headings, lists and links where
-that app takes formatting. It can ask one of your teams to do part of the work; that team only
+at the notch: **Copy** it and paste it into any app, and it keeps its headings, lists and links
+where that app takes formatting. It can ask one of your teams to do part of the work; that team only
 starts when you press **Start**, and that run costs what any run of the team costs.
 
 > [!NOTE]

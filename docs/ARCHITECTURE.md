@@ -478,10 +478,10 @@ promise ⌃⌥Space. One of My agents can be pinned to the notch
   chat's attachments. The panel takes the keyboard only while that message is written (focus may
   move on to Copy, See answer or Start; Escape gives it back), without bringing `LoomWatch` to
   the front;
-- its answer is read whole before Copy or a drag can take it, and both carry it twice: as HTML
+- its answer is read whole before Copy can take it, and Copy carries it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
   whose links keep their addresses. In the app, Copy writes both to the clipboard
-  (`NotchPanels::copy`); a drag hands both to `WebKit`;
+  (`NotchPanels::copy`);
 - a drag of a file, text or a link near the top is noticed by the drag pasteboard changing while
   the button is held (macOS sends other apps no pointer events once a drag begins, so the app
   checks every 50 ms then), and the whole panel takes the pointer so the drop lands in the page;
