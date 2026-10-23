@@ -97,6 +97,22 @@ export function pileColor(color: string | Color): Color {
   return out.setHSL(hsl.h, Math.min(1, hsl.s * 1.2), hsl.l)
 }
 
+/** How far a skin's sheen goes from its own colour toward white. */
+export const SHEEN_TOWARD_WHITE = 0.5
+
+/**
+ * Colour a figure's skin: the colour itself (pileColor, which the caller has applied), and the
+ * pile's sheen a pale tint of it, as the stills' fibres catch the light in their own colour. A white
+ * sheen laid a cream veil over the sides and caught the cool rim light under the chin.
+ */
+export function paintSkin(material: Material, color: Color) {
+  const skin = material as MeshPhysicalMaterial
+  skin.color.copy(color)
+  if (skin.isMeshPhysicalMaterial) skin.sheenColor.copy(color).lerp(WHITE, SHEEN_TOWARD_WHITE)
+}
+
+const WHITE = new Color('#FFFFFF')
+
 /**
  * Drop the shadow maps of `scene`'s lights, so three makes them again on the next frame. The map it
  * makes on a scene's first frame stopped taking draws after it (in Chrome on a Mac nothing cleared it
@@ -171,7 +187,7 @@ export function benchMaterial(role: string, mesh: string, textures: { pegboard: 
   const physical = (color: string, roughness: number, clearcoat = 0.4) => new MeshPhysicalMaterial({ color, roughness, clearcoat, clearcoatRoughness: 0.35 })
   const standard = (color: string, roughness: number, metalness = 0) => new MeshStandardMaterial({ color, roughness, metalness })
   const soft = (color: string) => new MeshPhysicalMaterial({ color, roughness: 0.62, specularIntensity: 0.7, sheen: 0.35, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
-  const pile = (color: string) => new MeshPhysicalMaterial({ color: pileColor(color), roughness: 0.9, specularIntensity: 0.7, sheen: 1, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
+  const pile = (color: string) => { const skin = new MeshPhysicalMaterial({ roughness: 0.9, specularIntensity: 0.7, sheen: 1, sheenRoughness: 0.6 }); paintSkin(skin, pileColor(color)); return skin }
   switch (role) {
     case 'bone': return physical('#EFEAE0', 0.5, 0.55)
     case 'benchtop': return physical('#E6DFD1', 0.6, 0.3)

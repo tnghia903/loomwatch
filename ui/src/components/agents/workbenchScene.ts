@@ -38,7 +38,7 @@ import { COLOR_HEX, FIGURE_KINDS, wornBy, type FigureChoice, type FigureKind } f
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { dress, type Dressed } from './accessoryMeshes'
 import { cardTexture, keyLabelTexture, OBSIDIAN_PEGBOARD, pegboardTexture, toolTexture, woundTexture, type PegboardColors } from './benchTextures'
-import { benchMaterial, fitCanvas, LIVE, pileColor, readModel, readyToDraw, renewShadows } from './workbenchModel'
+import { benchMaterial, fitCanvas, LIVE, paintSkin, pileColor, readModel, readyToDraw, renewShadows } from './workbenchModel'
 
 /** Everything the bench shows, from the agent on screen and the run in its chat. */
 export interface BenchView {
@@ -947,10 +947,9 @@ export class WorkbenchScene {
   private wear(figure: FigureChoice) {
     for (const [kind, head] of this.heads) head.visible = kind === figure.kind
     const skin = pileColor(COLOR_HEX[figure.color])
-    for (const mesh of this.meshes('skin')) (mesh.material as MeshStandardMaterial).color.copy(skin)
-    for (const mesh of this.meshes('skin_wound')) (mesh.material as MeshStandardMaterial).color.copy(skin)
+    for (const mesh of [...this.meshes('skin'), ...this.meshes('skin_wound')]) paintSkin(mesh.material as Material, skin)
     const deep = skin.clone().multiplyScalar(0.86)
-    for (const mesh of this.meshes('skin_deep')) (mesh.material as MeshStandardMaterial).color.copy(deep)
+    for (const mesh of this.meshes('skin_deep')) paintSkin(mesh.material as Material, deep)
     this.dress(figure)
     this.placeThought()
   }

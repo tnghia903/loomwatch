@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { Color, DirectionalLight, MeshPhysicalMaterial, MeshStandardMaterial, Scene, Texture, WebGLRenderTarget } from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { COLOR_HEX } from '../../lib/library/figures'
-import { benchMaterial, pileColor, renewShadows } from './workbenchModel'
+import { benchMaterial, paintSkin, pileColor, renewShadows, SHEEN_TOWARD_WHITE } from './workbenchModel'
 
 const textures = { pegboard: () => new Texture(), wound: null }
 
@@ -52,6 +52,15 @@ describe('benchMaterial', () => {
 
   it('leaves butter as it is, since lifted it is the gold of the app', () => {
     expect(pileColor(COLOR_HEX.butter).getHexString()).toBe(new Color(COLOR_HEX.butter).getHexString())
+  })
+
+  it('tints the pile sheen toward the figure colour, not plain white, as the fibres of the stills catch the light', () => {
+    const skin = benchMaterial('skin', 'skin', textures) as MeshPhysicalMaterial
+    const lilac = pileColor(COLOR_HEX.lilac)
+    paintSkin(skin, lilac)
+    expect(skin.color.getHexString()).toBe(lilac.getHexString())
+    expect(skin.sheenColor.getHexString()).toBe(lilac.clone().lerp(new Color('#FFFFFF'), SHEEN_TOWARD_WHITE).getHexString())
+    expect(skin.sheenColor.getHexString()).not.toBe('ffffff')
   })
 
   it('lays its cheeks over the skin as a see-through blush', () => {

@@ -28,7 +28,7 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { benchMaterial, drawn, fitCanvas, pileColor, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
+import { benchMaterial, drawn, fitCanvas, paintSkin, pileColor, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
 import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { CrewGlow, easeTint, glowColor } from './crewGlow'
@@ -708,8 +708,8 @@ export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, 
     if (!(object instanceof Mesh)) return
     const role = (object.material as Material).name
     const material = own(benchMaterial(role, object.name, { pegboard, wound }))
-    if (role === 'skin' || role === 'skin_wound') (material as MeshStandardMaterial).color.copy(skin)
-    if (role === 'skin_deep') (material as MeshStandardMaterial).color.copy(skin).multiplyScalar(0.86)
+    if (role === 'skin' || role === 'skin_wound') paintSkin(material, skin)
+    if (role === 'skin_deep') paintSkin(material, skin.clone().multiplyScalar(0.86))
     object.material = material
     object.userData.role = role
     meshes.push(object)
