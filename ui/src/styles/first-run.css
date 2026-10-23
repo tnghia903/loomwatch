@@ -17,7 +17,7 @@
 
 /* The host: the first agent, in the crew figure it keeps in My agents, and what it says. */
 .fr-host { display: flex; gap: var(--sp-5); align-items: flex-end; justify-content: center; margin: var(--sp-4) 0 var(--sp-2); }
-/* On a tile like an agent's card: the still carries a faint haze that only a solid ground hides. */
+/* On a tile like an agent's card, so the figure stands on something as it does there. */
 .fr-figure-tile {
   flex: none; display: grid; place-items: center; width: 132px; height: 132px; overflow: hidden;
   border-radius: 28px; background: var(--color-panel-solid); border: 1px solid var(--color-hairline);
