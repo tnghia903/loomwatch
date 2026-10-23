@@ -228,7 +228,7 @@ impl OpenRouter {
             let status = response.status();
             if status.is_success() {
                 match read_stream(response, request.model, deltas, cancel).await? {
-                    Streamed::Whole(completion) => return Ok(completion),
+                    Streamed::Whole(completion) => return Ok(*completion),
                     Streamed::Refused { status, said } => {
                         if limited && refused_the_limits(status, &said) {
                             self.forget_limits(request.model);
@@ -515,7 +515,7 @@ impl Assembled {
 
 /// How a stream that `OpenRouter` accepted ended.
 enum Streamed {
-    Whole(Completion),
+    Whole(Box<Completion>),
     /// It reported an error before the model wrote anything, so trying again repeats nothing.
     Refused {
         status: StatusCode,
@@ -554,7 +554,7 @@ async fn read_stream(
         };
         for event in decoder.push(&chunk) {
             if event.trim() == "[DONE]" {
-                return Ok(Streamed::Whole(finish(message)));
+                return Ok(Streamed::Whole(Box::new(finish(message))));
             }
             take_event(&event, &mut message, model, deltas).await?;
             if let Some((status, said)) = message.refused.take() {
@@ -573,7 +573,7 @@ async fn read_stream(
     if message.finish.is_none() && message.written.content.is_empty() && message.calls.is_empty() {
         return Err(AgentError::Stalled(Source::OpenRouter).into());
     }
-    Ok(Streamed::Whole(finish(message)))
+    Ok(Streamed::Whole(Box::new(finish(message))))
 }
 
 async fn take_event(
@@ -783,6 +783,7 @@ fn finish(message: Assembled) -> Completion {
         server_tool_calls,
         answer_from: message.written.answer_from,
         native: None,
+        context_tokens: None,
     }
 }
 

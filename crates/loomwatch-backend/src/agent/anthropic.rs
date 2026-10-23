@@ -13,7 +13,9 @@
 //! - a summary asks for no tool call (`tool_choice: none`) rather than dropping the tools.
 //!
 //! Anthropic reports tokens, not dollars, so the cost is worked out from list prices and marked as
-//! such. A call `pause_turn` stops (a long web search) is carried on within the same call.
+//! such. A call `pause_turn` stops (a long web search) is carried on within the same call, a few
+//! times; a reply still paused after that is taken without the step Anthropic hadn't run yet, and
+//! the model carries on from it in the next call.
 //!
 //! The same calls go to `OpenRouter`'s Anthropic-shaped `/messages` for a Claude on the operator's
 //! `OpenRouter` key ([`Route::OpenRouter`]): there a Claude's own web search is a block of its own
@@ -225,15 +227,22 @@ impl Anthropic {
         let model = ModelRef::parse(request.model).id;
         let mut so_far: Vec<Value> = Vec::new();
         let mut usage = Usage::default();
-        for _ in 0..=MAX_CONTINUATIONS {
+        let mut continued = 0;
+        loop {
             let call = self.call(request, &model, &so_far, deltas, cancel).await?;
             usage.add(&call.usage);
             so_far.extend(call.blocks);
-            if call.stop != "pause_turn" {
-                return Ok(self.finish(&model, so_far, &call.stop, usage));
+            if call.stop != "pause_turn" || continued == MAX_CONTINUATIONS {
+                let mut completion = self.finish(&model, so_far, &call.stop, usage);
+                // Each request read the conversation again, so the totals count it once a request.
+                if continued > 0 {
+                    completion.context_tokens =
+                        Some(call.usage.prompt_tokens() + call.usage.output_tokens);
+                }
+                return Ok(completion);
             }
+            continued += 1;
         }
-        Ok(self.finish(&model, so_far, "end_turn", usage))
     }
 
     /// One request, retried while nothing has streamed. `so_far` is what a paused reply has
@@ -364,7 +373,17 @@ impl Anthropic {
     }
 
     /// The finished message, from the blocks every call of it wrote.
-    fn finish(&self, model: &str, blocks: Vec<Value>, stop: &str, mut usage: Usage) -> Completion {
+    fn finish(
+        &self,
+        model: &str,
+        mut blocks: Vec<Value>,
+        stop: &str,
+        mut usage: Usage,
+    ) -> Completion {
+        // `OpenRouter`'s own web tools have no result block, and go back as they were written.
+        if self.route == Route::Anthropic && stop == "pause_turn" {
+            leave_out_unrun(&mut blocks);
+        }
         let mut written = Written::default();
         let mut tool_calls = Vec::new();
         let mut server_tool_calls = Vec::new();
@@ -402,6 +421,7 @@ impl Anthropic {
             "tool_use" => Finish::ToolCalls,
             "max_tokens" | "model_context_window_exceeded" => Finish::Length,
             "refusal" => Finish::ContentFilter,
+            "pause_turn" => Finish::Paused,
             _ if !tool_calls.is_empty() => Finish::ToolCalls,
             _ => Finish::Stop,
         };
@@ -423,6 +443,7 @@ impl Anthropic {
                 source: self.route.source(),
                 items: blocks,
             }),
+            context_tokens: None,
         }
     }
 
@@ -453,6 +474,50 @@ impl Anthropic {
             + tokens(usage.output_tokens, price.output)
             + searches
     }
+}
+
+/// Takes out each step Anthropic runs itself (a search, a page read, code) that has no result, and
+/// the calls such code made, from a reply still paused when it is taken as it stands: it ends with
+/// the step Anthropic was about to run, and Anthropic refuses a conversation that holds a step with
+/// no result. The model is told its reply was paused ([`Finish::Paused`]) and runs the step again if
+/// it still needs it.
+fn leave_out_unrun(blocks: &mut Vec<Value>) {
+    let answered: HashSet<String> = blocks
+        .iter()
+        .filter_map(|block| block.get("tool_use_id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect();
+    let mut unrun: HashSet<String> = blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("server_tool_use"))
+        .map(|block| text_of(block, "id"))
+        .filter(|id| !answered.contains(id))
+        .collect();
+    if unrun.is_empty() {
+        return;
+    }
+    loop {
+        let made_by_unrun: Vec<String> = blocks
+            .iter()
+            .filter(|block| {
+                block
+                    .pointer("/caller/tool_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|caller| unrun.contains(caller))
+            })
+            .map(|block| text_of(block, "id"))
+            .filter(|id| !id.is_empty() && !unrun.contains(id))
+            .collect();
+        if made_by_unrun.is_empty() {
+            break;
+        }
+        unrun.extend(made_by_unrun);
+    }
+    blocks.retain(|block| {
+        let id = block.get("id").or_else(|| block.get("tool_use_id"));
+        !id.and_then(Value::as_str)
+            .is_some_and(|id| unrun.contains(id))
+    });
 }
 
 fn text_of(block: &Value, key: &str) -> String {
