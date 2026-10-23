@@ -145,7 +145,7 @@
 .fr-option-connect { margin-top: 12px; }
 /* The source's own form sits in the sheet as it is, without its card: the option above names it,
    so its heading is left for screen readers. */
-.fr-option-connect .lw-settings-section { padding: 0; border: 0; border-radius: 0; box-shadow: none; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.fr-option-connect .lw-settings-section { padding: 0; border: 0; border-radius: 0; box-shadow: none; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .fr-option-connect .lw-settings-section > h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .fr-sheet-fine { margin: 14px 0 0; text-align: center; color: var(--color-ink-3); }
 
