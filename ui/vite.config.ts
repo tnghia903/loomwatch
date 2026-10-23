@@ -7,8 +7,9 @@ import { defineConfig } from 'vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // Safari still needs -webkit-backdrop-filter; naming it as a target makes the CSS
-  // minifier emit the prefix instead of dropping the standard property (e1 panels blur).
+  // Safari 16 still needs -webkit-backdrop-filter; naming it as a target makes the CSS minifier
+  // keep the prefix beside the standard property. Lightning CSS drops the standard property when
+  // the -webkit- one follows it, so the sheets write the prefix first (src/styles/glass-blur.test.ts).
   build: {
     cssTarget: ['chrome120', 'safari16', 'firefox120'],
     // The app's own chunk is ~615 kB (189 kB gzipped), so Vite's 500 kB default warned on every
