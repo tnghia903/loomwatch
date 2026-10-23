@@ -12,9 +12,10 @@ import { useSessionEvents } from '../lib/watch/useSessionEvents'
 import { workPhase } from '../lib/watch/workPhase'
 import { inApp, tellApp, type Area } from './bridge'
 import { intakeFrom } from './intake'
-import { AnswerSlip, CrewStage, IntakeJobs, Slot, TeamAskBody } from './PinnedAgent'
+import { AnswerSlip, CrewStage, IntakeJobs, Slot, StartTeam, TeamAskBody } from './PinnedAgent'
 import { teamAskKey, workedFor, type TeamNow } from './teams'
 import { useIsland, type Island as IslandState } from './useIsland'
+import { useRunLimit } from './useRunLimit'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
@@ -185,7 +186,7 @@ function Hang({ island, onPointerEnter, onPointerLeave }: { island: IslandState;
               <FigureStill figure={island.figure(shown.team.teamPath, shown.team.agent)} alt="" />
             </span>
             <div className="island-card" role="group" aria-label={`${shown.team.teamName} wants ${teamAsk.team.name} to do this: ${teamAsk.request}`}>
-              <TeamAskBody island={island} request={teamAsk} first />
+              <TeamAskBody island={island} request={teamAsk} first start decline={false} />
             </div>
           </>
         )}
@@ -371,20 +372,24 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
   }, [writing])
   const moment = work?.moment ?? 'ready'
   const phase = useActing(work, work?.agent ?? null, island.now)
+  const teamAsk = work?.teamAsks?.[0]
+  // Its request to start a team waits for Start, which sits in Send's place until something is
+  // written there, or under the request while something dropped has the box.
+  const asking = teamAsk && island.teamSaid?.id !== teamAsk.id ? teamAsk : null
+  const limit = useRunLimit(asking?.team.path ?? null)
   // While it works, a message is a note it reads after its current step, as its Chat tab says; the
   // box shows the short form, and the whole of it is its name and tooltip.
-  const to = island.intake ? 'Or say what to do' : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
+  const to = island.intake ? 'Or say what to do' : asking ? `Or message ${pinned.name}` : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
   const toWhole = island.pinnedWorking && !island.intake ? `${to} · after its current step` : to
-  const teamAsk = work?.teamAsks?.[0]
   return (
-    <div className="island-row island-pinned" data-moment={moment}>
+    <div className={`island-row island-pinned${asking ? ' is-asking' : ''}`} data-moment={moment}>
       <span className="island-row-figures" aria-hidden="true">
         <span className="island-row-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
           <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
         </span>
       </span>
       {teamAsk ? (
-        <TeamAskBody island={island} request={teamAsk} first={!firstPermission} />
+        <TeamAskBody island={island} request={teamAsk} first={!firstPermission} start={Boolean(island.intake)} decline />
       ) : work?.moment === 'ask' && work.asks[0] ? (
         <AskBody island={island} team={work} ticket={work.asks[0]} first={work.asks[0].id === firstPermission} />
       ) : work?.moment === 'work' ? (
@@ -425,7 +430,11 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
             if (event.key === 'Escape') event.currentTarget.blur()
           }}
         />
-        <button type="submit" className="island-button" disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? 'Send note' : 'Send'}</button>
+        {asking && !island.draft.trim() && !island.intake ? (
+          <StartTeam island={island} request={asking} first={!firstPermission} limit={limit} />
+        ) : (
+          <button type="submit" className="island-button" disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? 'Send note' : 'Send'}</button>
+        )}
       </form>
       {island.sent?.ok && <small className="island-sent" role="status">{island.sent.text}</small>}
       {island.sent && !island.sent.ok && (

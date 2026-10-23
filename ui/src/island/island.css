@@ -51,7 +51,7 @@ body {
 .island [data-phase="tools"] { --act: island-tool var(--t-flow) var(--ease-out) infinite; }
 .island [data-phase="typing"] { --act: island-bob var(--t-settle) ease-in-out infinite; }
 .island .island-row-figure.glow[data-moment="work"] > * { transform-origin: 50% 90%; animation: var(--act, island-bob calc(var(--t-breathe) / 2) ease-in-out infinite); }
-.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-slot-eyes, .island-stage-figure) > :is(img, .figure-still) {
+.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-slot-eyes, .island-stage-figure, .island-crew-figure) > :is(img, .figure-still) {
   display: block;
   width: 100%;
   height: 100%;
@@ -307,8 +307,25 @@ body {
 .island-row .island-answer { grid-column: 2 / -1; }
 .island-answer .island-words p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; white-space: pre-line; }
 .island-slip.is-answer { grid-template-columns: minmax(0, 1fr); }
-/* Its requests for a team can be read whole in its row before Start. */
+/* What it asks can be read whole in its row before it is answered; LoomWatch has the rest of a
+   long one. */
 .island-pinned .island-ask { -webkit-line-clamp: 4; line-clamp: 4; }
+/* Its request to start a team, in its own words: a bubble from its figure, × in the corner to say
+   don't, and the team under it. In its row the bubble takes the row's width, its figure at the
+   bubble's corner; on the card, the card is the bubble. */
+.island-pinned > .island-request { grid-column: 2 / -1; }
+.island-pinned.is-asking > .island-row-figures { align-self: start; }
+.island-said-by { position: relative; padding: 8px 36px 8px 12px; border-radius: var(--r-xs) var(--r-lg) var(--r-lg) var(--r-lg); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
+.island-card .island-said-by { padding: 0; border-radius: 0; background: none; }
+.island-not-now { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border: 0; border-radius: var(--r-full); background: transparent; color: var(--color-ink-2); font: 600 16px/1 var(--font-sans); cursor: pointer; }
+.island-not-now:hover { color: var(--color-ink); }
+.island-not-now:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.island-not-now:disabled { opacity: .5; cursor: default; }
+.island-words .island-for { margin-top: 4px; }
+.island-words .island-team { color: var(--color-ink); }
+.island-crew { display: inline-flex; vertical-align: middle; }
+.island-crew-figure { width: 20px; height: 20px; margin-right: -4px; }
+.island-crew-figure:last-child { margin-right: 0; }
 
 /* ---- The team the pinned agent started, at work on a gold line ---- */
 .island-stage { grid-column: 1 / -1; display: grid; gap: 6px; padding-top: 4px; }
