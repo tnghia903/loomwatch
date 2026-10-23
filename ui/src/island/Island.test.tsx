@@ -333,14 +333,15 @@ describe('beside the notch at rest, on every screen', () => {
     expect(read('src/index.css')).toContain(`@import './styles/mark.css';`)
   })
 
-  it('no team’s head is drawn over LoomWatch’s mark', async () => {
+  it('LoomWatch’s mark is never beside a figure: with none pinned, a team at work takes its place', async () => {
     runs = [run('r1', { working: ['writer'] })]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(leftEar(container).querySelectorAll('.island-head')).toHaveLength(2))
-    const [mark, head] = [...leftEar(container).querySelectorAll<HTMLElement>('.island-head')]
-    expect(mark.classList.contains('island-mark')).toBe(true)
-    expect(parseFloat(head.style.left)).toBeGreaterThan(parseFloat(mark.style.left) + parseFloat(mark.style.width))
+    await waitFor(() => expect(view(container)).toBe('tucked'))
+    const heads = [...leftEar(container).querySelectorAll<HTMLElement>('.island-head')]
+    expect(heads.map((head) => head.classList.contains('island-mark'))).toEqual([false])
+    expect(heads[0].getAttribute('data-moment')).toBe('work')
+    expect(heads[0].style.left).toBe('0px')
   })
 
   it('with reduced motion, a figure at work holds a pose, so it is not told from a ready one by colour alone', () => {

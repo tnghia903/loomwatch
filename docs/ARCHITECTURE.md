@@ -464,8 +464,9 @@ page reports. Only the island on the screen the pointer is on is live: it opens 
 questions and answers out, while the others stay at rest beside their notch, so nothing comes and
 goes as the pointer moves between screens. A pointer at a screen's very top edge is on that screen
 (`Rect::holds_pointer`, as `NSMouseInRect` has it). Results looked at on one island leave the others
-(the app passes `seen` between the pages). At rest the island shows the pinned agent's figure beside
-the notch, or LoomWatch's mark with none pinned. Unticking **Show at the notch** in the app's menu
+(the app passes `seen` between the pages). At rest the island is even either side of the camera:
+the pinned agent's figure on the left, or LoomWatch's mark when none is pinned and no team is at
+work, and the right side empty until there is something to say. Unticking **Show at the notch** in the app's menu
 writes `<state dir>/app-notch-off`, closes every panel, stops watching the pointer and gives
 ⌃⌥Space back; the face is in the menu bar instead until it is ticked again. One of My agents can be
 pinned to the notch

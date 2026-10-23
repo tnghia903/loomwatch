@@ -68,7 +68,7 @@ body {
   translate: -50% 0;
   pointer-events: auto;
   outline: none;
-  transition: width var(--t-spring) var(--ease-spring), height var(--t-spring) var(--ease-spring), translate var(--t-spring) var(--ease-spring), opacity var(--t-quick) var(--ease-out);
+  transition: width var(--t-spring) var(--ease-spring), height var(--t-spring) var(--ease-spring), opacity var(--t-quick) var(--ease-out);
 }
 .island-shape:focus-visible .island-body { box-shadow: inset 0 0 0 2px var(--color-accent); }
 /* Where it meets the top of the screen it flows out of the bezel, as the notch does. */
@@ -84,14 +84,12 @@ body {
   transition: border-radius var(--t-move) var(--ease-out);
 }
 
-.island[data-view="tucked"] .island-shape { --w: calc(var(--notch-w) + 2 * var(--ear)); }
-/* At rest it is never empty: the agent pinned to the notch, or LoomWatch's mark, sits beside the
-   camera, which stays where it is, and nothing covers the menu bar on the other side. Without a
-   notch the tab is just that figure, at the middle of the menu bar. */
-.island[data-view="rest"] .island-shape { --w: calc(var(--notch-w) + var(--ear)); translate: calc(-50% - var(--ear) / 2) 0; }
-.island[data-notch="none"][data-view="rest"] .island-shape { --w: var(--ear); translate: -50% 0; }
-/* It first appears where it rests, without travelling there. */
-.island:not([data-notch="none"])[data-view="hidden"] .island-shape { translate: calc(-50% - var(--ear) / 2) 0; }
+/* At rest and tucked the island is even either side of the camera: the pinned agent, or
+   LoomWatch's mark, and the teams' figures on the left; on the right, what there is to say (the
+   count, the time, a new result), empty at rest. Without a notch the tab at rest is just its
+   figure, at the middle of the menu bar. */
+.island:is([data-view="rest"], [data-view="tucked"]) .island-shape { --w: calc(var(--notch-w) + 2 * var(--ear)); }
+.island[data-notch="none"][data-view="rest"] .island-shape { --w: var(--ear); }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-shape {
   --w: calc(var(--notch-w) + 24px);
   --h: calc(var(--bar) + var(--fig) * .66);

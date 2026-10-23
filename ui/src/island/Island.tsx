@@ -26,11 +26,12 @@ export function Island() {
   const root = useRef<HTMLDivElement>(null)
   useReportAreas(root, view)
 
-  // First beside the notch, always: the agent pinned to it, in its work's glow or ready; with none
-  // pinned, LoomWatch's own mark. Then one head per other team. At rest the ear is no wider than
-  // its figure, so it covers as little of the menu bar as it can.
-  const figures = tucked.heads.length + 1
-  const heads = headsLayout(island.pinned !== null, tucked.heads.length, bar)
+  // First beside the notch: the agent pinned to it, in its work's glow or ready, then one head per
+  // other team. LoomWatch's own mark stands there only while there is no figure at all, never beside
+  // one. At rest the ear is no wider than what is in it, so it covers as little menu bar as it can.
+  const first = island.pinned ? 'pinned' : tucked.heads.length ? 'none' : 'mark'
+  const figures = tucked.heads.length + (first === 'none' ? 0 : 1)
+  const heads = headsLayout(first, tucked.heads.length, bar)
   const ear = view === 'rest' ? heads.span + 10 : Math.max(Math.round(bar * 1.5), heads.span + 14 + (tucked.more ? 16 : 0))
   const style = {
     '--notch-w': `${notch.width}px`,
@@ -105,11 +106,12 @@ export function Island() {
         <Balcony island={island} />
         <div className="island-ear island-ear-left" aria-hidden="true">
           <span className="island-heads" style={{ width: heads.span }}>
-            {island.pinned ? (
+            {island.pinned && (
               <span className="island-head island-pinned-head glow" data-moment={tucked.pinned?.moment ?? 'ready'} style={{ left: 0, zIndex: figures }}>
                 <FigureStill figure={figureFor(island.pinned.id, island.pinned.job.figure)} alt="" />
               </span>
-            ) : (
+            )}
+            {first === 'mark' && (
               <span className="island-head island-mark" style={{ left: 0, width: heads.mark, zIndex: figures }}>
                 <LoomMark size={heads.mark} />
               </span>
@@ -420,14 +422,15 @@ function working(team: TeamNow, now: number): ReactNode {
   return <>{who} is working <span className="island-nowrap">· {time}</span></>
 }
 
-/** Where the figures beside the notch go: the pinned agent's or LoomWatch's mark at the left, then
-    each other team's head, overlapping the one before; but none over the mark, which is a tile. */
-function headsLayout(pinned: boolean, others: number, bar: number): { mark: number; first: number; step: number; span: number } {
+/** Where the figures beside the notch go: the pinned agent at the left, then each other team's head,
+    overlapping the one before; or LoomWatch's mark alone, when there is no figure. */
+function headsLayout(first: 'pinned' | 'mark' | 'none', others: number, bar: number): { mark: number; first: number; step: number; span: number } {
   const head = Math.round(bar * 1.06)
   const mark = Math.round(bar * 0.78)
   const step = Math.round(bar * 0.62)
-  const first = pinned ? step : mark + 4
-  return { mark, first, step, span: others ? first + (others - 1) * step + head : pinned ? head : mark }
+  if (first === 'mark') return { mark, first: 0, step, span: mark }
+  const start = first === 'pinned' ? step : 0
+  return { mark, first: start, step, span: others ? start + (others - 1) * step + head : first === 'pinned' ? head : 0 }
 }
 
 /** What a screen reader hears of the island. */
