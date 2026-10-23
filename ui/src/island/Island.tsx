@@ -5,8 +5,11 @@ import { useEffect, useLayoutEffect, useRef, type CSSProperties, type PointerEve
 
 import { FigureStill } from '../components/agents/FigureStill'
 import { LoomMark } from '../components/ui/glyphs'
+import type { WorkPhase } from '../lib/library/figure'
 import { figureFor } from '../lib/library/figures'
 import type { Ticket } from '../lib/story/needsYou'
+import { useSessionEvents } from '../lib/watch/useSessionEvents'
+import { workPhase } from '../lib/watch/workPhase'
 import { inApp, tellApp, type Area } from './bridge'
 import { intakeFrom } from './intake'
 import { AnswerSlip, CrewStage, IntakeJobs, Slot, TeamAskBody } from './PinnedAgent'
@@ -139,18 +142,31 @@ export function Island() {
     handover one ducks and the next pops up. */
 function Balcony({ island }: { island: IslandState }) {
   const shown = island.shown
+  const current = !shown ? null : shown.pop.kind === 'start' || shown.pop.kind === 'handover' ? shown.pop.key : shown.team.agent
+  const phase = useActing(island.view === 'work' ? shown?.team : null, current, island.now)
   if (!shown) return null
-  const current = shown.pop.kind === 'start' || shown.pop.kind === 'handover' ? shown.pop.key : shown.team.agent
   const agents = shown.team.agents.length ? shown.team.agents : current ? [current] : []
   return (
     <div className="island-balcony" aria-hidden="true">
       {agents.map((agent) => (
-        <span key={agent} className={`island-slot glow${agent === current ? ' is-on' : ''}`} data-agent={agent} data-moment={shown.team.moment}>
+        <span key={agent} className={`island-slot glow${agent === current ? ' is-on' : ''}`} data-agent={agent} data-moment={shown.team.moment} data-phase={agent === current ? phase ?? undefined : undefined}>
           <FigureStill figure={island.figure(shown.team.teamPath, agent)} alt="" />
         </span>
       ))}
     </div>
   )
+}
+
+/**
+ * What `agent` is at in `team`'s run while it works, from the run's events, for its figure to act
+ * out as Team at work's does: `null` when it isn't at work, for an answer in the chat, which has no
+ * run, and until the run's events have arrived, which would otherwise read as its first moments.
+ * Only a figure that is out follows its run, one connection each, while it is drawn.
+ */
+function useActing(team: TeamNow | null | undefined, agent: string | null, now: number): WorkPhase | null {
+  const runId = team?.moment === 'work' && !team.chat && agent ? team.runId : ''
+  const { events, loading } = useSessionEvents(runId)
+  return runId && agent && !loading ? workPhase(events, agent, now) : null
 }
 
 /** A question, dropped on a gold line, held by the agent that asks it. */
@@ -291,13 +307,7 @@ function List({ island }: { island: IslandState }) {
       {rows.length === 0 && !island.pinned && <p className="island-quiet">Nothing is running</p>}
       {rows.map((team) => (
         <div key={team.runId} className="island-row" data-moment={team.moment}>
-          <span className="island-row-figures" aria-hidden="true" data-moment={team.moment}>
-            {(team.agents.length ? team.agents : [team.agent]).slice(0, 3).map((agent, index) => (
-              <span key={agent ?? index} className={`island-row-figure${agent === team.agent ? ' glow' : ' is-behind'}`} data-moment={team.moment} style={{ left: index * 16, zIndex: agent === team.agent ? 4 : 3 - index }}>
-                <FigureStill figure={island.figure(team.teamPath, agent)} alt="" />
-              </span>
-            ))}
-          </span>
+          <RowFigures island={island} team={team} />
           {team.moment === 'ask' && team.asks[0] ? (
             <AskBody island={island} team={team} ticket={team.asks[0]} first={team.asks[0].id === firstPermission} />
           ) : team.moment === 'work' ? (
@@ -331,6 +341,21 @@ function List({ island }: { island: IslandState }) {
   )
 }
 
+/** A team's figures in its row: the one acting in front, acting out what it is at while it works,
+    and the rest a step behind. */
+function RowFigures({ island, team }: { island: IslandState; team: TeamNow }) {
+  const phase = useActing(team, team.agent, island.now)
+  return (
+    <span className="island-row-figures" aria-hidden="true" data-moment={team.moment}>
+      {(team.agents.length ? team.agents : [team.agent]).slice(0, 3).map((agent, index) => (
+        <span key={agent ?? index} className={`island-row-figure${agent === team.agent ? ' glow' : ' is-behind'}`} data-moment={team.moment} data-phase={agent === team.agent ? phase ?? undefined : undefined} style={{ left: index * 16, zIndex: agent === team.agent ? 4 : 3 - index }}>
+          <FigureStill figure={island.figure(team.teamPath, agent)} alt="" />
+        </span>
+      ))}
+    </span>
+  )
+}
+
 /**
  * The agent pinned to the notch: what it is doing, if anything, and a box to message it. A message
  * starts its work, or joins it as a note while it works; its answer slides out as any team's does.
@@ -345,6 +370,7 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
     if (writing && document.activeElement !== field.current) field.current?.focus()
   }, [writing])
   const moment = work?.moment ?? 'ready'
+  const phase = useActing(work, work?.agent ?? null, island.now)
   // While it works, a message is a note it reads after its current step, as its Chat tab says; the
   // box shows the short form, and the whole of it is its name and tooltip.
   const to = island.intake ? 'Or say what to do' : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
@@ -353,7 +379,7 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
   return (
     <div className="island-row island-pinned" data-moment={moment}>
       <span className="island-row-figures" aria-hidden="true">
-        <span className="island-row-figure glow" data-moment={moment}>
+        <span className="island-row-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
           <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
         </span>
       </span>

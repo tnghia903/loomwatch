@@ -26,6 +26,18 @@ const messages: Record<string, unknown>[] = []
 const toApp: unknown[] = []
 /** While set, reading one run whole waits for it. */
 let holdRunReads: Promise<void> | null = null
+/** What the archive has of each run's events; a run not here has none the page can read. */
+let sessionEvents: Record<string, Record<string, unknown>[]> = {}
+/** While set, reading a run's events waits for it. */
+let holdEventReads: Promise<void> | null = null
+
+/** One of a run's events, as the archive returns it, just now. */
+function runEvent(runId: string, seq: number, agentId: string, kind: string, payload: Record<string, unknown>) {
+  return { id: `${runId}-${seq}`, sessionId: runId, agentId, seq, ts: new Date().toISOString(), kind, payload }
+}
+
+/** The live connection after the archive, which brings nothing more. */
+class QuietSocket { onopen = null; onmessage = null; onclose = null; onerror = null; close() {} }
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -50,9 +62,17 @@ beforeEach(() => {
   messages.length = 0
   toApp.length = 0
   holdRunReads = null
+  sessionEvents = {}
+  holdEventReads = null
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith('/api/runs?')) return json(runs)
+    if (url.startsWith('/api/session/events?')) {
+      if (holdEventReads) await holdEventReads
+      const query = new URLSearchParams(url.split('?')[1])
+      const events = sessionEvents[query.get('session')!]
+      return events ? json(events.filter((event) => Number(event.seq) > Number(query.get('afterSeq')))) : json({ error: 'not found' }, 404)
+    }
     if (url.startsWith('/api/chat/answering?')) {
       noteReads += 1
       return json(notes)
@@ -246,6 +266,8 @@ describe('the island page', () => {
     notes = [answering('m1')]
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
     expect(container.querySelector('.island-slot.is-on')?.getAttribute('data-agent')).toBe('writer')
+    // An answer in the chat has no run to follow: the figure bobs rather than acting anything out.
+    expect(container.querySelector('.island-slot.is-on')?.getAttribute('data-phase')).toBeNull()
     notes = [answering('m1', { answers: { waiting: [], said: [said('Every item keeps one number.')] }, finishedAt: new Date().toISOString() })]
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('done'), { timeout: 5000 })
     const slip = within(container.querySelector<HTMLElement>('.island-slip')!)
@@ -255,6 +277,33 @@ describe('the island page', () => {
     expect(slip.getByText('Every item keeps one number.')).toBeTruthy()
     fireEvent.click(slip.getByRole('button', { name: 'See answer' }))
     expect(toApp).toContainEqual({ kind: 'open', link: '/?path=trip.yaml&view=chat' })
+  }, 15_000)
+
+  it('the figure that peeks out acts out what its agent is at, from its run, and so does the one in front in its row', async () => {
+    vi.stubGlobal('WebSocket', QuietSocket)
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+    const island = container.querySelector('.island')!
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    // The researcher is on a web search: a call still open.
+    sessionEvents.r1 = [runEvent('r1', 0, 'researcher', 'tool_call', { callId: 'call1', status: 'in_progress', title: 'Web search' })]
+    let letEvents = () => {}
+    holdEventReads = new Promise((done) => { letEvents = done })
+    runs = [run('r1', { working: ['researcher'] })]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
+    const out = container.querySelector('.island-slot.is-on')!
+    expect(out.getAttribute('data-agent')).toBe('researcher')
+    // Until its events arrive it acts nothing out: no events would read as its first moments.
+    await act(async () => { await new Promise((done) => setTimeout(done, 300)) })
+    expect(out.getAttribute('data-phase')).toBeNull()
+    letEvents()
+    await waitFor(() => expect(out.getAttribute('data-phase')).toBe('tools'))
+    // Pointing at the notch: the researcher in front of its row acts it out; the writer behind waits.
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
+    const figures = [...container.querySelectorAll('.island-row .island-row-figure')]
+    await waitFor(() => expect(figures.map((figure) => figure.getAttribute('data-phase'))).toEqual(['tools', null]))
   }, 15_000)
 
   it('slides out a stop when the agent answering in the chat could not answer, saying why, which opens the chat', async () => {
@@ -349,6 +398,39 @@ describe('beside the notch at rest, on every screen', () => {
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
     expect(reduced).not.toBe('')
     expect(reduced).toContain('.island:is([data-view="rest"], [data-view="tucked"]) .island-head[data-moment="work"] { translate: 0 -2px; }')
+  })
+
+  it('a figure acts out every phase with a move of its own, its glow is wide enough to read on black, and reduced motion stops it all', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8')
+    const moving = css.slice(0, css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(moving).not.toBe('')
+    const moves = (['reading', 'thinking', 'tools', 'typing'] as const).map((phase) => {
+      const move = new RegExp(`\\.island \\[data-phase="${phase}"\\] \\{ --act: ([\\w-]+) `).exec(moving)?.[1]
+      expect(move, phase).toBeTruthy()
+      const frames = new RegExp(`@keyframes ${move} \\{ (.+) \\}\\n`).exec(moving)?.[1] ?? ''
+      expect(frames, phase).toMatch(/rotate|translate/)
+      // It starts from rest, so a figure that starts acting doesn't jump.
+      const start = /(?:^|\} )0%(?:, 100%)? \{ ([^}]*) \}/.exec(frames)?.[1]
+      if (start !== undefined) expect(['rotate: 0deg;', 'translate: 0 0;'], phase).toContain(start.trim())
+      return move
+    })
+    // Four different moves: reading, thinking, a tool and writing each look like themselves.
+    expect(new Set(moves).size).toBe(4)
+    // The figure that peeks out, and the one in front in a row, take the move; until its run says, each bobs.
+    expect(moving).toContain('.island[data-view="work"] .island-slot.is-on > * { animation: var(--act, island-bob ')
+    expect(moving).toContain('.island .island-row-figure.glow[data-moment="work"] > * { transform-origin: 50% 90%; animation: var(--act, island-bob ')
+    // In a row, its breath stays closer, off the teammates behind it.
+    expect(moving).toContain('.island .island-row-figure.glow[data-moment="work"] { animation-name: island-breathe-near; }')
+    // A figure at work in the menu bar bobs as well as breathing, down, as its head is at the screen's top.
+    expect(moving).toContain('.island:is([data-view="rest"], [data-view="tucked"]) .island-head[data-moment="work"] > * { animation: island-dip ')
+    expect(moving).toMatch(/@keyframes island-dip \{ 0%, 100% \{ translate: 0 0; \} 50% \{ translate: 0 \d+px; \} \}/)
+    // The glow's wide shadow is at least 5 px, at rest and at work's breath; 2.5 px read as a thin edge.
+    const widest = (rule: string) => Math.max(...[...rule.matchAll(/drop-shadow\(0 0 ([\d.]+)px/g)].map((match) => Number(match[1])))
+    expect(widest(/\.island \.glow \{ filter: ([^}]+)\}/.exec(moving)![1])).toBeGreaterThanOrEqual(5)
+    expect(widest(/@keyframes island-breathe \{([^\n]+)/.exec(moving)![1])).toBeGreaterThanOrEqual(10)
+    expect(widest(/@keyframes island-breathe-near \{([^\n]+)/.exec(moving)![1])).toBeLessThanOrEqual(8)
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toContain('.island *, .island *::before, .island *::after { animation: none !important; }')
   })
 
   it('the pinned agent sits first beside the notch, ready, in its own figure', async () => {
@@ -450,8 +532,11 @@ describe('the agent pinned to the notch', () => {
   }, 15_000)
 
   it('while it works, a message joins its turn as a note, and its chat is not written again', async () => {
+    vi.stubGlobal('WebSocket', QuietSocket)
     pinnedAgent = 'maya'
     jobs = [maya]
+    // Maya is writing her answer: her figure in her row acts it out.
+    sessionEvents.c1 = [runEvent('c1', 0, 'maya', 'message', { role: 'assistant', text: 'You have two' })]
     runs = [pinnedChat('c1', { working: ['maya'] })]
     const { container } = render(<Island />)
     const { findByRole } = within(container)
@@ -461,6 +546,7 @@ describe('the agent pinned to the notch', () => {
     const field = await findByRole('textbox', { name: 'Note for Maya · after its current step' })
     // Its work is its own row's, under its name, not a team's row of its own.
     expect(container.querySelector('.island-pinned .island-words')?.textContent).toBe('Maya just started')
+    await waitFor(() => expect(container.querySelector('.island-pinned .island-row-figure')?.getAttribute('data-phase')).toBe('typing'))
     expect(within(container).getByRole('button', { name: 'Send note' })).toBeTruthy()
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
     fireEvent.focus(field)
@@ -694,7 +780,6 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
   }, 15_000)
 
   it('asks to start one of your teams on the gold line; Start runs it, and its agents work on Maya’s stage', async () => {
-    class QuietSocket { onopen = null; onmessage = null; onclose = null; onerror = null; close() {} }
     vi.stubGlobal('WebSocket', QuietSocket)
     pinnedAgent = 'maya'
     jobs = [maya]
