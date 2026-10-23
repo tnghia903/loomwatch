@@ -1,4 +1,5 @@
 /* The island page's styles: the app's tokens, in its dark theme, and the island's own rules. */
 @import 'tailwindcss/theme.css' layer(theme);
 @import '../styles/tokens.css';
+@import '../styles/mark.css';
 @import './island.css';

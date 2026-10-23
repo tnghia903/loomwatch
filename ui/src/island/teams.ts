@@ -245,11 +245,14 @@ export function momentsBetween(before: readonly TeamNow[] | null, after: readonl
   return pops
 }
 
-/** What the tucked island shows beside the notch. */
+/** What the island at rest shows beside the notch. */
 export interface Tucked {
-  /** One per team, most urgent first, at most three. */
+  /** The work of the agent pinned to the notch, which its own figure, always first beside the
+      notch, shows; `null` while it does none. */
+  pinned: TeamNow | null
+  /** One per other team, most urgent first, at most three. */
   heads: TeamNow[]
-  /** Teams beyond the three. */
+  /** Teams beyond those. */
   more: number
   /** Every question, permission, review and spend stop, across all teams. */
   asks: number
@@ -266,7 +269,8 @@ export const teamAskKey = (request: Pick<TeamRequest, 'id'>): string => `team:${
 export function tucked(teams: readonly TeamNow[]): Tucked {
   const asks = teams.reduce((sum, team) => sum + team.asks.length + (team.teamAsks?.length ?? 0), 0)
   const right = asks ? 'count' : teams.some((team) => team.moment === 'done' || team.moment === 'fail') ? 'slip' : teams.length === 1 && teams[0].moment === 'work' ? 'time' : 'none'
-  return { heads: teams.slice(0, HEADS), more: Math.max(0, teams.length - HEADS), asks, right }
+  const others = teams.filter((team) => !team.pinned)
+  return { pinned: teams.find((team) => team.pinned) ?? null, heads: others.slice(0, HEADS), more: Math.max(0, others.length - HEADS), asks, right }
 }
 
 /** How long a run has been at work: "4m" beside the notch, "4 min" in the list; hours past one.

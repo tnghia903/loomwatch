@@ -1,10 +1,11 @@
-//! The see-through panel over the notch that holds the island page (ADR 0083, `crate::island`).
+//! The see-through panels over the notch that hold the island page (ADR 0083, `crate::island`):
+//! one on every screen, so no screen's island comes and goes as the pointer moves between them.
 //!
 //! `AppKit` and `WebKit` have no safe Rust interface for what the island needs: a panel above the
 //! menu bar that takes the keyboard only while a message to the pinned agent is written, a web
-//! view with no background, and messages from the page. So this module, and only this one in the workspace, calls them directly. Everything it
-//! decides is in `crate::island`, where it is tested; what is left here is placing the panel,
-//! passing the pointer, and carrying messages.
+//! view with no background, and messages from the page. So this module, and only this one in the
+//! workspace, calls them directly. Everything it decides is in `crate::island`, where it is
+//! tested; what is left here is placing the panels, passing the pointer, and carrying messages.
 #![allow(unsafe_code)]
 
 use std::cell::Cell;
@@ -36,16 +37,19 @@ use tray_icon::menu::{ContextMenu, Menu};
 
 use crate::island::{self, FromPage, Rect, Screen, ToPage};
 
-/// What the panel hears, for the app's event loop.
+/// What the panels hear, for the app's event loop.
 #[derive(Debug)]
 pub enum IslandEvent {
-    /// A message from the page.
-    Page(FromPage),
+    /// A message from the page of one screen's island, by the island's number.
+    Page {
+        from: u32,
+        message: FromPage,
+    },
     /// The pointer moved.
     Pointer,
     /// A click landed somewhere other than `LoomWatch`.
     ClickOutside,
-    /// Screens, spaces or the frontmost app changed: place the panel again.
+    /// Screens, spaces or the frontmost app changed: place the panels again.
     Screens,
     /// The left button went down, or up, in another app: a drag may begin, or ends.
     PressStarted,
@@ -56,47 +60,343 @@ pub enum IslandEvent {
 
 type Sender = Rc<dyn Fn(IslandEvent)>;
 
-pub struct NotchPanel {
-    panel: Retained<IslandPanel>,
-    web: Retained<IslandWebView>,
-    /// Kept for as long as the panel: the page's messages, the event monitors and the observers
-    /// stop when these go.
-    _bridge: Retained<Bridge>,
-    _monitors: Vec<Retained<AnyObject>>,
-    _observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
-    /// What ⌃⌥Space calls, for as long as the shortcut is registered; `None` when another app
-    /// holds it.
-    _shortcut: Option<Box<Sender>>,
-    /// Every screen, as last measured: the island follows the pointer from one to the next.
+/// The island on every screen. Dropped, every panel closes and `LoomWatch` stops watching the
+/// pointer and gives ⌃⌥Space back: Show at the notch, unticked.
+pub struct NotchPanels {
+    mtm: MainThreadMarker,
+    send: Sender,
+    /// One island for each screen, in the order `NSScreen` lists them, the main screen first.
+    islands: Vec<ScreenIsland>,
+    /// The number the next island made gets, so a page's message reaches only its own island.
+    next_id: u32,
+    /// Which of them is live: the one on the screen the pointer is on.
+    live: Option<usize>,
+    /// Every screen, as last measured.
     screens: Vec<Screen>,
+    /// `loomwatchd`'s address, once it answers: the island of a screen plugged in later loads its
+    /// page from it.
+    origin: Option<String>,
     /// The drag pasteboard's count when the left button went down in another app: a different
     /// count while it is held means something is being dragged, not a window or a selection.
     pressed_at: Option<isize>,
+    /// What every page was last told, so they hear only of changes.
+    away: bool,
+    full_screen: bool,
+    /// Taken out when the islands go: the event monitors, the observers and their notification
+    /// centres, and ⌃⌥Space, `None` when another app holds it.
+    monitors: Vec<Retained<AnyObject>>,
+    observers: Vec<Observer>,
+    _shortcut: Option<Shortcut>,
+}
+
+type Observer = (
+    Retained<NSNotificationCenter>,
+    Retained<ProtocolObject<dyn NSObjectProtocol>>,
+);
+
+impl NotchPanels {
+    /// No islands yet: [`NotchPanels::place`] makes one for each screen, and
+    /// [`NotchPanels::load`] shows them. `send` hands what they hear to the app's event loop.
+    pub fn new(mtm: MainThreadMarker, send: impl Fn(IslandEvent) + 'static) -> Self {
+        let send: Sender = Rc::new(send);
+        Self {
+            mtm,
+            islands: Vec::new(),
+            next_id: 0,
+            live: None,
+            screens: Vec::new(),
+            origin: None,
+            pressed_at: None,
+            away: false,
+            full_screen: false,
+            monitors: monitors(&send),
+            observers: observers(&send),
+            _shortcut: register_shortcut(&send),
+            send,
+        }
+    }
+
+    /// Show the island page from the `loomwatchd` at `origin` on every screen. Done again when
+    /// `loomwatchd` comes back on another port.
+    pub fn load(&mut self, origin: &str) {
+        self.origin = Some(origin.to_owned());
+        for island in &mut self.islands {
+            island.load(origin);
+        }
+    }
+
+    /// One screen's page listens: tell it where it is and what it needs to know.
+    pub fn page_ready(&mut self, from: u32) {
+        let (away, full_screen) = (self.away, self.full_screen);
+        if let Some(island) = self.island(from) {
+            island.ready = true;
+            if let Some(place) = island.place.clone() {
+                island.send(&place);
+            }
+            island.send(&ToPage::Away { away });
+            island.send(&ToPage::FullScreen { on: full_screen });
+            island.send(&ToPage::Live { on: island.live });
+        }
+    }
+
+    /// Measure the screens again: an island for each, hanging from its top, and the one on the
+    /// screen the pointer is on live.
+    pub fn place(&mut self) {
+        self.screens = screens(self.mtm);
+        self.islands.truncate(self.screens.len());
+        while self.islands.len() < self.screens.len() {
+            let mut island = ScreenIsland::new(self.mtm, self.next_id, &self.send);
+            self.next_id += 1;
+            if let Some(origin) = &self.origin {
+                island.load(origin);
+            }
+            self.islands.push(island);
+        }
+        for (island, screen) in self.islands.iter_mut().zip(&self.screens) {
+            island.put(screen);
+        }
+        if self.live.is_some_and(|live| live >= self.islands.len()) {
+            self.live = None;
+        }
+        self.follow_pointer();
+        self.check_full_screen();
+    }
+
+    /// The island on the screen the pointer is on is live (`island::live_screen`), and the one
+    /// that was goes back to rest. The island a message is being written in stays live, wherever
+    /// the pointer goes.
+    fn follow_pointer(&mut self) {
+        if self
+            .islands
+            .iter()
+            .any(|island| island.panel.ivars().keyboard.get())
+        {
+            return;
+        }
+        let at = NSEvent::mouseLocation();
+        let live = island::live_screen(&self.screens, (at.x, at.y), self.live);
+        if live == self.live {
+            return;
+        }
+        if let Some(was) = self.live.and_then(|was| self.islands.get_mut(was)) {
+            was.set_live(false);
+        }
+        if let Some(now) = live.and_then(|now| self.islands.get_mut(now)) {
+            now.set_live(true);
+        }
+        self.live = live;
+    }
+
+    /// Where one screen's island and what dropped out of it are now.
+    pub fn set_areas(&mut self, from: u32, areas: Vec<Rect>) {
+        if let Some(island) = self.island(from) {
+            island.areas = areas;
+        }
+        self.pointer();
+    }
+
+    /// The pointer moved: the live island's panel takes it only on the island, and its page hears
+    /// which of its areas it is on.
+    pub fn pointer(&mut self) {
+        self.follow_pointer();
+        let at = NSEvent::mouseLocation();
+        self.drag_moved(at.x, at.y);
+        if let Some(island) = self.live_island() {
+            let (x, y) = island::in_panel(island.frame, at.x, at.y);
+            island.set_area(island::area_under(&island.areas, x, y));
+        }
+    }
+
+    /// While the left button is held in another app: once a drag of something begins, macOS sends
+    /// other apps no more of the pointer, so the islands follow it from here, the live one opens as
+    /// a slot when it comes near, and takes the pointer there, which makes its panel where the drag
+    /// can drop. False once the button is up, wherever it came up: on an island, no other app
+    /// hears it.
+    pub fn poll_drag(&mut self) -> bool {
+        if NSEvent::pressedMouseButtons() & 1 == 0 {
+            self.press_ended();
+            return false;
+        }
+        self.pointer();
+        true
+    }
+
+    /// The left button went down in another app: note the drag pasteboard, to tell a drag of
+    /// something (a file, a picture, text) from a drag of a window or a selection.
+    pub fn press_started(&mut self) {
+        self.pressed_at = Some(NSPasteboard::pasteboardWithName(drag_pasteboard()).changeCount());
+    }
+
+    /// The button came up: whatever was dragged was dropped, here or elsewhere.
+    pub fn press_ended(&mut self) {
+        self.pressed_at = None;
+        for island in &mut self.islands {
+            island.set_drag_near(false);
+        }
+    }
+
+    /// While something is dragged, the live island's page hears whether it is near, so the island
+    /// opens to take it; the page then reports the open island, and the panel takes the drag there
+    /// like any pointer.
+    fn drag_moved(&mut self, x: f64, y: f64) {
+        let Some(pressed_at) = self.pressed_at else {
+            return;
+        };
+        if NSPasteboard::pasteboardWithName(drag_pasteboard()).changeCount() == pressed_at {
+            return;
+        }
+        let near = self
+            .live
+            .and_then(|live| self.screens.get(live))
+            .is_some_and(|screen| island::near_island(screen, x, y));
+        if let Some(island) = self.live_island() {
+            island.set_drag_near(near);
+        }
+    }
+
+    /// Copy on an answer: on the clipboard as any app's Copy puts it, formatted (`html`) for an
+    /// app that pastes formatting, such as Mail, Notes or Pages, and as plain `text` for the rest.
+    pub fn copy(text: &str, html: Option<&str>) {
+        let board = NSPasteboard::generalPasteboard();
+        board.clearContents();
+        if let Some(html) = html {
+            // SAFETY: `NSPasteboardTypeHTML` is `AppKit`'s own constant.
+            board.setString_forType(&NSString::from_str(html), unsafe { NSPasteboardTypeHTML });
+        }
+        // SAFETY: `NSPasteboardTypeString` is `AppKit`'s own constant.
+        board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
+    }
+
+    /// A message to the pinned agent is being written in one screen's island: its panel takes the
+    /// keyboard, without bringing `LoomWatch` to the front, so the app the person was in stays
+    /// where it was.
+    pub fn take_keyboard(&mut self, from: u32) {
+        if let Some(island) = self.island(from) {
+            island.take_keyboard();
+        }
+    }
+
+    /// The message is sent, put away or left: the keyboard goes back to the app that had it.
+    pub fn give_back_keyboard(&mut self, from: u32) {
+        if let Some(island) = self.island(from) {
+            island.give_back_keyboard();
+        }
+    }
+
+    /// ⌃⌥Space: the box to write to the pinned agent opens in the live island, with the keyboard;
+    /// pressed again while it is open, the page puts it away and gives the keyboard back.
+    pub fn compose(&mut self) {
+        if let Some(island) = self.live_island() {
+            island.take_keyboard();
+            island.send(&ToPage::Compose);
+        }
+    }
+
+    /// A click elsewhere: a pop-out tucks away at once, on every island the click wasn't on.
+    pub fn click_outside(&self) {
+        for island in self.islands.iter().filter(|island| island.area.is_none()) {
+            island.send(&ToPage::ClickOutside);
+        }
+    }
+
+    /// Results looked at on one screen's island leave the others too.
+    pub fn seen(&self, from: u32, runs: &[String]) {
+        let seen = ToPage::Seen {
+            runs: runs.to_vec(),
+        };
+        for island in self.islands.iter().filter(|island| island.id != from) {
+            island.send(&seen);
+        }
+    }
+
+    /// Every couple of seconds: is the person away, and is an app full screen?
+    pub fn tick(&mut self) {
+        // SAFETY: a plain query of the window server, with its documented constants.
+        let idle = unsafe {
+            CGEventSourceSecondsSinceLastEventType(COMBINED_SESSION_STATE, ANY_INPUT_EVENT)
+        };
+        let away = island::away(idle);
+        if away != self.away {
+            self.away = away;
+            self.tell_all(&ToPage::Away { away });
+        }
+        self.check_full_screen();
+    }
+
+    /// The app's menu, where one screen's island was right-clicked or its ⋯ pressed.
+    pub fn show_menu(&mut self, from: u32, menu: &Menu) {
+        if let Some(island) = self.island(from) {
+            let view = Retained::as_ptr(&island.web).cast::<std::ffi::c_void>();
+            // SAFETY: the web view is a valid `NSView` for as long as its island.
+            unsafe { menu.show_context_menu_for_nsview(view, None) };
+        }
+    }
+
+    fn check_full_screen(&mut self) {
+        let on = NSApplication::sharedApplication(self.mtm)
+            .currentSystemPresentationOptions()
+            .contains(NSApplicationPresentationOptions::FullScreen);
+        if on != self.full_screen {
+            self.full_screen = on;
+            self.tell_all(&ToPage::FullScreen { on });
+        }
+    }
+
+    fn tell_all(&self, message: &ToPage) {
+        for island in &self.islands {
+            island.send(message);
+        }
+    }
+
+    fn island(&mut self, id: u32) -> Option<&mut ScreenIsland> {
+        self.islands.iter_mut().find(|island| island.id == id)
+    }
+
+    fn live_island(&mut self) -> Option<&mut ScreenIsland> {
+        self.live.and_then(|live| self.islands.get_mut(live))
+    }
+}
+
+impl Drop for NotchPanels {
+    /// Show at the notch, unticked: every panel closes, and nothing of the island is left
+    /// listening. ⌃⌥Space goes back with `Shortcut`'s own drop.
+    fn drop(&mut self) {
+        self.islands.clear();
+        for monitor in &self.monitors {
+            // SAFETY: a monitor `NSEvent` returned from `monitors`, removed once.
+            unsafe { NSEvent::removeMonitor(monitor) };
+        }
+        for (centre, observer) in &self.observers {
+            // SAFETY: an observer added to this centre in `observers`, removed once.
+            unsafe { centre.removeObserver(AsRef::<AnyObject>::as_ref(&**observer)) };
+        }
+    }
+}
+
+/// One screen's island: its panel, and the page in it.
+struct ScreenIsland {
+    id: u32,
+    panel: Retained<IslandPanel>,
+    web: Retained<IslandWebView>,
+    /// Kept for as long as the island: the page's messages stop when it goes.
+    _bridge: Retained<Bridge>,
     /// The panel's frame on screen, and the island's areas in it, as the page last reported them.
     frame: Rect,
     areas: Vec<Rect>,
-    /// What the page was last told, so it hears only of changes.
-    told: Told,
+    /// What the page was last told, so it hears only of changes: which of the island's areas the
+    /// pointer is on, whether something dragged is near, and whether it is the live island.
+    area: Option<usize>,
+    drag_near: bool,
+    live: bool,
     place: Option<ToPage>,
     /// The page has loaded and listens.
     ready: bool,
 }
 
-#[derive(Default)]
-struct Told {
-    /// Which of the island's areas the pointer is on.
-    area: Option<usize>,
-    away: bool,
-    full_screen: bool,
-    /// Something is being dragged near the island.
-    drag_near: bool,
-}
-
-impl NotchPanel {
-    /// The panel, empty and hidden until [`NotchPanel::load`]. `send` hands what it hears to the
-    /// app's event loop.
-    pub fn new(mtm: MainThreadMarker, send: impl Fn(IslandEvent) + 'static) -> Self {
-        let send: Sender = Rc::new(send);
+impl ScreenIsland {
+    /// The panel, empty and hidden until [`ScreenIsland::load`]. Its page's messages go to `send`
+    /// with `id`.
+    fn new(mtm: MainThreadMarker, id: u32, send: &Sender) -> Self {
         let frame = Rect::new(0.0, 0.0, island::PANEL_WIDTH, island::PANEL_HEIGHT);
 
         // A panel that never activates `LoomWatch` and becomes key only while a message to the
@@ -104,7 +404,8 @@ impl NotchPanel {
         // the menu bar on every space and beside full-screen apps; and that lets every click
         // through until the pointer is on the island.
         let panel = IslandPanel::new(mtm, frame);
-        // SAFETY: the panel is kept in `NotchPanel` and never closed, so it must not free itself.
+        // SAFETY: the panel is kept in its island and closed only as that goes, so it must not
+        // free itself.
         unsafe { panel.setReleasedWhenClosed(false) };
         panel.setFloatingPanel(true);
         panel.setBecomesKeyOnlyIfNeeded(true);
@@ -122,9 +423,9 @@ impl NotchPanel {
         panel.setIgnoresMouseEvents(true);
         panel.setAcceptsMouseMovedEvents(true);
 
-        let bridge = Bridge::new(mtm, Rc::clone(&send));
+        let bridge = Bridge::new(mtm, id, Rc::clone(send));
         // SAFETY: a configuration and a web view made on the main thread, with a message handler
-        // that lives as long as the panel. `drawsBackground` is the web view's own switch for a
+        // that lives as long as the island. `drawsBackground` is the web view's own switch for a
         // see-through page, set through key-value coding as `WebKit` documents for macOS.
         let web = unsafe {
             let configuration = WKWebViewConfiguration::new(mtm);
@@ -152,25 +453,21 @@ impl NotchPanel {
         panel.setContentView(Some(&web));
 
         Self {
+            id,
             panel,
             web,
             _bridge: bridge,
-            _monitors: monitors(&send),
-            _observers: observers(&send),
-            _shortcut: register_shortcut(&send),
-            screens: Vec::new(),
-            pressed_at: None,
             frame,
             areas: Vec::new(),
-            told: Told::default(),
+            area: None,
+            drag_near: false,
+            live: false,
             place: None,
             ready: false,
         }
     }
 
-    /// Show the island page from the `loomwatchd` at `origin`. Done again when `loomwatchd` comes
-    /// back on another port.
-    pub fn load(&mut self, origin: &str) {
+    fn load(&mut self, origin: &str) {
         let address = NSString::from_str(&format!("{origin}/island.html"));
         let Some(url) = NSURL::URLWithString(&address) else {
             return;
@@ -183,145 +480,43 @@ impl NotchPanel {
         self.panel.orderFrontRegardless();
     }
 
-    /// The page listens: tell it where it is and what it needs to know.
-    pub fn page_ready(&mut self) {
-        self.ready = true;
-        if let Some(place) = self.place.clone() {
-            self.send(&place);
-        }
-        self.send(&ToPage::Away {
-            away: self.told.away,
-        });
-        self.send(&ToPage::FullScreen {
-            on: self.told.full_screen,
-        });
-    }
-
-    /// Measure the screens again, and put the panel on the one the pointer is on.
-    pub fn place(&mut self, mtm: MainThreadMarker) {
-        self.screens = screens(mtm);
-        self.follow_pointer();
-        self.check_full_screen(mtm);
-    }
-
-    /// The island is on the screen the pointer is on (`island::island_screen`): around its notch,
-    /// or at the middle of its menu bar. It stays put while a message is being written in it.
-    fn follow_pointer(&mut self) {
-        if self.panel.ivars().keyboard.get() {
-            return;
-        }
-        let at = NSEvent::mouseLocation();
-        let Some(screen) = island::island_screen(&self.screens, (at.x, at.y)).copied() else {
-            return;
-        };
-        let frame = island::panel_frame(&screen);
+    /// Hang the panel from the top of `screen`, centred on its notch or on the screen without
+    /// one, and tell the page what it is around.
+    fn put(&mut self, screen: &Screen) {
+        let frame = island::panel_frame(screen);
         if frame != self.frame {
             self.panel.setFrame_display(ns_rect(frame), true);
             self.frame = frame;
         }
-        let place = ToPage::place(&screen);
+        let place = ToPage::place(screen);
         if self.place.as_ref() != Some(&place) {
             self.send(&place);
             self.place = Some(place);
         }
     }
 
-    /// Where the island and what dropped out of it are now.
-    pub fn set_areas(&mut self, areas: Vec<Rect>) {
-        self.areas = areas;
-        self.pointer();
-    }
-
-    /// The pointer moved: the panel takes it only on the island, and the page hears which of its
-    /// areas it is on.
-    pub fn pointer(&mut self) {
-        self.follow_pointer();
-        let at = NSEvent::mouseLocation();
-        self.drag_moved(at.x, at.y);
-        let (x, y) = island::in_panel(self.frame, at.x, at.y);
-        self.set_area(island::area_under(&self.areas, x, y));
-    }
-
-    /// While the left button is held in another app: once a drag of something begins, macOS sends
-    /// other apps no more of the pointer, so the island follows it from here, opens as a slot when
-    /// it comes near, and takes the pointer there, which makes the panel where the drag can drop.
-    /// False once the button is up, wherever it came up: on the island, no other app hears it.
-    pub fn poll_drag(&mut self) -> bool {
-        if NSEvent::pressedMouseButtons() & 1 == 0 {
-            self.press_ended();
-            return false;
-        }
-        self.pointer();
-        true
-    }
-
-    /// The left button went down in another app: note the drag pasteboard, to tell a drag of
-    /// something (a file, a picture, text) from a drag of a window or a selection.
-    pub fn press_started(&mut self) {
-        self.pressed_at = Some(NSPasteboard::pasteboardWithName(drag_pasteboard()).changeCount());
-    }
-
-    /// The button came up: whatever was dragged was dropped, here or elsewhere.
-    pub fn press_ended(&mut self) {
-        self.pressed_at = None;
-        self.set_drag_near(false);
-    }
-
-    /// While something is dragged, the page hears whether it is near the island, so the island
-    /// opens to take it; the page then reports the open island, and the panel takes the drag
-    /// there like any pointer.
-    fn drag_moved(&mut self, x: f64, y: f64) {
-        let Some(pressed_at) = self.pressed_at else {
-            return;
-        };
-        if NSPasteboard::pasteboardWithName(drag_pasteboard()).changeCount() == pressed_at {
-            return;
-        }
-        let near = self
-            .screens
-            .iter()
-            .find(|screen| screen.frame.contains(x, y))
-            .is_some_and(|screen| island::near_island(screen, x, y));
-        self.set_drag_near(near);
-    }
-
-    /// While something dragged is near, the whole panel takes the pointer at once: macOS offers a
-    /// window as a place to drop only as the drag moves over it, so waiting for the island to open
-    /// first could leave a drag that has stopped moving with nowhere to land.
-    fn set_drag_near(&mut self, near: bool) {
-        if near != self.told.drag_near {
-            self.told.drag_near = near;
-            self.panel
-                .setIgnoresMouseEvents(!near && self.told.area.is_none());
-            self.send(&ToPage::Drag { near });
+    /// Live, the island may open and drop things out; no longer live, it goes back to rest and
+    /// lets the pointer through.
+    fn set_live(&mut self, on: bool) {
+        if on != self.live {
+            self.live = on;
+            if !on {
+                self.set_area(None);
+                self.set_drag_near(false);
+            }
+            self.send(&ToPage::Live { on });
         }
     }
 
-    /// Copy on an answer: on the clipboard as any app's Copy puts it, formatted (`html`) for an
-    /// app that pastes formatting, such as Mail, Notes or Pages, and as plain `text` for the rest.
-    pub fn copy(text: &str, html: Option<&str>) {
-        let board = NSPasteboard::generalPasteboard();
-        board.clearContents();
-        if let Some(html) = html {
-            // SAFETY: `NSPasteboardTypeHTML` is `AppKit`'s own constant.
-            board.setString_forType(&NSString::from_str(html), unsafe { NSPasteboardTypeHTML });
-        }
-        // SAFETY: `NSPasteboardTypeString` is `AppKit`'s own constant.
-        board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
-    }
-
-    /// A message to the pinned agent is being written: the panel takes the keyboard, without
-    /// bringing `LoomWatch` to the front, so the app the person was in stays where it was.
-    pub fn take_keyboard(&self) {
+    fn take_keyboard(&self) {
         self.panel.ivars().keyboard.set(true);
         self.panel.makeKeyWindow();
         self.panel.makeFirstResponder(Some(&self.web));
     }
 
-    /// The message is sent, put away or left: the keyboard goes back to the app that had it. The
-    /// panel steps out and back, and the window server gives the key back to the app in front,
-    /// which never stopped being in front.
-    pub fn give_back_keyboard(&self) {
+    /// The panel steps out and back, and the window server gives the key back to the app in
+    /// front, which never stopped being in front.
+    fn give_back_keyboard(&self) {
         self.panel.ivars().keyboard.set(false);
         if self.panel.isKeyWindow() {
             self.panel.orderOut(None);
@@ -329,56 +524,23 @@ impl NotchPanel {
         }
     }
 
-    /// ⌃⌥Space: the box to write to the pinned agent opens, with the keyboard; pressed again
-    /// while it is open, the page puts it away and gives the keyboard back.
-    pub fn compose(&self) {
-        self.take_keyboard();
-        self.send(&ToPage::Compose);
-    }
-
-    /// A click elsewhere: a pop-out tucks away at once.
-    pub fn click_outside(&self) {
-        if self.told.area.is_none() {
-            self.send(&ToPage::ClickOutside);
-        }
-    }
-
-    /// Every couple of seconds: is the person away, and is an app full screen?
-    pub fn tick(&mut self, mtm: MainThreadMarker) {
-        // SAFETY: a plain query of the window server, with its documented constants.
-        let idle = unsafe {
-            CGEventSourceSecondsSinceLastEventType(COMBINED_SESSION_STATE, ANY_INPUT_EVENT)
-        };
-        let away = island::away(idle);
-        if away != self.told.away {
-            self.told.away = away;
-            self.send(&ToPage::Away { away });
-        }
-        self.check_full_screen(mtm);
-    }
-
-    /// The app's menu, where the island was right-clicked.
-    pub fn show_menu(&self, menu: &Menu) {
-        let view = Retained::as_ptr(&self.web).cast::<std::ffi::c_void>();
-        // SAFETY: the web view is a valid `NSView` for as long as `self`.
-        unsafe { menu.show_context_menu_for_nsview(view, None) };
-    }
-
-    fn check_full_screen(&mut self, mtm: MainThreadMarker) {
-        let on = NSApplication::sharedApplication(mtm)
-            .currentSystemPresentationOptions()
-            .contains(NSApplicationPresentationOptions::FullScreen);
-        if on != self.told.full_screen {
-            self.told.full_screen = on;
-            self.send(&ToPage::FullScreen { on });
+    /// While something dragged is near, the whole panel takes the pointer at once: macOS offers a
+    /// window as a place to drop only as the drag moves over it, so waiting for the island to open
+    /// first could leave a drag that has stopped moving with nowhere to land.
+    fn set_drag_near(&mut self, near: bool) {
+        if near != self.drag_near {
+            self.drag_near = near;
+            self.panel
+                .setIgnoresMouseEvents(!near && self.area.is_none());
+            self.send(&ToPage::Drag { near });
         }
     }
 
     fn set_area(&mut self, area: Option<usize>) {
-        if area != self.told.area {
-            self.told.area = area;
+        if area != self.area {
+            self.area = area;
             self.panel
-                .setIgnoresMouseEvents(area.is_none() && !self.told.drag_near);
+                .setIgnoresMouseEvents(area.is_none() && !self.drag_near);
             self.send(&ToPage::Pointer {
                 over: area.is_some(),
                 area,
@@ -393,6 +555,22 @@ impl NotchPanel {
         let script = NSString::from_str(&message.script());
         // SAFETY: a script of our own making, run in our own page, with no completion handler.
         unsafe { self.web.evaluateJavaScript_completionHandler(&script, None) };
+    }
+}
+
+impl Drop for ScreenIsland {
+    /// A screen unplugged, or Show at the notch unticked: the page stops sending, and the panel
+    /// closes.
+    fn drop(&mut self) {
+        // SAFETY: the handler added under this name in `ScreenIsland::new`, on the main thread.
+        unsafe {
+            self.web
+                .configuration()
+                .userContentController()
+                .removeScriptMessageHandlerForName(ns_string!("island"));
+        }
+        self.panel.orderOut(None);
+        self.panel.close();
     }
 }
 
@@ -423,7 +601,7 @@ fn screens(mtm: MainThreadMarker) -> Vec<Screen> {
 }
 
 /// The pointer anywhere, and clicks in other apps: `AppKit` tells a global monitor of what happens
-/// in other apps, and a local one of what happens in `LoomWatch`'s own panel.
+/// in other apps, and a local one of what happens in `LoomWatch`'s own panels.
 fn monitors(send: &Sender) -> Vec<Retained<AnyObject>> {
     let moved = NSEventMask::MouseMoved | NSEventMask::LeftMouseDragged;
     let pointer = {
@@ -471,32 +649,42 @@ fn monitors(send: &Sender) -> Vec<Retained<AnyObject>> {
 }
 
 /// Screens added, removed or rearranged; another space; another app in front.
-fn observers(send: &Sender) -> Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>> {
+fn observers(send: &Sender) -> Vec<Observer> {
     let block = {
         let send = Rc::clone(send);
         RcBlock::new(move |_: NonNull<NSNotification>| send(IslandEvent::Screens))
     };
+    let app = NSNotificationCenter::defaultCenter();
     let workspace = NSWorkspace::sharedWorkspace().notificationCenter();
     // SAFETY: the names are `AppKit`'s own, and the block lives as long as the observer.
     unsafe {
         vec![
-            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
-                Some(NSApplicationDidChangeScreenParametersNotification),
-                None,
-                None,
-                &block,
+            (
+                app.clone(),
+                app.addObserverForName_object_queue_usingBlock(
+                    Some(NSApplicationDidChangeScreenParametersNotification),
+                    None,
+                    None,
+                    &block,
+                ),
             ),
-            workspace.addObserverForName_object_queue_usingBlock(
-                Some(NSWorkspaceActiveSpaceDidChangeNotification),
-                None,
-                None,
-                &block,
+            (
+                workspace.clone(),
+                workspace.addObserverForName_object_queue_usingBlock(
+                    Some(NSWorkspaceActiveSpaceDidChangeNotification),
+                    None,
+                    None,
+                    &block,
+                ),
             ),
-            workspace.addObserverForName_object_queue_usingBlock(
-                Some(NSWorkspaceDidActivateApplicationNotification),
-                None,
-                None,
-                &block,
+            (
+                workspace.clone(),
+                workspace.addObserverForName_object_queue_usingBlock(
+                    Some(NSWorkspaceDidActivateApplicationNotification),
+                    None,
+                    None,
+                    &block,
+                ),
             ),
         ]
     }
@@ -562,6 +750,8 @@ define_class!(
 );
 
 struct BridgeIvars {
+    /// The island whose page this hears.
+    id: u32,
     send: Sender,
 }
 
@@ -585,15 +775,19 @@ define_class!(
             if let Ok(text) = body.downcast::<NSString>()
                 && let Some(message) = FromPage::parse(&text.to_string())
             {
-                (self.ivars().send)(IslandEvent::Page(message));
+                let ivars = self.ivars();
+                (ivars.send)(IslandEvent::Page {
+                    from: ivars.id,
+                    message,
+                });
             }
         }
     }
 );
 
 impl Bridge {
-    fn new(mtm: MainThreadMarker, send: Sender) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(BridgeIvars { send });
+    fn new(mtm: MainThreadMarker, id: u32, send: Sender) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(BridgeIvars { id, send });
         // SAFETY: `NSObject`'s `init`.
         unsafe { msg_send![super(this), init] }
     }
@@ -621,10 +815,30 @@ fn drag_pasteboard() -> &'static NSString {
     unsafe { NSPasteboardNameDrag }
 }
 
+/// ⌃⌥Space, held for as long as the islands are at the notch, and given back to macOS as they go:
+/// where it is "Select next source in Input menu" with more than one input source.
+struct Shortcut {
+    hot_key: *mut c_void,
+    handler: *mut c_void,
+    /// What ⌃⌥Space calls: Carbon holds a pointer to it until the handler is removed.
+    _send: Box<Sender>,
+}
+
+impl Drop for Shortcut {
+    fn drop(&mut self) {
+        // SAFETY: the hot key and handler `register_shortcut` installed, each removed once, before
+        // `_send`, which the handler points at, goes.
+        unsafe {
+            UnregisterEventHotKey(self.hot_key);
+            RemoveEventHandler(self.handler);
+        }
+    }
+}
+
 /// ⌃⌥Space from any app (`island::SHORTCUT_KEY`), through Carbon's hot keys: a shortcut that works
 /// whichever app is in front, without asking for Accessibility. `None`, and a line in the log,
 /// when another app holds it.
-fn register_shortcut(send: &Sender) -> Option<Box<Sender>> {
+fn register_shortcut(send: &Sender) -> Option<Shortcut> {
     let held: Box<Sender> = Box::new(Rc::clone(send));
     let pressed = EventTypeSpec {
         class: KEYBOARD_EVENTS,
@@ -636,8 +850,8 @@ fn register_shortcut(send: &Sender) -> Option<Box<Sender>> {
     };
     let mut handler = std::ptr::null_mut();
     let mut hot_key = std::ptr::null_mut();
-    // SAFETY: the handler is called on the main thread with `held`, which lives in the panel for as
-    // long as the shortcut is registered: the app's whole life.
+    // SAFETY: the handler is called on the main thread with `held`, which lives in the `Shortcut`
+    // for as long as the shortcut is registered, and the handler is removed if the key can't be.
     let status = unsafe {
         let target = GetApplicationEventTarget();
         let installed = InstallEventHandler(
@@ -650,24 +864,32 @@ fn register_shortcut(send: &Sender) -> Option<Box<Sender>> {
                 .cast::<c_void>(),
             &raw mut handler,
         );
-        if installed == 0 {
-            RegisterEventHotKey(
+        if installed != 0 {
+            installed
+        } else {
+            let registered = RegisterEventHotKey(
                 island::SHORTCUT_KEY,
                 island::SHORTCUT_MODIFIERS,
                 id,
                 target,
                 0,
                 &raw mut hot_key,
-            )
-        } else {
-            installed
+            );
+            if registered != 0 {
+                RemoveEventHandler(handler);
+            }
+            registered
         }
     };
     if status != 0 {
         eprintln!("LoomWatch: ⌃⌥Space is not available ({status}); another app may hold it.");
         return None;
     }
-    Some(held)
+    Some(Shortcut {
+        hot_key,
+        handler,
+        _send: held,
+    })
 }
 
 /// Carbon calls this for ⌃⌥Space.
@@ -676,7 +898,7 @@ unsafe extern "C" fn shortcut_pressed(
     _event: *mut c_void,
     data: *mut c_void,
 ) -> i32 {
-    // SAFETY: `data` is the `Sender` boxed in `register_shortcut`, alive for the app's life.
+    // SAFETY: `data` is the `Sender` boxed in `register_shortcut`, alive until the handler goes.
     let send = unsafe { &*data.cast::<Sender>() };
     send(IslandEvent::Shortcut);
     0
@@ -711,6 +933,7 @@ unsafe extern "C" {
         user_data: *mut c_void,
         handler_ref: *mut *mut c_void,
     ) -> i32;
+    fn RemoveEventHandler(handler_ref: *mut c_void) -> i32;
     fn RegisterEventHotKey(
         key_code: u32,
         modifiers: u32,
@@ -719,6 +942,7 @@ unsafe extern "C" {
         options: u32,
         hot_key_ref: *mut *mut c_void,
     ) -> i32;
+    fn UnregisterEventHotKey(hot_key_ref: *mut c_void) -> i32;
 }
 
 /// `kCGEventSourceStateCombinedSessionState` and `kCGAnyInputEventType`.

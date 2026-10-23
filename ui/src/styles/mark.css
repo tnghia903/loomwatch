@@ -1,0 +1,11 @@
+/* LoomWatch's mark (LoomMark, components/ui/glyphs.tsx), still: the stitch smile at rest, the gold
+   "o" only when something needs you, and its glows. Loaded by the app and by the island at the
+   notch, so the mark says the same everywhere; how it moves is in motion.css. */
+.lw-mark :is(.lw-mark-face, .lw-mark-eyes, .lw-mark-o) { transform-box: fill-box; transform-origin: center; }
+.lw-mark .lw-mark-o { opacity: 0; scale: .4; }
+.lw-mark[data-mouth='o'] .lw-mark-stitch { opacity: 0; }
+.lw-mark[data-mouth='o'] .lw-mark-o { opacity: 1; scale: 1; }
+.lw-mark[data-mouth='o'] .lw-mark-eyes { scale: 1 1.08; }
+.lw-mark[data-glow='live'] { --glow: var(--color-live); }
+.lw-mark[data-glow='you'] { --glow: var(--color-accent); }
+.lw-mark:is([data-glow='live'], [data-glow='you']) { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }

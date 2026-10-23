@@ -20,6 +20,10 @@ use crate::api::ApiError;
 use crate::watch_api::local_evidence;
 
 const FILE_NAME: &str = "pinned.json";
+/// The file the Mac app keeps in the state folder while Show at the notch is unticked in its menu:
+/// no island on any screen, and ⌃⌥Space given back to macOS. Its twin is `OFF_FILE` in
+/// `crates/loomwatch-app/src/island.rs`, which writes it.
+const NOTCH_OFF_FILE: &str = "app-notch-off";
 
 /// `pinned.json`, `GET /api/pinned-agent` and the body of `PUT /api/pinned-agent`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,10 +33,23 @@ pub struct PinnedAgent {
     pub agent: Option<String>,
 }
 
-/// Which agent is pinned, shared by the routes. `file` is `None` in tests that keep it in memory.
+/// What `GET` and `PUT /api/pinned-agent` answer: the pinned agent, and whether there is an island
+/// at the notch to message it from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinnedNow {
+    pub agent: Option<String>,
+    /// False while Show at the notch is unticked in the Mac app: the agent stays pinned, but there
+    /// is no island and no ⌃⌥Space to reach it until it is ticked again.
+    pub notch_shown: bool,
+}
+
+/// Which agent is pinned, shared by the routes. `file` and `state_dir` are `None` in tests that
+/// keep it in memory.
 #[derive(Clone)]
 pub struct Pinned {
     file: Option<PathBuf>,
+    state_dir: Option<PathBuf>,
     teams_root: PathBuf,
     agent: Arc<RwLock<Option<String>>>,
 }
@@ -45,6 +62,7 @@ impl Pinned {
         let agent = load(&file);
         Self {
             file: Some(file),
+            state_dir: Some(state_dir.to_owned()),
             teams_root: teams_root.to_owned(),
             agent: Arc::new(RwLock::new(agent)),
         }
@@ -55,8 +73,24 @@ impl Pinned {
     pub fn in_memory(teams_root: &Path) -> Self {
         Self {
             file: None,
+            state_dir: None,
             teams_root: teams_root.to_owned(),
             agent: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Whether the island is at the notch: so unless the Mac app says Show at the notch is off.
+    #[must_use]
+    pub fn notch_shown(&self) -> bool {
+        self.state_dir
+            .as_ref()
+            .is_none_or(|state| !state.join(NOTCH_OFF_FILE).exists())
+    }
+
+    fn now(&self, pinned: PinnedAgent) -> PinnedNow {
+        PinnedNow {
+            agent: pinned.agent,
+            notch_shown: self.notch_shown(),
         }
     }
 
@@ -187,20 +221,20 @@ pub fn router(pinned: Pinned) -> Router {
         .with_state(pinned)
 }
 
-async fn get_pinned(State(pinned): State<Pinned>) -> Json<PinnedAgent> {
-    Json(pinned.get())
+async fn get_pinned(State(pinned): State<Pinned>) -> Json<PinnedNow> {
+    Json(pinned.now(pinned.get()))
 }
 
 async fn put_pinned(
     State(pinned): State<Pinned>,
     Json(next): Json<PinnedAgent>,
-) -> Result<Json<PinnedAgent>, ApiError> {
+) -> Result<Json<PinnedNow>, ApiError> {
     let store = pinned.clone();
     let kept = tokio::task::spawn_blocking(move || store.set(next))
         .await
         .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     match kept {
-        Ok(kept) => Ok(Json(kept)),
+        Ok(kept) => Ok(Json(pinned.now(kept))),
         Err(SetError::NotFound(id)) => {
             eprintln!("LoomWatch: no agent {id:?} in My agents to pin");
             Err(ApiError::new(
@@ -365,6 +399,39 @@ mod tests {
             body(app.oneshot(get()).await.expect("get")).await["agent"],
             serde_json::Value::Null
         );
+    }
+
+    #[tokio::test]
+    async fn the_page_hears_when_show_at_the_notch_is_off_and_the_pin_stays() {
+        let teams = folder();
+        let state = folder();
+        agent(teams.path(), "maya");
+        let app = router(Pinned::open(state.path(), teams.path()));
+        let first = body(app.clone().oneshot(get()).await.expect("get")).await;
+        assert_eq!(first["notchShown"], true);
+        // The Mac app's Show at the notch, unticked: it writes its file in the state folder.
+        std::fs::write(state.path().join("app-notch-off"), b"").expect("off");
+        let pinned = body(
+            app.clone()
+                .oneshot(put(r#"{"agent":"maya"}"#))
+                .await
+                .expect("pin"),
+        )
+        .await;
+        assert_eq!(pinned["agent"], "maya");
+        assert_eq!(pinned["notchShown"], false);
+        let off = body(app.clone().oneshot(get()).await.expect("get")).await;
+        assert_eq!(off["agent"], "maya");
+        assert_eq!(off["notchShown"], false);
+        // Ticked again.
+        std::fs::remove_file(state.path().join("app-notch-off")).expect("on");
+        assert_eq!(
+            body(app.oneshot(get()).await.expect("get")).await["notchShown"],
+            true
+        );
+        // What is kept is only which agent: the notch is the app's to say.
+        let kept = std::fs::read_to_string(state.path().join("pinned.json")).expect("kept");
+        assert!(!kept.contains("notch"), "{kept}");
     }
 
     #[tokio::test]

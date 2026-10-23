@@ -1,13 +1,17 @@
 //! The island at the notch (ADR 0083): where it goes, and what passes between the Mac app's
-//! see-through panel and the page drawn in it.
+//! see-through panels and the page drawn in each.
 //!
-//! The page (`ui/island.html`, served by `loomwatchd`) draws the island, decides when it pops out
-//! and tucks away, and answers a permission with the same calls the browser makes. The app only
-//! places the panel over the notch, lets clicks through everywhere but the island itself, and
-//! tells the page where the pointer is, whether the person is away, and whether an app is full
-//! screen. The panel never takes the keyboard, except while a message to the agent pinned to the
-//! notch is written (decision 9), and then only because the page asked. Kept apart from `AppKit`
-//! so it is the same, and tested, everywhere.
+//! Every screen has an island of its own, so none comes and goes as the pointer moves between
+//! screens; the one on the screen the pointer is on is the live one, which opens and drops things
+//! out (decision 1). The page (`ui/island.html`, served by `loomwatchd`) draws the island, decides
+//! when it pops out and tucks away, and answers a permission with the same calls the browser
+//! makes. The app only places a panel over each screen's notch, lets clicks through everywhere but
+//! the island itself, and tells each page whether it is live, where the pointer is, whether the
+//! person is away, and whether an app is full screen. A panel never takes the keyboard, except
+//! while a message to the agent pinned to the notch is written (decision 9), and then only because
+//! its page asked. Kept apart from `AppKit` so it is the same, and tested, everywhere.
+
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +54,14 @@ impl Rect {
 
     pub fn contains(&self, x: f64, y: f64) -> bool {
         x >= self.x && x < self.max_x() && y >= self.y && y < self.max_y()
+    }
+
+    /// Whether the pointer at (`x`, `y`) on screen is on this screen. macOS puts a pointer pushed
+    /// up to the very top of a screen at its top edge, and none at its bottom edge, which is the
+    /// top of the screen below (`NSMouseInRect`): so the top edge is in and the bottom edge out,
+    /// and a pointer in a `MacBook`'s notch is on the `MacBook`.
+    pub fn holds_pointer(&self, x: f64, y: f64) -> bool {
+        x >= self.x && x < self.max_x() && y > self.y && y <= self.max_y()
     }
 }
 
@@ -94,14 +106,17 @@ pub fn notch_from(safe_top: f64, left: Rect, right: Rect) -> Option<Notch> {
         .then_some(notch)
 }
 
-/// Where the island lives: on the screen the pointer is on, around its notch, or at the middle of
-/// its menu bar where it has none, so every screen has it; with the pointer on none of them, the
-/// main screen (`screens[0]`, the one with the menu bar in Displays settings).
-pub fn island_screen(screens: &[Screen], pointer: (f64, f64)) -> Option<&Screen> {
+/// Which screen's island is live, the one that opens and drops things out: the island on the
+/// screen the pointer is on, its top edge and notch included; with the pointer on none of them,
+/// the one that `was`, or else the main screen's (`screens[0]`, the one with the menu bar in
+/// Displays settings). Every other screen's island stays at rest, around its notch or at the
+/// middle of its menu bar.
+pub fn live_screen(screens: &[Screen], pointer: (f64, f64), was: Option<usize>) -> Option<usize> {
     screens
         .iter()
-        .find(|screen| screen.frame.contains(pointer.0, pointer.1))
-        .or_else(|| screens.first())
+        .position(|screen| screen.frame.holds_pointer(pointer.0, pointer.1))
+        .or_else(|| was.filter(|was| *was < screens.len()))
+        .or_else(|| (!screens.is_empty()).then_some(0))
 }
 
 /// How far from the middle of the top of a screen, and how far down, something dragged is near
@@ -118,7 +133,7 @@ pub fn near_island(screen: &Screen, x: f64, y: f64) -> bool {
         || screen.frame.x + screen.frame.width / 2.0,
         |notch| notch.mid_x(),
     );
-    screen.frame.contains(x, y)
+    screen.frame.holds_pointer(x, y)
         && (x - mid_x).abs() <= DROP_REACH.width
         && screen.frame.max_y() - y <= DROP_REACH.height
 }
@@ -161,6 +176,31 @@ pub fn away(idle_seconds: f64) -> bool {
     idle_seconds >= AWAY_AFTER_SECONDS
 }
 
+/// The file in `LoomWatch`'s state folder that says the island is off: Show at the notch,
+/// unticked in the app's menu. Without it the island is at the notch, as it is the first time.
+/// `loomwatchd` reads it too, so pinning an agent says how to reach it (its twin is
+/// `NOTCH_OFF_FILE` in `crates/loomwatch-backend/src/pinned.rs`).
+const OFF_FILE: &str = "app-notch-off";
+
+/// Whether the island is at the notch, with `state` the state folder.
+pub fn shown(state: &Path) -> bool {
+    !state.join(OFF_FILE).exists()
+}
+
+/// Show the island at the notch from now on, or don't.
+pub fn set_shown(state: &Path, shown: bool) -> std::io::Result<()> {
+    let off = state.join(OFF_FILE);
+    if shown {
+        match std::fs::remove_file(&off) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            done => done,
+        }
+    } else {
+        std::fs::create_dir_all(state)?;
+        std::fs::write(off, b"")
+    }
+}
+
 /// What the page sends the app.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -185,6 +225,8 @@ pub enum FromPage {
         #[serde(default)]
         html: Option<String>,
     },
+    /// Results looked at on this screen's island, by run: they leave every island.
+    Seen { runs: Vec<String> },
 }
 
 impl FromPage {
@@ -224,6 +266,11 @@ pub enum ToPage {
     Compose,
     /// Something is being dragged near the island, so it opens to take it; or no longer is.
     Drag { near: bool },
+    /// This island is the live one, on the screen the pointer is on, and may open and drop things
+    /// out; or it is no longer, and stays at rest.
+    Live { on: bool },
+    /// Results looked at on another screen's island: they leave this one too.
+    Seen { runs: Vec<String> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -301,29 +348,49 @@ mod tests {
     }
 
     #[test]
-    fn the_island_is_on_the_screen_the_pointer_is_on_notch_or_not() {
-        // The pointer on the MacBook: the island at its notch.
+    fn the_live_island_is_on_the_screen_the_pointer_is_on_notch_or_not() {
+        // The screen above is the main one: Displays settings put the menu bar on it.
         let both = [external(ABOVE), macbook()];
-        assert_eq!(island_screen(&both, (700.0, 500.0)), Some(&macbook()));
-        // On the screen above it, which has no notch: the island moves there.
-        assert_eq!(
-            island_screen(&both, (700.0, 1500.0)),
-            Some(&external(ABOVE))
-        );
-        // Between screens, or nowhere a screen is: the main screen.
-        assert_eq!(
-            island_screen(&both, (-900.0, -900.0)),
-            Some(&external(ABOVE))
-        );
-        assert_eq!(island_screen(&[], (0.0, 0.0)), None);
+        // The pointer on the MacBook: its island is live.
+        assert_eq!(live_screen(&both, (700.0, 500.0), None), Some(1));
+        // On the screen above it, which has no notch: that screen's island.
+        assert_eq!(live_screen(&both, (700.0, 1500.0), Some(1)), Some(0));
+        // Nowhere a screen is: the island that was live stays so, or else the main screen's.
+        assert_eq!(live_screen(&both, (-900.0, -900.0), Some(1)), Some(1));
+        assert_eq!(live_screen(&both, (-900.0, -900.0), None), Some(0));
+        assert_eq!(live_screen(&both, (-900.0, -900.0), Some(5)), Some(0));
+        assert_eq!(live_screen(&[], (0.0, 0.0), None), None);
+    }
+
+    #[test]
+    fn a_pointer_pushed_up_into_the_notch_stays_on_the_macbook() {
+        // macOS puts a pointer at the very top of a screen at its top edge: 982 on the MacBook.
+        // Each time it comes from the other screen, whose island was live.
+        let top = (756.0, 982.0);
+        // A main screen above the MacBook starts where the MacBook ends.
+        let above = [external(ABOVE), macbook()];
+        assert_eq!(live_screen(&above, top, Some(0)), Some(1));
+        // The first point up is on the screen above.
+        assert_eq!(live_screen(&above, (756.0, 982.5), Some(1)), Some(0));
+        // A main screen beside the MacBook, its top level with the MacBook's: no screen above the
+        // notch at all.
+        let beside = [
+            external(Rect::new(1512.0, -98.0, 1920.0, 1080.0)),
+            macbook(),
+        ];
+        assert_eq!(live_screen(&beside, top, Some(0)), Some(1));
+        assert_eq!(live_screen(&beside, (2000.0, 982.0), Some(1)), Some(0));
+        // The very bottom of the MacBook is the top of nothing: still the MacBook.
+        assert_eq!(live_screen(&beside, (756.0, 0.5), Some(0)), Some(1));
     }
 
     #[test]
     fn something_dragged_near_the_top_middle_of_the_screen_is_near_the_island() {
         let mac = macbook();
-        // Just under the notch, and a little to one side.
+        // Just under the notch, and a little to one side; and right up at the top edge.
         assert!(near_island(&mac, 756.0, 960.0));
         assert!(near_island(&mac, 756.0 + 250.0, 820.0));
+        assert!(near_island(&mac, 756.0, 982.0));
         // Too far down, too far aside, or on another screen.
         assert!(!near_island(&mac, 756.0, 700.0));
         assert!(!near_island(&mac, 200.0, 960.0));
@@ -430,6 +497,12 @@ mod tests {
                 html: Some(r#"<p>Rent rises <a href="https://x.vn">4%</a></p>"#.into())
             })
         );
+        assert_eq!(
+            FromPage::parse(r#"{"kind":"seen","runs":["r1","r2"]}"#),
+            Some(FromPage::Seen {
+                runs: vec!["r1".into(), "r2".into()]
+            })
+        );
         assert_eq!(FromPage::parse(r#"{"kind":"launch"}"#), None);
         assert_eq!(FromPage::parse("not json"), None);
     }
@@ -460,11 +533,46 @@ mod tests {
             ToPage::Drag { near: true }.script(),
             r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"drag","near":true})"#
         );
+        assert_eq!(
+            ToPage::Live { on: false }.script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"live","on":false})"#
+        );
+        assert_eq!(
+            ToPage::Seen {
+                runs: vec!["r1".into()]
+            }
+            .script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"seen","runs":["r1"]})"#
+        );
     }
 
     #[test]
     fn a_minute_without_the_mouse_or_keyboard_is_away() {
         assert!(!away(5.0));
         assert!(away(60.0));
+    }
+
+    #[test]
+    fn show_at_the_notch_is_on_until_unticked_and_stays_as_left() {
+        let state = std::env::temp_dir().join(format!(
+            "loomwatch-app-island-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // The first time, before the state folder is even made: at the notch.
+        assert!(shown(&state));
+        set_shown(&state, false).unwrap();
+        assert!(!shown(&state));
+        // Unticked twice, then ticked twice: each time as asked, and no error.
+        set_shown(&state, false).unwrap();
+        assert!(!shown(&state));
+        set_shown(&state, true).unwrap();
+        assert!(shown(&state));
+        set_shown(&state, true).unwrap();
+        assert!(shown(&state));
+        let _ = std::fs::remove_dir_all(&state);
     }
 }

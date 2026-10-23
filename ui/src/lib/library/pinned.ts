@@ -14,21 +14,33 @@ const PATH = '/api/pinned-agent'
 /** Dispatched on `window` after the pin changes, so every place that shows it reads it again. */
 export const PINNED_CHANGED_EVENT = 'loomwatch:pinned-changed'
 
-async function read(response: Response): Promise<string | null> {
-  const body = (await response.json().catch(() => null)) as { agent?: string | null; error?: string } | null
+/** The pinned agent, and whether the Mac app shows the island at the notch to reach it from. */
+export interface PinnedReading {
+  agent: string | null
+  /** False while Show at the notch is off in LoomWatch's menu: the agent stays pinned, but there
+      is no island and no shortcut to reach it. A daemon that doesn't say has the island. */
+  notchShown: boolean
+}
+
+async function read(response: Response): Promise<PinnedReading> {
+  const body = (await response.json().catch(() => null)) as { agent?: string | null; notchShown?: boolean; error?: string } | null
   if (!response.ok) throw new Error(body?.error ?? 'LoomWatch couldn’t answer. Restart LoomWatch and try again.')
-  return typeof body?.agent === 'string' ? body.agent : null
+  return { agent: typeof body?.agent === 'string' ? body.agent : null, notchShown: body?.notchShown !== false }
+}
+
+async function fetchPinned(signal?: AbortSignal): Promise<PinnedReading> {
+  const response = await daemonFetch(PATH, { cache: 'no-store', signal })
+  if (response.status === 404) return { agent: null, notchShown: true }
+  return read(response)
 }
 
 /** The id of the pinned agent, or `null`. A daemon older than the pin pins nothing. */
 export async function fetchPinnedAgent(signal?: AbortSignal): Promise<string | null> {
-  const response = await daemonFetch(PATH, { cache: 'no-store', signal })
-  if (response.status === 404) return null
-  return read(response)
+  return (await fetchPinned(signal)).agent
 }
 
 /** Pin agent `id` to the notch in place of any other, or none. Returns what is pinned now. */
-export async function pinAgent(id: string | null): Promise<string | null> {
+export async function pinAgent(id: string | null): Promise<PinnedReading> {
   const pinned = await read(await daemonFetch(PATH, {
     method: 'PUT',
     cache: 'no-store',
@@ -42,16 +54,18 @@ export async function pinAgent(id: string | null): Promise<string | null> {
 export interface PinnedAgentState {
   /** The pinned agent's id; `null` when none is, or before the first answer. */
   pinned: string | null
-  /** Pin `id`, or unpin with `null`. Throws when the daemon refuses. */
-  pin: (id: string | null) => Promise<void>
+  /** Whether the island is at the notch to message it from (see `PinnedReading`). */
+  notchShown: boolean
+  /** Pin `id`, or unpin with `null`, and hear what is pinned now. Throws when the daemon refuses. */
+  pin: (id: string | null) => Promise<PinnedReading>
 }
 
 /** Which agent is pinned, kept up to date as it changes on this page or another. */
 export function usePinnedAgent(): PinnedAgentState {
-  const [pinned, setPinned] = useState<string | null>(null)
+  const [reading, setReading] = useState<PinnedReading>({ agent: null, notchShown: true })
   useEffect(() => {
     const controller = new AbortController()
-    const load = () => { fetchPinnedAgent(controller.signal).then(setPinned, () => {}) }
+    const load = () => { fetchPinned(controller.signal).then(setReading, () => {}) }
     load()
     window.addEventListener(PINNED_CHANGED_EVENT, load)
     window.addEventListener('focus', load)
@@ -61,6 +75,10 @@ export function usePinnedAgent(): PinnedAgentState {
       window.removeEventListener('focus', load)
     }
   }, [])
-  const pin = useCallback(async (id: string | null) => { setPinned(await pinAgent(id)) }, [])
-  return { pinned, pin }
+  const pin = useCallback(async (id: string | null) => {
+    const now = await pinAgent(id)
+    setReading(now)
+    return now
+  }, [])
+  return { pinned: reading.agent, notchShown: reading.notchShown, pin }
 }

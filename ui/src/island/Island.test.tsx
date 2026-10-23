@@ -1,4 +1,6 @@
-import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NoteAnswering } from '../lib/chat/client'
@@ -106,6 +108,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Each test's island goes with it: left mounted, it keeps reading the runs every two seconds,
+  // and a render it queues can land after the file's page is gone.
+  cleanup()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   delete window.webkit
@@ -216,7 +221,8 @@ describe('the island page', () => {
     expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('list')
     const rows = [...container.querySelectorAll('.island-row')].map((row) => row.textContent)
     expect(rows).toEqual(['Trip plannerWriter just started', 'Weekly digestChecker just started'])
-    // Its ⋯ asks the app for its menu: Open LoomWatch, Start at login, Show log, Quit.
+    // Its ⋯ asks the app for its menu: Open LoomWatch, Start at login, Show at the notch, Show
+    // log, Quit.
     fireEvent.click(container.querySelector('.island-list')!.querySelector<HTMLElement>('[aria-label="More"]')!)
     expect(toApp.at(-1)).toMatchObject({ kind: 'menu' })
   })
@@ -298,6 +304,109 @@ describe('the island page', () => {
     expect(team.getByText('Weekly digest didn’t answer')).toBeTruthy()
     expect(two.getByText('Researcher and Writer didn’t answer')).toBeTruthy()
     expect(two.getByRole('button', { name: 'Open chat' })).toBeTruthy()
+  })
+})
+
+describe('beside the notch at rest, on every screen', () => {
+  const place = () => tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+  const view = (container: HTMLElement) => container.querySelector('.island')?.getAttribute('data-view')
+  const leftEar = (container: HTMLElement) => container.querySelector<HTMLElement>('.island-ear-left')!
+
+  it('with no agent pinned, LoomWatch’s mark sits beside the notch, even with nothing running', async () => {
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(view(container)).toBe('rest'))
+    const first = leftEar(container).querySelector('.island-head')
+    expect(first).not.toBeNull()
+    expect(first!.classList.contains('island-mark')).toBe(true)
+    expect(first!.querySelector('svg.lw-mark')).toBeTruthy()
+    expect(leftEar(container).querySelectorAll('.island-head')).toHaveLength(1)
+  })
+
+  it('LoomWatch’s mark rests with its stitch smile on the island page too; its gold “o” is for something that needs you', async () => {
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(view(container)).toBe('rest'))
+    expect(leftEar(container).querySelector('svg.lw-mark')?.getAttribute('data-mouth')).toBe('stitch')
+    // The rule that keeps the "o" hidden at rest reaches the island's page, not only the app's.
+    const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8')
+    const mark = read('src/styles/mark.css')
+    expect(mark).toMatch(/\.lw-mark \.lw-mark-o \{ opacity: 0;/)
+    expect(read('src/island/index.css')).toContain(`@import '../styles/mark.css';`)
+    expect(read('src/index.css')).toContain(`@import './styles/mark.css';`)
+  })
+
+  it('LoomWatch’s mark is never beside a figure: with none pinned, a team at work takes its place', async () => {
+    runs = [run('r1', { working: ['writer'] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(view(container)).toBe('tucked'))
+    const heads = [...leftEar(container).querySelectorAll<HTMLElement>('.island-head')]
+    expect(heads.map((head) => head.classList.contains('island-mark'))).toEqual([false])
+    expect(heads[0].getAttribute('data-moment')).toBe('work')
+    expect(heads[0].style.left).toBe('0px')
+  })
+
+  it('with reduced motion, a figure at work holds a pose, so it is not told from a ready one by colour alone', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8')
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).not.toBe('')
+    expect(reduced).toContain('.island:is([data-view="rest"], [data-view="tucked"]) .island-head[data-moment="work"] { translate: 0 -2px; }')
+  })
+
+  it('the pinned agent sits first beside the notch, ready, in its own figure', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(leftEar(container).querySelector('.island-pinned-head img')).toBeTruthy())
+    expect(view(container)).toBe('rest')
+    const first = leftEar(container).querySelector<HTMLElement>('.island-head')!
+    expect(first.classList.contains('island-pinned-head')).toBe(true)
+    expect(first.getAttribute('data-moment')).toBe('ready')
+    expect(leftEar(container).querySelector('.island-mark')).toBeNull()
+  })
+
+  it('while the pinned agent works it glows as at work, first, with each other busy team after it', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    runs = [pinnedChat('c1', { working: ['maya'] }), run('r1', { working: ['writer'] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(leftEar(container).querySelector('.island-pinned-head')?.getAttribute('data-moment')).toBe('work'))
+    const heads = [...leftEar(container).querySelectorAll<HTMLElement>('.island-head')]
+    expect(heads.map((head) => head.classList.contains('island-pinned-head'))).toEqual([true, false])
+    expect(heads[1].getAttribute('data-moment')).toBe('work')
+  })
+
+  it('drops nothing out while another screen’s island is live, and the list opens only on the live one', async () => {
+    runs = [run('r1', { permissionRequests: [permission('p1')] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(view(container)).toBe('ask'))
+    tellPage({ kind: 'live', on: false })
+    expect(view(container)).toBe('tucked')
+    tellPage({ kind: 'live', on: true })
+    expect(view(container)).toBe('ask')
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    expect(view(container)).toBe('list')
+    tellPage({ kind: 'live', on: false })
+    expect(view(container)).toBe('tucked')
+  })
+
+  it('tells the other screens’ islands what was looked at here, and not what they told it', async () => {
+    runs = [run('r1', { status: 'succeeded', finishedAt: new Date().toISOString(), reply: 'Five days in Kyoto' }), run('r2', { working: ['writer'] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(view(container)).not.toBe('hidden'))
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    const row = [...container.querySelectorAll<HTMLElement>('.island-row')].find((each) => each.textContent?.includes('Five days in Kyoto'))!
+    fireEvent.click(within(row).getByRole('button', { name: 'See answer' }))
+    expect(toApp).toContainEqual({ kind: 'seen', runs: ['r1'] })
+    const told = toApp.length
+    tellPage({ kind: 'seen', runs: ['r2'] })
+    await act(async () => {})
+    expect(toApp.slice(told).filter((message) => (message as { kind: string }).kind === 'seen')).toEqual([])
   })
 })
 

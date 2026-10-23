@@ -177,6 +177,16 @@ describe('the island tucked beside the notch', () => {
     expect(tucked(teams.slice(0, 2)).more).toBe(0)
   })
 
+  it('the pinned agent’s own work is its figure’s, first beside the notch, not one of the heads', () => {
+    const teams = teamsNow(['a', 'b', 'c', 'd'].map((id) => run(id, { working: ['writer'] })), 0, none, nobody)
+    const pinnedWork = { ...teams[3], pinned: true }
+    const summary = tucked([pinnedWork, ...teams.slice(0, 3)])
+    expect(summary.pinned).toBe(pinnedWork)
+    expect(summary.heads.map((team) => team.runId)).toEqual(['a', 'b', 'c'])
+    expect(summary.more).toBe(0)
+    expect(tucked(teams).pinned).toBeNull()
+  })
+
   it('counts every question across teams; else a slip for a result, or one team’s time', () => {
     const asking = teamsNow([
       run('a', { permissionRequests: [permission('p1'), permission('p2')] }),
