@@ -15,6 +15,7 @@ const maya: SavedJob = { id: 'maya', file: '.jobs/maya.yaml', name: 'Maya', inst
 const writer: SavedJob = { id: 'writer', file: '.jobs/writer.yaml', name: 'Writer', instructions: 'Write a short draft.', model: 'fake/offline' }
 
 let pinned: string | null = null
+let notchShown: boolean | undefined = true
 const pins: { agent: unknown; fromLoomWatch: boolean }[] = []
 
 function onA(platform: 'MacIntel' | 'Win32') {
@@ -23,6 +24,7 @@ function onA(platform: 'MacIntel' | 'Win32') {
 
 beforeEach(() => {
   pinned = null
+  notchShown = true
   pins.length = 0
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -31,9 +33,9 @@ beforeEach(() => {
       const { agent } = JSON.parse(String(init.body)) as { agent: string | null }
       pins.push({ agent, fromLoomWatch: new Headers(init.headers).get('X-LoomWatch-Request') === '1' })
       pinned = agent
-      return new Response(JSON.stringify({ agent: pinned }), { status: 200 })
+      return new Response(JSON.stringify({ agent: pinned, notchShown }), { status: 200 })
     }
-    if (url === '/api/pinned-agent') return new Response(JSON.stringify({ agent: pinned }), { status: 200 })
+    if (url === '/api/pinned-agent') return new Response(JSON.stringify({ agent: pinned, notchShown }), { status: 200 })
     if (url === '/api/jobs/maya' && init?.method === 'PUT') return new Response(JSON.stringify({ ...maya, ...JSON.parse(String(init.body)), version: 2 }), { status: 200 })
     if (url === '/api/teams') return new Response(JSON.stringify({ root: '/teams', files: [], teams: [] }), { status: 200 })
     return new Response('{}', { status: 404 })
@@ -63,6 +65,30 @@ describe('Pinning an agent to the notch', () => {
     expect(pins.at(-1)).toEqual({ agent: null, fromLoomWatch: true })
     expect(await screen.findByText('Unpinned.')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: /^Maya, Saved .*open agent menu$/ })).toBeInTheDocument()
+  }, 15_000)
+
+  it('while Show at the notch is off, pinning says where to turn it on before the shortcut works', async () => {
+    onA('MacIntel')
+    notchShown = false
+    window.history.replaceState({}, '', '/agents/maya')
+    page()
+    fireEvent.click(await screen.findByRole('button', { name: /^Maya, .*open agent menu$/ }, { timeout: 5000 }))
+    const pin = within(screen.getByRole('dialog', { name: 'Agent menu' })).getByRole('button', { name: 'Pin to the notch' })
+    expect(pin).toHaveAttribute('title', 'Message it from the top middle of your screen, after you turn on Show at the notch')
+    await act(async () => { fireEvent.click(pin) })
+    expect(pins).toEqual([{ agent: 'maya', fromLoomWatch: true }])
+    expect(await screen.findByText('Pinned. Click LoomWatch’s face in the menu bar and turn on Show at the notch. Then press Control-Option-Space in any app to message Maya.')).toBeInTheDocument()
+    expect(screen.queryByText(/point at the top middle of your screen/)).not.toBeInTheDocument()
+  }, 15_000)
+
+  it('a LoomWatch that doesn’t say whether the notch is on is taken to have it', async () => {
+    onA('MacIntel')
+    notchShown = undefined
+    window.history.replaceState({}, '', '/agents/maya')
+    page()
+    fireEvent.click(await screen.findByRole('button', { name: /^Maya, .*open agent menu$/ }, { timeout: 5000 }))
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog', { name: 'Agent menu' })).getByRole('button', { name: 'Pin to the notch' })) })
+    expect(await screen.findByText('Pinned. Press Control-Option-Space in any app, or point at the top middle of your screen, to message Maya.')).toBeInTheDocument()
   }, 15_000)
 
   it('says what pinning did right after a save, and which agent it took the place of', async () => {

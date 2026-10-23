@@ -178,6 +178,8 @@ pub fn away(idle_seconds: f64) -> bool {
 
 /// The file in `LoomWatch`'s state folder that says the island is off: Show at the notch,
 /// unticked in the app's menu. Without it the island is at the notch, as it is the first time.
+/// `loomwatchd` reads it too, so pinning an agent says how to reach it (its twin is
+/// `NOTCH_OFF_FILE` in `crates/loomwatch-backend/src/pinned.rs`).
 const OFF_FILE: &str = "app-notch-off";
 
 /// Whether the island is at the notch, with `state` the state folder.

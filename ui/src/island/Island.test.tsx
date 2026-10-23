@@ -1,4 +1,4 @@
-import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -108,6 +108,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Each test's island goes with it: left mounted, it keeps reading the runs every two seconds,
+  // and a render it queues can land after the file's page is gone.
+  cleanup()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   delete window.webkit

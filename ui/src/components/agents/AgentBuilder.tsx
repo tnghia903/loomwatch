@@ -190,10 +190,15 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     const pinning = pinned.pinned !== agent
     const before = pinning && pinned.pinned ? jobs.find((job) => job.id === pinned.pinned)?.name ?? null : null
     try {
-      await pinned.pin(pinning ? agent : null)
-      // The line under the name says what pinning did now, not the last save.
+      const now = await pinned.pin(pinning ? agent : null)
+      // The line under the name says what pinning did now, not the last save; and, while Show at
+      // the notch is off, how to turn it on from the face, the one way in then, and still the
+      // shortcut, so the line stays true once it is on.
       if (save.kind === 'saved') setSave({ kind: 'idle' })
-      setPinSaid({ ok: true, text: pinning ? `Pinned${before ? ` in place of ${before}` : ''}. Press ${PINNED_SHORTCUT_WORDS} in any app, or point at the top middle of your screen, to message ${name}.` : 'Unpinned.' })
+      const reach = now.notchShown
+        ? `Press ${PINNED_SHORTCUT_WORDS} in any app, or point at the top middle of your screen, to message ${name}.`
+        : `Click LoomWatch’s face in the menu bar and turn on Show at the notch. Then press ${PINNED_SHORTCUT_WORDS} in any app to message ${name}.`
+      setPinSaid({ ok: true, text: pinning ? `Pinned${before ? ` in place of ${before}` : ''}. ${reach}` : 'Unpinned.' })
     } catch {
       setPinSaid({ ok: false, text: pinning ? `Couldn’t pin ${name}. Try again.` : `Couldn’t unpin ${name}. Try again.` })
     }
@@ -283,7 +288,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     // beside it while there is something to save.
     const state: ChipState = save.kind === 'saving' ? 'saving' : save.kind === 'error' ? 'failed' : problem ? 'incomplete' : !saved ? 'new' : changed ? 'dirty' : save.kind === 'saved' ? 'saved' : 'clean'
     // A saved agent can be kept at the notch of a Mac (ADR 0083): only the island there shows it.
-    const pin = saved && isMac() ? { pinned: pinned.pinned === saved.id, onToggle: () => void togglePin(saved.id, name) } : undefined
+    const pin = saved && isMac() ? { pinned: pinned.pinned === saved.id, notchShown: pinned.notchShown, onToggle: () => void togglePin(saved.id, name) } : undefined
     const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
     return (
       <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>

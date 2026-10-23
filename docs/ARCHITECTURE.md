@@ -468,8 +468,9 @@ goes as the pointer moves between screens. A pointer at a screen's very top edge
 the pinned agent's figure on the left, or LoomWatch's mark when none is pinned and no team is at
 work, and the right side empty until there is something to say. Unticking **Show at the notch** in the app's menu
 writes `<state dir>/app-notch-off`, closes every panel, stops watching the pointer and gives
-⌃⌥Space back; the face is in the menu bar instead until it is ticked again. One of My agents can be
-pinned to the notch
+⌃⌥Space back; the face is in the menu bar instead until it is ticked again. `loomwatchd` reads the
+same file to answer `notchShown` with the pin, so My agents says to turn the notch on rather than
+promise ⌃⌥Space. One of My agents can be pinned to the notch
 (`GET`/`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`):
 - the island's list opens with a box to message it, and ⌃⌥Space (a Carbon hot key) opens it from
   any app; the message goes into that agent's own chat (`.jobs/.bench/<id>.yaml`, written as the

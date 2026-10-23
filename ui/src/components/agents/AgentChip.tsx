@@ -16,7 +16,7 @@ export interface AgentChipProps {
   onRemove?: () => void
   /** Keep it at the notch on a Mac, to message from the top of the screen (ADR 0083), or take it
       away; absent where there is no notch to keep it at. */
-  pin?: { pinned: boolean; onToggle: () => void }
+  pin?: { pinned: boolean; notchShown: boolean; onToggle: () => void }
 }
 
 /**
@@ -59,7 +59,7 @@ export function AgentChip({ name, state, detail, action, onRemove, pin }: AgentC
             {removing
               ? <span className="pop-inline t-meta" role="alertdialog" aria-label="Remove from My agents"><span>Remove it from My agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => { setOpen(false); onRemove() }}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></span>
               : <span className="acts">
-                {pin && <button type="button" className="link" title={pin.pinned ? undefined : `Message it with ${PINNED_SHORTCUT_WORDS} (${PINNED_SHORTCUT}) or from the top middle of your screen, without opening LoomWatch`} onClick={() => { setOpen(false); pin.onToggle() }}>{pin.pinned ? 'Unpin from the notch' : 'Pin to the notch'}</button>}
+                {pin && <button type="button" className="link" title={pin.pinned ? undefined : pin.notchShown ? `Message it with ${PINNED_SHORTCUT_WORDS} (${PINNED_SHORTCUT}) or from the top middle of your screen, without opening LoomWatch` : 'Message it from the top middle of your screen, after you turn on Show at the notch'} onClick={() => { setOpen(false); pin.onToggle() }}>{pin.pinned ? 'Unpin from the notch' : 'Pin to the notch'}</button>}
                 <button type="button" className="link alert" onClick={() => setRemoving(true)}>Remove from My agents…</button>
               </span>}
           </div>
