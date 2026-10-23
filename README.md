@@ -415,17 +415,20 @@ you built, then add, connect and rename agents to match. To run a team on a sche
    (about 30 MB, for Apple silicon and Intel Macs) and open it.
 2. Drag **LoomWatch** to **Applications**, then open it from Applications.
 
-LoomWatch opens in your browser, where your first agent asks what to make first. It then waits in
-the notch at the top middle of your screen: the black notch around the camera on a MacBook with
-one, and a small black tab LoomWatch draws there on any other screen, whichever screen your pointer
-is on.
+LoomWatch opens in your browser, where your first agent asks what to make first. It then waits at
+the notch at the top middle of each screen: the black notch around the camera on a MacBook with
+one, and a small black tab LoomWatch draws there on any other screen. LoomWatch's face sits beside
+it.
 Point at it to see your teams, and click **⋯** there for **Open LoomWatch**, **Start at login**,
-**Show log** and **Quit LoomWatch**. There is no window to keep open; closing the browser tab
-leaves LoomWatch running until you quit it. Then follow [Try your first run](#try-your-first-run).
+**Show at the notch**, **Show log** and **Quit LoomWatch**. Turn off **Show at the notch** to hide
+it: LoomWatch's face moves to the right side of the menu bar. Click the face for the same menu, and
+to turn the notch back on. There is no window to keep open; closing the browser tab leaves
+LoomWatch running until you quit it. Then follow [Try your first run](#try-your-first-run).
 
 To keep one of your agents at hand, open it in **My agents**, click its name at the top and choose
-**Pin to the notch**. Then press **⌃⌥Space** (Control-Option-Space) in any app, or point at the
-notch, and write to it. Drag a file, a picture, a link or some text to the notch to hand it over:
+**Pin to the notch**. Its figure then takes the place of LoomWatch's face. Press **⌃⌥Space**
+(Control-Option-Space) in any app, or point at the notch, and write to it. Both need **Show at the
+notch** turned on. Drag a file, a picture, a link or some text to the notch to hand it over:
 the notch opens to take it, offers a few jobs that fit, and you can say your own. Its answer shows
 at the notch: **Copy** it, or drag it into any app, and it keeps its headings, lists and links where
 that app takes formatting. It can ask one of your teams to do part of the work; that team only
@@ -524,9 +527,9 @@ its API credit. Nothing else needs installing.
    so they survive restarts and reinstalling.
 
 The app needs no window: quit it from its menu (on a Mac, point at the notch at the top of the
-screen and click ⋯; on Windows, right-click its icon beside the clock). The Mac app's log is in
-`~/Library/Logs/LoomWatch`, and the Windows app's in `%LOCALAPPDATA%\LoomWatch\Logs`; **Show log**
-in the menu opens it.
+screen and click ⋯, or click LoomWatch's face in the menu bar; on Windows, right-click its icon
+beside the clock). The Mac app's log is in `~/Library/Logs/LoomWatch`, and the Windows app's in
+`%LOCALAPPDATA%\LoomWatch\Logs`; **Show log** in the menu opens it.
 
 LoomWatch reads no other app's settings or sign-ins. Your skills live in LoomWatch's own folder (see
 [Where your work is saved](#where-your-work-is-saved)). On the **Skills** page (top of Home), **Look on this computer**
@@ -537,7 +540,7 @@ copies in the skills your AI apps keep, and only when you click it.
 | To | Do this |
 | --- | --- |
 | Start LoomWatch, or open it if it is already running | Open LoomWatch from Applications, or on Windows from the Start menu. While it runs, **Open LoomWatch** in its menu does the same (on Windows, click its icon beside the clock) |
-| Stop LoomWatch | **Quit LoomWatch** in the app's menu (⋯ at the notch; on Windows, right-click its icon beside the clock) |
+| Stop LoomWatch | **Quit LoomWatch** in the app's menu (⋯ at the notch, or LoomWatch's face in the menu bar; on Windows, right-click its icon beside the clock) |
 | Start LoomWatch when you sign in to the computer | **Start at login** in the app's menu (**Start at sign-in** on Windows) |
 | Update to the newest release | **Update available** on Home, then **Update and restart** |
 | See which version you have, and whether a newer one is out | <kbd>⌘</kbd><kbd>K</kbd> (<kbd>Ctrl</kbd>+<kbd>K</kbd> on Windows) → **Check for updates…** |
@@ -563,7 +566,8 @@ The Mac app can't replace itself while it runs from the disk image or from Downl
 folder your account can't change; the window then says so and shows the steps to do it by hand:
 download the new
 [LoomWatch-macos.dmg](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-macos.dmg),
-quit LoomWatch from its menu (point at the notch at the top of the screen and click ⋯), drag
+quit LoomWatch from its menu (point at the notch at the top of the screen and click ⋯, or click
+LoomWatch's face in the menu bar), drag
 the new one to Applications and choose **Replace**. On
 Windows, the steps are to download the new
 [LoomWatch-windows-setup.exe](https://github.com/tnghia903/loomwatch/releases/latest/download/LoomWatch-windows-setup.exe)
@@ -590,7 +594,7 @@ hour. Each try starts the work over, and costs what it uses. For scheduled runs 
    stop the keys working anywhere, delete them at [openrouter.ai/keys](https://openrouter.ai/keys)
    and in the Claude Console too.
 2. Remove the app. **The Mac app:** in its menu (point at the notch at the top of the screen and
-   click ⋯), turn off **Start at login**, choose **Quit LoomWatch**, and drag LoomWatch from
+   click ⋯, or click LoomWatch's face in the menu bar), turn off **Start at login**, choose **Quit LoomWatch**, and drag LoomWatch from
    Applications to the Trash. After an update, the version it replaced is beside it, hidden, as
    `.LoomWatch.app.previous`: press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd> in Applications to show
    it, and drag it to the Trash too. **The Windows app:** remove LoomWatch in **Settings › Apps ›

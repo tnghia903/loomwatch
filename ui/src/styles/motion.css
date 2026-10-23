@@ -132,15 +132,8 @@
    a link home, so the motion stays small and slow. Ready: still. A team running: the face glances
    along the work and the crew's blue glow breathes. Something needs you: the mouth opens to a gold
    "o" and it glows gold, held still as a waiting figure is. A run done: one blink, then rest.
-   Reduced motion keeps the glows and the "o", still; the pose (data-*) already says so. */
-.lw-mark :is(.lw-mark-face, .lw-mark-eyes, .lw-mark-o) { transform-box: fill-box; transform-origin: center; }
-.lw-mark .lw-mark-o { opacity: 0; scale: .4; }
-.lw-mark[data-mouth='o'] .lw-mark-stitch { opacity: 0; }
-.lw-mark[data-mouth='o'] .lw-mark-o { opacity: 1; scale: 1; }
-.lw-mark[data-mouth='o'] .lw-mark-eyes { scale: 1 1.08; }
-.lw-mark[data-glow='live'] { --glow: var(--color-live); }
-.lw-mark[data-glow='you'] { --glow: var(--color-accent); }
-.lw-mark:is([data-glow='live'], [data-glow='you']) { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
+   Reduced motion keeps the glows and the "o", still; the pose (data-*) already says so. Its still
+   poses are in mark.css, which the island at the notch loads too. */
 
 @media (prefers-reduced-motion: no-preference) {
   .lw-mark :is(.lw-mark-stitch, .lw-mark-o, .lw-mark-eyes) { transition: opacity var(--t-quick) var(--ease-out), scale var(--t-move) var(--ease-out); }

@@ -153,6 +153,57 @@ describe('the island, moment by moment', () => {
   })
 })
 
+describe('an island on every screen, the live one where the pointer is', () => {
+  const live = (on: boolean): IslandAction => ({ type: 'app', message: { kind: 'live', on } })
+
+  it('drops a question out only while live; elsewhere it waits beside the notch, and is out again once the pointer comes', () => {
+    let s = play([[at(0), placed], [at(0), runs()], [at(1), runs(run('a', { permissionRequests: [permission('p1')] }))]])
+    expect(viewOf(s)).toBe('ask')
+    s = islandReducer(s, { ...live(false), now: at(1) + 1000 })
+    expect(viewOf(s)).toBe('tucked')
+    expect(tucked(s.teams!).asks).toBe(1)
+    s = islandReducer(s, { ...live(true), now: at(1) + 2000 })
+    expect(viewOf(s)).toBe('ask')
+  })
+
+  it('a list open when the pointer goes to another screen closes at once, and what it showed has been seen', () => {
+    let s = play([
+      [at(0), placed],
+      [at(0), runs(run('a', { working: ['writer'] }))],
+      [at(5), runs(run('a', { status: 'succeeded', finishedAt: iso(5), reply: 'Five days in Kyoto' }))],
+    ])
+    s = islandReducer(s, { type: 'pointerOnIsland', over: true, now: at(6) })
+    expect(viewOf(s)).toBe('list')
+    s = islandReducer(s, { ...live(false), now: at(6) + 100 })
+    expect(viewOf(s)).toBe('rest')
+    expect([s.listOpen, s.onIsland, s.seen.has('a')]).toEqual([false, false, true])
+    // Back on this screen: nothing reopens.
+    expect(viewOf(islandReducer(s, { ...live(true), now: at(7) }))).toBe('rest')
+  })
+
+  it('opens no slot for a drag while another screen’s island is live', () => {
+    let s = play([[at(0), placed], [at(0), runs()], [at(0), { type: 'pinned', pinned: pinnedNow(maya.id, [maya]) }]])
+    s = islandReducer(s, { ...live(false), now: at(1) })
+    s = islandReducer(s, { type: 'app', message: { kind: 'drag', near: true }, now: at(1) })
+    expect(viewOf(s)).toBe('rest')
+  })
+
+  it('a result looked at on another screen’s island leaves this one, and stays gone', () => {
+    let s = play([
+      [at(0), placed],
+      [at(0), runs(run('a', { working: ['writer'] }), run('b', { working: ['writer'] }))],
+      [at(5), runs(run('a', { status: 'succeeded', finishedAt: iso(5), reply: 'Five days in Kyoto' }), run('b', { working: ['writer'] }))],
+    ])
+    s = islandReducer(s, { ...live(false), now: at(5) + 100 })
+    expect(tucked(s.teams!).right).toBe('slip')
+    s = islandReducer(s, { type: 'app', message: { kind: 'seen', runs: ['a'] }, now: at(6) })
+    expect(s.teams!.map((team) => team.runId)).toEqual(['b'])
+    expect(tucked(s.teams!).right).toBe('time')
+    s = islandReducer(s, { type: 'runs', records: [run('a', { status: 'succeeded', finishedAt: iso(5) }), run('b', { working: ['writer'] })], now: at(7) })
+    expect(s.teams!.map((team) => team.runId)).toEqual(['b'])
+  })
+})
+
 describe('writing to the agent pinned to the notch', () => {
   const pinned: IslandAction = { type: 'pinned', pinned: pinnedNow('maya', [maya]) }
 

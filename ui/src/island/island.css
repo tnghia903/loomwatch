@@ -68,7 +68,7 @@ body {
   translate: -50% 0;
   pointer-events: auto;
   outline: none;
-  transition: width var(--t-spring) var(--ease-spring), height var(--t-spring) var(--ease-spring), opacity var(--t-quick) var(--ease-out);
+  transition: width var(--t-spring) var(--ease-spring), height var(--t-spring) var(--ease-spring), translate var(--t-spring) var(--ease-spring), opacity var(--t-quick) var(--ease-out);
 }
 .island-shape:focus-visible .island-body { box-shadow: inset 0 0 0 2px var(--color-accent); }
 /* Where it meets the top of the screen it flows out of the bezel, as the notch does. */
@@ -85,6 +85,13 @@ body {
 }
 
 .island[data-view="tucked"] .island-shape { --w: calc(var(--notch-w) + 2 * var(--ear)); }
+/* At rest it is never empty: the agent pinned to the notch, or LoomWatch's mark, sits beside the
+   camera, which stays where it is, and nothing covers the menu bar on the other side. Without a
+   notch the tab is just that figure, at the middle of the menu bar. */
+.island[data-view="rest"] .island-shape { --w: calc(var(--notch-w) + var(--ear)); translate: calc(-50% - var(--ear) / 2) 0; }
+.island[data-notch="none"][data-view="rest"] .island-shape { --w: var(--ear); translate: -50% 0; }
+/* It first appears where it rests, without travelling there. */
+.island:not([data-notch="none"])[data-view="hidden"] .island-shape { translate: calc(-50% - var(--ear) / 2) 0; }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-shape {
   --w: calc(var(--notch-w) + 24px);
   --h: calc(var(--bar) + var(--fig) * .66);
@@ -170,14 +177,15 @@ body {
   transition: translate var(--t-spring) var(--ease-spring) var(--t-move), opacity var(--t-quick) var(--ease-out) var(--t-move);
 }
 
-/* ---- Tucked into the menu bar beside the camera ---- */
+/* ---- Tucked into the menu bar beside the camera, first the pinned agent or LoomWatch's mark ---- */
 .island-ear { position: absolute; top: 0; height: var(--bar); width: var(--ear); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
 .island-ear-left { left: 0; }
 .island-ear-right { right: 0; }
-.island[data-view="tucked"] .island-ear { opacity: 1; transition-delay: var(--t-quick); }
+.island:is([data-view="rest"], [data-view="tucked"]) .island-ear { opacity: 1; transition-delay: var(--t-quick); }
 .island-heads { position: relative; height: var(--bar); }
 .island-head { position: absolute; top: calc(var(--bar) * -.1); width: var(--head); height: var(--head); translate: 0 var(--bar); transition: translate var(--t-spring) var(--ease-spring) var(--t-quick), rotate var(--t-move) var(--ease-out); }
-.island[data-view="tucked"] .island-head { translate: 0 0; }
+.island:is([data-view="rest"], [data-view="tucked"]) .island-head { translate: 0 0; }
+.island-head.island-mark { top: 0; height: var(--bar); display: grid; place-items: center; }
 .island[data-view="tucked"] .island-head[data-moment="ask"] { rotate: -8deg; }
 .island[data-view="tucked"] .island-head[data-moment="done"] { translate: 0 3px; }
 .island[data-view="tucked"] .island-head[data-moment="fail"] { rotate: 8deg; translate: 0 3px; }
@@ -328,5 +336,8 @@ body {
   .island-hang { opacity: 0; }
   .island[data-view="ask"] .island-hang { opacity: 1; }
   .island-slot, .island-head { opacity: 0; }
-  .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on, .island[data-view="tucked"] .island-head { opacity: 1; }
+  .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on, .island:is([data-view="rest"], [data-view="tucked"]) .island-head { opacity: 1; }
+  /* Without its breath, a figure at work holds the top of its bob: told from one that is ready by
+     its pose, not by its colour alone. */
+  .island:is([data-view="rest"], [data-view="tucked"]) .island-head[data-moment="work"] { translate: 0 -2px; }
 }

@@ -2,9 +2,10 @@
 //! doing. While agents work its stitch sews round and the menu names who is working; when something
 //! needs you its mouth opens and the menu bar counts what waits.
 //!
-//! On a `MacBook` the teams live in the notch instead (ADR 0083): an island that pops out when
-//! something happens and tucks into the menu bar beside the camera (`crate::island`,
-//! `crate::notch_panel`). The face stays for any screen without a notch.
+//! The teams live at the notch instead (ADR 0083): an island on every screen, around a `MacBook`'s
+//! notch or at the middle of the menu bar, that pops out when something happens and tucks into the
+//! menu bar beside the camera (`crate::island`, `crate::notch_panel`). With Show at the notch
+//! unticked in the menu there is no island, and the face is back in the menu bar.
 //!
 //! It also updates itself: Update and restart in the app has `loomwatchd` stop for it, and it puts
 //! the new release's `LoomWatch.app` in its own place and opens that (`crate::update`).
@@ -27,7 +28,7 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, Predefin
 use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::island::{self, FromPage};
-use crate::notch_panel::{IslandEvent, NotchPanel};
+use crate::notch_panel::{IslandEvent, NotchPanels};
 use crate::progress::{self, Ended, Mood, Progress, Row};
 use crate::update;
 
@@ -145,6 +146,7 @@ impl Paths {
     }
 }
 
+#[allow(clippy::too_many_lines)] // Every event the app answers, in one loop, as on Windows.
 pub fn run() -> Result<()> {
     // Started at login: stay in the menu bar without opening the browser.
     let background = std::env::args().any(|arg| arg == "--background");
@@ -180,7 +182,9 @@ pub fn run() -> Result<()> {
                 if let Some(menu) = menu.take() {
                     bar.build(menu);
                 }
-                island = Island::start(&island_proxy, &mut bar);
+                if island::shown(&paths.state) {
+                    island = Island::start(&island_proxy, &mut bar, None);
+                }
             }
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
                 bar.tick();
@@ -232,6 +236,10 @@ pub fn run() -> Result<()> {
                     }
                 } else if event.id == *items.at_login.id() {
                     items.switch_start_at_login(&paths);
+                } else if event.id == *items.notch.id() {
+                    let origin = address.as_deref();
+                    Island::switch(&mut island, &island_proxy, &mut bar, origin, &paths.state);
+                    items.notch.set_checked(island.is_some());
                 } else if event.id == *items.log.id() {
                     let _ = Command::new("/usr/bin/open").arg(&paths.log).status();
                 } else if event.id == *items.quit.id() {
@@ -255,7 +263,7 @@ pub fn run() -> Result<()> {
 /// The island at the notch (ADR 0083), and when it next checks whether the person is away and an
 /// app is full screen.
 struct Island {
-    panel: NotchPanel,
+    panel: NotchPanels,
     next_check: Instant,
     /// An agent is pinned to the notch, so ⌃⌥Space has a box to open.
     pinned: bool,
@@ -264,15 +272,23 @@ struct Island {
 }
 
 impl Island {
-    /// Made once the app runs, on its main thread. The island is on every screen, so the menu bar
+    /// Made once the app runs, on its main thread, or when Show at the notch is ticked, with
+    /// `origin` the `loomwatchd` already answering. The island is on every screen, so the menu bar
     /// face stays out of the menu bar while it runs (ADR 0083).
-    fn start(proxy: &EventLoopProxy<UserEvent>, bar: &mut Bar) -> Option<Self> {
+    fn start(
+        proxy: &EventLoopProxy<UserEvent>,
+        bar: &mut Bar,
+        origin: Option<&str>,
+    ) -> Option<Self> {
         let mtm = MainThreadMarker::new()?;
         let proxy = proxy.clone();
-        let mut panel = NotchPanel::new(mtm, move |event| {
+        let mut panel = NotchPanels::new(mtm, move |event| {
             let _ = proxy.send_event(UserEvent::Island(event));
         });
-        panel.place(mtm);
+        panel.place();
+        if let Some(origin) = origin {
+            panel.load(origin);
+        }
         bar.set_visible(false);
         Some(Self {
             panel,
@@ -282,14 +298,35 @@ impl Island {
         })
     }
 
+    /// Show at the notch, ticked or unticked: the islands come, or they go and the face comes back
+    /// to the menu bar; either way it stays so the next time.
+    fn switch(
+        island: &mut Option<Self>,
+        proxy: &EventLoopProxy<UserEvent>,
+        bar: &mut Bar,
+        origin: Option<&str>,
+        state: &Path,
+    ) {
+        let shown = island.is_none();
+        if let Err(error) = island::set_shown(state, shown) {
+            eprintln!("LoomWatch: show at the notch: {error}");
+        }
+        *island = if shown {
+            Self::start(proxy, bar, origin)
+        } else {
+            None
+        };
+        if island.is_none() {
+            bar.set_visible(true);
+        }
+    }
+
     fn tick(&mut self) {
         if self.pressing {
             self.pressing = self.panel.poll_drag();
         }
-        if let Some(mtm) = MainThreadMarker::new()
-            && Instant::now() >= self.next_check
-        {
-            self.panel.tick(mtm);
+        if Instant::now() >= self.next_check {
+            self.panel.tick();
             self.next_check = Instant::now() + ISLAND_CHECK;
         }
     }
@@ -307,20 +344,22 @@ impl Island {
     fn on(&mut self, event: IslandEvent, origin: Option<&str>, menu: &Menu) {
         let panel = &mut self.panel;
         match event {
-            IslandEvent::Page(FromPage::Ready) => panel.page_ready(),
-            IslandEvent::Page(FromPage::Areas { rects }) => panel.set_areas(rects),
-            IslandEvent::Page(FromPage::Open { link }) => {
-                if let Some(url) = origin.and_then(|origin| island::app_address(origin, &link)) {
-                    open_in_browser(&url);
+            IslandEvent::Page { from, message } => match message {
+                FromPage::Ready => panel.page_ready(from),
+                FromPage::Areas { rects } => panel.set_areas(from, rects),
+                FromPage::Open { link } => {
+                    if let Some(url) = origin.and_then(|origin| island::app_address(origin, &link))
+                    {
+                        open_in_browser(&url);
+                    }
                 }
-            }
-            IslandEvent::Page(FromPage::Menu { .. }) => panel.show_menu(menu),
-            IslandEvent::Page(FromPage::Keyboard { on: true }) => panel.take_keyboard(),
-            IslandEvent::Page(FromPage::Keyboard { on: false }) => panel.give_back_keyboard(),
-            IslandEvent::Page(FromPage::Pinned { name }) => self.pinned = name.is_some(),
-            IslandEvent::Page(FromPage::Copy { text, html }) => {
-                NotchPanel::copy(&text, html.as_deref());
-            }
+                FromPage::Menu { .. } => panel.show_menu(from, menu),
+                FromPage::Keyboard { on: true } => panel.take_keyboard(from),
+                FromPage::Keyboard { on: false } => panel.give_back_keyboard(from),
+                FromPage::Pinned { name } => self.pinned = name.is_some(),
+                FromPage::Copy { text, html } => NotchPanels::copy(&text, html.as_deref()),
+                FromPage::Seen { runs } => panel.seen(from, &runs),
+            },
             // ⌃⌥Space opens the box to the pinned agent; with none pinned there is nothing to open.
             IslandEvent::Shortcut => {
                 if self.pinned {
@@ -337,11 +376,7 @@ impl Island {
             }
             IslandEvent::Pointer => panel.pointer(),
             IslandEvent::ClickOutside => panel.click_outside(),
-            IslandEvent::Screens => {
-                if let Some(mtm) = MainThreadMarker::new() {
-                    panel.place(mtm);
-                }
-            }
+            IslandEvent::Screens => panel.place(),
         }
     }
 }
@@ -371,6 +406,8 @@ struct Items {
     open: MenuItem,
     status: MenuItem,
     at_login: CheckMenuItem,
+    /// Show at the notch: the island, or, unticked, the face in the menu bar.
+    notch: CheckMenuItem,
     log: MenuItem,
     quit: MenuItem,
 }
@@ -386,6 +423,7 @@ impl Items {
                 login_item::enabled(),
                 None,
             ),
+            notch: CheckMenuItem::new("Show at the notch", true, island::shown(&paths.state), None),
             log: MenuItem::new("Show log", true, None),
             quit: MenuItem::new("Quit LoomWatch", true, None),
         };
@@ -395,6 +433,8 @@ impl Items {
             &items.status,
             &PredefinedMenuItem::separator(),
             &items.at_login,
+            &items.notch,
+            &PredefinedMenuItem::separator(),
             &items.log,
             &PredefinedMenuItem::separator(),
             &items.quit,
@@ -418,7 +458,7 @@ impl Items {
 /// you beside it, a tooltip, and the menu's rows under the status line.
 struct Bar {
     tray: Option<TrayIcon>,
-    /// Whether the face is wanted: not when every screen has a notch for the island.
+    /// Whether the face is wanted: not while the island is at the notch.
     visible: bool,
     faces: Faces,
     face: Face,

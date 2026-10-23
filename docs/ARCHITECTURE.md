@@ -456,11 +456,19 @@ with a per-node lock available to forbid it.
 `loomwatchd` serves a single-page web UI and a WebSocket for live events: you run the daemon and
 open a browser, with no Electron. On a Mac, `LoomWatch.app` is only a launcher. It starts
 `loomwatchd`, opens LoomWatch in the browser and stays in the notch (ADR 0083): a see-through panel
-at the top middle of whichever screen the pointer is on, around the camera on a MacBook, shows
-`island.html`, a second page of the same build. With the app's own API calls it reads the runs and
-the messages agents answer in the chat without starting a run (`GET /api/chat/answering`), and
-answers a permission; the panel places the page, tells it where the pointer is, and takes the
-pointer only over what the page reports. One of My agents can be pinned to the notch
+at the top middle of every screen, around the camera on a MacBook, shows `island.html`, a second
+page of the same build. With the app's own API calls it reads the runs and the messages agents
+answer in the chat without starting a run (`GET /api/chat/answering`), and answers a permission;
+each panel places its page, tells it where the pointer is, and takes the pointer only over what the
+page reports. Only the island on the screen the pointer is on is live: it opens the list and drops
+questions and answers out, while the others stay at rest beside their notch, so nothing comes and
+goes as the pointer moves between screens. A pointer at a screen's very top edge is on that screen
+(`Rect::holds_pointer`, as `NSMouseInRect` has it). Results looked at on one island leave the others
+(the app passes `seen` between the pages). At rest the island shows the pinned agent's figure beside
+the notch, or LoomWatch's mark with none pinned. Unticking **Show at the notch** in the app's menu
+writes `<state dir>/app-notch-off`, closes every panel, stops watching the pointer and gives
+⌃⌥Space back; the face is in the menu bar instead until it is ticked again. One of My agents can be
+pinned to the notch
 (`GET`/`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`):
 - the island's list opens with a box to message it, and ⌃⌥Space (a Carbon hot key) opens it from
   any app; the message goes into that agent's own chat (`.jobs/.bench/<id>.yaml`, written as the
@@ -471,7 +479,7 @@ pointer only over what the page reports. One of My agents can be pinned to the n
 - its answer is read whole before Copy or a drag can take it, and both carry it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
   whose links keep their addresses. In the app, Copy writes both to the clipboard
-  (`NotchPanel::copy`); a drag hands both to `WebKit`;
+  (`NotchPanels::copy`); a drag hands both to `WebKit`;
 - a drag of a file, text or a link near the top is noticed by the drag pasteboard changing while
   the button is held (macOS sends other apps no pointer events once a drag begins, so the app
   checks every 50 ms then), and the whole panel takes the pointer so the drop lands in the page;

@@ -25,6 +25,9 @@ export interface AppSays {
   fullScreen: boolean
   /** Something is being dragged near the island, in another app. */
   drag: boolean
+  /** This screen's island is the live one, on the screen the pointer is on (always so in a
+      browser, and until the app says): only it opens and drops things out. */
+  live: boolean
 }
 
 export interface IslandState {
@@ -94,7 +97,7 @@ export function initialIsland(now: number, inApp: boolean): IslandState {
     requests: [],
     seen: new Set(),
     lastAgent: new Map(),
-    app: { placed: !inApp, notch: BROWSER_NOTCH, menuBar: BROWSER_NOTCH.height, away: false, fullScreen: false, drag: false },
+    app: { placed: !inApp, notch: BROWSER_NOTCH, menuBar: BROWSER_NOTCH.height, away: false, fullScreen: false, drag: false, live: true },
     onIsland: false,
     onDrop: false,
     listOpen: false,
@@ -197,6 +200,15 @@ function fromApp(s: IslandState, message: FromApp): IslandState {
       // The drag's own events say when it is over the island and when it drops; a drag let go of
       // elsewhere is cleared by the page (`useIsland`).
       return { ...s, app: { ...s.app, drag: message.near && s.pinned !== null } }
+    case 'live': {
+      if (message.on) return { ...s, app: { ...s.app, live: true } }
+      // The pointer went to another screen: what was open here closes at once, as a list closes
+      // once the pointer has left it, and what drops out drops out over there.
+      const resting = { ...s, app: { ...s.app, live: false, drag: false }, onIsland: false, onDrop: false, listOpen: false, composing: false, dragOver: false }
+      return s.listOpen ? seeResults(resting, (team) => team.moment === 'done' || team.moment === 'fail') : resting
+    }
+    case 'seen':
+      return markSeen(s, message.runs)
   }
 }
 
@@ -207,9 +219,14 @@ function openToWrite(s: IslandState): IslandState {
 
 /** Results matching `which` have been seen: they leave the island. */
 function seeResults(s: IslandState, which: (team: TeamNow) => boolean): IslandState {
-  const results = (s.teams ?? []).filter((team) => (team.moment === 'done' || team.moment === 'fail') && which(team)).map((team) => team.runId)
-  if (!results.length) return s
-  const seen = new Set([...s.seen, ...results])
+  return markSeen(s, (s.teams ?? []).filter((team) => (team.moment === 'done' || team.moment === 'fail') && which(team)).map((team) => team.runId))
+}
+
+/** These runs' results have been seen, here or on another screen's island: they leave it. */
+function markSeen(s: IslandState, runs: readonly string[]): IslandState {
+  const fresh = runs.filter((run) => !s.seen.has(run))
+  if (!fresh.length) return s
+  const seen = new Set([...s.seen, ...fresh])
   return { ...s, seen, teams: withPinned(teamsNow(s.records, s.since, seen, s.lastAgent, s.notes), s.pinned, s.requests, s.since, seen) }
 }
 
@@ -246,8 +263,10 @@ const POP_VIEW: Record<PopKind, IslandViewName> = { start: 'work', handover: 'wo
 export function viewOf(s: IslandState): IslandViewName {
   const teams = s.teams ?? []
   // Something dragged near opens the slot, whatever was out: the pinned agent takes what is dropped.
-  if (s.app.placed && s.pinned && (s.app.drag || s.dragOver)) return 'slot'
+  if (s.app.placed && s.app.live && s.pinned && (s.app.drag || s.dragOver)) return 'slot'
   let view: IslandViewName = s.listOpen ? 'list' : s.pop.out && s.shown ? POP_VIEW[s.pop.out.pop.kind] : teams.length ? 'tucked' : 'rest'
+  // Every screen has an island; only the live one, where the pointer is, shows what drops out.
+  if (!s.app.live) view = teams.length ? 'tucked' : 'rest'
   // On a screen without a notch the island rests at the middle of the menu bar, as at a notch;
   // over a full-screen app there it is there only while something has dropped out of it.
   if (!s.app.placed || (s.app.notch === null && s.app.fullScreen && !s.listOpen && (view === 'rest' || view === 'tucked' || view === 'work'))) view = 'hidden'

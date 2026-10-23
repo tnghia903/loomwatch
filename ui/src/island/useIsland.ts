@@ -42,6 +42,8 @@ export interface Island {
   shown: IslandState['shown']
   tucked: Tucked
   notch: { width: number; height: number }
+  /** The island is around a real notch; on a screen without one it draws its own. */
+  atNotch: boolean
   bar: number
   now: number
   /** A waiting question's figure bounces. */
@@ -127,12 +129,25 @@ export function useIsland(): Island {
     return () => window.clearInterval(id)
   }, [read])
 
-  // The app's side: where the panel is, the pointer, the person, the screen, a click elsewhere.
+  // The app's side: where the panel is, whether it is the live island, the pointer, the person,
+  // the screen, a click elsewhere, and results looked at on another screen's island.
+  const toldSeen = useRef(new Set<string>())
   useEffect(() => {
-    const stop = listen((message) => dispatch({ type: 'app', message }))
+    const stop = listen((message) => {
+      if (message.kind === 'seen') for (const run of message.runs) toldSeen.current.add(run)
+      dispatch({ type: 'app', message })
+    })
     tellApp({ kind: 'ready' })
     return stop
   }, [])
+  // Results looked at here leave the other screens' islands too.
+  const seen = state.seen
+  useEffect(() => {
+    const runs = [...seen].filter((run) => !toldSeen.current.has(run))
+    if (!runs.length) return
+    for (const run of runs) toldSeen.current.add(run)
+    tellApp({ kind: 'seen', runs })
+  }, [seen])
 
   // My agents: read at the start, when another agent is pinned, and as the list opens, so the
   // pinned agent's name, figure and instructions are as saved.
@@ -343,6 +358,7 @@ export function useIsland(): Island {
     shown: state.shown,
     tucked: summary,
     notch: notch ?? { width: 160, height: menuBar },
+    atNotch: notch !== null,
     bar: notch?.height ?? menuBar,
     now: state.now,
     nudge,

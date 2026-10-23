@@ -18,6 +18,11 @@ export type FromApp =
   /** Something (a file, a picture, text, a link) is being dragged near the island, or no longer
       is: the island opens as a slot to take it. */
   | { kind: 'drag'; near: boolean }
+  /** This screen's island is the live one, on the screen the pointer is on: it opens and drops
+      things out. Every other screen's island stays at rest. Live until the app says. */
+  | { kind: 'live'; on: boolean }
+  /** Results looked at on another screen's island, by run: they leave this one too. */
+  | { kind: 'seen'; runs: string[] }
 
 export interface Area {
   x: number
@@ -40,6 +45,8 @@ export type ToApp =
   /** Put an answer on the clipboard, Copy on it: `text` for apps that take plain text, and `html`,
       when there is one, formatted for apps that take it. */
   | { kind: 'copy'; text: string; html: string | null }
+  /** Results looked at here, by run: they leave the other screens' islands too. */
+  | { kind: 'seen'; runs: string[] }
 
 declare global {
   interface Window {

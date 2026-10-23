@@ -96,7 +96,7 @@ function sentence(text: string): string {
 /** Where the Mac or Windows app's menu, with Show log and Quit, is: on a Mac under the ⋯ of the
     notch at the top of the screen, on every screen (ADR 0083); on Windows on its icon. */
 function appMenu(): string {
-  return isWindows() ? 'the menu of LoomWatch’s icon beside the clock' : 'LoomWatch’s menu (point at the notch at the top of the screen and click ⋯)'
+  return isWindows() ? 'the menu of LoomWatch’s icon beside the clock' : 'LoomWatch’s menu (point at the notch at the top of the screen and click ⋯, or click LoomWatch’s face in the menu bar)'
 }
 
 function headline(status: UpdateStatus | null, checking: boolean, progress: InstallProgress): string {
@@ -362,7 +362,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                 ) : (
                   <ol>
                     <li>Download <strong>LoomWatch-macos.dmg</strong> from the release page above and open it.</li>
-                    <li>Quit LoomWatch: point at the notch at the top of the screen and click ⋯, then <strong>Quit LoomWatch</strong>.</li>
+                    <li>Quit LoomWatch: point at the notch at the top of the screen and click ⋯, or click LoomWatch’s face in the menu bar, then <strong>Quit LoomWatch</strong>.</li>
                     <li>Drag LoomWatch to Applications and choose <strong>Replace</strong>, then open it again. Your teams and history stay.</li>
                   </ol>
                 )}
