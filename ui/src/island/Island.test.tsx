@@ -7,6 +7,7 @@ import type { NoteAnswering } from '../lib/chat/client'
 import type { SavedJob } from '../lib/library/jobs'
 import type { TeamRequest } from '../lib/runs/teamRequests'
 import type { RunRecord } from '../lib/runs/client'
+import { cascaded, DESKTOP, rulesOf } from '../test/cascade'
 import { answering, at, failed, iso, maya, OUT_OF_CREDITS, permission, pinnedChat, run, said } from './fixtures'
 import { Island } from './Island'
 import { setTearing } from './tearing'
@@ -311,6 +312,12 @@ describe('beside the notch at rest, on every screen', () => {
   const place = () => tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
   const view = (container: HTMLElement) => container.querySelector('.island')?.getAttribute('data-view')
   const leftEar = (container: HTMLElement) => container.querySelector<HTMLElement>('.island-ear-left')!
+  const islandRules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
+  /** The least the cascade lets the island be, in the sizes the page was given for where it is. */
+  const least = (island: HTMLElement, property: string) => {
+    const value = cascaded(island.querySelector('.island-shape')!, property, DESKTOP, islandRules)
+    return value && island.style.getPropertyValue(/^var\((--[\w-]+)\)$/.exec(value)?.[1] ?? '')
+  }
 
   it('with no agent pinned, LoomWatch’s mark sits beside the notch, even with nothing running', async () => {
     const { container } = render(<Island />)
@@ -345,6 +352,29 @@ describe('beside the notch at rest, on every screen', () => {
     expect(heads.map((head) => head.classList.contains('island-mark'))).toEqual([false])
     expect(heads[0].getAttribute('data-moment')).toBe('work')
     expect(heads[0].style.left).toBe('0px')
+  })
+
+  it('is never smaller than the notch, so shrinking back on its spring never leaves the notch showing below it', async () => {
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(view(container)).toBe('rest'))
+    const island = container.querySelector<HTMLElement>('.island')!
+    // Whatever it moves between, it can't overshoot past the notch on the way.
+    for (const each of ['rest', 'tucked', 'work', 'ask', 'done', 'fail', 'list', 'slot']) {
+      island.setAttribute('data-view', each)
+      expect([each, least(island, 'min-width'), least(island, 'min-height')]).toEqual([each, '188px', '32px'])
+    }
+  })
+
+  it('without a notch, the tab shrinks back to its figure and no further, nor shorter than the menu bar', async () => {
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: null, menuBar: 24 })
+    await waitFor(() => expect(view(container)).toBe('rest'))
+    const island = container.querySelector<HTMLElement>('.island')!
+    // As wide as LoomWatch's mark and its margin, which is all there is beside no notch.
+    const ear = island.style.getPropertyValue('--ear')
+    expect(Number.parseFloat(ear)).toBeLessThan(40)
+    expect([least(island, 'min-width'), least(island, 'min-height')]).toEqual([ear, '24px'])
   })
 
   it('with reduced motion, a figure at work holds a pose, so it is not told from a ready one by colour alone', () => {
