@@ -83,20 +83,20 @@ export type PassageAnswer =
 const LIVE_RUN = new Set(['queued', 'starting', 'running'])
 
 /**
- * Every part of a file asked about in a chat, oldest first: in messages that started work, in
- * notes sent into it, and in notes on their own. A message still on its way counts too.
+ * Every part of a file asked about in a chat, oldest first by when you asked: in messages that
+ * started work, in notes sent into it, and in notes on their own. A message still on its way counts
+ * too, after them.
  */
 export function askedPassages(items: readonly ChatItem[], pending: readonly { text: string; replyTo?: ReplyTo | null; to?: ChatTarget; state?: 'sending' | 'failed' }[] = [], now = Date.now()): AskedPassage[] {
-  const found: AskedPassage[] = []
-  const add = (message: Pick<ChatMessage, 'text' | 'replyTo'> & { id?: string; agentId?: string | null }, runId: string | null, answer: (asked: string) => PassageAnswer, onItsOwn = false) => {
+  const found: { at: string; passage: AskedPassage }[] = []
+  const add = (message: Pick<ChatMessage, 'text' | 'replyTo'> & { id?: string; agentId?: string | null; createdAt?: string }, runId: string | null, answer: (asked: string) => PassageAnswer, onItsOwn = false) => {
     const reply = message.replyTo
     if (reply?.kind !== 'passage' || !reply.file) return
     // Asked of one agent, it is that agent's face beside the part, whoever made the file.
     const from = message.agentId ?? reply.from
-    found.push({ file: reply.file, text: reply.text, from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null, onItsOwn, answer: answer(from) })
+    found.push({ at: message.createdAt ?? '', passage: { file: reply.file, text: reply.text, from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null, onItsOwn, answer: answer(from) } })
   }
-  // The chat holds its items newest first.
-  for (const item of [...items].reverse()) {
+  for (const item of items) {
     if (item.kind === 'note') add(item.message, item.message.runId ?? null, (from) => noteAnswer(item.message, from, now), true)
     else {
       const answer = (from: string) => workAnswer(item.run, from)
@@ -104,8 +104,42 @@ export function askedPassages(items: readonly ChatItem[], pending: readonly { te
       for (const note of item.notes) add(note, item.run.runId, answer)
     }
   }
+  // By when each was asked, not where the chat keeps it: a note sent into earlier work is kept
+  // with that work, before anything asked since.
+  found.sort((a, b) => a.at.localeCompare(b.at))
   for (const message of pending) add({ ...message, agentId: message.to?.kind === 'agent' ? message.to.agent : null }, null, () => (message.state === 'failed' ? { state: 'unsent' } : { state: 'sending' }))
-  return found
+  return found.map((item) => item.passage)
+}
+
+/** What tells one ask about a part of a file from another: its words and the agent asked. The same agent asked again about the same words is the same ask, newer. */
+export function askKey(passage: Pick<AskedPassage, 'text' | 'from'>): string {
+  return `${passage.from}\u0000${passage.text}`
+}
+
+/**
+ * The asks a file shows, oldest first: each agent's newest ask about each part of it. Several
+ * agents asked about the same words each keep their own bubble there, and their own answer.
+ */
+export function fileAsks(asked: readonly AskedPassage[], file: string): AskedPassage[] {
+  const byKey = new Map<string, AskedPassage>()
+  for (const passage of asked) {
+    if (passage.file !== file) continue
+    const key = askKey(passage)
+    byKey.delete(key)
+    byKey.set(key, passage)
+  }
+  return [...byKey.values()]
+}
+
+/** The words of the parts to mark, each once, in the order of its newest ask: where two overlap, the newer is marked. The page's script does the same (pageFrame.ts). */
+export function partTexts(asks: readonly Pick<AskedPassage, 'text'>[]): string[] {
+  const texts: string[] = []
+  for (const { text } of asks) {
+    const at = texts.indexOf(text)
+    if (at >= 0) texts.splice(at, 1)
+    texts.push(text)
+  }
+  return texts
 }
 
 /** Where the chat shows what came of asking (TeamChat's `reveal`): the answer of its work, or your message with the answers under it. */
@@ -281,15 +315,31 @@ export function partLook(answer: PassageAnswer, read: boolean): PartLook {
   return answer.state === 'said' && !read ? 'waiting' : 'read'
 }
 
+const WORDS_LOOKS: readonly PartLook[] = ['busy', 'waiting', 'failed', 'read']
+
+/** How marked words look with several asks on them: at work while any is, else waiting while any answer waits, else stopped, else read. The page's script does the same. */
+export function wordsLook(looks: readonly PartLook[]): PartLook {
+  return WORDS_LOOKS.find((look) => looks.includes(look)) ?? 'read'
+}
+
+/** The ask a press on marked words opens: the newest whose answer waits for you, else the newest. The page's script does the same. */
+export function wordsOpen<T>(asks: readonly T[], look: (ask: T) => PartLook): T | undefined {
+  return asks.findLast((ask) => look(ask) === 'waiting') ?? asks.at(-1)
+}
+
 /** Who a part's bubble shows: the agent answering, or the one asked while nobody is yet. */
 export function bubbleAgent(passage: AskedPassage): string {
   return 'by' in passage.answer ? passage.answer.by : passage.from
 }
 
 /** A part's words as a label quotes them: its first line, cut with an ellipsis past `most` characters. */
-function quoted(passage: AskedPassage, most = 60): string {
-  const line = quoteLine(passage.text)
+export function partQuote(text: string, most = 60): string {
+  const line = quoteLine(text)
   return `“${line.length > most ? `${line.slice(0, most - 1).trimEnd()}…` : line}”`
+}
+
+function quoted(passage: AskedPassage, most = 60): string {
+  return partQuote(passage.text, most)
 }
 
 /** What a part's bubble says to a screen reader: its state; being a button that opens says the rest. */
@@ -314,6 +364,19 @@ export function bubbleTitle(passage: AskedPassage, look: PartLook, name: (id: st
         : look === 'waiting' ? 'New answer'
           : look === 'failed' ? 'Stopped' : ''
   return [said, words].filter(Boolean).join(' · ')
+}
+
+/** What a bubble's agent card says under who the agent is: what came of asking, and what you asked. */
+export function bubbleCardLine(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
+  const words = yourWords(passage.asked, name(passage.from))
+  const state = passage.answer.state
+  const said = state === 'unsent' ? 'Not sent'
+    : state === 'sending' ? 'Sending your question'
+      : state === 'writing' ? 'Writing its answer'
+        : state === 'working' ? 'Working on it'
+          : look === 'waiting' ? 'New answer'
+            : look === 'failed' ? 'Stopped' : ''
+  return [said, words && `You asked: ${words}`].filter(Boolean).join(' · ')
 }
 
 /** Your words without the @ they were sent with: "@Writer why?" is "why?". */

@@ -105,8 +105,14 @@ asks at once. The answer opens beside the words: first the agent writing, then i
 formatted as in the chat. If the work changed those words, the answer opens at the top of the file,
 and stays in the chat. Each part asked about keeps a marker stroke and, after it, a bubble with the
 face of the agent asked: it types while the agent works and shows a gold dot until you open the
-answer here (remembered in this browser). The bubble or the marked words open the answer again;
-Esc or × closes it. A web page the agent made is marked the same way. Drag the edge between the
+answer here (remembered in this browser). Ask several agents about the same words and each gets
+its own bubble after them, stacked in the order you asked; ask the same agent again and its bubble
+shows the newer answer. Pointing at a bubble brings it to the front with the agent's card, as its
+face in the chat does, and what you asked it. Ask about words that overlap words asked about
+before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
+answer then opens at the newer words and says which words it is about. A bubble opens its own
+answer, and the marked words open the one still waiting for you, or else the newest; Esc or ×
+closes it. A web page the agent made is marked the same way. Drag the edge between the
 chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.

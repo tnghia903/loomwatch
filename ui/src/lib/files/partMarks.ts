@@ -1,7 +1,7 @@
 /**
  * Parts of a page asked about, marked in place (ADR 0077): the words of each part wrapped in a mark
- * the reader styles as a marker stroke, and after the last word an empty slot the agent's bubble is
- * drawn in, so the line makes room for the bubble rather than the bubble covering words.
+ * the reader styles as a marker stroke, and after the last word an empty slot the bubbles of the
+ * agents asked are drawn in, so the line makes room for them rather than them covering words.
  *
  * The page may be one React draws. Every change is undone exactly by `undo`, last first: each text
  * node split is joined again and each one moved is put back, with its own words, so React finds its
@@ -17,6 +17,8 @@ export interface PartToMark {
 }
 
 export interface MarkedPart {
+  /** The part whose words are marked: this part, or the newer one that overlaps it. */
+  key: string
   /** The marks round the part's words, in order: one for each piece of text it spans. */
   marks: HTMLElement[]
   /** The empty slot after its last word. */
@@ -25,20 +27,27 @@ export interface MarkedPart {
 
 /** The marks put on a page, and how to take them off. */
 export interface PartMarks {
+  /** Each part by its key. Parts that overlap share the newer one's marks and slot. */
   parts: Map<string, MarkedPart>
   undo: () => void
 }
 
 /**
  * Marks `parts`, oldest first, on the page their ranges are in. Where two overlap, the newer is
- * marked; a part with no words is not. `mark` and `slot` are the class names of marks and slots.
+ * marked, and the older is shown with it: its key gives the newer one's marks and slot, so its
+ * bubble sits there too. A part with no words is not marked. `mark` and `slot` are the class names
+ * of marks and slots.
  */
 export function markParts(parts: readonly PartToMark[], names: { mark: string; slot: string }): PartMarks {
   const undo: (() => void)[] = []
   const marked = new Map<string, MarkedPart>()
   const kept: PartToMark[] = []
+  const joined: [string, string][] = []
   for (const part of [...parts].reverse()) {
-    if (!part.range.collapsed && !kept.some((other) => overlaps(other.range, part.range))) kept.push(part)
+    if (part.range.collapsed) continue
+    const over = kept.find((other) => overlaps(other.range, part.range))
+    if (over) joined.push([part.key, over.key])
+    else kept.push(part)
   }
   // Last in the page first, so a part marked never moves the boundaries of one still to mark.
   kept.sort((a, b) => b.range.compareBoundaryPoints(Range.START_TO_START, a.range))
@@ -77,7 +86,11 @@ export function markParts(parts: readonly PartToMark[], names: { mark: string; s
     slot.setAttribute('contenteditable', 'false')
     marks.at(-1)!.after(slot)
     undo.push(() => slot.remove())
-    marked.set(key, { marks, slot })
+    marked.set(key, { key, marks, slot })
+  }
+  for (const [key, over] of joined) {
+    const part = marked.get(over)
+    if (part) marked.set(key, part)
   }
   return { parts: marked, undo: () => { for (const step of undo.reverse()) step() } }
 }

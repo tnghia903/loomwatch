@@ -90,9 +90,23 @@
 .tc-faces { display: inline-flex; flex: none; }
 .tc-faces .tc-member { display: inline-flex; font-style: normal; }
 .tc-faces .tc-member + .tc-member { margin-left: -5px; }
-/* A face rests above the one beside it while the pointer is on it. */
+/* Figures, which have no disc to overlap, stack closer, each over the one before, as the bubbles
+   on a file's words do (reader.css); after the face that has the work they keep clear of its pill's
+   words. With no hover to bring one up, a finger needs each face whole. */
+.tc-faces .tc-member:not(.holds):has(.chat-avatar.has-figure) + .tc-member:has(.chat-avatar.has-figure) { margin-left: -8px; }
+@media (pointer: coarse) { .tc-faces .tc-member + .tc-member { margin-left: -5px; } }
+/* The face pointed at comes up over the rest; after a rest its agent's card opens (AgentFace). */
 .tc-faces .tc-member:hover, .tc-faces .tc-member:focus-within { z-index: 1; }
 .tc-faces .chat-avatar:not(.has-figure) { box-shadow: 0 0 0 2px var(--color-panel); }
+/* Folded, each figure sits in a round bubble, as an agent asked about a file's words does (owner,
+   2026-10-23: an exception to the figure standing alone, here only): the marker's gold wash and
+   edge in the app's lightness, its state still the figure's glow. */
+.tc-faces .chat-avatar.has-figure {
+  background: var(--color-face-bubble);
+  box-shadow: 0 0 0 1px var(--color-face-bubble), 0 0 0 2px var(--color-face-bubble-edge), 0 3px 10px color-mix(in srgb, var(--color-black) 16%, transparent);
+}
+/* The figure fills its bubble as in the reader (img's own max-width would squeeze it). */
+.tc-faces .chat-avatar.has-figure > .chat-avatar-figure { inset: -12.5%; width: 125%; height: 125%; max-width: none; }
 /* Who has the work: its face grows into a pill in its colour that says how the work reached it —
    "Asking Researcher…" (BatonPill, lib/chat/baton.ts). Every face carries one, folded to nothing
    under its own avatar, so the pill starts from the face's middle and the faces after it make room.
@@ -213,6 +227,8 @@
 .tc-agent-card-role { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
 .tc-agent-card-works { font-size: 11.5px; color: var(--color-ink-3); }
 .tc-agent-card-hint { display: inline-flex; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--color-hairline); font-size: 11.5px; color: var(--color-accent); }
+/* On a bubble in a file the agent was asked about (FileReader): what you asked it there. */
+.tc-agent-card-asked { padding-top: 8px; border-top: 1px solid var(--color-hairline); font-size: 11.5px; color: var(--color-ink-2); overflow-wrap: anywhere; }
 /* The message box, once a face put a name in it. */
 .tc-mention-glow { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
@@ -636,7 +652,9 @@ a mark.tc-find-hit { box-shadow: none; }
   /* The pill grows out of the face that gets the work as the one that had it folds back into its
      own; the faces around it step back and forward. */
   .tc-baton { transition: grid-template-columns var(--t-entrance) var(--ease-out), padding var(--t-entrance) var(--ease-out), background-color var(--t-move) var(--ease-out), border-color var(--t-move) var(--ease-out); }
-  .tc-faces .tc-face .chat-avatar { transition: box-shadow var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out), background-color var(--t-move) var(--ease-out), color var(--t-move) var(--ease-out); }
+  .tc-faces .tc-face .chat-avatar { transition: box-shadow var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out), scale var(--t-quick) var(--ease-out), background-color var(--t-move) var(--ease-out), color var(--t-move) var(--ease-out); }
+  .tc-faces .tc-face:is(:hover, :focus-visible) .chat-avatar { translate: 0 -2px; scale: 1.08; }
+  .tc-faces .tc-member { transition: margin-left var(--t-entrance) var(--ease-out); }
   /* Its card rises into place below the face (or sinks into place above it), and fades as it goes. */
   .tc-agent-card { animation: tc-card-in var(--t-move) var(--ease-out) both; transform-origin: top left; }
   .tc-agent-card.above { animation-name: tc-card-in-above; transform-origin: bottom left; }

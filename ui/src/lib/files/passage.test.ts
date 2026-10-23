@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChatItem, ChatMessage, ReplyTo } from '../chat/client'
 import type { RunRecord } from '../runs/client'
-import { answerPlace, askedInChat, askedPassages, bubblePlace, findPassage, pageText, partBox, partLines, partLook, PASSAGE_MAX_CHARS, passageId, passageOf, passageReply } from './passage'
+import { answerPlace, askedInChat, askedPassages, askKey, bubbleCardLine, bubblePlace, fileAsks, findPassage, pageText, partBox, partLines, partLook, partTexts, PASSAGE_MAX_CHARS, passageId, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage } from './passage'
 
 describe('a marked part, as it is asked about', () => {
   it('keeps its lines, trims its edges and blank runs, and refuses a stray letter', () => {
@@ -29,30 +29,31 @@ describe('a marked part, as it is asked about', () => {
 
 describe('the parts a chat asked about', () => {
   const passage = (text: string, file = '/w/market.md'): ReplyTo => ({ runId: 'run-1', messageId: passageId(file, text), from: 'writer', to: null, kind: 'passage', text, file })
-  const message = (id: string, text: string, replyTo: ReplyTo | null, runId: string | null = 'run-1'): ChatMessage => ({
-    id, teamKey: 't', teamPath: 't.yaml', text, createdAt: '2026-10-19T01:00:00Z', route: 'agent', runId, agentId: 'writer', deliveredAt: null, now: false, replyTo,
+  const message = (id: string, text: string, replyTo: ReplyTo | null, runId: string | null = 'run-1', at = '01:00'): ChatMessage => ({
+    id, teamKey: 't', teamPath: 't.yaml', text, createdAt: `2026-10-19T${at}:00.000Z`, route: 'agent', runId, agentId: 'writer', deliveredAt: null, now: false, replyTo,
   })
   const work = (runId: string, request: ChatMessage | null, notes: ChatMessage[] = []): ChatItem => ({ kind: 'work', run: { runId } as RunRecord, request, notes })
 
-  it('finds them in messages that started work, notes into it, notes on their own and messages on their way, oldest first', () => {
+  it('finds them in messages that started work, notes into it, notes on their own and messages on their way, oldest first by when they were asked', () => {
+    // As the chat keeps them: oldest first, a note sent into work kept with that work.
     const items: ChatItem[] = [
-      { kind: 'note', message: message('n-2', 'and this', passage('Costs fell'), null) },
-      work('run-2', message('m-2', 'why?', passage('Sales grew'), 'run-2'), [message('n-1', 'shorter', passage('Q3 note'), 'run-2')]),
-      work('run-1', message('m-1', 'start', { ...passage('x'), kind: 'answer', file: undefined })),
+      work('run-1', message('m-1', 'start', { ...passage('x'), kind: 'answer', file: undefined }, 'run-1', '01:00')),
+      work('run-2', message('m-2', 'why?', passage('Sales grew'), 'run-2', '01:01'), [message('n-1', 'shorter', passage('Q3 note'), 'run-2', '01:05')]),
+      { kind: 'note', message: message('n-2', 'and this', passage('Costs fell'), null, '01:03') },
     ]
     const found = askedPassages(items, [{ text: '@Writer explain', replyTo: passage('On its way') }])
     expect(found.map((item) => [item.text, item.asked, item.runId, item.messageId])).toEqual([
       ['Sales grew', 'why?', 'run-2', 'm-2'],
-      ['Q3 note', 'shorter', 'run-2', 'n-1'],
       ['Costs fell', 'and this', 'run-1', 'n-2'],
+      ['Q3 note', 'shorter', 'run-2', 'n-1'],
       ['On its way', '@Writer explain', 'run-1', null],
     ])
   })
 
   it('names the agent asked, which need not be the one who made the file', () => {
     const items: ChatItem[] = [
-      work('run-2', { ...message('m-2', '@Researcher why?', passage('Sales grew'), 'run-2'), agentId: 'researcher' }),
-      { kind: 'note', message: { ...message('n-1', 'for everyone', passage('Costs fell'), null), route: 'team_note', agentId: null } },
+      { kind: 'note', message: { ...message('n-1', 'for everyone', passage('Costs fell'), null, '01:00'), route: 'team_note', agentId: null } },
+      work('run-2', { ...message('m-2', '@Researcher why?', passage('Sales grew'), 'run-2', '01:02'), agentId: 'researcher' }),
     ]
     const found = askedPassages(items, [{ text: '@Researcher explain', replyTo: passage('On its way'), to: { kind: 'agent', agent: 'researcher' } }])
     expect(found.map((item) => [item.text, item.from])).toEqual([
@@ -60,6 +61,57 @@ describe('the parts a chat asked about', () => {
       ['Sales grew', 'researcher'],
       ['On its way', 'researcher'],
     ])
+  })
+})
+
+describe('the asks a file shows', () => {
+  const ask = (text: string, from: string, asked: string, more: Partial<AskedPassage> = {}): AskedPassage => ({
+    file: '/w/lesson.html', text, from, asked, runId: null, messageId: asked, onItsOwn: true, answer: { state: 'none', why: 'note' }, ...more,
+  })
+
+  it('keeps each agent asked about the same words, oldest first, and an agent asked again only for its newest', () => {
+    const asked = [
+      ask('not derived', 'tutor', 'bold this text'),
+      ask('Markov-chain', 'tutor', 'why?'),
+      ask('not derived', 'checker', 'Explain this part in plain words.'),
+      ask('Sales', 'tutor', 'elsewhere', { file: '/w/other.md' }),
+      ask('Markov-chain', 'tutor', 'shorter, please'),
+    ]
+    expect(fileAsks(asked, '/w/lesson.html').map((item) => [item.text, item.from, item.asked])).toEqual([
+      ['not derived', 'tutor', 'bold this text'],
+      ['not derived', 'checker', 'Explain this part in plain words.'],
+      ['Markov-chain', 'tutor', 'shorter, please'],
+    ])
+    expect(askKey(asked[0])).not.toBe(askKey(asked[2]))
+    expect(askKey(asked[1])).toBe(askKey(asked[4]))
+  })
+
+  it('marks each part’s words once, in the order of its newest ask', () => {
+    expect(partTexts([{ text: 'a' }, { text: 'b' }, { text: 'a' }, { text: 'c' }])).toEqual(['b', 'a', 'c'])
+  })
+
+  it('shows words asked about by several agents at work while any is, waiting while any answer waits, and opens the newest waiting answer', () => {
+    expect(wordsLook(['read', 'busy', 'waiting'])).toBe('busy')
+    expect(wordsLook(['read', 'waiting', 'failed'])).toBe('waiting')
+    expect(wordsLook(['read', 'failed'])).toBe('failed')
+    expect(wordsLook([])).toBe('read')
+    const look = (ask: { look: 'busy' | 'waiting' | 'read' | 'failed' }) => ask.look
+    expect(wordsOpen([{ id: 1, look: 'waiting' }, { id: 2, look: 'waiting' }, { id: 3, look: 'read' }] as const, look)?.id).toBe(2)
+    expect(wordsOpen([{ id: 1, look: 'read' }, { id: 2, look: 'busy' }] as const, look)?.id).toBe(2)
+    expect(wordsOpen([], look)).toBeUndefined()
+  })
+})
+
+describe('what a bubble’s agent card says', () => {
+  const asked = (answer: AskedPassage['answer']): AskedPassage => ({ file: '/w/a.md', text: 'x', from: 'writer', asked: '@Writer why?', runId: null, messageId: 'm', onItsOwn: true, answer })
+  const name = (id: string) => (id === 'writer' ? 'Writer' : id)
+
+  it('is what you asked, after what came of it while that is news', () => {
+    expect(bubbleCardLine(asked({ state: 'said', by: 'writer', text: 'y', at: null }), 'read', name)).toBe('You asked: why?')
+    expect(bubbleCardLine(asked({ state: 'said', by: 'writer', text: 'y', at: null }), 'waiting', name)).toBe('New answer · You asked: why?')
+    expect(bubbleCardLine(asked({ state: 'writing', by: 'writer' }), 'busy', name)).toBe('Writing its answer · You asked: why?')
+    expect(bubbleCardLine(asked({ state: 'failed', by: 'writer', text: 'z' }), 'failed', name)).toBe('Stopped · You asked: why?')
+    expect(bubbleCardLine(asked({ state: 'unsent' }), 'failed', name)).toBe('Not sent · You asked: why?')
   })
 })
 

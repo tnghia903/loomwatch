@@ -886,6 +886,8 @@ describe("an agent's face", () => {
     renderChat({ team: described })
     const face = within(screen.getByRole('list', { name: 'Who is on the team' })).getByRole('button', { name: 'Researcher: mention in your message' })
     fireEvent.pointerEnter(face, { pointerType: 'mouse' })
+    // Not at once: only once the pointer has rested on the face.
+    expect(screen.queryByRole('tooltip')).toBeNull()
     const card = await screen.findByRole('tooltip')
     expect(face).toHaveAttribute('aria-describedby', card.id)
     expect(card).toHaveTextContent('Researcher')
@@ -1535,10 +1537,10 @@ describe('asking about a part of a file', () => {
     await waitFor(() => expect(box()).toHaveValue('@Writer '))
     expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toHaveTextContent('Sales grew 12% in Q3.')
     expect(box()).toHaveAttribute('placeholder', 'Ask Writer about this part…')
-    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], 'Sales grew 12% in Q3.'))
+    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], 'Sales grew 12% in Q3.', expect.any(Array)))
     // Letting go of it lets go of the part the reader lights.
     fireEvent.keyDown(box(), { key: 'Escape' })
-    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], null))
+    await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], null, expect.any(Array)))
   })
 
   it('Explain sends at once, to that agent, with the part and its file', async () => {
@@ -1571,7 +1573,9 @@ describe('asking about a part of a file', () => {
     await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([{
       file: '/w/market.md', text: 'Sales grew 12% in Q3.', from: 'writer', asked: '@Writer why?', runId: 'run-2', messageId: 'm-2', onItsOwn: false,
       answer: { state: 'said', by: 'writer', text: '# Digest\nThe chip story.', at: '2026-10-06T02:04:00.000Z' },
-    }], null))
+    }], null, expect.any(Array)))
+    // With the team's agents as their cards show them, for the reader's bubbles.
+    expect(onPassages.mock.lastCall![2]).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'writer', name: 'Writer', stateWords: expect.any(String) })]))
     // The quote under the message says what it asked about.
     expect(await screen.findByLabelText('Replying to a part of market.md from Writer')).toHaveTextContent('Sales grew 12% in Q3.')
   })

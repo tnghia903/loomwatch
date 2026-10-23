@@ -87,9 +87,10 @@
 
 /* ---------- The parts asked about: a marker stroke on the words, the agent's bubble after them ----------
    lib/files/partMarks.ts wraps each part's words in .rd-mark and leaves a .rd-slot after the last
-   word, so the bubble sits in the line and the line makes room for it. FileReader sets each part's
-   look on both: busy, waiting, read or failed; on-dark, fresh, lit. A web page draws the same in
-   itself (pageFrame.ts PAGE_BRIDGE): keep the two alike. The stroke is a tint, never a fill: the
+   word, so the bubbles sit in the line and the line makes room for them: one for each agent asked
+   about those words, in the order asked. FileReader sets the words' look on the marks (busy,
+   waiting, read or failed; on-dark, fresh, lit), on-dark on the slot, and each ask's own look on
+   its bubble. A web page draws the same in itself (pageFrame.ts PAGE_BRIDGE): keep the two alike. The stroke is a tint, never a fill: the
    part open or pointed at is told by a line under it, not by more gold. */
 .rd-mark {
   --rd-a: 58%;
@@ -110,7 +111,8 @@
    marker's gold and edged in it, in the lightness of the page under it (owner: a light file keeps a
    light bubble in the dark theme), a little above the words it follows and clear of the line above:
    lifted by the text's own size. */
-.rd-slot { display: inline-block; margin: 0 2px 0 9px; line-height: 0; text-indent: 0; vertical-align: middle; translate: 0 -0.4em; -webkit-user-select: none; user-select: none; }
+.rd-slot { position: relative; display: inline-block; margin: 0 2px 0 9px; line-height: 0; text-indent: 0; vertical-align: middle; translate: 0 -0.4em; -webkit-user-select: none; user-select: none; }
+.rd-slot:is(:hover, :focus-within) { z-index: 2; }
 .rd-bubble {
   --glow: transparent;
   --rd-b: var(--color-bubble-light); --rd-b-edge: var(--color-bubble-light-edge); --rd-b-ink: var(--color-bubble-light-ink); --rd-b-ink-2: var(--color-bubble-light-ink-2);
@@ -131,7 +133,21 @@
 .rd-bubble-point-fill { fill: var(--rd-b); }
 .rd-bubble-point-edge { fill: none; stroke: var(--rd-b-edge); stroke-width: 1px; stroke-linejoin: round; stroke-linecap: round; }
 .rd-bubble:is(.read, .failed) { padding-right: 2px; }
-.rd-bubble:hover, .rd-bubble:focus-visible, .rd-slot.lit .rd-bubble { scale: 1.08; }
+.rd-bubble:hover, .rd-bubble:focus-visible, .rd-bubble.lit { scale: 1.08; }
+/* Several agents asked about the same words: their bubbles stack, each over the one before, and
+   only the first points at the words. The one pointed at comes up over the rest, with its agent's
+   card (FileReader); the one whose answer is open stays above the others. Inside the stack each
+   one's hand's worth is its own face. */
+.rd-bubble + .rd-bubble { margin-left: -8px; }
+.rd-bubble + .rd-bubble .rd-bubble-point { display: none; }
+.rd-bubble + .rd-bubble::after { left: 0; }
+.rd-bubble:not(:last-child)::after { right: 0; }
+/* A bubble that ends in a mark (typing, an answer waiting, stopped) is overlapped only on its edge,
+   so the mark shows; with no hover to bring one up, a finger needs each bubble whole. */
+.rd-bubble:is(.busy, .waiting, .failed) + .rd-bubble { margin-left: -3px; }
+@media (pointer: coarse) { .rd-bubble + .rd-bubble { margin-left: 4px; } }
+.rd-bubble.lit { z-index: 1; }
+.rd-bubble:is(:hover, :focus-visible) { z-index: 2; translate: 0 -2px; }
 .rd-bubble .rd-bubble-face { flex: none; }
 .rd-bubble .rd-bubble-face.has-figure { background-color: transparent; }
 .rd-bubble .chat-dots { gap: 3px; }
@@ -213,6 +229,8 @@
   display: -webkit-box; margin: 0 14px 6px; padding-left: 8px; overflow: hidden; border-left: 2px solid var(--rd-edge);
   color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
+/* An earlier part shown with the newer one over it: which words the answer is about. */
+.rd-answer-about { margin: 0 14px 4px; color: var(--color-ink-2); font: 400 12px/1.4 var(--font-sans); overflow-wrap: anywhere; }
 /* The part is gone from the file: said on a line of its own, in the answer's own words' colour. */
 .rd-answer-gone { margin: 0 14px 6px; font: 400 12.5px/1.4 var(--font-sans); }
 .rd-answer-body { min-height: 0; padding: 2px 14px 12px; overflow-y: auto; overscroll-behavior: contain; font-size: 13.5px; line-height: 1.5; -webkit-user-select: text; user-select: text;
@@ -291,8 +309,8 @@
   .rd-mark.fresh { animation: rd-sweep var(--t-spring) var(--ease-out) both; }
   .rd-mark.busy { animation: rd-shine var(--t-flow) linear infinite; }
   .rd-mark.fresh.busy { animation: rd-sweep var(--t-spring) var(--ease-out) both, rd-shine var(--t-flow) linear var(--t-spring) infinite; }
-  .rd-bubble { transition: scale var(--t-quick) var(--ease-out); }
-  .rd-slot.fresh .rd-bubble { animation: rd-bubble-in var(--t-spring) var(--ease-spring) 200ms both; }
+  .rd-bubble { transition: scale var(--t-quick) var(--ease-out), translate var(--t-quick) var(--ease-out); }
+  .rd-bubble.fresh { animation: rd-bubble-in var(--t-spring) var(--ease-spring) 200ms both; }
   .rd-bubble-new { animation: rd-new-in var(--t-spring) var(--ease-spring) both; }
   .rd-answer { animation: rd-answer-in var(--t-move) var(--ease-out) both; }
   .rd-answer.above { animation-name: rd-answer-in-above; }
