@@ -28,7 +28,7 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { benchMaterial, drawn, fitCanvas, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
+import { benchMaterial, drawn, fitCanvas, pileColor, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
 import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { CrewGlow, easeTint, glowColor } from './crewGlow'
@@ -703,7 +703,7 @@ export class CrewScene {
 export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, own: <T extends { dispose: () => void }>(item: T) => T): Mesh[] {
   const meshes: Mesh[] = []
   const pegboard = () => own(pegboardTexture())
-  const skin = new Color(COLOR_HEX[member.figure.color])
+  const skin = pileColor(COLOR_HEX[member.figure.color])
   root.traverse((object) => {
     if (!(object instanceof Mesh)) return
     const role = (object.material as Material).name

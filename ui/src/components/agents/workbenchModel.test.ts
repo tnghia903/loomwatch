@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { MeshPhysicalMaterial, MeshStandardMaterial, Texture } from 'three'
-import { describe, expect, it } from 'vitest'
-import { benchMaterial } from './workbenchModel'
+import { Color, DirectionalLight, MeshPhysicalMaterial, MeshStandardMaterial, Scene, Texture, WebGLRenderTarget } from 'three'
+import { describe, expect, it, vi } from 'vitest'
+import { COLOR_HEX } from '../../lib/library/figures'
+import { benchMaterial, pileColor, renewShadows } from './workbenchModel'
 
 const textures = { pegboard: () => new Texture(), wound: null }
 
@@ -31,9 +32,46 @@ describe('benchMaterial', () => {
     }
   })
 
+  it('gives the figure the short flocked pile of its stills: a full velvet sheen over a rough skin', () => {
+    for (const role of ['skin', 'skin_wound', 'skin_deep']) {
+      const material = benchMaterial(role, role, textures) as MeshPhysicalMaterial
+      expect(material.sheen).toBeGreaterThanOrEqual(0.9)
+      expect(material.roughness).toBeGreaterThanOrEqual(0.85)
+    }
+  })
+
+  it('lifts a figure colour back from the grey its pile gives it, keeping its hue and lightness', () => {
+    const given = { h: 0, s: 0, l: 0 }
+    const shown = { h: 0, s: 0, l: 0 }
+    new Color(COLOR_HEX.sky).getHSL(given)
+    pileColor(COLOR_HEX.sky).getHSL(shown)
+    expect(shown.s).toBeCloseTo(given.s * 1.2, 3)
+    expect(shown.h).toBeCloseTo(given.h, 3)
+    expect(shown.l).toBeCloseTo(given.l, 3)
+  })
+
+  it('leaves butter as it is, since lifted it is the gold of the app', () => {
+    expect(pileColor(COLOR_HEX.butter).getHexString()).toBe(new Color(COLOR_HEX.butter).getHexString())
+  })
+
   it('lays its cheeks over the skin as a see-through blush', () => {
     const blush = benchMaterial('blush', 'spool_blush_l', textures) as MeshStandardMaterial
     expect(blush.transparent).toBe(true)
     expect(blush.opacity).toBeLessThan(1)
+  })
+})
+
+describe('renewShadows', () => {
+  it('drops the shadow map of a light, so three draws a fresh one on the next frame', () => {
+    const scene = new Scene()
+    const key = new DirectionalLight()
+    key.castShadow = true
+    scene.add(key)
+    const first = new WebGLRenderTarget(4, 4)
+    const disposed = vi.spyOn(first, 'dispose')
+    key.shadow.map = first
+    renewShadows(scene)
+    expect(key.shadow.map).toBeNull()
+    expect(disposed).toHaveBeenCalled()
   })
 })
