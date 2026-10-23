@@ -1,15 +1,11 @@
 import { AtSign } from 'lucide-react'
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useAgentFaces, type AgentFacts } from '../../lib/chat/faces'
+import { AGENT_CARD_WIDTH, useAgentCard, type CardPlace } from '../../lib/chat/useAgentCard'
 import { AvatarFace } from '../agents/AvatarFace'
 
-/** How long the pointer rests on a face before its card opens, so passing over the team opens nothing. */
-const HOVER_DELAY_MS = 280
-/** How long the card takes to leave (--t-quick); where motion is reduced it simply goes. */
-const LEAVE_MS = 160
-const CARD_WIDTH = 264
 
 /**
  * An agent's avatar in the team's chat. Resting on it shows a card of who the agent is and what it
@@ -24,49 +20,28 @@ export function AgentFace({ id, className = '', doing, children }: { id: string;
   return <Face facts={facts} mention={faces.mention} className={className} doing={doing}>{children}</Face>
 }
 
-type Phase = 'closed' | 'open' | 'leaving'
+/** An agent's card, floating where `useAgentCard` placed it; `hint` takes the place of its last line. */
+export function AgentCardPopup({ id, facts, place, leaving, hint }: { id: string; facts: AgentFacts; place: CardPlace; leaving: boolean; hint?: ReactNode }) {
+  return createPortal(
+    <div id={id} role="tooltip" className={`tc-agent-card e2${leaving ? ' leaving' : ''}${place.bottom !== undefined ? ' above' : ''}`} style={{ width: AGENT_CARD_WIDTH, ...place }}>
+      <AgentCard facts={facts} hint={hint} />
+    </div>,
+    document.body,
+  )
+}
 
 function Face({ facts, mention, className, doing, children }: { facts: AgentFacts; mention: (id: string) => void; className: string; doing?: string; children: ReactNode }) {
   const button = useRef<HTMLButtonElement>(null)
   const cardId = useId()
   const doingId = useId()
-  const [phase, setPhase] = useState<Phase>('closed')
-  const [place, setPlace] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+  const card = useAgentCard()
   // Each click presses the face in once.
   const [pressed, setPressed] = useState(0)
-  const timer = useRef<number | undefined>(undefined)
   // A face focused by a press is about to be clicked; one reached with the keyboard shows its card.
   const pressing = useRef(false)
+  const faceBox = () => button.current?.getBoundingClientRect()
 
-  const clear = () => window.clearTimeout(timer.current)
-  const open = useCallback(() => {
-    const at = button.current?.getBoundingClientRect()
-    if (!at) return
-    const left = Math.max(8, Math.min(at.left, window.innerWidth - CARD_WIDTH - 8))
-    // Below the face, unless that is the bottom of the window: then above it.
-    setPlace(at.bottom > window.innerHeight * 0.6 ? { left, bottom: window.innerHeight - at.top + 8 } : { left, top: at.bottom + 8 })
-    setPhase('open')
-  }, [])
-  const close = useCallback(() => {
-    clear()
-    setPhase((now) => (now === 'open' ? 'leaving' : now))
-    timer.current = window.setTimeout(() => setPhase((now) => (now === 'leaving' ? 'closed' : now)), LEAVE_MS)
-  }, [])
-
-  // The card belongs to where the face was: scrolling the chat or the page takes it away.
-  useEffect(() => {
-    if (phase !== 'open') return
-    const away = () => close()
-    window.addEventListener('scroll', away, true)
-    window.addEventListener('resize', away)
-    return () => {
-      window.removeEventListener('scroll', away, true)
-      window.removeEventListener('resize', away)
-    }
-  }, [phase, close])
-  useEffect(() => clear, [])
-
-  const shown = phase !== 'closed' && place !== null
+  const shown = card.shown
   return (
     <>
       <button
@@ -76,34 +51,28 @@ function Face({ facts, mention, className, doing, children }: { facts: AgentFact
         aria-label={`${facts.name}: mention in your message`}
         aria-describedby={[shown && cardId, doing && doingId].filter(Boolean).join(' ') || undefined}
         onClick={() => {
-          clear()
-          setPhase('closed')
+          card.shut()
           setPressed((count) => count + 1)
           mention(facts.id)
         }}
         onPointerEnter={(event) => {
           if (event.pointerType !== 'mouse') return
-          clear()
-          timer.current = window.setTimeout(open, HOVER_DELAY_MS)
+          card.rest(faceBox)
         }}
-        onPointerLeave={close}
+        onPointerLeave={card.close}
         onPointerDown={() => { pressing.current = true }}
         onFocus={() => {
-          if (!pressing.current) open()
+          const box = faceBox()
+          if (!pressing.current && box) card.open(box)
           pressing.current = false
         }}
-        onBlur={close}
-        onKeyDown={(event) => { if (event.key === 'Escape' && phase === 'open') { event.stopPropagation(); close() } }}
+        onBlur={card.close}
+        onKeyDown={(event) => { if (event.key === 'Escape' && card.phase === 'open') { event.stopPropagation(); card.close() } }}
       >
         <span key={pressed} className={pressed > 0 ? 'tc-face-press' : undefined}>{children}</span>
       </button>
       {doing && <span id={doingId} hidden>{doing}</span>}
-      {shown && createPortal(
-        <div id={cardId} role="tooltip" className={`tc-agent-card e2${phase === 'leaving' ? ' leaving' : ''}${place.bottom !== undefined ? ' above' : ''}`} style={{ width: CARD_WIDTH, ...place }}>
-          <AgentCard facts={facts} />
-        </div>,
-        document.body,
-      )}
+      {shown && card.place && <AgentCardPopup id={cardId} facts={facts} place={card.place} leaving={card.phase === 'leaving'} />}
     </>
   )
 }
@@ -118,8 +87,8 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
-/** The card itself: rough details, never the whole team file. */
-export function AgentCard({ facts }: { facts: AgentFacts }) {
+/** The card itself: rough details, never the whole team file. Its last line says a click mentions the agent, unless `hint` says otherwise. */
+export function AgentCard({ facts, hint }: { facts: AgentFacts; hint?: ReactNode }) {
   const works = [
     facts.skills > 0 && plural(facts.skills, 'skill', 'skills'),
     facts.tools > 0 && plural(facts.tools, 'tool', 'tools'),
@@ -137,7 +106,7 @@ export function AgentCard({ facts }: { facts: AgentFacts }) {
       {facts.model && <p className="tc-agent-card-app">{facts.model}</p>}
       {facts.role && <p className="tc-agent-card-role">{facts.role}</p>}
       {works && <p className="tc-agent-card-works">{works}</p>}
-      <p className="tc-agent-card-hint"><AtSign size={12} aria-hidden="true" />Click to mention {facts.name}</p>
+      {hint === undefined ? <p className="tc-agent-card-hint"><AtSign size={12} aria-hidden="true" />Click to mention {facts.name}</p> : hint}
     </>
   )
 }

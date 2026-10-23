@@ -89,6 +89,7 @@ import type { TeamView } from './chat/WorkPiece'
 import type { ReplyTo } from '../lib/chat/client'
 import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
 import { describeDocument, isDocument } from '../lib/chat/document'
+import type { AgentFacts } from '../lib/chat/faces'
 import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, type MadeTab, type PaneTab } from '../lib/chat/paneTabs'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
@@ -1675,8 +1676,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     setChatAsk({ reply, words, agent, at: Date.now() })
     if (!wide && !words) closeDetails()
   }, [wide, closeDetails])
-  const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null }>({ asked: [], asking: null })
-  const takePassages = useCallback((asked: AskedPassage[], asking: string | null) => setPassages({ asked, asking }), [])
+  const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null; faces: AgentFacts[] }>({ asked: [], asking: null, faces: [] })
+  const takePassages = useCallback((asked: AskedPassage[], asking: string | null, faces: AgentFacts[]) => setPassages({ asked, asking, faces }), [])
   const showAsked = useCallback((passage: AskedPassage) => {
     const shown = askedInChat(passage)
     if (!shown) return
@@ -2517,7 +2518,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               <div className="tc-details-body" id="tc-pane-body" role={paneTabs.length ? 'tabpanel' : undefined} aria-labelledby={paneTabs.length ? paneTabId(paneTabs, shownTab) : undefined}>
                 {shownFile ? (
                   <FileReader key={shownFile.path} file={shownFile} name={(id) => chatTeam.names.get(id) ?? id} hue={(id) => chatTeam.hues.get(id) ?? 1} team={askable} role={(id) => agentRoles.get(id) ?? ''}
-                    onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} onShowAsked={showAsked} />
+                    onAsk={composerState.kind === 'blocked' ? undefined : askInChat} asked={passages.asked} asking={passages.asking} faces={passages.faces} onShowAsked={showAsked} />
                 ) : shownTab === 'answer' ? (
                   <FileOriginContext.Provider value={answerOrigin}>
                     <AnswerDocument text={responseText} by={nodeNames.get(record?.responder ?? '') ?? record?.responder ?? 'the team'} streaming={!session.terminal} touched={touchedFiles} folder={responderAgent?.folder} />

@@ -68,9 +68,11 @@ export const PAGE_BRIDGE = `(function () {
     shown = false; send({ type: 'selection', text: '' });
   }, true);
   // The parts asked about, marked in the page as the reader marks its own text (lib/files/partMarks.ts):
-  // each part's words wrapped in a mark, and the agent's bubble in a slot after the last word, so the
-  // line makes room for it. Every change is undone exactly, last first, before the page is marked again.
-  var marked = { key: null, undo: [], parts: {}, found: {} }, wanted = [];
+  // each part's words wrapped in a mark, and after the last word a slot with a bubble for each agent
+  // asked about them, in the order asked, so the line makes room for them. Where two parts overlap,
+  // the newer is marked and the older's bubbles sit with it. Every change is undone exactly, last
+  // first, before the page is marked again.
+  var marked = { key: null, undo: [], parts: {}, found: {} }, wanted = [], texts = [], hovered = null, pressing = false;
   function dark(element) {
     for (var at = element; at && at.nodeType === 1; at = at.parentElement) {
       var colour = /rgba?\\(([^)]*)\\)/.exec(getComputedStyle(at).backgroundColor);
@@ -98,10 +100,9 @@ export const PAGE_BRIDGE = `(function () {
     return pieces;
   }
   function overlaps(a, b) { return a.compareBoundaryPoints(Range.END_TO_START, b) < 0 && a.compareBoundaryPoints(Range.START_TO_END, b) > 0; }
-  function lit(text, on) {
-    var at = marked.parts[text];
-    if (!at) return;
-    at.marks.concat([at.slot]).forEach(function (element) { element.classList.toggle('lw-lit', on || element.getAttribute('data-lw-open') === 'true'); });
+  function lit(at, bubble, on) {
+    at.marks.forEach(function (element) { element.classList.toggle('lw-lit', on || at.lit); });
+    bubble.classList.toggle('lw-lit', on || bubble.lwLit);
   }
   function wrap(piece, text, marks) {
     var node = piece.node, data = node.data, target = node, added = [];
@@ -120,47 +121,98 @@ export const PAGE_BRIDGE = `(function () {
       node.data = data;
     });
   }
-  function bubbleFor(text, last) {
+  function slotAfter(last) {
     var slot = document.createElement('span');
     slot.className = 'lw-slot';
     slot.setAttribute('contenteditable', 'false');
     last.parentNode.insertBefore(slot, last.nextSibling);
     marked.undo.push(function () { if (slot.parentNode) slot.parentNode.removeChild(slot); });
+    return slot;
+  }
+  function bubbleFor(at, key) {
     var bubble = document.createElement('button');
     bubble.type = 'button';
-    bubble.className = 'lw-bubble';
     bubble.innerHTML = '<svg class="lw-point" viewBox="0 0 10 7" aria-hidden="true" focusable="false"><path class="lw-point-fill" d="${BUBBLE_POINT_FILL}"/><path class="lw-point-edge" d="${BUBBLE_POINT_EDGE}"/></svg><span class="lw-face"></span><span class="lw-dots"><i></i><i></i><i></i></span><i class="lw-new"></i><span class="lw-stop">\u00d7</span>';
-    bubble.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); send({ type: 'open', text: text }); });
-    ['mouseenter', 'focus'].forEach(function (name) { bubble.addEventListener(name, function () { lit(text, true); }); });
-    ['mouseleave', 'blur'].forEach(function (name) { bubble.addEventListener(name, function () { lit(text, false); }); });
-    slot.appendChild(bubble);
-    return { slot: slot, bubble: bubble };
+    bubble.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); unhover(true); send({ type: 'open', key: key }); });
+    // Pointed at with the mouse, or reached with the keyboard, the reader shows the agent's card.
+    bubble.addEventListener('mouseenter', function () { lit(at, bubble, true); hover(bubble, key, false); });
+    bubble.addEventListener('pointerdown', function () { pressing = true; });
+    bubble.addEventListener('focus', function () { lit(at, bubble, true); if (!pressing) hover(bubble, key, true); pressing = false; });
+    ['mouseleave', 'blur'].forEach(function (name) { bubble.addEventListener(name, function () { lit(at, bubble, false); unhover(false); }); });
+    return bubble;
+  }
+  function hover(bubble, key, now) {
+    var box = bubble.getBoundingClientRect();
+    hovered = key;
+    send({ type: 'hover', key: key, now: now, rect: { top: box.top, bottom: box.bottom, left: box.left, right: box.right } });
+  }
+  function unhover(now) {
+    if (hovered === null) return;
+    hovered = null;
+    send({ type: 'hover', key: null, now: now });
   }
   function mark(list) {
-    var kept = [];
+    var kept = [], joined = [];
     for (var i = list.length - 1; i >= 0; i--) {
-      var part = list[i];
-      if (!part.range.collapsed && !kept.some(function (other) { return overlaps(other.range, part.range); })) kept.push(part);
+      var part = list[i], over = null;
+      if (part.range.collapsed) continue;
+      for (var k = 0; k < kept.length && !over; k++) if (overlaps(kept[k].range, part.range)) over = kept[k];
+      if (over) joined.push([part.text, over.text]); else kept.push(part);
     }
     kept.sort(function (a, b) { return b.range.compareBoundaryPoints(Range.START_TO_START, a.range); });
     kept.forEach(function (part) {
       var pieces = textIn(part.range).reverse(), marks = [];
       if (!pieces.length) return;
       pieces.forEach(function (piece) { wrap(piece, part.text, marks); });
-      var last = marks[marks.length - 1], made = bubbleFor(part.text, last);
-      marked.parts[part.text] = { marks: marks, slot: made.slot, bubble: made.bubble, dark: dark(last.parentNode) };
+      var last = marks[marks.length - 1];
+      marked.parts[part.text] = { text: part.text, marks: marks, slot: slotAfter(last), bubbles: {}, asks: [], lit: false, dark: dark(last.parentNode) };
+    });
+    joined.forEach(function (pair) { if (marked.parts[pair[1]]) marked.parts[pair[0]] = marked.parts[pair[1]]; });
+  }
+  // How marked words look with several asks on them, and which one a press on them opens (passage.ts wordsLook, wordsOpen).
+  var LOOKS = ['busy', 'waiting', 'failed', 'read'];
+  function wordsLook(asks) { return LOOKS.filter(function (look) { return asks.some(function (ask) { return ask.look === look; }); })[0] || 'read'; }
+  function wordsOpen(asks) {
+    for (var i = asks.length - 1; i >= 0; i--) if (asks[i].look === 'waiting') return asks[i];
+    return asks[asks.length - 1];
+  }
+  function show() {
+    var shown = [];
+    wanted.forEach(function (ask) {
+      var at = marked.parts[ask.text];
+      if (!at) return;
+      if (shown.indexOf(at) < 0) { shown.push(at); at.asks = []; }
+      at.asks.push(ask);
+    });
+    shown.forEach(function (at) {
+      var any = function (name) { return at.asks.some(function (ask) { return ask[name]; }); };
+      at.lit = any('lit');
+      var look = ' lw-' + wordsLook(at.asks) + (at.dark ? ' lw-dark' : '') + (any('fresh') ? ' lw-fresh' : '') + (at.lit ? ' lw-lit' : '');
+      at.marks.forEach(function (element) { element.className = 'lw-mark' + look; });
+      // A bubble for each ask, in the order asked: kept while its ask is, so it does not pop up
+      // again. Those no longer asked go first, so the rest are moved only if their order changed
+      // (a moved bubble replays its animations and loses focus).
+      var kept = {};
+      at.asks.forEach(function (ask) { kept[ask.key] = true; });
+      Object.keys(at.bubbles).forEach(function (key) {
+        if (kept[key]) return;
+        at.slot.removeChild(at.bubbles[key]);
+        delete at.bubbles[key];
+      });
+      at.asks.forEach(function (ask, i) {
+        var bubble = at.bubbles[ask.key] || (at.bubbles[ask.key] = bubbleFor(at, ask.key));
+        if (at.slot.children[i] !== bubble) at.slot.insertBefore(bubble, at.slot.children[i] || null);
+        dress(bubble, ask, at.dark);
+      });
     });
   }
-  function show(part, at) {
-    var look = ' lw-' + part.look + (at.dark ? ' lw-dark' : '') + (part.fresh ? ' lw-fresh' : '') + (part.lit ? ' lw-lit' : '');
-    at.marks.concat([at.slot]).forEach(function (element) { element.setAttribute('data-lw-open', part.lit ? 'true' : 'false'); });
-    at.marks.forEach(function (element) { element.className = 'lw-mark' + look; });
-    at.slot.className = 'lw-slot' + look;
-    at.bubble.className = 'lw-bubble lw-' + part.look + (at.dark ? ' lw-dark' : '');
-    at.bubble.setAttribute('aria-label', String(part.label || ''));
-    at.bubble.setAttribute('aria-expanded', part.open ? 'true' : 'false');
-    at.bubble.title = String(part.title || '');
-    var face = at.bubble.querySelector('.lw-face'), src = String(part.figure || ''), says = src || String(part.initials || '');
+  function dress(bubble, ask, dark) {
+    bubble.lwLit = Boolean(ask.lit);
+    bubble.className = 'lw-bubble lw-' + ask.look + (dark ? ' lw-dark' : '') + (ask.fresh ? ' lw-fresh' : '') + (ask.lit ? ' lw-lit' : '');
+    bubble.setAttribute('aria-label', String(ask.label || ''));
+    bubble.setAttribute('aria-expanded', ask.open ? 'true' : 'false');
+    bubble.title = String(ask.title || '');
+    var face = bubble.querySelector('.lw-face'), src = String(ask.figure || ''), says = src || String(ask.initials || '');
     if (face.getAttribute('data-shows') === says) return;
     face.setAttribute('data-shows', says);
     face.textContent = '';
@@ -169,17 +221,17 @@ export const PAGE_BRIDGE = `(function () {
       image.alt = '';
       image.src = src;
       face.appendChild(image);
-    } else face.textContent = String(part.initials || '');
+    } else face.textContent = String(ask.initials || '');
   }
   function parts() {
-    send({ type: 'parts', parts: wanted.map(function (part) {
-      var at = marked.parts[part.text], rects = [];
-      if (!at) return { text: part.text, rects: rects, missing: !marked.found[part.text], dark: false };
+    send({ type: 'parts', parts: texts.map(function (text) {
+      var at = marked.parts[text], rects = [];
+      if (!at) return { text: text, rects: rects, missing: !marked.found[text], as: text, dark: false };
       at.marks.forEach(function (element) {
         var list = element.getClientRects();
         for (var i = 0; i < list.length && rects.length < 60; i++) rects.push({ top: list[i].top, bottom: list[i].bottom, left: list[i].left, right: list[i].right });
       });
-      return { text: part.text, rects: rects, missing: false, dark: at.dark };
+      return { text: text, rects: rects, missing: false, as: at.text, dark: at.dark };
     }) });
   }
   function later() {
@@ -187,7 +239,8 @@ export const PAGE_BRIDGE = `(function () {
     queued = true;
     requestAnimationFrame(function () { queued = false; parts(); });
   }
-  addEventListener('scroll', function () { if (shown) report(); later(); }, true);
+  // The agent's card belongs to where the bubble was: scrolling the page takes it away.
+  addEventListener('scroll', function () { if (shown) report(); unhover(false); later(); }, true);
   addEventListener('resize', function () { if (shown) report(); later(); });
   document.addEventListener('click', function (event) {
     var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
@@ -195,7 +248,8 @@ export const PAGE_BRIDGE = `(function () {
       var selection = document.getSelection();
       if (selection && !selection.isCollapsed) return;
       var marking = event.target && event.target.closest ? event.target.closest('.lw-mark') : null;
-      if (marking && marking.lwPart) send({ type: 'open', text: marking.lwPart });
+      var at = marking && marking.lwPart ? marked.parts[marking.lwPart] : null, opens = at && wordsOpen(at.asks);
+      if (opens) send({ type: 'open', key: opens.key });
       return;
     }
     if ((link.getAttribute('href') || '').charAt(0) === '#') return;
@@ -241,21 +295,24 @@ export const PAGE_BRIDGE = `(function () {
     if (event.source !== parent || !data || data.lw !== 'reader') return;
     if (data.type === 'clear') { var selection = document.getSelection(); if (selection) selection.removeAllRanges(); shown = false; }
     if (data.type === 'marks') {
-      wanted = (Array.isArray(data.parts) ? data.parts : []).filter(function (part) { return part && typeof part.text === 'string'; });
-      var key = wanted.map(function (part) { return part.text; }).join('\\u0000');
+      wanted = (Array.isArray(data.parts) ? data.parts : []).filter(function (ask) { return ask && typeof ask.text === 'string' && typeof ask.key === 'string'; });
+      // Each part's words once, in the order of its newest ask (passage.ts partTexts).
+      texts = [];
+      wanted.forEach(function (ask) { var at = texts.indexOf(ask.text); if (at >= 0) texts.splice(at, 1); texts.push(ask.text); });
+      var key = texts.join('\\u0000');
       if (key !== marked.key) {
         unmark();
         var page = index(), list = [];
-        wanted.forEach(function (part) {
-          var range = find(page, part.text);
+        texts.forEach(function (text) {
+          var range = find(page, text);
           if (!range) return;
-          marked.found[part.text] = true;
-          list.push({ text: part.text, range: range });
+          marked.found[text] = true;
+          list.push({ text: text, range: range });
         });
         mark(list);
         marked.key = key;
       }
-      wanted.forEach(function (part) { if (marked.parts[part.text]) show(part, marked.parts[part.text]); });
+      show();
       if (window.CSS && CSS.highlights && typeof Highlight === 'function') light('lw-read-asking', data.asking ? [find(index(), data.asking)] : []);
       parts();
     }
@@ -275,7 +332,8 @@ export const PAGE_BRIDGE = `(function () {
     + '.lw-mark.lw-lit{box-shadow:inset 0 -2px 0 #8A6A16!important}.lw-mark.lw-dark.lw-lit{box-shadow:inset 0 -2px 0 #E9C46A!important}'
     + '.lw-mark.lw-busy{' + shine('rgba(255,255,255,.7)') + '}'
     + '.lw-mark.lw-dark.lw-busy{' + shine('rgba(233,196,106,.4)') + '}'
-    + '.lw-slot{display:inline-block!important;margin:0 2px 0 9px!important;padding:0!important;line-height:0!important;text-indent:0;vertical-align:middle!important;translate:0 -0.4em;-webkit-user-select:none;user-select:none}'
+    + '.lw-slot{position:relative!important;display:inline-block!important;margin:0 2px 0 9px!important;padding:0!important;line-height:0!important;text-indent:0;vertical-align:middle!important;translate:0 -0.4em;-webkit-user-select:none;user-select:none}'
+    + '.lw-slot:hover,.lw-slot:focus-within{z-index:2!important}'
     // The bubble is round, washed with the marker's gold and edged in it, in the lightness of the page under it (reader.css .rd-bubble).
     + '.lw-bubble{all:unset;box-sizing:border-box!important;position:relative!important;display:inline-flex!important;align-items:center!important;gap:3px;height:22px!important;padding:0 7px 0 2px!important;margin:0!important;border:0!important;border-radius:999px!important;background:#F5F0E4!important;color:#17150F!important;'
     + 'font:600 11px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;white-space:nowrap;cursor:pointer;vertical-align:middle;'
@@ -286,7 +344,15 @@ export const PAGE_BRIDGE = `(function () {
     + '.lw-point-fill{fill:#F5F0E4!important;stroke:none!important}.lw-point-edge{fill:none!important;stroke:color-mix(in srgb,#8A6A16 40%,#F5F0E4)!important;stroke-width:1px!important;stroke-linejoin:round;stroke-linecap:round}'
     + '.lw-dark .lw-point-fill{fill:#1A1508!important}.lw-dark .lw-point-edge{stroke:color-mix(in srgb,#E9C46A 40%,#1A1508)!important}'
     + '.lw-bubble.lw-read{padding-right:2px!important}.lw-bubble.lw-failed{padding-right:0!important}'
-    + '.lw-bubble:hover,.lw-bubble:focus-visible,.lw-slot.lw-lit .lw-bubble{scale:1.08}.lw-bubble:focus-visible{outline:2px solid #8A6A16!important;outline-offset:2px}'
+    + '.lw-bubble:hover,.lw-bubble:focus-visible,.lw-bubble.lw-lit{scale:1.08}.lw-bubble:focus-visible{outline:2px solid #8A6A16!important;outline-offset:2px}'
+    // Several agents asked about the same words: their bubbles stack, each over the one before, and only the first points at the words.
+    // The one pointed at comes up over the rest, and the one whose answer is open stays above the others.
+    + '.lw-bubble+.lw-bubble{margin-left:-8px!important}.lw-bubble+.lw-bubble .lw-point{display:none!important}.lw-bubble+.lw-bubble::after{left:0}.lw-bubble:not(:last-child)::after{right:0}'
+    // A bubble that ends in a mark (typing, an answer waiting, stopped) is overlapped only on its edge, so the mark shows.
+    + '.lw-bubble:is(.lw-busy,.lw-waiting,.lw-failed)+.lw-bubble{margin-left:-3px!important}'
+    // With no hover to bring one up, a finger needs each bubble whole.
+    + '@media (pointer:coarse){.lw-bubble+.lw-bubble{margin-left:4px!important}}'
+    + '.lw-bubble.lw-lit{z-index:1!important}.lw-bubble:hover,.lw-bubble:focus-visible{z-index:2!important;translate:0 -2px}'
     + '.lw-face{position:relative;display:inline-grid;place-items:center;flex:none;width:18px;height:18px;border-radius:50%;font:600 9px/1 sans-serif;color:inherit}'
     + '.lw-face:not(:has(img)):not(:empty){background:color-mix(in srgb,currentColor 12%,transparent)}'
     + '.lw-face img{position:absolute;inset:-20%;width:140%;height:140%;max-width:none;object-fit:contain}'
@@ -300,10 +366,10 @@ export const PAGE_BRIDGE = `(function () {
     + '.lw-bubble.lw-waiting img{filter:drop-shadow(0 0 1px var(--lw-fill)) drop-shadow(0 0 2px var(--lw-fill))}'
     + '.lw-bubble.lw-failed img{rotate:8deg;translate:0 2px;filter:saturate(.35) drop-shadow(0 0 1px var(--lw-alert)) drop-shadow(0 0 2px var(--lw-alert))}'
     + '@media (prefers-reduced-motion:no-preference){'
-    + '.lw-bubble{transition:scale .16s cubic-bezier(.2,0,0,1)}'
+    + '.lw-bubble{transition:scale .16s cubic-bezier(.2,0,0,1),translate .16s cubic-bezier(.2,0,0,1)}'
     + '.lw-mark.lw-fresh{animation:lw-sweep .56s cubic-bezier(.2,0,0,1) both}.lw-mark.lw-busy{animation:lw-shine 1.4s linear infinite}'
     + '.lw-mark.lw-fresh.lw-busy{animation:lw-sweep .56s cubic-bezier(.2,0,0,1) both,lw-shine 1.4s linear .56s infinite}'
-    + '.lw-slot.lw-fresh .lw-bubble{animation:lw-pop .56s cubic-bezier(.32,1.36,.5,1) .2s both}.lw-waiting .lw-new{animation:lw-pop .56s cubic-bezier(.32,1.36,.5,1) both}'
+    + '.lw-bubble.lw-fresh{animation:lw-pop .56s cubic-bezier(.32,1.36,.5,1) .2s both}.lw-waiting .lw-new{animation:lw-pop .56s cubic-bezier(.32,1.36,.5,1) both}'
     + '.lw-dots i{animation:lw-typing 1.2s ease-in-out infinite}.lw-dots i:nth-child(2){animation-delay:.15s}.lw-dots i:nth-child(3){animation-delay:.3s}}'
     + '@media (prefers-reduced-motion:reduce){.lw-mark.lw-busy,.lw-mark.lw-dark.lw-busy{' + plain + '}.lw-dots i{opacity:1}}'
     + '@keyframes lw-sweep{from{background-size:0% 74%}}@keyframes lw-shine{from{background-position:100% 62%,0 62%}to{background-position:-150% 62%,0 62%}}'
@@ -315,8 +381,13 @@ export const PAGE_BRIDGE = `(function () {
 
 type PageRect = { top: number; bottom: number; left: number; right: number }
 
-/** A part asked about, as the reader asks the page to mark it: how it looks, and its bubble's agent and words. */
+/**
+ * An ask about a part, as the reader asks the page to show it: the part's words to mark, and the
+ * ask's bubble after them, how it looks, its agent and words. Several asks may be about the same words.
+ */
 export interface PageMark {
+  /** Which ask it is (passage.ts `askKey`): what the page says when its bubble is pressed. */
+  key: string
   text: string
   look: 'busy' | 'waiting' | 'read' | 'failed'
   /** Asked just now: its stroke sweeps on. */
@@ -331,8 +402,11 @@ export interface PageMark {
   initials: string
 }
 
-/** A part asked about, as the page has it now: its lines on screen, or `missing` when the page no longer has its words. */
-export interface PagePart { text: string; rects: PageRect[]; missing: boolean; dark: boolean }
+/**
+ * A part asked about, as the page has it now: its lines on screen, or `missing` when the page no
+ * longer has its words. `as`: the words it is shown on, a newer part's where one overlaps it.
+ */
+export interface PagePart { text: string; rects: PageRect[]; missing: boolean; as?: string; dark: boolean }
 
 /**
  * A message from the page's script, once checked to be one: the words marked, where the parts
@@ -341,7 +415,10 @@ export interface PagePart { text: string; rects: PageRect[]; missing: boolean; d
 export type PageMessage =
   | { type: 'selection'; text: string; rect?: PageRect }
   | { type: 'parts'; parts: PagePart[] }
-  | { type: 'open'; text: string }
+  /** An ask's bubble, or the words it is about, was pressed: its answer opens. */
+  | { type: 'open'; key: string }
+  /** An ask's bubble was pointed at (`now`: reached with the keyboard), or no longer is (`key` null): its agent's card opens or closes. */
+  | { type: 'hover'; key: string | null; now: boolean; rect?: PageRect }
   | { type: 'escape' }
   | { type: 'ready' }
 
@@ -361,13 +438,24 @@ export function pageMessage(data: unknown): PageMessage | null {
     return {
       type: 'parts',
       parts: parts.slice(0, 200).flatMap((part: Record<string, unknown> | null) => (part && typeof part.text === 'string'
-        ? [{ text: part.text.slice(0, 100_000), rects: Array.isArray(part.rects) ? part.rects.filter(isRect).slice(0, 60) : [], missing: part.missing === true, dark: part.dark === true }]
+        ? [{
+          text: part.text.slice(0, 100_000), rects: Array.isArray(part.rects) ? part.rects.filter(isRect).slice(0, 60) : [], missing: part.missing === true,
+          ...(typeof part.as === 'string' ? { as: part.as.slice(0, 100_000) } : {}), dark: part.dark === true,
+        }]
         : [])),
     }
   }
+  if (message.type === 'hover') {
+    const { key, now, rect } = data as { key?: unknown; now?: unknown; rect?: unknown }
+    if (key === null) return { type: 'hover', key: null, now: now === true }
+    return typeof key === 'string' && isRect(rect) ? { type: 'hover', key: key.slice(0, 100_000), now: now === true, rect } : null
+  }
+  if (message.type === 'open') {
+    const key = (data as { key?: unknown }).key
+    return typeof key === 'string' ? { type: 'open', key: key.slice(0, 100_000) } : null
+  }
   if (typeof message.text !== 'string') return null
   const text = message.text.slice(0, 100_000)
-  if (message.type === 'open') return { type: 'open', text }
   if (message.type !== 'selection') return null
   return { type: 'selection', text, rect: isRect(message.rect) ? message.rect : undefined }
 }

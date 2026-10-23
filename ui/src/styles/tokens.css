@@ -74,6 +74,10 @@
   --color-accent-on-fill: var(--lw-paper-0);
   --color-accent-dim:     var(--lw-brass-450);
   --color-accent-tint:    var(--lw-gold-tint-light);
+  /* A figure's round bubble in the app's own lightness (team-chat.css .tc-faces): the reader's
+     part bubble, in the theme rather than the page's. */
+  --color-face-bubble:      var(--color-bubble-light);
+  --color-face-bubble-edge: var(--color-bubble-light-edge);
   --color-live:           var(--lw-blue-700);
   --color-live-dim:       var(--lw-blue-500);
   --color-live-tint:      var(--lw-blue-tint-light);
@@ -138,6 +142,8 @@
   --color-accent-on-fill: var(--lw-obsidian-950);
   --color-accent-dim:     var(--lw-gold-700);
   --color-accent-tint:    var(--lw-gold-tint-dark);
+  --color-face-bubble:      var(--color-bubble-dark);
+  --color-face-bubble-edge: var(--color-bubble-dark-edge);
   --color-live:           var(--lw-blue-300);
   --color-live-dim:       var(--lw-blue-500);
   --color-live-tint:      var(--lw-blue-tint-dark);

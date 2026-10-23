@@ -2,7 +2,7 @@ import { MessagesSquare, X } from 'lucide-react'
 import type { CSSProperties, Ref } from 'react'
 
 import { clockTime, dayLabel } from '../../lib/chat/format'
-import { askedInChat, partLook, yourWords, type AskedPassage } from '../../lib/files/passage'
+import { askedInChat, partLook, partQuote, yourWords, type AskedPassage } from '../../lib/files/passage'
 import { AvatarFace } from '../agents/AvatarFace'
 import { Markdown } from '../ui/Markdown'
 
@@ -14,6 +14,8 @@ interface PassageAnswerProps {
   place: { top: number; left: number; above: boolean; arrow: number } | null
   /** The file no longer has the part (it was changed as asked): the answer sits at the top, pointing at nothing. */
   gone?: boolean
+  /** The words it is about, when they are not the words it points at: a newer part overlaps them. */
+  about?: string | null
   /** How tall its words may grow before they scroll. */
   maxHeight: number
   onClose: () => void
@@ -27,7 +29,7 @@ interface PassageAnswerProps {
  * is: your words, then the agent's face and its answer. The chat keeps the same answer, under your
  * message.
  */
-export function PassageAnswer({ passage, name, hue, place, gone = false, maxHeight, onClose, onShowInChat, ref }: PassageAnswerProps) {
+export function PassageAnswer({ passage, name, hue, place, gone = false, about = null, maxHeight, onClose, onShowInChat, ref }: PassageAnswerProps) {
   const answer = passage.answer
   const by = 'by' in answer ? answer.by : passage.from
   const who = name(by)
@@ -61,6 +63,7 @@ export function PassageAnswer({ passage, name, hue, place, gone = false, maxHeig
           <button type="button" onClick={onClose} aria-label="Close the answer" title="Close"><X size={14} aria-hidden="true" /></button>
         </span>
       </header>
+      {about && <p className="rd-answer-about">About {partQuote(about)}</p>}
       {yours && <p className="rd-answer-asked"><span className="visually-hidden">You asked: </span>{yours}</p>}
       {gone && <p className="rd-answer-gone">The words you marked have changed.</p>}
       <div className="rd-answer-body" style={{ maxHeight }} role="status" aria-live="polite">

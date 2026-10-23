@@ -22,7 +22,7 @@ import { failedAgent, plainRunError, problemAction } from '../../lib/runs/errors
 import { answerRun, newStartKey, RunApiError, STALE_TEAM_REVISION, TEAM_NEEDS_REVIEW, type RunRecord, type TeamReview } from '../../lib/runs/client'
 import type { ReceiptLine } from '../../lib/story/receipt'
 import type { AlwaysAllowed } from '../../lib/tools/allow'
-import { AgentFacesContext, ChatMentionsContext, type AgentFaces, type ChatMentions } from '../../lib/chat/faces'
+import { AgentFacesContext, ChatMentionsContext, type AgentFaces, type AgentFacts, type ChatMentions } from '../../lib/chat/faces'
 import { batonWords, sameBaton, type Baton } from '../../lib/chat/baton'
 import { usePieceLine } from '../../lib/chat/pieceLine'
 import { AgentFace } from './AgentFace'
@@ -91,8 +91,11 @@ interface TeamChatProps {
    * unless another was chosen). `at` tells one ask from the next.
    */
   ask?: { reply: ReplyTo; words?: string; agent?: string; at: number } | null
-  /** The parts of files asked about in this chat, and the one in the box now, whenever they change. */
-  onPassages?: (asked: AskedPassage[], asking: string | null) => void
+  /**
+   * The parts of files asked about in this chat, the one in the box now, and the team's agents as
+   * their cards show them (for the reader's bubbles), whenever they change.
+   */
+  onPassages?: (asked: AskedPassage[], asking: string | null, faces: AgentFacts[]) => void
   /**
    * A folder dropped on the chat, by its name (ADR 0082): a page can't learn where it is, so it is
    * found in the folder picker and added for the team rather than sent. Resolves with what to say
@@ -540,9 +543,10 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // page of the chat read again changes nothing.
   const passagesSaid = useMemo(() => JSON.stringify(askedPassages(chat.items, chat.pending)), [chat.items, chat.pending])
   const askingNow = replyTo?.kind === 'passage' ? replyTo.text : null
+  const facesSaid = JSON.stringify(members.flatMap((member) => faces.facts(member.id) ?? []))
   useEffect(() => {
-    onPassages?.(JSON.parse(passagesSaid) as AskedPassage[], askingNow)
-  }, [passagesSaid, askingNow, onPassages])
+    onPassages?.(JSON.parse(passagesSaid) as AskedPassage[], askingNow, JSON.parse(facesSaid) as AgentFacts[])
+  }, [passagesSaid, askingNow, facesSaid, onPassages])
   const address = (id: string) => {
     const agent = members.find((member) => member.id === id)
     if (!agent) return

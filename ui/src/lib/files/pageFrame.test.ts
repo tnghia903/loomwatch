@@ -92,7 +92,7 @@ describe('a web page in the reader', () => {
       const tell = (data: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', ...data }, source: inner.parent }))
       const said = () => sent.map((message) => JSON.parse(JSON.stringify(message)) as unknown)
       const document = doc
-      const mark = (text: string, look: string, more: Record<string, unknown> = {}) => ({ text, look, fresh: false, lit: false, open: false, label: `Show the answer about ${text}`, title: 'why?', figure: null, initials: 'WR', ...more })
+      const mark = (text: string, look: string, more: Record<string, unknown> = {}) => ({ key: `writer:${text}`, text, look, fresh: false, lit: false, open: false, label: `Show the answer about ${text}`, title: 'why?', figure: null, initials: 'WR', ...more })
       tell({ type: 'marks', asking: null, parts: [mark('beat Markov-chain', 'waiting'), mark('Costs fell.', 'busy', { figure: 'data:image/webp;base64,AAAA' }), mark('Sales fell.', 'read')] })
 
       // The words are marked where they are, across elements; the bubble is in the line after them.
@@ -109,9 +109,9 @@ describe('a web page in the reader', () => {
 
       // Where each is, dark behind it or not; one the page no longer has is missing.
       const parts = { lw: 'reader', type: 'parts', parts: [
-        { text: 'beat Markov-chain', rects: [{ top: 10, bottom: 30, left: 5, right: 80 }, { top: 10, bottom: 30, left: 5, right: 80 }], missing: false, dark: false },
-        { text: 'Costs fell.', rects: [{ top: 10, bottom: 30, left: 5, right: 80 }], missing: false, dark: true },
-        { text: 'Sales fell.', rects: [], missing: true, dark: false },
+        { text: 'beat Markov-chain', rects: [{ top: 10, bottom: 30, left: 5, right: 80 }, { top: 10, bottom: 30, left: 5, right: 80 }], missing: false, as: 'beat Markov-chain', dark: false },
+        { text: 'Costs fell.', rects: [{ top: 10, bottom: 30, left: 5, right: 80 }], missing: false, as: 'Costs fell.', dark: true },
+        { text: 'Sales fell.', rects: [], missing: true, as: 'Sales fell.', dark: false },
       ] }
       expect(sent.at(-1)).toEqual(parts)
       sent.length = 0
@@ -127,7 +127,7 @@ describe('a web page in the reader', () => {
       expect(sent).toEqual([])
       bubbles[0].click()
       marks[2].dispatchEvent(new inner.MouseEvent('click', { bubbles: true }))
-      expect(said()).toEqual([{ lw: 'reader', type: 'open', text: 'beat Markov-chain' }, { lw: 'reader', type: 'open', text: 'Costs fell.' }])
+      expect(said()).toEqual([{ lw: 'reader', type: 'open', key: 'writer:beat Markov-chain' }, { lw: 'reader', type: 'open', key: 'writer:Costs fell.' }])
       // Escape in the page, with nothing marked in it, is passed to the reader: it closes the answer.
       sent.length = 0
       document.dispatchEvent(new inner.KeyboardEvent('keydown', { key: 'Escape' }))
@@ -137,8 +137,9 @@ describe('a web page in the reader', () => {
       tell({ type: 'marks', asking: null, parts: [mark('beat Markov-chain', 'read', { lit: true }), mark('Costs fell.', 'busy'), mark('Sales fell.', 'read')] })
       expect(document.querySelector('.lw-mark')).toBe(marks[0])
       expect(marks[0].className).toBe('lw-mark lw-read lw-lit')
-      // A bubble wears the lightness of the page under it: light on the light part, dark on the dark one.
-      expect(bubbles[0].className).toBe('lw-bubble lw-read')
+      // A bubble wears the lightness of the page under it: light on the light part, dark on the dark
+      // one; the one whose answer is open is lit.
+      expect(bubbles[0].className).toBe('lw-bubble lw-read lw-lit')
       expect(bubbles[1].className).toBe('lw-bubble lw-busy lw-dark')
       tell({ type: 'marks', asking: null, parts: [] })
       expect(document.body.innerHTML).toBe(page)
@@ -148,9 +149,112 @@ describe('a web page in the reader', () => {
     }
   })
 
+  it('shows a bubble for each agent asked about the same words, and the older of two overlapping parts with the newer', async () => {
+    const holder = document.createElement('iframe')
+    document.body.append(holder)
+    const inner = holder.contentWindow! as Window & typeof globalThis
+    const doc = holder.contentDocument!
+    const sent: unknown[] = []
+    vi.spyOn(inner.parent, 'postMessage').mockImplementation((message: unknown) => { sent.push(JSON.parse(JSON.stringify(message))) })
+    vi.spyOn(inner.Element.prototype, 'getClientRects').mockImplementation(() => [{ top: 10, bottom: 30, left: 5, right: 80 }] as unknown as DOMRectList)
+    vi.spyOn(inner, 'requestAnimationFrame').mockImplementation(() => 1)
+    try {
+      const page = '<p>Gradient descent is used, <b>not derived</b>. SASRec beat Markov-chain baselines.</p>'
+      doc.body.innerHTML = page
+      new inner.Function(PAGE_BRIDGE)()
+      const tell = (data: Record<string, unknown>) => inner.dispatchEvent(new inner.MessageEvent('message', { data: { lw: 'reader', ...data }, source: inner.parent }))
+      const ask = (who: string, text: string, look: string, more: Record<string, unknown> = {}) => ({ key: `${who}:${text}`, text, look, fresh: false, lit: false, open: false, label: `${who}'s answer about ${text}`, title: '', figure: null, initials: who.slice(0, 2).toUpperCase(), ...more })
+      const tutor = ask('tutor', 'not derived', 'read')
+      const checker = ask('checker', 'not derived', 'waiting', { fresh: true })
+      tell({ type: 'marks', asking: null, parts: [tutor, checker] })
+
+      // The words are marked once; after them, one bubble for each agent asked, in the order asked.
+      expect([...doc.querySelectorAll('.lw-mark')].map((element) => element.textContent)).toEqual(['not derived'])
+      expect(doc.querySelectorAll('.lw-slot')).toHaveLength(1)
+      const bubbles = () => [...doc.querySelectorAll<HTMLButtonElement>('.lw-slot > .lw-bubble')]
+      expect(bubbles().map((bubble) => bubble.getAttribute('aria-label'))).toEqual(["tutor's answer about not derived", "checker's answer about not derived"])
+      expect(bubbles().map((bubble) => bubble.querySelector('.lw-face')!.textContent)).toEqual(['TU', 'CH'])
+      // Each bubble wears its own ask's look; the words wear the liveliest of them.
+      expect(bubbles().map((bubble) => bubble.className)).toEqual(['lw-bubble lw-read', 'lw-bubble lw-waiting lw-fresh'])
+      expect(doc.querySelector('.lw-mark')!.className).toBe('lw-mark lw-waiting lw-fresh')
+      expect(doc.querySelector('.lw-slot')!.className).toBe('lw-slot')
+      // Pointed at, or reached with the keyboard, a bubble says so, and where it is, for its agent's card.
+      sent.length = 0
+      bubbles()[1].dispatchEvent(new inner.MouseEvent('mouseenter'))
+      bubbles()[1].dispatchEvent(new inner.MouseEvent('mouseleave'))
+      bubbles()[0].dispatchEvent(new inner.FocusEvent('focus'))
+      inner.dispatchEvent(new inner.Event('scroll'))
+      expect(sent.filter((message) => (message as { type: string }).type === 'hover')).toEqual([
+        { lw: 'reader', type: 'hover', key: 'checker:not derived', now: false, rect: { top: 0, bottom: 0, left: 0, right: 0 } },
+        { lw: 'reader', type: 'hover', key: null, now: false },
+        { lw: 'reader', type: 'hover', key: 'tutor:not derived', now: true, rect: { top: 0, bottom: 0, left: 0, right: 0 } },
+        // Scrolling the page takes the card away.
+        { lw: 'reader', type: 'hover', key: null, now: false },
+      ])
+      // Each bubble opens its own answer; the words open the one waiting for you.
+      sent.length = 0
+      bubbles()[0].click()
+      bubbles()[1].click()
+      doc.querySelector('.lw-mark')!.dispatchEvent(new inner.MouseEvent('click', { bubbles: true }))
+      expect(sent).toEqual([
+        { lw: 'reader', type: 'open', key: 'tutor:not derived' },
+        { lw: 'reader', type: 'open', key: 'checker:not derived' },
+        { lw: 'reader', type: 'open', key: 'checker:not derived' },
+      ])
+      // The page says where the words are once, however many agents were asked about them.
+      sent.length = 0
+      const [first, second] = bubbles()
+      tell({ type: 'marks', asking: null, parts: [tutor, { ...checker, look: 'read', fresh: false, open: true, lit: true }] })
+      expect(sent).toEqual([{ lw: 'reader', type: 'parts', parts: [{ text: 'not derived', rects: [{ top: 10, bottom: 30, left: 5, right: 80 }], missing: false, as: 'not derived', dark: false }] }])
+      // A look changing keeps each bubble where it is, so none pops up again.
+      expect(bubbles()).toHaveLength(2)
+      expect(bubbles()[0]).toBe(first)
+      expect(bubbles()[1]).toBe(second)
+      expect(second.className).toBe('lw-bubble lw-read lw-lit')
+      expect(second.getAttribute('aria-expanded')).toBe('true')
+      expect(first.getAttribute('aria-expanded')).toBe('false')
+      // An agent no longer asked takes its bubble away, and leaves the others where they are: a
+      // bubble moved would replay its animations and lose focus.
+      const watch = new inner.MutationObserver(() => undefined)
+      watch.observe(doc.querySelector('.lw-slot')!, { childList: true })
+      tell({ type: 'marks', asking: null, parts: [checker] })
+      const left = watch.takeRecords().flatMap((record) => [...record.removedNodes])
+      watch.disconnect()
+      expect(left).toEqual([first])
+      expect(bubbles()).toHaveLength(1)
+      expect(bubbles()[0]).toBe(second)
+      // The words open the answer waiting for you even when a newer ask is about them too.
+      tell({ type: 'marks', asking: null, parts: [ask('checker', 'not derived', 'waiting'), ask('tutor', 'not derived', 'read')] })
+      sent.length = 0
+      doc.querySelector('.lw-mark')!.dispatchEvent(new inner.MouseEvent('click', { bubbles: true }))
+      expect(sent).toEqual([{ lw: 'reader', type: 'open', key: 'checker:not derived' }])
+
+      // Two parts that overlap: the newer is marked, and the older's bubble sits with it.
+      tell({ type: 'marks', asking: null, parts: [ask('tutor', 'Markov-chain', 'read'), ask('checker', 'beat Markov-chain baselines', 'busy')] })
+      expect([...doc.querySelectorAll('.lw-mark')].map((element) => element.textContent)).toEqual(['beat Markov-chain baselines'])
+      expect(bubbles().map((bubble) => bubble.getAttribute('aria-label'))).toEqual(["tutor's answer about Markov-chain", "checker's answer about beat Markov-chain baselines"])
+      expect(sent.at(-1)).toEqual({ lw: 'reader', type: 'parts', parts: [
+        // The older part is shown on the newer part's words.
+        { text: 'Markov-chain', rects: [{ top: 10, bottom: 30, left: 5, right: 80 }], missing: false, as: 'beat Markov-chain baselines', dark: false },
+        { text: 'beat Markov-chain baselines', rects: [{ top: 10, bottom: 30, left: 5, right: 80 }], missing: false, as: 'beat Markov-chain baselines', dark: false },
+      ] })
+      tell({ type: 'marks', asking: null, parts: [] })
+      expect(doc.body.innerHTML).toBe(page)
+    } finally {
+      vi.restoreAllMocks()
+      holder.remove()
+    }
+  })
+
   it('takes only well-formed messages from the page’s script', () => {
     expect(pageMessage({ lw: 'reader', type: 'ready' })).toEqual({ type: 'ready' })
-    expect(pageMessage({ lw: 'reader', type: 'open', text: 'Sales' })).toEqual({ type: 'open', text: 'Sales' })
+    expect(pageMessage({ lw: 'reader', type: 'open', key: 'writer:Sales' })).toEqual({ type: 'open', key: 'writer:Sales' })
+    expect(pageMessage({ lw: 'reader', type: 'open', text: 'Sales' })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'hover', key: 'writer:Sales', now: true, rect: { top: 1, bottom: 2, left: 3, right: 4 } })).toEqual({ type: 'hover', key: 'writer:Sales', now: true, rect: { top: 1, bottom: 2, left: 3, right: 4 } })
+    expect(pageMessage({ lw: 'reader', type: 'hover', key: null })).toEqual({ type: 'hover', key: null, now: false })
+    expect(pageMessage({ lw: 'reader', type: 'hover', key: 'writer:Sales' })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'hover', key: 'writer:Sales', rect: { top: 'x' } })).toBeNull()
+    expect(pageMessage({ lw: 'reader', type: 'parts', parts: [{ text: 'Sales', rects: [], as: 'Sales grew' }] })).toEqual({ type: 'parts', parts: [{ text: 'Sales', rects: [], missing: false, as: 'Sales grew', dark: false }] })
     expect(pageMessage({ lw: 'reader', type: 'escape' })).toEqual({ type: 'escape' })
     expect(pageMessage({ lw: 'reader', type: 'parts', parts: [{ text: 'Sales', rects: [{ top: 1, bottom: 2, left: 3, right: 4 }, { top: 'x' }], dark: true }, { rects: [] }] }))
       .toEqual({ type: 'parts', parts: [{ text: 'Sales', rects: [{ top: 1, bottom: 2, left: 3, right: 4 }], missing: false, dark: true }] })

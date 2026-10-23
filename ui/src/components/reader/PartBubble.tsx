@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { useRef } from 'react'
 
 import { BUBBLE_POINT_EDGE, BUBBLE_POINT_FILL } from '../../lib/files/pageFrame'
 import { bubbleAgent, bubbleLabel, bubbleTitle, type AskedPassage, type PartLook } from '../../lib/files/passage'
@@ -10,21 +11,45 @@ interface PartBubbleProps {
   name: (id: string) => string
   hue: (id: string) => number
   open: boolean
+  /** Asked just now: it pops up. */
+  fresh: boolean
+  /** Its answer is open, or it is pointed at. */
+  lit: boolean
   onOpen: () => void
   onFocus: (on: boolean) => void
+  /**
+   * The agent's card opens when the bubble is pointed at (FileReader holds it): told where the
+   * bubble is, and whether at once (reached with the keyboard) or after a rest; `null` when it
+   * should close. Without it the bubble's words are its tooltip.
+   */
+  onCard?: (at: { top: number; bottom: number; left: number } | null, now: boolean) => void
+  /** The card, while it is open for this bubble. */
+  cardId?: string
 }
 
 /**
  * The bubble after a part asked about (ADR 0077), in the line with its words: the face of the agent
  * asked, typing while it works on it, with a gold dot once its answer waits for you. It is the way
  * to the answer. Drawn in the slot FileReader leaves after the part's last word (lib/files/partMarks.ts),
- * so the line makes room for it; a web page draws its own the same way (pageFrame.ts).
+ * so the line makes room for it, beside the bubbles of other agents asked about the same words; a
+ * web page draws its own the same way (pageFrame.ts).
  */
-export function PartBubble({ passage, look, name, hue, open, onOpen, onFocus }: PartBubbleProps) {
+export function PartBubble({ passage, look, name, hue, open, fresh, lit, onOpen, onFocus, onCard, cardId }: PartBubbleProps) {
   const by = bubbleAgent(passage)
+  const button = useRef<HTMLButtonElement>(null)
+  // A bubble focused by a press is about to be clicked; one reached with the keyboard shows its card.
+  const pressing = useRef(false)
+  const card = (now: boolean) => {
+    const box = button.current?.getBoundingClientRect()
+    if (box) onCard?.(box, now)
+  }
   return (
-    <button type="button" className={`rd-bubble ${look}`} aria-label={bubbleLabel(passage, look, name)} aria-expanded={open} title={bubbleTitle(passage, look, name)}
-      onClick={onOpen} onMouseEnter={() => onFocus(true)} onMouseLeave={() => onFocus(false)} onFocus={() => onFocus(true)} onBlur={() => onFocus(false)}>
+    <button ref={button} type="button" className={`rd-bubble ${look}${fresh ? ' fresh' : ''}${lit ? ' lit' : ''}`} aria-label={bubbleLabel(passage, look, name)} aria-expanded={open}
+      title={onCard ? undefined : bubbleTitle(passage, look, name)} aria-describedby={cardId}
+      onClick={() => { onCard?.(null, true); onOpen() }}
+      onMouseEnter={() => onFocus(true)} onMouseLeave={() => { onFocus(false); onCard?.(null, false) }}
+      onPointerEnter={(event) => { if (event.pointerType === 'mouse') card(false) }} onPointerDown={() => { pressing.current = true }}
+      onFocus={() => { onFocus(true); if (!pressing.current) card(true); pressing.current = false }} onBlur={() => { onFocus(false); onCard?.(null, false) }}>
       <BubblePoint />
       <AvatarFace id={by} hue={hue(by)} size={18} fontSize={9} text={initials(name(by))} className="rd-bubble-face" />
       {look === 'busy' && <span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>}

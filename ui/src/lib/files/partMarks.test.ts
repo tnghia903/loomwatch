@@ -40,14 +40,19 @@ describe('marking parts of a page in place', () => {
     expect(root.querySelector('p')!.childNodes).toHaveLength(1)
   })
 
-  it('marks the newer of two parts that overlap', () => {
+  it('marks the newer of two parts that overlap, and shows the older with it', () => {
     const root = page('<p>Sales grew 12% in Q3.</p>')
     const text = pageText(root)
     const { parts, undo } = markParts([
       { key: 'first', range: findPassage(text, 'Sales grew')! },
       { key: 'overlap', range: findPassage(text, 'grew 12%')! },
     ], NAMES)
-    expect([...parts.keys()]).toEqual(['overlap'])
+    expect(root.querySelectorAll('.mark')).toHaveLength(1)
+    expect(root.querySelector('.mark')).toHaveTextContent('grew 12%')
+    // The older part's bubble has a place: the newer one's slot, after the words marked.
+    expect(parts.get('overlap')!.key).toBe('overlap')
+    expect(parts.get('first')).toBe(parts.get('overlap'))
+    expect(root.querySelectorAll('.slot')).toHaveLength(1)
     undo()
     expect(root.innerHTML).toBe('<p>Sales grew 12% in Q3.</p>')
   })
