@@ -65,6 +65,10 @@ body {
   left: 50%;
   width: var(--w);
   height: var(--h);
+  /* Never smaller than where it rests, the notch: the spring overshoots, and shrinking back past
+     the notch would leave the notch's own black showing beyond the island for a moment. */
+  min-width: var(--notch-w);
+  min-height: var(--bar);
   translate: -50% 0;
   pointer-events: auto;
   outline: none;
@@ -87,9 +91,9 @@ body {
 /* At rest and tucked the island is even either side of the camera: the pinned agent, or
    LoomWatch's mark, and the teams' figures on the left; on the right, what there is to say (the
    count, the time, a new result), empty at rest. Without a notch the tab at rest is just its
-   figure, at the middle of the menu bar. */
+   figure, at the middle of the menu bar, and shrinks back no narrower than that figure. */
 .island:is([data-view="rest"], [data-view="tucked"]) .island-shape { --w: calc(var(--notch-w) + 2 * var(--ear)); }
-.island[data-notch="none"][data-view="rest"] .island-shape { --w: var(--ear); }
+.island[data-notch="none"][data-view="rest"] .island-shape { --w: var(--ear); min-width: var(--ear); }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-shape {
   --w: calc(var(--notch-w) + 24px);
   --h: calc(var(--bar) + var(--fig) * .66);
