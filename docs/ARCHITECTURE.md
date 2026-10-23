@@ -458,8 +458,11 @@ open a browser, with no Electron. On a Mac, `LoomWatch.app` is only a launcher. 
 `loomwatchd`, opens LoomWatch in the browser and stays in the notch (ADR 0083): a see-through panel
 at the top middle of every screen, around the camera on a MacBook, shows `island.html`, a second
 page of the same build. With the app's own API calls it reads the runs and the messages agents
-answer in the chat without starting a run (`GET /api/chat/answering`), and answers a permission;
-each panel places its page, tells it where the pointer is, and takes the pointer only over what the
+answer in the chat without starting a run (`GET /api/chat/answering`), and answers a permission.
+A figure that is out (peeking below the notch, or in front in the list's row) follows its run's
+events, as the run view does, only while it is drawn, and acts out what its agent is at with the
+moves of the run view's figures (`workPhase`), bobbing until the events arrive; in the menu bar a
+figure at work only breathes and dips, with no connection. Each panel places its page, tells it where the pointer is, and takes the pointer only over what the
 page reports. Only the island on the screen the pointer is on is live: it opens the list and drops
 questions and answers out, while the others stay at rest beside their notch, so nothing comes and
 goes as the pointer moves between screens. A pointer at a screen's very top edge is on that screen
@@ -478,10 +481,10 @@ promise ⌃⌥Space. One of My agents can be pinned to the notch
   chat's attachments. The panel takes the keyboard only while that message is written (focus may
   move on to Copy, See answer or Start; Escape gives it back), without bringing `LoomWatch` to
   the front;
-- its answer is read whole before Copy or a drag can take it, and both carry it twice: as HTML
+- its answer is read whole before Copy can take it, and Copy carries it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
   whose links keep their addresses. In the app, Copy writes both to the clipboard
-  (`NotchPanels::copy`); a drag hands both to `WebKit`;
+  (`NotchPanels::copy`);
 - a drag of a file, text or a link near the top is noticed by the drag pasteboard changing while
   the button is held (macOS sends other apps no pointer events once a drag begins, so the app
   checks every 50 ms then), and the whole panel takes the pointer so the drop lands in the page;

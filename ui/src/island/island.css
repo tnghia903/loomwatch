@@ -28,7 +28,8 @@ body {
 
 /* A figure's state is its glow, as the app draws it (blue at work, gold waiting for you, green
    done, red stopped), and its pose, as the team rail holds it, so no state is colour alone: it
-   breathes while working, leans in to ask, sits down when done, and slumps, greyed, when stopped.
+   breathes and bobs while working, leans in to ask, sits down when done, and slumps, greyed, when
+   stopped. On the notch's black the glow is wider than the app's, or it reads as a thin edge.
    The glow is on the figure's holder and the picture is masked to the figure, so the glow follows
    the figure and not the picture's square edge. */
 .island [data-moment="work"] { --glow: var(--color-live); }
@@ -37,9 +38,19 @@ body {
 .island [data-moment="fail"] { --glow: var(--color-alert); }
 /* The agent pinned to the notch, free for a message. */
 .island [data-moment="ready"] { --glow: var(--color-ok); }
-.island .glow { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2.5px var(--glow)); }
+.island .glow { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); }
 .island .glow[data-moment="work"] { animation: island-breathe var(--t-breathe) ease-in-out infinite; }
-.island .glow[data-moment="fail"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 2.5px var(--glow)); }
+.island .glow[data-moment="fail"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); }
+/* In a row it stands in front of its teammates: a closer breath keeps its light off them. */
+.island .island-row-figure.glow[data-moment="work"] { animation-name: island-breathe-near; }
+/* Out, a figure at work acts out what it is at, as on Team at work (StageFigure): it leans in to
+   read, sways to think, hops at a tool and bobs as it writes. Until its run says (an answer in the
+   chat has none, and a run's events take a moment to arrive) it bobs. */
+.island [data-phase="reading"] { --act: island-read var(--t-breathe) ease-in-out infinite; }
+.island [data-phase="thinking"] { --act: island-sway var(--t-breathe) ease-in-out infinite; }
+.island [data-phase="tools"] { --act: island-tool var(--t-flow) var(--ease-out) infinite; }
+.island [data-phase="typing"] { --act: island-bob var(--t-settle) ease-in-out infinite; }
+.island .island-row-figure.glow[data-moment="work"] > * { transform-origin: 50% 90%; animation: var(--act, island-bob calc(var(--t-breathe) / 2) ease-in-out infinite); }
 .island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-slot-eyes, .island-stage-figure) > :is(img, .figure-still) {
   display: block;
   width: 100%;
@@ -120,7 +131,7 @@ body {
   translate: 0 0;
   transition: translate var(--t-spring) var(--ease-spring) var(--t-quick);
 }
-.island[data-view="work"] .island-slot.is-on > * { animation: island-bob calc(var(--t-breathe) / 2) ease-in-out infinite; }
+.island[data-view="work"] .island-slot.is-on > * { animation: var(--act, island-bob calc(var(--t-breathe) / 2) ease-in-out infinite); }
 .island[data-view="done"] .island-slot.is-on > * { animation: island-hop var(--t-settle) var(--ease-spring) var(--t-entrance) 2; }
 .island[data-view="fail"] .island-slot.is-on > * { rotate: 8deg; translate: 0 3px; transition: rotate var(--t-move) var(--ease-out) var(--t-entrance), translate var(--t-move) var(--ease-out) var(--t-entrance); }
 
@@ -192,6 +203,9 @@ body {
 .island[data-view="tucked"] .island-head[data-moment="done"] { translate: 0 3px; }
 .island[data-view="tucked"] .island-head[data-moment="fail"] { rotate: 8deg; translate: 0 3px; }
 .island.is-nudging .island-head[data-moment="ask"] > * { animation: island-nudge var(--t-settle) var(--ease-spring); }
+/* At work in the menu bar it dips with each breath of its glow: down, as a bob up would take its
+   top past the top of the screen. */
+.island:is([data-view="rest"], [data-view="tucked"]) .island-head[data-moment="work"] > * { animation: island-dip var(--t-breathe) ease-in-out infinite; }
 .island-more { margin-left: 4px; font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
 .island-count { font: 700 13px/18px var(--font-sans); color: var(--color-accent); font-variant-numeric: tabular-nums; }
 .island-time { font: 600 12px/16px var(--font-sans); color: var(--color-ink-2); font-variant-numeric: tabular-nums; }
@@ -288,21 +302,11 @@ body {
 .island-chip.is-likely { border-color: var(--color-accent); color: var(--color-accent); }
 .island-chip:disabled { opacity: .5; cursor: default; }
 
-/* ---- The pinned agent's answer: an answer like any other, which can be taken into another app.
-   Pointed at, a gold tear line runs along its bottom; dragged, a paper copy of the whole answer
-   comes away with the pointer. ---- */
-.island-answer { position: relative; display: grid; gap: 10px; min-width: 0; cursor: grab; }
-.island-answer:active { cursor: grabbing; }
+/* ---- The pinned agent's answer: an answer like any other, its opening lines and Copy. ---- */
+.island-answer { display: grid; gap: 10px; min-width: 0; }
 .island-row .island-answer { grid-column: 2 / -1; }
 .island-answer .island-words p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; white-space: pre-line; }
-.island-answer::after { content: ""; position: absolute; left: -4px; right: -4px; bottom: -6px; border-top: 1.5px dashed var(--color-accent); opacity: 0; transition: opacity var(--t-quick) var(--ease-out); pointer-events: none; }
-.island-answer:not(.is-reading):hover::after, .island-answer.is-tearing::after { opacity: .85; }
-/* Until it is read whole, it can't be taken: no hand, no tear line. */
-.island-answer.is-reading { cursor: default; }
 .island-slip.is-answer { grid-template-columns: minmax(0, 1fr); }
-.island-answer .island-paper-copy { position: fixed; left: -2000px; top: 0; width: 260px; display: grid; gap: 4px; padding: 10px 12px 14px; border-radius: 3px; background: var(--color-ink); color: var(--color-black); pointer-events: none; }
-.island-answer .island-paper-copy small { font: 600 11px/14px var(--font-sans); color: color-mix(in srgb, var(--color-black) 55%, var(--color-ink)); }
-.island-answer .island-paper-copy p { display: block; margin: 0; max-height: 320px; overflow: hidden; font: 400 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-line-clamp: unset; line-clamp: unset; }
 /* Its requests for a team can be read whole in its row before Start. */
 .island-pinned .island-ask { -webkit-line-clamp: 4; line-clamp: 4; }
 
@@ -319,8 +323,13 @@ body {
 
 .island-list-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 6px 0 4px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 
-@keyframes island-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 6px var(--glow)); } }
+@keyframes island-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 11px var(--glow)); } }
+@keyframes island-breathe-near { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 7px var(--glow)); } }
 @keyframes island-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
+@keyframes island-dip { 0%, 100% { translate: 0 0; } 50% { translate: 0 2px; } }
+@keyframes island-read { 50% { rotate: 6deg; translate: 0 3%; } }
+@keyframes island-sway { 0%, 100% { rotate: 0deg; } 25% { rotate: -5deg; } 75% { rotate: 5deg; } }
+@keyframes island-tool { 25% { translate: 0 -13%; } 50% { translate: 0 0; } }
 @keyframes island-hop { 0%, 70%, 100% { translate: 0 0; } 35% { translate: 0 -12px; } }
 @keyframes island-swing { 0% { rotate: 0deg; } 18% { rotate: 2.4deg; } 42% { rotate: -1.5deg; } 68% { rotate: .7deg; } 100% { rotate: 0deg; } }
 @keyframes island-nudge { 0%, 100% { translate: 0 0; } 40% { translate: 0 -6px; } }
@@ -339,7 +348,7 @@ body {
   .island[data-view="ask"] .island-hang { opacity: 1; }
   .island-slot, .island-head { opacity: 0; }
   .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on, .island:is([data-view="rest"], [data-view="tucked"]) .island-head { opacity: 1; }
-  /* Without its breath, a figure at work holds the top of its bob: told from one that is ready by
-     its pose, not by its colour alone. */
+  /* Without its breath and its dip, a figure at work holds itself up a little, apart from one that
+     is ready and from done's sitting down: told by its pose, not by its colour alone. */
   .island:is([data-view="rest"], [data-view="tucked"]) .island-head[data-moment="work"] { translate: 0 -2px; }
 }

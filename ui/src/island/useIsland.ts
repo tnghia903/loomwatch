@@ -82,12 +82,11 @@ export interface Island {
   dragOver: (over: boolean) => void
   clearIntake: () => void
   /** The whole answer of a finished turn of the pinned agent, once read: what its card shows, and
-      what Copy and a drag carry. `null` until then, when neither can take it. */
+      what Copy takes. `null` until then, when Copy is off. */
   answerOf: (team: TeamNow) => WholeAnswer | null
-  /** Copy an answer; and an answer torn off into another app, which has been seen. */
+  /** Copy an answer. */
   copy: (answer: WholeAnswer) => void
   copied: boolean
-  took: (team: TeamNow) => void
   /** Start one of your teams on what the pinned agent asked it, or say not now. */
   answerTeam: (request: TeamRequest, decision: 'start' | 'decline') => void
   teamBusy: string | null
@@ -393,7 +392,6 @@ export function useIsland(): Island {
     answerOf,
     copy,
     copied,
-    took: useCallback((team: TeamNow) => dispatch({ type: 'opened', runId: team.runId }), []),
     answerTeam,
     teamBusy,
     teamFailed,
