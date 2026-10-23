@@ -1,7 +1,7 @@
 import { chromium } from 'playwright'
 import { readFileSync, mkdirSync } from 'node:fs'
 const cam = readFileSync('cam.json', 'utf8').trim()
-const shift = { yarn: [4.2, 8.7], spool: [4.2, 8.5], button: [0.7, 1.3], thimble: [4.9, 8.6], pincushion: [4.6, 8.8], cone: [4.6, 8.9], scissors: [0, 0], bobbin: [0, 0] }
+const shift = { yarn: [-0.9, -4.5], spool: [-0.7, -4.2], button: [1, -0.6], thimble: [-0.4, -3.8], pincushion: [-0.5, -4.4], cone: [-0.9, -3.5], scissors: [0, 0], bobbin: [0, 0] }
 const items = ['tee', 'overalls', 'apron', 'vest', 'band', 'chalk', 'patch', 'pin', 'monocle', 'cushion', 'shuttle']
 // Clothes in the figure's own colour (a tee is a deeper shade of it) get a layer per colour.
 const inColor = new Set(['tee'])

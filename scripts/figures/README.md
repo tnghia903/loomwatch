@@ -10,8 +10,9 @@ these files only add to them.
 | `heads.js` | Builds `head_scissors` and `head_bobbin`: under `figure/body/neck/head`, face toward +z, materials named by role, eyes named `<kind>_eye_[lr]`. |
 | `export.html`, `export.mjs` | Export the heads as a GLB of their own. |
 | `merge.py BASE HEADS OUT` | Adds the heads under `head` without re-encoding anything already in the model; refuses one that has them. |
-| `calib.html`, `calib.mjs` | Fit the camera and the arms' pose to the Blender stills' silhouettes (IoU 0.98). The result is `cam.json`. |
-| `render.html`, `still.mjs` | Render a still with `cam.json`: how the earned figures' stills are made. |
+| `pose.js` | The portrait's pose (arms a little out and forward, head tilted toward you), the same as `STILL_POSE` and `STILL_HEAD` in the Blender script. Every page here poses the figure with it. |
+| `calib.html`, `calib.mjs` | Fit the camera to the Blender stills' silhouettes, the figure posed by `pose.js` (IoU 0.99). The result is `cam.json`, with the lights that match the stills' warm studio. |
+| `render.html`, `still.mjs` | Render a still with `cam.json`: how the earned figures' stills are made, soft to the touch under a short flocked pile like the Blender ones, with the same blush. In `cam.json`, the colour lift (`liftS`, the same 1.2 as the Blender script's `flock()` and the live figure's `pileColor` in `workbenchModel.ts`; butter, in `liftKeep`, is not lifted, or it reads as the app's gold) and the scissors blades' darker steel (`blade`, `bladeRough`) keep them matched to the Blender stills. |
 | `layers.html`, `layers.mjs` | Render each item on each figure as a layer the size of a still (the tee, in the figure's own colour, once per colour): the figure hides what is behind it and catches its shadow. The accessories come from the app's own `accessoryMeshes.ts`, so the pictures match the 3D bench. Accessories on the face are moved by each still's measured face shift (in `layers.mjs`): the Blender stills' faces sit a few pixels from this model's. |
 | `finish.py` | Turns the layers into WebP in `ui/public/agent/wear`, with an icon and a locked silhouette per accessory. |
 

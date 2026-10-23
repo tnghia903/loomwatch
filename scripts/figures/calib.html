@@ -3,6 +3,7 @@
 <script type="module">
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { portrait } from './pose.js'
 const S = 160
 const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, preserveDrawingBuffer: true })
 renderer.setPixelRatio(1); renderer.setSize(S, S)
@@ -11,6 +12,7 @@ const scene = new THREE.Scene()
 const gltf = await new GLTFLoader().loadAsync('./agent/workbench.glb')
 const fig = gltf.scene.getObjectByName('figure')
 fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1); scene.add(fig)
+portrait(fig)
 const white = new THREE.MeshBasicMaterial({ color: '#fff' })
 fig.traverse((o) => { if (o.isMesh) o.material = white })
 const camera = new THREE.PerspectiveCamera(20, 1, 0.01, 50)
@@ -27,11 +29,10 @@ const kinds = ['yarn', 'button', 'cone', 'thimble', 'spool', 'pincushion']
 const refs = {}
 for (const k of kinds) refs[k] = await mask(`./agent/figures/${k}-sky.webp`)
 const gl = renderer.getContext(); const px = new Uint8Array(S * S * 4)
-function score(p, use = kinds, armDown = 0) {
+function score(p, use = kinds) {
   fig.rotation.y = p[0]
   camera.fov = p[3]; camera.updateProjectionMatrix()
   camera.position.set(p[5], p[1], p[2]); camera.lookAt(p[5], p[4], 0)
-  for (const side of ['arm_l', 'arm_r']) { const a = fig.getObjectByName(side); a.rotation.z = (side === 'arm_l' ? 1 : -1) * (p[6] ?? 0) }
   let total = 0
   for (const k of use) {
     fig.traverse((o) => { if (o.name.startsWith('head_')) o.visible = o.name === 'head_' + k })
@@ -40,8 +41,6 @@ function score(p, use = kinds, armDown = 0) {
     let inter = 0, uni = 0; const r = refs[k]
     for (let y = 0; y < S; y += 1) for (let x = 0; x < S; x += 1) {
       const mine = px[((S - 1 - y) * S + x) * 4 + 3] > 128 ? 1 : 0
-      // Leave out the ground shadow band at the bottom of the stills.
-      if (y > S * 0.9) continue
       const ref = r[y * S + x]
       if (mine && ref) inter += 1; if (mine || ref) uni += 1
     }

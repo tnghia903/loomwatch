@@ -3,6 +3,7 @@ import {
   BoxGeometry,
   Color,
   HalfFloatType,
+  Light,
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
@@ -12,6 +13,7 @@ import {
   Texture,
   WebGLRenderTarget,
   type Camera,
+  type LightShadow,
   type Material,
   type Object3D,
   type Scene,
@@ -20,6 +22,7 @@ import {
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { COLOR_HEX } from '../../lib/library/figures'
 
 /*
  * What every scene drawn from workbench.glb shares: the app's bench (WorkbenchScene, in
@@ -82,6 +85,50 @@ export async function readyToDraw(renderer: WebGLRenderer, object: Object3D, cam
 }
 
 /**
+ * A figure's colour as its flocked skin shows it. The pile's sheen greys a colour a little, so it is
+ * lifted back, as in the stills (the Blender script's flock and scripts/figures/cam.json's liftS).
+ * Butter is left as it is: lifted, it is the app's gold, which means "waiting for you".
+ */
+export function pileColor(color: string | Color): Color {
+  const out = new Color(color)
+  if (out.equals(new Color(COLOR_HEX.butter))) return out
+  const hsl = { h: 0, s: 0, l: 0 }
+  out.getHSL(hsl)
+  return out.setHSL(hsl.h, Math.min(1, hsl.s * 1.2), hsl.l)
+}
+
+/** How far a skin's sheen goes from its own colour toward white. */
+export const SHEEN_TOWARD_WHITE = 0.5
+
+/**
+ * Colour a figure's skin: the colour itself (pileColor, which the caller has applied), and the
+ * pile's sheen a pale tint of it, as the stills' fibres catch the light in their own colour. A white
+ * sheen laid a cream veil over the sides and caught the cool rim light under the chin.
+ */
+export function paintSkin(material: Material, color: Color) {
+  const skin = material as MeshPhysicalMaterial
+  skin.color.copy(color)
+  if (skin.isMeshPhysicalMaterial) skin.sheenColor.copy(color).lerp(WHITE, SHEEN_TOWARD_WHITE)
+}
+
+const WHITE = new Color('#FFFFFF')
+
+/**
+ * Drop the shadow maps of `scene`'s lights, so three makes them again on the next frame. The map it
+ * makes on a scene's first frame stopped taking draws after it (in Chrome on a Mac nothing cleared it
+ * or drew into it again), so that frame's shadows stayed for good: on the bench, those of the heads
+ * and keys shown before it is dressed, banding the worn head. One made after that frame follows it.
+ */
+export function renewShadows(scene: Object3D) {
+  scene.traverse((object) => {
+    const shadow = object instanceof Light && object.castShadow ? (object as Light & { shadow?: LightShadow }).shadow : undefined
+    if (!shadow?.map) return
+    shadow.map.dispose()
+    shadow.map = null
+  })
+}
+
+/**
  * The room the figures are lit by (RoomEnvironment) as an environment map, its shaders compiled
  * first (readyToDraw): PMREMGenerator compiles the room's as it draws it, and waits for them. It
  * draws the room, and a backdrop behind it, into a picture, so theirs are compiled with one current.
@@ -139,21 +186,25 @@ interface Compiled {
 export function benchMaterial(role: string, mesh: string, textures: { pegboard: () => Texture; wound: Texture | null }): Material {
   const physical = (color: string, roughness: number, clearcoat = 0.4) => new MeshPhysicalMaterial({ color, roughness, clearcoat, clearcoatRoughness: 0.35 })
   const standard = (color: string, roughness: number, metalness = 0) => new MeshStandardMaterial({ color, roughness, metalness })
+  const soft = (color: string) => new MeshPhysicalMaterial({ color, roughness: 0.62, specularIntensity: 0.7, sheen: 0.35, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
+  const pile = (color: string) => { const skin = new MeshPhysicalMaterial({ roughness: 0.9, specularIntensity: 0.7, sheen: 1, sheenRoughness: 0.6 }); paintSkin(skin, pileColor(color)); return skin }
   switch (role) {
     case 'bone': return physical('#EFEAE0', 0.5, 0.55)
     case 'benchtop': return physical('#E6DFD1', 0.6, 0.3)
     case 'graphite': return physical('#24242B', 0.55, 0.35)
     case 'shoe': return physical('#2B2B33', 0.55, 0.3)
     case 'pegboard': return mesh === 'pegboard_face' ? new MeshStandardMaterial({ map: textures.pegboard(), roughness: 0.9 }) : standard('#1C1C21', 0.8)
-    // The figure. Its skin is coloured when it is dressed (wear), from the figure it wears.
-    case 'skin': return new MeshPhysicalMaterial({ color: '#E3A386', roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.3, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
-    case 'skin_wound': return new MeshStandardMaterial({ color: '#E3A386', roughness: 0.78, bumpMap: textures.wound, bumpScale: 1.6 })
-    case 'skin_deep': return new MeshStandardMaterial({ color: '#C38C73', roughness: 0.62 })
+    // The figure, soft to the touch under a short flocked pile, as in its stills: matte, no clear coat,
+    // a velvet sheen. Its skin is coloured when it is dressed (wear), through pileColor.
+    case 'skin': return pile('#E3A386')
+    case 'skin_wound': return Object.assign(pile('#E3A386'), { bumpMap: textures.wound, bumpScale: 1.6 })
+    case 'skin_deep': return pile('#C38C73')
+    case 'blush': return new MeshStandardMaterial({ color: '#F08A8A', roughness: 0.9, transparent: true, opacity: 0.55, depthWrite: false })
     case 'eye': return new MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 })
     case 'glint': return new MeshBasicMaterial({ color: '#FFFFFF' })
     case 'stitch': return standard('#D8A93C', 0.35, 0.6)
-    case 'wood': return physical('#E9D5B1', 0.55, 0.3)
-    case 'leaf': return physical('#6E9C6A', 0.5, 0.3)
+    case 'wood': return soft('#E9D5B1')
+    case 'leaf': return soft('#6E9C6A')
     case 'steel': return standard('#C9CCD2', 0.3, 0.9)
     case 'pin_a': return physical('#E9C46A', 0.3, 0.6)
     case 'pin_b': return physical('#F4F1EA', 0.3, 0.6)

@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { dress } from './lib/components/agents/accessoryMeshes.js'
+import { portrait } from './pose.js'
 
 // mode=layer: one accessory, the figure hidden but hiding what is behind it and catching shadows.
 // mode=full: the figure and its accessories, for looking at. mode=icon: the accessory alone.
@@ -27,17 +28,19 @@ const scene = new THREE.Scene()
 const pmrem = new THREE.PMREMGenerator(renderer)
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 scene.environmentIntensity = cam.env
-// Light from the upper left and in front, as in the stills.
-const key = new THREE.DirectionalLight('#fff', cam.key); key.position.set(-1.4, 3, 3); key.castShadow = true
+// Warm light from the upper left and in front, a warm one from behind and a warm fill, as in the stills.
+const key = new THREE.DirectionalLight(cam.keyColor ?? '#fff', cam.key); key.position.set(-1.4, 3, 3); key.castShadow = true
 key.shadow.mapSize.set(2048, 2048); key.shadow.camera.left = -1; key.shadow.camera.right = 1; key.shadow.camera.top = 1.5; key.shadow.camera.bottom = -0.5
 key.shadow.bias = -0.0003; key.shadow.normalBias = 0.01; key.shadow.radius = 4
 scene.add(key)
+const back = new THREE.DirectionalLight('#FFDBB3', cam.back ?? 0); back.position.set(1.2, 1.6, -2.2); scene.add(back)
+scene.add(new THREE.AmbientLight('#FFE3CC', cam.fill ?? 0))
 const gltf = await new GLTFLoader().loadAsync(params.get('glb') || './agent/workbench.glb')
 const fig = gltf.scene.getObjectByName('figure')
 fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1)
 scene.add(fig)
 fig.rotation.y = cam.rot
-for (const side of ['arm_l', 'arm_r']) fig.getObjectByName(side).rotation.z = (side === 'arm_l' ? 1 : -1) * cam.arm
+portrait(fig)
 const skin = new THREE.Color(color)
 const figureMeshes = []
 fig.traverse((o) => {

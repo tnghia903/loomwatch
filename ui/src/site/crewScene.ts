@@ -28,7 +28,7 @@ import {
   type Texture,
   type Vector4,
 } from 'three'
-import { benchMaterial, drawn, fitCanvas, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
+import { benchMaterial, drawn, fitCanvas, paintSkin, pileColor, readModel, readyToDraw, roomEnvironment } from '../components/agents/workbenchModel'
 import { pegboardTexture, woundTexture } from '../components/agents/benchTextures'
 import { COLOR_HEX, FIGURE_KINDS, type FigureChoice } from '../lib/library/figures'
 import { CrewGlow, easeTint, glowColor } from './crewGlow'
@@ -223,8 +223,10 @@ export class CrewScene {
       const meshes = dressFigure(root, member, wound, (item) => this.own(item))
       for (const mesh of meshes) {
         const role = mesh.userData.role as string
-        mesh.castShadow = role !== 'glint' && !mesh.name.endsWith('_face')
-        mesh.receiveShadow = role !== 'glint'
+        // The eyes' glints and the cheeks are painted on the face: they neither cast nor catch a shadow.
+        const decal = role === 'glint' || role === 'blush'
+        mesh.castShadow = !decal && !mesh.name.endsWith('_face')
+        mesh.receiveShadow = !decal
         mesh.userData.member = index
         mesh.userData.material = mesh.material
       }
@@ -701,13 +703,13 @@ export class CrewScene {
 export function dressFigure(root: Object3D, member: CrewMember, wound: Texture, own: <T extends { dispose: () => void }>(item: T) => T): Mesh[] {
   const meshes: Mesh[] = []
   const pegboard = () => own(pegboardTexture())
-  const skin = new Color(COLOR_HEX[member.figure.color])
+  const skin = pileColor(COLOR_HEX[member.figure.color])
   root.traverse((object) => {
     if (!(object instanceof Mesh)) return
     const role = (object.material as Material).name
     const material = own(benchMaterial(role, object.name, { pegboard, wound }))
-    if (role === 'skin' || role === 'skin_wound') (material as MeshStandardMaterial).color.copy(skin)
-    if (role === 'skin_deep') (material as MeshStandardMaterial).color.copy(skin).multiplyScalar(0.86)
+    if (role === 'skin' || role === 'skin_wound') paintSkin(material, skin)
+    if (role === 'skin_deep') paintSkin(material, skin.clone().multiplyScalar(0.86))
     object.material = material
     object.userData.role = role
     meshes.push(object)
