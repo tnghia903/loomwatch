@@ -139,21 +139,24 @@ interface Compiled {
 export function benchMaterial(role: string, mesh: string, textures: { pegboard: () => Texture; wound: Texture | null }): Material {
   const physical = (color: string, roughness: number, clearcoat = 0.4) => new MeshPhysicalMaterial({ color, roughness, clearcoat, clearcoatRoughness: 0.35 })
   const standard = (color: string, roughness: number, metalness = 0) => new MeshStandardMaterial({ color, roughness, metalness })
+  const soft = (color: string) => new MeshPhysicalMaterial({ color, roughness: 0.62, specularIntensity: 0.7, sheen: 0.35, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
   switch (role) {
     case 'bone': return physical('#EFEAE0', 0.5, 0.55)
     case 'benchtop': return physical('#E6DFD1', 0.6, 0.3)
     case 'graphite': return physical('#24242B', 0.55, 0.35)
     case 'shoe': return physical('#2B2B33', 0.55, 0.3)
     case 'pegboard': return mesh === 'pegboard_face' ? new MeshStandardMaterial({ map: textures.pegboard(), roughness: 0.9 }) : standard('#1C1C21', 0.8)
-    // The figure. Its skin is coloured when it is dressed (wear), from the figure it wears.
-    case 'skin': return new MeshPhysicalMaterial({ color: '#E3A386', roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.3, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
-    case 'skin_wound': return new MeshStandardMaterial({ color: '#E3A386', roughness: 0.78, bumpMap: textures.wound, bumpScale: 1.6 })
-    case 'skin_deep': return new MeshStandardMaterial({ color: '#C38C73', roughness: 0.62 })
+    // The figure, soft to the touch as in its stills: matte, no clear coat, a little sheen. Its skin is
+    // coloured when it is dressed (wear), from the figure it wears.
+    case 'skin': return soft('#E3A386')
+    case 'skin_wound': return Object.assign(soft('#E3A386'), { bumpMap: textures.wound, bumpScale: 1.6 })
+    case 'skin_deep': return soft('#C38C73')
+    case 'blush': return new MeshStandardMaterial({ color: '#F08A8A', roughness: 0.9, transparent: true, opacity: 0.55, depthWrite: false })
     case 'eye': return new MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 })
     case 'glint': return new MeshBasicMaterial({ color: '#FFFFFF' })
     case 'stitch': return standard('#D8A93C', 0.35, 0.6)
-    case 'wood': return physical('#E9D5B1', 0.55, 0.3)
-    case 'leaf': return physical('#6E9C6A', 0.5, 0.3)
+    case 'wood': return soft('#E9D5B1')
+    case 'leaf': return soft('#6E9C6A')
     case 'steel': return standard('#C9CCD2', 0.3, 0.9)
     case 'pin_a': return physical('#E9C46A', 0.3, 0.6)
     case 'pin_b': return physical('#F4F1EA', 0.3, 0.6)

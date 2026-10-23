@@ -4,6 +4,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { portrait } from './pose.js'
 const params = new URLSearchParams(location.search)
 const kind = params.get('kind') || 'yarn', color = params.get('color') || '#E3A386'
 const cam = JSON.parse(params.get('cam') || '{"y":0.62,"z":2.4,"fov":22,"ty":0.6,"exp":1}')
@@ -15,26 +16,32 @@ document.body.appendChild(renderer.domElement)
 const scene = new THREE.Scene()
 const pmrem = new THREE.PMREMGenerator(renderer)
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-const key = new THREE.DirectionalLight('#fff', 1.2); key.position.set(1, 2, 3); scene.add(key)
+// Warm light from the front, and a warm one from behind, as in the Blender studio.
+const key = new THREE.DirectionalLight(cam.keyColor ?? '#FFE6CC', 1.2); key.position.set(1, 2, 3); scene.add(key)
+const back = new THREE.DirectionalLight('#FFDBB3', 0); back.position.set(1.2, 1.6, -2.2); scene.add(back)
+const fill = new THREE.AmbientLight('#FFE3CC', 0); scene.add(fill)
 const gltf = await new GLTFLoader().loadAsync(params.get('glb') || './agent/workbench.glb')
 if (params.get('build')) { const { bobbin, scissors } = await import('./heads.js'); const head = gltf.scene.getObjectByName('head'); head.add(bobbin(gltf)); head.add(scissors(gltf)) }
 const fig = gltf.scene.getObjectByName('figure')
 fig.removeFromParent(); fig.position.set(0, 0, 0); fig.scale.setScalar(1)
-scene.add(fig); fig.rotation.y = cam.rot ?? 0; for (const side of ['arm_l', 'arm_r']) fig.getObjectByName(side).rotation.z = (side === 'arm_l' ? 1 : -1) * (cam.arm ?? 0); scene.environmentIntensity = cam.env ?? 1; key.intensity = cam.key ?? 1.2
+scene.add(fig); fig.rotation.y = cam.rot ?? 0; portrait(fig); scene.environmentIntensity = cam.env ?? 1; key.intensity = cam.key ?? 1.2; back.intensity = cam.back ?? 0; fill.intensity = cam.fill ?? 0
 const skin = new THREE.Color(color)
+const soft = (c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: cam.rough ?? 0.62, specularIntensity: 0.7, sheen: 0.35, sheenRoughness: 0.6, sheenColor: '#FFFFFF' })
 fig.traverse((o) => {
   if (o.name.startsWith('head_')) o.visible = o.name === 'head_' + kind
   if (!o.isMesh) return
   const role = o.material.name
   const m = {
-    skin: () => new THREE.MeshPhysicalMaterial({ color: skin, roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.3, sheenRoughness: 0.6, sheenColor: '#FFFFFF' }),
-    skin_wound: () => new THREE.MeshStandardMaterial({ color: skin, roughness: 0.78 }),
-    skin_deep: () => new THREE.MeshStandardMaterial({ color: skin.clone().multiplyScalar(0.86), roughness: 0.62 }),
+    // Soft-touch, as the Blender stills: matte, no clear coat, a little sheen.
+    skin: () => soft(skin),
+    skin_wound: () => soft(skin),
+    skin_deep: () => soft(skin.clone().multiplyScalar(0.86)),
+    blush: () => new THREE.MeshStandardMaterial({ color: '#F08A8A', roughness: 0.9, transparent: true, opacity: 0.55, depthWrite: false }),
     eye: () => new THREE.MeshPhysicalMaterial({ color: '#1E1E26', roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.08 }),
     glint: () => new THREE.MeshBasicMaterial({ color: '#FFFFFF' }),
     stitch: () => new THREE.MeshStandardMaterial({ color: '#D8A93C', roughness: 0.35, metalness: 0.6 }),
-    wood: () => new THREE.MeshPhysicalMaterial({ color: '#E9D5B1', roughness: 0.55, clearcoat: 0.3 }),
-    leaf: () => new THREE.MeshPhysicalMaterial({ color: '#6E9C6A', roughness: 0.5, clearcoat: 0.3 }),
+    wood: () => soft('#E9D5B1'),
+    leaf: () => soft('#6E9C6A'),
     steel: () => new THREE.MeshStandardMaterial({ color: '#C9CCD2', roughness: 0.3, metalness: 0.9 }),
     pin_a: () => new THREE.MeshPhysicalMaterial({ color: '#E9C46A', roughness: 0.3, clearcoat: 0.6 }),
     pin_b: () => new THREE.MeshPhysicalMaterial({ color: '#F4F1EA', roughness: 0.3, clearcoat: 0.6 }),

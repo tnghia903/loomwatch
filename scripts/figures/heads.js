@@ -14,8 +14,12 @@ function mesh(name, geometry, material, at = [0, 0, 0], rotation = [0, 0, 0]) {
   return m
 }
 
-/** A face like the spool's: two eyes and a stitched smile, cloned from the GLB so they match. */
-function face(kind, gltf, at, spread, mouthDrop) {
+/**
+ * A face like the spool's: two eyes, a stitched smile and blushed cheeks, cloned from the GLB so they
+ * match. The cheeks sit as far outside the eyes as the spool's do, unless `cheek` places the right one
+ * (the left mirrors it).
+ */
+function face(kind, gltf, at, spread, mouthDrop, cheek) {
   const source = gltf.scene.getObjectByName('spool_face')
   const out = new THREE.Group()
   out.name = `${kind}_face`
@@ -32,6 +36,14 @@ function face(kind, gltf, at, spread, mouthDrop) {
   mouth.position.set(0, -mouthDrop, 0)
   mouth.traverse((child) => { if (child !== mouth) child.name = child.name.replace('spool_', `${kind}_`) })
   out.add(mouth)
+  const spoolEye = source.getObjectByName('spool_eye_r').position.x
+  for (const side of ['l', 'r']) {
+    const blush = source.getObjectByName(`spool_blush_${side}`).clone(true)
+    blush.name = `${kind}_blush_${side}`
+    const [x, y, z] = cheek ?? [spread + blush.position.x * (side === 'l' ? -1 : 1) - spoolEye, blush.position.y, blush.position.z]
+    blush.position.set(side === 'l' ? -x : x, y, z)
+    out.add(blush)
+  }
   out.traverse((child) => { if (child.isMesh) child.material = mat[child.material.name] ?? role(child.material.name) })
   return out
 }
@@ -77,7 +89,8 @@ export function scissors(gltf) {
   head.add(mesh('scissors_blade_l', bladeGeometry, mat.steel, [0.01, 0.36, -0.03], [0, 0, 0.36]))
   head.add(mesh('scissors_blade_r', bladeGeometry, mat.steel, [-0.01, 0.36, 0.0], [0, 0, -0.36]))
   head.add(mesh('scissors_pivot', new THREE.CylinderGeometry(0.035, 0.035, 0.05, 16), mat.steel, [0, 0.38, 0.01], [Math.PI / 2, 0, 0]))
-  const eyes = face('scissors', gltf, [0, 0.17, 0.02], 0.14, 0.12)
+  // Its eyes sit inside the rings, so its cheeks go on the rings below and outside them.
+  const eyes = face('scissors', gltf, [0, 0.17, 0.02], 0.14, 0.12, [0.2, -0.07, 0.03])
   head.add(eyes)
   return head
 }

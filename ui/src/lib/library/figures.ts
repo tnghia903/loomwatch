@@ -14,7 +14,7 @@ export const STARTER_KINDS = ['yarn', 'spool', 'button', 'thimble', 'pincushion'
 export const FIGURE_KINDS = [...STARTER_KINDS, 'scissors', 'bobbin'] as const satisfies readonly (string | EarnedFigure)[]
 export type FigureKind = (typeof FIGURE_KINDS)[number]
 
-/** Satin and quiet, and never one of the app's status colours: blue runs, gold is you, red is trouble. */
+/** Soft and quiet, and never one of the app's status colours: blue runs, gold is you, red is trouble. */
 export const FIGURE_COLORS = ['clay', 'butter', 'sage', 'sky', 'lilac', 'rose', 'oat'] as const
 export type FigureColor = (typeof FIGURE_COLORS)[number]
 
