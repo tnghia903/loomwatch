@@ -10,7 +10,7 @@ import { fetchAbout } from '../feedback/report'
 import { daemonFetch } from '../daemonFetch'
 
 /** How this copy was installed, which decides how it is updated. */
-export type Install = 'release' | 'source' | 'app' | 'other'
+export type Install = 'source' | 'app' | 'other'
 
 /** The newest published release. */
 export interface Release {
@@ -30,7 +30,7 @@ export interface UpdateStatus {
   /** The running version. */
   current: string
   install: Install
-  /** The command that updates this copy, such as `loomwatch update`. Null for `other`. */
+  /** The command that updates a copy of the source, such as `./loomwatch update`. Null for the app. */
   command: string | null
   /** LoomWatch asks GitHub each time it opens. */
   automatic: boolean
@@ -189,10 +189,6 @@ export function offerUpdate(status: UpdateStatus | null): boolean {
   return Boolean(status?.available && status.latest && status.skipped !== status.latest.version)
 }
 
-/** The command that undoes an update, beside the one that makes it: `loomwatch rollback`. */
-export function rollbackCommand(command: string | null): string | null {
-  return command?.endsWith(' update') ? `${command.slice(0, -' update'.length)} rollback` : null
-}
 
 // One answer shared by the Home pill and the dialog, so skipping in one hides the other at once.
 let current: UpdateStatus | null = null

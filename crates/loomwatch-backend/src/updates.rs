@@ -9,16 +9,13 @@
 //! check on opening off in the app, and `LOOMWATCH_UPDATE_CHECK=off` turns every check off on this
 //! computer.
 //!
-//! Installing is the launcher's job, or the desktop app's. In the terminal, `loomwatch update` stops
-//! nothing without asking, backs the database up, and keeps the version it replaces for `loomwatch
-//! rollback`. A copy whose launcher stays beside it ([`SUPERVISED_ENV`]) can also be updated from
-//! the app: `POST /api/updates/install` names the release in a file the launcher reads, and the
-//! daemon exits with [`EXIT_TO_UPDATE`]. The launcher then runs that same update and starts
-//! `LoomWatch` again in its terminal, or starts this version again when the update did not finish.
-//! `LoomWatch.app` and `LoomWatch.exe` take the same hand-over: they download the release's `.dmg`
-//! or installer, put it in their own place and open it, or start this version again and say why.
+//! Installing is the desktop app's job: `LoomWatch.app` or `LoomWatch.exe`, which supervises this
+//! daemon ([`SUPERVISED_ENV`]). `POST /api/updates/install` names the release in a file the app
+//! reads, and the daemon exits with [`EXIT_TO_UPDATE`]. The app then downloads the release's `.dmg`
+//! or installer, puts it in its own place and opens it, or starts this version again and says why.
 //! An app that cannot replace itself, such as one opened from the `.dmg`, says why instead
-//! ([`BLOCKED_ENV`]), and the app shows the steps to do it by hand.
+//! ([`BLOCKED_ENV`]), and the app shows the steps to do it by hand. A copy of the source code is
+//! updated in its terminal (`./loomwatch update` pulls the newest `main` and rebuilds it).
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -51,24 +48,23 @@ pub const CHECK_ENV: &str = "LOOMWATCH_UPDATE_CHECK";
 /// Asks another server instead of GitHub, for trying a release before it is published. Only
 /// `https`, or `http` on this computer.
 pub const URL_ENV: &str = "LOOMWATCH_UPDATE_URL";
-/// `release` or `source`: how the launcher found this copy (`./loomwatch` sets it).
+/// `app` from the desktop app, `source` from `./loomwatch` in a copy of the source code.
 pub const INSTALL_ENV: &str = "LOOMWATCH_INSTALL";
 /// The update command as the operator would type it, such as `loomwatch update`.
 pub const COMMAND_ENV: &str = "LOOMWATCH_UPDATE_COMMAND";
-/// `1` from a launcher that stays beside the daemon: when the daemon exits with
+/// `1` from the desktop app, when it can replace itself: when the daemon exits with
 /// [`EXIT_TO_UPDATE`], it installs the release named in [`REQUEST_ENV`]'s file and starts the
-/// daemon again. `./loomwatch` sets it for a ready-built copy, and the desktop app when it can
-/// replace itself.
+/// daemon again.
 pub const SUPERVISED_ENV: &str = "LOOMWATCH_SUPERVISED";
-/// The file, an absolute path, where the daemon names the release for that launcher to install.
+/// The file, an absolute path, where the daemon names the release for the app to install.
 pub const REQUEST_ENV: &str = "LOOMWATCH_UPDATE_REQUEST";
-/// Set by that launcher when an update did not finish and it started this version again: why.
+/// Set by the app when an update did not finish and it started this version again: why.
 pub const FAILED_ENV: &str = "LOOMWATCH_UPDATE_FAILED";
 /// Set by the desktop app when it cannot replace itself, such as `LoomWatch.app` opened from the
 /// `.dmg`: why, in a sentence the app shows beside the steps to update by hand.
 pub const BLOCKED_ENV: &str = "LOOMWATCH_UPDATE_BLOCKED";
-/// The exit status that asks the launcher to update: sysexits' `EX_TEMPFAIL`, which nothing else
-/// in `LoomWatch` exits with. Any other status ends the launcher, as it always has.
+/// The exit status that asks the app to update: sysexits' `EX_TEMPFAIL`, which nothing else in
+/// `LoomWatch` exits with. Any other status ends the app's daemon, as it always has.
 pub const EXIT_TO_UPDATE: i32 = 75;
 /// How long a daemon stopping to update waits for requests still open, such as the app's live
 /// streams, before it exits anyway.
@@ -278,8 +274,6 @@ fn shorten(text: &str, limit: usize) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Install {
-    /// A ready-built release from `install.sh`: `loomwatch update` downloads the next one.
-    Release,
     /// A copy of the source code: `./loomwatch update` pulls it with Git and builds it.
     Source,
     /// `LoomWatch.app`, opened from Applications, or `LoomWatch.exe` from the Start menu: the next
@@ -435,7 +429,6 @@ impl Updates {
             Err(_) => LATEST_RELEASE.to_owned(),
         };
         let install = match std::env::var(INSTALL_ENV).as_deref() {
-            Ok("release") => Install::Release,
             Ok("source") => Install::Source,
             Ok("app") => Install::App,
             _ => Install::Other,
@@ -547,8 +540,7 @@ impl Updates {
             available,
             skipped: saved.skipped,
             releases_url: format!("https://github.com/{REPOSITORY}/releases"),
-            can_install: self.inner.handoff.is_some()
-                && matches!(self.inner.install, Install::Release | Install::App),
+            can_install: self.inner.handoff.is_some() && self.inner.install == Install::App,
             install_error: self.inner.install_error.clone(),
             install_blocked: self.inner.install_blocked.clone(),
         }
@@ -957,38 +949,27 @@ fn refusal(code: &str, error: &str) -> Response {
         .into_response()
 }
 
-/// The file to name the release in for whatever installs it, or why nothing here can (a refusal's
-/// code and words): a copy of the source, or one started without a launcher or an app that can
-/// install a release.
+/// The file to name the release in for the app that installs it, or why nothing here can (a
+/// refusal's code and words): a copy of the source, started some other way, or an app that cannot
+/// replace itself.
 fn installer(updates: &Updates, status: &Status) -> Result<PathBuf, (&'static str, String)> {
-    if !matches!(status.install, Install::Release | Install::App) {
+    if status.install != Install::App {
         return Err((
             "not_release",
-            "Only a ready-built LoomWatch, or the LoomWatch app, can update itself from the app. Update this copy in its terminal.".to_owned(),
+            "Only the LoomWatch app can update itself. Update this copy the way you set it up."
+                .to_owned(),
         ));
     }
     if let Some(handoff) = &updates.inner.handoff {
         return Ok(handoff.clone());
     }
-    if status.install == Install::App {
-        let why = status
-            .install_blocked
-            .as_deref()
-            .unwrap_or("This LoomWatch app cannot replace itself.");
-        return Err((
-            "not_supervised",
-            format!("{why} Download the new version from its release page instead."),
-        ));
-    }
-    let how = status.command.as_deref().map_or_else(
-        || "Stop LoomWatch, then update it the way you installed it.".to_owned(),
-        |command| format!("Stop LoomWatch, then run: {command}"),
-    );
+    let why = status
+        .install_blocked
+        .as_deref()
+        .unwrap_or("This LoomWatch app cannot replace itself.");
     Err((
         "not_supervised",
-        format!(
-            "This LoomWatch was started in a way that cannot start it again after updating. {how}"
-        ),
+        format!("{why} Download the new version from its release page instead."),
     ))
 }
 
@@ -1062,13 +1043,9 @@ async fn post_install(
         1 => " and the run in progress".to_owned(),
         count => format!(" and the {count} runs in progress"),
     };
-    let then = if status.install == Install::App {
-        "The app installs it and opens LoomWatch again."
-    } else {
-        "This window starts LoomWatch again when the update is done."
-    };
     println!(
-        "Stopping LoomWatch {}{and_runs} to install {}, as asked in the app. {then}",
+        "Stopping LoomWatch {}{and_runs} to install {}, as asked in the app. The app installs it \
+         and opens LoomWatch again.",
         status.current, latest.version
     );
     updates
@@ -1302,8 +1279,8 @@ mod tests {
             url: url.to_owned(),
             file,
             turned_off_by: None,
-            install: Install::Release,
-            command: Some("loomwatch update".to_owned()),
+            install: Install::App,
+            command: None,
             handoff: None,
             install_error: None,
             install_blocked: None,
@@ -1340,7 +1317,17 @@ mod tests {
             latest.url, "https://github.com/tnghia903/loomwatch/releases/tag/v0.1.6",
             "the link is built from the tag, never taken from the answer"
         );
-        assert_eq!(status.command.as_deref(), Some("loomwatch update"));
+        // A copy of the source says how it is updated in its terminal; the app needs no command.
+        assert_eq!(status.command, None);
+        let source = Updates::new(Options {
+            install: Install::Source,
+            command: Some("./loomwatch update".to_owned()),
+            ..options(&url, None)
+        });
+        assert_eq!(
+            source.status().command.as_deref(),
+            Some("./loomwatch update")
+        );
         assert!(
             github
                 .last_header(header::USER_AGENT)
@@ -1568,7 +1555,7 @@ mod tests {
         let (status, before) = call(&router, "GET", "/api/updates", None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(before["current"], "0.1.5");
-        assert_eq!(before["install"], "release");
+        assert_eq!(before["install"], "app");
         assert_eq!(before["available"], false);
         assert_eq!(before["latest"], Value::Null);
         assert_eq!(github.requests(), 0, "reading the status never asks GitHub");
@@ -1698,7 +1685,7 @@ mod tests {
             "{body}"
         );
 
-        // A ready-built copy started without the launcher that would start it again.
+        // An app started without the hand-over it would need to start again.
         let alone = Updates::new(options(&url, None));
         alone.check().await;
         assert!(alone.status().available);
@@ -1716,13 +1703,13 @@ mod tests {
             "{body}"
         );
         assert!(
-            body["error"].as_str().unwrap().contains("loomwatch update"),
+            body["error"].as_str().unwrap().contains("release page"),
             "it says what to do instead: {body}"
         );
 
         // Nothing newer: the same release, or none known yet.
         github.answer(StatusCode::OK, None, &release_json("v0.1.5"));
-        let newest = supervised(&url, &handoff, Install::Release).await;
+        let newest = supervised(&url, &handoff, Install::App).await;
         assert!(newest.status().can_install);
         let (status, body) = call(
             &api(newest.clone()),
@@ -1848,7 +1835,7 @@ mod tests {
         github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
         let folder = TempDirectory::new();
         let handoff = folder.0.join("update-request");
-        let updates = supervised(&url, &handoff, Install::Release).await;
+        let updates = supervised(&url, &handoff, Install::App).await;
         let runs = RunRegistry::default();
         let working = live_run("trips/japan.yaml");
         runs.insert(working.clone());
@@ -1927,12 +1914,7 @@ mod tests {
         let (github, url) = fake_github().await;
         github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
         let folder = TempDirectory::new();
-        let updates = supervised(
-            &url,
-            &folder.0.join("gone/update-request"),
-            Install::Release,
-        )
-        .await;
+        let updates = supervised(&url, &folder.0.join("gone/update-request"), Install::App).await;
         let runs = RunRegistry::default();
         let working = live_run("trip.yaml");
         runs.insert(working.clone());
@@ -1964,7 +1946,7 @@ mod tests {
         github.answer(StatusCode::OK, None, &release_json("v0.1.6"));
         let folder = TempDirectory::new();
         let handoff = folder.0.join("update-request");
-        let updates = supervised(&url, &handoff, Install::Release).await;
+        let updates = supervised(&url, &handoff, Install::App).await;
         let router = api(updates.clone());
         for (name, value) in [
             (header::ORIGIN, "https://evil.test"),

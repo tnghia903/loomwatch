@@ -43,8 +43,8 @@ pub const SUPERVISED_ENV: &str = "LOOMWATCH_SUPERVISED";
 pub const REQUEST_ENV: &str = "LOOMWATCH_UPDATE_REQUEST";
 pub const FAILED_ENV: &str = "LOOMWATCH_UPDATE_FAILED";
 pub const BLOCKED_ENV: &str = "LOOMWATCH_UPDATE_BLOCKED";
-/// Testing a release before it is published: the folder its files are served from, as
-/// `install.sh` reads it. `https` anywhere, or `http` on this computer only.
+/// Testing a release before it is published: the folder its files are served from. `https`
+/// anywhere, or `http` on this computer only.
 pub const DOWNLOAD_BASE_ENV: &str = "LOOMWATCH_DOWNLOAD_BASE";
 /// Where updates keep copies of the run history, as the launcher reads it.
 pub const BACKUP_DIR_ENV: &str = "LOOMWATCH_BACKUP_DIR";
@@ -262,7 +262,7 @@ pub fn sha256_hex(file: &Path) -> std::io::Result<String> {
 }
 
 /// Where the app keeps copies of its run history: [`BACKUP_DIR_ENV`], or `~/LoomWatch/backups`,
-/// in a folder of its own beside the terminal install's.
+/// in a folder of its own beside a source copy's.
 pub fn backup_folder(home: &Path) -> PathBuf {
     std::env::var_os(BACKUP_DIR_ENV)
         .map(PathBuf::from)

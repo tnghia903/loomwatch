@@ -1,19 +1,13 @@
-# One command to set up, build, start, update and stop LoomWatch on Windows: the Windows twin of
-# the ./loomwatch script, run through loomwatch.cmd.
+# One command to set up, build, start, update and stop LoomWatch from a copy of its source code on
+# Windows: the Windows twin of the ./loomwatch script, run through loomwatch.cmd.
 #
 #   loomwatch            set up anything missing, build if the code changed, start, open the browser
-#   loomwatch update     save a copy of the run history, download the latest version, and start
-#   loomwatch rollback   go back to the version the last update replaced (ready-built copies)
-#   loomwatch version    say which version this is, and whether a newer one is out
+#   loomwatch update     save a copy of the run history, pull the newest main, rebuild and start
+#   loomwatch version    say which version this is, and whether a newer release is out
 #   loomwatch stop       stop LoomWatch (your teams and history are kept)
 #
-# The same script runs a copy of the source code, which it builds, and a ready-built copy put in
-# %USERPROFILE%\LoomWatch\app by install.ps1, which carries its program in bin\ and updates from the
-# newest release instead of from Git. A ready-built copy can also be updated from the app, with
-# Update and restart: LoomWatch stops, this script updates it as `update` does, and starts it again
-# in the same window.
-#
-# LoomWatch keeps its run history in one file, and needs nothing else installed to start.
+# People get LoomWatch as the Windows app or the Mac app; this script is for running it from
+# source. A copy of the source keeps its run history in one file of its own, in .loomwatch\.
 #
 # Optional settings, read from the environment:
 #   LOOMWATCH_TEAMS_ROOT    where your teams live (default: ~\LoomWatch\teams)
@@ -43,26 +37,17 @@ $HomeFolder = [Environment]::GetFolderPath('UserProfile')
 $Cmd = Join-Path $RepoRoot 'loomwatch.cmd'
 
 # This script as the operator would type it again, for the instructions it prints: loomwatch when
-# its folder is on PATH (as install.ps1 arranges), .\loomwatch.cmd in a copy of the source.
+# its folder is on PATH, .\loomwatch.cmd otherwise.
 $Self = '.\loomwatch.cmd'
 $OnPath = Get-Command loomwatch -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($OnPath -and ($OnPath.Source -eq $Cmd)) { $Self = 'loomwatch' }
-elseif (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'Cargo.toml'))) { $Self = "& '$Cmd'" }
 
 $script:FailureHeading = 'LoomWatch could not start'
-# Set while an update asked for in the app runs: the LoomWatch started again after it says why the
-# update did not finish.
-$script:FailureNote = $null
 function Say([string]$Text) { Write-Host $Text }
 function Step([string]$Text) { Write-Host ''; Write-Host "==> $Text" -ForegroundColor Cyan }
 function Fail([string]$Text) {
   Write-Host ''
   Write-Host "$($script:FailureHeading): $Text" -ForegroundColor Red
-  if ($script:FailureNote) {
-    $why = $Text.Replace('The messages above say why.', 'The window running LoomWatch says why.')
-    try { [IO.File]::WriteAllText($script:FailureNote, $why) } catch { }
-    throw 'update failed'
-  }
   exit 1
 }
 
@@ -91,7 +76,6 @@ foreach ($arg in $args) {
   switch -Exact ($arg) {
     'start' { $Command = 'start' }
     'update' { $Command = 'update' }
-    'rollback' { $Command = 'rollback' }
     'stop' { $Command = 'stop' }
     'version' { $Command = 'version' }
     '--version' { $Command = 'version' }
@@ -115,37 +99,15 @@ $TeamsRoot = $env:LOOMWATCH_TEAMS_ROOT
 if (-not $TeamsRoot) { $TeamsRoot = Join-Path $HomeFolder 'LoomWatch\teams' }
 $BackupRoot = $env:LOOMWATCH_BACKUP_DIR
 if (-not $BackupRoot) { $BackupRoot = Join-Path $HomeFolder 'LoomWatch\backups' }
-# A ready-built copy has its program in bin\ and no source code to build it from.
-if ((Test-Path -LiteralPath (Join-Path $RepoRoot 'bin\loomwatchd.exe')) -and -not (Test-Path -LiteralPath (Join-Path $RepoRoot 'Cargo.toml'))) {
-  $Prebuilt = $true
-  $Binary = Join-Path $RepoRoot 'bin\loomwatchd.exe'
-  $StateDir = Join-Path $RepoRoot 'run'
-} else {
-  $Prebuilt = $false
-  $Binary = Join-Path $RepoRoot 'target\release\loomwatchd.exe'
-  $StateDir = Join-Path $RepoRoot 'target'
-}
+$Binary = Join-Path $RepoRoot 'target\release\loomwatchd.exe'
+$StateDir = Join-Path $RepoRoot 'target'
 $BuildStamp = Join-Path $RepoRoot 'target\release\.loomwatch-build'
 $PidFile = Join-Path $StateDir 'loomwatchd.pid'
-# The exit status LoomWatch asks for an update with (EX_TEMPFAIL), and where it names the release.
-$UpdateExitCode = 75
-$UpdateRequest = Join-Path $StateDir 'update-request'
-$UpdateFailed = Join-Path $StateDir 'update-failed'
 
-# The run history is one file. The ready-built copy in the usual folder keeps it where the program
-# keeps it by default, in LoomWatch's state folder (%LOCALAPPDATA%\LoomWatch), so it outlives
-# reinstalling. Every other copy, a copy of the source or a release being tried, keeps its own in
-# its folder: two copies never share one.
-$UsualApp = Join-Path $HomeFolder 'LoomWatch\app'
-if (-not $env:LOOMWATCH_DATABASE -and (-not $Prebuilt -or -not $RepoRoot.Equals($UsualApp, [StringComparison]::OrdinalIgnoreCase))) {
+# The run history is one file. A copy of the source keeps its own in its folder, so it never shares
+# one with the app or another copy.
+if (-not $env:LOOMWATCH_DATABASE) {
   $env:LOOMWATCH_DATABASE = Join-Path $RepoRoot '.loomwatch\loomwatch.db'
-}
-
-# Someone running a copy of the source is in its folder; someone running a ready-built copy may be
-# anywhere, so instructions name that copy's files in full.
-function WhereIs([string]$Name) {
-  if ($Prebuilt) { return Join-Path (Pretty $RepoRoot) $Name }
-  return $Name
 }
 
 # One argument as Windows programs read their command line (CommandLineToArgvW): quoted when it
@@ -284,22 +246,19 @@ function Assert-Prerequisites {
   $missing = New-Object System.Collections.Generic.List[string]
   $winget = Test-Command winget
 
-  # Only a copy of the source code is built here; a ready-built copy needs neither Node.js nor Rust.
-  if (-not $Prebuilt) {
-    if (-not (Test-Command node)) {
-      if ($winget) { $missing.Add('  - Node.js 22 or newer, which builds the browser app: winget install OpenJS.NodeJS.LTS') }
-      else { $missing.Add('  - Node.js 22 or newer, which builds the browser app: https://nodejs.org/') }
-    } else {
-      $check = Invoke-Tool node @('-e', 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)')
-      if ($check.ExitCode -ne 0) {
-        $missing.Add("  - A newer Node.js: LoomWatch needs 22.12 or newer and this computer has $((Invoke-Tool node @('--version')).Out.Trim()).
+  if (-not (Test-Command node)) {
+    if ($winget) { $missing.Add('  - Node.js 22 or newer, which builds the browser app: winget install OpenJS.NodeJS.LTS') }
+    else { $missing.Add('  - Node.js 22 or newer, which builds the browser app: https://nodejs.org/') }
+  } else {
+    $check = Invoke-Tool node @('-e', 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)')
+    if ($check.ExitCode -ne 0) {
+      $missing.Add("  - A newer Node.js: LoomWatch needs 22.12 or newer and this computer has $((Invoke-Tool node @('--version')).Out.Trim()).
     Install the current version from https://nodejs.org/")
-      }
     }
-    if (-not (Test-Command cargo)) {
-      if ($winget) { $missing.Add('  - Rust, which builds the LoomWatch program: winget install Rustlang.Rustup') }
-      else { $missing.Add('  - Rust, which builds the LoomWatch program: https://rustup.rs/') }
-    }
+  }
+  if (-not (Test-Command cargo)) {
+    if ($winget) { $missing.Add('  - Rust, which builds the LoomWatch program: winget install Rustlang.Rustup') }
+    else { $missing.Add('  - Rust, which builds the LoomWatch program: https://rustup.rs/') }
   }
 
   if ($missing.Count -gt 0) {
@@ -339,7 +298,6 @@ function Get-SourceFingerprint {
 }
 
 function Invoke-BuildIfNeeded {
-  if ($Prebuilt) { return }
   $fingerprint = Get-SourceFingerprint
   $stamp = ''
   if (Test-Path -LiteralPath $BuildStamp) { $stamp = ([IO.File]::ReadAllText($BuildStamp)).Trim() }
@@ -369,17 +327,8 @@ function Get-DatabaseFile {
   return $result.Out.Trim()
 }
 
-# Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits. A
-# ready-built copy names the commit its release was built from, in VERSION.
+# Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits.
 function Get-Commit {
-  if ($Prebuilt) {
-    $versionFile = Join-Path $RepoRoot 'VERSION'
-    if (Test-Path -LiteralPath $versionFile) {
-      $fields = ([IO.File]::ReadAllText($versionFile)).Trim().Split(' ')
-      if ($fields.Count -gt 1) { return $fields[1] }
-    }
-    return ''
-  }
   if (Test-Command git) { return (Invoke-Tool git @('describe', '--always', '--dirty', '--abbrev=7')).Out.Trim() }
   return ''
 }
@@ -422,14 +371,14 @@ function Start-LoomWatch {
   Invoke-BuildIfNeeded
   $database = Get-DatabaseFile
 
-  # The update hand-over is set below, for a ready-built copy only: a daemon told about one that
-  # nothing is running would stop and stay stopped.
+  # Only the apps hand an update over to be installed: a daemon told about a hand-over that nothing
+  # here would carry out would stop and stay stopped.
   foreach ($name in @('LOOMWATCH_SUPERVISED', 'LOOMWATCH_UPDATE_REQUEST', 'LOOMWATCH_UPDATE_FAILED')) {
     Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
   }
   $env:LOOMWATCH_COMMIT = Get-Commit
   # How this copy is updated, for the app's notice that a newer version is out (ADR 0052).
-  if ($Prebuilt) { $env:LOOMWATCH_INSTALL = 'release' } else { $env:LOOMWATCH_INSTALL = 'source' }
+  $env:LOOMWATCH_INSTALL = 'source'
   $env:LOOMWATCH_UPDATE_COMMAND = "$Self update"
 
   Step "LoomWatch is starting at $Url"
@@ -437,7 +386,6 @@ function Start-LoomWatch {
   Say "Your run history is in $(Pretty $database)"
   Say 'Keep this window open while you use LoomWatch. Press Ctrl+C to stop it.'
   New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-  if ($Prebuilt) { Invoke-Supervised }
   exit (Invoke-Daemon $OpenBrowser)
 }
 
@@ -472,17 +420,10 @@ function Stop-LoomWatch {
 
 # --- Updating (ADR 0052) -------------------------------------------------------------------------
 # An update never starts by itself: the app only says a newer version is out. `update` saves a copy
-# of the run history before anything can change it, and in a ready-built copy keeps the version it
-# replaces in .previous, so `rollback` can put it back.
+# of the run history before anything can change it; Git keeps every version of the code.
 
-# The version this copy runs: VERSION's first word in a ready-built copy, the program's own in a
-# copy of the source.
+# The version this copy of the source builds.
 function Get-InstalledVersion {
-  if ($Prebuilt) {
-    $file = Join-Path $RepoRoot 'VERSION'
-    if (Test-Path -LiteralPath $file) { return ([IO.File]::ReadAllText($file).Trim() -split ' ')[0] }
-    return ''
-  }
   $manifest = Join-Path $RepoRoot 'crates\loomwatch-backend\Cargo.toml'
   foreach ($line in [IO.File]::ReadAllLines($manifest)) {
     if ($line -match '^version = "(.*)"$') { return $Matches[1] }
@@ -509,15 +450,25 @@ function Test-UpdateCheckOff {
   return @('0', 'off', 'false', 'no') -contains ([string]$env:LOOMWATCH_UPDATE_CHECK).ToLowerInvariant()
 }
 
-# The newest published release, such as v0.5.0, or nothing when GitHub cannot be asked, and for a
-# trial of files served from elsewhere (LOOMWATCH_DOWNLOAD_BASE), which say nothing about GitHub.
+# The newest published release, such as v0.5.0, from where GitHub's releases/latest page leads (a
+# page, not the API, so it never meets the API's hourly limit), or nothing when GitHub cannot be
+# asked.
 function Get-LatestRelease {
-  if ($env:LOOMWATCH_DOWNLOAD_BASE) { return $null }
-  $installer = Join-Path $RepoRoot 'scripts\install.ps1'
-  if ($Prebuilt) { $installer = Join-Path $RepoRoot 'install.ps1' }
-  $result = Invoke-Tool powershell.exe @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-Latest')
-  if ($result.ExitCode -ne 0) { return $null }
-  $tag = $result.Out.Trim()
+  try {
+    $request = [System.Net.HttpWebRequest]::Create('https://github.com/tnghia903/loomwatch/releases/latest')
+    $request.Method = 'HEAD'
+    $request.AllowAutoRedirect = $false
+    $request.Timeout = 30000
+    $response = $request.GetResponse()
+    try { $location = [string]$response.Headers['Location'] } finally { $response.Close() }
+  } catch {
+    return $null
+  }
+  $marker = '/releases/tag/'
+  $at = $location.IndexOf($marker)
+  if ($at -lt 0) { return $null }
+  $tag = $location.Substring($at + $marker.Length)
+  if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$') { return $null }
   if (-not (ConvertTo-Version $tag)) { return $null }
   return $tag
 }
@@ -542,10 +493,7 @@ function Get-DatabaseLayout {
 
 # One folder of copies per copy of LoomWatch.
 function Get-BackupFolder {
-  if (-not $Prebuilt) { $name = (Split-Path -Leaf $RepoRoot).ToLowerInvariant() }
-  elseif ($RepoRoot.Equals($UsualApp, [StringComparison]::OrdinalIgnoreCase)) { $name = 'loomwatch-app' }
-  else { $name = 'loomwatch-app-' + (Get-Hash $RepoRoot.ToLowerInvariant()).Substring(0, 8) }
-  return Join-Path $BackupRoot $name
+  return Join-Path $BackupRoot ((Split-Path -Leaf $RepoRoot).ToLowerInvariant())
 }
 
 # Saves the run history in one file, a consistent copy made by the program itself even while
@@ -573,13 +521,11 @@ function Save-Database([string]$Suffix) {
   return $true
 }
 
-# Before an update can change the run history: notes its layout, so rollback can tell whether the
-# earlier version can still read it, and saves a copy.
+# Before an update can change the run history: saves a copy.
 function Backup-BeforeUpdate {
-  $script:LayoutBefore = Get-DatabaseLayout
   $script:BackupFile = ''
   # Never started here: there is no run history yet, so nothing to keep.
-  if (-not $script:LayoutBefore) { return }
+  if (-not (Get-DatabaseLayout)) { return }
   if (-not $BackUp) {
     Say 'Not saving a copy of your run history (--no-backup).'
     return
@@ -610,62 +556,9 @@ function Stop-BeforeUpdate {
   }
 }
 
-# What rollback needs, beside the version the installer kept: which version that is, the layout
-# of the run history it ran on, and the copy of the run history saved before the update.
-function Save-RollbackNote([string]$Version) {
-  $previous = Join-Path $RepoRoot '.previous'
-  if (-not (Test-Path -LiteralPath $previous)) { return }
-  Write-TextFile (Join-Path $previous 'ROLLBACK') "version=$Version`nlayout=$($script:LayoutBefore)`nbackup=$($script:BackupFile)`n"
-}
-
-function Get-RollbackValue([string]$Key) {
-  $file = Join-Path $RepoRoot '.previous\ROLLBACK'
-  if (-not (Test-Path -LiteralPath $file)) { return '' }
-  $value = ''
-  foreach ($line in [IO.File]::ReadAllLines($file)) {
-    if ($line.StartsWith("$Key=")) { $value = $line.Substring($Key.Length + 1) }
-  }
-  return $value
-}
-
-# This script, started again from the files now in this folder.
-function Start-Again {
-  $restart = @('start')
-  if (-not $OpenBrowser) { $restart += '--no-open' }
-  exit (Invoke-Native $Cmd $restart)
-}
-
-# Installs a release in this ready-built copy: saves the run history, has the installer replace
-# the files, keeping this version in .previous, and notes what rollback needs. Fails, changing
-# nothing, when any step does.
-function Install-Release([string]$Installed) {
-  Backup-BeforeUpdate
-  # The installer that put this copy here fetches the release and replaces it in place, keeping
-  # the version it replaces in .previous. This script keeps running: Windows PowerShell read all of
-  # it when it started.
-  $code = Invoke-Native powershell.exe @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $RepoRoot 'install.ps1'), '-Update', '-Dir', $RepoRoot)
-  if ($code -ne 0) { Fail "the download did not finish, and LoomWatch $Installed was left as it was. The messages above say why." }
-  Save-RollbackNote $Installed
-}
-
 function Update-LoomWatch {
   $script:FailureHeading = 'LoomWatch could not update'
   if (Test-LoomWatchRunning) { Stop-BeforeUpdate }
-  $installed = Get-InstalledVersion
-  if ($Prebuilt) {
-    # A release asked for by name is installed even when it is older: that is how to go back
-    # further than rollback does.
-    if (-not $env:LOOMWATCH_VERSION) {
-      $latest = Get-LatestRelease
-      if ($latest -and -not (Test-Newer $latest $installed)) {
-        Say "LoomWatch $installed is the newest version."
-        Start-Again
-      }
-    }
-    Install-Release $installed
-    if (Test-Path -LiteralPath (Join-Path $RepoRoot '.previous')) { Say "If the new version gives you trouble, $Self rollback goes back to $installed." }
-    Start-Again
-  }
   if (-not (Test-Command git)) { Fail 'updating needs Git. Install it with: winget install Git.Git' }
   Step 'Downloading the latest LoomWatch'
   $before = (Invoke-Tool git @('rev-parse', 'HEAD')).Out.Trim()
@@ -682,150 +575,6 @@ function Update-LoomWatch {
   Start-LoomWatch
 }
 
-# --- Updating from the app (ADR 0052, amended) -----------------------------------------------------
-# A ready-built copy's LoomWatch runs beside this script, so Update and restart in the app can hand
-# the update to it. LoomWatch names the release in update-request and exits with $UpdateExitCode;
-# this script then installs that release as `update` does and starts LoomWatch again in this
-# window. When the update does not finish, it starts the version that was running again, and
-# tells it why.
-
-function Invoke-Supervised {
-  $env:LOOMWATCH_SUPERVISED = '1'
-  $env:LOOMWATCH_UPDATE_REQUEST = $UpdateRequest
-  $open = $OpenBrowser
-  while ($true) {
-    Remove-Item -LiteralPath $UpdateRequest -ErrorAction SilentlyContinue
-    $code = Invoke-Daemon $open
-    $open = $false
-    Remove-Item -LiteralPath Env:LOOMWATCH_UPDATE_FAILED -ErrorAction SilentlyContinue
-    if ($code -ne $UpdateExitCode) { exit $code }
-    Update-FromApp
-  }
-}
-
-# After LoomWatch stopped for Update and restart. Starts the new version in its place, or returns
-# with LOOMWATCH_UPDATE_FAILED set, for the version still here to be started again.
-function Update-FromApp {
-  $installed = Get-InstalledVersion
-  $tag = ''
-  if (Test-Path -LiteralPath $UpdateRequest) { $tag = ([IO.File]::ReadAllLines($UpdateRequest) | Select-Object -First 1) }
-  Remove-Item -LiteralPath $UpdateRequest, $UpdateFailed -ErrorAction SilentlyContinue
-  $heading = $script:FailureHeading
-  $script:FailureHeading = 'LoomWatch could not update'
-  $script:FailureNote = $UpdateFailed
-  try {
-    if ([string]$tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$') { Fail 'LoomWatch did not say which version to install.' }
-    if (-not (Test-Newer $tag $installed)) { Fail "$($tag.TrimStart('v')) is not newer than LoomWatch $installed, so nothing was changed." }
-    Step "Updating LoomWatch $installed to $($tag.TrimStart('v')), as asked in the app"
-    $env:LOOMWATCH_VERSION = $tag
-    try { Install-Release $installed } finally { Remove-Item -LiteralPath Env:LOOMWATCH_VERSION -ErrorAction SilentlyContinue }
-  } catch {
-    # Fail said why, and wrote it down for the app.
-  }
-  $script:FailureNote = $null
-  $script:FailureHeading = $heading
-  # Whatever the steps said, the files in place decide which version runs next.
-  if ((Get-InstalledVersion) -ne $installed) {
-    if (Test-Path -LiteralPath (Join-Path $RepoRoot '.previous')) { Say "If the new version gives you trouble, $Self rollback goes back to $installed." }
-    Remove-Item -LiteralPath Env:LOOMWATCH_SUPERVISED, Env:LOOMWATCH_UPDATE_REQUEST -ErrorAction SilentlyContinue
-    # The app's tab is still open, and it waits for the new version: no second tab.
-    exit (Invoke-Native $Cmd @('start', '--no-open'))
-  }
-  $why = ''
-  if (Test-Path -LiteralPath $UpdateFailed) { $why = [IO.File]::ReadAllText($UpdateFailed) }
-  Remove-Item -LiteralPath $UpdateFailed -ErrorAction SilentlyContinue
-  if (-not $why) { $why = 'the update stopped before it finished. The window running LoomWatch says why.' }
-  $env:LOOMWATCH_UPDATE_FAILED = $why
-  Step "Starting LoomWatch $installed again"
-}
-
-# Puts a saved copy in place of the run history file: copied beside it first, then moved over it,
-# so the file in use is replaced only once the copy is whole.
-function Restore-Database([string]$Backup) {
-  $database = Get-DatabaseFile
-  $restoring = "$database.restoring"
-  Remove-Item -LiteralPath $restoring -ErrorAction SilentlyContinue
-  try {
-    Copy-Item -LiteralPath $Backup -Destination $restoring
-  } catch {
-    Remove-Item -LiteralPath $restoring -ErrorAction SilentlyContinue
-    Fail "the copy in $(Pretty $Backup) could not be restored, so nothing was changed. $($_.Exception.Message)"
-  }
-  # The write-ahead log belongs to the file being replaced, and would be read into the copy. What
-  # it held is in the copy saved just before this.
-  Remove-Item -LiteralPath "$database-wal", "$database-shm" -ErrorAction SilentlyContinue
-  try {
-    Move-Item -LiteralPath $restoring -Destination $database -Force
-  } catch {
-    Fail "the copy could not be put in place. It is in $(Pretty $restoring); the copy saved before going back is in $(Pretty $script:BackupFile)."
-  }
-}
-
-# An update may have changed how the run history is stored, which the earlier version cannot read.
-# Then the run history goes back to the copy saved before the update, after what was recorded
-# since is saved to a copy of its own.
-function Restore-DatabaseIfNeeded([string]$Current, [string]$Previous) {
-  $layoutThen = Get-RollbackValue 'layout'
-  $backup = Get-RollbackValue 'backup'
-  if (-not $layoutThen) { return }
-  $layoutNow = Get-DatabaseLayout
-  if (-not $layoutNow -or $layoutNow -eq $layoutThen) { return }
-  if (-not $backup -or -not (Test-Path -LiteralPath $backup)) {
-    Fail "LoomWatch $Current changed how your run history is stored, and $Previous cannot read it. The copy saved before the update is gone, so nothing was changed. Keep using $Current by running: $Self"
-  }
-  Say "LoomWatch $Current changed how your run history is stored, and $Previous cannot read it. Going back also puts the run history back to the copy saved before the update, $(Pretty $backup). What was recorded since is saved to another copy first; $Previous will not show it."
-  if (-not (Confirm-Yes "Go back to $Previous, with the run history from before the update?")) { Fail 'nothing was changed.' }
-  Step 'Putting the run history back'
-  if (-not (Save-Database '-before-rollback')) {
-    Fail 'the run history recorded since the update could not be saved, so nothing was changed. The messages above say why.'
-  }
-  Say "Saved the run history recorded since the update in $(Pretty $script:BackupFile)."
-  Restore-Database $backup
-}
-
-# Moves the kept version's files over the current ones. Each is a move in this folder; the current
-# version's files wait in a scratch folder until every one is in place.
-function Restore-Previous {
-  $previous = Join-Path $RepoRoot '.previous'
-  $scratch = Join-Path $RepoRoot (".loomwatch-rollback." + [Guid]::NewGuid().ToString('N').Substring(0, 8))
-  New-Item -ItemType Directory -Force -Path $scratch | Out-Null
-  foreach ($item in Get-ChildItem -LiteralPath $previous -Force) {
-    if ($item.Name -eq 'ROLLBACK') { continue }
-    $target = Join-Path $RepoRoot $item.Name
-    try {
-      if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination (Join-Path $scratch $item.Name) }
-      Move-Item -LiteralPath $item.FullName -Destination $target
-    } catch {
-      Fail "could not put $($item.Name) back. The files of both versions are in $(Pretty $RepoRoot) and $(Pretty $scratch)."
-    }
-  }
-  Remove-Item -LiteralPath $previous, $scratch -Recurse -Force
-}
-
-function Undo-Update {
-  $script:FailureHeading = 'LoomWatch could not go back'
-  if (-not $Prebuilt) {
-    Fail "rollback is for a ready-built copy. In a copy of the source code, Git keeps every version: find the one you want with git log, git checkout it, then run $Self"
-  }
-  $previous = Join-Path $RepoRoot '.previous'
-  if (-not (Test-Path -LiteralPath (Join-Path $previous 'bin\loomwatchd.exe')) -or -not (Test-Path -LiteralPath (Join-Path $previous 'loomwatch.cmd'))) {
-    Fail "no earlier version is kept in $(Pretty $RepoRoot). Each update keeps the version it replaced, until the next update. To install a particular release instead, run: `$env:LOOMWATCH_VERSION='v0.5.0'; $Self update (the versions are listed at https://github.com/tnghia903/loomwatch/releases)"
-  }
-  if (Test-LoomWatchRunning) {
-    Fail "it is still running. Stop it first (press Ctrl+C in its window, or run $Self stop), then run $Self rollback."
-  }
-  $current = Get-InstalledVersion
-  $previousVersion = ''
-  $previousFile = Join-Path $previous 'VERSION'
-  if (Test-Path -LiteralPath $previousFile) { $previousVersion = ([IO.File]::ReadAllText($previousFile).Trim() -split ' ')[0] }
-  if (-not $previousVersion) { $previousVersion = 'the earlier version' }
-  Step "Going back from LoomWatch $current to $previousVersion"
-  Restore-DatabaseIfNeeded $current $previousVersion
-  Restore-Previous
-  Say "LoomWatch is back to $previousVersion. Run $Self update when you want the newest version again."
-  Start-Again
-}
-
 function Show-Version {
   $installed = Get-InstalledVersion
   $commit = Get-Commit
@@ -838,33 +587,19 @@ function Show-Version {
   } else {
     $latest = Get-LatestRelease
     if (-not $latest) { Say 'Could not ask GitHub for the newest release.' }
-    elseif (Test-Newer $latest $installed) { Say "LoomWatch $($latest.TrimStart('v')) is out. Update with: $Self update" }
+    elseif (Test-Newer $latest $installed) { Say "LoomWatch $($latest.TrimStart('v')) is out. Update this copy with: $Self update" }
     elseif (Test-Newer $installed $latest) { Say "This is newer than the newest release, $($latest.TrimStart('v'))." }
     else { Say 'This is the newest release.' }
-  }
-  $previousFile = Join-Path $RepoRoot '.previous\VERSION'
-  if ($Prebuilt -and (Test-Path -LiteralPath $previousFile)) {
-    Say "The version it replaced, $(([IO.File]::ReadAllText($previousFile).Trim() -split ' ')[0]), is kept: $Self rollback goes back to it."
   }
 }
 
 function Show-Usage {
-  $startDoes = 'Set up anything missing, build if needed, start LoomWatch and open it (the default)'
-  $updateDoes = 'Save a copy of the run history, download the latest LoomWatch, rebuild it and start it'
-  $rollbackLine = ''
-  $rebuildOption = "`n  --rebuild     Build again even if nothing changed"
-  if ($Prebuilt) {
-    $startDoes = 'Set up anything missing, start LoomWatch and open it (the default)'
-    $updateDoes = 'Save a copy of the run history, install the newest release, then start it'
-    $rollbackLine = "`n  rollback  Go back to the version the last update replaced"
-    $rebuildOption = ''
-  }
   Write-Host @"
 Usage: $Self [command] [options]
 
 Commands:
-  start     $startDoes
-  update    $updateDoes$rollbackLine
+  start     Set up anything missing, build if needed, start LoomWatch and open it (the default)
+  update    Save a copy of the run history, pull the newest main, rebuild it and start it
   version   Say which version this is, and whether a newer one is out
   stop      Stop LoomWatch. Your teams and history are kept.
   help      Show this help
@@ -872,7 +607,8 @@ Commands:
 Options:
   --no-open     Do not open the browser
   --no-backup   Update without saving a copy of the run history first
-  --yes         Answer yes to questions, such as stopping LoomWatch to update it$rebuildOption
+  --yes         Answer yes to questions, such as stopping LoomWatch to update it
+  --rebuild     Build again even if nothing changed
 
 Settings (environment variables):
   LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $(Pretty $TeamsRoot))
@@ -886,7 +622,6 @@ Settings (environment variables):
 switch ($Command) {
   'start' { Start-LoomWatch }
   'update' { Update-LoomWatch }
-  'rollback' { Undo-Update }
   'version' { Show-Version }
   'stop' { Stop-LoomWatch }
   'help' { Show-Usage }

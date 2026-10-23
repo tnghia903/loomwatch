@@ -1,5 +1,5 @@
 import { ArrowUpCircle, Check, Copy, ExternalLink } from 'lucide-react'
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState } from 'react'
 
 import { relativeTime } from '../../lib/format'
 import { isWindows } from '../../lib/platform'
@@ -12,7 +12,6 @@ import {
   InstallRefused,
   offerUpdate,
   openUpdates,
-  rollbackCommand,
   saveUpdateSettings,
   setUpdateStatus,
   updateAndRestart,
@@ -115,14 +114,12 @@ function headline(status: UpdateStatus | null, checking: boolean, progress: Inst
  * Where Update and restart got to, once LoomWatch agreed to stop. The Mac and Windows apps update
  * themselves, with no terminal to keep open or look in.
  */
-function Progress({ progress, app }: { progress: Exclude<InstallProgress, { phase: 'idle' }>; app: boolean }) {
+function Progress({ progress }: { progress: Exclude<InstallProgress, { phase: 'idle' }> }) {
   switch (progress.phase) {
     case 'updating':
       return (
         <p role="status" className="up-progress">
-          {app
-            ? `LoomWatch is saving a copy of your run history, downloading ${progress.to} and opening it in place of this version. This page says when it is back.`
-            : `LoomWatch is saving a copy of your run history, installing ${progress.to} and starting again. Keep its terminal window open. This page says when it is back.`}
+          {`LoomWatch is saving a copy of your run history, downloading ${progress.to} and opening it in place of this version. This page says when it is back.`}
         </p>
       )
     case 'updated':
@@ -132,15 +129,13 @@ function Progress({ progress, app }: { progress: Exclude<InstallProgress, { phas
         <p role="alert" className="up-error">
           LoomWatch {progress.version} was started again instead of {progress.to}. {progress.error
             ? sentence(progress.error)
-            : app ? `Show log, in ${appMenu()}, says why.` : 'The terminal window running LoomWatch says why.'}
+            : `Show log, in ${appMenu()}, says why.`}
         </p>
       )
     case 'lost':
       return (
         <p role="alert" className="up-error">
-          LoomWatch didn’t answer for ten minutes after it stopped to install {progress.to}. {app
-            ? `Open ${appMenu()} and choose Show log, or open LoomWatch again.`
-            : 'Look in the terminal window running it.'}
+          LoomWatch didn’t answer for ten minutes after it stopped to install {progress.to}. Open {appMenu()} and choose Show log, or open LoomWatch again.
         </p>
       )
   }
@@ -149,19 +144,13 @@ function Progress({ progress, app }: { progress: Exclude<InstallProgress, { phas
 const FINISHED = new Set(['succeeded', 'failed', 'cancelled'])
 
 /**
- * Update and restart, for a ready-built copy whose launcher starts it again, or the Mac or Windows
- * app, which replaces itself. It asks first, naming the teams at work that updating would stop. A
- * terminal copy's command stays beside it.
+ * Update and restart, for the Mac or Windows app, which downloads the release and opens it in its
+ * own place. It asks first, naming the teams at work that updating would stop.
  */
-function UpdateAndRestart({ latest, app, command, rollback, installError, copyButton }: {
+function UpdateAndRestart({ latest, installError }: {
   latest: Release
-  /** The Mac or Windows app, which downloads the release and opens it in its own place. */
-  app: boolean
-  command: string | null
-  rollback: string | null
   /** Why the last update did not finish, unless the dialog already says so. */
   installError: string | null
-  copyButton: (command: string) => ReactNode
 }) {
   const [confirming, setConfirming] = useState(false)
   // Null while LoomWatch is asked which teams are at work.
@@ -236,21 +225,11 @@ function UpdateAndRestart({ latest, app, command, rollback, installError, copyBu
         </div>
       ) : (
         <>
-          <p>
-            {app
-              ? `LoomWatch saves a copy of your run history, downloads ${latest.version}, puts it in place of this version and opens it again. It takes a minute or two.`
-              : `LoomWatch saves a copy of your run history, installs ${latest.version} and starts again in its terminal window. It takes a minute or two.`}
-          </p>
+          <p>{`LoomWatch saves a copy of your run history, downloads ${latest.version}, puts it in place of this version and opens it again. It takes a minute or two.`}</p>
           <div className="up-acts">
             <button type="button" className="btn btn-primary" onClick={() => void ask()}>Update and restart</button>
           </div>
         </>
-      )}
-      {command && (
-        <p className="fb-note">
-          Or press <kbd>Ctrl</kbd>-<kbd>C</kbd> in that window and run <code className="t-mono-sm">{command}</code>{copyButton(command)}
-          {rollback && <> If the new version gives you trouble, <code className="t-mono-sm">{rollback}</code> goes back to this one.</>}
-        </p>
       )}
     </>
   )
@@ -305,7 +284,6 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
   const skipped = Boolean(latest && status?.skipped === latest.version)
   const releasedOn = published(latest?.publishedAt ?? null)
   const command = status?.command ?? null
-  const rollback = status?.install === 'release' ? rollbackCommand(command) : null
   // What the daemon's last check met is news; a click that failed just now is an alert.
   const error = problem ?? status?.error ?? null
   // Once LoomWatch stopped to update, the dialog follows that, not the release it offered.
@@ -334,7 +312,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
           </p>
         )}
         {error && <p role={problem ? 'alert' : 'status'} className="up-error">{error}</p>}
-        {progress.phase !== 'idle' && <Progress progress={progress} app={status?.install === 'app'} />}
+        {progress.phase !== 'idle' && <Progress progress={progress} />}
 
         {!following && latest && skipped && (
           <p className="fb-note">You chose to skip this version, so LoomWatch doesn’t point it out. <button type="button" className="link" onClick={() => save({ skipped: null })} disabled={busy !== null}>Point it out again</button></p>
@@ -354,11 +332,11 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
           <section className="up-how" aria-label="How to update">
             <span className="nt-label">How to update</span>
             {status?.canInstall ? (
-              <UpdateAndRestart latest={latest} app={status.install === 'app'} command={command} rollback={rollback} installError={progress.phase === 'failed' ? null : status.installError ?? null} copyButton={copyButton} />
+              <UpdateAndRestart latest={latest} installError={progress.phase === 'failed' ? null : status.installError ?? null} />
             ) : command ? (
               <>
                 <ol>
-                  <li>Wait until no team is working. Updating stops LoomWatch for a minute or two.</li>
+                  <li>Wait until no team is working. Updating stops LoomWatch for a few minutes.</li>
                   <li>In the terminal window running LoomWatch, press <kbd>Ctrl</kbd>-<kbd>C</kbd>.</li>
                   <li>
                     Run this in that window:
@@ -369,9 +347,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                   </li>
                 </ol>
                 <p className="fb-note">
-                  It saves a copy of your run history first, then starts the new version.
-                  {status?.install === 'source' && ' A copy of the source code is rebuilt, which takes a few minutes.'}
-                  {rollback && <> If the new version gives you trouble, <code className="t-mono-sm">{rollback}</code> goes back to this one.</>}
+                  It saves a copy of your run history first, then rebuilds LoomWatch from the newest code and starts it again.
                 </p>
               </>
             ) : status?.install === 'app' ? (
@@ -392,7 +368,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                 )}
               </>
             ) : (
-              <p>Download it from the release page above, or update LoomWatch the way you installed it.</p>
+              <p>Update this copy the way you set it up.</p>
             )}
           </section>
         )}

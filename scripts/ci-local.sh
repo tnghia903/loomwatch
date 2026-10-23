@@ -43,8 +43,7 @@ changes() { [ -n "$base" ] && [ -n "$(git diff --name-only "$base" -- "$@")" ]; 
 
 # Launcher job.
 check "Launcher: ShellCheck" \
-  shellcheck loomwatch scripts/install.sh scripts/package-release.sh scripts/test-update.sh scripts/ci-local.sh
-check "Launcher: update and rollback" scripts/test-update.sh
+  shellcheck loomwatch scripts/package-release.sh scripts/package-macos-app.sh scripts/ci-local.sh
 
 # Workflow lint.
 if command -v actionlint >/dev/null; then

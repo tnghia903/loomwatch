@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-# One command to set up, build, start, update and stop LoomWatch on this computer.
+# One command to set up, build, start, update and stop LoomWatch from a copy of its source code.
 #
 #   ./loomwatch            set up anything missing, build if the code changed, start, open the browser
-#   ./loomwatch update     save a copy of the run history, download the latest version, and start
-#   ./loomwatch rollback   go back to the version the last update replaced (ready-built copies)
-#   ./loomwatch version    say which version this is, and whether a newer one is out
+#   ./loomwatch update     save a copy of the run history, pull the newest main, rebuild and start
+#   ./loomwatch version    say which version this is, and whether a newer release is out
 #   ./loomwatch stop       stop LoomWatch (your teams and history are kept)
 #
-# The same script runs a copy of the source code, which it builds, and a ready-built copy put in
-# ~/LoomWatch/app by scripts/install.sh, which carries its program in bin/ and updates from the
-# newest release instead of from Git. A ready-built copy can also be updated from the app, with
-# Update and restart: LoomWatch stops, this script updates it as `update` does, and starts it
-# again in the same window.
-#
-# LoomWatch keeps its run history in one file.
+# People get LoomWatch as the Mac app or the Windows app; this script is for running it from source.
+# A copy of the source keeps its run history in one file of its own, in .loomwatch/.
 #
 # Optional settings, read from the environment:
 #   LOOMWATCH_TEAMS_ROOT    where your teams live (default: ~/LoomWatch/teams)
@@ -46,8 +40,8 @@ done
 repo_root=$(cd "$(dirname "$script")" && pwd -P)
 cd "$repo_root"
 
-# This script as the operator would type it again, for the instructions it prints: ./loomwatch in
-# a copy of the source, ~/LoomWatch/app/loomwatch or loomwatch for a ready-built copy.
+# This script as the operator would type it again, for the instructions it prints: ./loomwatch, or
+# its name when it was started through a folder on PATH.
 case $0 in
   */*)
     self=$0
@@ -64,11 +58,6 @@ step() { printf '\n%s==> %s%s\n' "$bold" "$*" "$reset"; }
 failure_heading='LoomWatch could not start'
 fail() {
   printf '\n%s%s:%s %s\n' "$bold" "$failure_heading" "$reset" "$*" >&2
-  # An update asked for in the app also tells the LoomWatch started again after it why it stopped.
-  if [ -n "${failure_note:-}" ]; then
-    local why=$*
-    printf '%s\n' "${why//The messages above say why./The window running LoomWatch says why.}" >"$failure_note" 2>/dev/null || true
-  fi
   exit 1
 }
 
@@ -89,7 +78,7 @@ back_up=1
 assume_yes=0
 for arg in "$@"; do
   case $arg in
-    start | update | rollback | stop) command=$arg ;;
+    start | update | stop) command=$arg ;;
     version | --version) command=version ;;
     help | -h | --help) command=help ;;
     --no-open) open_browser=0 ;;
@@ -105,36 +94,19 @@ done
 
 teams_root=${LOOMWATCH_TEAMS_ROOT:-$HOME/LoomWatch/teams}
 backup_root=${LOOMWATCH_BACKUP_DIR:-$HOME/LoomWatch/backups}
-# A ready-built copy has its program in bin/ and no source code to build it from.
-if [ -x bin/loomwatchd ] && [ ! -f Cargo.toml ]; then
-  prebuilt=1
-  binary=bin/loomwatchd
-  state_dir=run
-else
-  prebuilt=0
-  binary=target/release/loomwatchd
-  state_dir=target
-fi
+binary=target/release/loomwatchd
+state_dir=target
 build_stamp=target/release/.loomwatch-build
 pid_file=$state_dir/loomwatchd.pid
-# The script that stays beside a ready-built copy's LoomWatch, so `stop` can end both.
-launcher_pid_file=$state_dir/launcher.pid
 
-# The run history is one file. The ready-built copy in the usual folder keeps it where the program
-# keeps it by default, in LoomWatch's state folder, so it outlives reinstalling the app. Every other
-# copy, a copy of the source or a release being tried, keeps its own in its folder: two copies never
-# share one, as they once shared a database by accident. The state folder and the Keychain items stay
-# shared, so a copy of the source uses the key you gave LoomWatch. A release being tried sets
-# LOOMWATCH_STATE_DIR and LOOMWATCH_KEY_STORE=file, which reach loomwatchd unchanged (docs/CI.md).
-usual_app=
-if [ -d "$HOME/LoomWatch/app" ]; then usual_app=$(cd "$HOME/LoomWatch/app" && pwd -P); fi
-if [ -z "${LOOMWATCH_DATABASE:-}" ] && { [ "$prebuilt" = 0 ] || [ "$repo_root" != "$usual_app" ]; }; then
+# The run history is one file. A copy of the source keeps its own in its folder, so it never shares
+# one with the app or another copy, as two copies once shared a database by accident. The state
+# folder and the Keychain items stay shared, so a copy of the source uses the key you gave LoomWatch.
+if [ -z "${LOOMWATCH_DATABASE:-}" ]; then
   LOOMWATCH_DATABASE="$repo_root/.loomwatch/loomwatch.db"
   export LOOMWATCH_DATABASE
 fi
 
-# Someone running a copy of the source is in its folder; someone running a ready-built copy may be
-# anywhere, so instructions name that copy's files and folder in full.
 # A path as the operator would type it, with ~ for the home folder: shorter, and a pasted log no
 # longer shows the account name.
 pretty_path() { case $1 in "$HOME"/*) printf '~%s\n' "${1#"$HOME"}" ;; *) printf '%s\n' "$1" ;; esac; }
@@ -185,13 +157,6 @@ open_url() {
 # The file that holds the run history, as the program resolves it. Needs the program built.
 database_file() { "./$binary" database-path; }
 
-# A name for this copy of LoomWatch no other folder uses.
-own_project_name() {
-  local prefix=loomwatch
-  if [ "$prebuilt" = 1 ]; then prefix=loomwatch-app; fi
-  printf '%s-%08x\n' "$prefix" "$(printf '%s' "$repo_root" | cksum | cut -d ' ' -f 1)"
-}
-
 # A LoomWatch answering on the port is only this one when it was started from this folder. Another
 # copy, among them one whose folder has since been deleted, holds the port with its own files.
 already_running() {
@@ -215,27 +180,24 @@ check_prerequisites() {
   local missing='' brew=0
   if command -v brew >/dev/null 2>&1; then brew=1; fi
 
-  # Only a copy of the source code is built here; a ready-built copy needs neither Node.js nor Rust.
-  if [ "$prebuilt" = 0 ]; then
-    if ! command -v node >/dev/null 2>&1; then
-      if [ "$brew" = 1 ]; then
-        missing="$missing
-  - Node.js 22 or newer, which builds the browser app: brew install node (or https://nodejs.org/)"
-      else
-        missing="$missing
-  - Node.js 22 or newer, which builds the browser app: https://nodejs.org/"
-      fi
-    elif ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)'; then
+  if ! command -v node >/dev/null 2>&1; then
+    if [ "$brew" = 1 ]; then
       missing="$missing
+  - Node.js 22 or newer, which builds the browser app: brew install node (or https://nodejs.org/)"
+    else
+      missing="$missing
+  - Node.js 22 or newer, which builds the browser app: https://nodejs.org/"
+    fi
+  elif ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)'; then
+    missing="$missing
   - A newer Node.js: LoomWatch needs 22.12 or newer and this computer has $(node --version).
     Install the current version from https://nodejs.org/"
-    fi
+  fi
 
-    if ! command -v cargo >/dev/null 2>&1; then
-      missing="$missing
+  if ! command -v cargo >/dev/null 2>&1; then
+    missing="$missing
   - Rust, which builds the LoomWatch program. Install it with:
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-    fi
   fi
 
   if [ -n "$missing" ]; then
@@ -267,7 +229,6 @@ source_fingerprint() {
 }
 
 build_if_needed() {
-  [ "$prebuilt" = 0 ] || return 0
   local fingerprint
   fingerprint=$(source_fingerprint)
   if [ "$force_rebuild" = 0 ] && [ -x "$binary" ] && [ "$(cat "$build_stamp" 2>/dev/null)" = "$fingerprint" ]; then
@@ -295,20 +256,14 @@ start() {
   local database
   database=$(database_file) || fail "LoomWatch could not say where it keeps the run history. The messages above say why."
 
-  # The update hand-over is supervise's to set: a daemon told about one that nothing is running
-  # would stop and stay stopped.
+  # Only the apps hand an update over to be installed: a daemon told about a hand-over that nothing
+  # here would carry out would stop and stay stopped.
   unset LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST LOOMWATCH_UPDATE_FAILED
-  # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits. A
-  # ready-built copy names the commit its release was built from, in VERSION.
-  if [ "$prebuilt" = 1 ]; then
-    LOOMWATCH_COMMIT=$(cut -d ' ' -f 2 VERSION 2>/dev/null || true)
-  else
-    LOOMWATCH_COMMIT=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
-  fi
+  # Which checkout is running, for the "Send feedback" report. `-dirty` marks local edits.
+  LOOMWATCH_COMMIT=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
   export LOOMWATCH_COMMIT
   # How this copy is updated, for the app's notice that a newer version is out (ADR 0052).
   LOOMWATCH_INSTALL=source
-  if [ "$prebuilt" = 1 ]; then LOOMWATCH_INSTALL=release; fi
   # Typed as ./loomwatch only works from this folder, so the command says to go there first.
   LOOMWATCH_UPDATE_COMMAND="$self update"
   case $self in ./*) LOOMWATCH_UPDATE_COMMAND="cd $folder_display && $self update" ;; esac
@@ -332,7 +287,6 @@ start() {
   say "Your run history is in $(pretty_path "$database")"
   say "Keep this window open while you use LoomWatch. Press Ctrl-C to stop it."
   mkdir -p "$state_dir"
-  if [ "$prebuilt" = 1 ]; then supervise; fi
   echo "$$" >"$pid_file"
   exec "./$binary" serve --teams-root "$teams_root" --listen "127.0.0.1:$port"
 }
@@ -357,10 +311,10 @@ stop() {
     case $(ps -p "$pid" -o comm= 2>/dev/null) in
       *loomwatchd*)
         pgid=$(ps -p "$pid" -o pgid= | tr -d ' ')
-        # Started from a terminal, LoomWatch leads its process group, or the script staying beside
-        # it does: the group is LoomWatch, the agents it runs, and that script.
+        # Started from a terminal, LoomWatch leads its process group: the group is LoomWatch and the
+        # agents it runs.
         group=
-        if [ "$pgid" = "$pid" ] || [ "$pgid" = "$(cat "$launcher_pid_file" 2>/dev/null || true)" ]; then group=$pgid; fi
+        if [ "$pgid" = "$pid" ]; then group=$pgid; fi
         # One started in the background ignores Ctrl-C's signal, so it is then asked to end.
         if ! signal_and_wait INT "$pid" "$group" && ! signal_and_wait TERM "$pid" "$group"; then
           fail "LoomWatch (process $pid) is still running. Stop it with: kill -9 $pid"
@@ -370,7 +324,7 @@ stop() {
         ;;
     esac
   fi
-  rm -f "$pid_file" "$launcher_pid_file"
+  rm -f "$pid_file"
   if [ "$stopped" = 0 ] && loomwatch_is_running; then
     local other
     other=$(listener_pid "$port" || true)
@@ -384,17 +338,11 @@ stop() {
 
 # --- Updating (ADR 0052) -------------------------------------------------------------------------
 # An update never starts by itself: the app only says a newer version is out. `update` saves a copy
-# of the run history before anything can change it, and in a ready-built copy keeps the version it
-# replaces in .previous, so `rollback` can put it back.
+# of the run history before anything can change it; Git keeps every version of the code.
 
-# The version this copy runs: VERSION's first word in a ready-built copy, the program's own in a
-# copy of the source.
+# The version this copy of the source builds.
 installed_version() {
-  if [ "$prebuilt" = 1 ]; then
-    cut -d ' ' -f 1 VERSION 2>/dev/null || true
-  else
-    sed -n 's/^version = "\(.*\)"$/\1/p' crates/loomwatch-backend/Cargo.toml 2>/dev/null | head -n 1
-  fi
+  sed -n 's/^version = "\(.*\)"$/\1/p' crates/loomwatch-backend/Cargo.toml 2>/dev/null | head -n 1
 }
 
 is_version_core() {
@@ -427,13 +375,17 @@ update_check_off() {
   esac
 }
 
-# The newest published release, such as v0.1.6. Fails when GitHub cannot be asked, and for a trial
-# of files served from elsewhere (LOOMWATCH_DOWNLOAD_BASE), which say nothing about GitHub.
+# The newest published release, such as v0.1.6, from where GitHub's releases/latest page leads.
+# Fails when GitHub cannot be asked.
 latest_release() {
-  [ -z "${LOOMWATCH_DOWNLOAD_BASE:-}" ] || return 1
-  local installer=scripts/install.sh
-  if [ "$prebuilt" = 1 ]; then installer=./install.sh; fi
-  bash "$installer" --latest 2>/dev/null
+  local effective tag
+  effective=$(curl -fsSIL --proto '=https' --proto-redir '=https' --retry 2 --max-time 30 -o /dev/null \
+    -w '%{url_effective}' "https://github.com/tnghia903/loomwatch/releases/latest" 2>/dev/null) || return 1
+  tag=${effective##*/releases/tag/}
+  [ "$tag" != "$effective" ] || return 1
+  case $tag in v[0-9]*.[0-9]*.[0-9]*) ;; *) return 1 ;; esac
+  case $tag in *[!0-9A-Za-z.+-]*) return 1 ;; esac
+  printf '%s\n' "$tag"
 }
 
 # Asks a yes-or-no question. No is the answer when there is no one at a terminal to ask, unless
@@ -458,15 +410,7 @@ database_layout() {
 # saved before and after LoomWatch kept its history in a file sit together.
 backup_folder() {
   local name=${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}
-  if [ -z "$name" ]; then
-    if [ "$prebuilt" = 0 ]; then
-      name=$(basename "$repo_root" | tr '[:upper:]' '[:lower:]')
-    elif [ "$repo_root" = "$usual_app" ]; then
-      name=loomwatch-app
-    else
-      name=$(own_project_name)
-    fi
-  fi
+  if [ -z "$name" ]; then name=$(basename "$repo_root" | tr '[:upper:]' '[:lower:]'); fi
   printf '%s/%s\n' "$backup_root" "$name"
 }
 
@@ -494,15 +438,12 @@ save_database() {
   fi
 }
 
-# Before an update can change the run history: notes its layout, so rollback can tell whether the
-# earlier version can still read it, and saves a copy. Sets layout_before and backup_file, each
-# empty when there was nothing to note or save.
+# Before an update can change the run history: saves a copy. Sets backup_file, empty when there was
+# nothing to save.
 back_up_before_update() {
-  layout_before=
   backup_file=
-  layout_before=$(database_layout)
   # Never started here: there is no run history yet, so nothing to keep.
-  [ -n "$layout_before" ] || return 0
+  [ -n "$(database_layout)" ] || return 0
   if [ "$back_up" = 0 ]; then
     say "Not saving a copy of your run history (--no-backup)."
     return 0
@@ -531,53 +472,9 @@ stop_before_update() {
   fi
 }
 
-# What rollback needs, beside the version the installer kept: which version that is, the layout
-# of the run history it ran on, and the copy of the run history saved before the update.
-remember_for_rollback() {
-  [ -d .previous ] || return 0
-  {
-    printf 'version=%s\n' "$1"
-    printf 'layout=%s\n' "$layout_before"
-    printf 'backup=%s\n' "$backup_file"
-  } >.previous/ROLLBACK
-}
-
-rollback_value() { sed -n "s/^$1=//p" .previous/ROLLBACK 2>/dev/null | tail -n 1; }
-
-# This script, started again from the files now in this folder.
-start_again() {
-  if [ "$open_browser" = 0 ]; then exec "$repo_root/loomwatch" start --no-open; fi
-  exec "$repo_root/loomwatch" start
-}
-
-# Installs a release in this ready-built copy: saves the run history, has the installer replace
-# the files, keeping this version in .previous, and notes what rollback needs. $1 is the
-# version installed now. Fails, changing nothing, when any step does.
-install_release() {
-  back_up_before_update
-  # The installer that put this copy here fetches the release and replaces it in place, keeping
-  # the version it replaces in .previous. This script keeps running from the copy it started as.
-  bash ./install.sh --update --dir "$repo_root" ||
-    fail "the download did not finish, and LoomWatch $1 was left as it was. The messages above say why."
-  remember_for_rollback "$1"
-}
-
 update() {
   failure_heading='LoomWatch could not update'
   if loomwatch_is_running; then stop_before_update; fi
-  local installed latest
-  installed=$(installed_version)
-  if [ "$prebuilt" = 1 ]; then
-    # A release asked for by name is installed even when it is older: that is how to go back
-    # further than rollback does.
-    if [ -z "${LOOMWATCH_VERSION:-}" ] && latest=$(latest_release) && ! newer_than "$latest" "$installed"; then
-      say "LoomWatch $installed is the newest version."
-      start_again
-    fi
-    install_release "$installed"
-    if [ -d .previous ]; then say "If the new version gives you trouble, $self rollback goes back to $installed."; fi
-    start_again
-  fi
   command -v git >/dev/null 2>&1 || fail "updating needs Git. Install it with: xcode-select --install"
   step "Downloading the latest LoomWatch"
   local before
@@ -594,182 +491,16 @@ update() {
   start
 }
 
-# --- Updating from the app (ADR 0052, amended) -----------------------------------------------------
-# A ready-built copy's LoomWatch runs beside this script instead of in its place, so Update and
-# restart in the app can hand the update to it. LoomWatch names the release in update_request and
-# exits with update_exit_code; this script then installs that release as `update` does and starts
-# LoomWatch again in this window. When the update does not finish, it starts the version that was
-# running again, and tells it why.
-
-# The exit status LoomWatch asks for an update with (EX_TEMPFAIL). Any other one ends this script.
-update_exit_code=75
-update_request="$repo_root/$state_dir/update-request"
-update_failed="$repo_root/$state_dir/update-failed"
-
-supervise() {
-  local code
-  export LOOMWATCH_SUPERVISED=1 LOOMWATCH_UPDATE_REQUEST="$update_request"
-  echo "$$" >"$launcher_pid_file"
-  while :; do
-    rm -f "$update_request"
-    code=0
-    # In the foreground, so Ctrl-C reaches LoomWatch and the agents it runs as it always has. sh
-    # writes down its own process number, which exec hands on to LoomWatch, for stop to find.
-    sh -c 'echo "$$" >"$1" && shift && exec "$@"' sh "$pid_file" \
-      "./$binary" serve --teams-root "$teams_root" --listen "127.0.0.1:$port" || code=$?
-    unset LOOMWATCH_UPDATE_FAILED
-    if [ "$code" != "$update_exit_code" ]; then
-      rm -f "$launcher_pid_file"
-      exit "$code"
-    fi
-    update_from_app
-  done
-}
-
-# After LoomWatch stopped for Update and restart. Starts the new version in its place, or returns
-# with LOOMWATCH_UPDATE_FAILED set, for the version still here to be started again.
-update_from_app() {
-  local installed tag
-  installed=$(installed_version)
-  tag=$(sed -n 1p "$update_request" 2>/dev/null | tr -d '\r' || true)
-  rm -f "$update_request"
-  # In a subshell, so a step that fails ends only the update, not this window's LoomWatch.
-  rm -f "$update_failed"
-  (
-    failure_heading='LoomWatch could not update'
-    failure_note=$update_failed
-    install_from_app "$installed" "$tag"
-  ) || true
-  # Whatever the steps said, the files in place decide which version runs next.
-  if [ "$(installed_version)" != "$installed" ]; then
-    if [ -d .previous ]; then say "If the new version gives you trouble, $self rollback goes back to $installed."; fi
-    unset LOOMWATCH_SUPERVISED LOOMWATCH_UPDATE_REQUEST
-    rm -f "$launcher_pid_file"
-    # The app's tab is still open, and it waits for the new version: no second tab.
-    exec "$repo_root/loomwatch" start --no-open
-  fi
-  LOOMWATCH_UPDATE_FAILED=$(cat "$update_failed" 2>/dev/null || true)
-  rm -f "$update_failed"
-  export LOOMWATCH_UPDATE_FAILED="${LOOMWATCH_UPDATE_FAILED:-the update stopped before it finished. The window running LoomWatch says why.}"
-  step "Starting LoomWatch $installed again"
-}
-
-# The release the app named, installed. Fails, changing nothing, unless it is a version number
-# newer than this one.
-install_from_app() {
-  local installed=$1 tag=$2
-  case $tag in
-    v[0-9]*.[0-9]*.[0-9]*) ;;
-    *) fail "LoomWatch did not say which version to install." ;;
-  esac
-  case $tag in *[!0-9A-Za-z.+-]*) fail "LoomWatch asked for a version that is not a version number." ;; esac
-  newer_than "$tag" "$installed" || fail "${tag#v} is not newer than LoomWatch $installed, so nothing was changed."
-  step "Updating LoomWatch $installed to ${tag#v}, as asked in the app"
-  LOOMWATCH_VERSION=$tag install_release "$installed"
-}
-
-# Puts a saved copy in place of the run history file: copied beside it first, then renamed over
-# it, so the file in use is replaced only once the copy is whole.
-restore_database() {
-  local backup=$1 database
-  database=$(database_file) || fail "LoomWatch could not say where it keeps the run history, so nothing was changed."
-  rm -f "$database.restoring"
-  if ! (umask 077 && cp "$backup" "$database.restoring"); then
-    rm -f "$database.restoring"
-    fail "the copy in $(pretty_path "$backup") could not be restored, so nothing was changed. The messages above say why."
-  fi
-  # The write-ahead log belongs to the file being replaced, and would be read into the copy. What
-  # it held is in the copy saved just before this.
-  rm -f "$database-wal" "$database-shm"
-  mv "$database.restoring" "$database" ||
-    fail "the copy could not be put in place. It is in $(pretty_path "$database.restoring"); the copy saved before going back is in $(pretty_path "$backup_file")."
-}
-
-# An update may have changed how the run history is stored, which the earlier version cannot read.
-# Then the run history goes back to the copy saved before the update, after what was recorded
-# since is saved to a copy of its own.
-restore_database_if_needed() {
-  local current=$1 previous=$2 layout_then layout_now backup
-  layout_then=$(rollback_value layout)
-  backup=$(rollback_value backup)
-  [ -n "$layout_then" ] || return 0
-  layout_now=$(database_layout)
-  if [ -z "$layout_now" ] || [ "$layout_now" = "$layout_then" ]; then return 0; fi
-  if [ -z "$backup" ] || [ ! -f "$backup" ]; then
-    fail "LoomWatch $current changed how your run history is stored, and $previous cannot read it. The copy saved before the update ${backup:+($(pretty_path "$backup")) }is gone, so nothing was changed. Keep using $current by running: $self"
-  fi
-  say "LoomWatch $current changed how your run history is stored, and $previous cannot read it. Going back also puts the run history back to the copy saved before the update, $(pretty_path "$backup"). What was recorded since is saved to another copy first; $previous will not show it."
-  confirm "Go back to $previous, with the run history from before the update?" || fail "nothing was changed."
-  step "Putting the run history back"
-  save_database -before-rollback ||
-    fail "the run history recorded since the update could not be saved, so nothing was changed. The messages above say why."
-  say "Saved the run history recorded since the update in $(pretty_path "$backup_file")."
-  restore_database "$backup"
-}
-
-# Whether the kept version is one that keeps its run history in PostgreSQL in Docker: its launcher
-# has the function that said so. (The bracket keeps this line from matching itself.)
-previous_uses_docker() { grep -q '^uses_docker_databas[e]() {' .previous/loomwatch 2>/dev/null; }
-
-# Moves the kept version's files over the current ones. Each is a rename in this folder; the
-# current version's files wait in a scratch folder until every one is in place.
-put_previous_back() {
-  local scratch item name
-  scratch=$(mktemp -d "$repo_root/.loomwatch-rollback.XXXXXX")
-  for item in .previous/* .previous/.[!.]*; do
-    [ -e "$item" ] || continue
-    name=$(basename "$item")
-    [ "$name" != ROLLBACK ] || continue
-    if [ -e "$name" ] && ! mv "$name" "$scratch/$name"; then
-      fail "could not move $name aside. The files of both versions are in $folder_display and $(pretty_path "$scratch")."
-    fi
-    mv "$item" "$name" ||
-      fail "could not put $name back. The files of both versions are in $folder_display and $(pretty_path "$scratch")."
-  done
-  rm -rf .previous "$scratch"
-}
-
-rollback() {
-  failure_heading='LoomWatch could not go back'
-  if [ "$prebuilt" = 0 ]; then
-    fail "rollback is for a ready-built copy. In a copy of the source code, Git keeps every version: find the one you want with git log, git checkout it, then run $self"
-  fi
-  if [ ! -x .previous/bin/loomwatchd ] || [ ! -f .previous/loomwatch ]; then
-    fail "no earlier version is kept in $folder_display. Each update keeps the version it replaced, until the next update. To install a particular release instead, run: LOOMWATCH_VERSION=v0.1.4 $self update (the versions are listed at https://github.com/tnghia903/loomwatch/releases)"
-  fi
-  if loomwatch_is_running; then
-    fail "it is still running. Stop it first (press Ctrl-C in its window, or run $self stop), then run $self rollback."
-  fi
-  local current previous
-  current=$(installed_version)
-  previous=$(cut -d ' ' -f 1 .previous/VERSION 2>/dev/null || true)
-  previous=${previous:-the earlier version}
-  step "Going back from LoomWatch $current to $previous"
-  if previous_uses_docker; then
-    # Its run history is in Docker, where the update only read it: it is all still there.
-    say "LoomWatch $previous keeps its run history in Docker, as it was before the update. What you ran since then stays in $(pretty_path "$(database_file)"), which $previous does not read."
-  else
-    restore_database_if_needed "$current" "$previous"
-  fi
-  put_previous_back
-  say "LoomWatch is back to $previous. Run $self update when you want the newest version again."
-  start_again
-}
-
 show_version() {
   local installed commit latest
   installed=$(installed_version)
-  if [ "$prebuilt" = 1 ]; then
-    commit=$(cut -d ' ' -f 2 VERSION 2>/dev/null || true)
-  else
-    commit=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
-  fi
+  commit=$(git describe --always --dirty --abbrev=7 2>/dev/null || true)
   say "LoomWatch ${installed:-(version unknown)}${commit:+ ($commit)}"
   if update_check_off; then
     say "Checking for new versions is off (LOOMWATCH_UPDATE_CHECK)."
   elif latest=$(latest_release); then
     if newer_than "$latest" "$installed"; then
-      say "LoomWatch ${latest#v} is out. Update with: $self update"
+      say "LoomWatch ${latest#v} is out. Update this copy with: $self update"
     elif newer_than "$installed" "$latest"; then
       say "This is newer than the newest release, ${latest#v}."
     else
@@ -778,29 +509,15 @@ show_version() {
   else
     say "Could not ask GitHub for the newest release."
   fi
-  if [ "$prebuilt" = 1 ] && [ -f .previous/VERSION ]; then
-    say "The version it replaced, $(cut -d ' ' -f 1 .previous/VERSION), is kept: $self rollback goes back to it."
-  fi
 }
 
 usage() {
-  local start_does='Set up anything missing, build if needed, start LoomWatch and open it (the default)'
-  local update_does='Save a copy of the run history, download the latest LoomWatch, rebuild it and start it'
-  local rollback_line='' rebuild_option='
-  --rebuild     Build again even if nothing changed'
-  if [ "$prebuilt" = 1 ]; then
-    start_does='Set up anything missing, start LoomWatch and open it (the default)'
-    update_does='Save a copy of the run history, install the newest release, then start it'
-    rollback_line='
-  rollback  Go back to the version the last update replaced'
-    rebuild_option=
-  fi
   cat <<EOF
 Usage: $self [command] [options]
 
 Commands:
-  start     $start_does
-  update    $update_does$rollback_line
+  start     Set up anything missing, build if needed, start LoomWatch and open it (the default)
+  update    Save a copy of the run history, pull the newest main, rebuild it and start it
   version   Say which version this is, and whether a newer one is out
   stop      Stop LoomWatch. Your teams and history are kept.
   help      Show this help
@@ -808,7 +525,8 @@ Commands:
 Options:
   --no-open     Do not open the browser
   --no-backup   Update without saving a copy of the run history first
-  --yes         Answer yes to questions, such as stopping LoomWatch to update it$rebuild_option
+  --yes         Answer yes to questions, such as stopping LoomWatch to update it
+  --rebuild     Build again even if nothing changed
 
 Settings (environment variables):
   LOOMWATCH_TEAMS_ROOT     Where your teams live (now: $(pretty_path "$teams_root"))
@@ -822,7 +540,6 @@ EOF
 case $command in
   start) start ;;
   update) update ;;
-  rollback) rollback ;;
   version) show_version ;;
   stop) stop ;;
   help) usage ;;

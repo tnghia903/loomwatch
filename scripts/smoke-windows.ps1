@@ -1,13 +1,11 @@
-# Installs a packed LoomWatch for Windows both ways a person does, and checks each one works:
+# Checks LoomWatch for Windows as the installer puts it in place, and the installer itself:
 #
-#   1. install.ps1 (irm | iex) into a folder with a space, then loomwatch.cmd: help, version, start,
-#      an empty teams folder, the offline demo team (copied in from this checkout) through its
-#      review stop to the end, an agent on an OpenRouter model
-#      (scripts/mock-openrouter.py standing in for OpenRouter) that keeps its key in Credential
-#      Manager (on a CI runner only) and runs a command with cmd.exe, a Claude API key and a ChatGPT
-#      sign-in kept together in Credential Manager with an agent on each (scripts/mock-vendors.py
-#      standing in for Anthropic and OpenAI), stop, then update to a newer release (made from this
-#      one) and roll back from it;
+#   1. the program, from the files the installer installs, in a folder with a space: it starts, the
+#      offline demo team (copied in from this checkout) runs through its review stop to the end, an
+#      agent on an OpenRouter model (scripts/mock-openrouter.py standing in for OpenRouter) keeps its
+#      key in Credential Manager (on a CI runner only) and runs a command with cmd.exe, and a Claude
+#      API key and a ChatGPT sign-in are kept together in Credential Manager with an agent on each
+#      (scripts/mock-vendors.py standing in for Anthropic and OpenAI); then it stops;
 #   2. LoomWatch.exe, the app beside the clock: it starts LoomWatch, a second one starts nothing,
 #      and LoomWatch.exe --quit stops both;
 #   3. LoomWatch-windows-setup.exe, when -Dist has it: a silent install, its Start menu entry, the
@@ -21,8 +19,8 @@
 #
 #   scripts\smoke-windows.ps1 -Dist dist
 #
-# -Dist is the folder scripts/package-release.sh wrote loomwatch-windows-x86_64.zip and its checksum
-# to, and scripts/package-windows-app.ps1 the installer.
+# -Dist is the folder scripts/package-release.sh wrote loomwatch-windows-x86_64.zip (the files the
+# installer installs) to, and scripts/package-windows-app.ps1 the installer.
 param(
   [Parameter(Mandatory = $true)][string]$Dist,
   [int]$Port = 3300
@@ -77,11 +75,10 @@ function Show-Log([string]$Title, [string]$Path) {
   }
 }
 
-# The release files and the installer, served over http as GitHub would serve them.
+# The release files, served over http as GitHub would serve them, for Update and restart below.
 $served = Join-Path $work 'served'
 New-Item -ItemType Directory -Force -Path $served | Out-Null
 Copy-Item -Path (Join-Path $Dist '*') -Destination $served
-Copy-Item -LiteralPath (Join-Path $repo 'scripts\install.ps1') -Destination $served
 $python = (Get-Command python -CommandType Application | Select-Object -First 1).Source
 $server = Start-Process -FilePath $python -ArgumentList @('-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', "`"$served`"") -PassThru -WindowStyle Hidden
 # OpenRouter's stand-in. LoomWatch honours LOOMWATCH_OPENROUTER_URL only for this computer's own
@@ -99,42 +96,36 @@ $env:LOOMWATCH_OPENAI_AUTH_URL = 'http://127.0.0.1:4201'
 $env:LOOMWATCH_OPENAI_URL = 'http://127.0.0.1:4201'
 $daemonLog = Join-Path $work 'loomwatch.log'
 $appLog = Join-Path $env:LOOMWATCH_STATE_DIR 'Logs\loomwatchd.log'
-$launcher = $null
+$daemon = $null
 try {
-  Wait-Until { try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:8765/install.ps1').StatusCode -eq 200 } catch { $false } } 30 'the file server' | Out-Null
+  Wait-Until { try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:8765/loomwatch-windows-x86_64.zip.sha256').StatusCode -eq 200 } catch { $false } } 30 'the file server' | Out-Null
 
-  # --- 1. The terminal way --------------------------------------------------------------------
-  # Install exactly as the README says, in Windows PowerShell 5.1, into a folder with a space.
-  $env:LOOMWATCH_DOWNLOAD_BASE = 'http://127.0.0.1:8765'
-  $env:LOOMWATCH_APP_DIR = $app
-  $env:LOOMWATCH_NO_START = '1'
-  & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command 'irm http://127.0.0.1:8765/install.ps1 | iex'
-  Check ($LASTEXITCODE -eq 0) 'install.ps1 installs from the release files'
-  foreach ($part in @('bin\loomwatchd.exe', 'LoomWatch.exe', 'loomwatch.cmd', 'scripts\loomwatch.ps1', 'install.ps1', 'VERSION')) {
-    Check (Test-Path -LiteralPath (Join-Path $app $part)) "the install has $part"
+  # --- 1. The program -------------------------------------------------------------------------
+  # The files the installer puts in place, in a folder with a space, with none of the terminal
+  # install's files (gone after 0.11.0).
+  $unpacked = Join-Path $work 'unpacked'
+  Expand-Archive -LiteralPath (Join-Path $Dist 'loomwatch-windows-x86_64.zip') -DestinationPath $unpacked
+  Move-Item -LiteralPath (Join-Path $unpacked 'loomwatch') -Destination $app
+  foreach ($part in @('bin\loomwatchd.exe', 'LoomWatch.exe', 'VERSION', 'README.txt')) {
+    Check (Test-Path -LiteralPath (Join-Path $app $part)) "the app's files have $part"
   }
-  Remove-Item Env:LOOMWATCH_NO_START, Env:LOOMWATCH_APP_DIR, Env:LOOMWATCH_DOWNLOAD_BASE
-
-  $cmd = Join-Path $app 'loomwatch.cmd'
-  $help = & cmd.exe /c "`"$cmd`" help" 2>&1 | Out-String
-  Check ($LASTEXITCODE -eq 0 -and $help -match 'Usage:' -and $help -match 'rollback') 'loomwatch help prints the usage of a ready-built copy'
-  & cmd.exe /c "`"$cmd`" --no-such-option" 2>&1 | Out-Null
-  Check ($LASTEXITCODE -eq 1) 'an unknown option fails with exit code 1'
-  $version = & cmd.exe /c "`"$cmd`" version" 2>&1 | Out-String
+  foreach ($gone in @('install.ps1', 'loomwatch.cmd', 'scripts')) {
+    Check (-not (Test-Path -LiteralPath (Join-Path $app $gone))) "the app's files have no $gone"
+  }
   $packed = ([IO.File]::ReadAllText((Join-Path $app 'VERSION')).Trim() -split ' ')[0]
-  Check ($LASTEXITCODE -eq 0 -and $version -match [regex]::Escape("LoomWatch $packed")) "loomwatch version names $packed"
 
-  # Start it as a person would. A copy outside the usual folder keeps its run history in its own.
-  $env:LOOMWATCH_TEAMS_ROOT = $teams
-  $env:LOOMWATCH_PORT = "$Port"
-  $launcher = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', "`"`"$cmd`" --no-open > `"$daemonLog`" 2>&1`"") -PassThru -WindowStyle Hidden
+  # Started as the app starts it, with a run history of its own, so the app below meets a new one.
+  $env:LOOMWATCH_DATABASE = Join-Path $work 'program.db'
+  New-Item -ItemType Directory -Force -Path $teams | Out-Null
+  $program = Join-Path $app 'bin\loomwatchd.exe'
+  $daemon = Start-Process -FilePath $program -ArgumentList @('serve', '--teams-root', "`"$teams`"", '--listen', "127.0.0.1:$Port") -PassThru -NoNewWindow -RedirectStandardOutput $daemonLog -RedirectStandardError "$daemonLog.err"
   Wait-Until { Get-Health $Port } 90 'LoomWatch to answer' | Out-Null
-  Check $true 'loomwatch.cmd starts LoomWatch'
-  Check ((Test-Path -LiteralPath $teams -PathType Container) -and -not (Get-ChildItem -LiteralPath $teams -Filter '*.yaml')) 'the first start makes an empty teams folder, with no demo team in it'
-  Check (Test-Path -LiteralPath (Join-Path $app '.loomwatch\loomwatch.db')) 'the run history is one file in the copy''s own folder'
+  Check $true 'loomwatchd.exe starts LoomWatch'
+  Check (Test-Path -LiteralPath $env:LOOMWATCH_DATABASE) 'the run history is one file'
   $url = "http://127.0.0.1:$Port"
   $about = Invoke-RestMethod -Uri "$url/api/about"
   Check ($about.os -eq 'windows') "LoomWatch reports it runs on $($about.os)"
+  Check ($about.version -eq $packed) "LoomWatch reports version $($about.version), as packed ($packed)"
   $ai = Invoke-RestMethod -Uri "$url/api/ai"
   Check (-not $ai.openrouter.connected) 'no OpenRouter key is kept yet'
 
@@ -284,46 +275,11 @@ try {
     Check (-not ($credentials -match 'LoomWatch\.Plans')) 'removing both takes LoomWatch.Plans out of Credential Manager'
   }
 
-  # Stop it the way a person does.
-  $stop = & cmd.exe /c "`"$cmd`" stop" 2>&1 | Out-String
-  Write-Host $stop
-  Check ($stop -match 'Stopped LoomWatch') 'loomwatch stop stops LoomWatch'
-  Check (-not (Get-Health $Port)) 'LoomWatch no longer answers after loomwatch stop'
-
-  # Update to a "newer" release, this one with another version number, served as GitHub would.
-  $next = Join-Path $work 'next'
-  Expand-Archive -LiteralPath (Join-Path $served 'loomwatch-windows-x86_64.zip') -DestinationPath $next
-  [IO.File]::WriteAllText((Join-Path $next 'loomwatch\VERSION'), "99.0.0 smoke`n")
-  $nextServed = Join-Path $served 'v99.0.0'
-  New-Item -ItemType Directory -Force -Path $nextServed | Out-Null
-  $nextZip = Join-Path $nextServed 'loomwatch-windows-x86_64.zip'
-  Compress-Archive -Path (Join-Path $next 'loomwatch') -DestinationPath $nextZip
-  $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $nextZip).Hash.ToLowerInvariant()
-  [IO.File]::WriteAllText("$nextZip.sha256", "$hash  loomwatch-windows-x86_64.zip`n")
-  $env:LOOMWATCH_DOWNLOAD_BASE = 'http://127.0.0.1:8765/v99.0.0'
-  $updateLog = Join-Path $work 'update.log'
-  # `update` starts the new version in its window when it is done, so it runs in a window of its own.
-  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', "`"`"$cmd`" update --yes --no-open > `"$updateLog`" 2>&1`"") -WindowStyle Hidden | Out-Null
-  Wait-Until { Get-Health $Port } 180 'the updated LoomWatch to answer' | Out-Null
-  $now = ([IO.File]::ReadAllText((Join-Path $app 'VERSION')).Trim() -split ' ')[0]
-  Check ($now -eq '99.0.0') "loomwatch update installs the newer release ($now)"
-  Check (Test-Path -LiteralPath (Join-Path $app '.previous\bin\loomwatchd.exe')) 'and keeps the version it replaced'
-  Check (@(Get-ChildItem -LiteralPath $env:LOOMWATCH_BACKUP_DIR -Recurse -Filter 'loomwatch-*.db').Count -eq 1) 'and saved a copy of the run history first'
-  Remove-Item Env:LOOMWATCH_DOWNLOAD_BASE
-  & cmd.exe /c "`"$cmd`" stop" 2>&1 | Out-Null
-  Wait-Until { -not (Get-Health $Port) } 30 'the updated LoomWatch to stop' | Out-Null
-
-  # Go back to the version the update replaced.
-  $rollbackLog = Join-Path $work 'rollback.log'
-  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', "`"`"$cmd`" rollback --yes --no-open > `"$rollbackLog`" 2>&1`"") -WindowStyle Hidden | Out-Null
-  Wait-Until { Get-Health $Port } 120 'LoomWatch to answer after rollback' | Out-Null
-  $now = ([IO.File]::ReadAllText((Join-Path $app 'VERSION')).Trim() -split ' ')[0]
-  Check ($now -eq $packed) "loomwatch rollback puts $packed back ($now)"
-  Check (-not (Test-Path -LiteralPath (Join-Path $app '.previous'))) 'and keeps no earlier version afterwards'
-  $kept = Invoke-RestMethod -Uri "$url/api/runs/$runId"
-  Check ($kept.status -eq 'succeeded') 'the demo run is still in the run history'
-  & cmd.exe /c "`"$cmd`" stop" 2>&1 | Out-Null
-  Wait-Until { -not (Get-Health $Port) } 30 'LoomWatch to stop after rollback' | Out-Null
+  # Stop it, as quitting the app ends it.
+  Stop-Process -Id $daemon.Id -Force
+  Wait-Until { -not (Get-Health $Port) } 30 'LoomWatch to stop' | Out-Null
+  Check $true 'LoomWatch no longer answers once stopped'
+  Remove-Item Env:LOOMWATCH_DATABASE
 
   # --- 2. The app beside the clock --------------------------------------------------------------
   $appPort = $Port + 1
@@ -358,10 +314,19 @@ try {
     Start-Process -FilePath (Join-Path $installed 'LoomWatch.exe') -ArgumentList '--background' | Out-Null
     Wait-Until { Get-Health $appPort } 90 'the installed LoomWatch.exe to start LoomWatch' | Out-Null
     Check $true 'the installed LoomWatch.exe starts LoomWatch'
+    # What versions 0.11.0 and older put in the same folder for the terminal install, which the
+    # installer removes.
+    New-Item -ItemType Directory -Force -Path (Join-Path $installed 'scripts') | Out-Null
+    foreach ($file in @('install.ps1', 'loomwatch.cmd', 'scripts\loomwatch.ps1')) {
+      [IO.File]::WriteAllText((Join-Path $installed $file), "left by an older version`r`n")
+    }
     # Running the installer again is how LoomWatch updates: it quits the running one first.
     $again = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru
     Check ($again.WaitForExit(180000) -and $again.ExitCode -eq 0) 'installing over a running LoomWatch succeeds'
     Check (@(Get-AppProcesses).Count -eq 0 -and -not (Get-Health $appPort)) 'the installer quit the running LoomWatch first'
+    foreach ($gone in @('install.ps1', 'loomwatch.cmd', 'scripts')) {
+      Check (-not (Test-Path -LiteralPath (Join-Path $installed $gone))) "the installer removes $gone, left by an older version"
+    }
 
     # Update and restart in the app, to a "newer" release whose installer is this one, served as
     # GitHub would serve it, with a stand-in for GitHub's answer about the newest release.
@@ -410,13 +375,12 @@ try {
   Write-Host "FAIL  $($_.Exception.Message)" -ForegroundColor Red
   $failures++
 } finally {
-  Show-Log 'loomwatch.cmd output' $daemonLog
-  Show-Log 'loomwatch update output' (Join-Path $work 'update.log')
-  Show-Log 'loomwatch rollback output' (Join-Path $work 'rollback.log')
+  Show-Log 'loomwatchd output' $daemonLog
+  Show-Log 'loomwatchd errors' "$daemonLog.err"
   Show-Log 'LoomWatch.exe log' $appLog
   Get-AppProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
   Get-Process -Name loomwatchd -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  if ($launcher -and -not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue }
+  if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue }
   if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
   if ($mock -and -not $mock.HasExited) { Stop-Process -Id $mock.Id -Force -ErrorAction SilentlyContinue }
   if ($vendors -and -not $vendors.HasExited) { Stop-Process -Id $vendors.Id -Force -ErrorAction SilentlyContinue }
