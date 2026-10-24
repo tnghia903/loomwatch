@@ -482,6 +482,34 @@ describe('beside the notch at rest, on every screen', () => {
     expect(reduced).toContain('.island *, .island *::before, .island *::after { animation: none !important; }')
   })
 
+  it('a figure keeps its glow while it moves: one light to an element, a rim on the figure and a halo on its holder', async () => {
+    // Safari's engine, which the Mac app draws the island with, drops two lights on one element
+    // while the figure inside it moves: a head at work beside the notch showed no glow at all.
+    runs = [run('r1', { working: ['writer'] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(view(container)).toBe('tucked'))
+    const head = leftEar(container).querySelector<HTMLElement>('.island-head.glow')!
+    const figure = head.firstElementChild!
+    expect(head.getAttribute('data-moment')).toBe('work')
+    // At work it dips inside its holder: the case that lost its light.
+    expect(cascaded(figure, 'animation', DESKTOP, islandRules)).toMatch(/^island-dip /)
+    const lights = (filter: string | null) => [...(filter ?? '').matchAll(/drop-shadow\(0 0 ([\d.]+)px var\(--glow\)\)/g)].map((match) => Number(match[1]))
+    for (const moment of ['work', 'ask', 'done', 'fail', 'ready']) {
+      head.setAttribute('data-moment', moment)
+      expect([moment, lights(cascaded(figure, 'filter', DESKTOP, islandRules)), lights(cascaded(head, 'filter', DESKTOP, islandRules))]).toEqual([moment, [1], [5]])
+    }
+    // Only a stopped figure is greyed, under its red rim.
+    expect(cascaded(figure, 'filter', DESKTOP, islandRules)).toBe('drop-shadow(0 0 1px var(--glow))')
+    head.setAttribute('data-moment', 'fail')
+    expect(cascaded(figure, 'filter', DESKTOP, islandRules)).toMatch(/^saturate\(\.35\) drop-shadow\(0 0 1px /)
+    // No element on the island, at rest or in a breath, carries two lights.
+    const css = readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8')
+    const filters = [...css.matchAll(/filter: ([^;}]+)/g)].map((match) => match[1])
+    expect(filters.length).toBeGreaterThanOrEqual(5)
+    for (const filter of filters) expect([filter, (filter.match(/drop-shadow/g) ?? []).length <= 1]).toEqual([filter, true])
+  })
+
   it('the pinned agent sits first beside the notch, ready, in its own figure', async () => {
     pinnedAgent = 'maya'
     jobs = [maya]
