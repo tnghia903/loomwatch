@@ -161,10 +161,10 @@ jobs:
         run: scripts/smoke-windows.ps1 -Dist dist
 
   # Compares a pull request with its base, or main before and after a push. Fails when the change
-  # adds a dependency, in Cargo.lock, ui/pnpm-lock.yaml or the connectors' package-lock.json files,
-  # with a known vulnerability of moderate severity or worse. It reads GitHub's dependency graph, so
-  # it needs no checkout and can't run on a computer. A pull request's own refs come first: on a
-  # new push to one, `github.event.before` is its previous head, not its base.
+  # adds a dependency, in Cargo.lock or ui/pnpm-lock.yaml, with a known vulnerability of moderate
+  # severity or worse. It reads GitHub's dependency graph, so it needs no checkout and can't run on
+  # a computer. A pull request's own refs come first: on a new push to one, `github.event.before`
+  # is its previous head, not its base.
   dependency-review:
     name: Dependency review
     if: github.event_name != 'workflow_dispatch'
