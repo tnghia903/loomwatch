@@ -1251,7 +1251,6 @@ fn pipe(
 }
 
 /// Waits until `done` says so, for up to ten seconds.
-#[cfg(unix)]
 async fn until(what: &str, done: impl Fn() -> bool) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while !done() {
