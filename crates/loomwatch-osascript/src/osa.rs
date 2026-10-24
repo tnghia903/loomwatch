@@ -2,14 +2,21 @@
 //! runs scripts with, so that a script behaves the same here: the same languages, results, `log`
 //! lines and errors.
 //!
-//! `OpenScripting` and the Apple Event Manager are C interfaces with no safe Rust crate, so this
-//! module, and only this one in the program, calls them directly. Every descriptor, compiled
-//! script and component it gets back is held by a type that frees it when dropped.
+//! One thing works better here than in `/usr/bin/osascript`: an app that macOS quit to free memory
+//! still looks running, so `AppleScript` sends to it instead of starting it, and the script fails
+//! with "Application isn't running" (-600). This module starts such an app and sends again.
+//!
+//! `OpenScripting`, the Apple Event Manager, Launch Services and Core Foundation are C interfaces
+//! with no safe Rust crate, so this module, and only this one in the program, calls them directly.
+//! Every descriptor, compiled script, component and Core Foundation object it gets back is held by
+//! a type that frees it when dropped.
 #![allow(unsafe_code)]
 
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::io::Write as _;
 use std::ptr;
+use std::time::{Duration, Instant};
 
 type FourCharCode = u32;
 type OsErr = i16;
@@ -18,6 +25,19 @@ type OsaId = u32;
 type Size = isize;
 type ComponentInstance = *mut c_void;
 type EventHandler = extern "C" fn(*const AeDesc, *mut AeDesc, *mut c_void) -> OsErr;
+/// What a scripting component sends its Apple Events with (`OSASendProcPtr`): `AESend`'s
+/// arguments and the value given when it was set.
+type SendProc = unsafe extern "C" fn(
+    *const AeDesc,
+    *mut AeDesc,
+    i32,
+    i16,
+    i32,
+    *const c_void,
+    *const c_void,
+    *mut c_void,
+) -> OsErr;
+type CfType = *const c_void;
 
 /// An Apple Event descriptor (`AEDesc`): a type code and the data it owns. The Apple Event headers
 /// pack it to two bytes (`#pragma pack(push, 2)`), so it is 12 bytes, not 16.
@@ -25,6 +45,26 @@ type EventHandler = extern "C" fn(*const AeDesc, *mut AeDesc, *mut c_void) -> Os
 struct AeDesc {
     descriptor_type: FourCharCode,
     data_handle: *mut c_void,
+}
+
+/// A process serial number (`ProcessSerialNumber`), which is how `AppleScript` addresses an app it
+/// takes for running.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Psn {
+    high: u32,
+    low: u32,
+}
+
+/// How to start an app (`LSLaunchURLSpec`). Launch Services packs it to two bytes like `AEDesc`,
+/// so the last field sits at 28, not 32.
+#[repr(C, packed(2))]
+struct LaunchSpec {
+    app: CfType,
+    items: CfType,
+    pass_through: *const AeDesc,
+    flags: u32,
+    async_refcon: *mut c_void,
 }
 
 #[link(name = "CoreServices", kind = "framework")]
@@ -80,8 +120,48 @@ unsafe extern "C" {
         handler: EventHandler,
         system: u8,
     ) -> OsErr;
+    fn AEGetAttributeDesc(
+        event: *const AeDesc,
+        key: FourCharCode,
+        wanted: FourCharCode,
+        out: *mut AeDesc,
+    ) -> OsErr;
     fn OpenDefaultComponent(kind: FourCharCode, subtype: FourCharCode) -> ComponentInstance;
     fn CloseComponent(component: ComponentInstance) -> OsErr;
+    fn LSOpenFromURLSpec(spec: *const LaunchSpec, launched: *mut CfType) -> i32;
+}
+
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C" {
+    fn ProcessInformationCopyDictionary(psn: *const Psn, info: u32) -> CfType;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFStringCreateWithBytes(
+        allocator: CfType,
+        bytes: *const u8,
+        size: isize,
+        encoding: u32,
+        external: u8,
+    ) -> CfType;
+    fn CFStringGetTypeID() -> usize;
+    fn CFStringGetCString(text: CfType, buffer: *mut u8, size: isize, encoding: u32) -> u8;
+    fn CFNumberGetTypeID() -> usize;
+    fn CFNumberGetValue(number: CfType, kind: isize, out: *mut c_void) -> u8;
+    fn CFGetTypeID(object: CfType) -> usize;
+    fn CFDictionaryGetValue(dictionary: CfType, key: CfType) -> CfType;
+    fn CFURLCreateFromFileSystemRepresentation(
+        allocator: CfType,
+        path: *const u8,
+        size: isize,
+        directory: u8,
+    ) -> CfType;
+    fn CFRelease(object: CfType);
+}
+
+unsafe extern "C" {
+    fn kill(pid: i32, signal: i32) -> i32;
 }
 
 #[link(name = "Carbon", kind = "framework")]
@@ -121,6 +201,25 @@ unsafe extern "C" {
     ) -> OsaError;
     fn OSADispose(osa: ComponentInstance, id: OsaId) -> OsaError;
     fn OSASetDefaultScriptingComponent(osa: ComponentInstance, subtype: FourCharCode) -> OsaError;
+    fn OSAGetSendProc(
+        osa: ComponentInstance,
+        send: *mut Option<SendProc>,
+        refcon: *mut *mut c_void,
+    ) -> OsaError;
+    fn OSASetSendProc(
+        osa: ComponentInstance,
+        send: Option<SendProc>,
+        refcon: *mut c_void,
+    ) -> OsaError;
+    fn AESend(
+        event: *const AeDesc,
+        reply: *mut AeDesc,
+        mode: i32,
+        priority: i16,
+        timeout: i32,
+        idle: *const c_void,
+        filter: *const c_void,
+    ) -> OsErr;
 }
 
 const fn code(name: [u8; 4]) -> FourCharCode {
@@ -157,6 +256,19 @@ const AUTO_RETURN_ID: i16 = -1;
 const ANY_TRANSACTION: i32 = 0;
 /// `errOSAScriptError`: the script itself failed, and `OSAScriptError` says how.
 const SCRIPT_ERROR: OsaError = -1753;
+/// `procNotFound`: no running app at the address an event was sent to.
+const PROC_NOT_FOUND: OsErr = -600;
+const KEY_ADDRESS: FourCharCode = code(*b"addr");
+const TYPE_PSN: FourCharCode = code(*b"psn ");
+/// `kProcessDictionaryIncludeAllInformationMask`.
+const ALL_INFORMATION: u32 = 0xFFFF_FFFF;
+const CF_UTF8: u32 = 0x0800_0100;
+const CF_SINT64: isize = 4;
+/// `kLSLaunchDefaults | kLSLaunchDontAddToRecents | kLSLaunchDontSwitch`: started the way
+/// `AppleScript` starts an app, behind the app in front.
+const LAUNCH_BEHIND: u32 = 0x0000_0001 | 0x0000_0100 | 0x0000_0200;
+/// How long an app macOS quit may take to start again before its event is given up on.
+const START_WAIT: Duration = Duration::from_secs(30);
 
 /// The scripting language a name passed to `-l` stands for, spelled as `osalang` lists it.
 #[must_use]
@@ -238,15 +350,19 @@ impl From<&str> for Failure {
     }
 }
 
-/// What a person can do about a script error macOS gave because it didn't let `LoomWatch` control
-/// the app: told once (Privacy & Security, Automation), it doesn't ask again. Said after macOS's own
-/// line, for the agent to pass on, since `-10004` reads like anything but a setting.
+/// What a person can do about a script error macOS gave because it didn't let `LoomWatch` use the
+/// app: told once, it doesn't ask again. Calendar, Reminders, Contacts and Photos also need their
+/// own switch, and they answer `-1743` for either one. Said after macOS's own line, for the agent
+/// to pass on, since `-10004` reads like anything but a setting.
 #[must_use]
 pub fn refusal_hint(number: Option<i32>) -> Option<&'static str> {
     // errAEEventNotPermitted, errAEEventWouldRequireUserConsent, errAEPrivilegeError.
     matches!(number, Some(-1743 | -1744 | -10004)).then_some(
-        "osascript: macOS didn't let LoomWatch control this app. The person can allow it in \
-         System Settings → Privacy & Security → Automation → LoomWatch.",
+        "osascript: macOS didn't let LoomWatch use this app. The person can allow it in \
+         System Settings → Privacy & Security → Automation → LoomWatch. Calendar, Reminders, \
+         Contacts and Photos also have their own list under Privacy & Security, where LoomWatch \
+         must be allowed too (Full Access, where macOS offers a choice). If macOS then says \
+         LoomWatch must quit first, choose Quit & Reopen and ask again.",
     )
 }
 
@@ -276,6 +392,8 @@ pub fn run(
         }
     }
     let logging = Logging::start(osa);
+    // Before compiling, which may already ask an app for its words.
+    let sending = Sending::start(osa);
     let compiled = match script {
         Script::Text(source) => {
             let source = Desc::bytes(TYPE_UTF8, source.as_bytes())
@@ -320,6 +438,7 @@ pub fn run(
             &raw mut result,
         )
     };
+    drop(sending);
     drop(logging);
     if error == SCRIPT_ERROR {
         return Err(osa.script_error("execution error"));
@@ -606,6 +725,225 @@ extern "C" fn on_log(event: *const AeDesc, _reply: *mut AeDesc, refcon: *mut c_v
     0
 }
 
+/// The component's Apple Events sent as before, except that an app macOS quit to free memory is
+/// started again first. macOS keeps such an app listed as running, so `AppleScript` sends to it
+/// rather than starting it, and every try finds nobody there (-600).
+struct Sending {
+    osa: Osa,
+    /// What the send proc reads; boxed so its address holds while it is set.
+    state: Box<SendState>,
+}
+
+struct SendState {
+    /// How the component sent before, and the value that goes with it.
+    before: Option<SendProc>,
+    before_refcon: *mut c_void,
+    /// The apps started this run, each started once at most.
+    started: RefCell<Vec<Psn>>,
+}
+
+impl Sending {
+    fn start(osa: Osa) -> Self {
+        let mut state = Box::new(SendState {
+            before: None,
+            before_refcon: ptr::null_mut(),
+            started: RefCell::new(Vec::new()),
+        });
+        // SAFETY: `osa` is open; the old proc and its value are written into `state`, which
+        // outlives the new proc: `drop` puts the old one back before the box is freed.
+        unsafe {
+            OSAGetSendProc(osa.0, &raw mut state.before, &raw mut state.before_refcon);
+            OSASetSendProc(osa.0, Some(on_send), (&raw mut *state).cast());
+        }
+        Self { osa, state }
+    }
+}
+
+impl Drop for Sending {
+    fn drop(&mut self) {
+        // SAFETY: puts back what `start` found.
+        unsafe { OSASetSendProc(self.osa.0, self.state.before, self.state.before_refcon) };
+    }
+}
+
+extern "C" fn on_send(
+    event: *const AeDesc,
+    reply: *mut AeDesc,
+    mode: i32,
+    priority: i16,
+    timeout: i32,
+    idle: *const c_void,
+    filter: *const c_void,
+    refcon: *mut c_void,
+) -> OsErr {
+    // SAFETY: `refcon` is the `SendState` `Sending::start` set, alive until `drop` unsets it.
+    let state = unsafe { &*refcon.cast::<SendState>() };
+    let send = || match state.before {
+        // SAFETY: the component's own proc, with the arguments it was given.
+        Some(before) => unsafe {
+            before(
+                event,
+                reply,
+                mode,
+                priority,
+                timeout,
+                idle,
+                filter,
+                state.before_refcon,
+            )
+        },
+        // SAFETY: `event` and `reply` are the live descriptors the component passed in.
+        None => unsafe { AESend(event, reply, mode, priority, timeout, idle, filter) },
+    };
+    let mut error = send();
+    if error != PROC_NOT_FOUND {
+        return error;
+    }
+    let Some(psn) = target(event) else {
+        return error;
+    };
+    if state.started.borrow().contains(&psn) || !start_quit_app(psn) {
+        return error;
+    }
+    state.started.borrow_mut().push(psn);
+    // The app keeps its address when it starts again; it takes events once it is up.
+    let started = Instant::now();
+    let mut pause = Duration::from_millis(100);
+    while error == PROC_NOT_FOUND && started.elapsed() < START_WAIT {
+        std::thread::sleep(pause);
+        pause = (pause * 2).min(Duration::from_secs(1));
+        error = send();
+    }
+    error
+}
+
+/// The app an event is addressed to, when it is addressed as `AppleScript` addresses an app it
+/// takes for running.
+fn target(event: *const AeDesc) -> Option<Psn> {
+    let mut address = Desc::null();
+    // SAFETY: `event` is live; the address is copied into `address`, which owns it.
+    if unsafe { AEGetAttributeDesc(event, KEY_ADDRESS, TYPE_WILDCARD, &raw mut address.0) } != 0 {
+        return None;
+    }
+    if address.0.descriptor_type != TYPE_PSN {
+        return None;
+    }
+    let data = address.data();
+    Some(Psn {
+        high: u32::from_ne_bytes(data.get(0..4)?.try_into().ok()?),
+        low: u32::from_ne_bytes(data.get(4..8)?.try_into().ok()?),
+    })
+}
+
+/// Starts the app at `psn` again when it isn't running although macOS still lists it: macOS quit
+/// it, or it quit. Whether it was started.
+fn start_quit_app(psn: Psn) -> bool {
+    // SAFETY: reads the process's details into a dictionary this program then owns.
+    let Some(details) =
+        Cf::new(unsafe { ProcessInformationCopyDictionary(&raw const psn, ALL_INFORMATION) })
+    else {
+        return false;
+    };
+    if details.number("pid").is_some_and(running) {
+        // Still starting, or busy: not this module's to start.
+        return false;
+    }
+    let Some(path) = details.text("BundlePath") else {
+        return false;
+    };
+    let Ok(size) = isize::try_from(path.len()) else {
+        return false;
+    };
+    // SAFETY: the path's bytes are copied into the new URL.
+    let Some(app) = Cf::new(unsafe {
+        CFURLCreateFromFileSystemRepresentation(ptr::null(), path.as_ptr(), size, 1)
+    }) else {
+        return false;
+    };
+    let spec = LaunchSpec {
+        app: app.0,
+        items: ptr::null(),
+        pass_through: ptr::null(),
+        flags: LAUNCH_BEHIND,
+        async_refcon: ptr::null_mut(),
+    };
+    // SAFETY: `spec` and the URL in it are live for the call.
+    unsafe { LSOpenFromURLSpec(&raw const spec, ptr::null_mut()) == 0 }
+}
+
+/// Whether a process with this ID is there. It may belong to someone else (`EPERM`).
+fn running(pid: i64) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 only asks whether the process is there.
+    let there = unsafe { kill(pid, 0) } == 0;
+    // EPERM: there, but someone else's.
+    there || std::io::Error::last_os_error().raw_os_error() == Some(1)
+}
+
+/// A Core Foundation object this program owns, released when dropped.
+struct Cf(CfType);
+
+impl Cf {
+    fn new(object: CfType) -> Option<Self> {
+        (!object.is_null()).then_some(Self(object))
+    }
+
+    fn string(text: &str) -> Option<Self> {
+        let size = isize::try_from(text.len()).ok()?;
+        // SAFETY: the bytes are copied into the new string.
+        Self::new(unsafe { CFStringCreateWithBytes(ptr::null(), text.as_ptr(), size, CF_UTF8, 0) })
+    }
+
+    /// The value under `key` in this dictionary, still owned by it.
+    fn get(&self, key: &str) -> Option<CfType> {
+        let key = Self::string(key)?;
+        // SAFETY: both are live; the value is borrowed from the dictionary.
+        let value = unsafe { CFDictionaryGetValue(self.0, key.0) };
+        (!value.is_null()).then_some(value)
+    }
+
+    fn text(&self, key: &str) -> Option<String> {
+        let value = self.get(key)?;
+        // SAFETY: `value` is live while the dictionary is.
+        if unsafe { CFGetTypeID(value) != CFStringGetTypeID() } {
+            return None;
+        }
+        let mut buffer = vec![0u8; 4096];
+        let size = isize::try_from(buffer.len()).ok()?;
+        // SAFETY: `buffer` has room for `size` bytes, the end marker included.
+        if unsafe { CFStringGetCString(value, buffer.as_mut_ptr(), size, CF_UTF8) } == 0 {
+            return None;
+        }
+        let end = buffer.iter().position(|&byte| byte == 0)?;
+        buffer.truncate(end);
+        String::from_utf8(buffer).ok()
+    }
+
+    fn number(&self, key: &str) -> Option<i64> {
+        let value = self.get(key)?;
+        // SAFETY: `value` is live while the dictionary is.
+        if unsafe { CFGetTypeID(value) != CFNumberGetTypeID() } {
+            return None;
+        }
+        let mut number = 0i64;
+        // SAFETY: `number` has room for the 64-bit integer asked for.
+        let exact = unsafe { CFNumberGetValue(value, CF_SINT64, (&raw mut number).cast()) };
+        (exact != 0).then_some(number)
+    }
+}
+
+impl Drop for Cf {
+    fn drop(&mut self) {
+        // SAFETY: the object is owned here and released once.
+        unsafe { CFRelease(self.0) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,16 +961,35 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_from_macos_names_the_setting_that_lifts_it() {
+    fn a_refusal_from_macos_names_the_settings_that_lift_it() {
         for number in [-1743, -1744, -10004] {
             let hint = refusal_hint(Some(number)).unwrap();
             assert!(
                 hint.contains("Privacy & Security → Automation → LoomWatch"),
                 "{hint}"
             );
+            assert!(
+                hint.contains(
+                    "Calendar, Reminders, Contacts and Photos also have their own list under \
+                     Privacy & Security"
+                ),
+                "{hint}"
+            );
+            assert!(hint.contains("Quit & Reopen"), "{hint}");
         }
         assert_eq!(refusal_hint(Some(42)), None);
         assert_eq!(refusal_hint(None), None);
+    }
+
+    /// Laid out as the C headers lay them out (checked with `offsetof`): one byte off and Launch
+    /// Services reads the flags, or the pointer after them, from the wrong place.
+    #[test]
+    fn launch_services_and_process_structs_match_their_c_layout() {
+        assert_eq!(std::mem::size_of::<LaunchSpec>(), 36);
+        assert_eq!(std::mem::offset_of!(LaunchSpec, flags), 24);
+        assert_eq!(std::mem::offset_of!(LaunchSpec, async_refcon), 28);
+        assert_eq!(std::mem::size_of::<Psn>(), 8);
+        assert_eq!(std::mem::size_of::<AeDesc>(), 12);
     }
 
     #[test]

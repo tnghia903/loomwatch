@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LoomWatch.app's Info.plist. scripts/package-macos-app.sh puts the version in for @VERSION@. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>LoomWatch</string>
+  <key>CFBundleDisplayName</key><string>LoomWatch</string>
+  <key>CFBundleIdentifier</key><string>io.github.loomwatch</string>
+  <key>CFBundleExecutable</key><string>LoomWatch</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+  <key>CFBundleVersion</key><string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+  <!-- A menu-bar app: no Dock icon. -->
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <!-- Under macOS's question the first time an agent works in an app (Automation). -->
+  <key>NSAppleEventsUsageDescription</key><string>Allow only if the work you gave your agents needs that app.</string>
+  <!-- Calendar, Reminders, Contacts and Photos also ask macOS whether LoomWatch may have their data
+       before they answer an agent's script, and an agent's command-line tool may ask directly.
+       Without these lines macOS refuses at once and never asks the person (ADR 0087). The *Full
+       Access* keys are what macOS 14 and later read, the others what macOS 11 to 13 read. -->
+  <key>NSCalendarsFullAccessUsageDescription</key><string>Allow only if the work you gave your agents needs your calendar.</string>
+  <key>NSCalendarsUsageDescription</key><string>Allow only if the work you gave your agents needs your calendar.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>Allow only if the work you gave your agents needs your reminders.</string>
+  <key>NSRemindersUsageDescription</key><string>Allow only if the work you gave your agents needs your reminders.</string>
+  <key>NSContactsUsageDescription</key><string>Allow only if the work you gave your agents needs your contacts.</string>
+  <key>NSPhotoLibraryUsageDescription</key><string>Allow only if the work you gave your agents needs your photos.</string>
+</dict>
+</plist>

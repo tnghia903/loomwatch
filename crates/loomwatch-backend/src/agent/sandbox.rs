@@ -503,6 +503,53 @@ mod tests {
         assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
+    /// Calendar, Reminders, Contacts and Photos ask macOS whether `LoomWatch` may have their data
+    /// before they answer an agent's script. macOS asks the person only when the app's
+    /// `Info.plist` says why; without the line it refuses at once (`-1743`), and `LoomWatch` never
+    /// shows up under that app in Privacy & Security.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn on_a_mac_the_app_says_why_for_each_app_whose_data_macos_guards() {
+        let info = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/macos/Info.plist");
+        let guarded: [(&str, &[&str]); 4] = [
+            (
+                "com.apple.iCal",
+                &[
+                    "NSCalendarsFullAccessUsageDescription",
+                    "NSCalendarsUsageDescription",
+                ],
+            ),
+            (
+                "com.apple.reminders",
+                &[
+                    "NSRemindersFullAccessUsageDescription",
+                    "NSRemindersUsageDescription",
+                ],
+            ),
+            ("com.apple.AddressBook", &["NSContactsUsageDescription"]),
+            ("com.apple.Photos", &["NSPhotoLibraryUsageDescription"]),
+        ];
+        for (app, keys) in guarded {
+            assert!(
+                ENTITLEMENTS.contains(&format!("<string>{app}</string>")),
+                "{app}"
+            );
+            for key in keys {
+                let read = std::process::Command::new("/usr/bin/plutil")
+                    .args(["-extract", key, "raw", "-o", "-"])
+                    .arg(&info)
+                    .output()
+                    .unwrap();
+                let why = String::from_utf8_lossy(&read.stdout);
+                assert!(
+                    read.status.success() && !why.trim().is_empty(),
+                    "{key} ({app}): {}",
+                    String::from_utf8_lossy(&read.stderr)
+                );
+            }
+        }
+    }
+
     /// Inside the sandbox, a command's `osascript` is the signed copy.
     #[cfg(target_os = "macos")]
     #[tokio::test]

@@ -75,7 +75,10 @@ yourself.
   first. A command can still work in another app on your Mac, such as Calendar or Mail, through
   LoomWatch's own `osascript`. The first time it does, macOS asks whether LoomWatch may control
   that app; you can change your answer later in System Settings → Privacy & Security → Automation
-  → LoomWatch. An app you allow can do what the sandbox stops the command doing itself: Mail can
+  → LoomWatch. For Calendar, Reminders, Contacts and Photos, macOS also asks whether LoomWatch may
+  read and change what's in them; you can change that answer in System Settings → Privacy &
+  Security → Calendars (or Reminders, Contacts, Photos). An app you allow can do what the sandbox
+  stops the command doing itself: Mail can
   send email as you, Finder can move or delete files anywhere, and Terminal or System Events can
   run commands outside the sandbox. Allow only the apps your agents' work needs.
 - **Stop commands whole.** A command stops at its time limit (two minutes unless the agent asks
