@@ -28,7 +28,7 @@ use crate::agent::{
     AgentError, Anthropic, ChatGptPlan, Demo, HostTools, NoHostTools, OFFLINE_MODEL, OpenRouter,
     Problem, ProblemKind, Provider, Session, SessionConfig, ToolSet,
 };
-use crate::ai::{ModelRef, Source};
+use crate::ai::{ClaudeModel, ModelRef, Source};
 use crate::archive::EventArchive;
 use crate::team_bus::TeamBusConnection;
 use crate::{EventKind, SessionOutcome};
@@ -1085,13 +1085,18 @@ impl AgentRun {
         if let Some(ai) = crate::ai::installed() {
             config.skill_library.push(ai.skills_folder());
             let model = ModelRef::parse(model);
+            let claude = (model.source == Source::Anthropic)
+                .then(|| {
+                    ai.claude_status()
+                        .models
+                        .into_iter()
+                        .find(|listed| listed.id == model.id)
+                })
+                .flatten();
             config.context_window = match model.source {
                 // What the key's check said, else the catalog's figure for the same model.
-                Source::Anthropic => ai
-                    .claude_status()
-                    .models
-                    .iter()
-                    .find(|listed| listed.id == model.id)
+                Source::Anthropic => claude
+                    .as_ref()
                     .map(|listed| listed.context_length)
                     .filter(|length| *length > 0),
                 Source::ChatGpt => ai
@@ -1109,6 +1114,7 @@ impl AgentRun {
                     .context_length(&model.openrouter_equivalent())
                     .await;
             }
+            longer_replies(&mut config, claude.as_ref());
             // A picture the agent opens is shown to the model only when its model list says the
             // model takes pictures.
             config.sees_pictures = ai.sees_pictures(&model).await;
@@ -1206,11 +1212,51 @@ async fn write(recorder: &mut Recorder, record: Record) -> Result<()> {
     }
 }
 
+/// Lets an agent on a Claude key write replies as long as the key's model list says its model
+/// writes. Only that list says so: any other agent keeps the default. Set the context window first.
+fn longer_replies(config: &mut SessionConfig, claude: Option<&ClaudeModel>) {
+    if let Some(most) = claude
+        .map(|listed| listed.max_output)
+        .filter(|most| *most > 0)
+    {
+        config.reply_up_to(most);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::*;
+
+    /// An agent on Claude Opus 5.5 may write a 64,000-token reply, where every model had 16,000: a
+    /// lesson written as one page no longer comes out cut off and written again.
+    #[test]
+    fn an_agent_on_claude_writes_replies_as_long_as_its_model_list_says() {
+        let opus = |max_output| ClaudeModel {
+            id: "claude-opus-5-5".into(),
+            name: "Claude Opus 5.5".into(),
+            context_length: 1_000_000,
+            max_output,
+            adaptive_thinking: true,
+            sees_pictures: true,
+            efforts: Vec::new(),
+        };
+        let longest = |claude: Option<ClaudeModel>| {
+            let mut config = SessionConfig::new(
+                "s",
+                "tutor",
+                PathBuf::from("."),
+                "anthropic:claude-opus-5-5",
+            );
+            config.context_window = Some(1_000_000);
+            longer_replies(&mut config, claude.as_ref());
+            config.max_tokens
+        };
+        assert_eq!(longest(Some(opus(128_000))), 64_000);
+        assert_eq!(longest(Some(opus(0))), 16_000, "a list that doesn't say");
+        assert_eq!(longest(None), 16_000, "not on a Claude key");
+    }
 
     /// The skills a large library lists follow the agent's role and task, not the material it was
     /// handed: a long handover or Brief would match skills the work isn't about.

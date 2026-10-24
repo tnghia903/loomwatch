@@ -37,6 +37,7 @@ use super::openrouter;
 use super::provider::{
     Cancel, ChatRequest, Completion, DeltaSink, Finish, Message, Native, ToolCall, Usage, Written,
 };
+use super::session::tokens;
 use super::sse::SseDecoder;
 use crate::ai::anthropic::API_VERSION;
 use crate::ai::{ClaudeModel, ModelRef, Source};
@@ -232,15 +233,14 @@ impl Anthropic {
         loop {
             let call = self.call(request, &model, &so_far, deltas, cancel).await?;
             usage.add(&call.usage);
+            let context = call.context_tokens();
             so_far.extend(call.blocks);
             unparsed.extend(call.unparsed);
             if call.stop != "pause_turn" || continued == MAX_CONTINUATIONS {
                 let mut completion = self.finish(&model, so_far, &unparsed, &call.stop, usage);
-                // Each request read the conversation again, so the totals count it once a request.
-                if continued > 0 {
-                    completion.context_tokens =
-                        Some(call.usage.prompt_tokens() + call.usage.output_tokens);
-                }
+                // Each request read the conversation again, so the totals count it once a request:
+                // how full it is comes from the last one.
+                completion.context_tokens = Some(context);
                 return Ok(completion);
             }
             continued += 1;
@@ -840,6 +840,50 @@ struct Streamed {
     unparsed: HashMap<String, String>,
     stop: String,
     usage: Usage,
+    /// The prompt `message_start` counted: the conversation as it was sent.
+    sent: u64,
+}
+
+impl Streamed {
+    /// About how many tokens the conversation holds once this request is in it: what was sent,
+    /// what the model wrote, and the results of the searches, pages and code Anthropic ran.
+    ///
+    /// Anthropic runs its own tools in a loop within the one request, and the model reads the
+    /// whole conversation again on every turn of that loop, which `usage` adds up. After the
+    /// tutor's web research of 2026-10-24 it counted 444,559 tokens where the conversation held
+    /// about 70,000, and the conversation was summarised for nothing, twice. So the results are
+    /// counted by their size, as any other step's are, and never as more than `usage` says.
+    fn context_tokens(&self) -> u64 {
+        let counted = self.usage.prompt_tokens();
+        let results: usize = self
+            .blocks
+            .iter()
+            .filter(|block| block.get("tool_use_id").is_some())
+            .map(read_size)
+            .sum();
+        let prompt = if results == 0 || self.sent == 0 {
+            counted
+        } else {
+            (self.sent + tokens(results)).min(counted)
+        };
+        prompt + self.usage.output_tokens
+    }
+}
+
+/// How many bytes of text a result block brings into the conversation. A PDF a page read gave back
+/// comes as base64, whose size says little about the text the model reads of it, and counts
+/// nothing: the next request's count has it.
+fn read_size(value: &Value) -> usize {
+    match value {
+        Value::Object(fields) if fields.get("type").and_then(Value::as_str) == Some("base64") => 0,
+        Value::Object(fields) => fields
+            .iter()
+            .map(|(key, value)| key.len() + read_size(value))
+            .sum(),
+        Value::Array(items) => items.iter().map(read_size).sum(),
+        Value::String(text) => text.len(),
+        other => other.to_string().len(),
+    }
 }
 
 /// How a stream Anthropic accepted ended.
@@ -862,6 +906,7 @@ struct Assembled {
     unparsed: HashMap<String, String>,
     stop: Option<String>,
     usage: Usage,
+    sent: u64,
     begun: bool,
     done: bool,
 }
@@ -941,6 +986,7 @@ impl Assembled {
             unparsed: self.unparsed,
             stop: self.stop.unwrap_or_else(|| "end_turn".to_owned()),
             usage: self.usage,
+            sent: self.sent,
         }
     }
 }
@@ -966,6 +1012,7 @@ async fn take_event(
         Some("message_start") => {
             if let Some(usage) = event.pointer("/message/usage") {
                 read_usage(usage, route, &mut message.usage);
+                message.sent = message.usage.prompt_tokens();
             }
         }
         Some("content_block_start") => {

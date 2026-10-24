@@ -55,6 +55,12 @@ const COMPACT_AT: f64 = 0.8;
 /// several times as much per call as one summarised at 160k, and models follow a very long
 /// conversation less well.
 const COMPACT_WINDOW_CAP: u64 = 200_000;
+/// The longest reply asked for, however long the model may write: about 64,000 tokens is the most
+/// a page, a lesson or a report written in one reply needs, and as long as a reply takes a model
+/// many minutes.
+const MAX_REPLY: u64 = 64_000;
+/// The longest reply asked for when what the model may write isn't known, and the longest summary.
+const DEFAULT_REPLY: u32 = 16_000;
 /// How many replies in a row the length limit may cut off with the turn still going on: a cut reply
 /// is carried on, and a cut tool call is sent back to be made smaller. One more ends the turn.
 const MAX_CUT_OFFS: usize = 2;
@@ -204,7 +210,8 @@ pub struct SessionConfig {
     /// What this agent learned from the person's feedback on its work (ADR 0078), in the
     /// instructions.
     pub lessons: Vec<String>,
-    /// The longest reply one model call may write.
+    /// The longest reply one model call may write. A summary is never asked for more than
+    /// [`DEFAULT_REPLY`].
     pub max_tokens: u32,
     /// The model's context size, from the model catalog.
     pub context_window: Option<u64>,
@@ -249,7 +256,7 @@ impl SessionConfig {
             instructions: None,
             person: None,
             lessons: Vec::new(),
-            max_tokens: 16_000,
+            max_tokens: DEFAULT_REPLY,
             context_window: None,
             max_tool_calls: 200,
             sees_pictures: false,
@@ -261,6 +268,22 @@ impl SessionConfig {
             purpose: WORK.to_owned(),
             now: None,
         }
+    }
+}
+
+impl SessionConfig {
+    /// Lets a reply be as long as the model may write, `most` tokens by its own list, up to
+    /// [`MAX_REPLY`] and the room the context has above the point where the conversation is
+    /// summarised, so the longest reply still fits beside the longest conversation sent. Set the
+    /// context window first.
+    ///
+    /// At 16,000 a lesson written as one page was cut off part way and written again whole: two
+    /// minutes and 16,000 tokens spent for nothing.
+    pub fn reply_up_to(&mut self, most: u64) {
+        let window = self.context_window.unwrap_or(DEFAULT_CONTEXT);
+        let room = window.saturating_sub(summarise_at(window));
+        let longest = room.min(MAX_REPLY).max(u64::from(DEFAULT_REPLY)).min(most);
+        self.max_tokens = u32::try_from(longest).unwrap_or(DEFAULT_REPLY);
     }
 }
 
@@ -889,7 +912,10 @@ impl Session {
             } else {
                 ServerTools::default()
             },
-            max_tokens: self.config.max_tokens,
+            max_tokens: match call {
+                Call::Summary | Call::BareSummary => self.config.max_tokens.min(DEFAULT_REPLY),
+                Call::Work | Call::CarryOn => self.config.max_tokens,
+            },
             tools_off: bare && offered,
             session_key: &self.config.session_id,
             agent_id: &self.config.agent_id,
@@ -1431,14 +1457,8 @@ impl Session {
     }
 
     fn needs_compacting(&self) -> bool {
-        let window = self
-            .config
-            .context_window
-            .unwrap_or(DEFAULT_CONTEXT)
-            .min(COMPACT_WINDOW_CAP);
-        #[allow(clippy::cast_precision_loss)]
-        let used = self.estimate() as f64 / window as f64;
-        used >= COMPACT_AT && self.history.len() > 3
+        let window = self.config.context_window.unwrap_or(DEFAULT_CONTEXT);
+        self.estimate() >= summarise_at(window) && self.history.len() > 3
     }
 
     /// About how many tokens the next request will take: what the provider counted for the last
@@ -1468,12 +1488,13 @@ impl Session {
             .map_or(0, |index| index + 1)
     }
 
-    /// How many tokens a request may take and leave the model room for its longest reply.
+    /// How many tokens a request for a summary may take and leave the model room for the longest
+    /// summary.
     fn request_room(&self) -> u64 {
         self.config
             .context_window
             .unwrap_or(DEFAULT_CONTEXT)
-            .saturating_sub(u64::from(self.config.max_tokens))
+            .saturating_sub(u64::from(self.config.max_tokens.min(DEFAULT_REPLY)))
     }
 
     /// Cuts tool results down, each to its start with its whole text set aside for
@@ -1672,8 +1693,20 @@ impl Session {
     }
 }
 
+/// How many tokens the conversation may take in a context of `window` before it is summarised.
+fn summarise_at(window: u64) -> u64 {
+    let counted = window.min(COMPACT_WINDOW_CAP);
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    let line = (counted as f64 * COMPACT_AT).ceil() as u64;
+    line
+}
+
 /// About how many tokens `bytes` of text make.
-fn tokens(bytes: usize) -> u64 {
+pub(super) fn tokens(bytes: usize) -> u64 {
     u64::try_from(bytes).unwrap_or(u64::MAX) / BYTES_PER_TOKEN
 }
 
