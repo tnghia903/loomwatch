@@ -2,10 +2,11 @@
 //! doing. While agents work its stitch sews round and the menu names who is working; when something
 //! needs you its mouth opens and the menu bar counts what waits.
 //!
-//! The teams live at the notch instead (ADR 0083): an island on every screen, around a `MacBook`'s
-//! notch or at the middle of the menu bar, that pops out when something happens and tucks into the
-//! menu bar beside the camera (`crate::island`, `crate::notch_panel`). With Show at the notch
-//! unticked in the menu there is no island, and the face is back in the menu bar.
+//! The teams live at the notch instead (ADR 0083): an island around a screen's notch, that pops
+//! out when something happens and tucks into the menu bar beside the camera, and on every screen a
+//! box to message an agent, at ⌃⌥Space or Message in the menu (`crate::island`,
+//! `crate::notch_panel`). Wherever a screen has no notch, and with Show at the notch unticked in
+//! the menu, the face is in the menu bar.
 //!
 //! It also updates itself: Update and restart in the app has `loomwatchd` stop for it, and it puts
 //! the new release's `LoomWatch.app` in its own place and opens that (`crate::update`).
@@ -24,6 +25,7 @@ use objc2::MainThreadMarker;
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
+use tray_icon::menu::accelerator::{Accelerator, Code, Modifiers};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
@@ -182,9 +184,8 @@ pub fn run() -> Result<()> {
                 if let Some(menu) = menu.take() {
                     bar.build(menu);
                 }
-                if island::shown(&paths.state) {
-                    island = Island::start(&island_proxy, &mut bar, None);
-                }
+                island = Island::start(&island_proxy, &paths.state);
+                bar.set_visible(island.as_ref().is_none_or(Island::face_shows));
             }
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
                 bar.tick();
@@ -212,7 +213,18 @@ pub fn run() -> Result<()> {
             }
             Event::UserEvent(UserEvent::Island(event)) => {
                 if let Some(island) = island.as_mut() {
+                    let named = matches!(
+                        event,
+                        IslandEvent::Page {
+                            message: FromPage::Agent { .. },
+                            ..
+                        }
+                    );
                     island.on(event, address.as_deref(), &island_menu);
+                    bar.set_visible(island.face_shows());
+                    if named {
+                        items.show_agent(island);
+                    }
                 }
             }
             Event::UserEvent(UserEvent::Status(text)) => items.status.set_text(text),
@@ -229,6 +241,10 @@ pub fn run() -> Result<()> {
                     if let Some(url) = &address {
                         open_in_browser(&format!("{url}{link}"));
                     }
+                } else if event.id == *items.message.id() {
+                    if let Some(island) = island.as_mut() {
+                        island.compose();
+                    }
                 } else if event.id == *items.open.id() {
                     match &address {
                         Some(url) => open_in_browser(url),
@@ -237,9 +253,12 @@ pub fn run() -> Result<()> {
                 } else if event.id == *items.at_login.id() {
                     items.switch_start_at_login(&paths);
                 } else if event.id == *items.notch.id() {
-                    let origin = address.as_deref();
-                    Island::switch(&mut island, &island_proxy, &mut bar, origin, &paths.state);
-                    items.notch.set_checked(island.is_some());
+                    if let Some(island) = island.as_mut() {
+                        island.switch();
+                        items.notch.set_checked(island.panel.shown());
+                        items.show_agent(island);
+                        bar.set_visible(island.face_shows());
+                    }
                 } else if event.id == *items.log.id() {
                     let _ = Command::new("/usr/bin/open").arg(&paths.log).status();
                 } else if event.id == *items.quit.id() {
@@ -252,7 +271,7 @@ pub fn run() -> Result<()> {
             _ => {}
         }
         // Sleep until something happens, the face next moves or the island next checks.
-        *control_flow = [bar.wakes_at(), island.as_ref().map(Island::wakes_at)]
+        *control_flow = [bar.wakes_at(), island.as_ref().and_then(Island::wakes_at)]
             .into_iter()
             .flatten()
             .min()
@@ -260,65 +279,59 @@ pub fn run() -> Result<()> {
     })
 }
 
-/// The island at the notch (ADR 0083), and when it next checks whether the person is away and an
-/// app is full screen.
+/// The island at the notch and the box on every screen (ADR 0083), and when they next check
+/// whether the person is away and an app is full screen.
 struct Island {
     panel: NotchPanels,
+    /// The state folder, where Show at the notch is kept.
+    state: PathBuf,
     next_check: Instant,
-    /// An agent is pinned to the notch, so ⌃⌥Space has a box to open.
-    pinned: bool,
+    /// The agent the box opens with, by name: with none there is nothing for ⌃⌥Space to open.
+    agent: Option<String>,
     /// The left button is held in another app: a drag of something may be under way.
     pressing: bool,
 }
 
 impl Island {
-    /// Made once the app runs, on its main thread, or when Show at the notch is ticked, with
-    /// `origin` the `loomwatchd` already answering. The island is on every screen, so the menu bar
-    /// face stays out of the menu bar while it runs (ADR 0083).
-    fn start(
-        proxy: &EventLoopProxy<UserEvent>,
-        bar: &mut Bar,
-        origin: Option<&str>,
-    ) -> Option<Self> {
+    /// Made once the app runs, on its main thread: a panel on every screen while Show at the notch
+    /// is ticked (kept in `state`), and the screens watched either way.
+    fn start(proxy: &EventLoopProxy<UserEvent>, state: &Path) -> Option<Self> {
         let mtm = MainThreadMarker::new()?;
         let proxy = proxy.clone();
-        let mut panel = NotchPanels::new(mtm, move |event| {
+        let mut panel = NotchPanels::new(mtm, island::shown(state), move |event| {
             let _ = proxy.send_event(UserEvent::Island(event));
         });
         panel.place();
-        if let Some(origin) = origin {
-            panel.load(origin);
-        }
-        bar.set_visible(false);
         Some(Self {
             panel,
+            state: state.to_owned(),
             next_check: Instant::now(),
-            pinned: false,
+            agent: None,
             pressing: false,
         })
     }
 
-    /// Show at the notch, ticked or unticked: the islands come, or they go and the face comes back
-    /// to the menu bar; either way it stays so the next time.
-    fn switch(
-        island: &mut Option<Self>,
-        proxy: &EventLoopProxy<UserEvent>,
-        bar: &mut Bar,
-        origin: Option<&str>,
-        state: &Path,
-    ) {
-        let shown = island.is_none();
-        if let Err(error) = island::set_shown(state, shown) {
+    /// ⌃⌥Space, or Message in the menu: the box opens on the screen the pointer is on, with its
+    /// agent; with no agent there is nothing to open.
+    fn compose(&mut self) {
+        if self.agent.is_some() {
+            self.panel.compose();
+        }
+    }
+
+    /// Show at the notch, ticked or unticked: the panels come, or they go; either way it stays so
+    /// the next time.
+    fn switch(&mut self) {
+        let shown = !self.panel.shown();
+        if let Err(error) = island::set_shown(&self.state, shown) {
             eprintln!("LoomWatch: show at the notch: {error}");
         }
-        *island = if shown {
-            Self::start(proxy, bar, origin)
-        } else {
-            None
-        };
-        if island.is_none() {
-            bar.set_visible(true);
-        }
+        self.panel.set_shown(shown);
+    }
+
+    /// The menu bar face is wanted: wherever a screen has no notch, or with no island at all.
+    fn face_shows(&self) -> bool {
+        self.panel.face_shows()
     }
 
     fn tick(&mut self) {
@@ -331,11 +344,12 @@ impl Island {
         }
     }
 
-    fn wakes_at(&self) -> Instant {
+    /// With no island there is nothing to check, until a drag begun before it went ends.
+    fn wakes_at(&self) -> Option<Instant> {
         if self.pressing {
-            self.next_check.min(Instant::now() + DRAG_CHECK)
+            Some(self.next_check.min(Instant::now() + DRAG_CHECK))
         } else {
-            self.next_check
+            self.panel.any_island().then_some(self.next_check)
         }
     }
 
@@ -356,16 +370,11 @@ impl Island {
                 FromPage::Menu { .. } => panel.show_menu(from, menu),
                 FromPage::Keyboard { on: true } => panel.take_keyboard(from),
                 FromPage::Keyboard { on: false } => panel.give_back_keyboard(from),
-                FromPage::Pinned { name } => self.pinned = name.is_some(),
+                FromPage::Agent { name } => self.agent = name,
                 FromPage::Copy { text, html } => NotchPanels::copy(&text, html.as_deref()),
                 FromPage::Seen { runs } => panel.seen(from, &runs),
             },
-            // ⌃⌥Space opens the box to the pinned agent; with none pinned there is nothing to open.
-            IslandEvent::Shortcut => {
-                if self.pinned {
-                    panel.compose();
-                }
-            }
+            IslandEvent::Shortcut => self.compose(),
             IslandEvent::PressStarted => {
                 self.pressing = true;
                 panel.press_started();
@@ -403,6 +412,8 @@ fn forward_events(proxy: &EventLoopProxy<UserEvent>) {
 
 /// The menu's own items, which are always there.
 struct Items {
+    /// Message <agent>…: the box, as ⌃⌥Space opens it.
+    message: MenuItem,
     open: MenuItem,
     status: MenuItem,
     at_login: CheckMenuItem,
@@ -415,6 +426,14 @@ struct Items {
 impl Items {
     fn new(paths: &Paths) -> Result<(Self, Menu)> {
         let items = Self {
+            message: MenuItem::new(
+                MESSAGE_NO_AGENT,
+                false,
+                Some(Accelerator::new(
+                    Modifiers::CONTROL | Modifiers::ALT,
+                    Code::Space,
+                )),
+            ),
             open: MenuItem::new("Open LoomWatch", true, None),
             status: MenuItem::new("Starting…", false, None),
             at_login: CheckMenuItem::new(
@@ -429,6 +448,7 @@ impl Items {
         };
         let menu = Menu::new();
         menu.append_items(&[
+            &items.message,
             &items.open,
             &items.status,
             &PredefinedMenuItem::separator(),
@@ -452,13 +472,32 @@ impl Items {
         }
         self.at_login.set_checked(login_item::enabled());
     }
+
+    /// Message <agent>…, as the box would open now: greyed with no agent to message, and with
+    /// Show at the notch unticked, when there is no box.
+    fn show_agent(&self, island: &Island) {
+        self.message.set_text(message_row(island.agent.as_deref()));
+        self.message
+            .set_enabled(island.agent.is_some() && island.panel.shown());
+    }
+}
+
+/// The menu's first row before the box has an agent, or with none in My agents.
+const MESSAGE_NO_AGENT: &str = "Message an agent…";
+
+/// The menu's first row: whom ⌃⌥Space opens the box to.
+fn message_row(agent: Option<&str>) -> String {
+    agent.map_or_else(
+        || MESSAGE_NO_AGENT.to_owned(),
+        |name| format!("Message {name}…"),
+    )
 }
 
 /// The menu-bar item, and what it shows of the teams' work: the face, the count of what waits on
 /// you beside it, a tooltip, and the menu's rows under the status line.
 struct Bar {
     tray: Option<TrayIcon>,
-    /// Whether the face is wanted: not while the island is at the notch.
+    /// Whether the face is wanted: wherever a screen has no notch, and with no island.
     visible: bool,
     faces: Faces,
     face: Face,
@@ -474,8 +513,8 @@ impl Bar {
             faces: Faces::draw(),
             face: Face::default(),
             shown: Progress::default(),
-            // Under "Open LoomWatch" and the status line.
-            work: WorkSection::new(menu.clone(), 2),
+            // Under Message, "Open LoomWatch" and the status line.
+            work: WorkSection::new(menu.clone(), 3),
         }
     }
 
@@ -487,11 +526,17 @@ impl Bar {
             .build()
             .map_err(|error| eprintln!("LoomWatch: no menu-bar item: {error}"))
             .ok();
-        self.set_visible(self.visible);
+        if let Some(tray) = &self.tray {
+            let _ = tray.set_visible(self.visible);
+        }
     }
 
     /// Show the face in the menu bar, or take it out while the island at the notch does its work.
+    /// Asked after anything the island hears, so it changes only when it is told otherwise.
     fn set_visible(&mut self, visible: bool) {
+        if visible == self.visible {
+            return;
+        }
         self.visible = visible;
         if let Some(tray) = &self.tray {
             let _ = tray.set_visible(visible);
@@ -1481,6 +1526,12 @@ mod tests {
     use super::*;
 
     const WIDTH: usize = MENU_BAR_WIDTH as usize;
+
+    #[test]
+    fn the_menus_first_row_names_the_agent_the_box_opens_with() {
+        assert_eq!(message_row(Some("Maya")), "Message Maya…");
+        assert_eq!(message_row(None), "Message an agent…");
+    }
 
     fn alpha(pixels: &[u8], x: usize, y: usize) -> u8 {
         pixels[(y * WIDTH + x) * 4 + 3]

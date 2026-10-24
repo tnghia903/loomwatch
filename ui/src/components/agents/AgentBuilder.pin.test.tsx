@@ -56,7 +56,7 @@ describe('Pinning an agent to the notch', () => {
     await act(async () => { fireEvent.click(within(menu).getByRole('button', { name: 'Pin to the notch' })) })
     expect(pins).toEqual([{ agent: 'maya', fromLoomWatch: true }])
     // It says where to find it now.
-    expect(await screen.findByText('Pinned. Press Control-Option-Space in any app, or point at the top middle of your screen, to message Maya.')).toBeInTheDocument()
+    expect(await screen.findByText('Pinned. Press Control-Option-Space in any app to message Maya.')).toBeInTheDocument()
     // The menu closed; the name says it is pinned.
     expect(screen.queryByRole('dialog', { name: 'Agent menu' })).not.toBeInTheDocument()
     const chip = await screen.findByRole('button', { name: /^Maya, pinned to the notch, .*open agent menu$/ })
@@ -74,11 +74,11 @@ describe('Pinning an agent to the notch', () => {
     page()
     fireEvent.click(await screen.findByRole('button', { name: /^Maya, .*open agent menu$/ }, { timeout: 5000 }))
     const pin = within(screen.getByRole('dialog', { name: 'Agent menu' })).getByRole('button', { name: 'Pin to the notch' })
-    expect(pin).toHaveAttribute('title', 'Message it from the top middle of your screen, after you turn on Show at the notch')
+    expect(pin).toHaveAttribute('title', 'Message it with Control-Option-Space (⌃⌥Space) from any app, after you turn on Show at the notch')
     await act(async () => { fireEvent.click(pin) })
     expect(pins).toEqual([{ agent: 'maya', fromLoomWatch: true }])
     expect(await screen.findByText('Pinned. Click LoomWatch’s face in the menu bar and turn on Show at the notch. Then press Control-Option-Space in any app to message Maya.')).toBeInTheDocument()
-    expect(screen.queryByText(/point at the top middle of your screen/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Pinned\. Press Control-Option-Space/)).not.toBeInTheDocument()
   }, 15_000)
 
   it('a LoomWatch that doesn’t say whether the notch is on is taken to have it', async () => {
@@ -88,7 +88,7 @@ describe('Pinning an agent to the notch', () => {
     page()
     fireEvent.click(await screen.findByRole('button', { name: /^Maya, .*open agent menu$/ }, { timeout: 5000 }))
     await act(async () => { fireEvent.click(within(screen.getByRole('dialog', { name: 'Agent menu' })).getByRole('button', { name: 'Pin to the notch' })) })
-    expect(await screen.findByText('Pinned. Press Control-Option-Space in any app, or point at the top middle of your screen, to message Maya.')).toBeInTheDocument()
+    expect(await screen.findByText('Pinned. Press Control-Option-Space in any app to message Maya.')).toBeInTheDocument()
   }, 15_000)
 
   it('says what pinning did right after a save, and which agent it took the place of', async () => {
@@ -101,7 +101,7 @@ describe('Pinning an agent to the notch', () => {
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^Maya, .*open agent menu$/ }))
     await act(async () => { fireEvent.click(within(screen.getByRole('dialog', { name: 'Agent menu' })).getByRole('button', { name: 'Pin to the notch' })) })
-    expect(await screen.findByText('Pinned in place of Writer. Press Control-Option-Space in any app, or point at the top middle of your screen, to message Maya.')).toBeInTheDocument()
+    expect(await screen.findByText('Pinned in place of Writer. Press Control-Option-Space in any app to message Maya.')).toBeInTheDocument()
   }, 15_000)
 
   it('pins one at a time: the list marks the one pinned now', async () => {

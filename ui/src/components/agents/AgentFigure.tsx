@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 
 import type { FigurePart } from '../../lib/library/figure'
-import { useTheme } from '../../lib/theme'
+import { useTheme, type ResolvedTheme } from '../../lib/theme'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { placeFace, WorkbenchScene, type BenchAnchor, type BenchAnchors, type BenchFace, type BenchFaces, type BenchView } from './workbenchScene'
 
@@ -28,6 +28,12 @@ export interface AgentFigureProps {
   skillMime: string
   /** The bench could not be drawn here: the page falls back to plain controls. */
   onFail: (message: string) => void
+  /** To look at only, as the island's box shows it (ADR 0083, decision 11): its labels are words,
+      not buttons, and nothing on it can be picked up or dropped onto it. */
+  readOnly?: boolean
+  /** The furniture's tone, for a page with a theme of its own (the island is always dark). Left
+      out, it follows the app's theme. */
+  tone?: ResolvedTheme
 }
 
 const SCENE_URL = '/agent/workbench.glb'
@@ -39,7 +45,18 @@ const SCENE_URL = '/agent/workbench.glb'
  * over their faces: painted into the picture they blurred, because the bench is drawn small.
  * Its own download, because it brings three.js with it: fetched as an agent's page opens (benchFigure.ts).
  */
-export default function AgentFigure({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFail }: AgentFigureProps) {
+export default function AgentFigure(props: AgentFigureProps) {
+  return props.tone ? <Bench {...props} tone={props.tone} /> : <ThemedBench {...props} />
+}
+
+/** The bench in the app's theme. Only here is the theme read, because reading it also applies it
+    to the page: the island, dark whatever the app's theme, passes its own `tone` instead. */
+function ThemedBench(props: AgentFigureProps) {
+  const { resolved } = useTheme()
+  return <Bench {...props} tone={resolved} />
+}
+
+function Bench({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFail, readOnly = false, tone }: AgentFigureProps & { tone: ResolvedTheme }) {
   const stage = useRef<HTMLDivElement>(null)
   const surface = useRef<HTMLCanvasElement>(null)
   const scene = useRef<WorkbenchScene | null>(null)
@@ -118,8 +135,7 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
 
   useEffect(() => { scene.current?.set(view) }, [view])
   // The bench's furniture follows the app's theme; the landing page's bench stays dark.
-  const { resolved } = useTheme()
-  useEffect(() => { scene.current?.setTone(resolved) }, [resolved])
+  useEffect(() => { scene.current?.setTone(tone) }, [tone])
 
   const face = (which: BenchFace) => (element: HTMLDivElement | null) => { if (element) faces.current.set(which, element); else faces.current.delete(which) }
   const name = view.look.name.trim() || 'New agent'
@@ -144,8 +160,8 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
   }
 
   return (
-    <div ref={stage} className={`bench-stage${ready ? ' ready' : ''}`} onDragOver={dragOver} onDrop={drop}>
-      <canvas
+    <div ref={stage} className={`bench-stage${ready ? ' ready' : ''}${readOnly ? ' read-only' : ''}`} onDragOver={readOnly ? undefined : dragOver} onDrop={readOnly ? undefined : drop}>
+      {readOnly ? <canvas ref={surface} className="bench-canvas" aria-hidden="true" /> : <canvas
         ref={surface}
         className="bench-canvas"
         style={{ cursor }}
@@ -158,7 +174,7 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
         onPointerUp={(event) => { const [x, y] = at(event); scene.current?.pointerUp(x, y); setCursor('default'); scene.current?.pointerMove(x, y) }}
         onPointerCancel={() => { scene.current?.pointerLeave(); setCursor('default') }}
         onPointerLeave={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) scene.current?.pointerLeave() }}
-      />
+      />}
       {!ready && <p className="bench-loading t-meta">Setting up the bench…</p>}
       <div className="bench-faces" aria-hidden="true">
         <div ref={face('name')} className="bench-face bench-face-name" style={{ '--chars': name.length } as CSSProperties}><p><b>{name}</b>{does && <span>{does}</span>}</p></div>
@@ -170,21 +186,27 @@ export default function AgentFigure({ view, labels, open, onPart, onKey, onSkill
         <i className="bench-thought-dot near" />
         <i className="bench-thought-dot far" />
       </div>
-      {labels.map((tag) => (
-        <button
-          key={tag.anchor}
-          ref={(element) => { if (element) tags.current.set(tag.anchor, element); else tags.current.delete(tag.anchor) }}
-          type="button"
-          className={`bench-tag ${tag.place}${open === tag.part ? ' open' : ''}`}
-          hidden={!ready}
-          aria-label={tag.label}
-          aria-expanded={open === tag.part}
-          title={tag.place === 'plate' ? tag.label : undefined}
-          onClick={() => onPart(tag.part)}
-        >
-          {tag.place !== 'plate' && <span><span className="bench-long">{tag.text}</span><span className="bench-short">{tag.short ?? tag.text}</span></span>}
-        </button>
-      ))}
+      {labels.map((tag) => {
+        const keep = (element: HTMLElement | null) => { if (element) tags.current.set(tag.anchor, element); else tags.current.delete(tag.anchor) }
+        const words = <span><span className="bench-long">{tag.text}</span><span className="bench-short">{tag.short ?? tag.text}</span></span>
+        // To look at only: a label is its words, and a plate, which says it in the picture, has none.
+        if (readOnly) return tag.place === 'plate' ? null : <span key={tag.anchor} ref={keep} className={`bench-tag ${tag.place}`} hidden={!ready} role="note" aria-label={tag.label}>{words}</span>
+        return (
+          <button
+            key={tag.anchor}
+            ref={keep}
+            type="button"
+            className={`bench-tag ${tag.place}${open === tag.part ? ' open' : ''}`}
+            hidden={!ready}
+            aria-label={tag.label}
+            aria-expanded={open === tag.part}
+            title={tag.place === 'plate' ? tag.label : undefined}
+            onClick={() => onPart(tag.part)}
+          >
+            {tag.place !== 'plate' && words}
+          </button>
+        )
+      })}
     </div>
   )
 }

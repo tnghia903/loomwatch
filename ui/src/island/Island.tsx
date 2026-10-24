@@ -1,8 +1,11 @@
 // The island at the notch, drawn (ADR 0083): Peek. The agent at work peeks out below the notch; a
 // question drops down on a gold line; a result slides out as a slip; then it all tucks into the
 // menu bar beside the camera, one figure per busy team. Pointing at the notch opens the list.
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+// Without a notch only the box is drawn, while it is called, hanging from the menu bar, then its
+// agent at work in a pill, and its answer (decision 11).
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 
+import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
 import { LoomMark } from '../components/ui/glyphs'
 import type { WorkPhase } from '../lib/library/figure'
@@ -19,6 +22,13 @@ import { useRunLimit } from './useRunLimit'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
+/** Other agents shown beside the box before "+N"; Tab reaches every one. */
+const OTHER_AGENTS = 5
+
+/** The agent's workbench, with three.js: fetched as the box opens, not with the page, so the page
+    loads at once and the bench is ready by the time a message goes. */
+const loadBench = () => import('./BenchCard')
+const BenchCard = lazy(loadBench)
 
 /** What a question's button says when it opens LoomWatch at its run rather than answering here. */
 const OPEN_WORDS: Record<Ticket['kind'], string> = { question: 'Answer', review: 'Review', permission: 'Open', spend: 'Open', failed: 'Open' }
@@ -28,6 +38,13 @@ export function Island() {
   const { view, notch, bar, tucked } = island
   const root = useRef<HTMLDivElement>(null)
   useReportAreas(root, view)
+  // The bench comes as the box opens, so it is drawn by the time a message goes.
+  const composing = island.composing
+  useEffect(() => {
+    if (!composing) return
+    loadBench().catch(() => {})
+    AgentFigure.preload().catch(() => {})
+  }, [composing])
 
   // First beside the notch: the agent pinned to it, in its work's glow or ready, then one head per
   // other team. LoomWatch's own mark stands there only while there is no figure at all, never beside
@@ -59,36 +76,44 @@ export function Island() {
         className="island-shape"
         role="button"
         tabIndex={view === 'hidden' ? -1 : 0}
-        aria-label={label(island)}
+        aria-label={shapeLabel(island)}
         aria-expanded={view === 'list'}
         onPointerEnter={onIsland(true)}
         onPointerLeave={onIsland(false)}
         onClick={(event) => {
+          // The agent's workbench on its own opens the box, with it, to stay.
+          if (view === 'bench') {
+            island.openBench()
+            return
+          }
           // A press inside the open list (Copy, Start, Send, by mouse or keyboard) is not pointing
           // at the island: the list stays only while the pointer is on it or a message is written.
           if (event.target instanceof Element && event.target.closest('.island-list')) return
-          island.pointerOnIsland(true)
+          // Without a notch there is no list: the agent in its pill opens the box, with its bench.
+          if (!island.atNotch) island.openBench()
+          else island.pointerOnIsland(true)
         }}
         onKeyDown={(event) => {
-          // Keys typed inside the list (the message to the pinned agent) are its own.
+          // Keys typed inside the list (the message to the box's agent) are its own.
           if (event.target !== event.currentTarget) return
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
-            island.pointerOnIsland(view !== 'list')
+            if (!island.atNotch || view === 'bench') island.openBench()
+            else island.pointerOnIsland(view !== 'list')
           }
         }}
         onContextMenu={(event) => {
           event.preventDefault()
           tellApp({ kind: 'menu', x: event.clientX, y: event.clientY })
         }}
-        // Anything dropped onto the island goes to the pinned agent: the slot opens as it comes.
+        // Anything dropped onto the island goes to the box's agent: the slot opens as it comes.
         onDragEnter={(event) => {
-          if (!island.pinned) return
+          if (!island.box) return
           event.preventDefault()
           island.dragOver(true)
         }}
         onDragOver={(event) => {
-          if (!island.pinned) return
+          if (!island.box) return
           event.preventDefault()
           event.dataTransfer.dropEffect = 'copy'
         }}
@@ -97,7 +122,7 @@ export function Island() {
           island.dragOver(false)
         }}
         onDrop={(event) => {
-          if (!island.pinned) return
+          if (!island.box) return
           event.preventDefault()
           island.dragOver(false)
           const intake = intakeFrom(event.dataTransfer)
@@ -106,7 +131,8 @@ export function Island() {
       >
         <div className="island-body">
         {view === 'slot' && <Slot island={island} />}
-        <Balcony island={island} />
+        {island.atNotch && <Balcony island={island} />}
+        {island.atNotch && <>
         <div className="island-ear island-ear-left" aria-hidden="true">
           <span className="island-heads" style={{ width: heads.span }}>
             {island.pinned && (
@@ -132,9 +158,58 @@ export function Island() {
           {tucked.right === 'slip' && <i className="island-slip-mark" />}
           {tucked.right === 'time' && <span className="island-time">{workedFor((tucked.heads[0] ?? tucked.pinned)?.startedAt ?? null, island.now)}</span>}
         </div>
-        {view === 'list' && <List island={island} />}
+        </>}
+        {(view === 'list' || view === 'box' || view === 'bench') && <List island={island} mode={view} />}
+        {!island.atNotch && <Pill island={island} />}
         </div>
       </div>
+      {island.folding && <Fold island={island} />}
+    </div>
+  )
+}
+
+/**
+ * The words just sent, folding into the head of their agent at its workbench, which takes the box's
+ * place: from where they were written to where its head is on the bench.
+ */
+function Fold({ island }: { island: IslandState }) {
+  const folding = island.folding!
+  if (!folding.from) return null
+  const listTop = island.atNotch ? island.bar + 4 : island.bar + 10
+  const style = {
+    '--fx': `${folding.from.x}px`,
+    '--fy': `${folding.from.y}px`,
+    '--tx': `${window.innerWidth / 2}px`,
+    '--ty': `${listTop + BENCH_HEAD}px`,
+  } as CSSProperties
+  return <span key={folding.at} className="island-fold" style={style} aria-hidden="true">{folding.text}</span>
+}
+
+/** How far below the top of the list its agent's head is on the bench: its row, then about a third
+    of the way down the bench. */
+const BENCH_HEAD = 160
+
+/**
+ * Without a notch: after a message from the box, its agent tucked away in a pill hanging from the
+ * menu bar, sitting at a little desk, the sign that its workbench is there, with how long it has
+ * worked; pointed at, the workbench opens. Then what it asks or answers slides out below.
+ */
+function Pill({ island }: { island: IslandState }) {
+  const work = island.teams.find((team) => team.pinned) ?? null
+  const phase = useActing(island.view === 'pill' ? work : null, work?.agent ?? null, island.now)
+  const box = island.box
+  if (!box) return null
+  const moment = island.view === 'pill' ? 'work' : work?.moment ?? 'ready'
+  // How long, once there is a minute to say: until then the pill is only as wide as its figure.
+  const time = island.view === 'pill' && work?.moment === 'work' ? workedFor(work.startedAt, island.now) : ''
+  return (
+    <div className="island-pill" aria-hidden="true">
+      <span className="island-pill-desk">
+        <span className="island-pill-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
+          <FigureStill figure={figureFor(box.id, box.job.figure)} alt="" />
+        </span>
+      </span>
+      {time && <span className="island-time">{time}</span>}
     </div>
   )
 }
@@ -287,12 +362,19 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
   )
 }
 
-/** Pointing at the notch: the agent pinned to it, then one row per team, questions first. */
-function List({ island }: { island: IslandState }) {
-  const pinnedWork = island.pinned ? island.teams.find((team) => team.pinned) ?? null : null
+/**
+ * Pointing at the notch: the box's agent, then one row per team, questions first. As the box
+ * without a notch (`box`), and while the agent's workbench is open, only the agent: its workbench
+ * takes the rows' place. Its agent at its workbench on its own (`bench`), for a moment after a
+ * message goes and, without a notch, while its pill is pointed at, is the same list: the bench
+ * stays as it was while the box gives way to it, and the words fold into a head already there.
+ */
+function List({ island, mode }: { island: IslandState; mode: 'list' | 'box' | 'bench' }) {
+  const watching = mode === 'bench'
+  const pinnedWork = island.box && island.pinned?.id === island.box.id ? island.teams.find((team) => team.pinned) ?? null : null
   // A team the pinned agent started works on its stage, in its row; a question from it stays a row.
   const crews = island.teams.filter((team) => team.crewFor && team.moment === 'work')
-  const teams = island.teams.filter((team) => !team.pinned && !(team.crewFor && team.moment === 'work'))
+  const teams = mode !== 'list' || island.bench ? [] : island.teams.filter((team) => !team.pinned && !(team.crewFor && team.moment === 'work'))
   const rows = teams.slice(0, LIST_ROWS)
   const more = teams.length - rows.length
   const firstPermission = [...(pinnedWork ? [pinnedWork] : []), ...rows].flatMap((team) => team.asks.filter((ask) => team.quick.includes(ask.id)))[0]?.id
@@ -304,8 +386,9 @@ function List({ island }: { island: IslandState }) {
   })
   return (
     <div ref={list} className="island-list">
-      {island.pinned && <PinnedRow island={island} work={pinnedWork} crews={crews} firstPermission={firstPermission} />}
-      {rows.length === 0 && !island.pinned && <p className="island-quiet">Nothing is running</p>}
+      {island.box && <PinnedRow island={island} work={pinnedWork} crews={crews} firstPermission={firstPermission} watching={watching} />}
+      {island.box && (island.bench || watching) && <Suspense fallback={null}><BenchCard island={island} /></Suspense>}
+      {rows.length === 0 && !island.box && <p className="island-quiet">Nothing is running</p>}
       {rows.map((team) => (
         <div key={team.runId} className="island-row" data-moment={team.moment}>
           <RowFigures island={island} team={team} />
@@ -321,7 +404,7 @@ function List({ island }: { island: IslandState }) {
           )}
         </div>
       ))}
-      <div className="island-list-foot">
+      {mode === 'list' && <div className="island-list-foot">
         {more > 0 && <span>{more === 1 ? '1 more team' : `${more} more teams`} in LoomWatch</span>}
         <button type="button" className="island-button" onClick={island.openApp}>Open LoomWatch</button>
         {inApp() && (
@@ -337,7 +420,7 @@ function List({ island }: { island: IslandState }) {
             ⋯
           </button>
         )}
-      </div>
+      </div>}
     </div>
   )
 }
@@ -358,11 +441,15 @@ function RowFigures({ island, team }: { island: IslandState; team: TeamNow }) {
 }
 
 /**
- * The agent pinned to the notch: what it is doing, if anything, and a box to message it. A message
- * starts its work, or joins it as a note while it works; its answer slides out as any team's does.
+ * The box's agent: what it is doing, if anything, and a box to message it. A message starts its
+ * work, or joins it as a note while it works; its answer slides out as any team's does. Its figure
+ * opens its workbench; the other agents beside it, or Tab, switch the box to one of them. Watching
+ * it at its workbench (`watching`), its row only says what it is doing: a click on the island
+ * opens the box again.
  */
-function PinnedRow({ island, work, crews, firstPermission }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined }) {
-  const pinned = island.pinned!
+function PinnedRow({ island, work, crews, firstPermission, watching }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined; watching: boolean }) {
+  const pinned = island.box!
+  const others = island.agents.filter((agent) => agent.id !== pinned.id)
   const field = useRef<HTMLInputElement>(null)
   // Writing began without the box, from ⌃⌥Space or a drop, and the app gave the panel the
   // keyboard: the box takes it. Only then; pointing at the notch never does.
@@ -381,13 +468,49 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
   // box shows the short form, and the whole of it is its name and tooltip.
   const to = island.intake ? 'Or say what to do' : asking ? `Or message ${pinned.name}` : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
   const toWhole = island.pinnedWorking && !island.intake ? `${to} · after its current step` : to
+  const figure = (
+    <span className="island-row-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
+      <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
+    </span>
+  )
+  if (watching) {
+    const doing = work?.moment === 'work' ? working(work, island.now) : work?.moment === 'done' ? `${pinned.name} answered` : work?.moment === 'fail' ? `${pinned.name} stopped` : `${pinned.name} just started`
+    return (
+      <div className="island-row island-pinned" data-moment={moment}>
+        <span className="island-row-figures" aria-hidden="true">{figure}</span>
+        <div className="island-box-head"><p className="island-box-doing">{doing}</p></div>
+      </div>
+    )
+  }
   return (
     <div className={`island-row island-pinned${asking ? ' is-asking' : ''}`} data-moment={moment}>
-      <span className="island-row-figures" aria-hidden="true">
-        <span className="island-row-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
-          <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
-        </span>
-      </span>
+      {/* Pressing a figure keeps the keyboard in the box: WebKit would otherwise take it away from
+          the box without giving it to the button, and the box would close. */}
+      <button
+        type="button"
+        className="island-row-figures island-bench-toggle"
+        aria-label={island.bench ? `Hide ${pinned.name}’s workbench` : `See ${pinned.name}’s workbench`}
+        aria-expanded={island.bench}
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={() => island.setBench(!island.bench)}
+      >
+        {figure}
+      </button>
+      {/* Who the message goes to, by name: the field's own words go once something is written. */}
+      <div className="island-box-head">
+        <b className="island-box-name">{pinned.name}</b>
+        {others.length > 0 && (
+          <div className="island-agents" role="group" aria-label="Switch agent">
+            {others.slice(0, OTHER_AGENTS).map((agent) => (
+              <button key={agent.id} type="button" className="island-agent" aria-label={`Message ${agent.name.trim() || agent.id} instead`} onPointerDown={(event) => event.preventDefault()} onClick={() => island.choose(agent.id)}>
+                <FigureStill figure={figureFor(agent.id, agent.figure)} alt="" />
+              </button>
+            ))}
+            {others.length > OTHER_AGENTS && <span className="island-more">+{others.length - OTHER_AGENTS}</span>}
+            {!island.draft && <kbd className="island-key" aria-hidden="true">tab</kbd>}
+          </div>
+        )}
+      </div>
       {teamAsk ? (
         <TeamAskBody island={island} request={teamAsk} first={!firstPermission} start={Boolean(island.intake)} decline />
       ) : work?.moment === 'ask' && work.asks[0] ? (
@@ -427,7 +550,15 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
             island.compose(false)
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Escape') event.currentTarget.blur()
+            // Escape folds an open workbench first (`useIsland`), then puts the box away.
+            if (event.key === 'Escape' && !island.bench) event.currentTarget.blur()
+            // Before anything is written, Tab switches the box to the next agent, Shift-Tab back.
+            // Once something is, Tab moves on, as anywhere: a habit Tab to reach Send must not send
+            // the message to someone else. Option-Tab moves on too, as in any Mac app.
+            if (event.key === 'Tab' && !event.altKey && others.length > 0 && !island.draft) {
+              event.preventDefault()
+              island.choose(nextAgent(island.agents, pinned.id, event.shiftKey ? -1 : 1))
+            }
           }}
         />
         {asking && !island.draft.trim() && !island.intake ? (
@@ -445,6 +576,12 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
       )}
     </div>
   )
+}
+
+/** The agent after `id` in My agents, or before it with `step` -1, round from the end. */
+function nextAgent(agents: readonly { id: string }[], id: string, step: 1 | -1): string {
+  const at = agents.findIndex((agent) => agent.id === id)
+  return agents[(at + step + agents.length) % agents.length].id
 }
 
 /** "Writer is working · 4 min", or "Writer just started"; "Writer is answering" in the chat. */
@@ -465,6 +602,14 @@ function headsLayout(first: 'pinned' | 'mark' | 'none', others: number, bar: num
   if (first === 'mark') return { mark, first: 0, step, span: mark }
   const start = first === 'pinned' ? step : 0
   return { mark, first: start, step, span: others ? start + (others - 1) * step + head : first === 'pinned' ? head : 0 }
+}
+
+/** What a screen reader hears of the island as a whole: without a notch, what a press on it does,
+    and nothing once it is the box, whose own controls say what they do. */
+function shapeLabel(island: IslandState): string {
+  if (island.atNotch) return label(island)
+  if (!island.box || island.view === 'box') return 'LoomWatch'
+  return island.view === 'pill' ? `See ${island.box.name}’s workbench` : `Message ${island.box.name}`
 }
 
 /** What a screen reader hears of the island. */

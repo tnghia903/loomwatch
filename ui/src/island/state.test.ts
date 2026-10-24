@@ -13,6 +13,9 @@ function play(steps: [number, IslandAction][], start = initialIsland(at(0), true
 }
 
 const placed: IslandAction = { type: 'app', message: { kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 } }
+const noNotch: IslandAction = { type: 'app', message: { kind: 'place', notch: null, menuBar: 24 } }
+/** The page's box writes to the pinned agent, else the first of My agents (`useIsland`). */
+const boxed: IslandAction = { type: 'box', box: pinnedNow('maya', [maya]) }
 const runs = (...records: RunRecord[]): IslandAction => ({ type: 'runs', records })
 
 describe('the island, moment by moment', () => {
@@ -110,19 +113,13 @@ describe('the island, moment by moment', () => {
     expect(viewOf(s)).toBe('tucked')
   })
 
-  it('without a notch, it rests at the middle of the menu bar as at a notch; over a full-screen app, only what drops out shows', () => {
-    const noNotch: IslandAction = { type: 'app', message: { kind: 'place', notch: null, menuBar: 24 } }
-    expect(viewOf(play([[at(0), noNotch], [at(0), runs()]]))).toBe('rest')
+  it('without a notch, nothing is drawn at rest, nor for the teams: the menu bar face has their news', () => {
+    expect(viewOf(play([[at(0), noNotch], [at(0), runs()]]))).toBe('hidden')
+    // Not even before the app says this island has no news to show.
     let s = play([[at(0), noNotch], [at(0), runs()], [at(1), runs(run('a', { working: ['researcher'] }))]])
-    expect(viewOf(s)).toBe('work')
-    s = islandReducer(s, { type: 'tick', now: at(1) + ISLAND_WAITS.start })
-    expect(viewOf(s)).toBe('tucked')
-    s = islandReducer(s, { type: 'app', message: { kind: 'fullScreen', on: true }, now: at(2) })
-    expect(viewOf(s)).toBe('hidden')
+    expect([viewOf(s), s.pop.out]).toEqual(['hidden', null])
     s = islandReducer(s, { type: 'runs', records: [run('a', { permissionRequests: [permission('p1')] })], now: at(2) })
-    expect(viewOf(s)).toBe('ask')
-    s = islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.ask })
-    expect(viewOf(s)).toBe('hidden')
+    expect([viewOf(s), s.pop.out]).toEqual(['hidden', null])
   })
 
   it('keeps the answers in the chat it last knew when they could not be read, beside the runs', () => {
@@ -153,17 +150,27 @@ describe('the island, moment by moment', () => {
   })
 })
 
-describe('an island on every screen, the live one where the pointer is', () => {
+describe('the teams’ news at the notch, the box where the pointer is', () => {
   const live = (on: boolean): IslandAction => ({ type: 'app', message: { kind: 'live', on } })
+  const news = (on: boolean): IslandAction => ({ type: 'app', message: { kind: 'news', on } })
 
-  it('drops a question out only while live; elsewhere it waits beside the notch, and is out again once the pointer comes', () => {
-    let s = play([[at(0), placed], [at(0), runs()], [at(1), runs(run('a', { permissionRequests: [permission('p1')] }))]])
-    expect(viewOf(s)).toBe('ask')
-    s = islandReducer(s, { ...live(false), now: at(1) + 1000 })
-    expect(viewOf(s)).toBe('tucked')
-    expect(tucked(s.teams!).asks).toBe(1)
-    s = islandReducer(s, { ...live(true), now: at(1) + 2000 })
-    expect(viewOf(s)).toBe('ask')
+  it('drops the teams’ news out at the notch wherever the pointer is; an island without the news only counts it', () => {
+    const question = runs(run('a', { permissionRequests: [permission('p1')] }))
+    // The pointer is on a monitor beside the MacBook: the question still drops at the notch.
+    const atNotch = play([[at(0), placed], [at(0), runs()], [at(0), live(false)], [at(1), question]])
+    expect(viewOf(atNotch)).toBe('ask')
+    // A second screen with a notch, which the news is not on: it waits beside that notch.
+    const other = play([[at(0), placed], [at(0), runs()], [at(0), news(false)], [at(1), question]])
+    expect(viewOf(other)).toBe('tucked')
+    expect(tucked(other.teams!).asks).toBe(1)
+  })
+
+  it('drops what the box’s agent does where the pointer is, not at a notch it has left', () => {
+    const pinned: IslandAction = { type: 'pinned', pinned: pinnedNow('maya', [maya]) }
+    const working = runs(pinnedChat('c1', { working: ['maya'] }))
+    expect(viewOf(play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), working]]))).toBe('work')
+    const left = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(0), live(false)], [at(1), working]])
+    expect([viewOf(left), left.pop.out]).toEqual(['tucked', null])
   })
 
   it('a list open when the pointer goes to another screen closes at once, and what it showed has been seen', () => {
@@ -182,7 +189,8 @@ describe('an island on every screen, the live one where the pointer is', () => {
   })
 
   it('opens no slot for a drag while another screen’s island is live', () => {
-    let s = play([[at(0), placed], [at(0), runs()], [at(0), { type: 'pinned', pinned: pinnedNow(maya.id, [maya]) }]])
+    let s = play([[at(0), placed], [at(0), runs()], [at(0), { type: 'box', box: pinnedNow(maya.id, [maya]) }]])
+    expect(viewOf(islandReducer(s, { type: 'app', message: { kind: 'drag', near: true }, now: at(1) }))).toBe('slot')
     s = islandReducer(s, { ...live(false), now: at(1) })
     s = islandReducer(s, { type: 'app', message: { kind: 'drag', near: true }, now: at(1) })
     expect(viewOf(s)).toBe('rest')
@@ -204,11 +212,11 @@ describe('an island on every screen, the live one where the pointer is', () => {
   })
 })
 
-describe('writing to the agent pinned to the notch', () => {
+describe('writing to the box’s agent', () => {
   const pinned: IslandAction = { type: 'pinned', pinned: pinnedNow('maya', [maya]) }
 
   it('keeps the list open wherever the pointer goes, until a click lands elsewhere', () => {
-    let s = play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(1), { type: 'compose', on: true }]])
+    let s = play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(0), boxed], [at(1), { type: 'compose', on: true }]])
     expect([viewOf(s), s.composing]).toEqual(['list', true])
     s = islandReducer(s, { type: 'pointerOnIsland', over: false, now: at(1) })
     expect(viewOf(islandReducer(s, { type: 'closeList', now: at(2) }))).toBe('list')
@@ -216,10 +224,72 @@ describe('writing to the agent pinned to the notch', () => {
     expect([viewOf(s), s.composing]).toEqual(['rest', false])
   })
 
-  it('opens the list to write when the app’s menu asks, but only to an agent that is pinned', () => {
-    expect(viewOf(play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(1), { type: 'app', message: { kind: 'compose' } }]]))).toBe('list')
+  it('opens the list to write when the app’s menu asks, but only with an agent to write to', () => {
+    expect(viewOf(play([[at(0), placed], [at(0), runs()], [at(0), boxed], [at(1), { type: 'app', message: { kind: 'compose' } }]]))).toBe('list')
     const none = play([[at(0), placed], [at(0), runs()], [at(1), { type: 'app', message: { kind: 'compose' } }], [at(1), { type: 'compose', on: true }]])
     expect([viewOf(none), none.composing]).toEqual(['rest', false])
+  })
+
+  it('shows its agent at its workbench for a moment after a message goes, then the island is as it was', () => {
+    let s = play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(0), boxed], [at(1), { type: 'compose', on: true }]])
+    s = islandReducer(s, { type: 'sent', now: at(2) })
+    expect([viewOf(s), s.listOpen, s.composing]).toEqual(['bench', false, false])
+    s = islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.bench })
+    expect(viewOf(s)).toBe('rest')
+    // A click elsewhere tucks it away at once.
+    s = islandReducer(s, { type: 'sent', now: at(3) })
+    s = islandReducer(s, { type: 'app', message: { kind: 'clickOutside' }, now: at(3) + 500 })
+    expect(viewOf(s)).toBe('rest')
+  })
+
+  it('without a notch: the box when called, its agent at its workbench, tucked into a pill while it works and open again while pointed at, then its answer', () => {
+    let s = play([[at(0), noNotch], [at(0), pinned], [at(0), boxed], [at(0), runs()]])
+    expect(viewOf(s)).toBe('hidden')
+    s = islandReducer(s, { type: 'app', message: { kind: 'compose' }, now: at(1) })
+    expect(viewOf(s)).toBe('box')
+    // Its field loses the keyboard as the message goes (sending disables it): the box stays.
+    s = islandReducer(s, { type: 'compose', on: false, now: at(1) + 500 })
+    expect(viewOf(s)).toBe('box')
+    s = islandReducer(s, { type: 'sent', now: at(2) })
+    expect(viewOf(s)).toBe('bench')
+    s = islandReducer(s, { type: 'runs', records: [pinnedChat('c1', { working: ['maya'] })], now: at(2) + 500 })
+    expect(viewOf(s)).toBe('bench')
+    s = islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.bench })
+    expect(viewOf(s)).toBe('pill')
+    // The pointer passing over the pill opens nothing; resting there, its workbench opens.
+    s = islandReducer(s, { type: 'pointerOnIsland', over: true, now: at(3) })
+    expect(viewOf(s)).toBe('pill')
+    s = islandReducer(s, { type: 'peek', now: at(3) + ISLAND_WAITS.peek })
+    expect(viewOf(s)).toBe('bench')
+    s = islandReducer(s, { type: 'pointerOnIsland', over: false, now: at(4) })
+    s = islandReducer(s, { type: 'closeList', now: at(4) + ISLAND_WAITS.closeList })
+    expect(viewOf(s)).toBe('pill')
+    // Its answer slides out, and is the end of the pill.
+    s = islandReducer(s, { type: 'runs', records: [pinnedChat('c1', { status: 'succeeded', finishedAt: iso(5), reply: 'Two meetings' })], now: at(5) })
+    expect([viewOf(s), s.following]).toEqual(['done', false])
+    s = islandReducer(s, { type: 'tick', now: at(5) + ISLAND_WAITS.result })
+    expect(viewOf(s)).toBe('hidden')
+  })
+
+  it('without a notch, an answer that comes while the pill is pointed at slides out, and stays out once the pointer leaves', () => {
+    let s = play([[at(0), noNotch], [at(0), pinned], [at(0), boxed], [at(0), runs(pinnedChat('c1', { working: ['maya'] }))], [at(1), { type: 'compose', on: true }], [at(2), { type: 'sent' }]])
+    s = islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.bench })
+    s = islandReducer(s, { type: 'pointerOnIsland', over: true, now: at(3) })
+    s = islandReducer(s, { type: 'peek', now: at(3) + ISLAND_WAITS.peek })
+    expect(viewOf(s)).toBe('bench')
+    s = islandReducer(s, { type: 'runs', records: [pinnedChat('c1', { status: 'succeeded', finishedAt: iso(3), reply: 'Two meetings' })], now: at(3) + 1000 })
+    expect(viewOf(s)).toBe('done')
+    s = islandReducer(s, { type: 'pointerOnIsland', over: false, now: at(3) + 2000 })
+    s = islandReducer(s, { type: 'closeList', now: at(3) + 2000 + ISLAND_WAITS.closeList })
+    expect([viewOf(s), s.seen.has('c1')]).toEqual(['done', false])
+  })
+
+  it('without a notch, a click elsewhere puts the pill away, and the screen the pointer leaves draws nothing', () => {
+    let s = play([[at(0), noNotch], [at(0), pinned], [at(0), boxed], [at(0), runs(pinnedChat('c1', { working: ['maya'] }))], [at(1), { type: 'compose', on: true }], [at(2), { type: 'sent' }]])
+    s = islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.bench })
+    expect(viewOf(s)).toBe('pill')
+    expect(viewOf(islandReducer(s, { type: 'app', message: { kind: 'clickOutside' }, now: at(3) }))).toBe('hidden')
+    expect(viewOf(islandReducer(s, { type: 'app', message: { kind: 'live', on: false }, now: at(3) }))).toBe('hidden')
   })
 
   it('names its work as the agent, opening its chat, and leaves every team as it was', () => {
@@ -248,10 +318,10 @@ describe('the pinned agent’s slot, crew and requests for your teams', () => {
     ...changes,
   })
 
-  it('opens as a slot while something is dragged near, over whatever was out, only with an agent pinned', () => {
+  it('opens as a slot while something is dragged near, over whatever was out, only with an agent to take it', () => {
     const near: IslandAction = { type: 'app', message: { kind: 'drag', near: true } }
     expect(viewOf(play([[at(0), placed], [at(0), runs()], [at(1), near]]))).toBe('rest')
-    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), runs(run('a', { permissionRequests: [permission('p1')] }))]])
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), boxed], [at(0), runs()], [at(1), runs(run('a', { permissionRequests: [permission('p1')] }))]])
     expect(viewOf(s)).toBe('ask')
     s = islandReducer(s, { ...near, now: at(1) + 500 })
     expect(viewOf(s)).toBe('slot')
@@ -260,7 +330,7 @@ describe('the pinned agent’s slot, crew and requests for your teams', () => {
   })
 
   it('stays open for a drop that comes after the button is up: the drag’s own events close it', () => {
-    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), { type: 'app', message: { kind: 'drag', near: true } }], [at(1), { type: 'dragOver', over: true }]])
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), boxed], [at(0), runs()], [at(1), { type: 'app', message: { kind: 'drag', near: true } }], [at(1), { type: 'dragOver', over: true }]])
     s = islandReducer(s, { type: 'app', message: { kind: 'drag', near: false }, now: at(1) + 100 })
     expect(viewOf(s)).toBe('slot')
     s = islandReducer(s, { type: 'drop', intake: { files: [pdf], link: null, text: null }, now: at(1) + 200 })
@@ -268,7 +338,7 @@ describe('the pinned agent’s slot, crew and requests for your teams', () => {
   })
 
   it('keeps what was dropped in the box, open to write, until it goes with a message', () => {
-    let s = play([[at(0), placed], [at(0), pinned], [at(0), runs()], [at(1), { type: 'dragOver', over: true }]])
+    let s = play([[at(0), placed], [at(0), pinned], [at(0), boxed], [at(0), runs()], [at(1), { type: 'dragOver', over: true }]])
     expect(viewOf(s)).toBe('slot')
     s = islandReducer(s, { type: 'drop', intake: { files: [pdf], link: null, text: null }, now: at(1) + 100 })
     expect([viewOf(s), s.composing, s.intake?.files[0]?.name, s.dragOver]).toEqual(['list', true, 'Lease 2027.pdf', false])
