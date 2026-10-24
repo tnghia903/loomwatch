@@ -1545,6 +1545,44 @@ describe('switching workspace tab closes the node inspector', () => {
     await waitFor(() => expect(nodePanel()).toBeInTheDocument())
     restore()
   })
+
+  // The lane lives in the run's Details. The panel opened in the canvas's layer, under Details, so
+  // "Agent details" seemed to do nothing, and the panel showed only once Details was closed.
+  it('opens the panel over the run’s Details, inside the window', async () => {
+    const restore = selectionBackedByState(null)
+    sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+    renderWorkspace('run-1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Agent details' }))
+    await waitFor(() => expect(nodePanel()).toBeInTheDocument())
+    const panel = nodePanel()!
+    const details = screen.getByRole('complementary', { name: 'Details of this piece of work' })
+    // The header's menus (☰, the needs-you tray) open in its layer, a Tailwind z-40 class.
+    const header = Number(/\bz-(\d+)\b/.exec(document.querySelector('.workspace-chrome')!.className)![1])
+    for (const viewport of [DESKTOP, PHONE]) {
+      const z = Number(cascaded(panel, 'z-index', viewport))
+      expect(z).toBeGreaterThan(Number(cascaded(details, 'z-index', viewport)))
+      expect(z).toBeLessThan(header)
+      expect(cascaded(panel, 'max-height', viewport)).not.toBeNull()
+      expect(cascaded(panel, ['overflow', 'overflow-y'], viewport)).toBe('auto')
+    }
+    // A phone's Details takes the whole screen: the panel is a sheet across its bottom.
+    expect(cascaded(panel, 'position', PHONE)).toBe('fixed')
+    expect(cascaded(panel, 'top', PHONE)).toBe('auto')
+    expect(cascaded(panel, 'width', PHONE)).toBe('auto')
+    restore()
+  })
+
+  it('closes the panel with the Details it was opened from', async () => {
+    const restore = selectionBackedByState(null)
+    sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+    renderWorkspace('run-1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Agent details' }))
+    await waitFor(() => expect(nodePanel()).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Close details' }))
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument())
+    expect(nodePanel()).not.toBeInTheDocument()
+    restore()
+  })
 })
 
 // A scheduled delivery fails with "Open Connections and choose a destination page", so the

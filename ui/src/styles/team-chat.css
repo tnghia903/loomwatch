@@ -567,6 +567,14 @@
 .tc-details-head .btn { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; }
 .tc-details-body { position: relative; min-height: 0; }
 .tc-details .delivery-lane, .delivery-shown .tc-details .delivery-lane { position: absolute; inset: 0; }
+/* A card's "Agent details" opens the agent panel over Details, in Provenance's place: under the
+   header and scrolling inside the window. In the canvas's layer it opened behind Details, so the
+   link seemed to do nothing. Above Details (30), below the header (z-40), whose menus open over
+   it. Phones get Provenance's full-width sheet at the bottom. */
+.lw-shell.delivery-shown .node-inspector { z-index: 35; top: var(--lw-below-header); right: var(--lw-panel-inset); max-height: calc(100dvh - var(--lw-below-header) - var(--lw-panel-inset)); overflow-x: hidden; overflow-y: auto; }
+@media (max-width: 767px) {
+  .lw-shell.delivery-shown .node-inspector { position: fixed; top: auto; left: var(--sp-3); right: var(--sp-3); bottom: var(--sp-3); width: auto; max-height: 60vh; }
+}
 .details-open .lw-composer-notices { left: auto !important; right: 0 !important; transform: none !important; width: 100% !important; bottom: 12px !important; }
 @media (min-width: 1100px) {
   .details-open .lw-composer-notices { width: calc(100% - var(--tc-chat-w)) !important; }
