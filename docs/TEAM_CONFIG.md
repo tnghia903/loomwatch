@@ -224,6 +224,8 @@ depend on the document as a whole:
     - Each line is matched to its item by its words, or else by its number.
     - Lines may put the verdict first or the item first, be numbered or not, use bold or a mark
       such as ✅, or be table rows.
+    - Bold, italics and code inside an item or its evidence are kept, and the app shows them. Bold
+      around a whole item or evidence, and a mark left without its partner, are dropped.
     - An item it leaves out is Not sure ("Not checked"). Met with no evidence is Not sure, and
       "partly met" is Not met.
     - A line naming none of the items is kept as a problem of its own.
