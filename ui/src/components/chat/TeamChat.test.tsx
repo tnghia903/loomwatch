@@ -1272,6 +1272,70 @@ describe('reactions', () => {
     expect(screen.getByRole('button', { name: 'Writer picked this up. Add yours' })).toBeEnabled()
   })
 
+  it('keeps the faces against the message’s edge, with the button and any error on the far side', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [], reactions: [{ target: 'answer', face: 'hmm', at: '2026-10-06T02:05:00.000Z' }] }]
+    answer = () => new Response('the archive is busy', { status: 503 })
+    renderChat()
+    const row = (about: string) => screen.getByRole('group', { name: `Reactions to ${about}` })
+    const order = (about: string) => [...row(about).children].map((child) => child.getAttribute('role') ?? child.querySelector('button')?.getAttribute('aria-label') ?? child.getAttribute('aria-label'))
+    // Your request sits on the right: the agents' face ends at its edge, the button left of it.
+    await screen.findByRole('button', { name: 'Researcher and Writer worked on this · 4 min' })
+    expect(row('your request').closest('.tc-reactable')).toHaveClass('mine')
+    expect(order('your request')).toEqual(['React to your request', 'Researcher and Writer worked on this · 4 min'])
+    // The agents' answer sits on the left: its faces start at its edge, the button right of them.
+    expect(row("Writer's answer").closest('.tc-reactable')).not.toHaveClass('mine')
+    expect(order("Writer's answer")).toEqual(['Not sure: you. The team looks at it again. Take yours off', "React to Writer's answer"])
+    // A reaction that isn't kept says so on the same far side.
+    fireEvent.click(screen.getByRole('button', { name: 'React to your request' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Good' }))
+    expect(await within(row('your request')).findByRole('alert')).toHaveTextContent('Not saved')
+    expect(order('your request')).toEqual(['alert', 'React to your request', 'Researcher and Writer worked on this · 4 min'])
+  })
+
+  it('keeps the button on its corner when a face on a message with none is not kept', async () => {
+    page = [{ kind: 'note', message: message({ id: 'n-1', route: 'team_note', runId: null, text: 'we only cover listed companies', createdAt: '2026-10-06T01:00:00.000Z' }) }]
+    answer = () => new Response('the archive is busy', { status: 503 })
+    renderChat()
+    fireEvent.click(await screen.findByRole('button', { name: 'React to your note' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Good' }))
+    const row = screen.getByRole('group', { name: 'Reactions to your note' })
+    expect(await within(row).findByRole('alert')).toHaveTextContent('Not saved')
+    // The row rests on the message's corner: the button stays there, and the error runs on from it.
+    expect(row).toHaveClass('empty')
+    expect([...row.children].map((child) => child.getAttribute('role') ?? child.querySelector('button')?.getAttribute('aria-label'))).toEqual(['React to your note', 'alert'])
+  })
+
+  it('slides the tray back into a chat too narrow for it either way', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+    // A phone-wide chat with no room either side of the button: 248px of tray, 375px of chat.
+    const at = { "React to Writer's answer": 150, 'React to your request': 194 } as Record<string, number>
+    const box = (left: number, right: number, top = 0) => ({ left, right, top, bottom: top + 24, width: right - left, height: 24, x: left, y: top, toJSON: () => ({}) })
+    const measure = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const button = at[this.getAttribute('aria-label') ?? '']
+      if (button !== undefined) return box(button, button + 26, 400)
+      return this.matches('[role="log"], .tc-scroll') ? box(0, 375) : box(0, 0)
+    })
+    try {
+      renderChat()
+      const shifted = (about: string) => {
+        fireEvent.click(screen.getByRole('button', { name: `React to ${about}` }))
+        const tray = screen.getByRole('toolbar', { name: 'Pick a reaction' })
+        const side = tray.classList.contains('end') ? 'right' : 'left'
+        expect(cascaded(tray, side)).toContain('var(--tray-shift')
+        const placed = [side, tray.style.getPropertyValue('--tray-shift')]
+        fireEvent.keyDown(tray, { key: 'Escape' })
+        return placed
+      }
+      await screen.findByRole('button', { name: 'React to your request' })
+      // Yours opens toward the middle, back from the button's right: it would start 22px off the chat's left.
+      expect(shifted('your request')).toEqual(['right', '22px'])
+      // The agents' opens from the button's left: it would end 17px past the chat's right.
+      expect(shifted("Writer's answer")).toEqual(['left', '17px'])
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
   it('reacts to your own answer in the agents’ talk, and says what a face means on your own words', async () => {
     said.messages = [{
       id: 'q-1', kind: 'question', from: 'writer', handedBy: null, to: 'operator', text: 'Which region?', context: null,
