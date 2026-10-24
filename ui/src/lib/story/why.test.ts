@@ -99,6 +99,12 @@ describe('whyItFailed, for the other reasons a call fails', () => {
     ['OSError: [Errno 28] No space left on device', 'This Mac is out of disk space.'],
     ['  File "build.py", line 4\n    print(f"{a\\n}")\nSyntaxError: f-string expression part cannot include a backslash', 'The program it wrote had a mistake in it.'],
     ['research is a folder; use list_files.', 'research is a folder, not a file.'],
+    // What the agent's AI model sent, as LoomWatch's own engine found it.
+    ['Not run: your message reached the length limit of one reply before this call to write_file was complete. Make it smaller: split the work into several calls (write a long file in parts, the first with write_file and the rest with edit_file), and keep your thinking short.', 'Its reply hit the length limit and was cut off.'],
+    ["The arguments for write_file weren't a JSON object. Call it again with valid arguments.", 'What it sent came through garbled.'],
+    ['`path` is required and must be text.', 'It didn’t say which file.'],
+    ['`command` is required.', 'It didn’t say what to run.'],
+    ['`id` is required.', 'It left out a detail it needed.'],
   ])('reads %s', (output, text) => {
     expect(whyItFailed(output, 'command')).toMatchObject({ text, known: true })
   })

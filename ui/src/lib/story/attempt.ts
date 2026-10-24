@@ -7,8 +7,8 @@
 
 import type { Evidence } from '../watch/events'
 import { commandOf, commandPlan, type CommandPlan } from './commands'
-import { mendOf, type Mend } from './reads'
-import { describeEvidence } from './weft'
+import { cameEmpty, mendOf, type Mend } from './reads'
+import { describeEvidence, shortName } from './weft'
 import { whyItFailed, type Why } from './why'
 
 /**
@@ -29,6 +29,11 @@ export interface Attempt {
   mend: Mend<Evidence> | null
   /** What the agent did after a call that got it nothing: "Carried on without them". */
   then: string | null
+  /**
+   * What it came to, as far as the record shows: "Nothing lost" when the agent got there another way, the
+   * change that wasn't made, or, once the agent has finished, that its answer was made without it.
+   */
+  effect: string | null
 }
 
 const failed = (item: Pick<Evidence, 'status'>) => item.status === 'failed' || item.status === 'rejected'
@@ -73,11 +78,40 @@ function webSearch(agent: string, item: Evidence, outcome: Outcome): string | nu
   return ['failed', 'unclear', 'fixed'].includes(outcome) ? `${agent} couldn’t search the web for “${query}”` : `${agent} searched the web for “${query}”`
 }
 
+/** A change a call didn't make, said of the file it was for. */
+const UNCHANGED: Record<string, (file: string) => string> = {
+  'edited file': (file) => `The change to ${file} wasn’t made`,
+  'deleted file': (file) => `${file} wasn’t deleted`,
+  'moved file': (file) => `${file} wasn’t moved`,
+}
+
+/** What a teammate missed when work sent to it didn't get through. */
+const MISSED: Record<string, string> = { 'handed off to': 'didn’t get the work', dispatched: 'didn’t get the work', reported: 'didn’t get the report', escalated: 'didn’t hear about it' }
+
+/**
+ * What a call that didn't work came to. A change it was to make is missing whatever happened next;
+ * what it was to get is missing from the agent's answer only once there is one. A call you
+ * answered in the agent's place is not told here: it had your answer.
+ */
+function effectOf(item: Evidence, outcome: Outcome, finished: boolean, without: string): string | null {
+  if (outcome === 'fixed') return 'Nothing lost'
+  if (!['failed', 'unclear', 'declined'].includes(outcome)) return null
+  if (item.kind === 'file' && item.relation !== 'read file') {
+    const file = cameEmpty(item) ? '' : shortName(item.name)
+    return file ? (UNCHANGED[item.relation] ?? UNCHANGED['edited file'])(file) : 'Nothing was changed'
+  }
+  // Work handed to a teammate is missing from the teammate's side, whether or not this one finished.
+  if (item.kind === 'delegation' && item.relation !== 'asked') return item.target ? `${item.target} ${MISSED[item.relation] ?? 'didn’t get it'}` : null
+  if (!finished) return null
+  return `Its answer was made without ${item.kind === 'delegation' ? `hearing from ${item.target ?? 'its teammate'}` : without}`
+}
+
 /**
  * `agent` is the agent's name; `calls` are the same agent's calls in record order, which tell a
- * failure it made up for, and whether it went on after one it didn't.
+ * failure it made up for, and whether it went on after one it didn't. `finished`: the agent's
+ * part is done, so what it went without is missing from its answer.
  */
-export function readAttempt(agent: string, item: Evidence, calls: readonly Evidence[]): Attempt {
+export function readAttempt(agent: string, item: Evidence, calls: readonly Evidence[], finished: boolean): Attempt {
   const output = failed(item) ? outputText(item) : ''
   const why = failed(item) && !item.declined ? whyItFailed(output, item.kind) : null
   const mend = failed(item) && item.kind !== 'permission' ? mendOf(item, calls) : null
@@ -96,5 +130,6 @@ export function readAttempt(agent: string, item: Evidence, calls: readonly Evide
     why: why && ['failed', 'unclear', 'fixed'].includes(outcome) ? why : null,
     mend,
     then: missed && after ? `Carried on without ${without}` : null,
+    effect: effectOf(item, outcome, finished, without),
   }
 }

@@ -16,7 +16,7 @@ import { failedRead, isProviderCode, isWebSearch, webPageOf } from './webCalls'
  * Counts are of things, not calls: a skill the agent opened and LoomWatch then recorded as opened
  * is one skill, and a file read in two pages is one file.
  */
-type Item = Pick<Evidence, 'id' | 'kind' | 'relation' | 'name' | 'status' | 'toolKind' | 'rawInput' | 'locations'> & Partial<Pick<Evidence, 'declined' | 'content' | 'rawOutput'>>
+type Item = Pick<Evidence, 'id' | 'kind' | 'relation' | 'name' | 'status' | 'toolKind' | 'rawInput' | 'locations'> & Partial<Pick<Evidence, 'declined' | 'content' | 'rawOutput' | 'events'>>
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 const failed = (item: Pick<Evidence, 'status'>) => item.status === 'failed' || item.status === 'rejected'
@@ -90,9 +90,27 @@ export interface Mend<T> {
   how: MendHow
 }
 
+/**
+ * A call that reached LoomWatch with nothing in it: no input and no place named. A reply cut off at
+ * its length limit leaves one, and its tool's own name is all it has for a title. Claude Code opens
+ * every call with an empty input and sends it in an update, which the projection keeps only in the
+ * call's events, so those are read too.
+ */
+export function cameEmpty(item: Partial<Pick<Evidence, 'rawInput' | 'locations' | 'events'>>): boolean {
+  const empty = (raw: unknown) => raw !== null && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).length === 0
+  const said = (item.events ?? []).map((event) => (event.payload as { rawInput?: unknown } | null)?.rawInput).filter((raw) => raw !== undefined)
+  return empty(item.rawInput) && said.every(empty) && (item.locations ?? []).length === 0
+}
+
 /** What else the agent did that got what this failed call was after, or `null` when nothing did. */
 export function mendOf<T extends Item>(miss: T, items: readonly T[]): Mend<T> | null {
   const at = items.indexOf(miss)
+  // An empty call did nothing, so the agent's very next call, when it is the same kind and worked,
+  // is that call made again: run 948bd594's tutor wrote its lesson file on the try after one.
+  if (cameEmpty(miss)) {
+    const next = items[at + 1]
+    if (next && next.kind === miss.kind && next.relation === miss.relation && next.status === 'succeeded') return { by: next, how: 'tried again' }
+  }
   // A command counts only once it ran again after the failure: fixing a script and rerunning it.
   if (miss.kind === 'command') {
     const later = items.slice(at + 1).filter((item) => item.kind === 'command' && item.status === 'succeeded')
