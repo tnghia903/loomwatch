@@ -15,8 +15,12 @@ instructions and tools.
 
 - **A turn** adds the prompt to the conversation and streams the model's reply. It then works
   through every tool call the model asks for, each one allowed or declined first (see
-  [Permissions](#permissions)). It ends when the model replies without a tool call, when the turn
-  has made 200 tool calls, or when it is cancelled. What the model writes alongside tool calls
+  [Permissions](#permissions)). It ends when the model replies without a tool call, when it has
+  answered at its tool-call limit, or when it is cancelled. A turn may make 200 tool calls: the
+  result of the 180th says how many are left (a summary made after it says so again), and after
+  the 200th no call runs and the model is asked for its answer from what it has, once more with no
+  tool it may call if it called one instead. That turn ends `max_turn_requests`, with the answer
+  as its reply (ADR 0088). What the model writes alongside tool calls
   ("I'll read the notes first."), or before a web search its provider runs part way through a
   message ("Let me check the prices."), is recorded as said on the way, a paragraph of its own, and
   the turn's reply leaves it out unless it is all the turn wrote. A reply the length limit cut off
@@ -35,7 +39,10 @@ instructions and tools.
   larger one, is replaced by a summary the model writes.
 - **What the provider caches** stays the same from call to call: the tools offered (all of them
   from the first call), the opening instructions, and the conversation, which is only ever added
-  to. The summary call offers the same tools, so it reads the conversation from the cache too.
+  to. The summary call offers the same tools, so it reads the conversation from the cache too, and
+  so does the request for the answer at the tool-call limit. Only when the model calls a tool
+  instead is it asked again with `tool_choice: none` and the same tools (with no tools on
+  OpenRouter's chat completions), as a summary is.
   Each call carries the session's id, which keeps its calls on one OpenRouter route.
 - **A provider** answers each model call. **OpenRouter** (`agent/openrouter.rs`) makes one
   streamed `POST /chat/completions` per call. A Claude from 4.6 on goes to OpenRouter's
@@ -45,8 +52,12 @@ instructions and tools.
   without a model. It runs the offline demo team (`model: fake/offline`), which needs no key and
   no internet, and the tests.
 - **Built-in tools** (`agent/tools/`) are `list_files`, `read_file`, `search_files`,
-  `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. An agent
-  allowed the web also gets OpenRouter's web search and fetch. Tools the daemon serves itself,
+  `write_file`, `edit_file`, `run_command`, `update_plan` and `read_tool_output`. A Word, Excel,
+  PowerPoint, PDF or email file that `write_file` or `edit_file` changed is read back with the
+  document readers, and a CSV or JSON file parsed; the tool's answer says whether it opens and
+  what it holds (pages, sheets, slides, rows), or why not. Plain text and files over 10 MB aren't
+  checked, and the check never fails the write. An agent allowed the web also gets OpenRouter's
+  web search and fetch. Tools the daemon serves itself,
   such as the Team Bus and Ask's tools, come in through the `HostTools` trait. Calls a provider
   runs on its own side are recorded as finished tool calls named by what they were
   (`session.rs` `server_tool_title`): code Claude's web tools run is "Run code: <first line>"
@@ -438,7 +449,8 @@ are enforced server-side so no agent can prompt past them:
   may be outstanding
 - **Cycle detection:** A → B → A is rejected
 
-The agent loop adds one more: a turn stops after 200 tool calls (`max_turn_requests`). There are
+The agent loop adds one more: a turn makes at most 200 tool calls, then is asked for its answer
+and ends (`max_turn_requests`). There are
 no dollar budgets. Every model call is billed to the operator's OpenRouter account, and each
 turn's record carries its tokens and OpenRouter's exact cost.
 

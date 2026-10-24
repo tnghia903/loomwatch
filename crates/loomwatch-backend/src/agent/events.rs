@@ -141,7 +141,7 @@ pub(crate) fn plan(entries: &[(String, String)]) -> Value {
 /// How full the model's context is and what the session has cost so far.
 /// One model call, as its usage record names it.
 pub(crate) struct CallRecord<'a> {
-    /// `work`, `carry_on`, `summary` or `bare_summary`.
+    /// `work`, `carry_on`, `summary`, `bare_summary`, `last_answer` or `bare_last_answer`.
     pub call: &'a str,
     /// What the turn is for: `work`, `handover`, `checkpoint`, `check`, `ask_answer`, `helper`,
     /// `revision`.
