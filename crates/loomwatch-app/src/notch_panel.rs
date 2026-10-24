@@ -1,5 +1,6 @@
 //! The see-through panels at the top of every screen that hold the island page (ADR 0083,
-//! `crate::island`): the island at a notch, and the box to message an agent on any screen.
+//! `crate::island`): the island at a notch, real or drawn in the menu bar, and the box to message
+//! an agent on any screen.
 //!
 //! `AppKit` and `WebKit` have no safe Rust interface for what the island needs: a panel above the
 //! menu bar that takes the keyboard only while a message to the pinned agent is written, a web
@@ -83,7 +84,7 @@ pub struct NotchPanels {
     next_id: u32,
     /// Which of them is live: the one on the screen the pointer is on.
     live: Option<usize>,
-    /// Which of them pops the teams' news out: the one at a notch (`island::news_screen`).
+    /// Which of them pops the teams' news out: the live one, at its notch (`island::news_screen`).
     news: Option<usize>,
     /// Every screen, as last measured.
     screens: Vec<Screen>,
@@ -142,8 +143,8 @@ impl NotchPanels {
         self.shown
     }
 
-    /// Whether the menu bar face is wanted: wherever a screen has no notch to hold the island
-    /// (`island::menu_bar_face_shows`), and with Show at the notch unticked.
+    /// Whether the menu bar face is wanted: while no screen has a notch, real or drawn, to hold the
+    /// island (`island::menu_bar_face_shows`), and with Show at the notch unticked.
     pub fn face_shows(&self) -> bool {
         !self.shown || island::menu_bar_face_shows(&self.screens)
     }
@@ -199,11 +200,11 @@ impl NotchPanels {
         self.pointer();
     }
 
-    /// Measure the screens again: while shown, a panel hanging from the top of each, the one on the
-    /// screen the pointer is on live, the one at a notch with the news, and the pointer and ⌃⌥Space
-    /// watched only while there are panels.
+    /// Measure the screens again, a notch drawn on each without one (`island::with_drawn_notches`):
+    /// while shown, a panel hanging from the top of each, the one on the screen the pointer is on
+    /// live and with the news, and the pointer and ⌃⌥Space watched only while there are panels.
     pub fn place(&mut self) {
-        self.screens = screens(self.mtm);
+        self.screens = island::with_drawn_notches(screens(self.mtm));
         let wanted = if self.shown { self.screens.len() } else { 0 };
         self.islands.truncate(wanted);
         while self.islands.len() < wanted {
@@ -233,8 +234,9 @@ impl NotchPanels {
     }
 
     /// The panel on the screen the pointer is on is live (`island::live_screen`), and the one that
-    /// was goes back to rest; the news stays at the notch (`island::news_screen`). The panel a
-    /// message is being written in stays live, wherever the pointer goes.
+    /// was goes back to rest; the news goes with it, or stays at a notch while the pointer is on a
+    /// screen with none (`island::news_screen`). The panel a message is being written in stays
+    /// live, wherever the pointer goes.
     fn follow_pointer(&mut self) {
         if self
             .islands
@@ -609,8 +611,8 @@ impl ScreenIsland {
         self.set_drag_near(false);
     }
 
-    /// Hang the panel from the top of `screen`, centred on its notch or on the screen without
-    /// one, and tell the page what it is around.
+    /// Hang the panel from the top of `screen`, centred on its notch, real or drawn, or on the
+    /// screen with none, and tell the page what it is around.
     fn put(&mut self, screen: &Screen) {
         let frame = island::panel_frame(screen);
         if frame != self.frame {

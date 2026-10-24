@@ -1,9 +1,11 @@
 // The island at the notch, drawn (ADR 0083): Peek. The agent at work peeks out below the notch; a
 // question drops down on a gold line; a result slides out as a slip; then it all tucks into the
-// menu bar beside the camera, one figure per busy team. Pointing at the notch opens the list.
-// Without a notch only the box is drawn, while it is called, hanging from the menu bar, then its
-// agent at work in a pill, and its answer (decision 11).
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+// menu bar beside the camera, one figure per busy team. Pointing at the notch opens the list. A
+// notch drawn in the menu bar of a screen without one is the same (decision 12). With no notch at
+// all, on a screen showing no menu bar, only the box is drawn, while it is called, then its agent
+// at work in a pill, and its answer (decision 11).
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 
 import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
@@ -22,14 +24,15 @@ import { AnswerSlip, CrewStage, IntakeJobs, Slot, StartTeam, TeamAskBody } from 
 import { teamAskKey, workedFor, type TeamNow } from './teams'
 import { useIsland, type Island as IslandState } from './useIsland'
 import { useRunLimit } from './useRunLimit'
+import { ISLAND_WAITS } from './waits'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
 /** Other agents shown beside the box before "+N"; Tab reaches every one. */
 const OTHER_AGENTS = 5
 
-/** The agent's workbench, with three.js: fetched as the box opens, not with the page, so the page
-    loads at once and the bench is ready by the time a message goes. */
+/** The agent's workbench, with three.js: fetched once the page has settled, not with the page, so
+    the page loads at once and the bench is ready by the time the box opens. */
 const loadBench = () => import('./BenchCard')
 const BenchCard = lazy(loadBench)
 
@@ -41,19 +44,42 @@ export function Island() {
   const { view, notch, bar, tucked } = island
   const root = useRef<HTMLDivElement>(null)
   useReportAreas(root, view)
-  // The bench comes as the box opens, so it is drawn by the time a message goes.
-  const composing = island.composing
+  // The box's agent's workbench is set up out of sight once the pointer has settled on this screen,
+  // not as the box opens: three.js, its model and its shaders take the page a moment, which froze
+  // the box as it opened (for over a second the first time after an update). Set up, it moves into
+  // the box as the box opens, and shows at once under it or after a message. Only the screen the
+  // pointer is on keeps one, as only its box opens, and it goes a while after the pointer does. A
+  // box opened before then brings it.
+  const benchShown = island.bench || view === 'bench'
+  const settled = useHeld(Boolean(island.box) && island.live, ISLAND_WAITS.benchSetUp, ISLAND_WAITS.benchKept)
+  const benchUp = Boolean(island.box) && (settled || benchShown || island.composing || island.sending)
   useEffect(() => {
-    if (!composing) return
+    if (!benchUp) return
     loadBench().catch(() => {})
     AgentFigure.preload().catch(() => {})
-  }, [composing])
+  }, [benchUp])
+  const { node: benchNode, park: parkBench, slot: benchSlot } = useBenchHost()
+  // Where the pinned agent stands beside the notch at rest, for the list to bring it down from: read
+  // at rest, as once the list opens it has already begun to leave.
+  const pinnedAt = useRef<DOMRect | null>(null)
+  useLayoutEffect(() => {
+    if (view === 'rest' || view === 'tucked') pinnedAt.current = root.current?.querySelector('.island-pinned-head')?.getBoundingClientRect() ?? null
+  })
+  // What the island showed before, so the list knows it opened from rest, its agent beside the notch.
+  const [shownAs, setShownAs] = useState({ view, before: view })
+  if (shownAs.view !== view) setShownAs({ view, before: shownAs.view })
 
   // First beside the notch: the agent pinned to it, in its work's glow or ready, then one head per
   // other team. LoomWatch's own mark stands there only while there is no figure at all, never beside
   // one. At rest the ear is no wider than what is in it, so it covers as little menu bar as it can.
   const first = island.pinned ? 'pinned' : tucked.heads.length ? 'none' : 'mark'
   const figures = tucked.heads.length + (first === 'none' ? 0 : 1)
+  // Pinned, unpinned or another pinned, once the page knows which: the agent that stood first beside
+  // the notch ducks below the menu bar and the new one, or LoomWatch's mark, pops up in its place,
+  // as agents hand over at the notch.
+  const stood = useSwitched(island.pinned?.id ?? '', `${tucked.pinned?.moment ?? 'ready'} ${first}`, island.known)
+  const [stoodMoment, stoodFirst] = stood?.moment.split(' ') ?? []
+  const stoodAgent = stood?.id ? island.agents.find((agent) => agent.id === stood.id) ?? null : null
   const heads = headsLayout(first, tucked.heads.length, bar)
   const ear = view === 'rest' ? heads.span + 10 : Math.max(Math.round(bar * 1.5), heads.span + 14 + (tucked.more ? 16 : 0))
   const style = {
@@ -70,7 +96,7 @@ export function Island() {
   }
 
   return (
-    <div ref={root} className={`island${island.nudge ? ' is-nudging' : ''}`} data-view={view} data-notch={island.atNotch ? undefined : 'none'} style={style}>
+    <div ref={root} className={`island${island.nudge ? ' is-nudging' : ''}`} data-view={view} data-notch={!island.atNotch ? 'none' : island.drawn ? 'drawn' : undefined} style={style}>
       <div className="island-drop">
         <Hang island={island} onPointerEnter={onDrop(true)} onPointerLeave={onDrop(false)} />
         <Slip island={island} onPointerEnter={onDrop(true)} onPointerLeave={onDrop(false)} />
@@ -140,13 +166,23 @@ export function Island() {
         {island.atNotch && <>
         <div className="island-ear island-ear-left" aria-hidden="true">
           <span className="island-heads" style={{ width: heads.span }}>
+            {stood && !stood.id && stoodFirst === 'mark' && (
+              <span key="mark-left" className="island-head island-mark is-leaving" style={{ left: 0, width: heads.mark, zIndex: figures }}>
+                <LoomMark size={heads.mark} />
+              </span>
+            )}
+            {stoodAgent && (
+              <span key={`${stoodAgent.id}-left`} className="island-head glow is-leaving" data-moment={stoodMoment} style={{ left: 0, zIndex: figures }}>
+                <FigureStill figure={figureFor(stoodAgent.id, stoodAgent.figure)} alt="" />
+              </span>
+            )}
             {island.pinned && (
-              <span className="island-head island-pinned-head glow" data-moment={tucked.pinned?.moment ?? 'ready'} style={{ left: 0, zIndex: figures }}>
+              <span key={island.pinned.id} className={`island-head island-pinned-head glow${stood ? ' is-coming' : ''}`} data-moment={tucked.pinned?.moment ?? 'ready'} style={{ left: 0, zIndex: figures }}>
                 <FigureStill figure={figureFor(island.pinned.id, island.pinned.job.figure)} alt="" />
               </span>
             )}
             {first === 'mark' && (
-              <span className="island-head island-mark" style={{ left: 0, width: heads.mark, zIndex: figures }}>
+              <span key="mark" className={`island-head island-mark${stood ? ' is-coming' : ''}`} style={{ left: 0, width: heads.mark, zIndex: figures }}>
                 <LoomMark size={heads.mark} />
               </span>
             )}
@@ -164,13 +200,45 @@ export function Island() {
           {tucked.right === 'time' && <span className="island-time">{workedFor((tucked.heads[0] ?? tucked.pinned)?.startedAt ?? null, island.now)}</span>}
         </div>
         </>}
-        {(view === 'list' || view === 'box' || view === 'bench') && <List island={island} mode={view} />}
+        {(view === 'list' || view === 'box' || view === 'bench') && <List island={island} mode={view} benchSlot={benchSlot} openedFrom={shownAs.before} ear={pinnedAt} />}
         {!island.atNotch && <Pill island={island} />}
         </div>
       </div>
       {island.folding && <Fold island={island} />}
+      <div ref={parkBench} className="island-bench-park" hidden />
+      {benchUp && createPortal(<Suspense fallback={null}><BenchCard island={island} hidden={!benchShown} /></Suspense>, benchNode)}
     </div>
   )
+}
+
+/** True once `on` has held for `after` milliseconds, and until it has been off for `keep`. */
+function useHeld(on: boolean, after: number, keep: number): boolean {
+  const [held, setHeld] = useState(false)
+  useEffect(() => {
+    if (on === held) return
+    const id = window.setTimeout(() => setHeld(on), on ? after : keep)
+    return () => window.clearTimeout(id)
+  }, [on, held, after, keep])
+  return held
+}
+
+/**
+ * Where the box's agent's workbench is drawn, kept across the list opening and closing: out of
+ * sight in the island's park, and in its place under the box while the list is open. It moves
+ * between them as it is, the scene it has set up with it, rather than being set up again.
+ */
+function useBenchHost() {
+  const [node] = useState(() => document.createElement('div'))
+  const parked = useRef<HTMLDivElement | null>(null)
+  const park = useCallback((element: HTMLDivElement | null) => {
+    parked.current = element
+    if (element && !node.parentElement) element.appendChild(node)
+  }, [node])
+  const slot = useCallback((element: HTMLDivElement | null) => {
+    if (element) element.appendChild(node)
+    else parked.current?.appendChild(node)
+  }, [node])
+  return { node, park, slot }
 }
 
 /**
@@ -372,10 +440,11 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
  * without a notch (`box`), and while the agent's workbench is open, only the agent: its workbench
  * takes the rows' place. Its agent at its workbench on its own (`bench`), for a moment after a
  * message goes and while it is pointed at then, or at its pill without a notch, is the same list.
- * While a message is written its bench is set up out of sight, so the bench is there as the box
- * gives way to it, and the words fold into a head already there.
+ * Its bench, set up out of sight before the box opens (`useBenchHost`), takes its place under the
+ * agent's row (`benchSlot`), so the bench is there as the box gives way to it, and the words fold
+ * into a head already there.
  */
-function List({ island, mode }: { island: IslandState; mode: 'list' | 'box' | 'bench' }) {
+function List({ island, mode, benchSlot, openedFrom, ear }: { island: IslandState; mode: 'list' | 'box' | 'bench'; benchSlot: (element: HTMLDivElement | null) => void; openedFrom: string; ear: RefObject<DOMRect | null> }) {
   const watching = mode === 'bench'
   const pinnedWork = island.box && island.pinned?.id === island.box.id ? island.teams.find((team) => team.pinned) ?? null : null
   // A team the pinned agent started works on its stage, in its row; a question from it stays a row.
@@ -386,14 +455,17 @@ function List({ island, mode }: { island: IslandState; mode: 'list' | 'box' | 'b
   const firstPermission = [...(pinnedWork ? [pinnedWork] : []), ...rows].flatMap((team) => team.asks.filter((ask) => team.quick.includes(ask.id)))[0]?.id
   // The island grows to the list's height, which only the drawn list knows.
   const list = useRef<HTMLDivElement>(null)
+  // Opened from rest at a notch, its agent beside it comes down into its row (`flyFromEar`), and the
+  // rest of the list rises in around it. Decided as it opens, for as long as it is open.
+  const [flying] = useState(() => mode === 'list' && island.atNotch && Boolean(island.pinned) && island.pinned?.id === island.box?.id && (openedFrom === 'rest' || openedFrom === 'tucked'))
   useLayoutEffect(() => {
     const element = list.current
     element?.closest<HTMLElement>('.island')?.style.setProperty('--list-h', `${element.offsetTop + element.offsetHeight + 10}px`)
   })
   return (
-    <div ref={list} className="island-list">
-      {island.box && <PinnedRow island={island} work={pinnedWork} crews={crews} firstPermission={firstPermission} watching={watching} foot={mode === 'list'} />}
-      {island.box && (island.bench || watching || island.composing || island.sending) && <Suspense fallback={null}><BenchCard island={island} hidden={!island.bench && !watching} /></Suspense>}
+    <div ref={list} className={`island-list${flying ? ' is-flying' : ''}`}>
+      {island.box && <PinnedRow island={island} work={pinnedWork} crews={crews} firstPermission={firstPermission} watching={watching} foot={mode === 'list'} flying={flying} ear={ear} />}
+      {island.box && <div ref={benchSlot} className="island-bench-slot" />}
       {rows.length === 0 && !island.box && <p className="island-quiet">Nothing is running</p>}
       {rows.map((team) => (
         <div key={team.runId} className="island-row" data-moment={team.moment}>
@@ -454,15 +526,21 @@ function RowFigures({ island, team }: { island: IslandState; team: TeamNow }) {
  * it at its workbench (`watching`), its row only says what it is doing: a click on the island
  * opens the box again. Under the list's foot (`foot`), its answer opens from the foot.
  */
-function PinnedRow({ island, work, crews, firstPermission, watching, foot }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined; watching: boolean; foot: boolean }) {
+function PinnedRow({ island, work, crews, firstPermission, watching, foot, flying, ear }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined; watching: boolean; foot: boolean; flying: boolean; ear: RefObject<DOMRect | null> }) {
   const pinned = island.box!
+  const figures = useRef<HTMLButtonElement>(null)
+  useLayoutEffect(() => {
+    if (flying) flyFromEar(figures.current, ear.current)
+  }, [flying, ear])
   const others = island.agents.filter((agent) => agent.id !== pinned.id)
   const field = useRef<HTMLInputElement>(null)
   // Writing began without the box, from ⌃⌥Space or a drop, and the app gave the panel the
   // keyboard: the box takes it. Only then; pointing at the notch never does.
   const writing = island.composing
   useEffect(() => {
-    if (writing && document.activeElement !== field.current) field.current?.focus()
+    // Without scrolling: the box is still growing, and WebKit scrolled the island to show the field,
+    // lifting the agent's row, head first, out of its top.
+    if (writing && document.activeElement !== field.current) field.current?.focus({ preventScroll: true })
   }, [writing])
   const moment = work?.moment ?? 'ready'
   const phase = useActing(work, work?.agent ?? null, island.now)
@@ -476,9 +554,16 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot }: { i
   // box shows the short form, and the whole of it is its name and tooltip.
   const to = island.intake ? 'Or say what to do' : asking ? `Or message ${pinned.name}` : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
   const toWhole = island.pinnedWorking && !island.intake ? `${to} · after its current step` : to
+  // Switched to another agent (Tab, or one of the figures beside the name): the one it was ducks
+  // out of sight and the new one pops up in its place, as agents hand over at the notch, and the one
+  // left comes into the row beside the name.
+  const was = useSwitched(pinned.id, moment)
+  const left = was ? island.agents.find((agent) => agent.id === was.id) ?? null : null
   const figure = (
-    <span className="island-row-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
-      <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
+    <span key={pinned.id} className={`island-switch${was && !watching ? ' is-coming' : ''}`}>
+      <span className="island-row-figure glow" data-moment={moment} data-phase={phase ?? undefined}>
+        <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
+      </span>
     </span>
   )
   if (watching) {
@@ -495,6 +580,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot }: { i
       {/* Pressing a figure keeps the keyboard in the box: WebKit would otherwise take it away from
           the box without giving it to the button, and the box would close. */}
       <button
+        ref={figures}
         type="button"
         className="island-row-figures island-bench-toggle"
         aria-label={island.bench ? `Hide ${pinned.name}’s workbench` : `See ${pinned.name}’s workbench`}
@@ -502,6 +588,13 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot }: { i
         onPointerDown={(event) => event.preventDefault()}
         onClick={() => island.setBench(!island.bench)}
       >
+        {was && left && (
+          <span key={was.id} className="island-switch is-leaving" aria-hidden="true">
+            <span className="island-row-figure glow" data-moment={was.moment}>
+              <FigureStill figure={figureFor(left.id, left.figure)} alt="" />
+            </span>
+          </span>
+        )}
         {figure}
       </button>
       {/* Who the message goes to, by name: the field's own words go once something is written. */}
@@ -510,7 +603,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot }: { i
         {others.length > 0 && (
           <div className="island-agents" role="group" aria-label="Switch agent">
             {others.slice(0, OTHER_AGENTS).map((agent) => (
-              <button key={agent.id} type="button" className="island-agent" aria-label={`Message ${agent.name.trim() || agent.id} instead`} onPointerDown={(event) => event.preventDefault()} onClick={() => island.choose(agent.id)}>
+              <button key={agent.id} type="button" className={`island-agent${agent.id === was?.id ? ' is-coming' : ''}`} aria-label={`Message ${agent.name.trim() || agent.id} instead`} onPointerDown={(event) => event.preventDefault()} onClick={() => island.choose(agent.id)}>
                 <FigureStill figure={figureFor(agent.id, agent.figure)} alt="" />
               </button>
             ))}
@@ -588,6 +681,59 @@ function PinnedRow({ island, work, crews, firstPermission, watching, foot }: { i
       )}
     </div>
   )
+}
+
+/**
+ * Bring the agent's figure in its row (in `button`) from `from`, where it stood beside the notch, on
+ * the island's spring: the island grows on the same curve, so the figure rides it down into its
+ * place, rather than going from one place and showing up in another. The figure, not its button,
+ * is measured: the button can be wider than the figure at its corner.
+ */
+function flyFromEar(button: HTMLElement | null, from: DOMRect | null) {
+  const figure = button?.querySelector<HTMLElement>('.island-switch:not(.is-leaving) .island-row-figure')
+  if (!button || !figure || !from?.width || typeof button.animate !== 'function') return
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+  const to = figure.getBoundingClientRect()
+  const box = button.getBoundingClientRect()
+  if (!to.width) return
+  const style = getComputedStyle(button)
+  const duration = millisecondsOf(style.getPropertyValue('--t-spring')) ?? 560
+  const easing = style.getPropertyValue('--ease-spring').trim() || 'cubic-bezier(.32, 1.36, .5, 1)'
+  const origin = `${to.left - box.left}px ${to.top - box.top}px`
+  const start = `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width})`
+  // It stands where it starts until the flight has taken hold: WebKit draws a frame or two before a
+  // new animation does, which showed it in its row first, then back up to fly.
+  button.style.transformOrigin = origin
+  button.style.transform = start
+  const landed = () => {
+    button.style.removeProperty('transform')
+    button.style.removeProperty('transform-origin')
+  }
+  button.animate([{ transform: start, transformOrigin: origin }, { transform: 'none', transformOrigin: origin }], { duration, easing }).ready.then(landed, landed)
+}
+
+/** A CSS time in milliseconds: the build writes `560ms` as `.56s`. `null` for anything else. */
+function millisecondsOf(time: string): number | null {
+  const found = /^\s*(-?[\d.]+)(ms|s)\s*$/.exec(time)
+  return found ? Number(found[1]) * (found[2] === 's' ? 1000 : 1) : null
+}
+
+/** The agent the box wrote to just before it was switched to `id`, and how it was, while the switch
+    is drawn (`ISLAND_WAITS.switch`); `null` otherwise, as the box opens, and for a change that
+    isn't to be `drawn` (the page's first readings). */
+function useSwitched(id: string, moment: string, drawn = true): { id: string; moment: string } | null {
+  // Whether to draw a change is as it was before it: a change that comes with the first readings
+  // is part of them.
+  const [now, setNow] = useState<{ id: string; moment: string; drawn: boolean; was: { id: string; moment: string } | null }>({ id, moment, drawn, was: null })
+  if (now.id !== id) setNow({ id, moment, drawn, was: now.drawn ? { id: now.id, moment: now.moment } : null })
+  else if (now.moment !== moment || now.drawn !== drawn) setNow({ ...now, moment, drawn })
+  const was = now.was
+  useEffect(() => {
+    if (!was) return
+    const timer = window.setTimeout(() => setNow((current) => ({ ...current, was: null })), ISLAND_WAITS.switch)
+    return () => window.clearTimeout(timer)
+  }, [was])
+  return now.id === id ? was : null
 }
 
 /** The agent after `id` in My agents, or before it with `step` -1, round from the end. */

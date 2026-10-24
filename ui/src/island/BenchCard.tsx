@@ -29,14 +29,16 @@ export default function BenchCard({ island, hidden }: { island: Island; hidden: 
         </div>
       ) : (
         <Suspense fallback={<div className="island-bench-still"><span className="island-bench-figure">{still}</span></div>}>
-          <Bench key={box.id} job={box.job} record={island.boxRecord} onFail={() => setFailed(true)} />
+          {/* One bench for whichever agent the box writes to: switched, it takes the other agent as
+              it is, rather than being set up again while the switch is drawn. */}
+          <Bench who={box.id} job={box.job} record={island.boxRecord} onFail={() => setFailed(true)} />
         </Suspense>
       )}
     </div>
   )
 }
 
-function Bench({ job, record, onFail }: { job: SavedJob; record: RunRecord | null; onFail: () => void }) {
+function Bench({ who, job, record, onFail }: { who: string; job: SavedJob; record: RunRecord | null; onFail: () => void }) {
   const { view, labels } = useSavedBench(job, record)
-  return <AgentFigure view={view} labels={labels} open={null} onPart={NOTHING} onKey={NOTHING} onSkillDrop={NOTHING} skillMime="" onFail={onFail} readOnly tone="dark" />
+  return <AgentFigure view={view} labels={labels} open={null} onPart={NOTHING} onKey={NOTHING} onSkillDrop={NOTHING} skillMime="" onFail={onFail} readOnly tone="dark" who={who} />
 }

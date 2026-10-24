@@ -88,3 +88,20 @@ it('draws again as soon as its size changes, before the page is painted: a new s
   expect(drawn).toHaveBeenCalledTimes(1)
   scene.dispose()
 })
+
+it('puts another agent in place as it is, but acts out what changed for the same one', () => {
+  const scene = new WorkbenchScene(document.createElement('canvas'), { onPart() {}, onKey() {}, onHover() {}, onFrame() {} }, false)
+  const inside = scene as unknown as Inside & { apply(before: BenchView | null, view: BenchView): void }
+  inside.loaded = true
+  const applied = vi.spyOn(inside, 'apply').mockImplementation(() => {})
+  const maya = view('still')
+  const writer = view('working')
+  scene.set(maya)
+  // The same agent at work now: what changed since, it acts out.
+  scene.set(writer)
+  expect(applied).toHaveBeenLastCalledWith(maya, writer)
+  // Another agent at the bench: as if first set up, nothing moving as a change.
+  scene.set(maya, true)
+  expect(applied).toHaveBeenLastCalledWith(null, maya)
+  scene.dispose()
+})

@@ -157,6 +157,11 @@ function tellPage(message: unknown) {
   act(() => window.loomwatchIsland?.receive(message as never))
 }
 
+/** The box's agent's workbench where it can be seen: under the box, not folded out of sight. */
+function benchInSight(container: HTMLElement): Element | null {
+  return container.querySelector('.island-list .island-bench:not([hidden]) [data-testid="bench"]')
+}
+
 describe('the island page', () => {
   it('tells the app it listens, waits to be placed, and then shows a permission it can answer', async () => {
     runs = [run('r1', { permissionRequests: [permission('p1')] })]
@@ -382,6 +387,49 @@ describe('beside the notch at rest, on every screen', () => {
     const value = cascaded(island.querySelector('.island-shape')!, property, DESKTOP, islandRules)
     return value && island.style.getPropertyValue(/^var\((--[\w-]+)\)$/.exec(value)?.[1] ?? '')
   }
+
+  it('pinned, unpinned or another pinned: the one beside the notch ducks and the new one pops up in its place', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(container.querySelector('.island-pinned-head')).toBeTruthy())
+    // As the page first draws it, nothing is handed over.
+    expect(container.querySelector('.island-head.is-coming, .island-head.is-leaving')).toBeNull()
+    const mayaStill = container.querySelector('.island-pinned-head img')!.getAttribute('src')
+    // Maya unpinned in LoomWatch: she ducks, and LoomWatch's mark pops up in her place.
+    pinnedAgent = null
+    await waitFor(() => expect(container.querySelector('.island-head.island-mark.is-coming')).toBeTruthy(), { timeout: ISLAND_WAITS.poll + 2_000 })
+    expect(container.querySelector('.island-head.is-leaving')).toBeTruthy()
+    const leaving = container.querySelector<HTMLElement>('.island-head.is-leaving')!
+    expect(leaving.querySelector('img')?.getAttribute('src')).toBe(mayaStill)
+    expect(cascaded(leaving, 'animation', DESKTOP, islandRules)).toMatch(/^island-ear-duck /)
+    expect(cascaded(container.querySelector('.island-head.island-mark')!, 'animation', DESKTOP, islandRules)).toMatch(/^island-ear-pop /)
+    expect(cascaded(leaving, 'display', { ...DESKTOP, reducedMotion: true }, islandRules)).toBe('none')
+    // Handed over, the mark stands alone.
+    await waitFor(() => expect(container.querySelector('.island-head.is-leaving, .island-head.is-coming')).toBeNull(), { timeout: ISLAND_WAITS.switch + 2_000 })
+    expect(container.querySelectorAll('.island-ear-left .island-head')).toHaveLength(1)
+  }, 15_000)
+
+  it('a working agent unpinned ducks in its own light, its breath waiting; one pinned in the mark’s place has the mark duck', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    runs = [pinnedChat('c1', { working: ['maya'] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(container.querySelector('.island-pinned-head')?.getAttribute('data-moment')).toBe('work'), { timeout: 5_000 })
+    pinnedAgent = null
+    runs = []
+    await waitFor(() => expect(container.querySelector('.island-head.is-leaving')).toBeTruthy(), { timeout: ISLAND_WAITS.poll + 2_000 })
+    const leaving = container.querySelector<HTMLElement>('.island-head.is-leaving')!
+    expect(leaving.getAttribute('data-moment')).toBe('work')
+    expect(cascaded(leaving, 'animation', DESKTOP, islandRules)).toMatch(/^island-ear-duck /)
+    await waitFor(() => expect(container.querySelector('.island-head.is-leaving, .island-head.is-coming')).toBeNull(), { timeout: ISLAND_WAITS.switch + 2_000 })
+    // Pinned again: the mark ducks and she pops up in its place.
+    pinnedAgent = 'maya'
+    await waitFor(() => expect(container.querySelector('.island-head.island-mark.is-leaving')).toBeTruthy(), { timeout: ISLAND_WAITS.poll + 2_000 })
+    expect(container.querySelector('.island-pinned-head')?.classList.contains('is-coming')).toBe(true)
+  }, 20_000)
 
   it('with no agent pinned, LoomWatch’s mark sits beside the notch, even with nothing running', async () => {
     const { container } = render(<Island />)
@@ -874,6 +922,7 @@ describe('the agent pinned to the notch', () => {
 
 describe('the box: any of My agents, and its workbench', () => {
   const place = () => tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+  const islandRules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
   const view = (container: HTMLElement) => container.querySelector('.island')?.getAttribute('data-view')
 
   it('with none pinned, opens with the first of My agents, and the first message pins it', async () => {
@@ -935,6 +984,143 @@ describe('the box: any of My agents, and its workbench', () => {
     await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Writer' }))
   }, 15_000)
 
+  it('⌃⌥Space gives the box the keyboard without scrolling the island, which would lift its agent’s row out of the top', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    try {
+      const { container } = render(<Island />)
+      place()
+      await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+      tellPage({ kind: 'compose' })
+      const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+      await waitFor(() => expect(document.activeElement).toBe(field))
+      expect(focus.mock.contexts).toContain(field)
+      for (const [index, element] of focus.mock.contexts.entries()) if (element === field) expect(focus.mock.calls[index][0]).toEqual({ preventScroll: true })
+      // And nothing can scroll it: the island's body clips what is outside it.
+      expect(cascaded(container.querySelector<HTMLElement>('.island-body')!, 'overflow', DESKTOP, islandRules)).toBe('clip')
+    } finally {
+      focus.mockRestore()
+    }
+  }, 15_000)
+
+  it('draws a switch to another agent: the one it was ducks and the new one pops up with its name, and the same workbench takes it', async () => {
+    await import('./BenchCard')
+    pinnedAgent = 'maya'
+    jobs = [maya, writer]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const bench = await within(container).findByTestId('bench', undefined, { timeout: ISLAND_WAITS.benchSetUp + 3_000 })
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    // Opening the box draws no switch.
+    expect(container.querySelector('.is-coming, .is-leaving')).toBeNull()
+    const mayaStill = container.querySelector('.island-bench-toggle img')!.getAttribute('src')
+    fireEvent.keyDown(field, { key: 'Tab' })
+    await within(container).findByRole('textbox', { name: 'Message Writer' })
+    const toggle = within(container).getByRole('button', { name: 'See Writer’s workbench' })
+    // Maya ducks, Writer pops up in her place, his name rises, and she joins the others.
+    expect(toggle.querySelector('.island-switch.is-leaving')).toBeTruthy()
+    expect(toggle.querySelector('.island-switch.is-coming')).toBeTruthy()
+    const leaving = toggle.querySelector<HTMLElement>('.island-switch.is-leaving')!
+    const coming = toggle.querySelector<HTMLElement>('.island-switch.is-coming')!
+    expect(leaving.querySelector('img')?.getAttribute('src')).toBe(mayaStill)
+    expect(coming.querySelector('img')?.getAttribute('src')).not.toBe(mayaStill)
+    // Its duck is a transition, so a figure skipped while still rising ducks from where it got to.
+    expect([cascaded(leaving, 'translate', DESKTOP, islandRules), cascaded(leaving, 'transition', DESKTOP, islandRules)]).toEqual(['0 150%', 'translate var(--t-quick) var(--ease-in)'])
+    expect(cascaded(coming, 'animation', DESKTOP, islandRules)).toMatch(/^island-pop-up /)
+    expect(container.querySelector('.island-box-name')?.textContent).toBe('Writer')
+    expect(within(container).getByRole('button', { name: 'Message Maya instead' }).classList.contains('is-coming')).toBe(true)
+    // With motion reduced, the swap is at once: the one it was is gone, not ducking.
+    expect(cascaded(leaving, 'display', { ...DESKTOP, reducedMotion: true }, islandRules)).toBe('none')
+    // The same workbench, set up once, now Writer's.
+    expect(within(container).getByTestId('bench')).toBe(bench)
+    await waitFor(() => expect(bench.dataset.agent).toBe('Writer'))
+    // Drawn, the switch leaves Writer alone in the row.
+    await waitFor(() => expect(container.querySelector('.is-coming, .is-leaving')).toBeNull(), { timeout: ISLAND_WAITS.switch + 2_000 })
+    expect(toggle.querySelectorAll('.island-switch')).toHaveLength(1)
+  }, 20_000)
+
+  it('brings its agent down from beside the notch into its row as ⌃⌥Space opens the list, the rest rising in around it', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    // The flight takes hold when `taken` is called, as a browser's animation is ready a frame later.
+    let taken = () => {}
+    const animate = vi.fn(() => ({ ready: new Promise<void>((resolve) => { taken = resolve }) }))
+    const had = HTMLElement.prototype.animate
+    HTMLElement.prototype.animate = animate as never
+    const box = (x: number, y: number, size: number) => ({ x, y, left: x, top: y, width: size, height: size, right: x + size, bottom: y + size, toJSON() {} }) as DOMRect
+    // Where the page would lay them out: Maya beside the notch, and her place in the list's row.
+    // The island's spring as WebKit reads it from the built stylesheet: in seconds.
+    const style = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+      const real = style(element, pseudo)
+      return new Proxy(real, { get: (target, key) => (key === 'getPropertyValue' ? (name: string) => (name === '--t-spring' ? '.56s' : target.getPropertyValue(name)) : Reflect.get(target, key)) })
+    })
+    const rects = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      // Once the list opens she has begun to leave, a bar lower.
+      if (this.classList.contains('island-pinned-head')) return this.closest('.island')?.getAttribute('data-view') === 'list' ? box(100, 28, 40) : box(100, -4, 40)
+      // Her figure sits at the corner of its button, which is wider.
+      if (this.classList.contains('island-row-figure')) return box(40, 49, 38)
+      if (this.classList.contains('island-bench-toggle')) return box(40, 49, 56)
+      return box(0, 0, 0)
+    })
+    try {
+      const { container } = render(<Island />)
+      place()
+      await waitFor(() => expect(container.querySelector('.island-pinned-head')).toBeTruthy())
+      expect(view(container)).toBe('rest')
+      tellPage({ kind: 'compose' })
+      await within(container).findByRole('textbox', { name: 'Message Maya' })
+      // Her figure in the row starts where she stood beside the notch, and comes down on the spring.
+      expect(animate).toHaveBeenCalledTimes(1)
+      expect(animate.mock.contexts[0]).toBe(within(container).getByRole('button', { name: 'See Maya’s workbench' }))
+      const [frames, timing] = animate.mock.calls[0] as unknown as [Keyframe[], KeyframeAnimationOptions]
+      expect([frames[0].transform, frames.at(-1)?.transform]).toEqual([`translate(60px, -53px) scale(${40 / 38})`, 'none'])
+      expect(frames[0].transformOrigin).toBe('0px 0px')
+      // Until it has taken hold, she stands where it starts; then the flight alone moves her.
+      const button = within(container).getByRole('button', { name: 'See Maya’s workbench' })
+      expect(button.style.transform).toBe(frames[0].transform)
+      await act(async () => taken())
+      expect(button.style.transform).toBe('')
+      expect(timing).toMatchObject({ duration: 560 })
+      // The one beside the notch is gone at once, and the rest of the list rises in around her.
+      expect(cascaded(container.querySelector('.island-pinned-head')!, 'visibility', DESKTOP, islandRules)).toBe('hidden')
+      expect(container.querySelector('.island-list')?.classList.contains('is-flying')).toBe(true)
+      // Put away and opened again by pointing at it while a team's start is out: nothing to bring down.
+      tellPage({ kind: 'clickOutside' })
+      await waitFor(() => expect(view(container)).toBe('rest'))
+      runs = [run('r1', { working: ['researcher'] })]
+      await waitFor(() => expect(view(container)).toBe('work'), { timeout: 5_000 })
+      tellPage({ kind: 'pointer', over: true, area: 0 })
+      await waitFor(() => expect(view(container)).toBe('list'))
+      expect(animate).toHaveBeenCalledTimes(1)
+      expect(container.querySelector('.island-list')?.classList.contains('is-flying')).toBe(false)
+    } finally {
+      HTMLElement.prototype.animate = had
+      rects.mockRestore()
+      vi.mocked(window.getComputedStyle).mockRestore()
+    }
+  }, 20_000)
+
+  it('keeps the line between its agent’s row and the teams’ rows, past the workbench’s place between them', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    runs = [run('r1', { working: ['researcher'] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'pointer', over: true, area: 0 })
+    const team = await waitFor(() => {
+      const row = container.querySelector<HTMLElement>('.island-row:not(.island-pinned)')
+      expect(row).toBeTruthy()
+      return row!
+    })
+    expect(team.previousElementSibling?.classList.contains('island-bench-slot')).toBe(true)
+    expect(cascaded(team, 'border-top', DESKTOP, islandRules)).toBe('1px solid var(--color-hairline)')
+  }, 15_000)
+
   it('opens as it was when put away unsent: what was chosen was only for that message', async () => {
     pinnedAgent = 'maya'
     jobs = [maya, writer]
@@ -967,7 +1153,7 @@ describe('the box: any of My agents, and its workbench', () => {
     const bench = await within(container).findByTestId('bench')
     const shown = () => {
       expect(bench.isConnected).toBe(true)
-      return bench.closest('.island-bench')?.hasAttribute('hidden') === false
+      return benchInSight(container) === bench
     }
     await waitFor(() => expect(shown()).toBe(true))
     expect([bench.dataset.agent, bench.dataset.readOnly, bench.dataset.tone]).toEqual(['Maya', 'true', 'dark'])
@@ -985,6 +1171,49 @@ describe('the box: any of My agents, and its workbench', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(view(container)).not.toBe('list'))
     try { localStorage.removeItem('loomwatch:theme') } catch { /* no storage */ }
+  }, 15_000)
+
+  it('sets up its agent’s workbench out of sight once the page has settled, and the box opens with that one rather than setting up another', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    // Before ⌃⌥Space: her workbench is there, set up out of sight, and the box is not open.
+    const bench = await within(container).findByTestId('bench', undefined, { timeout: ISLAND_WAITS.benchSetUp + 3_000 })
+    expect(view(container)).toBe('rest')
+    expect(bench.closest('.island-bench-park')).toBeTruthy()
+    expect(benchInSight(container)).toBeNull()
+    tellPage({ kind: 'compose' })
+    await within(container).findByRole('textbox', { name: 'Message Maya' })
+    // The box opens with the same one, moved under her row, still out of sight.
+    expect(within(container).getByTestId('bench')).toBe(bench)
+    expect(bench.closest('.island-list')).toBeTruthy()
+    expect(benchInSight(container)).toBeNull()
+    // Her figure shows it, the same one again.
+    fireEvent.click(within(container).getByRole('button', { name: 'See Maya’s workbench' }))
+    await waitFor(() => expect(benchInSight(container)).toBe(bench))
+    // Put away, it goes back out of sight, kept for the next time.
+    tellPage({ kind: 'clickOutside' })
+    await waitFor(() => expect(view(container)).toBe('rest'))
+    expect(bench.isConnected).toBe(true)
+    expect(bench.closest('.island-bench-park')).toBeTruthy()
+  }, 15_000)
+
+  it('sets up no workbench on a screen the pointer isn’t on', async () => {
+    // Its code is loaded first: run alone, its download could outlast the wait and pass for nothing.
+    await import('./BenchCard')
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    tellPage({ kind: 'live', on: false })
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    await act(() => new Promise((resolve) => setTimeout(resolve, ISLAND_WAITS.benchSetUp + 500)))
+    expect(within(container).queryByTestId('bench')).toBeNull()
+    // The pointer comes: it is set up there.
+    tellPage({ kind: 'live', on: true })
+    expect(await within(container).findByTestId('bench', undefined, { timeout: ISLAND_WAITS.benchSetUp + 3_000 })).toBeTruthy()
   }, 15_000)
 
   it('without a notch, opens as a box from the menu bar, shows its agent at its workbench once sent, then tucks it into a pill at its desk, open again while pointed at', async () => {
@@ -1009,7 +1238,7 @@ describe('the box: any of My agents, and its workbench', () => {
     tellPage({ kind: 'away', away: false })
     expect(view(container)).toBe('pill')
     expect(container.querySelector('.island-pill-desk .island-pill-figure')).toBeTruthy()
-    expect(within(container).queryByTestId('bench')).toBeNull()
+    expect(benchInSight(container)).toBeNull()
     // Pointed at, her workbench opens; left, it tucks away again.
     tellPage({ kind: 'pointer', over: true, area: 0 })
     expect(view(container)).toBe('pill')
@@ -1076,7 +1305,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('bench'))
     // The same bench, shown: the words fold into her head, not into a bench still being set up.
     expect(within(container).getByTestId('bench')).toBe(bench)
-    expect(bench.closest('.island-bench')?.hasAttribute('hidden')).toBe(false)
+    expect(benchInSight(container)).toBe(bench)
     expect(container.querySelector('.island-fold')?.textContent).toBe('Summarize it')
     // The panel gives the keyboard back, and the pointer, never off the island, comes on it again.
     fireEvent.pointerLeave(shape, { pointerType: 'mouse' })
@@ -1090,7 +1319,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     tellPage({ kind: 'pointer', over: false, area: null })
     fireEvent.pointerLeave(shape, { pointerType: 'mouse' })
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('rest'), { timeout: 3000 })
-    expect(within(container).queryByTestId('bench')).toBeNull()
+    expect(benchInSight(container)).toBeNull()
   }, 15_000)
 
   it('takes a Mail message the app took from the drop, through the picker the app answers', async () => {
@@ -1139,7 +1368,8 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     expect(said.textContent).toBe('Maya can’t listen to recordings.')
     expect(island.getAttribute('data-view')).toBe('list')
     expect(container.querySelector('.island-intake')).toBeNull()
-    expect(toApp).toContainEqual({ kind: 'keyboard', on: true })
+    // The box takes the keyboard as it focuses its field, just after the line shows.
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'keyboard', on: true }))
     // A lease and the recording: the lease goes in, and the line says which stayed out.
     fireEvent.dragEnter(shape, carrying([pdf, recording]))
     fireEvent.drop(shape, carrying([pdf, recording]))

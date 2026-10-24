@@ -34,6 +34,9 @@ export interface AgentFigureProps {
   /** The furniture's tone, for a page with a theme of its own (the island is always dark). Left
       out, it follows the app's theme. */
   tone?: ResolvedTheme
+  /** Whose bench it is, where the same bench shows one agent then another (the island's box): a
+      new one is put in place as it is, not acted out as changes to the last. */
+  who?: string
 }
 
 const SCENE_URL = '/agent/workbench.glb'
@@ -56,7 +59,7 @@ function ThemedBench(props: AgentFigureProps) {
   return <Bench {...props} tone={resolved} />
 }
 
-function Bench({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFail, readOnly = false, tone }: AgentFigureProps & { tone: ResolvedTheme }) {
+function Bench({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFail, readOnly = false, tone, who }: AgentFigureProps & { tone: ResolvedTheme }) {
   const stage = useRef<HTMLDivElement>(null)
   const surface = useRef<HTMLCanvasElement>(null)
   const scene = useRef<WorkbenchScene | null>(null)
@@ -133,7 +136,12 @@ function Bench({ view, labels, open, onPart, onKey, onSkillDrop, skillMime, onFa
     }
   }, [])
 
-  useEffect(() => { scene.current?.set(view) }, [view])
+  const whose = useRef(who)
+  useEffect(() => {
+    const another = who !== whose.current
+    whose.current = who
+    scene.current?.set(view, another)
+  }, [view, who])
   // The bench's furniture follows the app's theme; the landing page's bench stays dark.
   useEffect(() => { scene.current?.setTone(tone) }, [tone])
 
