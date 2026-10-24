@@ -28,7 +28,7 @@ mod error;
 mod events;
 mod openrouter;
 mod permission;
-mod prompt;
+pub(crate) mod prompt;
 mod provider;
 mod sandbox;
 mod session;
@@ -36,7 +36,7 @@ mod skills;
 mod spend;
 mod sse;
 mod store;
-mod tools;
+pub(crate) mod tools;
 
 #[cfg(test)]
 mod tests;

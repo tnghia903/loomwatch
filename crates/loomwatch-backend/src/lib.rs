@@ -35,6 +35,7 @@ pub mod orientation;
 pub mod permissions;
 pub mod pinned;
 pub mod platform;
+pub(crate) mod prompt_blocks;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;

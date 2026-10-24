@@ -20,7 +20,7 @@ pub(crate) use command::CommandSettings;
 
 /// What `run_command` says it does: which shell reads the command, and where it may change files,
 /// which only the Mac's sandbox enforces.
-const RUN_COMMAND: &str = if cfg!(windows) {
+pub(crate) const RUN_COMMAND: &str = if cfg!(windows) {
     "Run a command in your work folder with cmd.exe, such as a script a skill provides. Write it \
      for cmd.exe; for PowerShell, run powershell -NoProfile -Command \"…\". The operator may be \
      asked first. Change files only inside your work folder."
