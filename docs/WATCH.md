@@ -109,7 +109,11 @@ and stays in the chat. Each part asked about keeps a marker stroke and, after it
 face of the agent asked: it types while the agent works and shows a gold dot until you open the
 answer here (remembered in this browser). Ask several agents about the same words and each gets
 its own bubble after them, stacked in the order you asked; ask the same agent again and its bubble
-shows the newer answer. Pointing at a bubble brings it to the front with the agent's card, as its
+shows the newer answer, under what you asked it before and what it said. **Reply** under an answer
+puts the words you marked back in the message box, addressed to the agent that answered, so your
+follow-up is about that part too; its answer shows under the first one. In the chat, every answer
+an agent gave you has **Reply** under it when you point at it: under an answer about a marked part
+it does the same, and under any other it quotes the answer. Pointing at a bubble brings it to the front with the agent's card, as its
 face in the chat does, and what you asked it. Ask about words that overlap words asked about
 before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
 answer then opens at the newer words and says which words it is about. A bubble opens its own

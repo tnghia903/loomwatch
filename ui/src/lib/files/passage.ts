@@ -42,6 +42,15 @@ export function passageReply(file: { path: string; runId: string | null; from: s
   return { runId: file.runId, messageId: passageId(file.path, text), from: file.from, to: null, kind: 'passage', text, file: file.path }
 }
 
+/**
+ * What Reply under an answer writes back about. An answer to a question about a part of a file goes
+ * on about the same part, as Reply on its answer in the reader does, so the agent is handed the part
+ * and its file again and the next answer joins the talk on the file. Any other answer is quoted.
+ */
+export function answerReply(asked: ReplyTo | null | undefined, answer: ReplyTo): ReplyTo {
+  return asked?.kind === 'passage' && asked.file ? asked : answer
+}
+
 /** A part already asked about, as the chat keeps it. */
 export interface AskedPassage {
   file: string

@@ -226,7 +226,7 @@
 .rd-answer-acts button:hover, .rd-answer-acts button:focus-visible { background: var(--color-hairline); color: var(--color-ink); }
 /* Your words, as a comment's: quiet, under the face of the agent answering them. */
 .rd-answer-asked {
-  display: -webkit-box; margin: 0 14px 6px; padding-left: 8px; overflow: hidden; border-left: 2px solid var(--rd-edge);
+  display: -webkit-box; margin: 0 0 6px; padding-left: 8px; overflow: hidden; border-left: 2px solid var(--rd-edge);
   color: var(--color-ink-2); font: 400 12.5px/1.4 var(--font-sans); -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 /* An earlier part shown with the newer one over it: which words the answer is about. */
@@ -241,10 +241,18 @@
 /* With no answer to read, the way on, in words. */
 .rd-answer-chat { margin: 8px 0 0; padding: 0; border: 0; background: none; color: inherit; font: 600 12.5px/1.4 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .rd-answer .chat-text ::selection { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+/* The talk about the part reads down, one question and its answer after another, each scrolled as
+   one; the line between them is lighter than the card's own edge. */
+.rd-answer-turn { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid color-mix(in srgb, var(--rd-edge) 60%, transparent); }
+/* Reply under the answer, where the chat has it under a message. */
+.rd-answer-foot { display: flex; padding: 0 14px 10px; }
+.rd-answer-reply { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--color-ink-2); font: 600 12.5px/1.4 var(--font-sans); cursor: pointer; }
+.rd-answer-reply:hover, .rd-answer-reply:focus-visible { color: var(--color-ink); }
 /* A finger's worth to press where the pointer is a finger. */
 @media (pointer: coarse) {
   .rd-answer-acts button { width: 44px; height: 44px; }
   .rd-answer-chat { padding: 10px 0; }
+  .rd-answer-reply { min-height: 44px; }
 }
 
 /* ---------- The tip, until the first part is asked about ---------- */

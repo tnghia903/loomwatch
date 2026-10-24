@@ -78,7 +78,8 @@ const sameMeasure = (a: Measured, b: Measured) => a.page === b.page && JSON.stri
  *
  * Mark any words and the agent's own face leans in over them: Ask puts them in the message box as a
  * quote, addressed to that agent, and Explain asks for them in plain words at once. The answer opens
- * beside the part as it is sent, and fills in when the agent has answered. A part asked about stays
+ * beside the part as it is sent, and fills in when the agent has answered; Reply under it writes back
+ * about the same part, and the answer to that shows under the first. A part asked about stays
  * lit in the file, with the agent's face in the margin: the face, or the lit words, open its answer
  * again. The file is read again whenever it changes on disk, so a part the agent was asked to change
  * is seen changed.
@@ -406,6 +407,16 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const cardFacts = cardAsk ? factsOf(bubbleAgent(cardAsk)) : null
   const cardLine = cardAsk ? bubbleCardLine(cardAsk, lookOfAsk(cardAsk), name) : ''
   const closeAnswer = () => setAnswerFor(null)
+  // The open answer's talk before it: what the same agent was asked about the same words, oldest first.
+  const earlierTalk = answerShown ? asked.filter((passage) => passage !== answerShown && passage.file === path && askKey(passage) === shownKey) : NO_PASSAGES
+  // Reply under an answer is one more ask about the same part, to the agent that answered, written
+  // in the message box as Ask writes it: the agent is handed the part and its file again, and its
+  // answer shows here, under the talk before it.
+  const replyAbout = (passage: AskedPassage, button: HTMLElement) => {
+    if (!from || !onAsk) return
+    flyToMessageBox(button, passage.text)
+    onAsk(passageReply({ path, runId: file.runId, from }, passage.text), undefined, bubbleAgent(passage))
+  }
 
   // The tip under a file, until a part of one has been asked about.
   const [hint, setHint] = useState(() => {
@@ -578,8 +589,9 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
             hint={cardLine ? <p className="tc-agent-card-asked">{cardLine}</p> : null} />
         )}
         {answerShown && (answerPart || answerLost) && (
-          <PassageAnswer ref={card} passage={answerShown} name={name} hue={hue} place={answerAt} gone={answerLost} maxHeight={answerMax} about={answerAbout}
-            onClose={() => setAnswerFor(null)} onShowInChat={onShowAsked && (() => onShowAsked(answerShown))} />
+          <PassageAnswer ref={card} passage={answerShown} earlier={earlierTalk} name={name} hue={hue} place={answerAt} gone={answerLost} maxHeight={answerMax} about={answerAbout}
+            onClose={() => setAnswerFor(null)} onShowInChat={onShowAsked && (() => onShowAsked(answerShown))}
+            onReply={onAsk && from ? (button) => replyAbout(answerShown, button) : undefined} />
         )}
         {askable && hint && !marked && from && text !== null && (
           <p className="rd-hint" data-reader-chrome>

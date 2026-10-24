@@ -17,6 +17,7 @@ import { useRunSession } from '../../lib/runs/useRunSession'
 import { useNow } from '../../lib/useNow'
 import { fileRefsIn, filesTouched, withFolderPaths } from '../../lib/files/fileRefs'
 import { FileOriginContext } from '../../lib/files/reader'
+import { answerReply } from '../../lib/files/passage'
 import { checkAnswer, type AnswerCheck } from '../../lib/story/answerCheck'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { expectsAnswer, type Bubble, type Party } from '../../lib/story/conversation'
@@ -111,8 +112,8 @@ interface WorkPieceProps {
   onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
   /** A finding of the answer's review: its record, or the agent's work, opened in Details. */
   onOpenFinding: (runId: string, line: ReceiptLine) => void
-  /** Reply to something said in this piece — what an agent said, or the answer (ADR 0051). */
-  onReply?: (reply: ReplyTo) => void
+  /** Reply to something said in this piece — what an agent said, or the answer (ADR 0051) — written to `to` when it is not who said it. */
+  onReply?: (reply: ReplyTo, to?: string) => void
   /** Show what one of your replies replied to, where it was said; absent when the chat cannot. */
   onShowReplied?: (reply: ReplyTo) => (() => void) | undefined
   /** Put your face on something said in this piece, or take it off. Absent, only the agents' faces show. */
@@ -504,7 +505,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
           reviewed={reviewedText === answer}
           onReviewed={() => setReviewedText(answer)}
           onOpenFinding={(line) => onOpenFinding(run.runId, line)}
-          onReply={onReply && answer.trim() ? () => onReply({ runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer }) : undefined}
+          onReply={onReply && answer.trim() ? () => onReply(answerReply(item.request?.replyTo, { runId: run.runId, messageId: answerKey, from: run.responder, to: null, kind: 'answer', text: answer }), run.responder) : undefined}
           replyLabel={`Reply to ${name(run.responder)}'s answer`}
         />
       </Outcome>

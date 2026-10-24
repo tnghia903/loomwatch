@@ -947,6 +947,11 @@ a mark.tc-find-hit { box-shadow: none; }
   .chat-reply { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
   .chat-msg:hover .chat-reply, .chat-msg:focus-within .chat-reply { opacity: 1; }
 }
+/* A finger's worth to press, with the row drawn as it is. */
+@media (pointer: coarse) {
+  .chat-reply { position: relative; }
+  .chat-reply::after { content: ''; position: absolute; inset: -14px -4px; }
+}
 .tc-replying {
   display: flex;
   align-items: center;

@@ -1,4 +1,4 @@
-import { ArrowDown, ChevronDown, ChevronRight, Play, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X } from 'lucide-react'
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
@@ -9,7 +9,7 @@ import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel, listNames } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { replyOf } from '../../lib/chat/reply'
-import { askedPassages, type AskedPassage } from '../../lib/files/passage'
+import { answerReply, askedPassages, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
 import { targets, yoursOn, type Face, type Reaction, type ReactionAbout } from '../../lib/chat/reactions'
@@ -560,7 +560,10 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
     ? (reply.file && readHere ? () => readHere({ path: reply.file as string, runId: reply.runId, from: reply.from }) : undefined)
     : reply.runId && runs.has(reply.runId)
       ? () => setShown({ runId: reply.runId as string, id: reply.messageId, at: Date.now() })
-      : undefined)
+      // An agent's own answer to your message (`note:<id>`): your message, with the answers under it.
+      : !reply.runId && chat.items.some((item) => item.kind === 'note' && `note:${item.message.id}` === reply.messageId)
+        ? () => setShown({ runId: '', id: reply.messageId, at: Date.now() })
+        : undefined)
   const name = (id: string) => nameWithHelpers(team.names, id) ?? id
   // A found line opened (ADR 0081): the chat goes back to its piece, reading earlier pages until it
   // is there, and shows the line in it with the words lit.
@@ -792,7 +795,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
                   ? <WorkPiece item={item} newest={item.run.runId === newestRun} approveFilled={!decision || decision.runId === item.run.runId} fixFilled={fixFill === item.run.runId} reveal={shown?.runId === item.run.runId ? shown : null} followed={item.run.followsRunId ? runs.get(item.run.followsRunId) ?? null : null} earlier={earlierTries(item.run, runs)} continuedFrom={continuedFrom.has(item.run.runId)} team={team} draft={draft}
                       detailsOpen={detailsRunId === item.run.runId} answerOpen={answerRunId === item.run.runId} onDetails={onDetails} onOpenAnswer={onOpenAnswer} onRun={chat.applyRun} onBaton={onBaton} onLine={line.onLine} onTryAgain={tryAgain} onContinue={keepGoing}
                       onDecided={() => setDraft('')} onAlwaysAllow={onAlwaysAllow} onOpenFinding={onOpenFinding} onReply={startReply} onShowReplied={showReplied} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />
-                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
+                  : <TeamNote message={item.message} reactions={item.reactions} lessons={item.lessons} fixFill={fixFill} name={name} hue={(id) => team.hues.get(id) ?? 1} flash={noteFlash?.id === item.message.id ? noteFlash.at : null} onReply={startReply} onShowReplied={showReplied} onStart={() => void startNote(item.message)} onReact={chat.react} onUndoLesson={undoLearned} onTellAllLesson={tellAllLearned} />}
               </Fragment>
             )
           })}
@@ -978,9 +981,11 @@ function revealId(runId: string, target: string): string {
  * A note to the whole team: it starts nothing, and the next work reads it. An @ message that needed
  * no workflow ("hi @team") is drawn as you sent it, with each agent's own answer under it, and the
  * ones still writing typing, in place of the work it would have started. You can react to the note
- * and to each answer, as to anything said in the chat; the faces are kept on the note.
+ * and to each answer, as to anything said in the chat; the faces are kept on the note. Reply under an
+ * answer writes back to the agent that gave it, with the answer quoted (ADR 0051), or about the same
+ * part of a file when that is what your message asked about (ADR 0077).
  */
-function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flash = null, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; fixFill?: string | null; name: (id: string) => string; hue: (id: string) => number; flash?: number | null; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void> }) {
+function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flash = null, onReply, onShowReplied, onStart, onReact, onUndoLesson, onTellAllLesson }: { message: ChatMessage; reactions?: readonly Reaction[]; lessons?: readonly Lesson[]; fixFill?: string | null; name: (id: string) => string; hue: (id: string) => number; flash?: number | null; onReply?: (reply: ReplyTo, to?: string) => void; onShowReplied: (reply: ReplyTo) => (() => void) | undefined; onStart: () => void; onReact?: (anchor: string, target: string, face: Face | null, about?: ReactionAbout) => Promise<void>; onUndoLesson?: (lesson: Lesson) => Promise<void>; onTellAllLesson?: (lesson: Lesson) => Promise<void> }) {
   const [starting, setStarting] = useState(false)
   const appear = useAppear()
   // Found by a search and opened (ADR 0081): it comes into view, ringed for a moment.
@@ -1024,7 +1029,15 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             {face(said.from)}
             <div className="chat-stack">
               <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
-              {reactOn(targets.reply(said.from), `${name(said.from)}'s reply`)(<div className="chat-bubble"><div className="chat-text"><Markdown>{said.text}</Markdown></div></div>)}
+              {reactOn(targets.reply(said.from), `${name(said.from)}'s answer`)(<div className="chat-bubble"><div className="chat-text"><Markdown>{said.text}</Markdown></div></div>)}
+              {onReply && said.text.trim() && (
+                <p className="chat-under">
+                  <button type="button" className="chat-reply" aria-label={`Reply to ${name(said.from)}'s answer`}
+                    onClick={() => onReply(answerReply(message.replyTo, { runId: null, messageId: `note:${message.id}`, from: said.from, to: null, kind: 'answer', text: said.text }), said.from)}>
+                    <Reply size={12} aria-hidden="true" />Reply
+                  </button>
+                </p>
+              )}
             </div>
           </li>
         ))}
