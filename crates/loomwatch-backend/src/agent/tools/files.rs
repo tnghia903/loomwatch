@@ -197,8 +197,8 @@ fn read(cwd: &Path, file: &Path, offset: usize, limit: usize, pictures: Pictures
     }
     if looks_binary(&bytes) {
         return Output::failed(format!(
-            "{shown_path} is not a text file ({} bytes). read_file reads text, PDF, Word, Excel \
-             and PowerPoint files, and PNG, JPEG, GIF and WebP pictures.",
+            "{shown_path} is not a text file ({} bytes). read_file reads text, PDF, Word, Excel, \
+             PowerPoint and email files, and PNG, JPEG, GIF and WebP pictures.",
             metadata.len()
         ));
     }

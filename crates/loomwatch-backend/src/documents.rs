@@ -1,5 +1,6 @@
 //! Reading the files people have, the way an agent needs them: a PDF's text; Word, Excel and
-//! `PowerPoint` files as text; and pictures, for a model that can look at them.
+//! `PowerPoint` files as text; an email's headers and words; and pictures, for a model that can
+//! look at them.
 //!
 //! The readers are part of `LoomWatch`, so they read the same on every computer and nothing has to
 //! be installed. A file can come from anywhere, and a damaged or hostile one could keep a reader
@@ -21,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+mod email;
 mod excel;
 mod office;
 mod pdf;
@@ -52,6 +54,8 @@ pub enum Kind {
     Word,
     Excel,
     PowerPoint,
+    /// An email (`.eml`), as Mail hands over a message dragged out of it.
+    Email,
     /// PNG, JPEG, GIF or `WebP`: the formats every provider takes.
     Picture,
     /// A Word or `PowerPoint` file in the format from before 2007, which isn't read.
@@ -73,6 +77,7 @@ impl Kind {
             Some("docx" | "docm" | "dotx") => Some(Self::Word),
             Some("xlsx" | "xlsm" | "xlsb" | "xls" | "ods") => Some(Self::Excel),
             Some("pptx" | "pptm" | "ppsx") => Some(Self::PowerPoint),
+            Some("eml") => Some(Self::Email),
             Some("png" | "jpg" | "jpeg" | "gif" | "webp") => Some(Self::Picture),
             Some("doc" | "ppt" | "pps") => Some(Self::OldOffice),
             Some("heic" | "heif") => Some(Self::Heic),
@@ -92,7 +97,7 @@ impl Kind {
     pub fn has_text(self) -> bool {
         matches!(
             self,
-            Self::Pdf | Self::Word | Self::Excel | Self::PowerPoint
+            Self::Pdf | Self::Word | Self::Excel | Self::PowerPoint | Self::Email
         )
     }
 
@@ -104,6 +109,7 @@ impl Kind {
             Self::Word => "Word",
             Self::Excel => "Excel",
             Self::PowerPoint => "PowerPoint",
+            Self::Email => "Email",
             Self::Picture | Self::Heic => "Picture",
             Self::OldOffice => "Office",
         }
@@ -297,6 +303,7 @@ pub fn read_here(path: &Path) -> Result<Document, String> {
         Kind::Word => office::word(path, &name)?,
         Kind::Excel => excel::text(path, &name)?,
         Kind::PowerPoint => office::powerpoint(path, &name)?,
+        Kind::Email => email::text(path, &name)?,
     };
     let text = tidy(&text);
     if text.is_empty() {

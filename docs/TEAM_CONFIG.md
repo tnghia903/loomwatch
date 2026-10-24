@@ -442,9 +442,9 @@ when the agent's own folder has nothing by that name. A **file** added in
 the panel is copied beside the team file under `<team>.files/`, and a relative `path` resolves
 against the team file's folder (`~/` against your home folder). The agent gets the file's text,
 up to 12,000 characters, and a read grant for that one file. The text of a PDF, Word (`.docx`),
-Excel (`.xlsx`, `.xls`, `.ods`) or PowerPoint (`.pptx`) file is read by LoomWatch itself, with
-nothing to install; when there is none to read, such as in a scanned PDF, the agent is told where
-the file is. A picture is described, and an agent on a model that can see pictures looks at it with
+Excel (`.xlsx`, `.xls`, `.ods`) or PowerPoint (`.pptx`) file, or of an email (`.eml`), is read by
+LoomWatch itself, with nothing to install; when there is none to read, such as in a scanned PDF,
+the agent is told where the file is. A picture is described, and an agent on a model that can see pictures looks at it with
 `read_file`. When a file's text is longer than 12,000 characters, the prompt carries its opening,
 and the full text is put in the prepared folder as `knowledge/<file>`, which the prompt names. Only
 `knowledge` may have a `path`.

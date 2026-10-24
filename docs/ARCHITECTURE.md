@@ -49,7 +49,10 @@ instructions and tools.
   with what it printed, and a page or search that code started is named by its input, or by the
   page its result says it read.
 - **Documents and pictures** (`documents.rs`): `read_file` reads a PDF, Word, Excel or
-  PowerPoint file as numbered text, and hands a PNG, JPEG, GIF or WebP picture to a model whose
+  PowerPoint file as numbered text, and an email (`.eml`, `documents/email.rs`, through
+  `mail-parser`) as who wrote to whom and when, its subject, its words decoded from any transfer
+  encoding and charset (HTML-only mail as its text), a forwarded message in its place and the other
+  attachments by name and size; and it hands a PNG, JPEG, GIF or WebP picture to a model whose
   model list says it takes pictures, shrunk only past 2576 pixels on its long side. Each provider
   gets the picture its own way: inside Claude's `tool_result`, inside the plan's
   `function_call_output`, and on OpenRouter in a user message after the tool results. Every file

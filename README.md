@@ -289,8 +289,9 @@ stream read it. Nothing is guessed from a title.
 ### 🧰 Skills, folders and files
 
 Add skills from skills.sh, ClawHub or GitHub, or copy in the ones your AI apps already have. Give an
-agent any folder or file: PDFs, Word, Excel and PowerPoint files are read as text, with nothing to
-install, and an agent on a model that can see pictures looks at screenshots and photos. LoomWatch
+agent any folder or file: PDFs, Word, Excel and PowerPoint files, and emails saved from Mail, are
+read as text, with nothing to install, and an agent on a model that can see pictures looks at
+screenshots and photos. LoomWatch
 delivers each one to the agents you choose, and turns off what you take off the canvas.
 
 </td>
@@ -815,8 +816,8 @@ a folder or a file, select the agent and click **Folder** or **File** under **Gi
   before it starts. Every agent also sees the name and purpose of each skill in LoomWatch, and reads
   one when its work calls for it.
 - A **folder or file** is given to the agent as reference material: a folder's listing and README,
-  or a file's text, read from a PDF, Word, Excel or PowerPoint file too. A scanned PDF has no text
-  to read. The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
+  or a file's text, read from a PDF, Word, Excel or PowerPoint file or an email too. A scanned PDF
+  has no text to read. The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
   folder for anything bigger.
 - A **tool** you connected, such as Todoist or Kiwi.com, lets the agent use that service. Connect one
   in the agent's **Tools it can use** block or in Connections; the agent asks you before each action
