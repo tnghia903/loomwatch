@@ -189,12 +189,12 @@ describe('adding a skill', () => {
     expect(install.header).toBe('1')
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(within(results).getAllByRole('listitem')[1]).toHaveTextContent('Added')
-    expect(await screen.findByRole('list', { name: 'Your skills' })).toHaveTextContent('PDF')
+    expect(await screen.findByRole('list', { name: 'My skills' })).toHaveTextContent('PDF')
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(await screen.findByText('Took back PDF.')).toBeInTheDocument()
     expect(sent.find((request) => request.method === 'DELETE')?.url).toBe('/api/skills/pdf')
-    await waitFor(() => expect(screen.queryByRole('list', { name: 'Your skills' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'My skills' })).toBeNull())
   })
 
   it('says why a skill’s license keeps it out, then leaves it out of the results', async () => {
@@ -303,7 +303,7 @@ describe('adding a skill', () => {
   })
 })
 
-describe('Your skills', () => {
+describe('My skills', () => {
   it('lists each skill on the shelf, opens it for details and asks before removing', async () => {
     let skills = [record('brand-guidelines', { runtimes: ['node'], hasScripts: true, needs: ['subagents', 'scripts'] }), record('notes', { origin: { kind: 'brought_in', app: 'Codex' }, license: { restricted: false } })]
     const sent = daemon(
@@ -311,7 +311,7 @@ describe('Your skills', () => {
       on('DELETE', '/api/skills/brand-guidelines', () => { skills = skills.slice(1); return json({ removed: 'brand-guidelines' }) }),
     )
     render(<SkillsPage />)
-    const shelf = await screen.findByRole('list', { name: 'Your skills' })
+    const shelf = await screen.findByRole('list', { name: 'My skills' })
     const [brand, notes] = within(shelf).getAllByRole('listitem')
     expect(brand).toHaveTextContent('Brand guidelines')
     expect(brand).toHaveTextContent('GitHub')
@@ -328,7 +328,7 @@ describe('Your skills', () => {
     fireEvent.click(within(brand).getByRole('button', { name: 'Remove Brand guidelines' }))
     expect(sent.some((request) => request.method === 'DELETE')).toBe(false)
     fireEvent.click(within(within(brand).getByRole('group', { name: 'Remove Brand guidelines?' })).getByRole('button', { name: 'Remove' }))
-    await waitFor(() => expect(within(screen.getByRole('list', { name: 'Your skills' })).getAllByRole('listitem')).toHaveLength(1))
+    await waitFor(() => expect(within(screen.getByRole('list', { name: 'My skills' })).getAllByRole('listitem')).toHaveLength(1))
     expect(sent.find((request) => request.method === 'DELETE')?.header).toBe('1')
   })
 
@@ -340,6 +340,21 @@ describe('Your skills', () => {
     fail = false
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText(/Nothing here yet/)).toBeInTheDocument()
+  })
+
+  it('keeps Find skills in your apps above a long list, as the one way to the skills your apps have', async () => {
+    daemon(on('GET', '/api/skills', () => folder(Array.from({ length: 30 }, (_, index) => record(`skill-${index}`)))))
+    render(<SkillsPage />)
+    const shelf = await screen.findByRole('list', { name: 'My skills' })
+    expect(within(shelf).getAllByRole('listitem')).toHaveLength(30)
+    const panel = screen.getByRole('region', { name: 'My skills' })
+    expect(within(panel).getByRole('heading', { name: 'My skills 30' })).toBeInTheDocument()
+    const look = within(panel).getByRole('button', { name: 'Find skills in your apps' })
+    expect(screen.getAllByRole('button', { name: 'Find skills in your apps' })).toEqual([look])
+    expect(look.compareDocumentPosition(shelf) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'About My skills' }))
+    expect(within(panel).getByRole('note')).toHaveTextContent('Claude Code or Codex may have skills too: Find skills in your apps copies them in')
   })
 })
 
@@ -364,7 +379,7 @@ describe('skills you already have', () => {
     await screen.findByText(/Nothing here yet/)
     expect(sent.some((request) => request.url.includes('bring-in'))).toBe(false)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Look on this computer' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Find skills in your apps' }))
     const sheet = await screen.findByRole('dialog', { name: 'Skills from your apps' })
     const claude = await within(sheet).findByRole('region', { name: 'Claude Code' })
     expect(within(sheet).getByRole('region', { name: 'Codex' })).toHaveTextContent('You already have it in LoomWatch.')
@@ -379,7 +394,7 @@ describe('skills you already have', () => {
     expect(sent.find((request) => request.url === '/api/skills/bring-in')?.body).toEqual({ keys: ['key-writer'] })
     expect(sent.find((request) => request.url === '/api/skills/bring-in')?.header).toBe('1')
     expect(sheet).toHaveTextContent('Review: A skill named “review” is already in LoomWatch.')
-    expect(await screen.findByRole('list', { name: 'Your skills' })).toHaveTextContent('Writer')
+    expect(await screen.findByRole('list', { name: 'My skills' })).toHaveTextContent('Writer')
 
     fireEvent.click(within(sheet).getByRole('button', { name: 'Undo' }))
     expect(await within(sheet).findByText('Took back 1 skill.')).toBeInTheDocument()
@@ -396,7 +411,7 @@ describe('the page’s words', () => {
     )
     render(<SkillsPage />)
     await searchFor()
-    fireEvent.click(screen.getByRole('button', { name: 'Look on this computer' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Find skills in your apps' }))
     await screen.findByRole('checkbox', { name: /Writer/ })
     expect(document.body.textContent).not.toMatch(/sign[ -]?in|log[ -]?in|subscription|account/i)
   })

@@ -5,9 +5,11 @@ export interface SectionHeadProps {
   title: string
   /** The heading's own look, which differs between the panels that use it. */
   className?: string
-  as?: 'div' | 'h3' | 'span'
+  as?: 'div' | 'h2' | 'h3' | 'span'
   /** How the section works, kept one click away so the section itself shows only state. */
   explain?: ReactNode
+  /** Shown after the title, inside the heading: a count. */
+  children?: ReactNode
 }
 
 /**
@@ -15,14 +17,16 @@ export interface SectionHeadProps {
  * sentences that say why live here, so a newcomer can still read them and nobody else has to.
  * The button sits beside the heading, not in it, so the heading's name stays its title.
  */
-export function SectionHead({ title, className = '', as: Tag = 'div', explain }: SectionHeadProps) {
+export function SectionHead({ title, className = '', as: Tag = 'div', explain, children }: SectionHeadProps) {
   const [open, setOpen] = useState(false)
   const id = useId()
-  if (!explain) return <Tag className={className}>{title}</Tag>
+  // The space keeps the title and a count apart when read aloud or copied ("My skills 25").
+  const heading = <>{title}{children && <>{' '}{children}</>}</>
+  if (!explain) return <Tag className={className}>{heading}</Tag>
   return (
     <>
       <div className="section-head">
-        <Tag className={className}>{title}</Tag>
+        <Tag className={className}>{heading}</Tag>
         <button type="button" className={`explain-toggle ${open ? 'on' : ''}`} aria-expanded={open} aria-controls={id} aria-label={`About ${title}`} title={open ? 'Hide' : 'What this means'} onClick={() => setOpen((current) => !current)}>
           <CircleHelp size={12} aria-hidden="true" />
         </button>
