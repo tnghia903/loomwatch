@@ -582,7 +582,14 @@ async fn run_team_mode(
         event_log.as_ref().map(EventLog::session_id),
         agent,
     );
-    let mut spec = agent_process_spec(agent, team_path, cwd, &composed.delivery, asker);
+    // Its permissions read what `materialise` delivered, the workspace with its copies included, as
+    // a pipeline stage's and a teammate's do. The composed prompt keeps a delivery only when it
+    // holds knowledge or a tool, so an agent wired only a skill would be asked to read its own copy.
+    let delivery = workspace
+        .as_ref()
+        .map(|workspace| workspace.delivery.clone())
+        .unwrap_or_default();
+    let mut spec = agent_process_spec(agent, team_path, cwd, &delivery, asker);
     spec.lessons = lessons::supply(
         &archive,
         team,
@@ -5317,6 +5324,90 @@ mod tests {
             .await
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         assert!(checkpoints.is_empty(), "{checkpoints:?}");
+        Ok(())
+    }
+
+    /// An agent working in a folder the operator chose (ADR 0042) reads the skill wired to it from
+    /// the workspace `LoomWatch` copied it into, as its prompt tells it to, without being asked:
+    /// the workspace is its own. A skill alone (no knowledge, no tool) once left the workspace out
+    /// of the lead's permissions, so the read waited on the operator, and a scheduled run declined
+    /// it and never followed the skill. The stand-in panics unless the read returns the skill.
+    #[tokio::test]
+    async fn an_agent_in_its_own_folder_reads_its_wired_skill_without_asking() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let scratch = platform::canonicalize(std::env::temp_dir())?
+            .join(format!("loomwatch-skill-read-{}", uuid::Uuid::new_v4()));
+        let project = scratch.join("project");
+        std::fs::create_dir_all(&project)?;
+        std::fs::create_dir_all(scratch.join(".agents/skills/notes"))?;
+        std::fs::write(
+            scratch.join(".agents/skills/notes/SKILL.md"),
+            "---\nname: notes\ndescription: Keeps notes short.\n---\nKeep notes to three lines.\n",
+        )?;
+        let team_path = scratch.join("team.yaml");
+        std::fs::write(&team_path, "")?;
+        let delivered = scratch.join(".loomwatch/skill-team/a/.agents/skills/notes/SKILL.md");
+        let (script, _) = crate::test_support::stand_in(vec![
+            crate::test_support::turn(&["## Required skill: notes"], "followed the notes skill")
+                .calling(
+                    "read_file",
+                    json!({"path": delivered.display().to_string()}),
+                    "Keep notes to three lines.",
+                ),
+        ]);
+        let mut agent = pipeline_agent("a", &script);
+        agent.spawn.cwd.clone_from(&project);
+        agent.capabilities = vec![config::CapabilityRef {
+            kind: config::CapabilityKind::Skill,
+            name: "notes".into(),
+            path: None,
+            notion: None,
+            always_allow: Vec::new(),
+        }];
+        let team = Arc::new(TeamConfig {
+            schema_version: 1,
+            id: "skill-team".into(),
+            name: "Skill".into(),
+            entrypoint: "a".into(),
+            responder: Some("a".into()),
+            schedule: None,
+            deliver: None,
+            conversation: ConversationConfig::default(),
+            permissions: crate::config::TeamPermissions::default(),
+            spend: crate::spend::SpendConfig::default(),
+            memory: None,
+            guards: GuardsConfig::default(),
+            agents: vec![agent],
+            edges: Vec::new(),
+        });
+        let archive = EventArchive::new(pool);
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(30),
+            run_team_mode(
+                &team,
+                &team_path,
+                archive.clone(),
+                "write the notes",
+                Duration::from_secs(2),
+                Some(EventLog::new(archive.clone(), "skill-read-run".into())),
+                &Arc::new(memory::TeamMemory::default()),
+                &RunLineage::default(),
+            ),
+        )
+        .await??;
+        assert!(
+            delivered.exists(),
+            "the skill was delivered where the prompt names it"
+        );
+        assert_eq!(outcome.reply, "followed the notes skill");
+        let events = archive.load_verified_session(&outcome.session_id).await?;
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.kind == crate::EventKind::Permission),
+            "reading its own skill asked the operator: {events:?}"
+        );
+        let _ = std::fs::remove_dir_all(&scratch);
         Ok(())
     }
 
