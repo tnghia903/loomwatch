@@ -93,7 +93,7 @@ yourself.
 - **Show a skill before it is installed.** The Skills page installs skills from skills.sh, ClawHub
   or a GitHub link. It shows each skill's license, scripts and files first, and refuses a skill
   whose license says "All rights reserved" or "proprietary". It caps a download at 50 MB and a
-  skill at 20 MB and 2,000 files, leaves out links, and refuses a download with a path outside its
+  skill at 200 MB and 2,000 files, leaves out links, and refuses a download with a path outside its
   own folder. Nothing in a skill runs when it is installed: an agent can run a skill's script only
   as a command, which asks like any other. **Look on this computer** copies skills from your AI
   apps' skill folders only when you click it, and reads nothing there but skill folders.

@@ -57,7 +57,8 @@ pub(crate) const LEFT_BEHIND: [&str; 2] = [".git", "node_modules"];
 /// How big a skill, and a download, may be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// The most one skill may hold, in bytes.
+    /// The most one skill may hold, in bytes. As much as a download may unpack to: a skill may
+    /// ship finished examples, and this is what stops a folder picked by mistake.
     pub skill_bytes: u64,
     /// The most files one skill may hold.
     pub skill_files: usize,
@@ -71,7 +72,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            skill_bytes: 20 * MB,
+            skill_bytes: 200 * MB,
             skill_files: 2_000,
             download_bytes: 50 * MB,
             unpacked_bytes: 200 * MB,
@@ -1861,6 +1862,54 @@ pub(crate) mod tests {
         });
         assert!(matches!(added, Err(SkillsError::Refused(_))));
         assert!(!store.folder().join("locked").exists());
+    }
+
+    #[test]
+    fn skills_with_big_examples_come_in_but_a_folder_past_200_mb_does_not() {
+        // A popular drawing skill ships 26 MB of finished examples beside its instructions. The
+        // files are sparse, so the test writes next to nothing to disk.
+        let sized = |path: &Path, bytes: u64| {
+            fs::create_dir_all(path.parent().expect("a parent")).expect("parent folder");
+            fs::File::create(path)
+                .expect("create")
+                .set_len(bytes)
+                .expect("size");
+        };
+        let state = Scratch::new("state");
+        let store = SkillsStore::new(state.path());
+        let add = |source: &Path, name| {
+            store.add(&NewSkill {
+                source,
+                name,
+                origin: Origin::new(OriginKind::Installed),
+                batch_id: None,
+                replace: false,
+                inherit_license: None,
+            })
+        };
+
+        let drawings = Scratch::new("drawings");
+        skill(drawings.path(), "drawings", "license: MIT\n");
+        sized(&drawings.path().join("examples/engine.pdf"), 15 * MB);
+        sized(&drawings.path().join("examples/engine.html"), 13 * MB);
+        let added = add(drawings.path(), "drawings").expect("a 28 MB skill comes in");
+        assert!(added.size_bytes > 28 * MB);
+        assert!(
+            store
+                .folder()
+                .join("drawings/examples/engine.pdf")
+                .is_file()
+        );
+
+        // A folder picked by mistake is still turned away before anything is copied.
+        let documents = Scratch::new("documents");
+        skill(documents.path(), "documents", "");
+        sized(&documents.path().join("films/holiday.mov"), 201 * MB);
+        match add(documents.path(), "documents") {
+            Err(SkillsError::Refused(reason)) => assert!(reason.contains("200 MB"), "{reason}"),
+            other => panic!("a 201 MB folder should be refused, got {other:?}"),
+        }
+        assert!(!store.folder().join("documents").exists());
     }
 
     #[test]

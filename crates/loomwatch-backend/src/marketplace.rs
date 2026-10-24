@@ -9,7 +9,7 @@
 //! What it never does: run anything it downloaded, keep a link from a download, write outside
 //! the staging folder, or take a skill whose license says "All rights reserved". A download that
 //! names a path outside its own folder is refused whole. Downloads are capped at 50 MB, and each
-//! skill at 20 MB and 2,000 files.
+//! skill at 200 MB and 2,000 files.
 //!
 //! A search never offers a skill it knows can't come in. Before it answers, it reads each
 //! result's `SKILL.md` for its `license:` line, and leaves out the ones that say "All rights
