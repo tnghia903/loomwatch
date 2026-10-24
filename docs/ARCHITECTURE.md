@@ -472,7 +472,10 @@ page reports. Only the island on the screen the pointer is on is live: it opens 
 questions and answers out, while the others stay at rest beside their notch, so nothing comes and
 goes as the pointer moves between screens. A pointer at a screen's very top edge is on that screen
 (`Rect::holds_pointer`, as `NSMouseInRect` has it). Results looked at on one island leave the others
-(the app passes `seen` between the pages). At rest the island is even either side of the camera:
+(the app passes `seen` between the pages). When `WebKit` ends a page's process (a crash, or the
+page breaking one of `WebKit`'s rules), the app gives back the keyboard that page held, so another
+screen's island can be live, and loads the page again (`NotchPanels::page_gone`): at once up to
+three times a minute, then after 30 seconds (`island::Reloads`). At rest the island is even either side of the camera:
 the pinned agent's figure on the left, or LoomWatch's mark when none is pinned and no team is at
 work, and the right side empty until there is something to say. Unticking **Show at the notch** in the app's menu
 writes `<state dir>/app-notch-off`, closes every panel, stops watching the pointer and gives
@@ -493,6 +496,21 @@ promise ⌃⌥Space. One of My agents can be pinned to the notch
 - a drag of a file, text or a link near the top is noticed by the drag pasteboard changing while
   the button is held (macOS sends other apps no pointer events once a drag begins, so the app
   checks every 50 ms then), and the whole panel takes the pointer so the drop lands in the page;
+- files another app writes only once they are dropped (file promises: a message from Mail, a
+  picture from Photos) the app takes itself (`IslandWebView::performDragOperation`), because
+  `WebKit`'s own way of taking them ends the page's process. When a drag promises its files both
+  the old way and the new, as Mail does, only the new are asked (`island::promises_to_ask`); the
+  files are written into a new folder in the user's temporary folder, each kept once
+  (`island::received_once`), and the page asks for them through a file picker the app answers
+  (`ToPage::Dropped`, `island/dropped.ts`), so they arrive as a file from Finder does;
+- what is dropped goes in only as far as the pinned agent can open it (`island/readable.ts`, the
+  twin of `documents::Kind::of` and `read_file`'s check for text). A HEIC, TIFF or BMP picture is
+  turned into a JPEG in the page first (`createImageBitmap` and a canvas, at most 2,576 px on its
+  longest side, as a model is sent). A file it can't open, one over 25 MB, a folder, or an
+  eleventh file stays out, and a line for each reason under what went in says why and what to do
+  instead; it stays while what went in waits. A later drop's files join those waiting
+  (`withDropped` in `island/intake.ts`), so the PDF made from a refused file goes with them. A Mail message is
+  called by its subject and offered email jobs;
 - the pinned agent may ask one of the person's teams to do part of a job (`my_teams`, `ask_team`
   on the Team Bus, `team_requests.rs`): the request waits at `GET /api/team-requests` until the
   person presses Start (`POST /api/team-requests/{id}`), the team runs as any run, and its answer

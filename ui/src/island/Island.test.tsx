@@ -760,7 +760,9 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     expect(island.getAttribute('data-view')).toBe('slot')
     expect(getByRole('status', { name: 'Drop it here for Maya' })).toBeTruthy()
     fireEvent.drop(shape, carrying([pdf]))
-    expect(island.getAttribute('data-view')).toBe('list')
+    // The slot stays open while what was dropped is sorted, then the list opens to write.
+    expect(island.getAttribute('data-view')).toBe('slot')
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
     // What went in, the jobs that fit it, and a box for your own words, which has the keyboard.
     const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
     expect(row.getByText('Lease 2027.pdf')).toBeTruthy()
@@ -774,6 +776,94 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     expect(uploads).toEqual(['Lease 2027.pdf'])
     expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/maya.yaml', text: 'Is the rent rise fair?', files: [{ path: '/teams/.jobs/.bench/files/Lease 2027.pdf' }] })
     expect(container.querySelector('.island-intake')).toBeNull()
+  }, 15_000)
+
+  it('takes a Mail message the app took from the drop, through the picker the app answers', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    const island = container.querySelector('.island')!
+    tellPage({ kind: 'drag', near: true })
+    fireEvent.dragEnter(container.querySelector<HTMLElement>('.island-shape')!, carrying([]))
+    tellPage({ kind: 'drag', near: false })
+    // The app answers the page's picker with the message Mail wrote, as it does in the panel.
+    const email = new File(['Subject: Rent\n\nHi'], 'Rent for March.eml', { type: 'message/rfc822' })
+    const asked: HTMLInputElement[] = []
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      asked.push(this)
+      Object.defineProperty(this, 'files', { value: [email] })
+      this.dispatchEvent(new Event('change'))
+    })
+    tellPage({ kind: 'dropped' })
+    click.mockRestore()
+    expect(asked.map((picker) => [picker.type, picker.isConnected])).toEqual([['file', false]])
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
+    // Called by its subject, with what one does with an email.
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    expect(row.getByText('Rent for March')).toBeTruthy()
+    fireEvent.click(row.getByRole('button', { name: 'Draft a reply' }))
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Rent for March.eml'])
+  }, 15_000)
+
+  it('says at the notch why a file Maya can’t open stays out, and takes the rest', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    const island = container.querySelector('.island')!
+    const shape = container.querySelector<HTMLElement>('.island-shape')!
+    const recording = new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00])], 'Call with landlord.m4a')
+    // Only a recording: nothing goes in, and the box says why, with the keyboard to say more.
+    fireEvent.dragEnter(shape, carrying([recording]))
+    fireEvent.drop(shape, carrying([recording]))
+    const said = await within(container).findByRole('alert')
+    expect(said.textContent).toBe('Maya can’t listen to recordings.')
+    expect(island.getAttribute('data-view')).toBe('list')
+    expect(container.querySelector('.island-intake')).toBeNull()
+    expect(toApp).toContainEqual({ kind: 'keyboard', on: true })
+    // A lease and the recording: the lease goes in, and the line says which stayed out.
+    fireEvent.dragEnter(shape, carrying([pdf, recording]))
+    fireEvent.drop(shape, carrying([pdf, recording]))
+    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Call with landlord.m4a. Maya can’t listen to recordings.'))
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    expect(row.getByText('Lease 2027.pdf')).toBeTruthy()
+    fireEvent.click(row.getByRole('button', { name: 'What should I check?' }))
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Lease 2027.pdf'])
+    // Sent: the line goes with what went in.
+    await waitFor(() => expect(within(container).queryByRole('alert')).toBeNull())
+  }, 15_000)
+
+  it('keeps what waits when the PDF made from a file Maya couldn’t open is dropped after it', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    const shape = container.querySelector<HTMLElement>('.island-shape')!
+    const plan = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])], 'Budget plan.pages')
+    fireEvent.dragEnter(shape, carrying([pdf, plan]))
+    fireEvent.drop(shape, carrying([pdf, plan]))
+    await waitFor(() => expect(within(container).getByRole('alert').textContent).toBe('Left out Budget plan.pages. Maya can’t open Pages files. In Pages, choose File › Export To › PDF, then drop the PDF.'))
+    // The list closes while the person exports it: the line stays with the lease that waits.
+    tellPage({ kind: 'clickOutside' })
+    await waitFor(() => expect(container.querySelector('.island')!.getAttribute('data-view')).not.toBe('list'))
+    tellPage({ kind: 'pointer', over: true, area: 0 })
+    expect(within(container).getByRole('alert').textContent).toContain('Budget plan.pages')
+    // The PDF joins the lease, and the line goes: nothing was left out this time.
+    const exported = new File(['%PDF-1.7 plan'], 'Budget plan.pdf', { type: 'application/pdf' })
+    fireEvent.dragEnter(shape, carrying([exported]))
+    fireEvent.drop(shape, carrying([exported]))
+    await waitFor(() => expect(container.querySelector('.island-intake-what')?.textContent).toBe('2 files×'))
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    expect(within(container).queryByRole('alert')).toBeNull()
+    fireEvent.click(row.getByRole('button', { name: 'Summarize each' }))
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(uploads).toEqual(['Lease 2027.pdf', 'Budget plan.pdf'])
   }, 15_000)
 
   it('sends a dropped link with the job picked, and opens when the app says something is dragged near', async () => {

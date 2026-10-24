@@ -428,8 +428,11 @@ LoomWatch running until you quit it. Then follow [Try your first run](#try-your-
 To keep one of your agents at hand, open it in **My agents**, click its name at the top and choose
 **Pin to the notch**. Its figure then takes the place of LoomWatch's face. Press **⌃⌥Space**
 (Control-Option-Space) in any app, or point at the notch, and write to it. Both need **Show at the
-notch** turned on. Drag a file, a picture, a link or some text to the notch to hand it over:
-the notch opens to take it, offers a few jobs that fit, and you can say your own. Its answer shows
+notch** turned on. Drag a file, a picture, an email from Mail, a link or some text to the notch to
+hand it over: the notch opens to take it, offers a few jobs that fit, and you can say your own.
+iPhone photos go in as JPEGs. A file your agent can't open, such as a Pages document or a video,
+stays out, and the notch says what to do instead, such as exporting it as a PDF; drop the PDF and
+it joins what is already there. Its answer shows
 at the notch: **Copy** it and paste it into any app, and it keeps its headings, lists and links
 where that app takes formatting. It can ask one of your teams to do part of the work; that team only
 starts when you press **Start**, and that run costs what any run of the team costs.

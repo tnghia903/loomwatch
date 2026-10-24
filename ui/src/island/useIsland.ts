@@ -14,6 +14,8 @@ import { answerTeamRequest, fetchTeamRequests, type TeamRequest } from '../lib/r
 import type { Ticket } from '../lib/story/needsYou'
 import { fetchTeamFile } from '../lib/team-file/client'
 import { inApp, listen, openInLoomWatch, tellApp } from './bridge'
+import { takeDropped } from './dropped'
+import { sortDropped } from './readable'
 import type { Intake } from './intake'
 import { pinnedNow, pinnedWorking, sendToPinned, type PinnedNow } from './pinned'
 import { wakesAt } from './popouts'
@@ -78,9 +80,12 @@ export interface Island {
   send: (job?: string) => void
   /** Its Chat tab in LoomWatch, where the message can be sent when the island couldn't. */
   openPinned: () => void
-  /** What was dropped into the slot, waiting for a job; dropping, dragging over, and taking it out. */
+  /** What was dropped into the slot, waiting for a job; dropping, dragging over, and taking it out.
+      A drop's files and `folders` go only as far as the pinned agent can open them (`readable`). */
   intake: Intake | null
-  drop: (intake: Intake) => void
+  /** What a drop left out, and why, in one line. */
+  away: string | null
+  drop: (intake: Intake, folders?: readonly string[]) => void
   dragOver: (over: boolean) => void
   clearIntake: () => void
   /** The whole answer of a finished turn of the pinned agent, once read: what its card shows, and
@@ -133,9 +138,15 @@ export function useIsland(): Island {
   // The app's side: where the panel is, whether it is the live island, the pointer, the person,
   // the screen, a click elsewhere, and results looked at on another screen's island.
   const toldSeen = useRef(new Set<string>())
+  // Files the app took from a drop go as a drop does (`drop`, below), as it is now.
+  const dropping = useRef<(intake: Intake) => void>(() => {})
   useEffect(() => {
     const stop = listen((message) => {
       if (message.kind === 'seen') for (const run of message.runs) toldSeen.current.add(run)
+      if (message.kind === 'dropped') {
+        takeDropped((files) => dropping.current({ files, link: null, text: null }))
+        return
+      }
       dispatch({ type: 'app', message })
     })
     tellApp({ kind: 'ready' })
@@ -163,6 +174,20 @@ export function useIsland(): Island {
   useEffect(() => {
     if (pinnedId !== undefined) tellApp({ kind: 'pinned', name: pinnedName })
   }, [pinnedId, pinnedName])
+  // A drop goes in once its files are sorted (`sortDropped`): what the pinned agent can't open
+  // stays out, and the box says why. Files already waiting count toward the ten a message carries.
+  const waitingFiles = useRef(0)
+  useEffect(() => { waitingFiles.current = state.intake?.files.length ?? 0 })
+  const drop = useCallback((dropped: Intake, folders: readonly string[] = []) => {
+    if (!dropped.files.length && !folders.length) {
+      dispatch({ type: 'drop', intake: dropped })
+      return
+    }
+    void sortDropped(dropped.files, folders, pinnedName ?? 'It', waitingFiles.current).then(({ taken, away }) => {
+      dispatch({ type: 'drop', intake: taken.length ? { ...dropped, files: taken } : null, away })
+    })
+  }, [pinnedName])
+  useEffect(() => { dropping.current = drop }, [drop])
 
   // The next moment to tuck away or bring out; and "4m" moving on.
   const wake = wakesAt(state.pop)
@@ -389,7 +414,8 @@ export function useIsland(): Island {
       dispatch({ type: 'closeList' })
     }, [pinned]),
     intake,
-    drop: useCallback((dropped: Intake) => dispatch({ type: 'drop', intake: dropped }), []),
+    away: state.away,
+    drop,
     dragOver: useCallback((over: boolean) => dispatch({ type: 'dragOver', over }), []),
     clearIntake: useCallback(() => dispatch({ type: 'intakeDone' }), []),
     answerOf,
