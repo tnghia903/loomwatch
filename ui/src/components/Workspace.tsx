@@ -90,6 +90,7 @@ import type { ReplyTo } from '../lib/chat/client'
 import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
 import { describeDocument, isDocument } from '../lib/chat/document'
 import type { AgentFacts } from '../lib/chat/faces'
+import { nameWithHelpers } from '../lib/chat/helpers'
 import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, type MadeTab, type PaneTab } from '../lib/chat/paneTabs'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
@@ -1579,7 +1580,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const [detailsFollow, setDetailsFollow] = useState(() => !initialRunId)
   const [newestPiece, setNewestPiece] = useState<string | null>(null)
   // The pane beside the chat shows one thing at a time (lib/chat/paneTabs.ts): the piece's record,
-  // or something it made — each file its answer names, and a long answer read as a document. The
+  // or something it came to — a long answer read as a document, and each file its answer names. The
   // chat keeps the answer short; a short one is read there and has no tab. `null` is the pane's own
   // choice: following the newest work, the first thing it made once it is finished, while work in
   // progress shows its record.
@@ -1595,8 +1596,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return open
   }), [])
   const answerResponder = record?.responder ?? null
-  const answerBy = nodeNames.get(answerResponder ?? '') ?? 'The team'
-  const paneAnswer = useMemo(() => (detailsOpen && isDocument(responseText) ? { title: describeDocument(responseText).title, hint: `${answerBy}’s answer` } : null), [detailsOpen, responseText, answerBy])
+  // Named as the chat names it beside its answer.
+  const answerBy = answerResponder ? nameWithHelpers(chatTeam.names, answerResponder) ?? answerResponder : 'The team'
+  const paneAnswer = useMemo(() => (detailsOpen && isDocument(responseText) ? { by: answerResponder, name: answerBy, title: describeDocument(responseText).title } : null), [detailsOpen, responseText, answerResponder, answerBy])
   // The files its finished answer names that the reader reads and that are on this computer: the
   // files its answer's cards in the chat offer to Read.
   const responderFolder = responderAgent?.folder ?? null
@@ -2511,7 +2513,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           {detailsOpen && (
             <aside className="tc-details" aria-label="Details of this piece of work">
               <header className="tc-details-head">
-                {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
+                {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
                 <h2>{shownFile ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
                 <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setReading(null) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>

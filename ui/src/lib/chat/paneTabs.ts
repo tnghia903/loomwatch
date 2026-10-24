@@ -2,9 +2,9 @@ import type { FileToRead } from '../files/reader'
 
 /**
  * The pane beside the team chat (ADR 0051, ADR 0077): the record of the piece of work on screen
- * (Details), and everything it made, each a tab of its own — the files its answer names that
- * LoomWatch reads, then the answer itself when it is long enough to be a document. The chat keeps
- * the answer short (a card, for a document); what the work made is read here.
+ * (Details), and everything it came to, each a tab of its own — the answer itself when it is long
+ * enough to be a document, then the files its answer names that LoomWatch reads. The chat keeps the
+ * answer short (a card, for a document); what the work made is read here.
  */
 export type PaneTab = 'details' | 'answer' | `file:${string}`
 
@@ -12,12 +12,14 @@ export const fileTab = (path: string): PaneTab => `file:${path}`
 
 export interface MadeTab {
   tab: PaneTab
-  /** What the tab says: the file's name, or the document's own title. */
+  /** What the tab says: the file's name, or the name of the agent whose answer it is. */
   label: string
-  /** Said on hover: the file's full path, or whose answer it is. */
+  /** Said on hover: the file's full path, or the answer's own title. */
   hint: string
   /** The file it reads; `null` for the answer. */
   file: FileToRead | null
+  /** The agent whose answer it is, drawn by its figure as in the chat; none for the team's. */
+  by?: string
   /** The daemon's kind for a file (`web`, `spreadsheet`…), for its icon. */
   kind?: string
   /**
@@ -33,22 +35,23 @@ export interface MadeTab {
 export const closedKey = (runId: string | null, tab: PaneTab): string => `${runId ?? ''}\n${tab}`
 
 /**
- * The tabs after Details, in order: the files the piece on screen made, then its answer when it is a
- * document, minus what you closed. A file kept open from other work (`kept`) comes last, so
- * following newer work leaves it where it is.
+ * The tabs after Details, in order: the answer of the piece on screen when it is a document, named
+ * by who gave it so it never reads as a file, then the files it made, minus what you closed. A file
+ * kept open from other work (`kept`) comes last, so following newer work leaves it where it is.
  */
 export function madeTabs({ runId, files, answer, kept, closed }: {
   runId: string | null
   files: readonly { file: FileToRead; label: string; kind?: string; lead?: boolean }[]
-  answer: { title: string; hint: string } | null
+  answer: { by: string | null; name: string; title: string } | null
   kept: { file: FileToRead; label: string } | null
   closed: ReadonlySet<string>
 }): MadeTab[] {
   const open = (tab: PaneTab) => !closed.has(closedKey(runId, tab))
-  const tabs: MadeTab[] = files
-    .map(({ file, label, kind, lead }) => ({ tab: fileTab(file.path), label, hint: file.path, file, kind, lead }))
-    .filter(({ tab }) => open(tab))
-  if (answer && open('answer')) tabs.push({ tab: 'answer', label: answer.title, hint: answer.hint, file: null, lead: true })
+  const tabs: MadeTab[] = answer && open('answer') ? [{ tab: 'answer', label: answer.name, hint: answer.title, file: null, lead: true, ...(answer.by ? { by: answer.by } : {}) }] : []
+  for (const { file, label, kind, lead } of files) {
+    const tab = fileTab(file.path)
+    if (open(tab)) tabs.push({ tab, label, hint: file.path, file, kind, lead })
+  }
   if (kept && !tabs.some((made) => made.file?.path === kept.file.path)) tabs.push({ tab: fileTab(kept.file.path), label: kept.label, hint: kept.file.path, file: kept.file, kept: true })
   return tabs
 }
@@ -61,11 +64,13 @@ export function paneTabId(tabs: readonly MadeTab[], tab: PaneTab): string {
 
 /**
  * The tab on screen: the one you chose while it is there; else, following the newest work, what it
- * came to once it is done (`done`: finished well), while work in progress shows its record.
+ * came to once it is done (`done`: finished well) — a file it made before its answer about it —
+ * while work in progress shows its record.
  */
 export function shownPaneTab(chosen: PaneTab | null, tabs: readonly MadeTab[], following: boolean, done: boolean): PaneTab {
   if (chosen === 'details' || (chosen && tabs.some((made) => made.tab === chosen))) return chosen
-  return following && done ? tabs.find((made) => made.lead)?.tab ?? 'details' : 'details'
+  if (!following || !done) return 'details'
+  return (tabs.find((made) => made.lead && made.file) ?? tabs.find((made) => made.lead))?.tab ?? 'details'
 }
 
 /** Where closing `closing` leaves you, as a browser does: the tab after it, else before it, else Details. */

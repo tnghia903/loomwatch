@@ -285,6 +285,16 @@
 .tc-pane-ext { flex: none; }
 .tc-pane-tabs .tc-pane-file-close { display: grid; flex: none; place-items: center; width: 18px; height: 18px; margin: 0 5px 0 -1px; padding: 0; border-radius: 4px; color: var(--color-ink-3); }
 .tc-pane-tabs .tc-pane-file-close:hover { background: var(--color-hairline); color: var(--color-ink); }
+/* A long answer reads as the chat's message does, never as a file: its agent's figure and name in
+   the agent's colour, in a bubble pointed as the chat's are, set apart from the files by a hairline.
+   Where the strip is short it gives way first: the files' names can't be guessed, and the figure
+   still says who. */
+.tc-pane-file.said { --hue: var(--color-ink); flex: 0 6 auto; border-radius: 3px 12px 12px 12px; box-shadow: inset 0 0 0 1px var(--color-hairline); }
+.tc-pane-file.said.shown { box-shadow: inset 0 0 0 1px var(--color-accent); }
+.tc-pane-tabs .tc-pane-file.said > button[role='tab'] { gap: 4px; padding-left: 5px; border-radius: 3px 5px 5px 12px; color: color-mix(in srgb, var(--hue) 94%, var(--color-ink)); }
+.tc-pane-tabs .tc-pane-file.said > button[role='tab']:hover { color: var(--color-ink); }
+.tc-pane-file .tc-pane-face { margin: -5px 0 -5px -2px; border-width: 0; }
+.tc-pane-split { flex: none; align-self: stretch; width: 1px; margin: 3px; background: var(--color-hairline); }
 
 /* Over an agent's bench: the reader fills what the long answer would. */
 .agent-file { position: relative; }

@@ -1,8 +1,9 @@
-import { FileText, X } from 'lucide-react'
-import { createElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { X } from 'lucide-react'
+import { createElement, Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { paneTabId, type MadeTab, type PaneTab } from '../../lib/chat/paneTabs'
 import { fileIcon } from '../../lib/files/icons'
+import { AvatarFace } from '../agents/AvatarFace'
 
 /** A file's name with its extension apart, so a narrowed tab still says what kind of file it is. */
 function nameParts(label: string): [string, string] {
@@ -10,12 +11,18 @@ function nameParts(label: string): [string, string] {
   return dot > 0 && label.length - dot <= 6 ? [label.slice(0, dot), label.slice(dot)] : [label, '']
 }
 
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : name.slice(0, 2)).toUpperCase()
+}
+
 /**
- * The pane's tabs: the piece's record, then each thing it made, by its own name and the mark of its
- * kind, each with its own close. When they outgrow the pane the made tabs scroll under Details,
- * which stays put; the side with more fades, and the one on screen is kept in view.
+ * The pane's tabs: the piece's record; its long answer as the chat shows a message, by the figure
+ * and name of who gave it, shaped as a bubble and set apart; then each file it made, by its own name
+ * and the mark of its kind. Each has its own close. When they outgrow the pane the made tabs scroll
+ * under Details, which stays put; the side with more fades, and the one on screen is kept in view.
  */
-export function PaneTabs({ tabs, shown, onShow, onClose }: { tabs: readonly MadeTab[]; shown: PaneTab; onShow: (tab: PaneTab) => void; onClose: (made: MadeTab) => void }) {
+export function PaneTabs({ tabs, shown, hue, onShow, onClose }: { tabs: readonly MadeTab[]; shown: PaneTab; hue: (id: string) => number; onShow: (tab: PaneTab) => void; onClose: (made: MadeTab) => void }) {
   const list = useRef<HTMLDivElement>(null)
   const shownId = paneTabId(tabs, shown)
   const [more, setMore] = useState<{ before: boolean; after: boolean; pin: number }>({ before: false, after: false, pin: 0 })
@@ -59,14 +66,20 @@ export function PaneTabs({ tabs, shown, onShow, onClose }: { tabs: readonly Made
       <button type="button" role="tab" id="tc-pane-details" className="tc-pane-details" aria-selected={shown === 'details'} aria-controls="tc-pane-body" onClick={() => onShow('details')}>Details</button>
       {tabs.map((made, at) => {
         const [stem, extension] = made.file ? nameParts(made.label) : [made.label, '']
+        const said = made.file ? made.label : `${made.label}’s answer`
         return (
-          <span key={made.tab} className={`tc-pane-file${shown === made.tab ? ' shown' : ''}`}>
-            <button type="button" role="tab" id={`tc-pane-made-${at}`} aria-selected={shown === made.tab} aria-controls="tc-pane-body" onClick={() => onShow(made.tab)} title={made.hint}>
-              {createElement(made.file ? fileIcon(made.kind, made.file.path) : FileText, { size: 13, 'aria-hidden': true })}
-              <span className="tc-pane-label"><span className="tc-pane-name">{stem}</span>{extension && <span className="tc-pane-ext">{extension}</span>}</span>
-            </button>
-            <button type="button" className="tc-pane-file-close" onClick={() => onClose(made)} aria-label={`Close ${made.label}`} title="Close"><X size={11} aria-hidden="true" /></button>
-          </span>
+          <Fragment key={made.tab}>
+            <span className={`tc-pane-file${made.file ? '' : ' said'}${shown === made.tab ? ' shown' : ''}`}>
+              <button type="button" role="tab" id={`tc-pane-made-${at}`} className={made.by ? `hue-${hue(made.by)}` : undefined} aria-selected={shown === made.tab} aria-controls="tc-pane-body" onClick={() => onShow(made.tab)} aria-label={made.file ? undefined : said} title={made.file ? made.hint : `${said}\n${made.hint}`}>
+                {made.file
+                  ? createElement(fileIcon(made.kind, made.file.path), { size: 13, 'aria-hidden': true })
+                  : made.by && <AvatarFace id={made.by} hue={hue(made.by)} size={22} fontSize={9} text={initials(made.label)} className="tc-pane-face" />}
+                <span className="tc-pane-label"><span className="tc-pane-name">{stem}</span>{extension && <span className="tc-pane-ext">{extension}</span>}</span>
+              </button>
+              <button type="button" className="tc-pane-file-close" onClick={() => onClose(made)} aria-label={`Close ${said}`} title={`Close ${said}`}><X size={11} aria-hidden="true" /></button>
+            </span>
+            {!made.file && at < tabs.length - 1 && <i className="tc-pane-split" aria-hidden="true" />}
+          </Fragment>
         )
       })}
     </div>
