@@ -1878,7 +1878,7 @@ async fn each_turn_counts_its_own_tool_calls() {
     let sink = Arc::new(Recorded::default());
     let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
     config.max_tool_calls = 2;
-    config.warn_at_tool_calls = Some(1);
+    config.warn_at_percent = 50;
     let mut session = Session::open(
         config,
         Provider::Demo(demo.clone()),
@@ -1923,7 +1923,7 @@ async fn a_tool_result_near_the_limit_says_how_many_calls_are_left() {
     ]);
     let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
     config.max_tool_calls = 10;
-    config.warn_at_tool_calls = Some(4);
+    config.warn_at_percent = 40;
     let mut session = Session::open(
         config,
         Provider::Demo(demo.clone()),
@@ -1992,7 +1992,7 @@ async fn a_warning_a_summary_replaced_still_holds() {
     let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
     config.context_window = Some(1000);
     config.max_tool_calls = 10;
-    config.warn_at_tool_calls = Some(2);
+    config.warn_at_percent = 20;
     let mut session = Session::open(
         config,
         Provider::Demo(demo.clone()),
