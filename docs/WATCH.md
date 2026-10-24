@@ -90,10 +90,12 @@ skills (a required one it never had, once the run is over, leaves the mark dashe
 mark opens its list under the row: the pages read by site, marked when the team's answer links
 them, and what each search found; each skill's receipt; or the calls, each opening its record.
 The request and the answer themselves are read in the chat, not again here. What the work made
-is a tab of the pane beside the chat, after **Details**: each file its answer names that LoomWatch
-can show and that is on this computer, by its name, then a long answer (or a titled one past a few
-lines), by its own title. In the chat such an answer stays short, a card with its title, opening
-words and length, whose **Open** shows its tab. Once the work has finished well, the pane following
+is a tab of the pane beside the chat, after **Details**: first a long answer (or a titled one past
+a few lines), as the chat shows a message, by the figure and name of the agent who gave it, in a
+bubble, with its title on hover; then, past a thin line, each file its answer names that
+LoomWatch can show and that is on this computer, by its name and the mark of its kind. In the chat
+such an answer stays short, a card with its title, opening words and length, whose **Open** shows
+its tab. Once the work has finished well, the pane following
 the newest work switches to what it came to: the first page, document, sheet or picture it wrote,
 else its long answer. Code, and files it only read, wait as tabs; work that stopped keeps its
 record on screen. Each tab has its own ×, and closing the one on screen shows the next; a tab
