@@ -90,9 +90,28 @@ winreg = "0.56"
 [build-dependencies]
 winresource = { version = "0.1.34", default-features = false }
 
+# The editing keys at the notch are an `AppKit` menu, which is made only on the main thread, where
+# libtest runs no test: their test is a program of its own, which presses keys at the menu.
+[[test]]
+name = "edit_keys"
+harness = false
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "NSMenu",
+  "objc2-core-graphics",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+  "std",
+  "CGEvent",
+  "CGEventTypes",
+  "CGRemoteOperation",
+] }
+
 # The workspace's lints, except that `unsafe` code is denied rather than forbidden, so that the one
 # module that calls `AppKit` and `WebKit` for the island at the notch (`notch_panel.rs`, ADR 0083)
-# can allow it for itself. Everything else in the workspace still forbids it.
+# can allow it for itself, as can the test of the editing keys there. Everything else in the
+# workspace still forbids it.
 [lints.rust]
 unsafe_code = "deny"
 
