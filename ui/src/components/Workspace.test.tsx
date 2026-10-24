@@ -259,34 +259,68 @@ describe('Workspace', () => {
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
       // As a browser does, the next tab takes its place.
       fireEvent.click(within(pane).getByRole('button', { name: 'Close market.md' }))
-      expect(tabs()).toEqual(['Details', 'Market brief'])
-      expect(within(pane).getByRole('tab', { name: 'Market brief' })).toHaveAttribute('aria-selected', 'true')
+      expect(tabs()).toEqual(['Details', 'Reviewer'])
+      expect(within(pane).getByRole('tab', { name: 'Reviewer’s answer' })).toHaveAttribute('aria-selected', 'true')
+      // Nothing after the answer to set it apart from.
+      expect(pane.querySelector('.tc-pane-split')).toBeNull()
       await new Promise((resolve) => setTimeout(resolve, 50))
-      expect(tabs()).toEqual(['Details', 'Market brief'])
+      expect(tabs()).toEqual(['Details', 'Reviewer'])
       fireEvent.click(await screen.findByRole('button', { name: 'Read market.md here' }))
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
-      expect(tabs()).toEqual(['Details', 'market.md', 'Market brief'])
+      expect(tabs()).toEqual(['Details', 'Reviewer', 'market.md'])
     })
 
-    // A long answer stays a short card in the chat and is read here, named by its own title.
-    it('reads a long answer as a tab named by its title, after the files, opened again from its card', async () => {
+    // A long answer stays a short card in the chat and is read here. The owner: "there is no way to
+    // tell what is the artifact, what is the long message". Its tab is the chat's message: who gave
+    // it, by figure and name, set apart before the files; its title is said on hover.
+    it('reads a long answer as a tab named by who gave it, before the files, opened again from its card', async () => {
       const report = `# Market brief\n\nThe brief is in \`${MADE}\`.\n\n${'The market moved again today. '.repeat(40)}`
       const run = finished('run-2', report)
       serve([work(run)], [run])
       renderWorkspace()
       const pane = await openPane()
+      // The pane still opens on the file the work made, though the answer's tab comes first.
       await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
-      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'market.md', 'Market brief'])
+      expect(within(pane).getAllByRole('tab').map((each) => each.textContent)).toEqual(['Details', 'Reviewer', 'market.md'])
       expect(within(pane).queryByRole('tab', { name: 'Answer' })).not.toBeInTheDocument()
-      fireEvent.click(within(pane).getByRole('tab', { name: 'Market brief' }))
+      const answer = within(pane).getByRole('tab', { name: 'Reviewer’s answer' })
+      expect(answer).toHaveAttribute('title', 'Reviewer’s answer\nMarket brief')
+      // The figure of who said it, never a file's mark; a file has its mark and no figure.
+      expect(answer.querySelector('.chat-avatar.has-figure img')).not.toBeNull()
+      // Reviewer's own figure, as the chat shows beside its answer.
+      const inChat = document.querySelector('.tc-answer .chat-gutter .chat-avatar')
+      expect(answer.querySelector('.chat-avatar')?.className.replace(' tc-pane-face', '')).toBe(inChat?.className)
+      expect(answer.querySelector('.chat-avatar img')?.getAttribute('src')).toBe(inChat?.querySelector('img')?.getAttribute('src'))
+      expect(answer.querySelector('svg')).toBeNull()
+      const file = within(pane).getByRole('tab', { name: 'market.md' })
+      expect(file.querySelector('svg')).not.toBeNull()
+      expect(file.querySelector('.chat-avatar')).toBeNull()
+      // Set apart: a hairline between what was said and what was made.
+      expect(answer.parentElement?.nextElementSibling).toHaveClass('tc-pane-split')
+      expect(answer.parentElement?.nextElementSibling?.nextElementSibling).toContainElement(file)
+      fireEvent.click(answer)
       expect(await within(pane).findByRole('heading', { name: 'Market brief', level: 1 })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /^Market brief, .* Showing beside the chat$/ })).toHaveAttribute('aria-pressed', 'true')
-      expect(within(pane).getByRole('tab', { name: 'Market brief' })).toHaveAttribute('title', 'Reviewer’s answer')
-      fireEvent.click(within(pane).getByRole('button', { name: 'Close Market brief' }))
-      expect(within(pane).queryByRole('tab', { name: 'Market brief' })).not.toBeInTheDocument()
+      // Its close says what it closes, never "remove Reviewer".
+      expect(within(pane).getByRole('button', { name: 'Close Reviewer’s answer' })).toHaveAttribute('title', 'Close Reviewer’s answer')
+      fireEvent.click(within(pane).getByRole('button', { name: 'Close Reviewer’s answer' }))
+      expect(within(pane).queryByRole('tab', { name: 'Reviewer’s answer' })).not.toBeInTheDocument()
+      expect(pane.querySelector('.tc-pane-split')).toBeNull()
       expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
       fireEvent.click(screen.getByRole('button', { name: /^Market brief, .* Open$/ }))
-      expect(within(pane).getByRole('tab', { name: 'Market brief' })).toHaveAttribute('aria-selected', 'true')
+      expect(within(pane).getByRole('tab', { name: 'Reviewer’s answer' })).toHaveAttribute('aria-selected', 'true')
+    })
+
+    // The chat names an agent since taken off the team by its id beside its answer; so does the tab.
+    it('names a long answer from an agent no longer on the team as the chat does', async () => {
+      const report = `# Market brief\n\n${'The market moved again today. '.repeat(40)}`
+      const run = { ...finished('run-2', report), responder: 'editor', agentIds: ['researcher', 'editor'] }
+      serve([work(run)], [run])
+      renderWorkspace()
+      const pane = await openPane()
+      const tab = await within(pane).findByRole('tab', { name: 'editor’s answer' })
+      expect(tab).toHaveTextContent('editor')
+      expect(tab).toHaveAttribute('title', 'editor’s answer\nMarket brief')
     })
 
     // A newcomer's reading: the pane should land on the result, not on a file the work only read.
@@ -1543,6 +1577,44 @@ describe('switching workspace tab closes the node inspector', () => {
     renderWorkspace('run-1')
     fireEvent.click(await screen.findByRole('button', { name: 'Agent details' }))
     await waitFor(() => expect(nodePanel()).toBeInTheDocument())
+    restore()
+  })
+
+  // The lane lives in the run's Details. The panel opened in the canvas's layer, under Details, so
+  // "Agent details" seemed to do nothing, and the panel showed only once Details was closed.
+  it('opens the panel over the run’s Details, inside the window', async () => {
+    const restore = selectionBackedByState(null)
+    sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+    renderWorkspace('run-1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Agent details' }))
+    await waitFor(() => expect(nodePanel()).toBeInTheDocument())
+    const panel = nodePanel()!
+    const details = screen.getByRole('complementary', { name: 'Details of this piece of work' })
+    // The header's menus (☰, the needs-you tray) open in its layer, a Tailwind z-40 class.
+    const header = Number(/\bz-(\d+)\b/.exec(document.querySelector('.workspace-chrome')!.className)![1])
+    for (const viewport of [DESKTOP, PHONE]) {
+      const z = Number(cascaded(panel, 'z-index', viewport))
+      expect(z).toBeGreaterThan(Number(cascaded(details, 'z-index', viewport)))
+      expect(z).toBeLessThan(header)
+      expect(cascaded(panel, 'max-height', viewport)).not.toBeNull()
+      expect(cascaded(panel, ['overflow', 'overflow-y'], viewport)).toBe('auto')
+    }
+    // A phone's Details takes the whole screen: the panel is a sheet across its bottom.
+    expect(cascaded(panel, 'position', PHONE)).toBe('fixed')
+    expect(cascaded(panel, 'top', PHONE)).toBe('auto')
+    expect(cascaded(panel, 'width', PHONE)).toBe('auto')
+    restore()
+  })
+
+  it('closes the panel with the Details it was opened from', async () => {
+    const restore = selectionBackedByState(null)
+    sessionState.events = [event(0, 'process', { phase: 'spawned', pid: 1 })]
+    renderWorkspace('run-1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Agent details' }))
+    await waitFor(() => expect(nodePanel()).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Close details' }))
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Details of this piece of work' })).not.toBeInTheDocument())
+    expect(nodePanel()).not.toBeInTheDocument()
     restore()
   })
 })

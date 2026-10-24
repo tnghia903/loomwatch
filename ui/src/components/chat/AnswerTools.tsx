@@ -6,9 +6,10 @@ import type { RunRecord } from '../../lib/runs/client'
 import { useNotionSend, type NotionSendState } from '../../lib/notion/useNotionSend'
 import type { AnswerCheck } from '../../lib/story/answerCheck'
 import type { ReceiptLine } from '../../lib/story/receipt'
-import type { VerdictTone } from '../../lib/story/verdict'
+import { lineWords, type VerdictTone } from '../../lib/story/verdict'
 import { NotionOffer, NotionOutcome } from '../run/NotionSend'
 import { FileCard } from '../ui/FileCard'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /** Each verdict differs by glyph as well as colour; `live` wears a dot from CSS instead. */
 const VERDICT_ICON: Record<VerdictTone, ReactNode> = {
@@ -148,7 +149,7 @@ function Review({ check, reviewed, onClose, onReviewed, onOpenFinding }: { check
 
 /** The review's lines, each a click from its record or from the work of the agent it came from. */
 function Lines({ lines, onOpen }: { lines: readonly ReceiptLine[]; onOpen: (line: ReceiptLine) => void }) {
-  return <ul>{lines.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${line.text}`} title={line.evidenceId ? 'Open the record' : 'Show this agent’s work'} onClick={() => onOpen(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul>
+  return <ul>{lines.map((line, index) => <li key={index} className={`tone-${line.tone}`}><span>{line.markdown ? <InlineMarkdown>{line.text}</InlineMarkdown> : line.text}</span>{(line.evidenceId || line.agentId) && <button type="button" className="receipt-open" aria-label={`Open: ${lineWords(line)}`} title={line.evidenceId ? 'Open the record' : 'Show this agent’s work'} onClick={() => onOpen(line)}><ArrowRight size={12} aria-hidden="true" /></button>}</li>)}</ul>
 }
 
 /** A dialog shown as a modal from the moment it mounts, so Esc and the backdrop work as expected. */

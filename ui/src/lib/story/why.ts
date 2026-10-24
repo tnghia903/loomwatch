@@ -81,6 +81,13 @@ export function whyItFailed(output: string, kind: EvidenceKind): Why {
   if (text.includes('the turn was cancelled')) return known('It was stopped when the run was stopped.')
   const stopped = /stopped after (\d+) seconds without finishing/.exec(text)
   if (stopped) return known(`It ran for ${stopped[1]} seconds without finishing, so it was stopped.`)
+  // What the agent's AI model sent, as LoomWatch found it.
+  if (text.includes('reached the length limit of one reply')) return known('Its reply hit the length limit and was cut off.')
+  if (/weren't a JSON object/.test(text)) return known('What it sent came through garbled.')
+  const required = /^`([\w.]+)` is required/m.exec(text)?.[1]
+  if (required === 'path') return known('It didn’t say which file.')
+  if (required === 'command') return known('It didn’t say what to run.')
+  if (required) return known('It left out a detail it needed.')
 
   // The web.
   const certificate = /CERTIFICATE_VERIFY_FAILED|certificate verify failed|unable to get local issuer certificate|SSL: /i.test(text)

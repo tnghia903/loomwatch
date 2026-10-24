@@ -289,8 +289,9 @@ stream read it. Nothing is guessed from a title.
 ### 🧰 Skills, folders and files
 
 Add skills from skills.sh, ClawHub or GitHub, or copy in the ones your AI apps already have. Give an
-agent any folder or file: PDFs, Word, Excel and PowerPoint files are read as text, with nothing to
-install, and an agent on a model that can see pictures looks at screenshots and photos. LoomWatch
+agent any folder or file: PDFs, Word, Excel and PowerPoint files, and emails saved from Mail, are
+read as text, with nothing to install, and an agent on a model that can see pictures looks at
+screenshots and photos. LoomWatch
 delivers each one to the agents you choose, and turns off what you take off the canvas.
 
 </td>
@@ -427,10 +428,15 @@ To message one of your agents from any app, press **⌃⌥Space** (Control-Optio
 you are on; **Tab** switches to another of your agents, and its figure opens its workbench. When you
 send, the agent shows at its workbench for a moment, then waits at the top of the screen while it
 works: point at it to watch. Its answer drops down there; **Copy** keeps its headings, lists and
-links when you paste. To hand it a file, a picture, a link or some text, drag it to the top middle
-of the screen. The box opens with the agent you last wrote to. If that agent asks one of your teams
-for help, the team starts only when you press **Start**, and that run costs what any run of the team
-costs. Untick **Show at the notch** in the menu to turn all of this off.
+links when you paste. The box opens with the agent you last wrote to.
+
+To hand it a file, a picture, an email from Mail, a link or some text, drag it to the top middle of
+the screen: the box opens to take it and offers a few jobs that fit. iPhone photos go in as JPEGs. A
+file your agent can't open, such as a Pages document or a video, stays out, and the box says what to
+do instead, such as exporting it as a PDF; drop the PDF and it joins what is already there. If your
+agent asks one of your teams for help, the team starts only when you press **Start**, and that run
+costs what any run of the team costs. Untick **Show at the notch** in the menu to turn all of this
+off.
 
 > [!NOTE]
 > LoomWatch is not notarized by Apple yet, so the first time you open it macOS may say it can't
@@ -813,8 +819,8 @@ a folder or a file, select the agent and click **Folder** or **File** under **Gi
   before it starts. Every agent also sees the name and purpose of each skill in LoomWatch, and reads
   one when its work calls for it.
 - A **folder or file** is given to the agent as reference material: a folder's listing and README,
-  or a file's text, read from a PDF, Word, Excel or PowerPoint file too. A scanned PDF has no text
-  to read. The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
+  or a file's text, read from a PDF, Word, Excel or PowerPoint file or an email too. A scanned PDF
+  has no text to read. The agent can also read the folder or file itself. An added file can be up to 25 MB; link a
   folder for anything bigger.
 - A **tool** you connected, such as Todoist or Kiwi.com, lets the agent use that service. Connect one
   in the agent's **Tools it can use** block or in Connections; the agent asks you before each action

@@ -90,10 +90,12 @@ skills (a required one it never had, once the run is over, leaves the mark dashe
 mark opens its list under the row: the pages read by site, marked when the team's answer links
 them, and what each search found; each skill's receipt; or the calls, each opening its record.
 The request and the answer themselves are read in the chat, not again here. What the work made
-is a tab of the pane beside the chat, after **Details**: each file its answer names that LoomWatch
-can show and that is on this computer, by its name, then a long answer (or a titled one past a few
-lines), by its own title. In the chat such an answer stays short, a card with its title, opening
-words and length, whose **Open** shows its tab. Once the work has finished well, the pane following
+is a tab of the pane beside the chat, after **Details**: first a long answer (or a titled one past
+a few lines), as the chat shows a message, by the figure and name of the agent who gave it, in a
+bubble, with its title on hover; then, past a thin line, each file its answer names that
+LoomWatch can show and that is on this computer, by its name and the mark of its kind. In the chat
+such an answer stays short, a card with its title, opening words and length, whose **Open** shows
+its tab. Once the work has finished well, the pane following
 the newest work switches to what it came to: the first page, document, sheet or picture it wrote,
 else its long answer. Code, and files it only read, wait as tabs; work that stopped keeps its
 record on screen. Each tab has its own ×, and closing the one on screen shows the next; a tab
@@ -107,7 +109,11 @@ and stays in the chat. Each part asked about keeps a marker stroke and, after it
 face of the agent asked: it types while the agent works and shows a gold dot until you open the
 answer here (remembered in this browser). Ask several agents about the same words and each gets
 its own bubble after them, stacked in the order you asked; ask the same agent again and its bubble
-shows the newer answer. Pointing at a bubble brings it to the front with the agent's card, as its
+shows the newer answer, under what you asked it before and what it said. **Reply** under an answer
+puts the words you marked back in the message box, addressed to the agent that answered, so your
+follow-up is about that part too; its answer shows under the first one. In the chat, every answer
+an agent gave you has **Reply** under it when you point at it: under an answer about a marked part
+it does the same, and under any other it quotes the answer. Pointing at a bubble brings it to the front with the agent's card, as its
 face in the chat does, and what you asked it. Ask about words that overlap words asked about
 before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
 answer then opens at the newer words and says which words it is about. A bubble opens its own

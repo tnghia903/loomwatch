@@ -44,6 +44,8 @@ interface ActivityPanelProps {
   ownerLabel: string
   /** The same agent's calls, as the receipt is given them: what tells a failure the agent put right. */
   calls: readonly Evidence[]
+  /** The agent's part is done: what a failed call got it nothing of is missing from its answer. */
+  finished: boolean
   onInspectEvidence: (id: string) => void
   onClose: () => void
 }
@@ -52,20 +54,21 @@ interface ActivityPanelProps {
 // visible and Escape/Close returns focus to the card that opened it.
 //
 // It reads the call the way a newcomer would ask about it: what the agent tried, how it went (the
-// crew's face, then a word), why it didn't work, and what the agent did next. The call as recorded
+// crew's face, then a word), why it didn't work, what the agent did next, and what that did to the
+// result. The call as recorded
 // (its command, output and events) waits under Technical details, open from the start only when
 // its output doesn't say why in plain words.
-export function ActivityPanel({ evidence, ownerLabel, calls, onInspectEvidence, onClose }: ActivityPanelProps) {
+export function ActivityPanel({ evidence, ownerLabel, calls, finished, onInspectEvidence, onClose }: ActivityPanelProps) {
   const closeButton = useRef<HTMLButtonElement>(null)
   useEffect(() => { closeButton.current?.focus() }, [evidence.id])
   const agent = ownerLabel.split(' · ')[0]
-  const attempt = readAttempt(agent, evidence, calls)
+  const attempt = readAttempt(agent, evidence, calls, finished)
   const look = LOOK[attempt.outcome]
   const mend = attempt.mend
   const said = evidence.kind === 'delegation' ? messageWords(evidence) : []
   const output = outputText(evidence)
   const at = new Date(evidence.ts)
-  const rows = Boolean(attempt.targets || attempt.why || attempt.mend || attempt.then)
+  const rows = Boolean(attempt.targets || attempt.why || attempt.mend || attempt.then || attempt.effect)
   return (
     <aside className={`panel right top e1 lw-activity tone-${look.tone}`} aria-labelledby="activity-title" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <header className="act-head">
@@ -93,6 +96,7 @@ export function ActivityPanel({ evidence, ownerLabel, calls, onInspectEvidence, 
             </dd></>
           )}
           {!mend && attempt.then && <><dt>Then</dt><dd className="act-then">{attempt.then}</dd></>}
+          {attempt.effect && <><dt>Effect</dt><dd>{attempt.effect}</dd></>}
         </dl>
       )}
       {/* A message to another agent reads as what was said, before the call that carried it. */}

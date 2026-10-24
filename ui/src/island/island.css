@@ -280,8 +280,13 @@ body {
 .island-field:disabled { opacity: .5; }
 .island-sent { grid-column: 2 / -1; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 .island-sent-failed { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
-.island-sent-failed .island-problem { display: flex; gap: 6px; align-items: baseline; color: var(--color-ink); }
-.island-sent-failed .island-problem i { font-style: normal; font-weight: 700; color: var(--color-alert); }
+/* A problem said in ink beside the failed mark: a message that didn't go, and what a drop left out
+   and why (one line for each reason). Long names wrap rather than run off the island. */
+:is(.island-sent-failed .island-problem, .island-away) { display: flex; gap: 6px; align-items: flex-start; color: var(--color-ink); }
+:is(.island-sent-failed .island-problem, .island-away) > svg { flex: none; margin-top: 2px; }
+:is(.island-sent-failed .island-problem, .island-away) > span { min-width: 0; overflow-wrap: anywhere; }
+.island-away { grid-column: 2 / -1; font: 400 12px/16px var(--font-sans); }
+.island-away > span { white-space: pre-line; }
 /* ---- The pinned agent's slot: a gold lip, and its eyes just over it ---- */
 .island-slot-open { position: absolute; inset: 0; pointer-events: none; }
 .island-slot-eyes { position: absolute; left: calc(50% - 26px); bottom: 2px; width: 52px; height: 52px; animation: island-rise var(--t-entrance) var(--ease-out) both; }

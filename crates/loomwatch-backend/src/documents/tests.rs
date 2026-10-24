@@ -62,6 +62,7 @@ fn kinds_come_from_the_extension_or_the_first_bytes() {
     assert_eq!(Kind::of(Path::new("shot.jpeg")), Some(Kind::Picture));
     assert_eq!(Kind::of(Path::new("old.doc")), Some(Kind::OldOffice));
     assert_eq!(Kind::of(Path::new("IMG_0001.HEIC")), Some(Kind::Heic));
+    assert_eq!(Kind::of(Path::new("Rent for March.eml")), Some(Kind::Email));
     let unnamed_pdf = folder.file("scan", &minimal_pdf(&["x"]));
     assert_eq!(Kind::of(&unnamed_pdf), Some(Kind::Pdf));
     let unnamed_png = folder.file("shot", &png(2, 2, false));
@@ -472,5 +473,134 @@ fn a_reader_is_bounded_in_time_and_size() {
     assert_eq!(
         bounded(&quick, Duration::from_secs(10), 1000).as_deref(),
         Ok(&b"Quarterly revenue rose"[..])
+    );
+}
+
+// Emails ------------------------------------------------------------------------------------------
+
+fn b64(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// A message as Mail writes one to a file: a text and an HTML version of the same words, the text
+/// one quoted-printable with soft line breaks and an accented letter.
+const RENT_EMAIL: &str = "From: Lan Nguyen <lan@example.com>\r
+To: Maya <maya@example.com>, landlord@example.com\r
+Cc: Minh Tran <minh@example.com>\r
+Date: Sat, 24 Oct 2026 10:31:00 +0700\r
+Subject: Rent for March\r
+MIME-Version: 1.0\r
+Content-Type: multipart/alternative; boundary=\"Apple-Mail=_A1\"\r
+\r
+--Apple-Mail=_A1\r
+Content-Type: text/plain; charset=utf-8\r
+Content-Transfer-Encoding: quoted-printable\r
+\r
+Hi Maya,=0A=0AThe rent for March goes up to 1,450 a month, from the caf=C3=A9 =\r
+side of the building.=20\r
+\r
+Lan\r
+--Apple-Mail=_A1\r
+Content-Type: text/html; charset=utf-8\r
+Content-Transfer-Encoding: quoted-printable\r
+\r
+<html><body><p>Hi Maya,</p><p>The rent for March goes up to 1,450 a month.</p></body></html>\r
+--Apple-Mail=_A1--\r
+";
+
+#[test]
+fn an_email_reads_as_who_wrote_to_whom_when_its_subject_and_its_words() {
+    let folder = Folder::new();
+    let text = text_of(&folder.file("Rent for March.eml", RENT_EMAIL.as_bytes()));
+    assert!(text.starts_with(
+        "From: Lan Nguyen <lan@example.com>\nTo: Maya <maya@example.com>, landlord@example.com\nCc: Minh Tran <minh@example.com>\nDate: Sat, 24 Oct 2026 10:31:00 +0700\nSubject: Rent for March\n\nHi Maya,\n\nThe rent for March goes up to 1,450 a month, from the café side of the building."
+    ), "{text}");
+    // The words once, from the text version: no codes, no markup, no MIME.
+    assert!(
+        !text.contains("=20") && !text.contains("=C3") && !text.contains("<p>"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("Apple-Mail") && !text.contains("Content-Type"),
+        "{text}"
+    );
+    assert_eq!(text.matches("The rent for March").count(), 1, "{text}");
+}
+
+#[test]
+fn an_email_in_base64_and_encoded_headers_reads_in_its_own_language() {
+    let folder = Folder::new();
+    // As Gmail sends Vietnamese: the name and subject as encoded words, the body in base64.
+    let body = "Chào anh,\n\nCuộc họp chuyển sang thứ Sáu lúc 9 giờ sáng.\n\nTrân trọng,\nHương";
+    let email = format!(
+        "From: =?UTF-8?B?{}?= <huong@example.com>\r\nTo: tnghia@example.com\r\nSubject: =?UTF-8?B?{}?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+        b64("Phạm Thu Hương".as_bytes()),
+        b64("Lịch họp tuần sau".as_bytes()),
+        b64(body.as_bytes())
+    );
+    let text = text_of(&folder.file("Lich hop.eml", email.as_bytes()));
+    assert!(
+        text.contains("From: Phạm Thu Hương <huong@example.com>"),
+        "{text}"
+    );
+    assert!(text.contains("Subject: Lịch họp tuần sau"), "{text}");
+    assert!(
+        text.contains("Cuộc họp chuyển sang thứ Sáu lúc 9 giờ sáng."),
+        "{text}"
+    );
+    // A Japanese message in Shift_JIS, one of the charsets read through `full_encoding`.
+    let japanese = format!(
+        "From: tanaka@example.co.jp\r\nSubject: =?ISO-2022-JP?B?{}?=\r\nContent-Type: text/plain; charset=Shift_JIS\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+        b64(b"\x1b$BF|K\\8l\x1b(B"),
+        b64(b"\x93\xfa\x96\x7b\x8c\xea\x82\xcc\x83\x81\x81\x5b\x83\x8b")
+    );
+    let text = text_of(&folder.file("Japanese.eml", japanese.as_bytes()));
+    assert!(text.contains("Subject: 日本語"), "{text}");
+    assert!(text.contains("日本語のメール"), "{text}");
+}
+
+#[test]
+fn an_html_only_email_reads_as_its_text() {
+    let folder = Folder::new();
+    let email = "From: news@example.com\r\nSubject: October news\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><head><style>p { color: red }</style></head><body><h1>October</h1><p>Our office moves to <b>12 Lake Road</b>.</p><ul><li>Parking is free</li></ul></body></html>\r\n";
+    let text = text_of(&folder.file("October news.eml", email.as_bytes()));
+    assert!(text.contains("Our office moves to 12 Lake Road."), "{text}");
+    assert!(text.contains("Parking is free"), "{text}");
+    assert!(
+        !text.contains('<') && !text.contains("color: red"),
+        "{text}"
+    );
+}
+
+#[test]
+fn an_email_names_its_attachments_and_reads_a_forwarded_message_in_its_place() {
+    let folder = Folder::new();
+    let pdf = minimal_pdf(&["Invoice 2041: 1,450"]);
+    let forwarded = "From: landlord@example.com\r\nTo: lan@example.com\r\nSubject: New rent\r\nContent-Type: text/plain\r\n\r\nFrom March the rent is 1,450.\r\n";
+    let email = format!(
+        "From: lan@example.com\r\nTo: maya@example.com\r\nSubject: Fwd: New rent\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nSee below, and the invoice.\r\n--b1\r\nContent-Type: application/pdf; name=\"Invoice 2041.pdf\"\r\nContent-Disposition: attachment; filename=\"Invoice 2041.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n--b1\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\n{forwarded}--b1\r\nContent-Type: image/png\r\nContent-Disposition: inline\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n--b1--\r\n",
+        b64(&pdf),
+        b64(&png(2, 2, false))
+    );
+    let text = text_of(&folder.file("Fwd New rent.eml", email.as_bytes()));
+    assert!(text.contains("See below, and the invoice."), "{text}");
+    // The forwarded message, read where it was attached.
+    assert!(text.contains("--- Attached message ---\nFrom: landlord@example.com\nTo: lan@example.com\nSubject: New rent\n\nFrom March the rent is 1,450.\n--- End of attached message ---"), "{text}");
+    // The PDF named, with its size, and not read; the unnamed picture in the words not listed.
+    assert!(text.contains("Attached files (named here; their contents aren't part of this text):\n- Invoice 2041.pdf ("), "{text}");
+    assert!(
+        !text.contains("Invoice 2041: 1,450") && !text.contains("JVBER"),
+        "{text}"
+    );
+    assert_eq!(text.matches("\n- ").count(), 1, "{text}");
+}
+
+#[test]
+fn a_file_named_eml_that_isnt_an_email_is_said_plainly() {
+    let folder = Folder::new();
+    let damaged = folder.file("broken.eml", &[0xff, 0xfe, 0x00, 0x01]);
+    assert_eq!(
+        refusal(&damaged),
+        "broken.eml isn't an email LoomWatch can read: it may be damaged."
     );
 }

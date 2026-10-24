@@ -387,6 +387,8 @@
   color: var(--color-ink);
 }
 .tc-decision p { margin: 0; }
+/* Gold on the gold tint is 4.45:1 in light: a link an agent wrote keeps ink words, its gold the underline. */
+.tc-decision :is(.tc-check-misses, .tc-context) a:not(.md-source) { color: var(--color-ink); text-decoration-color: var(--color-accent); }
 .tc-handover { padding: 8px 10px; border-radius: 10px; background: var(--color-panel-solid); border: 1px solid var(--color-hairline); }
 .tc-handover summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--color-ink-2); }
 .tc-handover .chat-text { margin-top: 6px; max-height: 18em; overflow: auto; font-size: 13px; }
@@ -567,6 +569,14 @@
 .tc-details-head .btn { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; }
 .tc-details-body { position: relative; min-height: 0; }
 .tc-details .delivery-lane, .delivery-shown .tc-details .delivery-lane { position: absolute; inset: 0; }
+/* A card's "Agent details" opens the agent panel over Details, in Provenance's place: under the
+   header and scrolling inside the window. In the canvas's layer it opened behind Details, so the
+   link seemed to do nothing. Above Details (30), below the header (z-40), whose menus open over
+   it. Phones get Provenance's full-width sheet at the bottom. */
+.lw-shell.delivery-shown .node-inspector { z-index: 35; top: var(--lw-below-header); right: var(--lw-panel-inset); max-height: calc(100dvh - var(--lw-below-header) - var(--lw-panel-inset)); overflow-x: hidden; overflow-y: auto; }
+@media (max-width: 767px) {
+  .lw-shell.delivery-shown .node-inspector { position: fixed; top: auto; left: var(--sp-3); right: var(--sp-3); bottom: var(--sp-3); width: auto; max-height: 60vh; }
+}
 .details-open .lw-composer-notices { left: auto !important; right: 0 !important; transform: none !important; width: 100% !important; bottom: 12px !important; }
 @media (min-width: 1100px) {
   .details-open .lw-composer-notices { width: calc(100% - var(--tc-chat-w)) !important; }
@@ -936,6 +946,11 @@ a mark.tc-find-hit { box-shadow: none; }
 @media (hover: hover) {
   .chat-reply { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
   .chat-msg:hover .chat-reply, .chat-msg:focus-within .chat-reply { opacity: 1; }
+}
+/* A finger's worth to press, with the row drawn as it is. */
+@media (pointer: coarse) {
+  .chat-reply { position: relative; }
+  .chat-reply::after { content: ''; position: absolute; inset: -14px -4px; }
 }
 .tc-replying {
   display: flex;

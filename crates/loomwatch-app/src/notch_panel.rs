@@ -8,29 +8,34 @@
 //! tested; what is left here is placing the panels, passing the pointer, and carrying messages.
 #![allow(unsafe_code)]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::time::Instant;
 
-use block2::RcBlock;
-use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, ProtocolObject};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use block2::{DynBlock, RcBlock};
+use objc2::rc::{Retained, Weak};
+use objc2::runtime::{AnyClass, AnyObject, ProtocolObject};
+use objc2::{
+    ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
+};
 use objc2_app_kit::{
     NSApplication, NSApplicationDidChangeScreenParametersNotification,
     NSApplicationPresentationOptions, NSAutoresizingMaskOptions, NSBackingStoreType, NSColor,
-    NSEvent, NSEventMask, NSMainMenuWindowLevel, NSPanel, NSPasteboard, NSPasteboardNameDrag,
-    NSPasteboardTypeHTML, NSPasteboardTypeString, NSResponder, NSScreen, NSView, NSWindow,
-    NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
+    NSDraggingInfo, NSEvent, NSEventMask, NSFilePromiseReceiver, NSMainMenuWindowLevel, NSPanel,
+    NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeHTML, NSPasteboardTypeString, NSResponder,
+    NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
     NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
 };
 use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSNumber, NSObject, NSObjectNSKeyValueCoding,
-    NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL, NSURLRequest, ns_string,
+    NSArray, NSDictionary, NSError, NSNotification, NSNotificationCenter, NSNumber, NSObject,
+    NSObjectNSKeyValueCoding, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSSize,
+    NSString, NSURL, NSURLRequest, ns_string,
 };
 use objc2_web_kit::{
-    WKScriptMessage, WKScriptMessageHandler, WKUserContentController, WKWebView,
+    WKFrameInfo, WKNavigationDelegate, WKOpenPanelParameters, WKScriptMessage,
+    WKScriptMessageHandler, WKUIDelegate, WKUserContentController, WKWebView,
     WKWebViewConfiguration,
 };
 use tray_icon::menu::{ContextMenu, Menu};
@@ -44,6 +49,10 @@ pub enum IslandEvent {
     Page {
         from: u32,
         message: FromPage,
+    },
+    /// The page of one screen's island is gone: `WebKit` ended its process.
+    PageGone {
+        from: u32,
     },
     /// The pointer moved.
     Pointer,
@@ -171,6 +180,23 @@ impl NotchPanels {
             island.send(&ToPage::Live { on: island.live });
             island.send(&ToPage::News { on: news });
         }
+    }
+
+    /// One screen's page is gone, and its panel shows nothing. Whatever the page was doing ends
+    /// with it: the keyboard goes back, so the island on the screen the pointer goes to can be the
+    /// live one again, and the page loads again, at once or, if it keeps ending, after a pause.
+    pub fn page_gone(&mut self, from: u32) {
+        let origin = self.origin.clone();
+        if let Some(island) = self.island(from) {
+            island.give_back_keyboard();
+            island.forget_page();
+            let wait = island.reloads.ended(Instant::now());
+            match origin {
+                Some(origin) if wait.is_zero() => island.load(&origin),
+                _ => island.reload_at = Some(Instant::now() + wait),
+            }
+        }
+        self.pointer();
     }
 
     /// Measure the screens again: while shown, a panel hanging from the top of each, the one on the
@@ -376,6 +402,14 @@ impl NotchPanels {
             self.tell_all(&ToPage::Away { away });
         }
         self.check_full_screen();
+        if let Some(origin) = self.origin.clone() {
+            let now = Instant::now();
+            for island in &mut self.islands {
+                if island.reload_at.is_some_and(|at| at <= now) {
+                    island.load(&origin);
+                }
+            }
+        }
     }
 
     /// The app's menu, where one screen's island was right-clicked or its ⋯ pressed.
@@ -468,6 +502,9 @@ struct ScreenIsland {
     place: Option<ToPage>,
     /// The page has loaded and listens.
     ready: bool,
+    /// When the page loads again after its process ended, if it is to wait.
+    reloads: island::Reloads,
+    reload_at: Option<Instant>,
 }
 
 impl ScreenIsland {
@@ -513,7 +550,7 @@ impl ScreenIsland {
                     ns_string!("island"),
                 );
             let web: Retained<IslandWebView> = msg_send![
-                super(IslandWebView::alloc(mtm).set_ivars(())),
+                super(IslandWebView::alloc(mtm).set_ivars(WebIvars::default())),
                 initWithFrame: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(frame.width, frame.height)),
                 configuration: &*configuration,
             ];
@@ -521,6 +558,11 @@ impl ScreenIsland {
                 Some(&NSNumber::numberWithBool(false)),
                 ns_string!("drawsBackground"),
             );
+            // The bridge hears when the page's process ends, and the web view answers the page's
+            // file picker with files it took from a drop itself. Both are held for as long as the
+            // island, so `WebKit`'s weak references to them hold too.
+            web.setNavigationDelegate(Some(ProtocolObject::from_ref(&*bridge)));
+            web.setUIDelegate(Some(ProtocolObject::from_ref(&*web)));
             web
         };
         web.setAutoresizingMask(
@@ -541,6 +583,8 @@ impl ScreenIsland {
             live: false,
             place: None,
             ready: false,
+            reloads: island::Reloads::default(),
+            reload_at: None,
         }
     }
 
@@ -549,12 +593,20 @@ impl ScreenIsland {
         let Some(url) = NSURL::URLWithString(&address) else {
             return;
         };
-        self.ready = false;
-        self.areas.clear();
-        self.set_area(None);
+        self.forget_page();
+        self.reload_at = None;
         // SAFETY: a request for an address made above, on the main thread.
         unsafe { self.web.loadRequest(&NSURLRequest::requestWithURL(&url)) };
         self.panel.orderFrontRegardless();
+    }
+
+    /// The page is gone or going: until the next one says it listens, the panel lets the pointer
+    /// through everywhere.
+    fn forget_page(&mut self) {
+        self.ready = false;
+        self.areas.clear();
+        self.set_area(None);
+        self.set_drag_near(false);
     }
 
     /// Hang the panel from the top of `screen`, centred on its notch or on the screen without
@@ -809,11 +861,18 @@ impl IslandPanel {
     }
 }
 
+#[derive(Default)]
+struct WebIvars {
+    /// Files taken from a drop, waiting for the page's file picker to ask for them.
+    taken: RefCell<Vec<Retained<NSURL>>>,
+}
+
 define_class!(
     // SAFETY: `WKWebView` may be subclassed, and `IslandWebView` does not implement `Drop`.
     #[unsafe(super(WKWebView, NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "LoomWatchIslandWebView"]
+    #[ivars = WebIvars]
     struct IslandWebView;
 
     impl IslandWebView {
@@ -823,8 +882,168 @@ define_class!(
         fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
             true
         }
+
+        /// Something dropped on the island, which the page has said it takes. Files another app
+        /// writes only once dropped, as Mail does with a message, the app takes itself: `WebKit`'s
+        /// own way of taking them ends the page's process (it refuses the page's read of the
+        /// drag), and the island would go. Anything else is the page's, as it always was.
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag_operation(&self, dragged: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            let board = dragged.draggingPasteboard();
+            if !promises_files(&board) {
+                // SAFETY: `WKWebView`'s own `performDragOperation:`, with what it was given.
+                return unsafe { msg_send![super(self), performDragOperation: dragged] };
+            }
+            self.receive_promised(&board)
+        }
+    }
+
+    // SAFETY: `NSObjectProtocol` has no safety requirements.
+    unsafe impl NSObjectProtocol for IslandWebView {}
+
+    // SAFETY: the method's signature is `WKUIDelegate`'s.
+    unsafe impl WKUIDelegate for IslandWebView {
+        /// The page's file picker: the files taken from a drop, if any wait; otherwise nothing
+        /// is chosen, as `WebKit` has it without this.
+        #[unsafe(method(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:))]
+        fn run_open_panel(
+            &self,
+            _web_view: &WKWebView,
+            _parameters: &WKOpenPanelParameters,
+            _frame: &WKFrameInfo,
+            chosen: &DynBlock<dyn Fn(*mut NSArray<NSURL>)>,
+        ) {
+            let taken = self.ivars().taken.take();
+            if taken.is_empty() {
+                chosen.call((std::ptr::null_mut(),));
+            } else {
+                let files = NSArray::from_retained_slice(&taken);
+                chosen.call((Retained::as_ptr(&files).cast_mut(),));
+            }
+        }
     }
 );
+
+impl IslandWebView {
+    /// Ask each app that promised files to write them into a folder of their own, and once the
+    /// last has arrived, hand them to the page, each once (`island::received_once`). A file that
+    /// fails is left out; with none, nothing is handed over, and the open slot closes as after any
+    /// drag let go of elsewhere.
+    fn receive_promised(&self, board: &NSPasteboard) -> bool {
+        let classes = NSArray::<AnyClass>::from_slice(&[NSFilePromiseReceiver::class()]);
+        // SAFETY: `NSFilePromiseReceiver` reads objects from a pasteboard, and no options.
+        let read = unsafe { board.readObjectsForClasses_options(&classes, None) };
+        let read: Vec<Retained<NSFilePromiseReceiver>> = read
+            .map(|read| {
+                read.iter()
+                    .filter_map(|object| object.downcast::<NSFilePromiseReceiver>().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let items: Vec<Vec<String>> = board
+            .pasteboardItems()
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| item.types().iter().map(|kind| kind.to_string()).collect())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let readable: Vec<String> = NSFilePromiseReceiver::readableDraggedTypes()
+            .iter()
+            .map(|kind| kind.to_string())
+            .collect();
+        let receivers: Vec<&Retained<NSFilePromiseReceiver>> =
+            island::promises_to_ask(&items, &readable, read.len())
+                .into_iter()
+                .map(|at| &read[at])
+                .collect();
+        let expected: usize = receivers
+            .iter()
+            .map(|receiver| receiver.fileTypes().count())
+            .sum();
+        if expected == 0 {
+            return false;
+        }
+        let Some(folder) = drop_folder() else {
+            return false;
+        };
+        let folder = NSURL::fileURLWithPath_isDirectory(
+            &NSString::from_str(&folder.to_string_lossy()),
+            true,
+        );
+        let arrived: Rc<RefCell<(usize, Vec<Retained<NSURL>>)>> = Rc::default();
+        let web = Weak::from(self);
+        let reader = RcBlock::new(move |file: NonNull<NSURL>, error: *mut NSError| {
+            let mut arrived = arrived.borrow_mut();
+            arrived.0 += 1;
+            if error.is_null() {
+                // SAFETY: `AppKit` hands the reader the file it wrote.
+                arrived.1.push(unsafe { file.as_ref() }.retain());
+            }
+            if arrived.0 < expected {
+                return;
+            }
+            let arrived = std::mem::take(&mut arrived.1);
+            let paths: Vec<std::path::PathBuf> = arrived
+                .iter()
+                .map(|file| {
+                    file.path()
+                        .map(|path| path.to_string())
+                        .unwrap_or_default()
+                        .into()
+                })
+                .collect();
+            let files: Vec<Retained<NSURL>> = island::received_once(&paths)
+                .into_iter()
+                .map(|index| arrived[index].clone())
+                .collect();
+            if let Some(web) = web.load()
+                && !files.is_empty()
+            {
+                web.ivars().taken.replace(files);
+                let script = NSString::from_str(&ToPage::Dropped.script());
+                // SAFETY: a script of our own making, run in our own page. `WebKit` runs it as if
+                // the person did it, so the page's file picker may open.
+                unsafe { web.evaluateJavaScript_completionHandler(&script, None) };
+            }
+        });
+        let options = NSDictionary::new();
+        let queue = NSOperationQueue::mainQueue();
+        for receiver in receivers {
+            // SAFETY: an empty options dictionary, and the main queue, where the reader's web view
+            // lives.
+            unsafe {
+                receiver.receivePromisedFilesAtDestination_options_operationQueue_reader(
+                    &folder, &options, &queue, &reader,
+                );
+            }
+        }
+        true
+    }
+}
+
+/// Whether a drag carries files its app writes only once they are dropped.
+fn promises_files(board: &NSPasteboard) -> bool {
+    let promised = NSFilePromiseReceiver::readableDraggedTypes();
+    board
+        .types()
+        .is_some_and(|types| types.iter().any(|kind| promised.containsObject(&kind)))
+}
+
+/// A new folder for one drop's files, in the user's own temporary folder, which macOS clears.
+/// Kept after the drop: the page sends the files with the message, which may be written later.
+fn drop_folder() -> Option<std::path::PathBuf> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    let folder = std::env::temp_dir()
+        .join("LoomWatch drops")
+        .join(stamp.to_string());
+    std::fs::create_dir_all(&folder).ok()?;
+    Some(folder)
+}
 
 struct BridgeIvars {
     /// The island whose page this hears.
@@ -858,6 +1077,16 @@ define_class!(
                     message,
                 });
             }
+        }
+    }
+
+    // SAFETY: the method's signature is `WKNavigationDelegate`'s.
+    unsafe impl WKNavigationDelegate for Bridge {
+        /// `WebKit` ended the page's process: it crashed, or broke one of `WebKit`'s rules.
+        #[unsafe(method(webViewWebContentProcessDidTerminate:))]
+        fn page_gone(&self, _web_view: &WKWebView) {
+            let ivars = self.ivars();
+            (ivars.send)(IslandEvent::PageGone { from: ivars.id });
         }
     }
 );

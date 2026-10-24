@@ -15,6 +15,10 @@ Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: tr
 // Markdown is code-split in the app (components/ui/Markdown.tsx). Tests render the real renderer
 // synchronously so assertions about formatted output need no Suspense round trip.
 vi.mock('../components/ui/Markdown', async () => {
-  const renderer = await import('../components/ui/MarkdownRenderer')
-  return { Markdown: renderer.default }
+  const { createElement } = await import('react')
+  const { default: Renderer } = await import('../components/ui/MarkdownRenderer')
+  return {
+    Markdown: Renderer,
+    InlineMarkdown: (props: { children: string; clickable?: boolean }) => createElement('span', { className: 'md-inline' }, createElement(Renderer, { ...props, inline: true })),
+  }
 })

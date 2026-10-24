@@ -374,6 +374,7 @@ impl Island {
                 FromPage::Copy { text, html } => NotchPanels::copy(&text, html.as_deref()),
                 FromPage::Seen { runs } => panel.seen(from, &runs),
             },
+            IslandEvent::PageGone { from } => panel.page_gone(from),
             IslandEvent::Shortcut => self.compose(),
             IslandEvent::PressStarted => {
                 self.pressing = true;

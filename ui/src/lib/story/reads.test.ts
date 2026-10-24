@@ -319,3 +319,50 @@ describe('mendOf, for a command LoomWatch’s own engine ran', () => {
     expect(describeEvidence('Coby', items[0])).toBe('Coby’s command “python3 build.py” failed.')
   })
 })
+
+describe('mendOf, for a call that came with nothing in it', () => {
+  // As run 948bd594 recorded it: a reply cut off at its length limit reached LoomWatch as an empty
+  // `write_file`, titled with the tool's own name, and the agent's next call wrote the file.
+  const LESSON = '/Users/you/LoomWatch/teams/.loomwatch/school/tutor/lessons/Enterprise KB Indexing.html'
+  const empty = (callId: string): Step[] => [
+    ['tutor', 'tool_call', { callId, title: 'write_file', toolKind: 'other', status: 'in_progress', rawInput: {}, locations: [] }],
+    ['tutor', 'tool_update', { callId, status: 'failed', content: [{ type: 'content', content: { type: 'text', text: '`path` is required and must be text.' } }] }],
+  ]
+  const write = (callId: string, failed = false): Step[] => [
+    ['tutor', 'tool_call', { callId, title: 'Write lessons/Enterprise KB Indexing.html', toolKind: 'edit', status: 'in_progress', rawInput: { path: 'lessons/Enterprise KB Indexing.html', content: '<!doctype html>' }, locations: [{ path: LESSON }] }],
+    ['tutor', 'tool_update', { callId, status: failed ? 'failed' : 'completed', content: [{ type: 'content', content: { type: 'text', text: failed ? 'Disk full.' : 'Created lessons/Enterprise KB Indexing.html (25704 bytes).' } }] }],
+  ]
+  const look = (callId: string): Step[] => [
+    ['tutor', 'tool_call', { callId, title: 'Read lessons/plan.md', toolKind: 'read', status: 'in_progress', rawInput: { path: 'lessons/plan.md' }, locations: [{ path: '/Users/you/plan.md' }] }],
+    ['tutor', 'tool_update', { callId, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'plan' } }] }],
+  ]
+
+  it('counts the next call of the same kind that worked as that call made again, and names no tool as a file', () => {
+    const items = projectRun(record([...empty('cut'), ...write('again')])).evidence
+    expect(mendOf(items[0], items)).toEqual({ by: items[1], how: 'tried again' })
+    expect(failuresOf(items)).toEqual([])
+    expect(describeEvidence('Tutor', items[0])).toBe('Tutor couldn’t edit a file.')
+  })
+
+  it('stays a failure when the next call was something else, or failed too', () => {
+    const other = projectRun(record([...empty('cut'), ...look('look'), ...write('again')])).evidence
+    expect(mendOf(other[0], other)).toBeNull()
+    const failedAgain = projectRun(record([...empty('cut'), ...write('again', true)])).evidence
+    expect(mendOf(failedAgain[0], failedAgain)).toBeNull()
+  })
+
+  it('does not take a call whose input came in an update for an empty one', () => {
+    // Claude Code's Bash starts with an empty input and names no place; the command comes in an
+    // update the projection keeps only in the call's events. The next command is not its retry.
+    const items = projectRun(record([
+      ['tutor', 'tool_call', { name: 'Bash', title: 'Terminal', callId: 'build', status: 'pending', content: [], rawInput: {}, toolKind: 'execute' }],
+      ['tutor', 'tool_update', { title: 'python3 build.py', callId: 'build', rawInput: { command: 'python3 build.py' } }],
+      ['tutor', 'tool_update', { callId: 'build', status: 'failed', content: [{ type: 'content', content: { type: 'text', text: 'SyntaxError: invalid syntax' } }] }],
+      ['tutor', 'tool_call', { name: 'Bash', title: 'ls', callId: 'look', status: 'pending', content: [], rawInput: { command: 'ls' }, toolKind: 'execute' }],
+      ['tutor', 'tool_update', { callId: 'look', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'build.py' } }] }],
+    ])).evidence
+    expect(items[0].locations).toEqual([])
+    expect(items[0].rawInput).toEqual({})
+    expect(mendOf(items[0], items)).toBeNull()
+  })
+})

@@ -204,7 +204,7 @@ pub(crate) fn excerpt(text: &str, copy_name: &str) -> (String, Option<TextCopy>)
     )
 }
 
-fn human_size(bytes: u64) -> String {
+pub(crate) fn human_size(bytes: u64) -> String {
     // Display only, so the precision lost in the cast does not matter.
     #[allow(clippy::cast_precision_loss)]
     let kib = bytes as f64 / 1024.0;

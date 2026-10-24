@@ -7,7 +7,7 @@ import type { FromApp } from './bridge'
 import { withPinned, type PinnedNow } from './pinned'
 import { advance, arrive, next, NOTHING_OUT, tuckNow, tuckOnClick, type Circumstances, type PopState } from './popouts'
 import type { TeamRequest } from '../lib/runs/teamRequests'
-import type { Intake } from './intake'
+import { withDropped, type Intake } from './intake'
 import { momentsBetween, teamAskKey, teamsNow, type Pop, type PopKind, type TeamNow } from './teams'
 import { ISLAND_WAITS } from './waits'
 
@@ -80,6 +80,8 @@ export interface IslandState {
   dragOver: boolean
   /** What was dropped into the slot, waiting for a job. */
   intake: Intake | null
+  /** What a drop left out because the box's agent can't open it, and why, in one line. */
+  away: string | null
   pop: PopState
   /** What is out, or was last out: kept while it tucks away, so it can be drawn leaving. */
   shown: { pop: Pop; team: TeamNow } | null
@@ -111,7 +113,7 @@ export type IslandAction =
   /** A drag on the page itself enters the island, or leaves it. */
   | { type: 'dragOver'; over: boolean }
   /** Something was dropped into the slot: it waits in the box for a job. */
-  | { type: 'drop'; intake: Intake }
+  | { type: 'drop'; intake: Intake | null; away?: string | null }
   /** What was dropped went with a message, or was put away. */
   | { type: 'intakeDone' }
 
@@ -138,6 +140,7 @@ export function initialIsland(now: number, inApp: boolean): IslandState {
     benchUntil: 0,
     dragOver: false,
     intake: null,
+    away: null,
     pop: NOTHING_OUT,
     shown: null,
   }
@@ -213,13 +216,19 @@ export function islandReducer(state: IslandState, action: IslandAction & { now: 
       break
     case 'drop':
       // What went in waits in the box, which takes the keyboard: a job is picked, or typed.
-      s = s.box ? { ...openToWrite(s), dragOver: false, app: { ...s.app, drag: false }, intake: action.intake } : s
+      // What the box's agent can't open stays out, and the box says why. Files join those already
+      // waiting, so the PDF made from a file it couldn't open goes with what was dropped before.
+      s = { ...s, dragOver: false }
+      if (s.box && (action.intake || action.away)) {
+        s = { ...openToWrite(s), app: { ...s.app, drag: false }, intake: action.intake ? withDropped(s.intake, action.intake) : s.intake, away: action.away ?? null }
+      }
       break
     case 'intakeDone':
-      s = { ...s, intake: null }
+      s = { ...s, intake: null, away: null }
       break
   }
-  return settle(s)
+  // What a drop left out is said while what went in waits, or the list is open.
+  return settle(s.listOpen || s.intake || !s.away ? s : { ...s, away: null })
 }
 
 function fromApp(s: IslandState, message: FromApp): IslandState {
@@ -257,6 +266,9 @@ function fromApp(s: IslandState, message: FromApp): IslandState {
       return { ...s, app: { ...s.app, news: message.on } }
     case 'seen':
       return markSeen(s, message.runs)
+    case 'dropped':
+      // The files come as a drop of their own, once the page's picker has them (`takeDropped`).
+      return s
   }
 }
 

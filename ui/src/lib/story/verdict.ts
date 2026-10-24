@@ -1,3 +1,4 @@
+import { plainWords } from '../chat/findWords'
 import type { RunPhase } from '../watch/events'
 import { checkProgress, type AnswerNotes, type CheckRound } from './checks'
 import { readPhrase, type ReadCount } from './reads'
@@ -69,8 +70,8 @@ export function checkFindings(checks: readonly CheckRound[] = []): ReceiptLine[]
   const items = read.flatMap((round) => round.items.map((item) => ({ ...item, checker: round.checker })))
   return [
     ...checks.filter((round) => round.readable === false).map((round) => ({ tone: 'warn' as const, text: 'The check could not be read, so nothing it checked is confirmed', agentId: round.checker })),
-    ...items.filter((item) => item.verdict === 'not_met').map((item) => ({ tone: 'warn' as const, text: `Check not met: ${item.item}${item.evidence ? ` (${item.evidence})` : ''}`, agentId: item.checker })),
-    ...items.filter((item) => item.verdict === 'not_sure').map((item) => ({ tone: 'warn' as const, text: `Check not sure: ${item.item}`, agentId: item.checker })),
+    ...items.filter((item) => item.verdict === 'not_met').map((item) => ({ tone: 'warn' as const, text: `Check not met: ${item.item}${item.evidence ? ` (${item.evidence})` : ''}`, agentId: item.checker, markdown: true })),
+    ...items.filter((item) => item.verdict === 'not_sure').map((item) => ({ tone: 'warn' as const, text: `Check not sure: ${item.item}`, agentId: item.checker, markdown: true })),
   ]
 }
 
@@ -99,15 +100,20 @@ export function checkProgressSentence(checks: readonly CheckRound[] = []): strin
 export function noteFindings(notes?: AnswerNotes | null): ReceiptLine[] {
   if (!notes) return []
   return [
-    ...notes.notMet.map((text) => ({ tone: 'warn' as const, text: `Could not meet: ${text}`, agentId: notes.agentId })),
-    ...notes.missing.map((text) => ({ tone: 'warn' as const, text: `Missing: ${text}`, agentId: notes.agentId })),
-    ...notes.notChanged.map((text) => ({ tone: 'warn' as const, text: `Kept against the check: ${text}`, agentId: notes.agentId })),
+    ...notes.notMet.map((text) => ({ tone: 'warn' as const, text: `Could not meet: ${text}`, agentId: notes.agentId, markdown: true })),
+    ...notes.missing.map((text) => ({ tone: 'warn' as const, text: `Missing: ${text}`, agentId: notes.agentId, markdown: true })),
+    ...notes.notChanged.map((text) => ({ tone: 'warn' as const, text: `Kept against the check: ${text}`, agentId: notes.agentId, markdown: true })),
   ]
 }
 
 /** The edits the daemon took off the end of the answer, each a line the review lists. */
 export function changeLines(notes?: AnswerNotes | null): ReceiptLine[] {
-  return notes ? notes.changes.map((text) => ({ tone: 'ok' as const, text, agentId: notes.agentId })) : []
+  return notes ? notes.changes.map((text) => ({ tone: 'ok' as const, text, agentId: notes.agentId, markdown: true })) : []
+}
+
+/** A line as the words it shows, for a tooltip or a button's name: an agent's Markdown loses its marks. */
+export function lineWords(line: ReceiptLine): string {
+  return line.markdown ? plainWords(line.text) : line.text
 }
 
 export function answerVerdict(input: VerdictInput): AnswerVerdict {
@@ -121,7 +127,7 @@ function verdictOf(input: VerdictInput, changed: number): AnswerVerdict {
   const findings = [...noteFindings(input.notes), ...checkFindings(input.checks), ...findingsOf(input.receipt)]
     .sort((a, b) => Number(b.tone === 'bad') - Number(a.tone === 'bad'))
   const allMet = Boolean(input.checks?.length) && input.checks!.every((round) => round.items.every((item) => item.verdict === 'met'))
-  const first = findings[0] ? `${findings[0].text}.` : ''
+  const first = findings[0] ? `${lineWords(findings[0])}.` : ''
   // What the check fixed, then where the edits are: neither is in the answer any more.
   const after = [checkProgressSentence(input.checks), changed ? `The review lists ${plural(changed, 'change')} made to the draft.` : ''].filter(Boolean).join(' ')
   const withAfter = (detail: string) => (after ? `${detail} ${after}` : detail)

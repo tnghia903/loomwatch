@@ -157,7 +157,8 @@ impl Builtin {
             ),
             Self::ReadFile => (
                 "Read a file. Text comes with its lines numbered, and so does the text of a PDF, \
-                 Word (.docx), Excel (.xlsx, .xls) or PowerPoint (.pptx) file. For a long file, \
+                 Word (.docx), Excel (.xlsx, .xls) or PowerPoint (.pptx) file, and an email \
+                 (.eml) as who wrote to whom, when, its subject and its words. For a long file, \
                  read it in parts with offset and limit. A picture (PNG, JPEG, GIF or WebP) is \
                  shown to you when the model you run on can see pictures.",
                 json!({

@@ -26,6 +26,10 @@ export type FromApp =
   | { kind: 'news'; on: boolean }
   /** Results looked at on another screen's island, by run: they leave this one too. */
   | { kind: 'seen'; runs: string[] }
+  /** Files dropped on the island that the app took itself, files another app writes only once
+      dropped, as Mail does with a message: the page's file picker asks for them, and the app
+      answers it with them (`takeDropped`). */
+  | { kind: 'dropped' }
 
 export interface Area {
   x: number

@@ -14,7 +14,8 @@
 //! message to an agent is written (decision 9), and then only because its page asked. Kept apart
 //! from `AppKit` so it is the same, and tested, everywhere.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -201,6 +202,76 @@ pub fn away(idle_seconds: f64) -> bool {
     idle_seconds >= AWAY_AFTER_SECONDS
 }
 
+/// The pasteboard type of an item whose app promises a file the new way (`NSFilePromiseProvider`).
+const PROMISED_NEW_WAY: &str = "com.apple.NSFilePromiseItemMetaData";
+
+/// Which of a drag's file promises to ask for their files, by their place among the `receivers`
+/// `AppKit` read from it, one for each item that holds a promise (`items`: each item's types, and
+/// `readable` the types a promise is read from). An app may promise its files both the old way and
+/// the new, and fill only the new: Mail does, and its old way's files come empty or not at all.
+/// Then only the new way's are asked. A drag that promises one way only is asked all of them, and
+/// so is one whose items and receivers can't be matched.
+pub fn promises_to_ask(items: &[Vec<String>], readable: &[String], receivers: usize) -> Vec<usize> {
+    let new_way: Vec<bool> = items
+        .iter()
+        .filter(|types| types.iter().any(|kind| readable.contains(kind)))
+        .map(|types| types.iter().any(|kind| kind == PROMISED_NEW_WAY))
+        .collect();
+    let both = new_way.contains(&true) && new_way.contains(&false);
+    if !both || new_way.len() != receivers {
+        return (0..receivers).collect();
+    }
+    (0..receivers).filter(|&at| new_way[at]).collect()
+}
+
+/// The files a drop's promises handed over, each once, by their place in `paths`: a promise may
+/// name a file that never arrived, or one another promise named too. Of the files there, the
+/// largest of each name.
+pub fn received_once(paths: &[PathBuf]) -> Vec<usize> {
+    let mut kept: Vec<(usize, u64)> = Vec::new();
+    for (index, path) in paths.iter().enumerate() {
+        let Ok(bytes) = std::fs::metadata(path).map(|file| file.len()) else {
+            continue;
+        };
+        match kept
+            .iter_mut()
+            .find(|(other, _)| paths[*other].file_name() == path.file_name())
+        {
+            Some(same) if bytes > same.1 => *same = (index, bytes),
+            Some(_) => {}
+            None => kept.push((index, bytes)),
+        }
+    }
+    kept.into_iter().map(|(index, _)| index).collect()
+}
+
+/// A page whose process ended loads again at once this many times a minute; past that, after
+/// `SLOW_RELOAD`, so a page that keeps ending never keeps the Mac busy, and never stays gone.
+pub const QUICK_RELOADS: usize = 3;
+pub const SLOW_RELOAD: Duration = Duration::from_secs(30);
+const RELOADS_WITHIN: Duration = Duration::from_secs(60);
+
+/// When one screen's page loads again after its process ended. `WebKit` ends a page's process
+/// when it crashes or breaks `WebKit`'s rules, and by itself loads it again only once.
+#[derive(Debug, Default)]
+pub struct Reloads {
+    ended: Vec<Instant>,
+}
+
+impl Reloads {
+    /// The page's process ended at `now`: how long to wait before loading it again.
+    pub fn ended(&mut self, now: Instant) -> Duration {
+        self.ended
+            .retain(|at| now.saturating_duration_since(*at) < RELOADS_WITHIN);
+        self.ended.push(now);
+        if self.ended.len() <= QUICK_RELOADS {
+            Duration::ZERO
+        } else {
+            SLOW_RELOAD
+        }
+    }
+}
+
 /// The file in `LoomWatch`'s state folder that says the island is off: Show at the notch,
 /// unticked in the app's menu. Without it the island is at the notch, as it is the first time.
 /// `loomwatchd` reads it too, so pinning an agent says how to reach it (its twin is
@@ -299,6 +370,10 @@ pub enum ToPage {
     News { on: bool },
     /// Results looked at on another screen's island: they leave this one too.
     Seen { runs: Vec<String> },
+    /// Files dropped on the island that the app took itself: files another app writes only once
+    /// they are dropped, as Mail does with a message. The page asks for them through a file
+    /// picker, which the app answers with them, so they arrive as a file from Finder does.
+    Dropped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -607,6 +682,103 @@ mod tests {
             .script(),
             r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"seen","runs":["r1"]})"#
         );
+    }
+
+    #[test]
+    fn files_the_app_took_from_a_drop_are_asked_for_by_the_page() {
+        assert_eq!(
+            ToPage::Dropped.script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"dropped"})"#
+        );
+    }
+
+    #[test]
+    fn a_drag_promising_files_both_ways_is_asked_only_the_new_way() {
+        let types = |kinds: &[&str]| {
+            kinds
+                .iter()
+                .map(|kind| (*kind).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let old_way = "dyn.ah62d4rv4gu8yc6durvwwa3xmrvw1gkdusm1044pxqyuha2pxsvw0e55bsmwca7d3sbwu";
+        let readable = types(&[
+            PROMISED_NEW_WAY,
+            old_way,
+            "com.apple.pasteboard.promised-file-content-type",
+        ]);
+        let new_item = types(&[PROMISED_NEW_WAY, "com.apple.pasteboard.promised-file-name"]);
+        // Mail, a conversation of two: one item promising both the old way, then one for each
+        // message the new way.
+        let mail = vec![
+            types(&[
+                "com.apple.mail.PasteboardTypeMessageTransfer",
+                "public.utf8-plain-text",
+                old_way,
+            ]),
+            new_item.clone(),
+            new_item.clone(),
+        ];
+        assert_eq!(promises_to_ask(&mail, &readable, 3), vec![1, 2]);
+        // Only the new way, or only the old: every promise.
+        assert_eq!(
+            promises_to_ask(&[new_item.clone(), new_item.clone()], &readable, 2),
+            vec![0, 1]
+        );
+        assert_eq!(promises_to_ask(&[types(&[old_way])], &readable, 1), vec![0]);
+        // An item with no promise is no receiver's; items and receivers that don't match: all.
+        let with_text = vec![
+            types(&["public.utf8-plain-text"]),
+            types(&[old_way]),
+            new_item.clone(),
+        ];
+        assert_eq!(promises_to_ask(&with_text, &readable, 2), vec![1]);
+        assert_eq!(promises_to_ask(&mail, &readable, 2), vec![0, 1]);
+    }
+
+    #[test]
+    fn files_promised_twice_or_never_written_arrive_once() {
+        let folder = std::env::temp_dir().join(format!(
+            "loomwatch-app-received-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let elsewhere = folder.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let survey = folder.join("Survey.eml");
+        let reply = folder.join("RE Survey.eml");
+        std::fs::write(&survey, "Subject: Survey\n\nHello").unwrap();
+        std::fs::write(&reply, "Subject: RE Survey\n\nHi").unwrap();
+        std::fs::write(elsewhere.join("Survey.eml"), "").unwrap();
+        // As Mail hands back a conversation of two: each message the old way, then the new way;
+        // the old way's copy empty or never written.
+        let paths = vec![
+            elsewhere.join("Survey.eml"),
+            folder.join("never written.eml"),
+            survey.clone(),
+            reply.clone(),
+            reply.clone(),
+        ];
+        assert_eq!(received_once(&paths), vec![2, 3]);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_page_that_ended_loads_again_at_once_then_after_a_pause_and_never_stays_gone() {
+        let start = Instant::now();
+        let mut reloads = Reloads::default();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        // A drop that ends the page, again and again: back at once, three times in a minute.
+        assert_eq!(reloads.ended(at(0)), Duration::ZERO);
+        assert_eq!(reloads.ended(at(5)), Duration::ZERO);
+        assert_eq!(reloads.ended(at(10)), Duration::ZERO);
+        // A page that keeps ending waits before it loads again, but loads.
+        assert_eq!(reloads.ended(at(15)), SLOW_RELOAD);
+        assert_eq!(reloads.ended(at(50)), SLOW_RELOAD);
+        // A minute after the first few, it is back at once again.
+        assert_eq!(reloads.ended(at(116)), Duration::ZERO);
     }
 
     #[test]

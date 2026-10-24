@@ -224,6 +224,8 @@ depend on the document as a whole:
     - Each line is matched to its item by its words, or else by its number.
     - Lines may put the verdict first or the item first, be numbered or not, use bold or a mark
       such as ✅, or be table rows.
+    - Bold, italics and code inside an item or its evidence are kept, and the app shows them. Bold
+      around a whole item or evidence, and a mark left without its partner, are dropped.
     - An item it leaves out is Not sure ("Not checked"). Met with no evidence is Not sure, and
       "partly met" is Not met.
     - A line naming none of the items is kept as a problem of its own.
@@ -442,9 +444,9 @@ when the agent's own folder has nothing by that name. A **file** added in
 the panel is copied beside the team file under `<team>.files/`, and a relative `path` resolves
 against the team file's folder (`~/` against your home folder). The agent gets the file's text,
 up to 12,000 characters, and a read grant for that one file. The text of a PDF, Word (`.docx`),
-Excel (`.xlsx`, `.xls`, `.ods`) or PowerPoint (`.pptx`) file is read by LoomWatch itself, with
-nothing to install; when there is none to read, such as in a scanned PDF, the agent is told where
-the file is. A picture is described, and an agent on a model that can see pictures looks at it with
+Excel (`.xlsx`, `.xls`, `.ods`) or PowerPoint (`.pptx`) file, or of an email (`.eml`), is read by
+LoomWatch itself, with nothing to install; when there is none to read, such as in a scanned PDF,
+the agent is told where the file is. A picture is described, and an agent on a model that can see pictures looks at it with
 `read_file`. When a file's text is longer than 12,000 characters, the prompt carries its opening,
 and the full text is put in the prepared folder as `knowledge/<file>`, which the prompt names. Only
 `knowledge` may have a `path`.

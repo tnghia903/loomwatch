@@ -90,6 +90,7 @@ import type { ReplyTo } from '../lib/chat/client'
 import { CHAT_WIDTH, clampChatWidth } from '../lib/chat/chatWidth'
 import { describeDocument, isDocument } from '../lib/chat/document'
 import type { AgentFacts } from '../lib/chat/faces'
+import { nameWithHelpers } from '../lib/chat/helpers'
 import { afterClosing, closedKey, fileTab, madeTabs, paneTabId, shownPaneTab, type MadeTab, type PaneTab } from '../lib/chat/paneTabs'
 import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
@@ -1524,6 +1525,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const deliveryShown = runView || runSetup
   // ADR 0051: the Run tab is the team's chat. A run open beside it is its Details.
   const detailsOpen = deliveryShown && runView
+  // A card's "Agent details" in Details opens the agent panel, so it closes with Details, which
+  // left it standing over the chat. Leaving the Chat tab clears it on its own (above).
+  const detailsWereOpenRef = useRef(detailsOpen)
+  useLayoutEffect(() => {
+    if (detailsWereOpenRef.current && !detailsOpen && deliveryShown) clearSelection()
+    detailsWereOpenRef.current = detailsOpen
+  }, [detailsOpen, deliveryShown, clearSelection])
   // Details' timeline asks to read a message: the chat shows it, in the piece it belongs to.
   const [chatReveal, setChatReveal] = useState<{ runId: string; id: string; at: number } | null>(null)
   const savedJobs = useSavedJobs().jobs
@@ -1579,7 +1587,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const [detailsFollow, setDetailsFollow] = useState(() => !initialRunId)
   const [newestPiece, setNewestPiece] = useState<string | null>(null)
   // The pane beside the chat shows one thing at a time (lib/chat/paneTabs.ts): the piece's record,
-  // or something it made — each file its answer names, and a long answer read as a document. The
+  // or something it came to — a long answer read as a document, and each file its answer names. The
   // chat keeps the answer short; a short one is read there and has no tab. `null` is the pane's own
   // choice: following the newest work, the first thing it made once it is finished, while work in
   // progress shows its record.
@@ -1595,8 +1603,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     return open
   }), [])
   const answerResponder = record?.responder ?? null
-  const answerBy = nodeNames.get(answerResponder ?? '') ?? 'The team'
-  const paneAnswer = useMemo(() => (detailsOpen && isDocument(responseText) ? { title: describeDocument(responseText).title, hint: `${answerBy}’s answer` } : null), [detailsOpen, responseText, answerBy])
+  // Named as the chat names it beside its answer.
+  const answerBy = answerResponder ? nameWithHelpers(chatTeam.names, answerResponder) ?? answerResponder : 'The team'
+  const paneAnswer = useMemo(() => (detailsOpen && isDocument(responseText) ? { by: answerResponder, name: answerBy, title: describeDocument(responseText).title } : null), [detailsOpen, responseText, answerResponder, answerBy])
   // The files its finished answer names that the reader reads and that are on this computer: the
   // files its answer's cards in the chat offer to Read.
   const responderFolder = responderAgent?.folder ?? null
@@ -2511,7 +2520,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
           {detailsOpen && (
             <aside className="tc-details" aria-label="Details of this piece of work">
               <header className="tc-details-head">
-                {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
+                {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
                 <h2>{shownFile ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
                 <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setReading(null) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>
@@ -2820,7 +2829,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onPending={setSchedulePending}
           />
         )}
-        {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} calls={projection.evidence.filter((item) => item.agentId === inspectedEvidence.agentId)} onInspectEvidence={setInspectedEvidenceId} onClose={() => setInspectedEvidenceId(null)} />}
+        {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} calls={projection.evidence.filter((item) => item.agentId === inspectedEvidence.agentId)} finished={(runAgents.find((node) => node.id === inspectedEvidence.agentId)?.data.runtime?.status ?? projection.agents.find((agent) => agent.id === inspectedEvidence.agentId)?.status) === 'succeeded'} onInspectEvidence={setInspectedEvidenceId} onClose={() => setInspectedEvidenceId(null)} />}
         {handover && (
           <HandoverPanel
             modal

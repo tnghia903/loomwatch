@@ -5,7 +5,7 @@ import { useLayoutEffect, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { NeedsYouTray } from './NeedsYouTray'
-import { appRules, background, cascaded, GOLD_FILLS } from '../../test/cascade'
+import { appRules, background, cascaded, GOLD_FILLS, neededClasses } from '../../test/cascade'
 import type { Ticket } from '../../lib/story/needsYou'
 
 afterEach(cleanup)
@@ -31,6 +31,30 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
     expect(onPermission).toHaveBeenLastCalledWith(ticket, 'allow_run')
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'd' })
     expect(onPermission).toHaveBeenLastCalledWith(ticket, 'deny')
+  })
+})
+
+// A review's context is what the step before wrote, in Markdown, starting with a check's open lines.
+describe('what a review ticket quotes', () => {
+  it('shows the agent’s Markdown formatted, and its tooltip as plain words', () => {
+    const context = 'Not met: Gives **2 empty slots** — see [the code](https://example.org/q1) in `/tmp/q1.py`\n## Draft\nThe `idf()` line.'
+    const question: Ticket = { ...ticket, id: 'quote-q:question', kind: 'question', runId: 'quote-q', text: 'Which slot?', context: 'Use the **filled** slots', requestId: undefined }
+    render(<NeedsYouTray tickets={[{ ...review('quote-r'), context }, { ...ticket, context: 'Run `ls *.md` in **notes**' }, question]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /3 need you/ }))
+    const [quote, command, asked] = [...screen.getByRole('dialog').querySelectorAll('blockquote')]
+    expect(quote).toHaveTextContent('Not met: Gives 2 empty slots — see the code in /tmp/q1.py Draft The idf() line.')
+    expect(quote.querySelector('strong')).toHaveTextContent('2 empty slots')
+    expect([...quote.querySelectorAll('code')].map((code) => code.textContent)).toEqual(['/tmp/q1.py', 'idf()'])
+    expect(quote.querySelector('h2')).toBeNull()
+    // The quote is cut at three lines: a link or file past them would still take the Tab key.
+    expect(quote.querySelector('a, button')).toBeNull()
+    expect(quote).toHaveAttribute('title', 'Not met: Gives 2 empty slots — see the code in /tmp/q1.py Draft The idf() line.')
+    // A permission's command is the app's own words, kept exactly as they are.
+    expect(command).toHaveTextContent('Run `ls *.md` in **notes**')
+    expect(command.querySelector('.md-inline')).toBeNull()
+    // What an agent asking a question handed over is its Markdown too.
+    expect(asked.querySelector('strong')).toHaveTextContent('filled')
+    expect(asked).toHaveAttribute('title', 'Use the filled slots')
   })
 })
 
@@ -110,8 +134,10 @@ describe('the bell when something needs you', () => {
   })
 })
 
-// The rules that reach an element of the rendered tray: jsdom applies no CSS, but it can match.
+// The rules that reach an element of the rendered tray: jsdom applies no CSS, but it can match. A
+// selector naming a class the element lacks is passed over without asking `matches`.
 const reaching = (element: Element) => everyRule.filter(([, selectors]) => selectors.split(',').some((one) => {
+  if (!neededClasses(one).every((name) => element.classList.contains(name))) return false
   try { return element.matches(one.trim()) } catch { return false }
 }))
 const values = (list: RegExpExecArray[], property: string) => list
@@ -151,19 +177,23 @@ describe('the tags on tickets', () => {
     render(<NeedsYouTray tickets={[review('tag-a'), { ...ticket, id: 'tag-b:permission:p1', runId: 'tag-b' }, question, spend, stopped]} working={0} onAnswer={vi.fn()} onPermission={vi.fn(() => Promise.resolve())} onSpend={vi.fn(() => Promise.resolve())} onDismiss={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /5 need you/ }))
     const tags = [...screen.getByRole('dialog').querySelectorAll('.ticket-tag')]
-    const tinted = tags.filter((tag) => values(reaching(tag), 'background').includes('var(--color-accent-tint)'))
+    // Each tag's rules are found once: matching every rule of the app against it takes a while, and
+    // finding them again for each property made this test outlast its time on a busy computer.
+    const reached = new Map(tags.map((tag) => [tag, reaching(tag)]))
+    const reachOf = (tag: Element) => reached.get(tag) ?? []
+    const tinted = tags.filter((tag) => values(reachOf(tag), 'background').includes('var(--color-accent-tint)'))
     expect(tinted.map((tag) => tag.textContent)).toEqual(['Review step', 'Permission', 'Spending'])
     for (const tag of tinted) {
-      const lit = reaching(tag).filter(([, , body]) => /background:\s*var\(--color-accent-tint\)/.test(body))
+      const lit = reachOf(tag).filter(([, , body]) => /background:\s*var\(--color-accent-tint\)/.test(body))
       expect(values(lit, 'color'), tag.textContent ?? '').toEqual(['var(--color-ink)'])
       expect(values(lit, 'border-color'), tag.textContent ?? '').toEqual(['var(--color-accent)'])
     }
     for (const tag of tags) {
-      expect(values(reaching(tag), 'color'), tag.textContent ?? '').not.toContain('var(--color-accent)')
-      expect(values(reaching(tag), 'border').map((border) => border.split(' ')[0]), tag.textContent ?? '').toEqual(['1px'])
-      for (const property of ['border-width', 'padding', 'height', 'font-size']) expect(values(reaching(tag), property).length, `${tag.textContent} ${property}`).toBeLessThanOrEqual(1)
+      expect(values(reachOf(tag), 'color'), tag.textContent ?? '').not.toContain('var(--color-accent)')
+      expect(values(reachOf(tag), 'border').map((border) => border.split(' ')[0]), tag.textContent ?? '').toEqual(['1px'])
+      for (const property of ['border-width', 'padding', 'height', 'font-size']) expect(values(reachOf(tag), property).length, `${tag.textContent} ${property}`).toBeLessThanOrEqual(1)
     }
-    expect(new Set(tags.map((tag) => values(reaching(tag), 'padding').join())).size).toBe(1)
+    expect(new Set(tags.map((tag) => values(reachOf(tag), 'padding').join())).size).toBe(1)
   })
 })
 
