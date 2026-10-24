@@ -25,6 +25,7 @@
   --halt: #8C8C98;
   --m-researcher: #F1ABC0;
   --m-writer: #A3C8EC;
+  --m-checker: #A5CBA3;
   --hairline: rgb(255 255 255 / 0.09);
   --hairline-2: rgb(255 255 255 / 0.14);
   --slip: #F1EEE6;
@@ -67,6 +68,7 @@
   --halt: #605F6B;
   --m-researcher: #AC3B61;
   --m-writer: #2D69A6;
+  --m-checker: #477A4B;
   --hairline: rgb(23 21 15 / 0.10);
   --hairline-2: rgb(23 21 15 / 0.16);
   --slip: #FFFFFF;
@@ -412,6 +414,7 @@ em { font-style: italic; }
 /* Each member keeps one colour: neither gold, which is you, nor blue, which is working now. */
 .m-researcher { --m: var(--m-researcher); }
 .m-writer { --m: var(--m-writer); }
+.m-checker { --m: var(--m-checker); }
 .m-you { --m: var(--accent); }
 .tc-av { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--m) 45%, transparent); background: color-mix(in srgb, var(--m) 16%, var(--panel-solid)); color: var(--m); font: 600 10px/1 var(--sans); letter-spacing: .02em; }
 .tc-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: start; }
@@ -575,6 +578,19 @@ em { font-style: italic; }
 .get-pick { display: none; margin-bottom: 22px; }
 .get[data-os] .get-pick { display: inline-flex; }
 .get-pick button { display: inline-flex; align-items: center; gap: 7px; }
+/* The highlight is one pill under the buttons that slides to the computer picked (main.js places it).
+   Until it is placed, the picked button keeps the dial's own highlight. */
+.get-pick { position: relative; }
+.get-pick button { position: relative; }
+.get-pick.ready::before { content: ''; position: absolute; top: 3px; bottom: 3px; left: 0; width: var(--pill-w, 0); transform: translateX(var(--pill-x, 0)); border-radius: 6px; background: var(--accent-tint); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); transition: transform .32s var(--ease), width .32s var(--ease); }
+.get-pick.ready button { transition: color .16s var(--ease); }
+.get-pick.ready button[aria-checked="true"] { background: transparent; box-shadow: none; }
+:root[data-theme="light"] .get-pick button[aria-checked="true"] { color: var(--ink); }
+/* The download that comes in, from the side the pill went. */
+.get-os.get-in-right { animation: get-in-right .32s var(--ease); }
+.get-os.get-in-left { animation: get-in-left .32s var(--ease); }
+@keyframes get-in-right { from { opacity: 0; transform: translateX(16px); } }
+@keyframes get-in-left { from { opacity: 0; transform: translateX(-16px); } }
 .get-pick .os-logo { width: 13px; height: 13px; margin-top: -1px; }
 .get-os + .get-os { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--hairline-2); }
 .get[data-os] .get-os + .get-os { margin-top: 0; padding-top: 0; border-top: 0; }
@@ -933,12 +949,13 @@ em { font-style: italic; }
 .btn.nudge { animation: nudge 1s var(--ease) infinite; }
 @keyframes nudge { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent); } }
 
-/* In the team's chat, Researcher and Writer are their figures alone, as agents are in the app: the
+/* In the team's chat, Researcher, Writer and Checker are their figures alone, as agents are in the app: the
    whole figure, a little larger than the face it stands for, with no disc behind it. */
-.tc-av.m-researcher, .tc-av.m-writer { position: relative; border-color: transparent; background: none; color: transparent; }
-.tc-av.m-researcher::before, .tc-av.m-writer::before { content: ''; position: absolute; inset: -20%; background: no-repeat 50% 50% / contain; pointer-events: none; }
+.tc-av.m-researcher, .tc-av.m-writer, .tc-av.m-checker { position: relative; border-color: transparent; background: none; color: transparent; }
+.tc-av.m-researcher::before, .tc-av.m-writer::before, .tc-av.m-checker::before { content: ''; position: absolute; inset: -20%; background: no-repeat 50% 50% / contain; pointer-events: none; }
 .tc-av.m-researcher::before { background-image: url(assets/figures/pincushion-rose.webp); }
 .tc-av.m-writer::before { background-image: url(assets/figures/spool-sky.webp); }
+.tc-av.m-checker::before { background-image: url(assets/figures/thimble-sage.webp); }
 .face { display: inline-block; width: 22px; height: 22px; margin: -5px 6px -5px 0; vertical-align: middle; border-radius: 50%; background: color-mix(in srgb, var(--m) 18%, var(--panel-solid)) no-repeat 50% 20% / 170%; flex: none; }
 .face.m-researcher { background-image: url(assets/figures/pincushion-rose.webp); }
 .face.m-writer { background-image: url(assets/figures/spool-sky.webp); }
@@ -946,7 +963,7 @@ em { font-style: italic; }
 /* What it does: every capability, in the order you use it. */
 .band-can { padding: 12vh 0 10vh; background: radial-gradient(ellipse 60% 40% at 50% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%); }
 .can-head h2 { margin-top: 14px; }
-.can-grid { margin-top: 34px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.can-grid { margin-top: 34px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .can-col { padding: 14px 18px 6px; border: 1px solid var(--hairline-2); border-radius: 16px; background: var(--panel-solid); }
 .can-col-head { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--hairline); }
 .can-col-head img { width: 56px; height: 56px; margin: -8px -4px -8px -8px; object-fit: contain; -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 78%, transparent 100%); }
@@ -965,6 +982,9 @@ em { font-style: italic; }
 .band-can .footnote { margin: 14px 0 0; max-width: 760px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
 #start.band { padding: 12vh 0 10vh; }
 
+@media (max-width: 1200px) {
+  .can-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 1000px) {
   .can-grid { grid-template-columns: minmax(0, 1fr); }
   .can-under { grid-template-columns: minmax(0, 1fr); }
@@ -993,4 +1013,64 @@ em { font-style: italic; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bench-poster, .btn.nudge { animation: none !important; }
+}
+
+/* ================================================================ Then · It improves */
+
+/* Writer's work in two teams (learn.js): the checker sends the first draft back, the fix passes, and
+   the lesson shows under it with Undo; later, in another team, the first draft already passes. All of
+   it sits under .win-learn, so none of its names reach the rest of the page. */
+.learn-log { display: grid; align-content: start; gap: 10px; }
+.learn-log .tc-notice { margin: 2px 0; }
+.learn-log .tc-bubble ul { margin: 0; padding-left: 18px; }
+.learn-log .tc-bubble li + li { margin-top: 4px; }
+.learn-log .tc-main { gap: 4px; }
+/* A check's verdict is the receipt's badge (.verdict above), here a word in the message, not a button.
+   What is wrong reads in ink inside its red dashed edge, as the app's failed pill does: red words on
+   the dark bubble are too faint for the words the chapter turns on. */
+.learn-log .verdict { margin-right: 4px; cursor: default; vertical-align: 1px; }
+.learn-log .verdict.warn { color: var(--ink); }
+.learn-log .verdict.warn::before { background: var(--alert); }
+.learn-log .src.missing { color: var(--ink-2); }
+/* What the agent learned, under the work it came from, as the app's chat shows it: Undo right after
+   the words, and where it came from in words, since a phone has no tooltip. */
+.win-learn .lesson { display: flex; align-items: flex-start; gap: 7px; margin: 0 0 0 36px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.win-learn .lesson-mark { flex: none; width: 14px; height: 14px; margin-top: 2px; color: var(--ink-3); }
+.win-learn .lesson > span { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.win-learn .lesson b { font-weight: 600; color: var(--ink); }
+.win-learn .lesson small, .win-learn .lb-list small { display: block; font-size: 12px; color: var(--ink-2); }
+.win-learn .lesson .link { flex: none; font-size: 12.5px; }
+/* Undo and Play again are words that act, without a button's box, and take a finger's width. */
+.win-learn button.link { padding: 0; border: 0; background: none; cursor: pointer; }
+.win-learn .tap { position: relative; }
+.win-learn .tap::after { content: ''; position: absolute; inset: -13px -8px; }
+/* Your reaction: the crew's face with no word, in a gold ring because it is yours. */
+.win-learn .tc-reacts { display: flex; gap: 4px; }
+.win-learn .react { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 26px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--panel-solid); color: var(--ink-2); }
+.win-learn .react.you { border-color: var(--accent); background: var(--accent-tint); color: var(--accent); }
+.win-learn .react svg { width: 18px; height: 18px; overflow: visible; }
+.learn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.learn-foot .link { flex: none; font-size: 13px; }
+/* The Learned tab: the agent's list, as its page in the app shows it, each lesson with Forget. */
+.win-learn .lb-head { display: flex; align-items: center; gap: 12px; }
+.win-learn .lb-head img { width: 44px; height: 44px; object-fit: contain; }
+.win-learn .lb-head b { display: block; font-size: 15px; }
+.win-learn .lb-head span { font-size: 12.5px; color: var(--ink-3); }
+.win-learn .lb-h { margin: 16px 0 4px; font: 600 11px/14px var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+.win-learn .lb-h:focus { outline: none; }
+.win-learn .lb-list { list-style: none; margin: 0; padding: 0; }
+.win-learn .lb-list li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: 1px solid var(--hairline); font-size: 14px; line-height: 1.45; }
+.win-learn .lb-list li > div { flex: 1; min-width: 0; }
+.win-learn .lb-list .iconbtn svg { width: 15px; height: 15px; }
+.win-learn .lb-empty { margin: 0; padding: 12px 0 0; border-top: 1px solid var(--hairline); font-size: 13.5px; color: var(--ink-3); }
+/* Played once in view, one step after another, about three seconds in all; Play again plays it from
+   the top. Nothing is hidden until learn.js says it will play. */
+.win-learn.will-play:not(.played) .lstep { opacity: 0; transform: translateY(6px); }
+.win-learn.played .lstep { transition: opacity .32s var(--ease), transform .32s var(--ease); transition-delay: calc(var(--i, 0) * 240ms); }
+@media (max-width: 640px) {
+  .win-learn .lesson { margin-left: 0; }
+  .win-learn .lb-list .iconbtn { width: 44px; height: 44px; margin: -8px -8px -8px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .win-learn .lstep { transition: none !important; }
 }

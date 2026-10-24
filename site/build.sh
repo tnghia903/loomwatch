@@ -19,7 +19,7 @@ mkdir -p "$out/assets/readme" "$out/assets/fonts"
 # Absolute from here on: the live figures are built from inside ui/, and the Pages workflow passes
 # a relative folder (_site).
 out=$(cd "$out" && pwd -P)
-cp "$root"/site/index.html "$root"/site/styles.css "$root"/site/main.js "$out/"
+cp "$root"/site/index.html "$root"/site/styles.css "$root"/site/main.js "$root"/site/learn.js "$out/"
 # The guides: site/<guide>/index.html is served at https://loomwatch.github.io/<guide>/, in the
 # landing page's styles.css with guides.css and guides.js of their own.
 for page in "$root"/site/*/index.html; do

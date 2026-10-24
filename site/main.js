@@ -2669,19 +2669,42 @@
   // The download for the visitor's computer: Windows when the browser says it runs on Windows, the
   // Mac otherwise (a phone too, as before). The other one is a click away on the switch.
   const get = $('#get')
+  const osPick = $('.get-pick')
   const osButtons = $$('.get-pick [data-os]')
-  function setOs(os) {
+  // The switch's highlight is one pill under the buttons, set on the computer picked; it slides there
+  // once it has been placed (styles.css, .get-pick::before). A switch by hand brings that computer's
+  // download in from the side the pill went.
+  function placeOsPill() {
+    const on = osButtons.find((b) => b.dataset.os === get.dataset.os)
+    osPick.style.setProperty('--pill-x', `${on.offsetLeft}px`)
+    osPick.style.setProperty('--pill-w', `${on.offsetWidth}px`)
+  }
+  function setOs(os, byHand = false) {
+    const from = osButtons.findIndex((b) => b.dataset.os === get.dataset.os)
     get.dataset.os = os
     osButtons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.os === os)))
+    placeOsPill()
+    const to = osButtons.findIndex((b) => b.dataset.os === os)
+    if (!byHand || from === to) return
+    const shown = $(`.get-os[data-os="${os}"]`, get)
+    shown.classList.remove('get-in-left', 'get-in-right')
+    void shown.offsetWidth
+    shown.classList.add(to > from ? 'get-in-right' : 'get-in-left')
   }
-  osButtons.forEach((b) => b.addEventListener('click', () => setOs(b.dataset.os)))
-  $('.get-pick').addEventListener('keydown', (event) => {
+  osButtons.forEach((b) => b.addEventListener('click', () => setOs(b.dataset.os, true)))
+  osPick.addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
     const at = osButtons.findIndex((b) => b.dataset.os === get.dataset.os)
     const next = osButtons[(at + (event.key === 'ArrowRight' ? 1 : osButtons.length - 1)) % osButtons.length]
-    setOs(next.dataset.os); next.focus(); event.preventDefault()
+    setOs(next.dataset.os, true); next.focus(); event.preventDefault()
   })
   setOs(/\bwin/i.test(navigator.userAgentData?.platform || navigator.userAgent) ? 'windows' : 'mac')
+  // The buttons are their final width once the fonts are in; only then may the pill slide.
+  ;(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+    placeOsPill()
+    window.requestAnimationFrame(() => osPick.classList.add('ready'))
+  })
+  window.addEventListener('resize', placeOsPill)
 
   const SCREENS = {
     home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
