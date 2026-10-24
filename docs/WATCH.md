@@ -101,7 +101,9 @@ else its long answer. Code, and files it only read, wait as tabs; work that stop
 record on screen. Each tab has its own ×, and closing the one on screen shows the next; a tab
 closed stays closed for that work until **Read** on the file's card (or **Open** on the answer's)
 brings it back in its place. Past the pane's width the tabs scroll under **Details**, which stays
-put. A file on screen stays when newer work starts, so a part asked about is seen changed. Mark
+put. A file that has been on screen stays a tab until its × is pressed. It stays when newer work
+starts, so a change to a part asked about can be seen, and when **Read** opens a file from other
+work, which gets its own tab. The pane's own × closes them all. Mark
 any words in a file to ask about them (ADR 0077): **Ask** puts them in the message box, **Explain**
 asks at once. The answer opens beside the words: first the agent writing, then its answer,
 formatted as in the chat. If the work changed those words, the answer opens at the top of the file,
