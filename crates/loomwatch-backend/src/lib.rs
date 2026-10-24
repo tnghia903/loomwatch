@@ -35,6 +35,7 @@ pub mod orientation;
 pub mod permissions;
 pub mod pinned;
 pub mod platform;
+pub mod prompt_blocks;
 pub mod runs;
 pub mod schedule;
 pub mod skill_routing;
@@ -3167,7 +3168,13 @@ fn only_checked_by_successors(team: &TeamConfig, agent_id: &str) -> bool {
 /// The item every check step checks besides what the work must satisfy (ADR 0062). A wrong fact is
 /// a problem whatever the Done when says, and without an item of its own a checker had nowhere to
 /// mark one: it wrote it above its checks, where it was thrown away.
-const CONTRADICTION_ITEM: &str = "No claim contradicts its source or the request";
+const CONTRADICTION_ITEM: prompt_blocks::Block = prompt_blocks::Block::new(
+    "check.contradiction",
+    "No claim contradicts its source or the request",
+);
+/// What a check step checks the work against when the checked agent has no Done when.
+const CHECK_REQUEST: prompt_blocks::Block =
+    prompt_blocks::Block::new("check.request", "Does what the request asked");
 /// The most of a check step's own account of the problems a send-back carries, in characters. It
 /// lists the most serious first, so the head is what is kept.
 const PROBLEMS_CHARS: usize = 3_000;
@@ -3267,9 +3274,9 @@ fn check_items(team: &TeamConfig, checked: &str) -> Vec<String> {
         .map(|agent| agent.done_when.clone())
         .unwrap_or_default();
     if items.is_empty() {
-        items.push("Does what the request asked".to_owned());
+        items.push(CHECK_REQUEST.text().to_owned());
     }
-    items.push(CONTRADICTION_ITEM.to_owned());
+    items.push(CONTRADICTION_ITEM.text().to_owned());
     items
 }
 
@@ -5210,6 +5217,9 @@ mod tests {
     use crate::config::{AgentConfig, ConversationConfig, EdgeConfig, GuardsConfig, SpawnConfig};
     use memory::PromptSectionKind as Kind;
     use std::collections::BTreeMap;
+
+    /// The item every check step checks, as these tests expect it.
+    const CONTRADICTION_ITEM: &str = super::CONTRADICTION_ITEM.default_text();
 
     /// What every stand-in answers the stage-boundary checkpoint request with. A stage of a team
     /// with a notebook — with a successor or not — takes this turn as its last, which is the

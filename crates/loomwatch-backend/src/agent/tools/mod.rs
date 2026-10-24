@@ -15,22 +15,61 @@ use serde_json::{Value, json};
 
 use super::events::ToolKind;
 use super::provider::{Cancel, Picture, ToolSpec};
+use crate::prompt_blocks::Block;
 
 pub(crate) use command::CommandSettings;
 
+// What each tool says it does, read each time the agent picks a tool.
+pub(crate) const LIST_FILES: Block = Block::new(
+    "tool.list_files",
+    "List the files and folders in a folder. Paths are relative to your work folder.",
+);
+pub(crate) const READ_FILE: Block = Block::new(
+    "tool.read_file",
+    "Read a file. Text comes with its lines numbered, and so does the text of a PDF, Word (.docx), \
+     Excel (.xlsx, .xls) or PowerPoint (.pptx) file, and an email (.eml) as who wrote to whom, \
+     when, its subject and its words. For a long file, read it in parts with offset and limit. A \
+     picture (PNG, JPEG, GIF or WebP) is shown to you when the model you run on can see pictures.",
+);
+pub(crate) const SEARCH_FILES: Block = Block::new(
+    "tool.search_files",
+    "Search the text of files for a regular expression. Answers with path:line: text for each \
+     match.",
+);
+pub(crate) const WRITE_FILE: Block = Block::new(
+    "tool.write_file",
+    "Create a file, or replace a file's whole content. Folders are created as needed.",
+);
+pub(crate) const EDIT_FILE: Block = Block::new(
+    "tool.edit_file",
+    "Change part of a file: replace old_text, which must appear exactly once, with new_text. Set \
+     replace_all to replace every occurrence. Read the file first.",
+);
 /// What `run_command` says it does: which shell reads the command, and where it may change files,
 /// which only the Mac's sandbox enforces.
-const RUN_COMMAND: &str = if cfg!(windows) {
-    "Run a command in your work folder with cmd.exe, such as a script a skill provides. Write it \
-     for cmd.exe; for PowerShell, run powershell -NoProfile -Command \"…\". The operator may be \
-     asked first. Change files only inside your work folder."
-} else if cfg!(target_os = "macos") {
-    "Run a shell command in your work folder, such as a script a skill provides. The operator may \
-     be asked first. It can change files only inside your work folder."
-} else {
-    "Run a shell command in your work folder, such as a script a skill provides. The operator may \
-     be asked first. Change files only inside your work folder."
-};
+pub(crate) const RUN_COMMAND: Block = Block::new(
+    "tool.run_command",
+    if cfg!(windows) {
+        "Run a command in your work folder with cmd.exe, such as a script a skill provides. Write \
+         it for cmd.exe; for PowerShell, run powershell -NoProfile -Command \"…\". The operator may \
+         be asked first. Change files only inside your work folder."
+    } else if cfg!(target_os = "macos") {
+        "Run a shell command in your work folder, such as a script a skill provides. The operator \
+         may be asked first. It can change files only inside your work folder."
+    } else {
+        "Run a shell command in your work folder, such as a script a skill provides. The operator \
+         may be asked first. Change files only inside your work folder."
+    },
+);
+pub(crate) const UPDATE_PLAN: Block = Block::new(
+    "tool.update_plan",
+    "Keep your plan for this task: the whole list of steps, each pending, in_progress or \
+     completed. Send the full list every time it changes.",
+);
+pub(crate) const READ_TOOL_OUTPUT: Block = Block::new(
+    "tool.read_tool_output",
+    "Read more of a long tool output that was set aside, by the id the shortened output named.",
+);
 
 /// A built-in tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,7 +184,7 @@ impl Builtin {
     pub(crate) fn spec(self) -> ToolSpec {
         let (description, parameters) = match self {
             Self::ListFiles => (
-                "List the files and folders in a folder. Paths are relative to your work folder.",
+                LIST_FILES,
                 json!({
                     "type": "object",
                     "properties": {
@@ -156,11 +195,7 @@ impl Builtin {
                 }),
             ),
             Self::ReadFile => (
-                "Read a file. Text comes with its lines numbered, and so does the text of a PDF, \
-                 Word (.docx), Excel (.xlsx, .xls) or PowerPoint (.pptx) file, and an email \
-                 (.eml) as who wrote to whom, when, its subject and its words. For a long file, \
-                 read it in parts with offset and limit. A picture (PNG, JPEG, GIF or WebP) is \
-                 shown to you when the model you run on can see pictures.",
+                READ_FILE,
                 json!({
                     "type": "object",
                     "properties": {
@@ -173,8 +208,7 @@ impl Builtin {
                 }),
             ),
             Self::SearchFiles => (
-                "Search the text of files for a regular expression. Answers with path:line: text \
-                 for each match.",
+                SEARCH_FILES,
                 json!({
                     "type": "object",
                     "properties": {
@@ -188,7 +222,7 @@ impl Builtin {
                 }),
             ),
             Self::WriteFile => (
-                "Create a file, or replace a file's whole content. Folders are created as needed.",
+                WRITE_FILE,
                 json!({
                     "type": "object",
                     "properties": {
@@ -200,8 +234,7 @@ impl Builtin {
                 }),
             ),
             Self::EditFile => (
-                "Change part of a file: replace old_text, which must appear exactly once, with \
-                 new_text. Set replace_all to replace every occurrence. Read the file first.",
+                EDIT_FILE,
                 json!({
                     "type": "object",
                     "properties": {
@@ -227,8 +260,7 @@ impl Builtin {
                 }),
             ),
             Self::UpdatePlan => (
-                "Keep your plan for this task: the whole list of steps, each pending, in_progress \
-                 or completed. Send the full list every time it changes.",
+                UPDATE_PLAN,
                 json!({
                     "type": "object",
                     "properties": {
@@ -250,8 +282,7 @@ impl Builtin {
                 }),
             ),
             Self::ReadToolOutput => (
-                "Read more of a long tool output that was set aside, by the id the shortened \
-                 output named.",
+                READ_TOOL_OUTPUT,
                 json!({
                     "type": "object",
                     "properties": {
@@ -266,7 +297,7 @@ impl Builtin {
         };
         ToolSpec {
             name: self.name().to_owned(),
-            description: description.to_owned(),
+            description: description.text().to_owned(),
             parameters,
         }
     }

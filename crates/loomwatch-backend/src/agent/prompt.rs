@@ -12,7 +12,97 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::prompt_blocks::Block;
 use crate::you::AboutYou;
+
+/// Who the agent works for, and where its task comes from. `{the_person}` is "the person who runs
+/// this team", after their name when they gave one.
+pub(crate) const INTRO: Block = Block::new(
+    "system.intro",
+    "You are an agent in LoomWatch, working on a task for {the_person}. The task, your role and \
+     what counts as done come in the person's message.",
+);
+/// For an agent that keeps a plan.
+pub(crate) const PLAN: Block = Block::new(
+    "system.plan",
+    "- For work with several steps, start by writing a short plan with update_plan, and keep it \
+     current as you go: mark a step in_progress when you start it and completed when it is done. \
+     Send update_plan in the same message as the step's other tool calls, not in a message of its \
+     own.",
+);
+/// For an agent with any tool. Every message re-reads the whole conversation, so one message
+/// asking for five things costs far less than five messages asking for one each.
+pub(crate) const BATCH: Block = Block::new(
+    "system.batch",
+    "- When you need several things that don't depend on each other, such as files to read or \
+     searches to run, ask for all of them in one message instead of one at a time.",
+);
+/// For an agent with files.
+pub(crate) const FILES: Block = Block::new(
+    "system.files",
+    "- Your work folder is {work_folder}. Paths are relative to it. Stay inside it unless the task \
+     names another place.\n\
+     - Look before you change anything: read a file before you edit it, and keep edits to what the \
+     task needs.",
+);
+/// For an agent that may run commands.
+pub(crate) const COMMANDS: Block = Block::new(
+    "system.commands",
+    "- run_command is for scripts and tools the task needs, such as the ones a skill provides. The \
+     person may be asked first, so don't run commands you don't need.",
+);
+/// For an agent that reads the web, with `{words}` of a page read. A page read stays in the
+/// conversation and is paid for again on every later call, so reading it twice pays for it twice
+/// from then on.
+pub(crate) const WEB: Block = Block::new(
+    "system.web",
+    "- You can search the web and read web pages. Prefer primary sources, and check that a source \
+     says what you cite it for. A page is read up to about {words} words. What you read stays in \
+     this conversation, so check a claim against it there rather than opening the page again.",
+);
+/// For every agent.
+pub(crate) const SOURCES: Block = Block::new(
+    "system.sources",
+    "- Say where facts come from: name the file, or the web page's address, for anything you \
+     didn't work out yourself.",
+);
+/// For an agent with `ask_user`.
+pub(crate) const ASK_USER: Block = Block::new(
+    "system.ask_user",
+    "- When something is unclear and a wrong guess would waste the work, ask the person with \
+     ask_user. Otherwise make a sensible choice and say what you chose.",
+);
+/// For an agent without `ask_user`.
+pub(crate) const UNCLEAR: Block = Block::new(
+    "system.unclear",
+    "- When something is unclear, make a sensible choice and say what you chose, or say exactly \
+     what you need.",
+);
+/// For every agent, last of how it works.
+pub(crate) const FINISH: Block = Block::new(
+    "system.finish",
+    "- If a tool says you were declined or answers you in the person's words, take that as their \
+     decision and carry on without it.\n\
+     - A long tool output may be set aside: you see its start and an id, and read_tool_output \
+     gives you the rest.\n\
+     - Before you finish, check your result against what the task asks for, and against \"Done \
+     when\" if it was given. Fix what falls short.\n\
+     - Then reply with the result itself, plainly. Don't describe the steps you took unless the \
+     person asked.",
+);
+/// Above what the person wrote about themselves (ADR 0074).
+pub(crate) const PERSON: Block = Block::new(
+    "system.person",
+    "They wrote this for the agents they work with in LoomWatch.",
+);
+/// Below it: how to use it.
+pub(crate) const PERSON_USE: Block = Block::new(
+    "system.person_use",
+    "Use this so your work fits them: follow what they say about how they want answers \
+     (language, length, tone, format), and pitch the content to who they are and what they know. \
+     Where the task or their message asks for something else, that wins. Don't repeat this back \
+     or mention it unless it matters to the task.",
+);
 
 /// The project notes file an agent reads from its work folder: the team's Brief when it is
 /// delivered as a file (`docs/TEAM_MEMORY.md`, channel 2), or what the person keeps there. The
@@ -82,47 +172,27 @@ pub(crate) fn system_prompt(
     extra: Option<&str>,
 ) -> String {
     let name = person.and_then(|person| person.name.as_deref());
-    let mut prompt = String::from("You are an agent in LoomWatch, working on a task for ");
-    if let Some(name) = name {
-        let _ = write!(prompt, "{name}, ");
-    }
-    prompt.push_str(
-        "the person who runs this team. The task, your role and what counts as done come in the \
-         person's message.\n\n\
-         ## How you work\n",
-    );
+    let the_person = match name {
+        Some(name) => format!("{name}, the person who runs this team"),
+        None => "the person who runs this team".to_owned(),
+    };
+    let mut prompt = INTRO.fill(&[("the_person", &the_person)]);
+    prompt.push_str("\n\n## How you work\n");
+    let mut habit = |text: &str| {
+        prompt.push_str(text);
+        prompt.push('\n');
+    };
     if abilities.plan {
-        prompt.push_str(
-            "- For work with several steps, start by writing a short plan with update_plan, and \
-             keep it current as you go: mark a step in_progress when you start it and completed \
-             when it is done. Send update_plan in the same message as the step's other tool \
-             calls, not in a message of its own.\n",
-        );
+        habit(PLAN.text());
     }
     if abilities.files || abilities.commands || abilities.web.is_some() || abilities.plan {
-        // Every message re-reads the whole conversation, so one message asking for five things
-        // costs far less than five messages asking for one each.
-        prompt.push_str(
-            "- When you need several things that don't depend on each other, such as files to \
-             read or searches to run, ask for all of them in one message instead of one at a \
-             time.\n",
-        );
+        habit(BATCH.text());
     }
     if abilities.files {
-        let _ = write!(
-            prompt,
-            "- Your work folder is {}. Paths are relative to it. Stay inside it unless the task \
-             names another place.\n\
-             - Look before you change anything: read a file before you edit it, and keep edits to \
-             what the task needs.\n",
-            cwd.display()
-        );
+        habit(&FILES.fill(&[("work_folder", &cwd.display().to_string())]));
     }
     if abilities.commands {
-        prompt.push_str(
-            "- run_command is for scripts and tools the task needs, such as the ones a skill \
-             provides. The person may be asked first, so don't run commands you don't need.\n",
-        );
+        habit(COMMANDS.text());
     }
     if let Some(words) = abilities.web {
         let words = if words >= 1_000 {
@@ -130,41 +200,15 @@ pub(crate) fn system_prompt(
         } else {
             words.to_string()
         };
-        // A page read stays in the conversation and is paid for again on every later call, so
-        // reading it twice pays for it twice from then on.
-        let _ = writeln!(
-            prompt,
-            "- You can search the web and read web pages. Prefer primary sources, and check that a \
-             source says what you cite it for. A page is read up to about {words} words. What you \
-             read stays in this conversation, so check a claim against it there rather than \
-             opening the page again."
-        );
+        habit(&WEB.fill(&[("words", &words)]));
     }
-    prompt.push_str(
-        "- Say where facts come from: name the file, or the web page's address, for anything you \
-         didn't work out yourself.\n",
-    );
-    if abilities.ask_user {
-        prompt.push_str(
-            "- When something is unclear and a wrong guess would waste the work, ask the person \
-             with ask_user. Otherwise make a sensible choice and say what you chose.\n",
-        );
+    habit(SOURCES.text());
+    habit(if abilities.ask_user {
+        ASK_USER.text()
     } else {
-        prompt.push_str(
-            "- When something is unclear, make a sensible choice and say what you chose, or say \
-             exactly what you need.\n",
-        );
-    }
-    prompt.push_str(
-        "- If a tool says you were declined or answers you in the person's words, take that as \
-         their decision and carry on without it.\n\
-         - A long tool output may be set aside: you see its start and an id, and read_tool_output \
-         gives you the rest.\n\
-         - Before you finish, check your result against what the task asks for, and against \
-         \"Done when\" if it was given. Fix what falls short.\n\
-         - Then reply with the result itself, plainly. Don't describe the steps you took unless \
-         the person asked.\n",
-    );
+        UNCLEAR.text()
+    });
+    habit(FINISH.text());
     if let Some(about) = person.and_then(|person| person.about.as_deref()) {
         person_section(&mut prompt, name, about);
     }
@@ -194,10 +238,9 @@ pub(crate) fn system_prompt(
 /// is context. The task still wins where the two differ: a request for one piece of work is more
 /// particular than a standing preference.
 fn person_section(prompt: &mut String, name: Option<&str>, about: &str) {
-    prompt.push_str(
-        "\n## The person you work for\nThey wrote this for the agents they work with in \
-         LoomWatch.\n\n",
-    );
+    prompt.push_str("\n## The person you work for\n");
+    prompt.push_str(PERSON.text());
+    prompt.push_str("\n\n");
     if let Some(name) = name {
         let _ = writeln!(prompt, "Name: {name}");
     }
@@ -209,12 +252,9 @@ fn person_section(prompt: &mut String, name: Option<&str>, about: &str) {
             let _ = writeln!(prompt, "> {line}");
         }
     }
-    prompt.push_str(
-        "\nUse this so your work fits them: follow what they say about how they want answers \
-         (language, length, tone, format), and pitch the content to who they are and what they \
-         know. Where the task or their message asks for something else, that wins. Don't repeat \
-         this back or mention it unless it matters to the task.\n",
-    );
+    prompt.push('\n');
+    prompt.push_str(PERSON_USE.text());
+    prompt.push('\n');
 }
 
 #[cfg(test)]

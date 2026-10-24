@@ -14,6 +14,7 @@
 use std::fmt::Write as _;
 
 use crate::config::{AgentConfig, TeamConfig};
+use crate::prompt_blocks::Block;
 
 /// Between the agent's id and the helper's number in a helper's id: `writer~2`. Never in an id
 /// the team file may use (`config::is_identifier`), so a helper can't share an id with an agent.
@@ -101,15 +102,21 @@ fn shown(agent: &AgentConfig) -> &str {
 
 /// The `start_helper` tool's description: read at the moment the agent decides, so it says when a
 /// helper pays for itself and that the brief is all the helper has.
-pub const TOOL_DESCRIPTION: &str = "Start a helper: a copy of you, with your instructions, tools \
-     and folders, that does one part of the work while you and other helpers do the rest. It \
-     starts fresh and sees only the brief you write here. Start all the helpers for a step \
-     together, in the same message, then do your own part or end your turn: what each one sends \
-     back comes to you in one more turn, once they have all finished.";
+pub(crate) const START_HELPER: Block = Block::new(
+    "bus.start_helper",
+    "Start a helper: a copy of you, with your instructions, tools and folders, that does one part \
+     of the work while you and other helpers do the rest. It starts fresh and sees only the brief \
+     you write here. Start all the helpers for a step together, in the same message, then do your \
+     own part or end your turn: what each one sends back comes to you in one more turn, once they \
+     have all finished.",
+);
 
 /// The `title` argument: what the person reads in the chat while the helper works.
-pub const TITLE_DESCRIPTION: &str = "The part this helper does, in two to five plain words the \
-     person reads in the chat, such as \"Rent in Hanoi\" or \"Read the 2025 reports\".";
+pub(crate) const START_HELPER_TITLE: Block = Block::new(
+    "bus.start_helper.title",
+    "The part this helper does, in two to five plain words the person reads in the chat, such as \
+     \"Rent in Hanoi\" or \"Read the 2025 reports\".",
+);
 
 /// The `task` argument: the part, with everything the helper needs to do it well.
 ///
@@ -117,15 +124,20 @@ pub const TITLE_DESCRIPTION: &str = "The part this helper does, in two to five p
 /// found an objective, an output format, guidance on sources and clear boundaries to be what a
 /// subagent needs, and `LangChain`'s Deep Agents saw models put the real instructions anywhere but
 /// the field they had, so each part has a field of its own, and both are required.
-pub const TASK_DESCRIPTION: &str = "This part of the work, for someone who has seen none of your \
-     conversation: its goal and how it fits the request, what you already know, and which \
-     sources, files or tools to use. Say what not to cover when another helper covers it.";
+pub(crate) const START_HELPER_TASK: Block = Block::new(
+    "bus.start_helper.task",
+    "This part of the work, for someone who has seen none of your conversation: its goal and how \
+     it fits the request, what you already know, and which sources, files or tools to use. Say \
+     what not to cover when another helper covers it.",
+);
 
 /// The `send_back` argument: what comes back, and where the helper stops.
-pub const SEND_BACK_DESCRIPTION: &str = "What it sends back and in what form (a list of findings \
-     with their links, a table, a draft of one section), and how far to go before it stops: a \
-     quick look or a thorough search. When it makes a file, the file's name: each helper writes \
-     its own.";
+pub(crate) const START_HELPER_SEND_BACK: Block = Block::new(
+    "bus.start_helper.send_back",
+    "What it sends back and in what form (a list of findings with their links, a table, a draft of \
+     one section), and how far to go before it stops: a quick look or a thorough search. When it \
+     makes a file, the file's name: each helper writes its own.",
+);
 
 /// The heading the second half of a brief is given under.
 const SEND_BACK_HEADING: &str = "## What to send back";
@@ -164,30 +176,30 @@ pub const HEADING: &str = "## Helpers";
 /// helper sees only its brief, and two helpers given vague briefs do the same search twice.
 #[must_use]
 pub fn for_lead(at_once: u32) -> String {
-    let mut text = String::new();
-    let _ = write!(
-        text,
-        "You can bring in helpers with `start_helper`, up to {at_once} at a time. Each is a copy \
-         of you that works on one part at the same time as you.\n\
-         - Most tasks need none: answer, change or write it yourself when you can do it well in \
-         a few steps, when its parts depend on each other, or when one voice and one line of \
-         judgement must run through all of it. Never bring one in only to check or redo your own \
-         work.\n\
-         - Bring them in when the task is wide and splits into parts that can be done separately, \
-         each big enough for a session of its own: several subjects to look into, several \
-         documents or sources to go through, several independent pieces to make. Two or three is \
-         usually right; more only for a task with that many truly separate parts.\n\
-         - Decide the split first, so no two parts overlap and nothing falls between them, and \
-         keep the part everything else depends on for yourself. Then start them together, and do \
-         your part while they work.\n\
-         - Helpers find, read and draft. You write the answer, and you check any file the person \
-         gets: when helpers make files, give each its own file to write.\n\
-         - What they send back is source material, not your answer: check it against the \
-         request, settle where they disagree, fill any gap yourself, and write the one finished \
-         result. The person reads only your reply."
-    );
-    text
+    LEAD.fill(&[("at_once", &at_once.to_string())])
 }
+
+/// `## Helpers`, with `{at_once}` helpers allowed at a time.
+pub(crate) const LEAD: Block = Block::new(
+    "helpers.lead",
+    "You can bring in helpers with `start_helper`, up to {at_once} at a time. Each is a copy of you \
+     that works on one part at the same time as you.\n\
+     - Most tasks need none: answer, change or write it yourself when you can do it well in a few \
+     steps, when its parts depend on each other, or when one voice and one line of judgement must \
+     run through all of it. Never bring one in only to check or redo your own work.\n\
+     - Bring them in when the task is wide and splits into parts that can be done separately, each \
+     big enough for a session of its own: several subjects to look into, several documents or \
+     sources to go through, several independent pieces to make. Two or three is usually right; \
+     more only for a task with that many truly separate parts.\n\
+     - Decide the split first, so no two parts overlap and nothing falls between them, and keep the \
+     part everything else depends on for yourself. Then start them together, and do your part \
+     while they work.\n\
+     - Helpers find, read and draft. You write the answer, and you check any file the person gets: \
+     when helpers make files, give each its own file to write.\n\
+     - What they send back is source material, not your answer: check it against the request, \
+     settle where they disagree, fill any gap yourself, and write the one finished result. The \
+     person reads only your reply.",
+);
 
 /// Where a helper sits: brought in by `lead` for one part of `request`.
 ///
@@ -196,26 +208,36 @@ pub fn for_lead(at_once: u32) -> String {
 /// doesn't take the whole of it on.
 #[must_use]
 pub fn for_copy(lead_name: &str, request: Option<&str>) -> String {
-    let mut text = format!(
-        "You are one of {lead_name}'s helpers. {lead_name} split a larger task and gave you one \
-         part of it: the task below. You have {lead_name}'s instructions, tools and folders, but \
-         you do only this part, completely, and stay within it. Other helpers work in the same \
-         folder at the same time, so write only the files your task names and change nothing \
-         else.\n\
-         Reply in the form \"What to send back\" asks for, condensed: what you found or made, and \
-         where (links, file paths), not how you worked. Say what you could not do or confirm \
-         rather than guessing: {lead_name} puts the parts together and needs to know."
-    );
+    let lead = [("lead", lead_name)];
+    let mut text = COPY.fill(&lead);
     if let Some(request) = request.map(str::trim).filter(|request| !request.is_empty()) {
         let _ = write!(
             text,
-            "\n\nFor context, what the person asked {lead_name} (it is {lead_name}'s to answer, \
-             not yours):\n> {}",
+            "\n\n{}\n> {}",
+            COPY_REQUEST.fill(&lead),
             cap(request, REQUEST_CHARS).replace('\n', "\n> ")
         );
     }
     text
 }
+
+/// A helper, brought in by `{lead}`.
+pub(crate) const COPY: Block = Block::new(
+    "helpers.copy",
+    "You are one of {lead}'s helpers. {lead} split a larger task and gave you one part of it: the \
+     task below. You have {lead}'s instructions, tools and folders, but you do only this part, \
+     completely, and stay within it. Other helpers work in the same folder at the same time, so \
+     write only the files your task names and change nothing else.\n\
+     Reply in the form \"What to send back\" asks for, condensed: what you found or made, and \
+     where (links, file paths), not how you worked. Say what you could not do or confirm rather \
+     than guessing: {lead} puts the parts together and needs to know.",
+);
+
+/// Above the request it is shown for context, quoted.
+pub(crate) const COPY_REQUEST: Block = Block::new(
+    "helpers.copy_request",
+    "For context, what the person asked {lead} (it is {lead}'s to answer, not yours):",
+);
 
 /// How much of the person's request a helper is shown for context: the gist, not a second copy of
 /// a long pasted document its brief already draws on.

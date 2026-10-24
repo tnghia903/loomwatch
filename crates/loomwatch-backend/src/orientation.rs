@@ -15,6 +15,7 @@
 use std::fmt::Write as _;
 
 use crate::config::{AgentConfig, TeamConfig};
+use crate::prompt_blocks::Block;
 use crate::skill_routing::{self, BusMode};
 
 /// The heading the section is rendered under.
@@ -25,7 +26,31 @@ pub const HEADING: &str = "## Your place in the team";
 const ROLE_SUMMARY_CHARS: usize = 140;
 
 /// What the agent whose reply is the team's answer is told about writing it.
-const FINAL_ANSWER: &str = "Your reply is the team's final answer: the operator reads it as you write it. Make it the finished result itself, as long as the request needs and no longer, not a report on how you produced it.";
+pub(crate) const FINAL_ANSWER: Block = Block::new(
+    "orientation.final_answer",
+    "Your reply is the team's final answer: the operator reads it as you write it. Make it the \
+     finished result itself, as long as the request needs and no longer, not a report on how you \
+     produced it.",
+);
+
+/// The lead, first: who it is and that the request comes to it.
+pub(crate) const LEAD: Block = Block::new(
+    "orientation.lead",
+    "You are {name}, the lead of {team}. The operator's request comes to you first.",
+);
+
+/// Above the lead's teammates, one line each.
+pub(crate) const LEAD_TEAMMATES: Block = Block::new(
+    "orientation.lead_teammates",
+    "Your teammates, whom you can hand parts of the work to with your Team Bus tools:",
+);
+
+/// What a lead may not do and `{teammates}` may (`what_teammates_may_do_instead`). `{ability}` is
+/// "search the web", "change files" or "run commands"; `{it_or_them}` is "it" for one teammate.
+pub(crate) const TEAMMATES_CAN: Block = Block::new(
+    "orientation.teammates_can",
+    "You can't {ability} yourself, but {teammates} can: hand {it_or_them} the parts that need it.",
+);
 
 /// The team-mode lead: the entrypoint, which receives the request and answers it.
 #[must_use]
@@ -38,15 +63,12 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
     if teammates.is_empty() {
         return None;
     }
-    let mut text = format!(
-        "You are {}, the lead of {}. The operator's request comes to you first.\n{FINAL_ANSWER}",
-        agent.name,
-        team_label(team)
-    );
+    let mut text = LEAD.fill(&[("name", &agent.name), ("team", &team_label(team))]);
+    text.push('\n');
+    text.push_str(FINAL_ANSWER.text());
     if skill_routing::bus_tools(BusMode::Team, agent.allow_recruiting).delegate {
-        text.push_str(
-            "\n\nYour teammates, whom you can hand parts of the work to with your Team Bus tools:",
-        );
+        text.push_str("\n\n");
+        text.push_str(LEAD_TEAMMATES.text());
         for teammate in &teammates {
             let _ = write!(text, "\n{}", teammate_line(teammate));
         }
@@ -55,7 +77,7 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
             text.push_str(&line);
         }
         text.push_str("\n\n");
-        text.push_str(DELEGATION);
+        text.push_str(DELEGATION.text());
     }
     Some(text)
 }
@@ -67,7 +89,65 @@ pub fn for_lead(team: &TeamConfig, agent: &AgentConfig) -> Option<String> {
 /// write the same rule into its lead after it spawned many subagents for simple queries. Then the
 /// brief, because the teammate sees only what it is sent (`for_helper`), and a vague brief is the
 /// commonest way delegated work is duplicated or misread.
-const DELEGATION: &str = "Do what you can do well yourself, and bring in a teammate only for a part that needs its job: each one you start opens a session of its own, which costs time and tokens. A teammate sees only what you send it, so give it the goal, what you already know, what to send back and where to stop. Check what comes back before you use it.";
+pub(crate) const DELEGATION: Block = Block::new(
+    "orientation.delegation",
+    "Do what you can do well yourself, and bring in a teammate only for a part that needs its \
+     job: each one you start opens a session of its own, which costs time and tokens. A teammate \
+     sees only what you send it, so give it the goal, what you already know, what to send back \
+     and where to stop. Check what comes back before you use it.",
+);
+
+/// A pipeline stage, first: who it is and where it sits.
+pub(crate) const STAGE: Block = Block::new(
+    "orientation.stage",
+    "You are {name}, step {step} of {steps} in {team}.",
+);
+
+/// The first stage.
+pub(crate) const STAGE_FIRST: Block = Block::new(
+    "orientation.stage_first",
+    "The operator's request comes to you first.",
+);
+
+/// Any later stage: `{names}` are the stages connected into it.
+pub(crate) const STAGE_BEFORE: Block = Block::new(
+    "orientation.stage_before",
+    "Before you: {names}. What came before you is in the sections above the task.",
+);
+
+/// A check step with stages after it, which are handed `{checked}`'s work instead of its reply.
+pub(crate) const STAGE_AFTER_CHECK: Block = Block::new(
+    "orientation.stage_after_check",
+    "After you: {names}. They receive {checked}'s work, not your reply, with the items you mark \
+     Not met or Not sure.",
+);
+
+/// A stage whose every successor is a check step on its work.
+pub(crate) const STAGE_AFTER_CHECKER: Block = Block::new(
+    "orientation.stage_after_checker",
+    "After you: {names}, which checks your reply as you write it against what it must satisfy.",
+);
+
+/// A stage with a review stop after it.
+pub(crate) const STAGE_AFTER_REVIEW: Block = Block::new(
+    "orientation.stage_after_review",
+    "After you: {names}. When your work is done you will be asked for a handover, and that \
+     handover is all they receive — they do not see this conversation.",
+);
+
+/// A stage with other stages after it.
+pub(crate) const STAGE_AFTER: Block = Block::new(
+    "orientation.stage_after",
+    "After you: {names}. They receive your reply as you write it, or, when it runs long, a \
+     shorter handover you will be asked for. They do not see this conversation.",
+);
+
+/// A check step: whose work it checks, before [`CHECK_BLOCK`].
+pub(crate) const CHECK: Block = Block::new(
+    "orientation.check",
+    "You check {checked}'s work: it is in the sections above the task, with what it was given and \
+     what it must satisfy.",
+);
 
 /// A pipeline stage at `index` in the run's `order`.
 ///
@@ -87,23 +167,19 @@ pub fn for_stage(
     if order.len() < 2 {
         return None;
     }
-    let mut text = format!(
-        "You are {}, step {} of {} in {}.",
-        agent.name,
-        index + 1,
-        order.len(),
-        team_label(team)
-    );
+    let mut text = STAGE.fill(&[
+        ("name", &agent.name),
+        ("step", &(index + 1).to_string()),
+        ("steps", &order.len().to_string()),
+        ("team", &team_label(team)),
+    ]);
     let ids = skill_routing::bus_tools(BusMode::Pipeline, agent.allow_recruiting).reachable();
     let before = neighbours(team, |edge| (edge.to == agent.id).then_some(&edge.from));
+    text.push('\n');
     if before.is_empty() {
-        text.push_str("\nThe operator's request comes to you first.");
+        text.push_str(STAGE_FIRST.text());
     } else {
-        let _ = write!(
-            text,
-            "\nBefore you: {}. What came before you is in the sections above the task.",
-            names(&before, ids)
-        );
+        text.push_str(&STAGE_BEFORE.fill(&[("names", &names(&before, ids))]));
     }
     let after = neighbours(team, |edge| (edge.from == agent.id).then_some(&edge.to));
     let checked = agent
@@ -113,12 +189,9 @@ pub fn for_stage(
     if let Some(checked) = checked.filter(|_| !after.is_empty()) {
         // ADR 0062: a check step hands on the work it checked, not its own reply (lib.rs
         // `checked_work_handover`), so it writes no handover either.
-        let _ = write!(
-            text,
-            "\nAfter you: {}. They receive {}'s work, not your reply, with the items you mark Not \
-             met or Not sure.",
-            names(&after, ids),
-            checked.name
+        text.push('\n');
+        text.push_str(
+            &STAGE_AFTER_CHECK.fill(&[("names", &names(&after, ids)), ("checked", &checked.name)]),
         );
     } else if !after.is_empty()
         && after
@@ -126,42 +199,29 @@ pub fn for_stage(
             .all(|next| next.checks.as_deref() == Some(agent.id.as_str()))
     {
         // ADR 0062: a check step is handed the work itself, so there is no handover to write.
-        let _ = write!(
-            text,
-            "\nAfter you: {}, which checks your reply as you write it against what it must satisfy.",
-            names(&after, ids)
-        );
+        text.push('\n');
+        text.push_str(&STAGE_AFTER_CHECKER.fill(&[("names", &names(&after, ids))]));
     } else if !after.is_empty() && after.iter().any(|next| next.is_operator()) {
-        let _ = write!(
-            text,
-            "\nAfter you: {}. When your work is done you will be asked for a handover, and that \
-             handover is all they receive — they do not see this conversation.",
-            names(&after, ids)
-        );
+        text.push('\n');
+        text.push_str(&STAGE_AFTER_REVIEW.fill(&[("names", &names(&after, ids))]));
     } else if !after.is_empty() {
         // A short reply is handed on as written, and a long one is summarised in a handover first
         // (`reply_is_its_own_handover` in lib.rs).
-        let _ = write!(
-            text,
-            "\nAfter you: {}. They receive your reply as you write it, or, when it runs long, a \
-             shorter handover you will be asked for. They do not see this conversation.",
-            names(&after, ids)
-        );
+        text.push('\n');
+        text.push_str(&STAGE_AFTER.fill(&[("names", &names(&after, ids))]));
     }
     if let Some(checked) = checked {
         // ADR 0062: the verdict is read from this block whatever the role says, so a check step
         // whose instructions were written by hand or by Ask LoomWatch is told it here; without
         // it, every item reads Not sure and nothing can be sent back.
-        let _ = write!(
-            text,
-            "
-You check {}'s work: it is in the sections above the task, with what it was given and what it must satisfy. {CHECK_BLOCK}",
-            checked.name
-        );
+        text.push('\n');
+        text.push_str(&CHECK.fill(&[("checked", &checked.name)]));
+        text.push(' ');
+        text.push_str(CHECK_BLOCK.text());
     }
     if responder == agent.id {
         text.push('\n');
-        text.push_str(FINAL_ANSWER);
+        text.push_str(FINAL_ANSWER.text());
     }
     Some(text)
 }
@@ -171,10 +231,13 @@ You check {}'s work: it is in the sections above the task, with what it was give
 ///
 /// Numbered, because a line is matched to the item it answers; and every problem is a line,
 /// because a problem written only above the block is never shown or sent back.
-const CHECK_BLOCK: &str = "Do not rewrite the work. End your reply with this block, one line \
-     for each numbered item it must satisfy, in order, starting with its number. Every problem you \
-     found must be one of these lines, marked Not met:\n## Check\n1. Met | Not met | Not sure — \
-     the item — your evidence";
+pub(crate) const CHECK_BLOCK: Block = Block::new(
+    "orientation.check_block",
+    "Do not rewrite the work. End your reply with this block, one line for each numbered item it \
+     must satisfy, in order, starting with its number. Every problem you found must be one of \
+     these lines, marked Not met:\n## Check\n1. Met | Not met | Not sure — the item — your \
+     evidence",
+);
 
 /// The heading of the section that says how to read the request.
 pub const READING_HEADING: &str = "## Reading the request";
@@ -189,38 +252,51 @@ pub const READING_HEADING: &str = "## Reading the request";
 /// lines about teammates and checks only for an agent that has them.
 #[must_use]
 pub fn reading(in_team: bool, checks: bool) -> String {
-    let mut text = String::from(
-        "Your role above says who you are and how you work. It is not a job to do again on every \
-         message. The task at the end is what the operator wants now: read it as a thoughtful \
-         colleague would, with the conversation so far, and give them what they meant.\n\
-         - Asked for work your role covers: do it fully.\n\
-         - Asked a question: answer it, from the conversation, earlier work and what you were \
-         handed, instead of producing your usual result. Look things up only when the answer \
-         needs it.\n\
-         - Asked to change something already made: change that, and keep the rest.\n\
-         - Greeted, thanked or chatted with: reply in a sentence or two, as a person would, and \
-         start no work.\n\
-         - Hold \"Done when\" to what was asked: an item about something the request doesn't call \
-         for does not apply.\n\
-         - When you can't tell what they want and a wrong guess would waste real work, ask. \
-         Otherwise take the likeliest reading and say which one you took.",
-    );
+    let mut text = READING.text().to_owned();
     if in_team {
-        text.push_str(
-            "\n- Your teammates read the same request. When it needs nothing from your part, say \
-             so in a line and pass on what you were handed as it is, rather than redoing your \
-             job. If your reply is the team's answer, give the operator that answer itself.",
-        );
+        text.push('\n');
+        text.push_str(READING_TEAM.text());
     }
     if checks {
-        text.push_str(
-            "\n- When you check a teammate's work, check it against what the operator asked, and \
-             always end with your check block. When the request asked for no work, such as a \
-             greeting, mark each item Met with \"Does not apply\" and why.",
-        );
+        text.push('\n');
+        text.push_str(READING_CHECKS.text());
     }
     text
 }
+
+/// `## Reading the request`, for every agent.
+pub(crate) const READING: Block = Block::new(
+    "orientation.reading",
+    "Your role above says who you are and how you work. It is not a job to do again on every \
+     message. The task at the end is what the operator wants now: read it as a thoughtful \
+     colleague would, with the conversation so far, and give them what they meant.\n\
+     - Asked for work your role covers: do it fully.\n\
+     - Asked a question: answer it, from the conversation, earlier work and what you were handed, \
+     instead of producing your usual result. Look things up only when the answer needs it.\n\
+     - Asked to change something already made: change that, and keep the rest.\n\
+     - Greeted, thanked or chatted with: reply in a sentence or two, as a person would, and start \
+     no work.\n\
+     - Hold \"Done when\" to what was asked: an item about something the request doesn't call for \
+     does not apply.\n\
+     - When you can't tell what they want and a wrong guess would waste real work, ask. Otherwise \
+     take the likeliest reading and say which one you took.",
+);
+
+/// Its line for an agent with teammates.
+pub(crate) const READING_TEAM: Block = Block::new(
+    "orientation.reading_team",
+    "- Your teammates read the same request. When it needs nothing from your part, say so in a \
+     line and pass on what you were handed as it is, rather than redoing your job. If your reply \
+     is the team's answer, give the operator that answer itself.",
+);
+
+/// Its line for a check step.
+pub(crate) const READING_CHECKS: Block = Block::new(
+    "orientation.reading_checks",
+    "- When you check a teammate's work, check it against what the operator asked, and always end \
+     with your check block. When the request asked for no work, such as a greeting, mark each item \
+     Met with \"Does not apply\" and why.",
+);
 
 /// An agent the operator wrote to directly with an @mention (ADR 0051).
 ///
@@ -240,36 +316,46 @@ pub fn for_one_agent(team: &TeamConfig, agent: &AgentConfig, about_a_part: bool)
         .iter()
         .filter(|other| about_a_part && other.id != agent.id && !other.is_operator())
         .collect::<Vec<_>>();
+    let label = team_label(team);
+    let who = [("name", agent.name.as_str()), ("team", label.as_str())];
     let mut text = if teammates.is_empty() {
-        format!(
-            "You are {}, on {}. The operator wrote to you directly, so this time you work alone: \
-             nobody else on the team runs, and your reply goes straight back to the operator.",
-            agent.name,
-            team_label(team)
-        )
+        ONE_AGENT.fill(&who)
     } else {
-        let mut text = format!(
-            "You are {}, on {}. The operator asked you directly about a part of a file, and your \
-             reply goes straight back to the operator.\n\
-             Answer it yourself when the answer is within your job. When it needs a teammate's \
-             job, ask that teammate with your Team Bus `ask` tool, sending the part, the question \
-             and what you need back, then answer with what it says and name who you asked. Your \
-             teammates:",
-            agent.name,
-            team_label(team)
-        );
+        let mut text = ONE_AGENT_ABOUT_A_PART.fill(&who);
         for teammate in &teammates {
             let _ = write!(text, "\n{}", teammate_line(teammate));
         }
         text
     };
-    text.push_str(
-        "\nWhen the task asks you to change your work, reply with the complete new version of it, \
-         not a description of what changed, and keep everything the task does not ask you to \
-         change. When it asks something else, such as a question about your work, answer that.",
-    );
+    text.push('\n');
+    text.push_str(ONE_AGENT_CHANGES.text());
     text
 }
+
+/// An agent the operator wrote to directly.
+pub(crate) const ONE_AGENT: Block = Block::new(
+    "orientation.one_agent",
+    "You are {name}, on {team}. The operator wrote to you directly, so this time you work alone: \
+     nobody else on the team runs, and your reply goes straight back to the operator.",
+);
+
+/// An agent asked about a part of a file, with teammates to ask, listed after it.
+pub(crate) const ONE_AGENT_ABOUT_A_PART: Block = Block::new(
+    "orientation.one_agent_about_a_part",
+    "You are {name}, on {team}. The operator asked you directly about a part of a file, and your \
+     reply goes straight back to the operator.\n\
+     Answer it yourself when the answer is within your job. When it needs a teammate's job, ask \
+     that teammate with your Team Bus `ask` tool, sending the part, the question and what you need \
+     back, then answer with what it says and name who you asked. Your teammates:",
+);
+
+/// Either way, last.
+pub(crate) const ONE_AGENT_CHANGES: Block = Block::new(
+    "orientation.one_agent_changes",
+    "When the task asks you to change your work, reply with the complete new version of it, not a \
+     description of what changed, and keep everything the task does not ask you to change. When it \
+     asks something else, such as a question about your work, answer that.",
+);
 
 /// A helper another agent brought in through the Team Bus.
 ///
@@ -280,19 +366,26 @@ pub fn for_helper(team: &TeamConfig, agent: &AgentConfig, caller: Option<&str>) 
     let caller = caller
         .and_then(|id| team.agents.iter().find(|other| other.id == id))
         .map_or("Another agent", |other| other.name.as_str());
-    // The last two sentences are the return a caller can use (ADR 0062): a helper may read widely,
-    // but what it sends back lands in the caller's context, so it is the result, condensed, and a
-    // part it could not do is named rather than guessed at.
-    Some(format!(
-        "You are {}, on {}. {caller} brought you in for the task below. It is one part of a \
-         larger piece of work, so do what was asked, completely, and stay within it.\n\
-         Reply with the result itself, condensed: what you found or made, and where (links, file \
-         paths), not how you worked. If you cannot do part of it, say what is missing rather than \
-         guessing.",
-        agent.name,
-        team_label(team)
-    ))
+    Some(HELPER.fill(&[
+        ("name", &agent.name),
+        ("team", &team_label(team)),
+        ("caller", caller),
+    ]))
 }
+
+/// A teammate another agent brought in. `{caller}` is that agent's name, or "Another agent".
+///
+/// The last two sentences are the return a caller can use (ADR 0062): a helper may read widely, but
+/// what it sends back lands in the caller's context, so it is the result, condensed, and a part it
+/// could not do is named rather than guessed at.
+pub(crate) const HELPER: Block = Block::new(
+    "orientation.helper",
+    "You are {name}, on {team}. {caller} brought you in for the task below. It is one part of a \
+     larger piece of work, so do what was asked, completely, and stay within it.\n\
+     Reply with the result itself, condensed: what you found or made, and where (links, file \
+     paths), not how you worked. If you cannot do part of it, say what is missing rather than \
+     guessing.",
+);
 
 fn team_label(team: &TeamConfig) -> String {
     let name = if team.name.trim().is_empty() {
@@ -395,11 +488,11 @@ fn what_teammates_may_do_instead(lead: &AgentConfig, teammates: &[&AgentConfig])
                 .map(|teammate| teammate.name.clone())
                 .collect();
             (!able.is_empty()).then(|| {
-                format!(
-                    "You can't {words} yourself, but {} can: hand {} the parts that need it.",
-                    sentence_list(&able),
-                    if able.len() == 1 { "it" } else { "them" }
-                )
+                TEAMMATES_CAN.fill(&[
+                    ("ability", words),
+                    ("teammates", &sentence_list(&able)),
+                    ("it_or_them", if able.len() == 1 { "it" } else { "them" }),
+                ])
             })
         })
         .collect()
@@ -567,7 +660,7 @@ mod tests {
         assert!(first.contains("The operator's request comes to you first."));
         assert!(!first.contains("Before you"));
         let last = for_stage(&team, &team.agents[2], &order(), 2, "write").unwrap();
-        assert!(last.contains(FINAL_ANSWER));
+        assert!(last.contains(FINAL_ANSWER.text()));
         assert!(
             !last.contains("After you"),
             "nothing reads the last stage's handover: {last}"
@@ -604,7 +697,7 @@ mod tests {
              - id: help\n    name: Helper\n    role: |\n      Look things up.\n      Second line.\n    {AGENT}\n"
         ));
         let text = for_lead(&with_bus, &with_bus.agents[0]).unwrap();
-        assert!(text.contains(FINAL_ANSWER));
+        assert!(text.contains(FINAL_ANSWER.text()));
         assert!(
             text.contains("- Helper (`help`): Look things up."),
             "{text}"
@@ -614,7 +707,7 @@ mod tests {
             "a teammate is summarised by its first line"
         );
         assert!(
-            text.ends_with(DELEGATION),
+            text.ends_with(DELEGATION.text()),
             "a lead that can reach its teammates is told when and how to use them: {text}"
         );
 

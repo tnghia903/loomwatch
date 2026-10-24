@@ -12,6 +12,7 @@ builds the Mac and Windows apps for a version tag.
 | Workflow | Runs on | What it proves | Typical time |
 | --- | --- | --- | --- |
 | `ci.yml` — **Frontend**, then **Rust** | every pull request (`pull-requests.yml` calls it), every push to `main`, by hand | UI lint (warnings fail), typecheck, build and tests; then `cargo fmt`, Clippy (`-D warnings`) and the full test suite, each database test on a SQLite file of its own, building on the exact `ui/dist` the Frontend job produced | 2 + 5–8 min |
+| `ci.yml` — **Rust with prompt overrides** | the same, after Frontend | the quality bench's developer build of the daemon (`--features prompt-overrides`, see `docs/ARCHITECTURE.md`): Clippy (`-D warnings`) and the daemon's full test suite with the feature on. It is the one build that turns the feature on, and nothing it makes ships | 5–8 min |
 | `ci.yml` — **Windows** | the same, after Frontend | on a Windows runner: the PowerShell scripts parse and are ASCII, Clippy (`-D warnings`) and the full test suite; then the app's files are gathered (`scripts/package-release.sh`), `LoomWatch-windows-setup.exe` is built from them, and `scripts/smoke-windows.ps1` tries both: the program from those files driven through the offline demo's review stop, an agent on a stand-in for OpenRouter (`scripts/mock-openrouter.py`) keeping its key in Credential Manager and running a `cmd.exe` command in its own folder, `LoomWatch.exe` (one at a time, `--quit`), and the installer installing, updating over a running LoomWatch, and uninstalling | 20–30 min |
 | `ci.yml` — **Launcher** | the same, beside Frontend | ShellCheck on the source launcher (`./loomwatch`), the packing scripts and `scripts/ci-local.sh` | < 1 min |
 | `ci.yml` — **Dependency review** | the same, not by hand | comparing a pull request with its base, or `main` before and after a push: the change adds no dependency with a known vulnerability of moderate severity or worse (`Cargo.lock`, `ui/pnpm-lock.yaml`) | < 1 min |
@@ -27,6 +28,7 @@ pull request / push to main
         │
         ▼
    Frontend ───ui/dist──▶ Rust (fmt → clippy → test) ──────────────────┐
+                    ├───▶ Rust with prompt overrides (clippy → test) ──┤
                     └───▶ Windows (clippy → test → pack → smoke) ──────┤
    Launcher (shellcheck) ──────────────────────────────────────────────┼──▶ CI result
    Dependency review (base and head of the change) ────────────────────┘
@@ -84,7 +86,9 @@ runs, unless the lid closes.
 - **Container**: `docker build`, only when the branch changes what the Dockerfile builds from and
   Docker is running.
 
-Dependency review reads GitHub's dependency graph, so it runs only on GitHub.
+Dependency review reads GitHub's dependency graph, so it runs only on GitHub. **Rust with prompt
+overrides** runs only there too: the script never builds with the developer feature, and lists the
+job as skipped.
 
 No check needs a database server: each database test makes a SQLite file of its own.
 
