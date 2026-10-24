@@ -2794,6 +2794,211 @@ async fn a_claude_reply_still_paused_leaves_out_the_step_that_never_ran() {
     assert_eq!(used, [1_015, 1_213]);
 }
 
+/// The tutor's web research of 2026-10-24: in one request Claude searched and read pages, and
+/// Anthropic's usage added up every pass of its own loop, 444,559 tokens for a conversation of about
+/// 70,000. The conversation was summarised for nothing, and the work started again from the
+/// summary. Now how full it is comes from what was sent, what came back and what the model wrote,
+/// and the work carries on without a summary.
+#[tokio::test]
+async fn a_claude_reply_that_read_the_web_is_not_summarised_for_nothing() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "hello").unwrap();
+    let page = "An inverted index maps each word to the documents that hold it. ".repeat(600);
+    let researched = events(
+        &[
+            vec![message_start(2, 33_000)],
+            server_tool_block(0, "srvtoolu_find", "web_search", &json!({"query": "inverted index"}))
+                .to_vec(),
+            result_block(
+                1,
+                "web_search_tool_result",
+                "srvtoolu_find",
+                &json!([{"type": "web_search_result", "title": "IR book", "url": "https://nlp.stanford.edu/IR-book/"}]),
+            )
+            .to_vec(),
+            server_tool_block(2, "srvtoolu_read", "web_fetch", &json!({"url": "https://nlp.stanford.edu/IR-book/"}))
+                .to_vec(),
+            result_block(
+                3,
+                "web_fetch_tool_result",
+                "srvtoolu_read",
+                &json!({"type": "web_fetch_result", "url": "https://nlp.stanford.edu/IR-book/",
+                        "content": {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": page}}}),
+            )
+            .to_vec(),
+            // The paper as a PDF: 400,000 bytes of base64 for a two-page paper.
+            server_tool_block(4, "srvtoolu_paper", "web_fetch", &json!({"url": "https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf"}))
+                .to_vec(),
+            result_block(
+                5,
+                "web_fetch_tool_result",
+                "srvtoolu_paper",
+                &json!({"type": "web_fetch_result", "url": "https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf",
+                        "content": {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjQK".repeat(33_334)}}}),
+            )
+            .to_vec(),
+            vec![
+                json!({"type": "content_block_start", "index": 6, "content_block": {"type": "tool_use", "id": "toolu_read", "name": "read_file", "input": {}}}),
+                json!({"type": "content_block_delta", "index": 6, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"notes.md\"}"}}),
+                json!({"type": "content_block_stop", "index": 6}),
+                json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"},
+                       "usage": {"input_tokens": 18, "cache_read_input_tokens": 401_049,
+                                 "cache_creation_input_tokens": 29_489, "output_tokens": 14_003,
+                                 "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 2}}}),
+                json!({"type": "message_stop"}),
+            ],
+        ]
+        .concat(),
+    );
+    let finished = || {
+        events(
+            &[
+                vec![message_start(10, 57_000)],
+                text_block(0, "Done.").to_vec(),
+                ended("end_turn", 3).to_vec(),
+            ]
+            .concat(),
+        )
+    };
+    let (stand, base) = stand(vec![researched, finished(), finished()]).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    let end = session.prompt("Teach indexing.").await.unwrap();
+    assert_eq!(end.reply, "Done.");
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    let summaries = bodies
+        .iter()
+        .filter(|body| body["messages"].to_string().contains("getting too long"))
+        .count();
+    assert_eq!(
+        (bodies.len(), summaries),
+        (2, 0),
+        "the work went on with no summary in between"
+    );
+    let used: Vec<u64> = sink
+        .all()
+        .iter()
+        .filter(|update| update["sessionUpdate"] == "usage_update")
+        .filter_map(|update| update["used"].as_u64())
+        .collect();
+    // 33,002 sent, about 9,700 of page and search results, 14,003 written; the PDF is counted when
+    // the next request says.
+    assert!(
+        (56_000..58_000).contains(&used[0]),
+        "the meter reads what the conversation holds: {used:?}"
+    );
+}
+
+/// A reply may be as long as the model may write, up to 64,000 tokens and the room above the point
+/// where the conversation is summarised; never shorter than before, unless the model says so.
+#[test]
+fn a_reply_may_be_as_long_as_the_model_writes() {
+    let longest = |window: Option<u64>, most: u64| {
+        let mut config = SessionConfig::new("s", "writer", PathBuf::from("."), "m");
+        config.context_window = window;
+        config.reply_up_to(most);
+        config.max_tokens
+    };
+    // Claude Opus 5.5: a million tokens of context, 128,000 to a reply.
+    assert_eq!(longest(Some(1_000_000), 128_000), 64_000);
+    // Summarised at 160,000 of 200,000: 40,000 left for the reply.
+    assert_eq!(longest(Some(200_000), 64_000), 40_000);
+    // At 102,400 of the 128,000 assumed when nobody says.
+    assert_eq!(longest(None, 128_000), 25_600);
+    assert_eq!(longest(Some(1_000_000), 8_192), 8_192);
+    assert_eq!(longest(Some(32_000), 64_000), 16_000);
+}
+
+/// The work asks for the longer replies; a summary asks for no more than it did, so the conversation
+/// it reads is cut no sooner. Here a 200,000-token context is summarised at 160,000 with a page read
+/// whole just past that point: had the summary asked for 40,000 too, the page would have been cut
+/// down to make room for it.
+#[tokio::test]
+async fn a_summary_asks_for_no_longer_a_reply_than_before() {
+    let folder = Folder::new();
+    let notes = format!(
+        "{}END OF NOTES",
+        "The index maps words to pages.\n".repeat(560)
+    );
+    std::fs::write(folder.0.join("notes.md"), &notes).unwrap();
+    let read = events(
+        &[
+            vec![message_start(10, 158_000)],
+            vec![
+                json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "toolu_read", "name": "read_file", "input": {}}}),
+                json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"notes.md\"}"}}),
+                json!({"type": "content_block_stop", "index": 0}),
+            ],
+            ended("tool_use", 20).to_vec(),
+        ]
+        .concat(),
+    );
+    let said = |text: &str| {
+        events(
+            &[
+                vec![message_start(10, 100)],
+                text_block(0, text).to_vec(),
+                ended("end_turn", 3).to_vec(),
+            ]
+            .concat(),
+        )
+    };
+    // The first summary comes back empty and is asked for again with no tools, as long.
+    let (stand, base) = stand(vec![
+        read,
+        said(""),
+        said("Read notes.md: an index."),
+        said("Done."),
+    ])
+    .await;
+    let mut config = SessionConfig::new(
+        "session-1",
+        "writer",
+        folder.0.clone(),
+        "anthropic:claude-opus-5-5",
+    );
+    config.context_window = Some(200_000);
+    config.reply_up_to(64_000);
+    let mut session = Session::open(
+        config,
+        claude(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    let end = session.prompt("Read the notes.").await.unwrap();
+    assert_eq!(end.reply, "Done.");
+    let bodies = stand.bodies.lock().unwrap().clone();
+    let asked: Vec<(Value, bool)> = bodies
+        .iter()
+        .map(|body| {
+            let summary = body["messages"].to_string().contains("getting too long");
+            (body["max_tokens"].clone(), summary)
+        })
+        .collect();
+    assert_eq!(
+        asked,
+        [
+            (json!(40_000), false),
+            (json!(16_000), true),
+            (json!(16_000), true),
+            (json!(40_000), false)
+        ]
+    );
+    let summarised = bodies[1]["messages"].to_string();
+    assert!(
+        summarised.contains("END OF NOTES") && !summarised.contains("the rest was set aside"),
+        "the summary read the page whole"
+    );
+}
+
 /// A reply still paused with no call of the agent's is carried on too: what it said on the way is
 /// not the answer, the code that never ran and the search that code made both come out, and the
 /// next call tells it why it is carrying on.
