@@ -543,7 +543,8 @@ the agent's permissions.
 Every agent in a run works with LoomWatch's own tools:
 
 - **Files** in its work folder: `list_files`, `read_file`, `search_files`, `write_file` and
-  `edit_file`.
+  `edit_file`. After writing a Word, Excel, PowerPoint, PDF, CSV or JSON file, the agent is told
+  whether it opens.
 - **Commands**: `run_command` runs a shell command in the agent's work folder (with `cmd.exe` on
   Windows) and stops it, and everything it started, after two minutes, or up to ten if the agent
   asks. The command's environment has every provider key and
