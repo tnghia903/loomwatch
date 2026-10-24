@@ -30,7 +30,7 @@ import { AgentMessages } from '../run/AgentMessages'
 import { ChatFiles } from './ChatFiles'
 import { PermissionActions, PermissionPrompt } from '../run/PermissionPrompt'
 import { SpendStopCard } from '../run/SpendStopCard'
-import { Markdown } from '../ui/Markdown'
+import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { checkStopTip, checkStopTitle } from '../../lib/story/checkStop'
 import { AnswerTools } from './AnswerTools'
 import { Helpers } from './Helpers'
@@ -426,8 +426,8 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
           <ul className="tc-check-misses" aria-label="Checks still not met">
             {waiting.check.items.map((item, index) => (
               <li key={index}>
-                <span className={`tc-check-verdict ${item.verdict}`}>{item.verdict === 'not_met' ? 'Not met' : 'Not sure'}</span> {item.item}
-                {item.evidence && <span className="t-meta"> — {item.evidence}</span>}
+                <span className={`tc-check-verdict ${item.verdict}`}>{item.verdict === 'not_met' ? 'Not met' : 'Not sure'}</span> <InlineMarkdown>{item.item}</InlineMarkdown>
+                {item.evidence && <span className="t-meta"> — <InlineMarkdown>{item.evidence}</InlineMarkdown></span>}
               </li>
             ))}
           </ul>

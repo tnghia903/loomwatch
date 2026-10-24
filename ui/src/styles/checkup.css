@@ -76,7 +76,9 @@
 .check-step-tip { margin: 0; }
 
 /* A check step that stopped to ask (ADR 0062): what is still not met, above the work. */
-.tc-check-misses { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font: 400 13px/1.45 var(--font-sans); color: var(--color-ink-1); }
+.tc-check-misses { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font: 400 13px/1.45 var(--font-sans); color: var(--color-ink); }
+/* What the check saw stays quieter than the item it explains, its bold included. */
+.tc-check-misses .t-meta { color: var(--color-ink-2); }
 .tc-check-verdict { display: inline-block; margin-right: 4px; font-weight: 600; }
 .tc-check-verdict.not_met { color: var(--color-alert); }
 .tc-check-verdict.not_sure { color: var(--color-ink-2); }

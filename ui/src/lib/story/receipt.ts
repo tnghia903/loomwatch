@@ -32,6 +32,8 @@ export interface ReceiptLine {
   allowed?: boolean
   /** Explains other lines rather than reporting anything of its own, so it is not a finding. */
   aside?: boolean
+  /** `text` carries words an agent wrote, in Markdown: shown formatted, and said as its words. */
+  markdown?: boolean
 }
 
 /** How the run ended, stamped on the slip: its word, in the tone of the slip's own marks. */

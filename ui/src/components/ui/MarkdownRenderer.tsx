@@ -24,13 +24,17 @@ import { FileChip } from './FileChip'
  * Research answers mark each claim and cite it: "[Sourced] … [Paper](https://…)". The mark reads
  * as a small tag and the links after the claim as its sources, not as bracketed text and a run of
  * underlined titles.
+ *
+ * `inline` keeps it inside a sentence: bold, code and links are shown, and a paragraph, heading or
+ * list is kept as its words. With `clickable={false}` as well, a link is its words and a file path
+ * stays code: for a quote cut short, where a hidden link would still take the Tab key.
  */
-export default function MarkdownRenderer({ children }: { children: string }) {
+export default function MarkdownRenderer({ children, inline = false, clickable = true }: { children: string; inline?: boolean; clickable?: boolean }) {
   // The words a chat search found, while the chat shows where one was said (ADR 0081).
   const found = useFoundWords()
   const rehype = useMemo(() => (found ? [...REHYPE_PLUGINS, () => (tree: { children: HastChild[] }) => markFound(tree, found)] : REHYPE_PLUGINS), [found])
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml components={COMPONENTS}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
       {children}
     </ReactMarkdown>
   )
@@ -38,6 +42,10 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 
 const REMARK_PLUGINS = [remarkGfm]
 const REHYPE_PLUGINS = [() => markClaimsAndSources]
+// What stays inside a sentence, the claim tag and found words included: everything else is
+// replaced by its words.
+const INLINE_ELEMENTS = ['a', 'strong', 'em', 'del', 'code', 'br', 'img', 'span', 'mark']
+const INLINE_WORDS = INLINE_ELEMENTS.filter((tag) => tag !== 'a')
 
 type HastElement = NonNullable<ExtraProps['node']>
 type HastChild = HastElement['children'][number]
@@ -155,3 +163,5 @@ const COMPONENTS: Components = {
   },
   img: ({ alt }) => <span className="delivery-image-reference">[Image: {alt || 'reference'}]</span>,
 }
+// Nothing to click: inline code stays code, a path in it too.
+const WORDS_ONLY: Components = { ...COMPONENTS, code: ({ children: text, className }) => <code className={className}>{text}</code> }

@@ -86,6 +86,22 @@ describe('under a team’s answer in the chat', () => {
     expect(onOpenFinding).toHaveBeenCalledWith(change)
   })
 
+  // A check's evidence is the checker's Markdown: formatted in the list, said as its words on the button.
+  it('shows a check’s Markdown formatted in the review, and names its button in plain words', () => {
+    const missed: ReceiptLine = { tone: 'warn', text: 'Check not met: Gives **2 empty slots** (see [the code](https://example.org/q1))', agentId: 'checker', markdown: true }
+    const { onOpenFinding } = setup({ check: check({ detail: 'Check not met: Gives 2 empty slots (see the code).', findings: [missed, finding] }) })
+    fireEvent.click(screen.getByRole('button', { name: '1 thing to check' }))
+    const worth = within(within(screen.getByRole('dialog', { name: 'Review the answer' })).getByRole('region', { name: 'Worth a look' }))
+    const [line, plain] = worth.getAllByRole('listitem')
+    expect(line).toHaveTextContent('Check not met: Gives 2 empty slots (see the code)')
+    expect(within(line).getByText('2 empty slots').tagName).toBe('STRONG')
+    expect(within(line).getByRole('link', { name: 'the code' })).toHaveAttribute('href', 'https://example.org/q1')
+    // A line of the app's own is shown as it is.
+    expect(plain.querySelector('.md-inline')).toBeNull()
+    fireEvent.click(worth.getByRole('button', { name: 'Open: Check not met: Gives 2 empty slots (see the code)' }))
+    expect(onOpenFinding).toHaveBeenCalledWith(missed)
+  })
+
   it('copies the exact Markdown, and saves it under its title and day', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

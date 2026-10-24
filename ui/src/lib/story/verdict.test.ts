@@ -28,9 +28,9 @@ describe('answerVerdict', () => {
     const verdict = answerVerdict({ ...finished, notes: { agentId: 'writer', notMet: ['Story 2 has a link: the page is down'], missing: ['The March total: no sheet was attached'], notChanged: ['2.5 million: the report says so'], changes: [] } })
     expect(verdict).toMatchObject({ tone: 'look', label: '3 things to check', detail: 'Could not meet: Story 2 has a link: the page is down.' })
     expect(verdict.findings).toEqual([
-      { tone: 'warn', text: 'Could not meet: Story 2 has a link: the page is down', agentId: 'writer' },
-      { tone: 'warn', text: 'Missing: The March total: no sheet was attached', agentId: 'writer' },
-      { tone: 'warn', text: 'Kept against the check: 2.5 million: the report says so', agentId: 'writer' },
+      { tone: 'warn', text: 'Could not meet: Story 2 has a link: the page is down', agentId: 'writer', markdown: true },
+      { tone: 'warn', text: 'Missing: The March total: no sheet was attached', agentId: 'writer', markdown: true },
+      { tone: 'warn', text: 'Kept against the check: 2.5 million: the report says so', agentId: 'writer', markdown: true },
     ])
   })
 
@@ -40,8 +40,8 @@ describe('answerVerdict', () => {
     const clean = answerVerdict({ ...finished, notes })
     expect(clean).toMatchObject({ tone: 'ok', label: 'Nothing flagged', detail: 'Every step finished and nothing in the record was flagged. The review lists 2 changes made to the draft.', findings: [] })
     expect(clean.changes).toEqual([
-      { tone: 'ok', text: '"overnight" became "at night"', agentId: 'editor' },
-      { tone: 'ok', text: 'Cut a repeated "the water"', agentId: 'editor' },
+      { tone: 'ok', text: '"overnight" became "at night"', agentId: 'editor', markdown: true },
+      { tone: 'ok', text: 'Cut a repeated "the water"', agentId: 'editor', markdown: true },
     ])
     // What the Editor flagged goes under Missing, which is worth a look; the edits still are not.
     const flagged = answerVerdict({ ...finished, notes: { ...notes, missing: ['The end date: the notice gives none'] } })
@@ -85,6 +85,21 @@ describe('answerVerdict', () => {
     const approved = (items: CheckItemResult[]) => answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 3, items, approved: true }] })
     expect(approved([missed, unsure])).toMatchObject({ tone: 'look', label: 'Approved with 2 checks not met', detail: 'You approved it as it was. Check not met: Linked (claim 2).' })
     expect(approved([missed]).label).toBe('Approved with 1 check not met')
+  })
+
+  // The checker writes Markdown: the review shows it formatted, the badge's tooltip as its words.
+  it('says a check’s Markdown as its words in the sentence beside the badge', () => {
+    const missed: CheckItemResult = { verdict: 'not_met', item: 'Uses `idf()` as written', evidence: 'gives **1.897**, per [IR book](https://nlp.stanford.edu/IR-book/)' }
+    const unsure: CheckItemResult = { verdict: 'not_sure', item: 'Under `200` words', evidence: '' }
+    const verdict = answerVerdict({ ...finished, checks: [{ checker: 'checker', checked: 'writer', round: 1, items: [missed, unsure] }] })
+    expect(verdict.detail).toBe('Check not met: Uses idf() as written (gives 1.897, per IR book).')
+    expect(verdict.findings).toEqual([
+      { tone: 'warn', text: 'Check not met: Uses `idf()` as written (gives **1.897**, per [IR book](https://nlp.stanford.edu/IR-book/))', agentId: 'checker', markdown: true },
+      { tone: 'warn', text: 'Check not sure: Under `200` words', agentId: 'checker', markdown: true },
+    ])
+    // A line of the app's own keeps every character, an underscore in a file name too.
+    const own = answerVerdict({ ...finished, receipt: receipt([{ tone: 'bad', text: 'Writer couldn’t read notes_2025.md, and carried on without it', evidenceId: 'f1' }]) })
+    expect(own.detail).toBe('Writer couldn’t read notes_2025.md, and carried on without it.')
   })
 
   // A reply the daemon could not read checked nothing: one finding says so, not a Not sure per item.
