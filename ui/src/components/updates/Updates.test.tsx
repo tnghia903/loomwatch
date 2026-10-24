@@ -136,7 +136,7 @@ describe('Updates', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Update available/ }))
     const how = within(screen.getByRole('dialog', { name: 'LoomWatch 0.1.6 is available' })).getByRole('region', { name: 'How to update' })
     expect(how).toHaveTextContent('Download LoomWatch-macos.dmg from the release page above and open it.')
-    expect(how).toHaveTextContent('Quit LoomWatch: point at the notch at the top of the screen and click ⋯, or click LoomWatch’s face in the menu bar, then Quit LoomWatch.')
+    expect(how).toHaveTextContent('Quit LoomWatch: point at the black notch at the top middle of the screen, click ⋯, then Quit LoomWatch.')
     expect(how).toHaveTextContent('Drag LoomWatch to Applications and choose Replace, then open it again. Your teams and history stay.')
     expect(how).not.toHaveTextContent(/Terminal|Ctrl-C/)
   })
@@ -395,7 +395,7 @@ describe('Update and restart', () => {
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Update and restart' }))
 
     expect(await screen.findByRole('dialog', { name: 'The update didn’t finish' })).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent(/^LoomWatch 0\.1\.5 was started again instead of 0\.1\.6\. Show log, in (LoomWatch’s menu \(point at the notch at the top of the screen and click ⋯, or click LoomWatch’s face in the menu bar\)|the menu of LoomWatch’s icon beside the clock), says why\.$/)
+    expect(screen.getByRole('alert')).toHaveTextContent(/^LoomWatch 0\.1\.5 was started again instead of 0\.1\.6\. Show log, in (LoomWatch’s menu \(point at the black notch at the top middle of the screen and click ⋯\)|the menu of LoomWatch’s icon beside the clock), says why\.$/)
   })
 
   it('shows the Mac app the steps by hand, and why, when it cannot replace itself', async () => {

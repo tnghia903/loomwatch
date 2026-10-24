@@ -44,9 +44,15 @@ export interface Island {
   shown: IslandState['shown']
   tucked: Tucked
   notch: { width: number; height: number }
-  /** The panel is at a notch, where the island lives; on a screen without one only the box is drawn,
-      while it is called, hanging from the menu bar (`bar` tall). */
+  /** The page has read which agent is pinned and My agents: a change after that is a change. */
+  known: boolean
+  /** The panel is at a notch, the camera's or one drawn in the menu bar (`drawn`), where the island
+      lives; with neither, on a screen showing no menu bar, only the box is drawn, while it is
+      called (`bar` tall). */
   atNotch: boolean
+  drawn: boolean
+  /** This screen's island is the live one, on the screen the pointer is on: only it opens the box. */
+  live: boolean
   bar: number
   now: number
   /** A waiting question's figure bounces. */
@@ -131,6 +137,7 @@ export function useIsland(): Island {
   const [nudge, setNudge] = useState(false)
   const [pinnedId, setPinnedId] = useState<string | null | undefined>(undefined)
   const [saved, setSaved] = useState<readonly SavedJob[]>([])
+  const [savedRead, setSavedRead] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState<{ ok: boolean; text: string } | null>(null)
@@ -181,7 +188,12 @@ export function useIsland(): Island {
 
   // My agents: read at the start, when another agent is pinned, and as the list or the box opens,
   // so each agent's name, figure and instructions are as saved.
-  const readSaved = useCallback(() => { fetchJobs().then((list) => setSaved(list?.jobs ?? []), () => {}) }, [])
+  const readSaved = useCallback(() => {
+    fetchJobs().then((list) => {
+      setSaved(list?.jobs ?? [])
+      setSavedRead(true)
+    }, () => {})
+  }, [])
   useEffect(readSaved, [readSaved, pinnedId])
   const listOpen = state.listOpen
   useEffect(() => { if (listOpen) readSaved() }, [readSaved, listOpen])
@@ -450,7 +462,10 @@ export function useIsland(): Island {
     shown: state.shown,
     tucked: summary,
     notch: notch ?? { width: 0, height: menuBar },
+    known: pinnedId !== undefined && savedRead,
     atNotch: notch !== null,
+    drawn: state.app.drawn,
+    live: state.app.live,
     bar: notch?.height ?? menuBar,
     now: state.now,
     nudge,

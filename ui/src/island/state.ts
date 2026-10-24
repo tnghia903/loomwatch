@@ -8,7 +8,7 @@ import { withPinned, type PinnedNow } from './pinned'
 import { advance, arrive, next, NOTHING_OUT, tuckNow, tuckOnClick, type Circumstances, type PopState } from './popouts'
 import type { TeamRequest } from '../lib/runs/teamRequests'
 import { withDropped, type Intake } from './intake'
-import { momentsBetween, teamAskKey, teamsNow, type Pop, type PopKind, type TeamNow } from './teams'
+import { momentsBetween, teamAskKey, teamsNow, tucked, type Pop, type PopKind, type TeamNow } from './teams'
 import { ISLAND_WAITS } from './waits'
 
 /** At a notch, every view; without one (decision 11), only the box (`box`), its agent at its
@@ -22,8 +22,11 @@ export const BROWSER_NOTCH = { width: 185, height: 32 }
 export interface AppSays {
   /** The app has said where the panel is (always so in a browser). */
   placed: boolean
-  /** The camera housing's size, or `null` on a screen without one. */
+  /** The camera housing's size, or the notch drawn in the menu bar of a screen without one;
+      `null` on a screen showing no menu bar. */
   notch: { width: number; height: number } | null
+  /** The notch is drawn, not the camera's: over a full-screen app it stands aside. */
+  drawn: boolean
   menuBar: number
   away: boolean
   fullScreen: boolean
@@ -128,7 +131,7 @@ export function initialIsland(now: number, inApp: boolean): IslandState {
     requests: [],
     seen: new Set(),
     lastAgent: new Map(),
-    app: { placed: !inApp, notch: BROWSER_NOTCH, menuBar: BROWSER_NOTCH.height, away: false, fullScreen: false, drag: false, live: true, news: true },
+    app: { placed: !inApp, notch: BROWSER_NOTCH, drawn: false, menuBar: BROWSER_NOTCH.height, away: false, fullScreen: false, drag: false, live: true, news: true },
     onIsland: false,
     onDrop: false,
     listOpen: false,
@@ -235,7 +238,7 @@ export function islandReducer(state: IslandState, action: IslandAction & { now: 
 function fromApp(s: IslandState, message: FromApp): IslandState {
   switch (message.kind) {
     case 'place':
-      return { ...s, app: { ...s.app, placed: true, notch: message.notch, menuBar: message.menuBar } }
+      return { ...s, app: { ...s.app, placed: true, notch: message.notch, drawn: Boolean(message.drawn && message.notch), menuBar: message.menuBar } }
     case 'away':
       return { ...s, app: { ...s.app, away: message.away } }
     case 'fullScreen':
@@ -358,7 +361,12 @@ export function viewOf(s: IslandState): IslandViewName {
   if (s.listOpen) return s.app.live ? 'list' : resting
   if (s.app.live && s.benchUntil > s.now) return 'bench'
   if (s.app.live && s.peeking) return 'bench'
-  return s.pop.out && s.shown ? POP_VIEW[s.pop.out.pop.kind] : resting
+  const view = s.pop.out && s.shown ? POP_VIEW[s.pop.out.pop.kind] : resting
+  // A notch drawn in a menu bar (decision 12) covers nothing of a full-screen app: there it shows
+  // only what drops out of it, and a question still waiting for you, as a camera's notch has the
+  // black around it anyway.
+  const waiting = view === 'tucked' && tucked(teams).asks > 0
+  return s.app.drawn && s.app.fullScreen && !waiting && (view === 'rest' || view === 'tucked' || view === 'work') ? 'hidden' : view
 }
 
 /**

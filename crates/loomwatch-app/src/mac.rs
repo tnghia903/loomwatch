@@ -2,11 +2,11 @@
 //! doing. While agents work its stitch sews round and the menu names who is working; when something
 //! needs you its mouth opens and the menu bar counts what waits.
 //!
-//! The teams live at the notch instead (ADR 0083): an island around a screen's notch, that pops
-//! out when something happens and tucks into the menu bar beside the camera, and on every screen a
-//! box to message an agent, at ⌃⌥Space or Message in the menu (`crate::island`,
-//! `crate::notch_panel`). Wherever a screen has no notch, and with Show at the notch unticked in
-//! the menu, the face is in the menu bar.
+//! The teams live at the notch instead (ADR 0083): an island around a screen's notch, or one drawn
+//! in the middle of its menu bar, that pops out when something happens and tucks into the menu bar
+//! beside it, and on every screen a box to message an agent, at ⌃⌥Space or Message in the menu
+//! (`crate::island`, `crate::notch_panel`). While no screen has the island, as with Show at the
+//! notch unticked in the menu, the face is in the menu bar.
 //!
 //! It also updates itself: Update and restart in the app has `loomwatchd` stop for it, and it puts
 //! the new release's `LoomWatch.app` in its own place and opens that (`crate::update`).
@@ -329,7 +329,8 @@ impl Island {
         self.panel.set_shown(shown);
     }
 
-    /// The menu bar face is wanted: wherever a screen has no notch, or with no island at all.
+    /// The menu bar face is wanted: while no screen has the island, or with Show at the notch
+    /// unticked.
     fn face_shows(&self) -> bool {
         self.panel.face_shows()
     }
@@ -498,7 +499,7 @@ fn message_row(agent: Option<&str>) -> String {
 /// you beside it, a tooltip, and the menu's rows under the status line.
 struct Bar {
     tray: Option<TrayIcon>,
-    /// Whether the face is wanted: wherever a screen has no notch, and with no island.
+    /// Whether the face is wanted: while no screen has the island.
     visible: bool,
     faces: Faces,
     face: Face,

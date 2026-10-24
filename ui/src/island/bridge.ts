@@ -4,7 +4,9 @@
 
 /** What the app tells the page. */
 export type FromApp =
-  | { kind: 'place'; notch: { width: number; height: number } | null; menuBar: number }
+  /** Where the panel is: around a notch, the camera's or one drawn in the menu bar of a screen
+      without one (`drawn`, decision 12), or with none, under a menu bar `menuBar` tall. */
+  | { kind: 'place'; notch: { width: number; height: number } | null; menuBar: number; drawn?: boolean }
   /** The pointer is on one of the island's areas, as the page reported them (the island first,
       then what dropped out of it), or on none. WebKit follows the pointer only in a key window,
       and the island's panel never becomes one, so the app says. */

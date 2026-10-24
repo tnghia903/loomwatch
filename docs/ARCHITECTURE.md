@@ -483,8 +483,11 @@ with a per-node lock available to forbid it.
 open a browser, with no Electron. On a Mac, `LoomWatch.app` is only a launcher. It starts
 `loomwatchd`, opens LoomWatch in the browser and stays in the notch (ADR 0083): a see-through panel
 at the top middle of every screen shows `island.html`, a second page of the same build. Around a
-MacBook's camera it draws the island; on a screen without a notch it draws nothing until its box is
-called (decision 11), and the app keeps its menu bar face wherever a screen has no notch
+MacBook's camera it draws the island; a screen without a notch has one drawn in the middle of its
+menu bar, as wide as the MacBook's notch (or a 14-inch MacBook Pro's) and as tall as that menu bar,
+and the same island around it (`island::with_drawn_notches`, decision 12). Only on a screen showing
+no menu bar (Displays have separate Spaces off) does the panel draw nothing until its box is called
+(decision 11); the app's menu bar face comes back only while no screen has the island
 (`island::menu_bar_face_shows`). With the app's own API calls the page reads the runs and the
 messages agents answer in the chat without starting a run (`GET /api/chat/answering`), and answers
 a permission.
@@ -494,8 +497,8 @@ moves of the run view's figures (`workPhase`), bobbing until the events arrive; 
 figure at work only breathes and dips, with no connection. Each panel places its page, tells it where the pointer is, and takes the pointer only over what the
 page reports. The panel on the screen the pointer is on is live: the list and the box open there,
 and what the box's agent does drops out there. The teams' news (questions, results, stops) pops out
-only at the notch (`island::news_screen`), wherever the pointer is, so nothing comes and goes as the
-pointer moves between screens. A pointer at a screen's very top edge is on that screen
+at the notch, drawn or not, of the screen the pointer is on, and stays where it was while the
+pointer is on a screen with none (`island::news_screen`). A pointer at a screen's very top edge is on that screen
 (`Rect::holds_pointer`, as `NSMouseInRect` has it). Results looked at on one island leave the others
 (the app passes `seen` between the pages). When `WebKit` ends a page's process (a crash, or the
 page breaking one of `WebKit`'s rules), the app gives back the keyboard that page held, so another
@@ -512,8 +515,14 @@ that one (`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.
 and the island share one agent. Its figure opens its workbench under the box: the builder's 3D
 bench (`AgentFigure`, read only, always in the island's dark), from the same view and labels the
 builder makes (`components/agents/benchOf.tsx`), acting out the agent's newest run in its chat. It
-loads with three.js only once the box opens to write, and is set up out of sight while a message is
-written, so it is there when the message goes. After a message is sent, the box gives way to the
+loads with three.js only once the page is under way: the screen the pointer is on sets it up out of
+sight once the pointer has been there a few seconds (`ISLAND_WAITS.benchSetUp`), not as the box
+opens, where setting it up froze the box (over a second the first time after an update, while
+`WebKit` compiled its shaders again), and keeps it for a while after the pointer leaves
+(`ISLAND_WAITS.benchKept`). It moves into the box as the box opens and out again as it closes, set
+up once (`useBenchHost`), so it is there at once under the box and when the message goes; switched
+to another agent, the box hands the same bench that agent (`WorkbenchScene.set(view, another)`),
+put in place as it is rather than set up again. After a message is sent, the box gives way to the
 agent at its workbench for a moment (`ISLAND_WAITS.bench`), and at a notch for as long as the
 pointer stays on it; without a notch it then tucks into a pill at the top of the screen, the agent
 at a little desk, whose workbench opens while it is pointed at. For the agent in the box:

@@ -795,9 +795,14 @@ export class WorkbenchScene {
     this.node('laptop_lid').add(this.screenLight)
   }
 
-  /** Show the agent and the run as they are now; what changed since last time, it reacts to. */
-  set(view: BenchView) {
-    const before = this.view
+  /**
+   * Show the agent and the run as they are now; what changed since last time, it reacts to. Unless
+   * it is `another` agent at the bench (the island's box switched to it): that one is put in place
+   * as it is, as when the bench was first set up, with nothing moving as if it had changed.
+   */
+  set(view: BenchView, another = false) {
+    const before = another ? null : this.view
+    if (another) this.events = view.events
     this.view = view
     if (this.loaded) this.apply(before, view)
   }

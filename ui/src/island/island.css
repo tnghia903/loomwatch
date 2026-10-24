@@ -102,7 +102,10 @@ body {
 .island-body {
   position: absolute;
   inset: 0;
+  /* Clipped, never scrolled: a field taking the keyboard while the island grows would scroll it,
+     lifting the agent's row out of the top. `hidden` for a WebKit too old for `clip`. */
   overflow: hidden;
+  overflow: clip;
   background: var(--color-black);
   border-radius: 0 0 var(--r) var(--r);
   transition: border-radius var(--t-move) var(--ease-out);
@@ -207,6 +210,11 @@ body {
 .island-head { position: absolute; top: calc(var(--bar) * -.1); width: var(--head); height: var(--head); translate: 0 var(--bar); transition: translate var(--t-spring) var(--ease-spring) var(--t-quick), rotate var(--t-move) var(--ease-out); }
 .island:is([data-view="rest"], [data-view="tucked"]) .island-head { translate: 0 0; }
 .island-head.island-mark { top: 0; height: var(--bar); display: grid; place-items: center; }
+/* Pinned, unpinned or another pinned: the one that stood first beside the notch ducks below the
+   menu bar, in its own light, and the new one pops up in its place, as agents hand over at the
+   notch. A working figure's breath waits while it does. */
+.island .island-head.is-leaving { animation: island-ear-duck var(--t-quick) var(--ease-in) forwards; }
+.island .island-head.is-coming { animation: island-ear-pop var(--t-spring) var(--ease-spring) calc(var(--t-quick) / 2) both; }
 .island[data-view="tucked"] .island-head[data-moment="ask"] { rotate: -8deg; }
 .island[data-view="tucked"] .island-head[data-moment="done"] { translate: 0 3px; }
 .island[data-view="tucked"] .island-head[data-moment="fail"] { rotate: 8deg; translate: 0 3px; }
@@ -256,8 +264,15 @@ body {
 
 /* ---- Pointing at the notch: one row per team ---- */
 .island-list { position: absolute; top: calc(var(--bar) + 4px); left: 18px; right: 18px; display: grid; animation: island-rise var(--t-entrance) var(--ease-out) var(--t-quick) both; }
+/* Opened from rest, its agent comes down from beside the notch into its row (flyFromEar): there from
+   the first frame, the one beside the notch gone at once, and the rest of the list rising in
+   around it. */
+.island[data-view="list"] .island-pinned-head { visibility: hidden; }
+.island-list.is-flying { animation: none; }
+.island-list.is-flying > :not(.island-pinned), .island-list.is-flying > .island-pinned > :not(.island-row-figures) { animation: island-rise var(--t-entrance) var(--ease-out) var(--t-quick) both; }
 .island-row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 8px; align-items: center; padding-block: 7px; }
-.island-row + .island-row { border-top: 1px solid var(--color-hairline); }
+/* Every row after the first, past the bench's slot between the agent's row and the teams'. */
+.island-row ~ .island-row { border-top: 1px solid var(--color-hairline); }
 .island-row-figures { position: relative; height: 38px; }
 .island-row-figure { position: absolute; top: 0; width: 38px; height: 38px; }
 /* The rest of the team stands a step behind the one acting, in its own colours. */
@@ -375,12 +390,23 @@ body {
    would read as resting or not there. */
 .island-agent { width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; cursor: pointer; }
 .island-agent:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Switched to another agent: the one it was ducks below its row and the new one pops up in its
+   place, as agents hand over at the notch, and the one left pops into the row beside the name. The
+   duck is quick, not the island's exit pace, so Tab after Tab keeps up; it is a transition, so a
+   figure skipped while still rising ducks from where it got to. The row's floor, under the
+   figures' light, is drawn only while they switch. */
+.island-switch { position: absolute; inset: 0; }
+.island-row-figures:has(> .island-switch:is(.is-leaving, .is-coming)) { clip-path: inset(-12px -12px -8px -12px); }
+.island-switch.is-leaving { translate: 0 150%; transition: translate var(--t-quick) var(--ease-in); }
+.island-switch.is-coming { animation: island-pop-up var(--t-spring) var(--ease-spring) calc(var(--t-quick) / 2) both; }
+.island-agent.is-coming { animation: island-agent-in var(--t-spring) var(--ease-spring) both; }
 .island-key { font: 500 11px/1 var(--font-sans); color: var(--color-ink-2); padding: 3px 5px; border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent); border-radius: var(--r-xs); }
 /* Watching it at its workbench: what it is doing, on its figure's line. */
 .island-box-doing { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--font-sans); color: var(--color-ink); }
 
 /* ---- The box's agent at its workbench: the builder's bench, to look at ---- */
-.island-bench { grid-column: 1 / -1; margin-top: 2px; }
+.island-bench-slot { grid-column: 1 / -1; }
+.island-bench { margin-top: 2px; }
 .island-bench .bench-stage { aspect-ratio: 22 / 15; border-radius: var(--r-lg); }
 .island-bench-still { display: grid; place-items: center; align-content: center; gap: 8px; aspect-ratio: 22 / 15; border-radius: var(--r-lg); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
 /* While it thinks, its thought bubble has the top of the bench: the labels up there step aside. */
@@ -404,8 +430,10 @@ body {
   animation: island-fold var(--t-spring) var(--ease-in) forwards;
 }
 
-/* ---- Without a notch (decision 11): only the box, hanging from under the menu bar while it is
-   called, its agent's workbench, and the agent tucked away in a pill, at a little desk ---- */
+/* ---- With no notch, real or drawn, on a screen showing no menu bar (decision 11): only the box,
+   hanging from the top while it is called, its agent's workbench, and the agent tucked away in a
+   pill, at a little desk. A notch drawn in a menu bar is `data-notch="drawn"`: the island there is
+   the same as at a camera's. ---- */
 .island[data-notch="none"] { --pill-h: 46px; }
 .island[data-notch="none"] .island-shape { top: var(--bar); min-width: 0; min-height: 0; }
 /* Hanging over whatever window is below, dark ones too, it keeps an edge, as the answer card does. */
@@ -477,12 +505,18 @@ body {
 @keyframes island-nudge { 0%, 100% { translate: 0 0; } 40% { translate: 0 -6px; } }
 @keyframes island-rise { from { opacity: 0; translate: 0 -6px; } to { opacity: 1; translate: 0 0; } }
 @keyframes island-fold { to { translate: calc(var(--tx) - var(--fx)) calc(var(--ty) - var(--fy)); scale: 0; } }
+@keyframes island-ear-duck { to { translate: 0 calc(var(--bar) * 1.2); } }
+@keyframes island-ear-pop { from { translate: 0 calc(var(--bar) * 1.2); } }
+@keyframes island-pop-up { from { translate: 0 150%; } }
+@keyframes island-agent-in { from { opacity: 0; scale: .4; } }
 
 /* Reduced motion: every moment still shows, and still says what it is by pose and words, but
    nothing travels, loops or grows. The island and what drops out of it appear where they belong. */
 @media (prefers-reduced-motion: reduce) {
   .island *, .island *::before, .island *::after { animation: none !important; }
   .island-fold { display: none; }
+  /* Switching agents swaps the figure at once: the one it was goes, with no duck to see it go. */
+  .island-switch.is-leaving, .island-head.is-leaving { display: none; }
   .island-send { scale: 1; transition: opacity var(--t-quick) var(--ease-out); }
   .island-field-box[data-written] > .island-send { transition: opacity var(--t-quick) var(--ease-out); }
   .island-stage-bead { transition: none; }

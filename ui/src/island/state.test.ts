@@ -14,6 +14,9 @@ function play(steps: [number, IslandAction][], start = initialIsland(at(0), true
 
 const placed: IslandAction = { type: 'app', message: { kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 } }
 const noNotch: IslandAction = { type: 'app', message: { kind: 'place', notch: null, menuBar: 24 } }
+/** A monitor beside a MacBook: a notch as wide as the MacBook's, drawn in its own menu bar. */
+const drawn: IslandAction = { type: 'app', message: { kind: 'place', notch: { width: 220, height: 30 }, menuBar: 30, drawn: true } }
+const fullScreen = (on: boolean): IslandAction => ({ type: 'app', message: { kind: 'fullScreen', on } })
 /** The page's box writes to the pinned agent, else the first of My agents (`useIsland`). */
 const boxed: IslandAction = { type: 'box', box: pinnedNow('maya', [maya]) }
 const runs = (...records: RunRecord[]): IslandAction => ({ type: 'runs', records })
@@ -120,6 +123,31 @@ describe('the island, moment by moment', () => {
     expect([viewOf(s), s.pop.out]).toEqual(['hidden', null])
     s = islandReducer(s, { type: 'runs', records: [run('a', { permissionRequests: [permission('p1')] })], now: at(2) })
     expect([viewOf(s), s.pop.out]).toEqual(['hidden', null])
+  })
+
+  it('with a notch drawn in the menu bar, is the island as at a notch, but over a full-screen app shows only what drops out of it', () => {
+    let s = play([[at(0), drawn], [at(0), runs()]])
+    expect(viewOf(s)).toBe('rest')
+    s = play([[at(1), runs(run('a', { working: ['researcher'] }))]], s)
+    expect(viewOf(s)).toBe('work')
+    // An app goes full screen: the drawn notch stands aside, its figure peeking or not.
+    s = play([[at(1) + 100, fullScreen(true)]], s)
+    expect(viewOf(s)).toBe('hidden')
+    s = play([[at(1) + ISLAND_WAITS.start, { type: 'tick' }]], s)
+    expect(viewOf(s)).toBe('hidden')
+    // A question still drops out, and tucked away it stays to wait for you; ⌃⌥Space still opens
+    // the box.
+    s = play([[at(2), runs(run('a', { permissionRequests: [permission('p1')] }))]], s)
+    expect(viewOf(s)).toBe('ask')
+    s = play([[at(2) + ISLAND_WAITS.ask + 10, { type: 'tick' }]], s)
+    expect(viewOf(s)).toBe('tucked')
+    s = play([[at(3), boxed], [at(3), { type: 'app', message: { kind: 'compose' } }]], s)
+    expect(viewOf(s)).toBe('list')
+    // Out of full screen, it is back.
+    s = play([[at(4), { type: 'app', message: { kind: 'clickOutside' } }], [at(4) + ISLAND_WAITS.ask, { type: 'tick' }], [at(5), fullScreen(false)]], s)
+    expect(viewOf(s)).not.toBe('hidden')
+    // A camera's notch stays over a full-screen app: the black is there anyway.
+    expect(viewOf(play([[at(0), placed], [at(0), runs()], [at(0), fullScreen(true)]]))).toBe('rest')
   })
 
   it('keeps the answers in the chat it last knew when they could not be read, beside the runs', () => {

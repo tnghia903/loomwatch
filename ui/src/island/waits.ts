@@ -30,6 +30,15 @@ export const ISLAND_WAITS = {
   peek: 320,
   /** After a message goes, how long its agent's workbench shows before it tucks away. */
   bench: 3_000,
+  /** How long the pointer has been on this screen, with an agent for the box, before that agent's
+      workbench is set up out of sight: after the page's first readings, and before the box is called. */
+  benchSetUp: 3_000,
+  /** How long a screen keeps that workbench after the pointer has left it: going back and forth
+      between screens doesn't set it up again each time. */
+  benchKept: 30_000,
+  /** How long switching the box to another agent is drawn: the one it was ducks (`--t-quick`) and
+      the new one pops up on the spring (`--t-spring`, island.css) half a duck later. */
+  switch: 700,
   /** How long the list stays open after the pointer leaves it. */
   closeList: 700,
   /** After a drag near the island is let go of elsewhere, how long the slot waits for its drop. */

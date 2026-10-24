@@ -2,10 +2,12 @@
 //! see-through panels and the page drawn in each.
 //!
 //! Every screen has a panel of its own, hanging from the middle of its top. At a notch it holds the
-//! island: the teams at rest beside the camera, and their news popping out (decision 1). Without a
-//! notch nothing is drawn there, and the menu bar face is in the menu bar instead; the panel only
-//! holds the box to message an agent, while it is called (decision 11). The panel on the screen the
-//! pointer is on is the live one: the box opens there, and what its agent does drops out there.
+//! island: the teams at rest beside the camera, and their news popping out (decision 1). A screen
+//! without one has a notch drawn in the middle of its menu bar, as wide as a `MacBook`'s, and the
+//! same island around it (decision 12). Only a screen with no menu bar showing has none: there the
+//! panel holds the box to message an agent, while it is called (decision 11), and with no island
+//! anywhere the menu bar face has the teams. The panel on the screen the pointer is on is the live
+//! one: the box opens there, and what its agent does drops out there.
 //! The page (`ui/island.html`, served by `loomwatchd`) draws all of it, decides when it pops out
 //! and tucks away, and answers a permission with the same calls the browser makes. The app only
 //! places the panels, lets clicks through everywhere but what the page draws, and tells each page
@@ -70,12 +72,14 @@ impl Rect {
     }
 }
 
-/// The camera housing at the top of a screen, in screen points.
+/// The camera housing at the top of a screen, in screen points, or the notch drawn in the menu bar
+/// of a screen without one (`drawn`, `with_drawn_notches`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Notch {
     pub min_x: f64,
     pub max_x: f64,
     pub height: f64,
+    pub drawn: bool,
 }
 
 impl Notch {
@@ -106,16 +110,52 @@ pub fn notch_from(safe_top: f64, left: Rect, right: Rect) -> Option<Notch> {
         min_x: left.max_x(),
         max_x: right.x,
         height: safe_top.max(left.height),
+        drawn: false,
     };
     (safe_top > 0.0 && left.width > 0.0 && right.width > 0.0 && notch.width() > 0.0)
         .then_some(notch)
 }
 
-/// The menu bar face is in the menu bar wherever a screen has no notch to hold the island, so the
-/// teams' work and the app's menu are on every screen: a monitor beside a `MacBook`, an iMac, a Mac
-/// mini, a `MacBook` with its lid closed. On a `MacBook` alone the island takes its place.
+/// How wide a notch is drawn on a screen without one when no `MacBook`'s screen is there to measure:
+/// a 14-inch `MacBook` Pro's, as the page draws one in a browser (`BROWSER_NOTCH`,
+/// ui/src/island/state.ts).
+pub const DRAWN_NOTCH_WIDTH: f64 = 185.0;
+
+/// Every screen has a menu bar, so a screen without a notch gets one drawn in the middle of it
+/// (decision 12): as wide as the notch of the `MacBook` beside it, or else `DRAWN_NOTCH_WIDTH`, and
+/// as tall as its own menu bar. The island is the same there as at a notch. A screen showing no
+/// menu bar, as with Displays have separate Spaces off, gets none, so nothing black hangs over
+/// what it shows.
+pub fn with_drawn_notches(screens: Vec<Screen>) -> Vec<Screen> {
+    let width = screens
+        .iter()
+        .find_map(|screen| screen.notch.map(|notch| notch.width()))
+        .unwrap_or(DRAWN_NOTCH_WIDTH);
+    screens
+        .into_iter()
+        .map(|screen| {
+            if screen.notch.is_some() || screen.menu_bar <= 0.0 {
+                return screen;
+            }
+            let mid_x = screen.frame.x + screen.frame.width / 2.0;
+            Screen {
+                notch: Some(Notch {
+                    min_x: mid_x - width / 2.0,
+                    max_x: mid_x + width / 2.0,
+                    height: screen.menu_bar,
+                    drawn: true,
+                }),
+                ..screen
+            }
+        })
+        .collect()
+}
+
+/// The menu bar face is in the menu bar while no screen has the island, so the teams' work and the
+/// app's menu are somewhere: a Mac without a notch whose menu bar is hidden, or with no screen at
+/// all. A notch, drawn or not, takes its place.
 pub fn menu_bar_face_shows(screens: &[Screen]) -> bool {
-    screens.is_empty() || screens.iter().any(|screen| screen.notch.is_none())
+    screens.iter().all(|screen| screen.notch.is_none())
 }
 
 /// Which screen's panel is live, where the box opens and its agent's work drops out: the one on the
@@ -131,9 +171,9 @@ pub fn live_screen(screens: &[Screen], pointer: (f64, f64), was: Option<usize>) 
 }
 
 /// Which screen's island pops the teams' news out (a question, a result, a stop): the live one if
-/// it has a notch; else the notched one that `was`, so the news stays at the notch while the
-/// pointer is on a monitor beside it; else the first with a notch. None on a Mac without a notch,
-/// where the menu bar face has the news.
+/// it has a notch, drawn or not; else the notched one that `was`, so the news stays where it was
+/// while the pointer is on a screen with no menu bar showing; else the first with a notch. None
+/// with no notch anywhere, where the menu bar face has the news.
 pub fn news_screen(screens: &[Screen], live: Option<usize>, was: Option<usize>) -> Option<usize> {
     let notched = |index: &usize| {
         screens
@@ -171,7 +211,7 @@ pub const SHORTCUT_KEY: u32 = 49;
 pub const SHORTCUT_MODIFIERS: u32 = 0x1000 | 0x0800;
 
 /// The panel's frame on `screen`: hanging from its top edge, centred on the notch, or on the
-/// screen without one, where the box hangs from the middle of the menu bar.
+/// screen with none, where the box hangs from the middle of the top.
 pub fn panel_frame(screen: &Screen) -> Rect {
     let mid_x = screen.notch.map_or_else(
         || screen.frame.x + screen.frame.width / 2.0,
@@ -343,10 +383,16 @@ pub fn app_address(origin: &str, link: &str) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ToPage {
-    /// Where the panel is. `notch` is the camera housing's size, centred at the top of the panel;
-    /// without one the island drops from the middle of a menu bar `menuBar` points tall.
+    /// Where the panel is. `notch` is the camera housing's size, or the one drawn on a screen
+    /// without one (`drawn`), centred at the top of the panel; with neither, the box drops from the
+    /// middle of a menu bar `menuBar` points tall. A drawn notch stands aside over a full-screen
+    /// app, where a camera's would cover nothing.
     #[serde(rename_all = "camelCase")]
-    Place { notch: Option<Size>, menu_bar: f64 },
+    Place {
+        notch: Option<Size>,
+        menu_bar: f64,
+        drawn: bool,
+    },
     /// The pointer moved onto one of the island's areas (`area`, as `area_under` numbers them),
     /// or off them all. The page can't tell by itself: `WebKit` follows the pointer only in a key
     /// window, and the island's panel never becomes one.
@@ -366,7 +412,7 @@ pub enum ToPage {
     /// agent's work and answer drop out here; or it is no longer, and stays at rest.
     Live { on: bool },
     /// This island pops the teams' news out (`news_screen`); or it no longer does, and only tucks
-    /// it beside the notch. A panel without a notch is never told to.
+    /// it beside the notch. A panel with no notch, drawn or not, is never told to.
     News { on: bool },
     /// Results looked at on another screen's island: they leave this one too.
     Seen { runs: Vec<String> },
@@ -397,6 +443,7 @@ impl ToPage {
                 height: notch.height,
             }),
             menu_bar: screen.menu_bar,
+            drawn: screen.notch.is_some_and(|notch| notch.drawn),
         }
     }
 }
@@ -451,17 +498,78 @@ mod tests {
     }
 
     #[test]
-    fn the_face_is_in_the_menu_bar_wherever_a_screen_has_no_notch() {
-        // A MacBook alone: the island takes its place.
+    fn a_screen_without_a_notch_gets_one_drawn_as_wide_as_the_macbooks() {
+        let drawn = with_drawn_notches(vec![external(ABOVE), macbook()]);
+        let notch = drawn[0].notch.expect("a notch drawn on the monitor");
+        // As wide as the MacBook's, in the middle of the monitor, as tall as its menu bar.
+        assert!((notch.width() - 188.0).abs() < f64::EPSILON);
+        assert!((notch.mid_x() - (ABOVE.x + ABOVE.width / 2.0)).abs() < f64::EPSILON);
+        assert!((notch.height - 24.0).abs() < f64::EPSILON);
+        assert_eq!(
+            ToPage::place(&drawn[0]),
+            ToPage::Place {
+                notch: Some(Size {
+                    width: 188.0,
+                    height: 24.0
+                }),
+                menu_bar: 24.0,
+                drawn: true,
+            }
+        );
+        assert_eq!(
+            ToPage::place(&drawn[0]).script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"place","notch":{"width":188.0,"height":24.0},"menuBar":24.0,"drawn":true})"#
+        );
+        // The MacBook keeps its own, and the page hears it is the camera's.
+        assert_eq!(drawn[1].notch, macbook().notch);
+        assert!(matches!(
+            ToPage::place(&drawn[1]),
+            ToPage::Place { drawn: false, .. }
+        ));
+        // No MacBook to measure (a Mac mini, an iMac, a MacBook with its lid closed): a 14-inch
+        // MacBook Pro's.
+        let alone = with_drawn_notches(vec![external(ABOVE)]);
+        let width = alone[0].notch.expect("a notch drawn").width();
+        assert!((width - DRAWN_NOTCH_WIDTH).abs() < f64::EPSILON);
+        // A screen showing no menu bar gets none.
+        let mut bare = external(ABOVE);
+        bare.menu_bar = 0.0;
+        assert_eq!(with_drawn_notches(vec![bare, macbook()])[0].notch, None);
+    }
+
+    #[test]
+    fn the_face_is_in_the_menu_bar_only_while_no_screen_has_the_island() {
+        // A MacBook alone, and a monitor beside it with its drawn notch: the island takes its place.
         assert!(!menu_bar_face_shows(&[macbook()]));
-        // A monitor beside it, an iMac, a MacBook with its lid closed.
-        assert!(menu_bar_face_shows(&[external(ABOVE), macbook()]));
-        assert!(menu_bar_face_shows(&[external(ABOVE)]));
+        assert!(!menu_bar_face_shows(&with_drawn_notches(vec![
+            external(ABOVE),
+            macbook()
+        ])));
+        assert!(!menu_bar_face_shows(&with_drawn_notches(vec![external(
+            ABOVE
+        )])));
+        // A monitor showing no menu bar beside the MacBook: the MacBook's island has the teams.
+        let mut bare = external(ABOVE);
+        bare.menu_bar = 0.0;
+        assert!(!menu_bar_face_shows(&with_drawn_notches(vec![
+            bare,
+            macbook()
+        ])));
+        // No island anywhere: no menu bar showing on a Mac without a notch, or no screen.
+        assert!(menu_bar_face_shows(&with_drawn_notches(vec![bare])));
         assert!(menu_bar_face_shows(&[]));
     }
 
     #[test]
+    fn the_news_drops_out_on_the_screen_the_pointer_is_on_with_a_drawn_notch_too() {
+        let drawn = with_drawn_notches(vec![external(ABOVE), macbook()]);
+        assert_eq!(news_screen(&drawn, Some(0), Some(1)), Some(0));
+        assert_eq!(news_screen(&drawn, Some(1), Some(0)), Some(1));
+    }
+
+    #[test]
     fn the_news_stays_at_the_notch_wherever_the_pointer_is() {
+        // A screen showing no menu bar has no notch, drawn or not.
         let both = [external(ABOVE), macbook()];
         // The pointer on the MacBook: its island, which is live too.
         assert_eq!(news_screen(&both, Some(1), None), Some(1));
@@ -645,7 +753,7 @@ mod tests {
     fn messages_to_the_page_wait_for_it_to_listen() {
         assert_eq!(
             ToPage::place(&macbook()).script(),
-            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"place","notch":{"width":188.0,"height":32.0},"menuBar":32.0})"#
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"place","notch":{"width":188.0,"height":32.0},"menuBar":32.0,"drawn":false})"#
         );
         assert_eq!(
             ToPage::Pointer {
