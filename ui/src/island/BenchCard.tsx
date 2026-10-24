@@ -13,7 +13,8 @@ import type { Island } from './useIsland'
 
 const NOTHING = () => {}
 
-export default function BenchCard({ island }: { island: Island }) {
+/** `hidden`: set up out of sight, while a message is written, to be there as soon as it goes. */
+export default function BenchCard({ island, hidden }: { island: Island; hidden: boolean }) {
   const box = island.box
   const [failed, setFailed] = useState(false)
   if (!box) return null
@@ -21,7 +22,7 @@ export default function BenchCard({ island }: { island: Island }) {
   // person could do about that, so nothing is said.
   const still = <FigureStill figure={figureFor(box.id, box.job.figure)} alt="" />
   return (
-    <div className="island-bench" role="group" aria-label={`${box.name}’s workbench`}>
+    <div className="island-bench" role="group" aria-label={`${box.name}’s workbench`} hidden={hidden}>
       {failed ? (
         <div className="island-bench-still">
           <span className="island-bench-figure">{still}</span>

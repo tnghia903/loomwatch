@@ -629,7 +629,8 @@ describe('the agent pinned to the notch', () => {
     // Its work is its own row's, under its name, not a team's row of its own.
     expect(container.querySelector('.island-pinned .island-words')?.textContent).toBe('Maya just started')
     await waitFor(() => expect(container.querySelector('.island-pinned .island-row-figure')?.getAttribute('data-phase')).toBe('typing'))
-    expect(within(container).getByRole('button', { name: 'Send note' })).toBeTruthy()
+    // A note's mark is the team chat's: a return arrow, where a message that starts work goes up.
+    expect(within(container).getByRole('button', { name: 'Send note' }).querySelector('svg.lucide-corner-down-left')).toBeTruthy()
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
     fireEvent.focus(field)
     fireEvent.change(field, { target: { value: 'Also check the weather' } })
@@ -658,6 +659,36 @@ describe('the agent pinned to the notch', () => {
     expect((field as HTMLInputElement).value).toBe('Book the dentist')
     fireEvent.click(await findByRole('button', { name: 'Open chat' }))
     expect(toApp).toContainEqual({ kind: 'open', link: '/agents/maya?view=chat' })
+  }, 15_000)
+
+  it('peeks out below the notch with its whole face and a little of its body, none of it behind the camera', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    const island = container.querySelector<HTMLElement>('.island')!
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    runs = [pinnedChat('c1', { working: ['maya'] })]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('work'), { timeout: 5000 })
+    // Its sizes, in points, as the island's rules work them out from the notch's height.
+    const rules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
+    const points = (element: HTMLElement, property: string): number => {
+      let value = element.style.getPropertyValue(property) || cascaded(element, property, DESKTOP, rules) || ''
+      for (let depth = 0; value.includes('var(') && depth < 8; depth += 1) {
+        value = value.replace(/var\((--[\w-]+)\)/g, (_, name: string) => `(${island.style.getPropertyValue(name) || cascaded(island, name, DESKTOP, rules)})`)
+      }
+      return Number(Function(`return ${value.replaceAll('calc', '').replaceAll('px', '')}`)())
+    }
+    const bar = points(island, '--bar')
+    const figure = points(island, '--fig')
+    const top = points(container.querySelector<HTMLElement>('.island-balcony')!, 'top')
+    const deep = points(container.querySelector<HTMLElement>('.island-shape')!, '--h')
+    // Of its picture: from the notch's edge, which the tallest figure's head (7% down) stays under,
+    // to past the spool's head (63%), so its face is whole and a little of its body shows.
+    const shown = [(bar - top) / figure, (deep - top) / figure]
+    expect(shown[0]).toBeCloseTo(0.07, 2)
+    expect(shown[1]).toBeGreaterThan(0.75)
   }, 15_000)
 
   it('shows its answer as any answer, which can be copied whole but not dragged out of the island', async () => {
@@ -748,8 +779,55 @@ describe('the agent pinned to the notch', () => {
     await act(async () => {})
     runs = [pinnedChat('c1', { status: 'succeeded', working: [], reply: 'Done.', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() })]
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('done'), { timeout: 5000 })
-    fireEvent.click(within(container.querySelector<HTMLElement>('.island-slip')!).getByRole('button', { name: 'See answer' }))
+    fireEvent.click(within(container.querySelector<HTMLElement>('.island-slip')!).getByRole('button', { name: 'Open in LoomWatch' }))
     expect(toApp).toContainEqual({ kind: 'open', link: '/agents/maya?view=chat' })
+  }, 15_000)
+
+  it('in the list, its answer has Copy as a mark, opens from the foot’s Open in LoomWatch, and Send is a mark that comes once something is written', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    const island = container.querySelector('.island')!
+    await waitFor(() => expect(noteReads).toBeGreaterThan(0))
+    await act(async () => {})
+    runs = [pinnedChat('c1', { status: 'succeeded', working: [], reply: 'Take the 8:10 train.', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() })]
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('done'), { timeout: 5000 })
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    const row = within(container.querySelector<HTMLElement>('.island-pinned')!)
+    // Her row: her answer and Copy, as a mark; no worded button but those of her figure and the box.
+    expect(row.getByText('Take the 8:10 train.')).toBeTruthy()
+    const copy = row.getByRole('button', { name: 'Copy' })
+    expect([copy.textContent, copy.querySelector('svg')]).toEqual(['', expect.anything()])
+    expect(row.queryByRole('button', { name: 'See answer' })).toBeNull()
+    expect(row.queryByRole('button', { name: 'Open in LoomWatch' })).toBeNull()
+    // Send: a mark at the field's end, out of sight until something is written.
+    const rules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
+    const send = row.getByRole('button', { name: 'Send' })
+    expect([send.textContent, Boolean(send.querySelector('svg.lucide-arrow-up')), cascaded(send, 'opacity', DESKTOP, rules)]).toEqual(['', true, '0'])
+    fireEvent.change(row.getByRole('textbox', { name: 'Message Maya' }), { target: { value: 'And the way back?' } })
+    expect(cascaded(send, 'opacity', DESKTOP, rules)).toBe('1')
+    // It comes by fading in and growing; with reduced motion it only fades, never growing.
+    expect([cascaded(send, 'scale', DESKTOP, rules), cascaded(send, 'transition', DESKTOP, rules)]).toEqual(['1', expect.stringContaining('scale')])
+    const still = { ...DESKTOP, reducedMotion: true }
+    fireEvent.change(row.getByRole('textbox', { name: 'Message Maya' }), { target: { value: '' } })
+    expect([cascaded(send, 'scale', still, rules), cascaded(send, 'transition', still, rules)]).toEqual(['1', expect.not.stringContaining('scale')])
+    // The foot opens her answer, where her chat has it whole.
+    fireEvent.click(within(container.querySelector<HTMLElement>('.island-list-foot')!).getByRole('button', { name: 'Open in LoomWatch' }))
+    expect(toApp).toContainEqual({ kind: 'open', link: '/agents/maya?view=chat' })
+  }, 15_000)
+
+  it('opens LoomWatch from the foot when its agent has no answer to open', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    runs = [run('r1', { working: ['writer'] })]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('tucked'))
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    await waitFor(() => expect(container.querySelector('.island-pinned')).toBeTruthy())
+    fireEvent.click(within(container.querySelector<HTMLElement>('.island-list-foot')!).getByRole('button', { name: 'Open in LoomWatch' }))
+    expect(toApp).toContainEqual({ kind: 'open', link: '/' })
   }, 15_000)
 
   it('opens its box with the keyboard when the app’s menu asks, and Escape gives the keyboard back', async () => {
@@ -887,6 +965,11 @@ describe('the box: any of My agents, and its workbench', () => {
     expect(figure.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(figure)
     const bench = await within(container).findByTestId('bench')
+    const shown = () => {
+      expect(bench.isConnected).toBe(true)
+      return bench.closest('.island-bench')?.hasAttribute('hidden') === false
+    }
+    await waitFor(() => expect(shown()).toBe(true))
     expect([bench.dataset.agent, bench.dataset.readOnly, bench.dataset.tone]).toEqual(['Maya', 'true', 'dark'])
     expect(bench.dataset.labels).toContain('job')
     expect(within(container).getByRole('button', { name: 'Hide Maya’s workbench' }).getAttribute('aria-expanded')).toBe('true')
@@ -894,9 +977,9 @@ describe('the box: any of My agents, and its workbench', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     // The workbench takes the place of the teams' rows.
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
-    // Escape folds the bench, and the box stays to write in; again, and the box goes.
+    // Escape folds the bench out of sight, and the box stays to write in; again, and the box goes.
     fireEvent.keyDown(window, { key: 'Escape' })
-    await waitFor(() => expect(within(container).queryByTestId('bench')).toBeNull())
+    await waitFor(() => expect(shown()).toBe(false))
     expect(field.isConnected).toBe(true)
     expect(view(container)).toBe('list')
     fireEvent.keyDown(window, { key: 'Escape' })
@@ -971,6 +1054,43 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     expect(uploads).toEqual(['Lease 2027.pdf'])
     expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/maya.yaml', text: 'Is the rent rise fair?', files: [{ path: '/teams/.jobs/.bench/files/Lease 2027.pdf' }] })
     expect(container.querySelector('.island-intake')).toBeNull()
+  }, 15_000)
+
+  it('a job picked for what was dropped: the box gives way to its agent’s workbench, set up while it waited, and the pointer still on the island keeps it there', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const island = container.querySelector('.island')!
+    const shape = container.querySelector<HTMLElement>('.island-shape')!
+    fireEvent.pointerEnter(shape, { pointerType: 'mouse' })
+    fireEvent.drop(shape, carrying([pdf]))
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
+    // Her workbench is there already, out of sight, while a job is picked.
+    const bench = await within(container).findByTestId('bench')
+    expect(bench.closest('.island-bench')?.hasAttribute('hidden')).toBe(true)
+    fireEvent.click(within(container).getByRole('button', { name: 'Summarize it' }))
+    // Sending disables the field, and a real browser takes the keyboard from it as it goes.
+    fireEvent.blur(container.querySelector('.island-field')!)
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('bench'))
+    // The same bench, shown: the words fold into her head, not into a bench still being set up.
+    expect(within(container).getByTestId('bench')).toBe(bench)
+    expect(bench.closest('.island-bench')?.hasAttribute('hidden')).toBe(false)
+    expect(container.querySelector('.island-fold')?.textContent).toBe('Summarize it')
+    // The panel gives the keyboard back, and the pointer, never off the island, comes on it again.
+    fireEvent.pointerLeave(shape, { pointerType: 'mouse' })
+    fireEvent.pointerEnter(shape, { pointerType: 'mouse' })
+    tellPage({ kind: 'pointer', over: true, area: 0 })
+    expect(island.getAttribute('data-view')).toBe('bench')
+    // Its moment is up, and the pointer is still on it: it stays; once the pointer leaves, it goes.
+    vi.setSystemTime(Date.now() + ISLAND_WAITS.bench)
+    tellPage({ kind: 'away', away: false })
+    expect(island.getAttribute('data-view')).toBe('bench')
+    tellPage({ kind: 'pointer', over: false, area: null })
+    fireEvent.pointerLeave(shape, { pointerType: 'mouse' })
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('rest'), { timeout: 3000 })
+    expect(within(container).queryByTestId('bench')).toBeNull()
   }, 15_000)
 
   it('takes a Mail message the app took from the drop, through the picker the app answers', async () => {

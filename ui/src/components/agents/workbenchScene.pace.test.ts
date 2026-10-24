@@ -8,7 +8,7 @@ vi.mock('three', async (load) => {
   const three = await load<typeof import('three')>()
   return {
     ...three,
-    WebGLRenderer: class { shadowMap = {}; setClearColor() {} render() {} dispose() {} },
+    WebGLRenderer: class { shadowMap = {}; domElement = document.createElement('canvas'); setClearColor() {} setDrawingBufferSize() {} render() {} dispose() {} },
     PMREMGenerator: class { fromScene() { return { texture: new three.Texture() } } dispose() {} },
   }
 })
@@ -78,5 +78,13 @@ it('draws every frame while something moves, and for a second after', () => {
   inside.actions.length = 0
   expect(aSecond(drawn)).toBe(60)
   expect(aSecond(drawn)).toBe(30)
+  scene.dispose()
+})
+
+it('draws again as soon as its size changes, before the page is painted: a new size empties its canvas', () => {
+  const { scene, drawn } = bench('still')
+  // Shown after it was set up out of sight: its stage goes from nothing to its size.
+  scene.resize(440, 300)
+  expect(drawn).toHaveBeenCalledTimes(1)
   scene.dispose()
 })

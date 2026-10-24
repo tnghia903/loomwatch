@@ -2,6 +2,8 @@
 // something is dragged near, what went in waiting for a job, its answer with Copy, its request to
 // start one of your teams in its own words, and the team it started at work under the notch as its
 // crew.
+import { Check, Copy } from 'lucide-react'
+
 import { FigureStill } from '../components/agents/FigureStill'
 import type { WorkPhase } from '../lib/library/figure'
 import { figureFor } from '../lib/library/figures'
@@ -49,26 +51,33 @@ export function IntakeJobs({ island }: { island: Island }) {
 }
 
 /**
- * The pinned agent's answer, as any answer on the island: who answered, its opening lines, Copy and
- * See answer. Copy takes the whole answer, formatted for apps that take formatting and as plain
- * text, links with their addresses, for the rest; until it is read whole, Copy is off.
+ * The pinned agent's answer, as any answer on the island: who answered with Copy beside it, as a
+ * mark, then its opening lines and Open in LoomWatch. Copy takes the whole answer, formatted for apps
+ * that take formatting and as plain text, links with their addresses, for the rest; until it is read
+ * whole, Copy is off. In the list, its foot's Open in LoomWatch opens the answer instead (`foot`).
  */
-export function AnswerSlip({ island, team }: { island: Island; team: TeamNow }) {
+export function AnswerSlip({ island, team, foot = false }: { island: Island; team: TeamNow; foot?: boolean }) {
   const answer = island.answerOf(team)
   const whole = plainText(answer?.text ?? team.result)
   return (
     <div className="island-answer">
       <div className="island-words">
-        <small>{team.teamName} answered</small>
+        <span className="island-answer-head">
+          <small>{team.teamName} answered</small>
+          {/* One button throughout, so the keyboard stays on it once it has copied. */}
+          <button type="button" className={`island-copy${island.copied ? ' is-copied' : ''}`} aria-label={island.copied ? 'Copied' : 'Copy'} disabled={!answer} onClick={() => { if (answer && !island.copied) island.copy(answer) }}>
+            {island.copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
+          </button>
+          <span className="island-unseen" role="status">{island.copied ? 'Copied.' : ''}</span>
+        </span>
         {/* Its opening lines, read without the blank lines between paragraphs. */}
         <p>{whole.replace(/\n{2,}/g, '\n')}</p>
       </div>
-      <div className="island-acts">
-        {island.copied ? <small className="island-sent" role="status">Copied.</small> : (
-          <button type="button" className="island-button" disabled={!answer} onClick={() => { if (answer) island.copy(answer) }}>Copy</button>
-        )}
-        <button type="button" className="island-button" onClick={() => island.open(team)}>See answer</button>
-      </div>
+      {!foot && (
+        <div className="island-acts">
+          <button type="button" className="island-button" onClick={() => island.open(team)}>Open in LoomWatch</button>
+        </div>
+      )}
     </div>
   )
 }

@@ -242,6 +242,45 @@ describe('writing to the box’s agent', () => {
     expect(viewOf(s)).toBe('rest')
   })
 
+  it('at a notch, the pointer on the island as the message goes keeps its agent at its workbench, past its moment, until the pointer leaves; it never opens the box again', () => {
+    const pointerOn: IslandAction = { type: 'pointerOnIsland', over: true }
+    let s = play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(0), boxed], [at(1), pointerOn], [at(1), { type: 'compose', on: true }]])
+    s = islandReducer(s, { type: 'sent', now: at(2) })
+    expect(viewOf(s)).toBe('bench')
+    // Its moment is up with the pointer never off it: it stays.
+    expect(viewOf(islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.bench }))).toBe('bench')
+    // The panel giving the keyboard back, or the pointer moving, says again that it is on the island.
+    s = islandReducer(s, { ...pointerOn, now: at(2) + 500 })
+    s = islandReducer(s, { type: 'app', message: { kind: 'pointer', over: true, area: 0 }, now: at(2) + 600 })
+    expect([viewOf(s), s.listOpen]).toEqual(['bench', false])
+    s = islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.bench })
+    expect(viewOf(s)).toBe('bench')
+    // Said again after its moment, while it is still pointed at: it stays.
+    s = islandReducer(s, { type: 'app', message: { kind: 'pointer', over: true, area: 0 }, now: at(2) + ISLAND_WAITS.bench + 100 })
+    expect([viewOf(s), s.listOpen]).toEqual(['bench', false])
+    s = islandReducer(s, { type: 'pointerOnIsland', over: false, now: at(3) })
+    s = islandReducer(s, { type: 'closeList', now: at(3) + ISLAND_WAITS.closeList })
+    expect(viewOf(s)).toBe('rest')
+    // Pointed at again, the list opens as ever.
+    expect(viewOf(islandReducer(s, { ...pointerOn, now: at(4) }))).toBe('list')
+  })
+
+  it('at a notch, the pointer coming onto its agent at its workbench after a message keeps it there; what the agent answers then slides out, and is not taken as seen as the pointer leaves', () => {
+    let s = play([[at(0), placed], [at(0), runs()], [at(0), pinned], [at(0), boxed], [at(1), { type: 'compose', on: true }], [at(2), { type: 'sent' }]])
+    s = islandReducer(s, { type: 'runs', records: [pinnedChat('c1', { working: ['maya'] })], now: at(2) + 500 })
+    s = islandReducer(s, { type: 'pointerOnIsland', over: true, now: at(2) + 1000 })
+    expect([viewOf(s), s.listOpen]).toEqual(['bench', false])
+    s = islandReducer(s, { type: 'tick', now: at(2) + ISLAND_WAITS.bench })
+    expect(viewOf(s)).toBe('bench')
+    s = islandReducer(s, { type: 'runs', records: [pinnedChat('c1', { status: 'succeeded', finishedAt: iso(3), reply: 'Two meetings' })], now: at(3) })
+    expect(viewOf(s)).toBe('done')
+    // Its answer ends watching it: once the answer has had its time, the bench doesn't come back.
+    expect(viewOf(islandReducer(s, { type: 'tick', now: at(3) + ISLAND_WAITS.result }))).toBe('tucked')
+    s = islandReducer(s, { type: 'pointerOnIsland', over: false, now: at(3) + 1000 })
+    s = islandReducer(s, { type: 'closeList', now: at(3) + 1000 + ISLAND_WAITS.closeList })
+    expect([viewOf(s), s.seen.has('c1')]).toEqual(['done', false])
+  })
+
   it('without a notch: the box when called, its agent at its workbench, tucked into a pill while it works and open again while pointed at, then its answer', () => {
     let s = play([[at(0), noNotch], [at(0), pinned], [at(0), boxed], [at(0), runs()]])
     expect(viewOf(s)).toBe('hidden')

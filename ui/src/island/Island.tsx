@@ -7,6 +7,8 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useRef, type CSSProperties,
 
 import { AgentFigure } from '../components/agents/benchFigure'
 import { FigureStill } from '../components/agents/FigureStill'
+import { ArrowUp, CornerDownLeft } from 'lucide-react'
+
 import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
 import { dropped } from '../lib/chat/attachments'
 import type { WorkPhase } from '../lib/library/figure'
@@ -369,8 +371,9 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
  * Pointing at the notch: the box's agent, then one row per team, questions first. As the box
  * without a notch (`box`), and while the agent's workbench is open, only the agent: its workbench
  * takes the rows' place. Its agent at its workbench on its own (`bench`), for a moment after a
- * message goes and, without a notch, while its pill is pointed at, is the same list: the bench
- * stays as it was while the box gives way to it, and the words fold into a head already there.
+ * message goes and while it is pointed at then, or at its pill without a notch, is the same list.
+ * While a message is written its bench is set up out of sight, so the bench is there as the box
+ * gives way to it, and the words fold into a head already there.
  */
 function List({ island, mode }: { island: IslandState; mode: 'list' | 'box' | 'bench' }) {
   const watching = mode === 'bench'
@@ -389,8 +392,8 @@ function List({ island, mode }: { island: IslandState; mode: 'list' | 'box' | 'b
   })
   return (
     <div ref={list} className="island-list">
-      {island.box && <PinnedRow island={island} work={pinnedWork} crews={crews} firstPermission={firstPermission} watching={watching} />}
-      {island.box && (island.bench || watching) && <Suspense fallback={null}><BenchCard island={island} /></Suspense>}
+      {island.box && <PinnedRow island={island} work={pinnedWork} crews={crews} firstPermission={firstPermission} watching={watching} foot={mode === 'list'} />}
+      {island.box && (island.bench || watching || island.composing || island.sending) && <Suspense fallback={null}><BenchCard island={island} hidden={!island.bench && !watching} /></Suspense>}
       {rows.length === 0 && !island.box && <p className="island-quiet">Nothing is running</p>}
       {rows.map((team) => (
         <div key={team.runId} className="island-row" data-moment={team.moment}>
@@ -409,7 +412,8 @@ function List({ island, mode }: { island: IslandState; mode: 'list' | 'box' | 'b
       ))}
       {mode === 'list' && <div className="island-list-foot">
         {more > 0 && <span>{more === 1 ? '1 more team' : `${more} more teams`} in LoomWatch</span>}
-        <button type="button" className="island-button" onClick={island.openApp}>Open LoomWatch</button>
+        {/* The box's agent's answer, when it has one, opens from here: its row has Copy only. */}
+        <button type="button" className="island-button" onClick={() => (pinnedWork?.moment === 'done' ? island.open(pinnedWork) : island.openApp())}>Open in LoomWatch</button>
         {inApp() && (
           <button
             type="button"
@@ -448,9 +452,9 @@ function RowFigures({ island, team }: { island: IslandState; team: TeamNow }) {
  * work, or joins it as a note while it works; its answer slides out as any team's does. Its figure
  * opens its workbench; the other agents beside it, or Tab, switch the box to one of them. Watching
  * it at its workbench (`watching`), its row only says what it is doing: a click on the island
- * opens the box again.
+ * opens the box again. Under the list's foot (`foot`), its answer opens from the foot.
  */
-function PinnedRow({ island, work, crews, firstPermission, watching }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined; watching: boolean }) {
+function PinnedRow({ island, work, crews, firstPermission, watching, foot }: { island: IslandState; work: TeamNow | null; crews: readonly TeamNow[]; firstPermission: string | undefined; watching: boolean; foot: boolean }) {
   const pinned = island.box!
   const others = island.agents.filter((agent) => agent.id !== pinned.id)
   const field = useRef<HTMLInputElement>(null)
@@ -467,6 +471,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching }: { island:
   // written there, or under the request while something dropped has the box.
   const asking = teamAsk && island.teamSaid?.id !== teamAsk.id ? teamAsk : null
   const limit = useRunLimit(asking?.team.path ?? null)
+  const startHere = asking && !island.draft.trim() && !island.intake ? asking : null
   // While it works, a message is a note it reads after its current step, as its Chat tab says; the
   // box shows the short form, and the whole of it is its name and tooltip.
   const to = island.intake ? 'Or say what to do' : asking ? `Or message ${pinned.name}` : island.pinnedWorking ? `Note for ${pinned.name}` : `Message ${pinned.name}`
@@ -523,7 +528,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching }: { island:
           <p>{working(work, island.now)}</p>
         </div>
       ) : work?.moment === 'done' ? (
-        <AnswerSlip island={island} team={work} />
+        <AnswerSlip island={island} team={work} foot={foot} />
       ) : work ? (
         <ResultBody island={island} team={work} />
       ) : null}
@@ -537,6 +542,9 @@ function PinnedRow({ island, work, crews, firstPermission, watching }: { island:
           island.send()
         }}
       >
+        {/* Send is a mark in the field's end, there once something is written; Enter sends too. A
+            note while it works is the team chat's mark for one: a return arrow, not up. */}
+        <span className="island-field-box" data-written={island.draft.trim() ? '' : undefined}>
         <input
           ref={field}
           className="island-field"
@@ -548,7 +556,7 @@ function PinnedRow({ island, work, crews, firstPermission, watching }: { island:
           disabled={island.sending}
           onChange={(event) => island.setDraft(event.target.value)}
           onFocus={() => island.compose(true)}
-          // Tab to Copy, See answer or Start keeps the island writing, and the keyboard with it.
+          // Tab to Copy, Open in LoomWatch or Start keeps the island writing, and the keyboard with it.
           onBlur={(event) => {
             if (event.relatedTarget instanceof Node && event.currentTarget.closest('.island-list')?.contains(event.relatedTarget)) return
             island.compose(false)
@@ -565,11 +573,11 @@ function PinnedRow({ island, work, crews, firstPermission, watching }: { island:
             }
           }}
         />
-        {asking && !island.draft.trim() && !island.intake ? (
-          <StartTeam island={island} request={asking} first={!firstPermission} limit={limit} />
-        ) : (
-          <button type="submit" className="island-button" disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? 'Send note' : 'Send'}</button>
+        {!startHere && (
+          <button type="submit" className="island-send" aria-label={island.pinnedWorking ? 'Send note' : 'Send'} disabled={island.sending || !island.draft.trim()}>{island.pinnedWorking ? <CornerDownLeft size={16} aria-hidden="true" /> : <ArrowUp size={17} aria-hidden="true" />}</button>
         )}
+        </span>
+        {startHere && <StartTeam island={island} request={startHere} first={!firstPermission} limit={limit} />}
       </form>
       {island.sent?.ok && <small className="island-sent" role="status">{island.sent.text}</small>}
       {island.sent && !island.sent.ok && (

@@ -70,8 +70,9 @@ export interface IslandState {
   following: boolean
   /** The box's agent's workbench is open under it. */
   bench: boolean
-  /** Without a notch, the pill is pointed at: its agent's workbench is open until the pointer
-      leaves, as the list closes. Not the list: closing it sees nothing. */
+  /** Its agent's workbench, out on its own, is pointed at: at a notch after a message, without one
+      at its pill. It stays until the pointer leaves, as the list closes. Not the list: closing it
+      sees nothing. */
   peeking: boolean
   /** After a message from the box, its agent's workbench shows on its own until then, so the
       person sees it start, and knows where to watch it; 0 when it doesn't. */
@@ -173,7 +174,7 @@ export function islandReducer(state: IslandState, action: IslandAction & { now: 
       s = { ...s, onDrop: action.over }
       break
     case 'closeList':
-      s = s.onIsland || s.composing ? s : { ...seeResults({ ...s, listOpen: false }, (team) => s.app.notch !== null && (team.moment === 'done' || team.moment === 'fail')), peeking: false }
+      s = s.onIsland || s.composing ? s : { ...seeResults({ ...s, listOpen: false }, (team) => s.listOpen && s.app.notch !== null && (team.moment === 'done' || team.moment === 'fail')), peeking: false }
       break
     case 'opened':
       s = seeResults({ ...s, listOpen: false, pop: tuckNow(s.pop, s.now) }, (team) => team.runId === action.runId)
@@ -202,8 +203,8 @@ export function islandReducer(state: IslandState, action: IslandAction & { now: 
       break
     case 'sent':
       // The box gives way to the agent's workbench, where it starts; without a notch it then tucks
-      // into a pill while it works.
-      s = { ...s, listOpen: false, composing: false, bench: false, peeking: false, following: s.app.notch === null, benchUntil: s.now + ISLAND_WAITS.bench }
+      // into a pill while it works. At a notch the pointer is usually on it still: it stays while so.
+      s = { ...s, listOpen: false, composing: false, bench: false, peeking: s.app.notch !== null && s.onIsland, following: s.app.notch === null, benchUntil: s.now + ISLAND_WAITS.bench }
       break
     case 'bench':
       s = { ...s, bench: action.on && s.box !== null }
@@ -272,11 +273,13 @@ function fromApp(s: IslandState, message: FromApp): IslandState {
   }
 }
 
-/** Pointing at the notch opens the list, in place of whatever was out. Without a notch there is no
-    list: the pointer resting on the agent in its pill opens its workbench (`peek`, a moment later,
-    so passing over it opens nothing), until the pointer leaves, as the list closes. */
+/** Pointing at the notch opens the list, in place of whatever was out; but the box's agent at its
+    workbench after a message stays, until the pointer leaves, as the list would. Without a notch
+    there is no list: the pointer resting on the agent in its pill opens its workbench (`peek`, a
+    moment later, so passing over it opens nothing), until the pointer leaves, as the list closes. */
 function pointedAt(s: IslandState): IslandState {
   if (s.app.notch === null) return { ...s, onIsland: true }
+  if (s.benchUntil > s.now || s.peeking) return { ...s, onIsland: true, peeking: true }
   return { ...s, onIsland: true, listOpen: true, pop: tuckNow(s.pop, s.now) }
 }
 
@@ -315,7 +318,9 @@ function settle(s: IslandState): IslandState {
   const team = pop.out ? teams.find((each) => each.runId === pop.out!.pop.runId) : undefined
   // The box's agent answered, or stopped: what it says takes the pill's place, and is the end of it.
   const ended = team?.pinned && (pop.out?.pop.kind === 'done' || pop.out?.pop.kind === 'fail')
-  return { ...s, pop, shown: pop.out && team ? { pop: pop.out.pop, team } : s.shown, following: s.following && !ended }
+  // At a notch, what it asks or answers ends watching it at its workbench: it never comes back after.
+  const says = s.app.notch !== null && (ended || (team?.pinned && pop.out?.pop.kind === 'ask'))
+  return { ...s, pop, shown: pop.out && team ? { pop: pop.out.pop, team } : s.shown, following: s.following && !ended, peeking: s.peeking && !says }
 }
 
 function circumstances(s: IslandState): Circumstances {
@@ -352,6 +357,7 @@ export function viewOf(s: IslandState): IslandViewName {
   // where it may (`here`).
   if (s.listOpen) return s.app.live ? 'list' : resting
   if (s.app.live && s.benchUntil > s.now) return 'bench'
+  if (s.app.live && s.peeking) return 'bench'
   return s.pop.out && s.shown ? POP_VIEW[s.pop.out.pop.kind] : resting
 }
 
