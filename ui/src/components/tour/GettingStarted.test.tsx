@@ -44,11 +44,11 @@ afterEach(() => {
 
 const HOME = '<div data-tour="home"><span data-tour="apps">Ready</span><a data-tour="build-agent">Build an agent</a><button data-tour="new-team">New team</button></div>'
 /** Your agents: the builder for one agent, with its chat open or not, or the list with its New agent button. */
-const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="your-teams">Your teams</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to My agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
+const builder = (saved = false, chat = '') => `<div data-tour="agents"><a data-tour="your-teams">My team</a><div data-tour="agent-builder"${saved ? ' data-tour-saved="true"' : ''}><button data-tour="save-agent">Save to My agents</button><nav><button data-tour="agent-tab-build"></button><button data-tour="agent-tab-chat"></button></nav><div data-tour="agent-blocks"></div>${chat}</div></div>`
 /** Its chat, before and after it answers. */
 const CHAT = '<section data-tour="chat"><form data-tour="composer"></form></section>'
 const ANSWERED = '<section data-tour="chat"><div data-tour="output"></div><form data-tour="composer"></form></section>'
-const AGENTS_LIST = '<div data-tour="agents"><a data-tour="your-teams">Your teams</a><button data-tour="new-agent">New agent</button></div>'
+const AGENTS_LIST = '<div data-tour="agents"><a data-tour="your-teams">My team</a><button data-tour="new-agent">New agent</button></div>'
 const workspace = (inner: string, agents = 1, view = 'workflow') => `<div data-tour="workspace" data-tour-agents="${agents}" data-tour-view="${view}"><nav data-tour="view-tabs"><button data-tour="tab-agents"></button><button data-tour="tab-workflow"></button><button data-tour="tab-chat"></button></nav>${inner}</div>`
 
 describe('GettingStarted', () => {
@@ -147,7 +147,7 @@ describe('GettingStarted', () => {
     }
   })
 
-  it('once the agent is saved, points the way to Your teams and carries on at Home', () => {
+  it('once the agent is saved, points the way to My team and carries on at Home', () => {
     showPage(builder())
     goToStep('save')
     renderGuide()
@@ -226,12 +226,12 @@ describe('GettingStarted', () => {
     expect(screen.getByRole('heading', { name: 'Put it in a team' })).toBeInTheDocument()
   })
 
-  it('waits in My agents for the operator to go back to Your teams', () => {
+  it('waits in My agents for the operator to go back to My team', () => {
     showPage(builder(true))
     goToStep('new-team')
     renderGuide()
-    expect(screen.getByRole('heading', { name: 'Go to Your teams to carry on' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Your teams' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('heading', { name: 'Go to My team to carry on' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'My team' })).toHaveAttribute('href', '/')
   })
 
   it('skips New team without landing on the dialog it would have opened', () => {

@@ -716,7 +716,7 @@ an agent, trying it on its own, putting it in a team and running it.
 
 A new install has no teams. Download the offline demo team,
 [examples/operator-stop.yaml](examples/operator-stop.yaml), into your teams folder
-(`~/LoomWatch/teams`), open LoomWatch and pick **Review stop demo** under **Your teams**. It is a
+(`~/LoomWatch/teams`), open LoomWatch and pick **Review stop demo** under **My team**. It is a
 three-step workflow: **Researcher → You → Writer**. Its agents produce fixed responses so you can
 learn the interface without calling a model provider.
 

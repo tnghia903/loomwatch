@@ -36,7 +36,7 @@ export interface TeamRailProps {
 }
 
 /**
- * Your teams down the side of a team's page, as the agent rail is down the side of an agent's: one
+ * My team, down the side of a team's page, as the agent rail is down the side of an agent's: one
  * click is another team, on the same tab, without going back to Home. Each team is its crew, and
  * glows what its newest work is doing, so a team waiting for you is seen from any other.
  */
@@ -68,7 +68,7 @@ export function TeamRail({ open, runs, savedJobs, view, go, onNewTeam, leave }: 
       art: <TeamCrewArt figures={team.agents.map((agent) => agentFigure(agent, savedJobs))} />,
     }))
   }, [teams, root, open, left, runs, savedJobs, view])
-  return <CrewRail label="Your teams" items={items} find="Find a team" none="No teams yet." add={{ label: 'New team', onAdd: onNewTeam }} go={go} leave={leave} />
+  return <CrewRail label="My team" items={items} find="Find a team" none="No teams yet." add={{ label: 'New team', onAdd: onNewTeam }} go={go} leave={leave} />
 }
 
 /** The page frame's team rail, as the team on screen sets it (`teamRailStore.ts`). */

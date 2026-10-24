@@ -28,7 +28,7 @@ export interface LeaveGuard {
 }
 
 export interface CrewRailProps {
-  /** The rail's name for screen readers: "My agents", "Your teams". */
+  /** The rail's name for screen readers: "My agents", "My team". */
   label: string
   items: readonly RailItem[] | null
   /** The find button's words and the find box's: "Find an agent". */

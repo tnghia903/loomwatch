@@ -62,7 +62,7 @@ export function AgentFrame({ mark, tray, rail, chip, onSlots, children }: AgentF
         <div className="lw-shell agent-bar">
           <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
             {/* The brand is the way home: every team is one click from the list of all teams. */}
-            <a className="delivery-brand" href="/" aria-label="LoomWatch, your teams" title="Your teams" data-tour="your-teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={mark} /><LoomWordmark height={19} /></a>
+            <a className="delivery-brand" href="/" aria-label="LoomWatch, my team" title="My team" data-tour="your-teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}><LoomMark size={26} state={mark} /><LoomWordmark height={19} /></a>
             {!narrow && menu}
             {!narrow && tray && <div className="needs-you-anchor">{tray}</div>}
             <div ref={tabsSlot} className="agent-bar-tabs" />
