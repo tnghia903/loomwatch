@@ -1593,8 +1593,14 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // progress shows its record.
   const [paneTab, setPaneTab] = useState<PaneTab | null>(null)
   // ADR 0077: a file read in the pane stays a tab of its own until it is closed, so following newer
-  // work leaves it where it is.
-  const [reading, setReading] = useState<FileToRead | null>(null)
+  // work, or reading another piece's file, leaves it where it is — every one read, not only the last.
+  // Each with its kind once known, for its mark.
+  const [kept, setKept] = useState<readonly { file: FileToRead; kind?: string }[]>([])
+  const keep = useCallback((file: FileToRead, kind?: string) => setKept((files) => {
+    const at = files.findIndex((each) => each.file.path === file.path)
+    if (at < 0) return [...files, { file, kind }]
+    return kind && !files[at].kind ? files.map((each, index) => (index === at ? { ...each, kind } : each)) : files
+  }), [])
   const [closedTabs, setClosedTabs] = useState<ReadonlySet<string>>(() => new Set())
   const reopen = useCallback((runId: string | null, tab: PaneTab) => setClosedTabs((closed) => {
     if (!closed.has(closedKey(runId, tab))) return closed
@@ -1626,20 +1632,25 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       }
     }),
     answer: paneAnswer,
-    kept: reading && { file: reading, label: baseName(reading.path) },
+    kept: kept.map(({ file, kind }) => ({ file, label: baseName(file.path), kind })),
     closed: closedTabs,
-  }), [activeRunId, foundFiles, writtenFiles, askable, answerResponder, paneAnswer, reading, closedTabs])
+  }), [activeRunId, foundFiles, writtenFiles, askable, answerResponder, paneAnswer, kept, closedTabs])
   // Its record stays on screen until what it made is known, so the pane moves once; work that
   // stopped or failed keeps its record on screen, where that is said.
   const shownTab = shownPaneTab(paneTab, paneTabs, detailsFollow, session.terminal && record?.status === 'succeeded' && foundFiles !== null)
-  const shownFile = paneTabs.find((made) => made.tab === shownTab)?.file ?? null
+  const shownMade = paneTabs.find((made) => made.tab === shownTab)
+  const shownFile = shownMade?.file ?? null
   const shownFileRef = useRef(shownFile)
   useEffect(() => { shownFileRef.current = shownFile })
+  // A file is read once it is on screen, whether you opened it or the pane opened on it.
+  const shownPath = shownFile?.path ?? null
+  const shownKind = shownMade?.kind
+  useEffect(() => { if (shownPath && shownFileRef.current) keep(shownFileRef.current, shownKind) }, [shownPath, shownKind, keep])
   // Following newer work changes the record and what it made, and leaves the file on screen.
   const keepShownFile = useCallback(() => {
     const file = shownFileRef.current
-    if (file) { setReading(file); setPaneTab(fileTab(file.path)) } else setPaneTab(null)
-  }, [])
+    if (file) { keep(file); setPaneTab(fileTab(file.path)) } else setPaneTab(null)
+  }, [keep])
   const closeDetails = useCallback(() => { setDetailsFollow(false); closeRun(); setRunSetup(true) }, [closeRun])
   const openDetails = useCallback((runId: string) => {
     if (detailsOpen && activeRunId === runId && shownTab === 'details') { closeDetails(); return }
@@ -1666,18 +1677,19 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const readHere = useCallback((file: FileToRead) => {
     const runId = file.runId ?? activeRunId ?? newestPiece
     reopen(runId, fileTab(file.path))
-    setReading(file)
+    keep(file)
     setPaneTab(fileTab(file.path))
     if (runId && (runId !== activeRunId || !detailsOpen)) {
       setDetailsFollow(runId === newestPiece)
       showRun(runId)
     }
-  }, [activeRunId, newestPiece, detailsOpen, showRun, reopen])
+  }, [activeRunId, newestPiece, detailsOpen, showRun, reopen, keep])
   const closeTab = useCallback((made: MadeTab) => {
     if (!made.kept) setClosedTabs((closed) => new Set(closed).add(closedKey(activeRunId, made.tab)))
-    if (made.file && made.file.path === reading?.path) setReading(null)
+    const closing = made.file?.path
+    if (closing) setKept((files) => files.filter((each) => each.file.path !== closing))
     if (made.tab === shownTab) setPaneTab(afterClosing(paneTabs, made.tab))
-  }, [activeRunId, reading, shownTab, paneTabs])
+  }, [activeRunId, shownTab, paneTabs])
   // What is marked in the file goes to the chat; on a narrow screen the pane covers the chat, so it
   // steps aside for the message box and the file waits in its tab.
   const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; agent: string; at: number } | null>(null)
@@ -2522,7 +2534,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               <header className="tc-details-head">
                 {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
                 <h2>{shownFile ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
-                <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setReading(null) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
+                <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setKept([]) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>
               <div className="tc-details-body" id="tc-pane-body" role={paneTabs.length ? 'tabpanel' : undefined} aria-labelledby={paneTabs.length ? paneTabId(paneTabs, shownTab) : undefined}>
                 {shownFile ? (

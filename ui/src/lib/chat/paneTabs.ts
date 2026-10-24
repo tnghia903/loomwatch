@@ -36,23 +36,32 @@ export const closedKey = (runId: string | null, tab: PaneTab): string => `${runI
 
 /**
  * The tabs after Details, in order: the answer of the piece on screen when it is a document, named
- * by who gave it so it never reads as a file, then the files it made, minus what you closed. A file
- * kept open from other work (`kept`) comes last, so following newer work leaves it where it is.
+ * by who gave it so it never reads as a file, then the files it made, minus what you closed. Files
+ * kept open (`kept`, in the order they were read) come once each: one of the piece on screen with
+ * its files, there before they are found, so the row doesn't swap as they load; one from other work
+ * last, so following newer work or reading another piece's file leaves it where it is.
  */
 export function madeTabs({ runId, files, answer, kept, closed }: {
   runId: string | null
   files: readonly { file: FileToRead; label: string; kind?: string; lead?: boolean }[]
   answer: { by: string | null; name: string; title: string } | null
-  kept: { file: FileToRead; label: string } | null
+  kept: readonly { file: FileToRead; label: string; kind?: string }[]
   closed: ReadonlySet<string>
 }): MadeTab[] {
   const open = (tab: PaneTab) => !closed.has(closedKey(runId, tab))
   const tabs: MadeTab[] = answer && open('answer') ? [{ tab: 'answer', label: answer.name, hint: answer.title, file: null, lead: true, ...(answer.by ? { by: answer.by } : {}) }] : []
+  const listed = (path: string) => tabs.some((made) => made.file?.path === path)
   for (const { file, label, kind, lead } of files) {
     const tab = fileTab(file.path)
     if (open(tab)) tabs.push({ tab, label, hint: file.path, file, kind, lead })
   }
-  if (kept && !tabs.some((made) => made.file?.path === kept.file.path)) tabs.push({ tab: fileTab(kept.file.path), label: kept.label, hint: kept.file.path, file: kept.file, kept: true })
+  for (const { file, label, kind } of kept) {
+    const tab = fileTab(file.path)
+    if (file.runId === runId && open(tab) && !listed(file.path)) tabs.push({ tab, label, hint: file.path, file, kind })
+  }
+  for (const { file, label, kind } of kept) {
+    if (file.runId !== runId && !listed(file.path)) tabs.push({ tab: fileTab(file.path), label, hint: file.path, file, kind, kept: true })
+  }
   return tabs
 }
 

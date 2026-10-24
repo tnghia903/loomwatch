@@ -211,6 +211,8 @@ describe('Workspace', () => {
     const OWN = '/teams/sales/q3.md'
     // Code the work wrote: a tab, but not what the pane opens on.
     const CODE = '/teams/.loomwatch/demo/researcher/make_chart.py'
+    // What an earlier piece of work made.
+    const EARLIER = '/teams/.loomwatch/demo/researcher/sales.md'
     /** The chat holds `items`; `market.md` is on this computer, `draft.md` is not. */
     function serve(items: unknown[], runs: Array<{ runId: string }>, sent: (body: Record<string, unknown>) => unknown = () => null) {
       const fallback = globalThis.fetch
@@ -219,7 +221,7 @@ describe('Workspace', () => {
         const path = new URLSearchParams(url.split('?')[1] ?? '').get('path')
         if (url.startsWith('/api/chat?')) return new Response(JSON.stringify({ teamKey: 'demo', teamPath: 'demo.yaml', more: false, items }), { status: 200 })
         if (url === '/api/chat/messages') return new Response(JSON.stringify(sent(JSON.parse(String(init?.body)))), { status: 200 })
-        if (url.startsWith('/api/files/stat?')) return new Response(JSON.stringify({ path, name: path?.split('/').pop(), exists: path === MADE || path === OWN || path === CODE, isDir: false, sizeBytes: 40, modifiedAt: null, kind: 'markdown', folder: path === OWN ? 'sales' : '.loomwatch/demo/researcher', openable: true }), { status: 200 })
+        if (url.startsWith('/api/files/stat?')) return new Response(JSON.stringify({ path, name: path?.split('/').pop(), exists: [MADE, OWN, CODE, EARLIER].includes(path ?? ''), isDir: false, sizeBytes: 40, modifiedAt: null, kind: 'markdown', folder: path === OWN ? 'sales' : '.loomwatch/demo/researcher', openable: true }), { status: 200 })
         if (url.startsWith('/api/files/read?')) return new Response(JSON.stringify({ path, name: 'market.md', kind: 'markdown', text: '# West region\n\nSales rose in the west.', extracted: false, truncated: false, sizeBytes: 40, modifiedAt: null }), { status: 200 })
         const run = runs.find((each) => url.includes(`/api/runs/${each.runId}`))
         if (run && !url.includes('/checkpoints')) return new Response(JSON.stringify(run), { status: 200 })
@@ -342,6 +344,44 @@ describe('Workspace', () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(within(pane).getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
       expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'false')
+    })
+
+    // The owner, with a page from one piece of work open and Read on another's: "I have 2 different
+    // artifacts. But they are showing only 1 tab". Every file read stays a tab until it is closed.
+    it('keeps each file read from other work as its own tab, until it is closed', async () => {
+      const earlier = finished('run-1', `Done. The figures are in \`${EARLIER}\`.`)
+      const run = finished('run-2', `Done. The brief is in \`${MADE}\`.`)
+      serve([work(earlier), work(run)], [earlier, run])
+      renderWorkspace()
+      const pane = await openPane()
+      const tabs = () => within(pane).getAllByRole('tab').map((each) => each.textContent)
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true'))
+      const mark = () => within(pane).getByRole('tab', { name: 'market.md' }).querySelector('svg')?.getAttribute('class')
+      const itsMark = mark()
+      expect(itsMark).toContain('lucide-file-text')
+      // Read, then left for the record: still read.
+      fireEvent.click(within(pane).getByRole('tab', { name: 'Details' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Read sales.md here' }))
+      // At once, before what its work made is found, and in the place it keeps once that is found.
+      expect(within(pane).getByRole('tab', { name: 'sales.md' })).toHaveAttribute('aria-selected', 'true')
+      expect(window.location.search).toContain('run=run-1')
+      expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
+      await waitFor(() => expect(within(pane).getByRole('tab', { name: 'sales.md' }).querySelector('svg')?.getAttribute('class')).toContain('lucide-file-text'))
+      expect(tabs()).toEqual(['Details', 'sales.md', 'market.md'])
+      // Its kind's mark, as when its own work was on screen.
+      expect(mark()).toBe(itsMark)
+      fireEvent.click(within(pane).getByRole('tab', { name: 'market.md' }))
+      expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
+      expect(await within(pane).findByRole('heading', { name: 'West region' })).toBeInTheDocument()
+      // And back: the file just read stays too, not only the last one.
+      fireEvent.click(screen.getByRole('button', { name: 'Read market.md here' }))
+      await waitFor(() => expect(window.location.search).toContain('run=run-2'))
+      await waitFor(() => expect(tabs()).toEqual(['Details', 'market.md', 'sales.md']))
+      expect(within(pane).getByRole('tab', { name: 'market.md' })).toHaveAttribute('aria-selected', 'true')
+      fireEvent.click(within(pane).getByRole('button', { name: 'Close sales.md' }))
+      expect(tabs()).toEqual(['Details', 'market.md'])
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(tabs()).toEqual(['Details', 'market.md'])
     })
 
     // ADR 0077: asking about a part of the file starts new work; the file stays where it is.
