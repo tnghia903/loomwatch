@@ -1310,7 +1310,7 @@ describe('reactions', () => {
     renderChat()
     // What the page read says shows on the answer it was on.
     expect(await screen.findByRole('button', { name: 'Love it: you. Exactly right. The team keeps to it. Take yours off' })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(screen.getByRole('button', { name: "React to Researcher's reply" }))
+    fireEvent.click(screen.getByRole('button', { name: "React to Researcher's answer" }))
     fireEvent.click(screen.getByRole('button', { name: 'Good' }))
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/reactions', body: { teamPath: 'news.yaml', anchor: 'n-1', target: 'reply:researcher', face: 'glad' } }))
     expect(await screen.findByRole('button', { name: 'Good: you. The team keeps doing this. Take yours off' })).toBeInTheDocument()
@@ -1515,6 +1515,43 @@ describe('replying to something said', () => {
     expect(screen.getByPlaceholderText('Reply to Researcher…')).toBeInTheDocument()
   })
 
+  it('a reply to an agent’s own answer to your message writes back to that agent, with its answer quoted, and the quote shows it again', async () => {
+    const first = message({ id: 'hi-8', text: '@Writer what is a claim?', route: 'team_note', runId: null, agentId: 'writer', answers: { waiting: [], said: [{ from: 'writer', text: 'A **claim** is a sentence that could be wrong.', at: '2026-10-06T02:00:02.000Z' }] } })
+    const quoted = { runId: null, messageId: 'note:hi-8', from: 'writer', to: null, kind: 'answer' as const, text: 'A **claim** is a sentence that could be wrong.' }
+    page = [{ kind: 'note', message: first }]
+    answer = () => {
+      const reply = message({ id: 'hi-9', text: '@Writer an example?', route: 'team_note', runId: null, agentId: 'writer', createdAt: '2026-10-06T02:01:00.000Z', replyTo: quoted, answers: { waiting: ['writer'], said: [] } })
+      page = [{ kind: 'note', message: first }, { kind: 'note', message: reply }]
+      return new Response(JSON.stringify({ route: 'team_note', message: reply }), { status: 202 })
+    }
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    fireEvent.click(await within(log).findByRole('button', { name: "Reply to Writer's answer" }))
+    expect(box()).toHaveValue('@Writer ')
+    await waitFor(() => expect(box()).toHaveFocus())
+    expect(screen.getByRole('group', { name: "Replying to Writer's answer" })).toHaveTextContent('A claim is a sentence that could be wrong.')
+    expect(box()).toHaveAttribute('placeholder', 'Reply to Writer…')
+
+    fireEvent.change(box(), { target: { value: '@Writer an example?' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Writer an example?', to: { kind: 'agent', agent: 'writer' }, replyTo: quoted } }))
+    // The reply says what it answered; a click shows that answer, under the message it answered.
+    const quote = await within(log).findByRole('button', { name: "Replying to Writer's answer. Show it" })
+    const asked = within(log).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@Writer what is a claim?').closest('li')!
+    expect(asked).not.toHaveClass('flash')
+    fireEvent.click(quote)
+    await waitFor(() => expect(asked).toHaveClass('flash'))
+  })
+
+  it('offers Reply under each agent’s answer to a message, and none under one still writing', async () => {
+    page = [{ kind: 'note', message: message({ id: 'hi-10', text: 'hi @team', route: 'team_note', runId: null, createdAt: new Date().toISOString(), answers: { waiting: ['writer'], said: [{ from: 'researcher', text: 'Hi there!', at: new Date().toISOString() }] } }) }]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    expect(await within(log).findByRole('button', { name: "Reply to Researcher's answer" })).toBeInTheDocument()
+    expect(within(log).getByRole('status', { name: 'Writer is writing' })).toBeInTheDocument()
+    expect(within(log).queryByRole('button', { name: "Reply to Writer's answer" })).toBeNull()
+  })
+
   it('shows a note and a team note with what they replied to, and Try again sends the same reply', async () => {
     const quoted = { runId: 'run-1', messageId: 'h1:said', from: 'researcher', to: 'writer', kind: 'handover' as const, text: 'Three stories, sourced.' }
     page = [
@@ -1583,6 +1620,29 @@ describe('asking about a part of a file', () => {
     expect(onPassages.mock.lastCall![2]).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'writer', name: 'Writer', stateWords: expect.any(String) })]))
     // The quote under the message says what it asked about.
     expect(await screen.findByLabelText('Replying to a part of market.md from Writer')).toHaveTextContent('Sales grew 12% in Q3.')
+  })
+
+  it('Reply under the answer to a part goes on about the part, to the agent that answered, as Reply on the file does', async () => {
+    page = [{ kind: 'note', message: message({ id: 'hi-11', text: '@Researcher what is a claim?', route: 'team_note', runId: null, agentId: 'researcher', replyTo: part, answers: { waiting: [], said: [{ from: 'researcher', text: 'A sentence that could be wrong.', at: '2026-10-06T02:00:02.000Z' }] } }) }]
+    answer = () => new Response(JSON.stringify({ error: 'later' }), { status: 500 })
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    fireEvent.click(await within(log).findByRole('button', { name: "Reply to Researcher's answer" }))
+    expect(box()).toHaveValue('@Researcher ')
+    expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toHaveTextContent('Sales grew 12% in Q3.')
+    fireEvent.change(box(), { target: { value: '@Researcher an example?' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Researcher an example?', to: { kind: 'agent', agent: 'researcher' }, replyTo: part } }))
+  })
+
+  it('Reply under the answer of work a part started goes on about the part too', async () => {
+    said.read = true
+    page = [{ kind: 'work', run: run({ runId: 'run-2', onlyAgent: 'researcher', responder: 'researcher', reply: 'Up by twelve.' }), request: message({ id: 'm-2', runId: 'run-2', text: '@Researcher why?', route: 'agent', agentId: 'researcher', replyTo: part }), notes: [] }]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    fireEvent.click(await within(log).findByRole('button', { name: "Reply to Researcher's answer" }))
+    expect(box()).toHaveValue('@Researcher ')
+    expect(screen.getByRole('group', { name: 'Asking about a part of market.md from Writer' })).toHaveTextContent('Sales grew 12% in Q3.')
   })
 
   it('the quote of a part opens its file in the reader beside the chat', async () => {

@@ -379,6 +379,53 @@ describe('reading a file an agent made', () => {
     expect(answerCard()).toBeNull()
   })
 
+  it('Reply under an answer writes back about the same part to the agent that answered, and the talk reads down from the first question', async () => {
+    const first = part({ state: 'said', by: 'research', text: 'A claim is a sentence that could be wrong.', at: '2026-10-19T01:05:00Z' }, { from: 'research', asked: '@Researcher what is a claim?', messageId: 'n-1' })
+    const { onAsk, rerender } = renderReader({ asked: [first] })
+    fireEvent.click(await screen.findByRole('button', { name: "Researcher's answer about “Sales grew 12% in Q3.”" }))
+    const card = () => screen.getByRole('region', { name: "Researcher's answer to your question" })
+    fireEvent.click(within(card()).getByRole('button', { name: 'Reply to Researcher' }))
+    // The part again, from the agent who made the file, asked of the agent who answered: written in the message box, as Ask is.
+    expect(onAsk).toHaveBeenCalledWith({ runId: 'run-1', messageId: passageId(REPORT, SALES), from: 'writer', to: null, kind: 'passage', text: SALES, file: REPORT }, undefined, 'research')
+    expect(card()).toBeInTheDocument()
+
+    // Sent, it is one more ask about the part: the answer to it comes under the talk before it.
+    const next = (answer: PassageAnswer, messageId: string | null) => part(answer, { from: 'research', asked: '@Researcher an example?', messageId })
+    rerender({ asked: [first, next({ state: 'sending' }, null)] })
+    const asked = () => [...card().querySelectorAll('.rd-answer-asked')].map((line) => line.textContent)
+    expect(asked()).toEqual(['You asked: what is a claim?', 'You asked: an example?'])
+    expect(card()).toHaveTextContent('A claim is a sentence that could be wrong.')
+    expect(within(card()).getByLabelText('Sending your question')).toBeInTheDocument()
+    expect(document.querySelectorAll('.rd-bubble')).toHaveLength(1)
+    // Nothing to reply to until it has answered.
+    expect(within(card()).queryByRole('button', { name: 'Reply to Researcher' })).toBeNull()
+    rerender({ asked: [first, next({ state: 'said', by: 'research', text: 'Sales grew **12%**.', at: '2026-10-19T01:07:00Z' }, 'n-2')] })
+    expect(await within(card()).findByText('12%', { selector: 'strong' })).toBeInTheDocument()
+    expect(asked()).toEqual(['You asked: what is a claim?', 'You asked: an example?'])
+    expect(within(card()).getByRole('button', { name: 'Reply to Researcher' })).toBeInTheDocument()
+  })
+
+  it('shows an earlier question still being answered at work, under the newer one’s sending', async () => {
+    const { rerender } = renderReader({ asked: [part({ state: 'writing', by: 'writer' }, { asked: '@Writer why?', messageId: 'n-1' })] })
+    await screen.findByRole('button', { name: 'Writer is answering your question about “Sales grew 12% in Q3.”' })
+    rerender({ asked: [part({ state: 'writing', by: 'writer' }, { asked: '@Writer why?', messageId: 'n-1' }), part({ state: 'sending' }, { asked: '@Writer and how?', messageId: null })] })
+    const turn = answerCard()!.querySelector('.rd-answer-turn') as HTMLElement
+    expect(turn).toHaveTextContent('why?')
+    expect(within(turn).getByLabelText('Writer is writing')).toBeInTheDocument()
+    expect(within(answerCard()!).getByLabelText('Sending your question')).toBeInTheDocument()
+  })
+
+  it('keeps the talk with each agent apart, and offers no Reply where nothing can be sent', async () => {
+    renderReader({ onAsk: undefined, asked: [
+      part({ state: 'said', by: 'writer', text: 'Made it bold.', at: '2026-10-19T01:05:00Z' }, { asked: '@Writer bold this text', messageId: 'n-1' }),
+      part({ state: 'said', by: 'research', text: 'It means sales rose.', at: '2026-10-19T01:06:00Z' }, { from: 'research', asked: '@Researcher why?', messageId: 'n-2' }),
+      part({ state: 'said', by: 'writer', text: 'Done.', at: '2026-10-19T01:07:00Z' }, { file: '/other.md', asked: '@Writer bold this text', messageId: 'n-3' }),
+    ] })
+    fireEvent.click(await screen.findByRole('button', { name: "Writer's answer about “Sales grew 12% in Q3.”" }))
+    expect([...answerCard()!.querySelectorAll('.rd-answer-asked')].map((line) => line.textContent)).toEqual(['You asked: bold this text'])
+    expect(within(answerCard()!).queryByRole('button', { name: /^Reply/ })).toBeNull()
+  })
+
   it('says when the work stopped, or nothing came back', async () => {
     const { rerender } = renderReader({ asked: [part({ state: 'failed', by: 'writer', text: 'The AI could not be reached.' })] })
     fireEvent.click(await screen.findByRole('button', { name: 'Writer stopped before answering about “Sales grew 12% in Q3.”' }))
