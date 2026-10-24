@@ -33,7 +33,8 @@ body {
    The picture is masked to the figure, so the glow follows the figure and not the picture's
    square edge. The glow is two lights, one to an element: a thin rim on the figure, and a wide
    halo on its holder, cast by the figure and its rim. Safari's engine, which the Mac app draws the
-   island with, drops two lights on one element while the figure inside it moves. */
+   island with, drops two lights on one element, or a light before another filter, while the
+   figure inside it moves: each light is the last of its filter. */
 .island [data-moment="work"] { --glow: var(--color-live); }
 .island [data-moment="ask"] { --glow: var(--color-accent); }
 .island [data-moment="done"] { --glow: var(--color-ok); }

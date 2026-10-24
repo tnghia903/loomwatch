@@ -503,11 +503,15 @@ describe('beside the notch at rest, on every screen', () => {
     expect(cascaded(figure, 'filter', DESKTOP, islandRules)).toBe('drop-shadow(0 0 1px var(--glow))')
     head.setAttribute('data-moment', 'fail')
     expect(cascaded(figure, 'filter', DESKTOP, islandRules)).toMatch(/^saturate\(\.35\) drop-shadow\(0 0 1px /)
-    // No element on the island, at rest or in a breath, carries two lights.
+    // No element on the island, at rest or in a breath, carries two lights, and its one light comes
+    // last: a light before another filter, such as saturate(), is dropped as well.
     const css = readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8')
     const filters = [...css.matchAll(/filter: ([^;}]+)/g)].map((match) => match[1])
     expect(filters.length).toBeGreaterThanOrEqual(5)
-    for (const filter of filters) expect([filter, (filter.match(/drop-shadow/g) ?? []).length <= 1]).toEqual([filter, true])
+    for (const filter of filters) {
+      const oneLightLast = (filter.match(/drop-shadow\(/g) ?? []).length <= 1 && !/drop-shadow\(.*\)\s+[\w-]+\(/.test(filter)
+      expect([filter, oneLightLast]).toEqual([filter, true])
+    }
   })
 
   it('the pinned agent sits first beside the notch, ready, in its own figure', async () => {
