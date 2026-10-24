@@ -3492,14 +3492,13 @@ fn check_line(raw: &str) -> Option<CheckLine> {
         // The item first: "Every claim has a link — Met — opened all four".
         let (item, verdict, evidence) = item_first(body)?;
         let (after, item) = leading_number(item.trim());
-        let evidence = evidence
-            .trim_start_matches(FIELD_SEPARATORS)
+        let evidence = next_field(evidence)
             .trim()
             .trim_start_matches('(')
             .trim_end_matches(')');
         return checked_line(number.or(after), verdict, item, evidence, false);
     };
-    let rest = rest.trim_start_matches(FIELD_SEPARATORS).trim();
+    let rest = next_field(rest).trim();
     let (mut item, mut evidence) = split_check_fields(rest);
     // The number may follow the verdict, as its own field ("Met — 2 — the item — evidence") or
     // before the item ("Met — 2. The item — evidence").
@@ -3523,7 +3522,114 @@ fn check_line(raw: &str) -> Option<CheckLine> {
 }
 
 /// What a check line's fields are separated by, and trimmed of at their start.
-const FIELD_SEPARATORS: [char; 9] = [' ', '—', '–', '-', '|', ':', '.', '*', '_'];
+const FIELD_SEPARATORS: [char; 7] = [' ', '—', '–', '-', '|', ':', '.'];
+
+/// `text` from where its next field starts: past the separators, and past marks that close what
+/// came before (`** — ` after `**Met`), but not marks that open the field (`**Line 184** uses it`).
+fn next_field(text: &str) -> &str {
+    let mut text = text.trim_start_matches(FIELD_SEPARATORS);
+    loop {
+        let (unpaired, _, _) = end_marks(text);
+        if unpaired == 0 {
+            return text;
+        }
+        text = text[unpaired..].trim_start_matches(FIELD_SEPARATORS);
+    }
+}
+
+/// `field` without the emphasis marks left over at its ends: bold around it whole (`**Short**`),
+/// and a mark with no partner in it, whose partner went with a bold verdict or line (`none**`).
+/// Marks that pair inside it are its own: `**Line 184** uses it`, `*1.897* vs *1.735*`.
+fn without_leftover_marks(field: &str) -> &str {
+    let mut field = field.trim();
+    loop {
+        let (lead, trail, wrap) = end_marks(field);
+        let (lead, trail) = if lead + trail > 0 {
+            (lead, trail)
+        } else {
+            (wrap, wrap)
+        };
+        if lead + trail == 0 {
+            return field;
+        }
+        field = field
+            .get(lead..field.len().saturating_sub(trail))
+            .unwrap_or_default()
+            .trim();
+    }
+}
+
+/// How many emphasis marks at `field`'s ends are not its own: those it starts with and those it
+/// ends with that pair with nothing in it, and those pairing its start with its end. Marks pair as
+/// Markdown pairs them: a run of `*` or `_` opens before a word and closes after one, its nearest
+/// opener first, and `_` inside a word (`snake_case`) is no mark.
+fn end_marks(field: &str) -> (usize, usize, usize) {
+    struct Run {
+        start: usize,
+        end: usize,
+        mark: u8,
+        unpaired: usize,
+    }
+    let mut runs: Vec<Run> = Vec::new();
+    let mut openers: Vec<usize> = Vec::new();
+    let mut wrap = 0;
+    let mut from = 0;
+    while let Some(found) = field[from..].find(['*', '_']) {
+        let start = from + found;
+        let mark = field.as_bytes()[start];
+        let end = start
+            + field[start..]
+                .bytes()
+                .take_while(|byte| *byte == mark)
+                .count();
+        from = end;
+        let (before, after) = (
+            field[..start].chars().next_back(),
+            field[end..].chars().next(),
+        );
+        if mark == b'_'
+            && before.is_some_and(char::is_alphanumeric)
+            && after.is_some_and(char::is_alphanumeric)
+        {
+            continue;
+        }
+        let index = runs.len();
+        runs.push(Run {
+            start,
+            end,
+            mark,
+            unpaired: end - start,
+        });
+        if before.is_some_and(|c| !c.is_whitespace()) {
+            while runs[index].unpaired > 0 {
+                let Some(nearest) = openers.iter().rposition(|at| runs[*at].mark == mark) else {
+                    break;
+                };
+                let opener = openers[nearest];
+                let paired = runs[opener].unpaired.min(runs[index].unpaired);
+                runs[opener].unpaired -= paired;
+                runs[index].unpaired -= paired;
+                if runs[opener].start == 0 && end == field.len() {
+                    wrap += paired;
+                }
+                // Openers between the two are left without a partner.
+                openers.truncate(nearest + usize::from(runs[opener].unpaired > 0));
+            }
+        }
+        if after.is_some_and(|c| !c.is_whitespace()) && runs[index].unpaired > 0 {
+            openers.push(index);
+        }
+    }
+    let lead = runs
+        .first()
+        .filter(|run| run.start == 0)
+        .map_or(0, |run| run.unpaired);
+    let trail = runs
+        .last()
+        .filter(|run| run.end == field.len())
+        .map_or(0, |run| run.unpaired);
+    (lead, trail, wrap)
+}
 
 /// A line that names the item before its verdict: the item, the verdict and what follows it. The
 /// verdict must be a field of its own, after a separator, so prose that merely uses the word is not
@@ -3558,7 +3664,7 @@ fn table_check_line(line: &str) -> Option<CheckLine> {
     let cells: Vec<&str> = line
         .trim_matches('|')
         .split('|')
-        .map(|cell| cell.trim().trim_matches(['*', '_']).trim())
+        .map(without_leftover_marks)
         .collect();
     let (number, cells) = match cells.split_first() {
         Some((first, rest))
@@ -3602,9 +3708,8 @@ enum Verdict {
 /// The verdict `line` starts with, and what follows it: a word, in bold or after a mark such as
 /// ✅, or the mark alone.
 fn check_verdict(line: &str) -> Option<(Verdict, &str)> {
-    let unmarked = line.trim_start_matches(|c: char| {
-        c.is_whitespace() || matches!(c, '*' | '_' | '`') || (!c.is_ascii() && !c.is_alphanumeric())
-    });
+    let decoration = |c: char| c.is_whitespace() || (!c.is_ascii() && !c.is_alphanumeric());
+    let unmarked = line.trim_start_matches(|c: char| decoration(c) || matches!(c, '*' | '_' | '`'));
     if let Some(found) = verdict_words(unmarked) {
         return Some(found);
     }
@@ -3615,7 +3720,8 @@ fn check_verdict(line: &str) -> Option<(Verdict, &str)> {
         '⚠' | '❓' => Verdict::NotSure,
         _ => return None,
     };
-    Some((verdict, unmarked))
+    // What follows the mark keeps its own bold: "✅ **Five stories** — …".
+    Some((verdict, line.trim_start_matches(decoration)))
 }
 
 /// The verdict word `line` starts with, and what follows it.
@@ -3646,8 +3752,8 @@ fn checked_line(
     evidence: &str,
     bare: bool,
 ) -> Option<CheckLine> {
-    let item = item.trim().trim_matches(['*', '_']).trim();
-    let evidence = evidence.trim().trim_matches(['*', '_']).trim();
+    let item = without_leftover_marks(item);
+    let evidence = without_leftover_marks(evidence);
     if item.is_empty() && number.is_none() {
         return None;
     }
@@ -3695,9 +3801,19 @@ fn verdict_word<'a>(line: &'a str, word: &str) -> Option<&'a str> {
         .then_some(rest)
 }
 
-/// `line` without the list marker or bold it starts with.
+/// `line` without the list marker it starts with, or the bold around it whole. Marks that open its
+/// first field are kept: `*Every* claim — Met — …`.
 fn strip_list_marker(line: &str) -> &str {
-    line.trim_start_matches(|c: char| matches!(c, '-' | '*' | '•' | '_') || c.is_whitespace())
+    let mut line = line;
+    loop {
+        let unlisted = without_leftover_marks(
+            line.trim_start_matches(|c: char| matches!(c, '-' | '•') || c.is_whitespace()),
+        );
+        if unlisted.len() == line.len() {
+            return line;
+        }
+        line = unlisted;
+    }
 }
 
 /// The item number `text` starts with (`1.`, `1)`, `(1)`, `#1:`), and the rest.
@@ -8799,6 +8915,89 @@ mod tests {
                 ("met", "Names the three tools", "Otter, Fathom, Granola"),
                 ("not_met", CONTRADICTION_ITEM, "the price is 2024's"),
             ])
+        );
+    }
+
+    /// The app shows a check's item and evidence as Markdown, so the marks a checker writes inside
+    /// them are kept. Every `*` and `_` was cut off their ends: "*1.897* vs *1.735*" showed as
+    /// "*1.897* vs *1.735", and "**Line 184** uses …" as "Line 184** uses …". Bold or italics
+    /// around a whole field, and a mark whose partner went with a bold verdict or line, are still
+    /// dropped.
+    #[test]
+    fn a_check_keeps_the_marks_inside_its_item_and_evidence() {
+        assert_eq!(
+            settled(
+                "## Check\n\
+                 - Not met — Ranks by ratio — these give *1.897* vs *1.735*\n\
+                 - Not met — Names the line — **Line 184** uses the old name\n\
+                 - Not sure — Sets up once — it calls __init__\n\
+                 - Not met — Sets the name — _my_var is never set_\n\
+                 *Every* source is dated — **Not met** — _the March page_ has none\n\
+                 ✅ *Five* stories — counted them\n\
+                 | 6 | **Not met** | **Every claim has a link** | see *note 3* |\n\
+                 - Met — **Every story has a link** — opened all five\n\
+                 **Not met — Has a date — story 2 has *none***\n\
+                 - Met — Short — 90 words**",
+                &[],
+            ),
+            owned(&[
+                ("not_met", "Ranks by ratio", "these give *1.897* vs *1.735*"),
+                (
+                    "not_met",
+                    "Names the line",
+                    "**Line 184** uses the old name"
+                ),
+                ("not_sure", "Sets up once", "it calls __init__"),
+                ("not_met", "Sets the name", "my_var is never set"),
+                (
+                    "not_met",
+                    "*Every* source is dated",
+                    "_the March page_ has none"
+                ),
+                ("met", "*Five* stories", "counted them"),
+                ("not_met", "Every claim has a link", "see *note 3*"),
+                ("met", "Every story has a link", "opened all five"),
+                ("not_met", "Has a date", "story 2 has *none*"),
+                ("met", "Short", "90 words"),
+            ])
+        );
+        // The live shape, a number and one field: the field may open with its own bold.
+        assert_eq!(
+            settled(
+                "## Check\n1. **Not met** — **Line 184** uses the old name\n\
+                 2. Met — the ratios are *1.897* and *1.735*",
+                &["Uses the new name", "The ratios are right"],
+            ),
+            owned(&[
+                (
+                    "not_met",
+                    "Uses the new name",
+                    "**Line 184** uses the old name"
+                ),
+                (
+                    "met",
+                    "The ratios are right",
+                    "the ratios are *1.897* and *1.735*"
+                ),
+            ])
+        );
+        // A list marker or bold before the number still goes, so the number is read.
+        assert_eq!(
+            settled(
+                "## Check\n* 1. Met — Every claim linked — opened all four\n\
+                 **2. Not met — Under 300 words — 412 words**",
+                &["Every claim has a link", "Under 300 words"],
+            ),
+            owned(&[
+                ("met", "Every claim has a link", "opened all four"),
+                ("not_met", "Under 300 words", "412 words"),
+            ])
+        );
+        // Marks that cross pair as Markdown pairs them: `_says` opened inside `*…*` closes with
+        // it, so the last `_` is left over.
+        assert_eq!(
+            settled("## Check\n- Met — Dated — *the page _says* 2023_", &[]),
+            owned(&[("met", "Dated", "*the page _says* 2023")])
         );
     }
 
