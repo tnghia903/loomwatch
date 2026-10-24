@@ -74,6 +74,10 @@ pdf-extract = "0.12.1"
 calamine = { version = "0.37", default-features = false }
 quick-xml = "0.42"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# Email files (`.eml`, as Mail hands over a message dragged out of it; documents/email.rs): headers,
+# bodies in any transfer encoding and charset, and HTML-only mail as text. `full_encoding` adds the
+# Asian charsets through encoding_rs, already in the build through calamine and lopdf.
+mail-parser = { version = "0.11.9", features = ["full_encoding"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"
