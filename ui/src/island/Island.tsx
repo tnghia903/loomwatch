@@ -4,7 +4,8 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 
 import { FigureStill } from '../components/agents/FigureStill'
-import { LoomMark } from '../components/ui/glyphs'
+import { LoomMark, StatusGlyph } from '../components/ui/glyphs'
+import { dropped } from '../lib/chat/attachments'
 import type { WorkPhase } from '../lib/library/figure'
 import { figureFor } from '../lib/library/figures'
 import type { Ticket } from '../lib/story/needsYou'
@@ -99,9 +100,11 @@ export function Island() {
         onDrop={(event) => {
           if (!island.pinned) return
           event.preventDefault()
-          island.dragOver(false)
-          const intake = intakeFrom(event.dataTransfer)
-          if (intake) island.drop(intake)
+          // The slot stays open until what was dropped is sorted, a moment later.
+          const { files, folders } = dropped(event.dataTransfer)
+          const intake = intakeFrom({ files, getData: (type) => event.dataTransfer.getData(type) })
+          if (intake || folders.length) island.drop(intake ?? { files: [], link: null, text: null }, folders)
+          else island.dragOver(false)
         }}
       >
         <div className="island-body">
@@ -403,6 +406,7 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
       ) : null}
       {crews.map((crew) => <CrewStage key={crew.runId} island={island} crew={crew} />)}
       <IntakeJobs island={island} />
+      {island.away && <small className="island-away" role="alert"><StatusGlyph status="failed" /><span>{island.away}</span></small>}
       <form
         className="island-compose"
         onSubmit={(event) => {
@@ -439,7 +443,7 @@ function PinnedRow({ island, work, crews, firstPermission }: { island: IslandSta
       {island.sent?.ok && <small className="island-sent" role="status">{island.sent.text}</small>}
       {island.sent && !island.sent.ok && (
         <div className="island-sent island-sent-failed">
-          <small className="island-problem" role="alert"><i aria-hidden="true">×</i><span>{island.sent.text}</span></small>
+          <small className="island-problem" role="alert"><StatusGlyph status="failed" /><span>{island.sent.text}</span></small>
           <button type="button" className="island-button" onClick={island.openPinned}>Open chat</button>
         </div>
       )}

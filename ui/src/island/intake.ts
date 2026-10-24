@@ -10,13 +10,18 @@ export interface Intake {
   text: string | null
 }
 
-export type IntakeKind = 'document' | 'picture' | 'table' | 'files' | 'link' | 'text'
+export type IntakeKind = 'email' | 'document' | 'picture' | 'table' | 'files' | 'link' | 'text'
 
-const PICTURE = /\.(png|jpe?g|gif|webp|heic|tiff?)$/i
-const TABLE = /\.(csv|tsv|xlsx?|numbers)$/i
+// The kinds the pinned agent opens (`readable`): a HEIC photo or a Numbers file never gets in.
+const PICTURE = /\.(png|jpe?g|gif|webp)$/i
+const TABLE = /\.(csv|tsv|xlsx|xlsm|xlsb|xls|ods)$/i
+/** A message dragged from Mail comes as a file of this kind. */
+const EMAIL = /\.eml$/i
+
+const emails = (intake: Intake) => intake.files.length > 0 && intake.files.every((file) => EMAIL.test(file.name))
 
 /** What a drop carries, or `null` when it carries nothing the agent can take. */
-export function intakeFrom(data: Pick<DataTransfer, 'files' | 'getData'>): Intake | null {
+export function intakeFrom(data: { files: Iterable<File> | null; getData: DataTransfer['getData'] }): Intake | null {
   const files = [...(data.files ?? [])]
   const uris = (data.getData('text/uri-list') || '').split('\n').map((line) => line.trim()).filter((line) => line && !line.startsWith('#'))
   const plain = (data.getData('text/plain') || '').trim()
@@ -26,7 +31,17 @@ export function intakeFrom(data: Pick<DataTransfer, 'files' | 'getData'>): Intak
   return { files, link, text }
 }
 
+/** What waits in the box after another drop: its files join the files already there, each once;
+    a link or some text takes the place of what was there, as files do of a link or text. */
+export function withDropped(waiting: Intake | null, dropped: Intake): Intake {
+  if (!waiting?.files.length || !dropped.files.length) return dropped
+  const key = (file: File) => `${file.name}\n${file.size}`
+  const there = new Set(waiting.files.map(key))
+  return { ...dropped, files: [...waiting.files, ...dropped.files.filter((file) => !there.has(key(file)))] }
+}
+
 export function kindOf(intake: Intake): IntakeKind {
+  if (emails(intake)) return 'email'
   if (intake.files.length > 1) return 'files'
   const file = intake.files[0]
   if (file) return PICTURE.test(file.name) || file.type.startsWith('image/') ? 'picture' : TABLE.test(file.name) ? 'table' : 'document'
@@ -36,6 +51,7 @@ export function kindOf(intake: Intake): IntakeKind {
 /** The three jobs offered for what went in, most likely first. Plain words a person would say. */
 export function jobsFor(kind: IntakeKind): readonly [string, string, string] {
   switch (kind) {
+    case 'email': return ['Draft a reply', 'Summarize it', 'What do they want?']
     case 'document': return ['What should I check?', 'Summarize it', 'Pull out the dates']
     case 'picture': return ['What is this?', 'Describe it', 'Copy out the words']
     case 'table': return ['What stands out?', 'Summarize it', 'Find the totals']
@@ -47,6 +63,8 @@ export function jobsFor(kind: IntakeKind): readonly [string, string, string] {
 
 /** What the chip in the box says went in: "Lease 2027.pdf", "3 files", "a link to example.com". */
 export function intakeLabel(intake: Intake): string {
+  // An email is called by its subject, as Mail names its file.
+  if (emails(intake)) return intake.files.length > 1 ? `${intake.files.length} emails` : intake.files[0].name.replace(EMAIL, '')
   if (intake.files.length > 1) return `${intake.files.length} files`
   if (intake.files[0]) return intake.files[0].name
   if (intake.link) {

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { intakeFrom, intakeLabel, jobsFor, kindOf, messageFor, type Intake } from './intake'
+import { intakeFrom, intakeLabel, jobsFor, kindOf, messageFor, withDropped, type Intake } from './intake'
 
 function dropped(files: File[], data: Record<string, string> = {}) {
   return { files: files as unknown as FileList, getData: (type: string) => data[type] ?? '' }
 }
 
 const pdf = new File(['%PDF'], 'Lease 2027.pdf', { type: 'application/pdf' })
-const photo = new File(['x'], 'IMG_2041.HEIC', { type: '' })
+const photo = new File(['x'], 'IMG_2041.JPG', { type: '' })
 const sheet = new File(['a,b'], 'budget.csv', { type: 'text/csv' })
 
 describe('what goes into the slot', () => {
@@ -43,5 +43,24 @@ describe('what goes into the slot', () => {
     expect(messageFor({ files: [pdf], link: null, text: null }, ' What should I check? ')).toBe('What should I check?')
     expect(messageFor({ files: [], link: 'https://example.com/rent', text: null }, 'Summarize the page')).toBe('Summarize the page\n\nhttps://example.com/rent')
     expect(messageFor({ files: [], link: null, text: 'Line one\nLine two' }, 'Reply to it')).toBe('Reply to it\n\n> Line one\n> Line two')
+  })
+
+  it('calls an email from Mail by its subject and offers what one does with an email', () => {
+    const email = new File(['Subject: Rent'], 'Rent for March.eml')
+    const reply = new File(['Subject: RE: Rent'], 'RE_ Rent for March.eml')
+    expect(kindOf({ files: [email], link: null, text: null })).toBe('email')
+    expect(intakeLabel({ files: [email], link: null, text: null })).toBe('Rent for March')
+    expect(intakeLabel({ files: [email, reply], link: null, text: null })).toBe('2 emails')
+    expect(jobsFor('email')).toEqual(['Draft a reply', 'Summarize it', 'What do they want?'])
+    // An email with a PDF is files.
+    expect(kindOf({ files: [email, pdf], link: null, text: null })).toBe('files')
+  })
+
+  it('adds a drop’s files to those waiting, each once; a link or text takes their place', () => {
+    const waiting: Intake = { files: [pdf], link: null, text: null }
+    expect(withDropped(waiting, { files: [sheet, pdf], link: null, text: null }).files).toEqual([pdf, sheet])
+    expect(withDropped(waiting, { files: [], link: 'https://example.com', text: null })).toEqual({ files: [], link: 'https://example.com', text: null })
+    expect(withDropped({ files: [], link: null, text: 'hi' }, { files: [sheet], link: null, text: null })).toEqual({ files: [sheet], link: null, text: null })
+    expect(withDropped(null, { files: [sheet], link: null, text: null }).files).toEqual([sheet])
   })
 })

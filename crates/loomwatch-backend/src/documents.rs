@@ -45,7 +45,8 @@ const MAX_PART_BYTES: u64 = 128 * 1024 * 1024;
 /// The most an Office file may hold once unpacked.
 const MAX_UNPACKED_BYTES: u128 = 1024 * 1024 * 1024;
 
-/// The kinds of file read here.
+/// The kinds of file read here. Twin: `ui/src/island/readable.ts`, which turns away at the notch
+/// what an agent can't open; a kind read here is taken there too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Pdf,
