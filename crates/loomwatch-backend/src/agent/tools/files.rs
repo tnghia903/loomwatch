@@ -1186,6 +1186,14 @@ mod tests {
             "{}",
             trailing.text
         );
+        let marked = wrote(cwd, "marked.json", "\u{feff}[1, 2]");
+        assert!(
+            marked
+                .text
+                .ends_with("Checked: it parses as JSON: a list of 2 items."),
+            "{}",
+            marked.text
+        );
     }
 
     /// Plain text, and a file too large to read back at once, are written as they always were.

@@ -1799,6 +1799,30 @@ async fn a_paused_answer_at_the_limit_is_asked_for_with_no_tools() {
         .filter(|update| update["phase"] == "commentary")
         .count();
     assert_eq!(phases, 1);
+
+    // Paused with a tool call: the call is answered unrun and nothing is carried on either.
+    let folder = Folder::new();
+    let demo = Demo::responder(|request| {
+        if request.tools.is_empty() {
+            return Some(Completion::text("The answer."));
+        }
+        let mut list = Completion::calls("", vec![call("l", "list_files", &json!({}))]);
+        if request.prompt() == LAST_ANSWER {
+            list.finish = Finish::Paused;
+        }
+        Some(list)
+    });
+    let mut session = limited(&folder, &demo, 1, Arc::new(Recorded::default()));
+    assert_eq!(
+        session.prompt("Survey.").await.unwrap().reply,
+        "The answer."
+    );
+    let requests = demo.requests();
+    assert_eq!(requests.len(), 3);
+    let told_to_carry_on = requests[2].messages.iter().any(
+        |message| matches!(message, Message::User { content, .. } if content.contains("Carry on")),
+    );
+    assert!(!told_to_carry_on, "{:?}", requests[2].messages);
 }
 
 /// A request for the answer that was cancelled or failed is taken back, so it doesn't join the
