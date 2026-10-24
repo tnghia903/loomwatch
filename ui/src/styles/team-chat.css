@@ -1027,8 +1027,9 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
 .tc-react-error { font-size: 11.5px; color: var(--color-alert); }
 
 /* The tray: the five faces, and under them one line: what the one you point at tells the team. */
-.tc-react-tray { position: absolute; bottom: calc(100% + 6px); left: -6px; z-index: 6; display: grid; gap: 2px; width: 248px; padding: 4px 4px 7px; border: 1px solid var(--color-hairline); border-radius: 16px; background: var(--color-panel-solid); box-shadow: var(--e2-shadow); }
-.tc-react-tray.end { left: auto; right: -6px; }
+/* `--tray-shift` slides it back into a chat too narrow for it either way (placeTray). */
+.tc-react-tray { position: absolute; bottom: calc(100% + 6px); left: calc(-6px - var(--tray-shift, 0px)); z-index: 6; display: grid; gap: 2px; width: 248px; padding: 4px 4px 7px; border: 1px solid var(--color-hairline); border-radius: 16px; background: var(--color-panel-solid); box-shadow: var(--e2-shadow); }
+.tc-react-tray.end { left: auto; right: calc(-6px - var(--tray-shift, 0px)); }
 .tc-react-tray.below { top: calc(100% + 6px); bottom: auto; }
 .tc-react-faces { display: flex; gap: 2px; }
 .tc-react-pick { display: grid; flex: 1; place-items: center; height: 42px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: var(--color-ink-2); cursor: pointer; }

@@ -68,7 +68,7 @@ interface ReactionsProps {
 export function Reactions({ yours, agents = [], about, name, hue, mine = false, own = mine, onReact, children }: ReactionsProps) {
   const chips = chipsOf(yours, agents)
   // Open, the tray says which way it opens: up, or down near the top of the chat; and from the
-  // button's left, or back from its right where the chat has no room for it.
+  // button's left, or back from its right, toward the middle of the chat.
   const [open, setOpen] = useState<Placement | null>(null)
   // The reaction you just put on: it is sewn on, once.
   const [fresh, setFresh] = useState<Face | null>(null)
@@ -99,23 +99,30 @@ export function Reactions({ yours, agents = [], about, name, hue, mine = false, 
   const toggle = () => setOpen(open ? null : placeTray(add.current, mine))
 
   const empty = chips.length === 0
+  const adder = onReact && (
+    <span className="tc-react-add-wrap">
+      <button ref={add} type="button" className="tc-react-add" aria-label={`React to ${about}`} aria-haspopup="true" aria-expanded={Boolean(open)} title="React" onClick={toggle}>
+        <SmilePlus size={14} strokeWidth={1.6} aria-hidden="true" />
+      </button>
+      {open && <Tray yours={yours} own={own} placement={open} anchor={add} onPick={pick} onClose={() => { setOpen(null); add.current?.focus() }} />}
+    </span>
+  )
+  const failed = error && <span className="tc-react-error" role="alert">Not saved: {error}</span>
+  // The faces sit against the message's edge, its right on yours, its left on the agents'. The
+  // button keeps its room while hidden, so it goes on the far side of them, and so does an error.
+  // With no faces the button rests on the corner, and an error runs on from it.
   return (
     <div className={`tc-reactable${mine ? ' mine' : ''}`}>
       {children}
       {(!empty || onReact) && (
         <div className={`tc-reacts${empty ? ' empty' : ''}${open ? ' open' : ''}`} role="group" aria-label={`Reactions to ${about}`}>
+          {mine && !empty && failed}
+          {mine && adder}
           {chips.map((chip) => (
             <ReactionChip key={chip.face} chip={chip} fresh={fresh === chip.face} own={own} name={name} hue={hue} disabled={!onReact} onClick={() => pick(chip.you ? null : chip.face)} />
           ))}
-          {onReact && (
-            <span className="tc-react-add-wrap">
-              <button ref={add} type="button" className="tc-react-add" aria-label={`React to ${about}`} aria-haspopup="true" aria-expanded={Boolean(open)} title="React" onClick={toggle}>
-                <SmilePlus size={14} strokeWidth={1.6} aria-hidden="true" />
-              </button>
-              {open && <Tray yours={yours} own={own} placement={open} anchor={add} onPick={pick} onClose={() => { setOpen(null); add.current?.focus() }} />}
-            </span>
-          )}
-          {error && <span className="tc-react-error" role="alert">Not saved: {error}</span>}
+          {!mine && adder}
+          {(!mine || empty) && failed}
         </div>
       )}
     </div>
@@ -170,8 +177,10 @@ function Head({ id, hue, name }: { id: string; hue: number; name: string }) {
 interface Placement {
   /** Down from the button: near the top of the chat there is no room above it. */
   below: boolean
-  /** Back from the button's right edge: the chat has no room for it to the right. */
+  /** Back from the button's right edge: toward the middle of the chat on yours, or where it has no room to the right. */
   end: boolean
+  /** In a chat too narrow for either way, how far the tray slides back toward the button to stay in it. */
+  shift: number
 }
 
 /** The tray's width: room for what a face tells the team under its row of faces. */
@@ -183,11 +192,15 @@ function placeTray(button: HTMLElement | null, mine: boolean): Placement {
   const log = button?.closest('[role="log"]')
   const column = log?.getBoundingClientRect()
   const view = button?.closest('.tc-scroll')?.getBoundingClientRect()
-  if (!at || !log || !column || !view) return { below: false, end: mine }
+  if (!at || !log || !column || !view) return { below: false, end: mine, shift: 0 }
   const style = getComputedStyle(log)
-  const fitsRight = at.left - 6 + TRAY_WIDTH <= column.right - (parseFloat(style.paddingRight) || 0)
-  const fitsLeft = at.right + 6 - TRAY_WIDTH >= column.left + (parseFloat(style.paddingLeft) || 0)
-  return { below: at.top - view.top < 96, end: mine ? fitsLeft || !fitsRight : !fitsRight && fitsLeft }
+  const left = column.left + (parseFloat(style.paddingLeft) || 0)
+  const right = column.right - (parseFloat(style.paddingRight) || 0)
+  const fitsRight = at.left - 6 + TRAY_WIDTH <= right
+  const fitsLeft = at.right + 6 - TRAY_WIDTH >= left
+  const end = mine ? fitsLeft || !fitsRight : !fitsRight && fitsLeft
+  const shift = end ? left - (at.right + 6 - TRAY_WIDTH) : at.left - 6 + TRAY_WIDTH - right
+  return { below: at.top - view.top < 96, end, shift: Math.max(0, Math.round(shift)) }
 }
 
 /**
@@ -230,7 +243,7 @@ function Tray({ yours, own, placement, anchor, onPick, onClose }: { yours: Face 
     buttons[next]?.focus()
   }
   return (
-    <div ref={tray} className={`tc-react-tray${placement.end ? ' end' : ''}${placement.below ? ' below' : ''}`} role="toolbar" aria-label="Pick a reaction" aria-description={TRAY_SAYS} onKeyDown={keys} onPointerLeave={() => setPointed(null)}>
+    <div ref={tray} className={`tc-react-tray${placement.end ? ' end' : ''}${placement.below ? ' below' : ''}`} style={{ '--tray-shift': `${placement.shift}px` } as CSSProperties} role="toolbar" aria-label="Pick a reaction" aria-description={TRAY_SAYS} onKeyDown={keys} onPointerLeave={() => setPointed(null)}>
       <div className="tc-react-faces">
         {PALETTE.map(({ face, label, tells, yours: onYours }, index) => (
           <button
