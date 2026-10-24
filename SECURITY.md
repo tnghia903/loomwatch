@@ -72,7 +72,12 @@ yourself.
   (Seatbelt, `/usr/bin/sandbox-exec`). It can change files only in the agent's work folder and in
   temporary and cache folders, and it can reach the network only when the agent may use the web.
   Every command is approved before it runs, so the sandbox is the second line of defence, not the
-  first.
+  first. A command can still work in another app on your Mac, such as Calendar or Mail, through
+  LoomWatch's own `osascript`. The first time it does, macOS asks whether LoomWatch may control
+  that app; you can change your answer later in System Settings → Privacy & Security → Automation
+  → LoomWatch. An app you allow can do what the sandbox stops the command doing itself: Mail can
+  send email as you, Finder can move or delete files anywhere, and Terminal or System Events can
+  run commands outside the sandbox. Allow only the apps your agents' work needs.
 - **Stop commands whole.** A command stops at its time limit (two minutes unless the agent asks
   for more, ten at most) or when its turn is stopped, and everything it started stops with it. On
   Windows, where commands run in `cmd.exe`, each one runs in a Windows job of its own, so nothing it
@@ -88,7 +93,7 @@ yourself.
   else still asks.
 - **Give agents no tools that reach past the run.** An agent's tools are its files, the web,
   commands, its plan and the Team Bus to its teammates. None of them publishes, posts or sends a
-  message anywhere. Tools set up in another AI app's settings (MCP servers) are not given to
+  message anywhere, except a command working in an app you let LoomWatch control, such as Mail. Tools set up in another AI app's settings (MCP servers) are not given to
   agents; an agent wired to one is told it is unavailable.
 - **Show a skill before it is installed.** The Skills page installs skills from skills.sh, ClawHub
   or a GitHub link. It shows each skill's license, scripts and files first, and refuses a skill

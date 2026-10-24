@@ -238,7 +238,8 @@ build_if_needed() {
   # The browser app is built first: it is packed into the LoomWatch program.
   (cd ui && npx --yes pnpm@12 install --frozen-lockfile && npx --yes pnpm@12 run build) ||
     fail "the browser app did not build. The messages above say why."
-  cargo build --release --locked --bin loomwatchd ||
+  # loomwatch-osascript is what agents' commands run as `osascript` on a Mac (ADR 0087).
+  cargo build --release --locked --bin loomwatchd --bin loomwatch-osascript ||
     fail "the LoomWatch program did not build. The messages above say why."
   printf '%s\n' "$fingerprint" >"$build_stamp"
 }

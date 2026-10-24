@@ -1,0 +1,20 @@
+[package]
+name = "loomwatch-osascript"
+description = "LoomWatch's own osascript: what agents' commands run on a Mac, inside the sandbox, to work in other apps."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "loomwatch-osascript"
+path = "src/main.rs"
+
+# The workspace's lints, except that `unsafe` code is denied rather than forbidden, so that the one
+# module that calls macOS's scripting framework (`osa.rs`) can allow it for itself.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

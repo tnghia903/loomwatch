@@ -59,6 +59,7 @@ pub use provider::{
     Completion, Finish, Message, Native, Picture, Provider, ServerTools, ToolCall, ToolSpec, Usage,
     WebLimits,
 };
+pub use sandbox::use_own_programs;
 pub use session::{
     CancelHandle, HostAsk, HostTools, MAX_PICTURE_BYTES, MAX_PICTURES, NoHostTools, Session,
     SessionConfig, Snapshot, StopReason, ToolSet, TurnEnd, WORK,

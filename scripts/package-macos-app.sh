@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Builds LoomWatch.app and the LoomWatch-macos.dmg people download, from two built programs.
+# Builds LoomWatch.app and the LoomWatch-macos.dmg people download, from three built programs.
 #
-#   scripts/package-macos-app.sh LOOMWATCHD LOOMWATCH_APP OUT_DIR
+#   scripts/package-macos-app.sh LOOMWATCHD LOOMWATCH_APP LOOMWATCH_OSASCRIPT OUT_DIR
 #
-# LOOMWATCHD is a built loomwatchd (with the UI built into it) and LOOMWATCH_APP the built
-# `LoomWatch` program from crates/loomwatch-app; both may be universal. Writes
-# OUT_DIR/LoomWatch-macos.dmg and OUT_DIR/LoomWatch-macos.dmg.sha256.
+# LOOMWATCHD is a built loomwatchd (with the UI built into it), LOOMWATCH_APP the built
+# `LoomWatch` program from crates/loomwatch-app, and LOOMWATCH_OSASCRIPT the built
+# `loomwatch-osascript` from crates/loomwatch-osascript, which loomwatchd signs a copy of for agents'
+# commands (ADR 0087); all may be universal. Writes OUT_DIR/LoomWatch-macos.dmg and
+# OUT_DIR/LoomWatch-macos.dmg.sha256.
 #
 # Signing, from the environment:
 #   MACOS_SIGN_IDENTITY  a "Developer ID Application: …" identity in the keychain. Without it the
@@ -19,7 +21,7 @@
 #   python3 -m venv .dmgbuild && .dmgbuild/bin/pip install --require-hashes -r packaging/macos/dmgbuild-requirements.txt
 set -euo pipefail
 
-[ $# -eq 3 ] || { echo "usage: $0 LOOMWATCHD LOOMWATCH_APP OUT_DIR" >&2; exit 2; }
+[ $# -eq 4 ] || { echo "usage: $0 LOOMWATCHD LOOMWATCH_APP LOOMWATCH_OSASCRIPT OUT_DIR" >&2; exit 2; }
 dmgbuild=${DMGBUILD:-$(command -v dmgbuild || true)}
 [ -x "$dmgbuild" ] || {
   echo "$0: needs dmgbuild; see packaging/macos/dmgbuild-requirements.txt, or set DMGBUILD" >&2
@@ -27,7 +29,8 @@ dmgbuild=${DMGBUILD:-$(command -v dmgbuild || true)}
 }
 daemon=$1
 app_program=$2
-out=$3
+osascript_program=$3
+out=$4
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/crates/loomwatch-backend/Cargo.toml" | head -n 1)
 [ -n "$version" ] || { echo "$0: no version in crates/loomwatch-backend/Cargo.toml" >&2; exit 1; }
@@ -39,7 +42,9 @@ app=$stage/LoomWatch.app
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$app_program" "$app/Contents/MacOS/LoomWatch"
 cp "$daemon" "$app/Contents/MacOS/loomwatchd"
-chmod 755 "$app/Contents/MacOS/LoomWatch" "$app/Contents/MacOS/loomwatchd"
+cp "$osascript_program" "$app/Contents/MacOS/loomwatch-osascript"
+chmod 755 "$app/Contents/MacOS/LoomWatch" "$app/Contents/MacOS/loomwatchd" \
+  "$app/Contents/MacOS/loomwatch-osascript"
 cp "$root/packaging/macos/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$app/Contents/Resources/"
 printf '%s %s\n' "$version" "$commit" >"$app/Contents/Resources/VERSION"
@@ -62,14 +67,22 @@ cat >"$app/Contents/Info.plist" <<PLIST
   <!-- A menu-bar app: no Dock icon. -->
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Under macOS's question the first time an agent works in an app (Automation). -->
+  <key>NSAppleEventsUsageDescription</key><string>Allow only if the work you gave your agents needs that app.</string>
 </dict>
 </plist>
 PLIST
 
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
-  # Inside out: the helper program first, then the app around it.
-  codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$app/Contents/MacOS/loomwatchd"
-  codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$app"
+  # Inside out: the helper programs first, then the app around them. Under the hardened runtime,
+  # macOS asks before agents work in another app only for programs entitled to send Apple Events.
+  entitlements=$root/packaging/macos/LoomWatch.entitlements
+  codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" \
+    "$app/Contents/MacOS/loomwatch-osascript"
+  codesign --force --options runtime --timestamp --entitlements "$entitlements" \
+    --sign "$MACOS_SIGN_IDENTITY" "$app/Contents/MacOS/loomwatchd"
+  codesign --force --options runtime --timestamp --entitlements "$entitlements" \
+    --sign "$MACOS_SIGN_IDENTITY" "$app"
 else
   codesign --force --deep --sign - "$app"
 fi

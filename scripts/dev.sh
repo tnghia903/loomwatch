@@ -9,7 +9,8 @@ TEAMS_ROOT="${TEAMS_ROOT:-teams}"
 LOOMWATCH_DATABASE="${LOOMWATCH_DATABASE:-.loomwatch/loomwatch.db}"
 
 (cd ui && pnpm install && pnpm build)
-cargo build --release -p loomwatch-backend
+# loomwatch-osascript: agents' `osascript` on a Mac, found beside loomwatchd (ADR 0087).
+cargo build --release -p loomwatch-backend -p loomwatch-osascript
 
 exec ./target/release/loomwatchd serve \
   --teams-root "$TEAMS_ROOT" \

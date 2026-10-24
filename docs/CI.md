@@ -20,7 +20,7 @@ builds the Mac and Windows apps for a version tag.
 | `container.yml` — **Build image** | a pull request or push to `main` that changes the Dockerfile or a lockfile/toolchain/manifest it builds from, monthly, by hand | `docker build` still succeeds; the image is never pushed | ~10–15 min (estimate) |
 | `actionlint.yml` | a pull request or push to `main` that changes `.github/workflows/`, by hand | the workflow files themselves are valid | < 1 min |
 | `pages.yml` — **Publish** | a change to `site/`, the README screenshots or fonts it borrows, by hand | builds the landing page with `site/build.sh` and pushes it to the `loomwatch/loomwatch.github.io` repository, which GitHub Pages serves | < 1 min |
-| `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd` and the app around it for macOS (universal programs, on macOS) and Windows x86_64, packs `LoomWatch-macos.dmg` (`scripts/package-macos-app.sh`) and `LoomWatch-windows-setup.exe` (Inno Setup, from Chocolatey, from the files `scripts/package-release.sh` gathers), and, for a tag, attaches them and a `.sha256` for each to a **draft** release. Run by hand, it only builds the files | ~15 min |
+| `release.yml` | a `v*` tag, by hand | builds the browser app once, then `loomwatchd`, the `osascript` stand-in and the app around them for macOS (universal programs, on macOS) and Windows x86_64, packs `LoomWatch-macos.dmg` (`scripts/package-macos-app.sh`) and `LoomWatch-windows-setup.exe` (Inno Setup, from Chocolatey, from the files `scripts/package-release.sh` gathers), and, for a tag, attaches them and a `.sha256` for each to a **draft** release. Run by hand, it only builds the files | ~15 min |
 
 ```
 pull request / push to main

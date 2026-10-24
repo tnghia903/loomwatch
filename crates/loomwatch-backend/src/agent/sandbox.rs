@@ -9,15 +9,58 @@
 //!
 //! Every command is also approved before it runs, so the sandbox is the second line, not the
 //! first. Other systems run commands without it for now.
+//!
+//! macOS refuses Apple Events from any sandboxed program whose signature lacks an Apple Events
+//! entitlement, so `/usr/bin/osascript` can't work in Calendar, Mail or any other app from in here.
+//! A command finds `LoomWatch`'s own `osascript` first on its `PATH` instead (ADR 0087): a copy of
+//! `loomwatch-osascript` signed with that entitlement. macOS still asks the person once for each
+//! app, and the sandbox still keeps writes to the work folder.
 
+use std::ffi::{OsStr, OsString};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::{PoisonError, RwLock};
 
 use tokio::process::Command;
 
 use super::tools::CommandSettings;
 
 const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
+/// The `osascript` stand-in, built beside `loomwatchd` (`crates/loomwatch-osascript`).
+const OSASCRIPT_PROGRAM: &str = "loomwatch-osascript";
+
+/// What macOS looks for in a sandboxed program's signature before it delivers the Apple Events the
+/// program sends. macOS 26 checks only that the entitlement is there; Apple's own apps are named so
+/// that agents keep working in them should a later macOS read the list.
+const ENTITLEMENTS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.temporary-exception.apple-events</key>
+  <array>
+    <string>com.apple.iCal</string>
+    <string>com.apple.reminders</string>
+    <string>com.apple.Notes</string>
+    <string>com.apple.mail</string>
+    <string>com.apple.AddressBook</string>
+    <string>com.apple.MobileSMS</string>
+    <string>com.apple.Music</string>
+    <string>com.apple.Photos</string>
+    <string>com.apple.Safari</string>
+    <string>com.apple.finder</string>
+    <string>com.apple.systemevents</string>
+    <string>com.apple.shortcuts.events</string>
+    <string>com.apple.iWork.Pages</string>
+    <string>com.apple.iWork.Numbers</string>
+    <string>com.apple.iWork.Keynote</string>
+  </array>
+</dict>
+</plist>
+"#;
+
+/// The folder of `LoomWatch`'s own programs, first on every command's `PATH` once made.
+static PROGRAMS: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// The profile. `WORK`, `TMP` and `CACHE` are filled in per command; `WRITABLE_<n>` for extra
 /// granted folders.
@@ -87,6 +130,97 @@ fn temp_and_cache() -> (PathBuf, PathBuf) {
         |home| canonical(&PathBuf::from(home).join("Library/Caches")),
     );
     (temp, cache)
+}
+
+/// Puts `LoomWatch`'s own `osascript` first on the `PATH` of agents' commands from now on: the
+/// `loomwatch-osascript` beside this program, signed into `state_dir`. Only on a Mac; slow the
+/// first time a version of `LoomWatch` runs, as it signs a copy, so call it off the async threads.
+pub fn use_own_programs(state_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let program = std::env::current_exe().map(|daemon| daemon.with_file_name(OSASCRIPT_PROGRAM));
+    match program.and_then(|program| own_programs(&program, state_dir)) {
+        Ok(folder) => *PROGRAMS.write().unwrap_or_else(PoisonError::into_inner) = Some(folder),
+        Err(error) => eprintln!(
+            "warning: agents' commands use macOS's own osascript, which the sandbox keeps from \
+             other apps: {error}"
+        ),
+    }
+}
+
+/// `program` signed for Apple Events, as `osascript` in `state_dir/programs`, the folder it
+/// returns. Signed once for each build of `program`: the next start finds it already there.
+fn own_programs(program: &Path, state_dir: &Path) -> std::io::Result<PathBuf> {
+    use sha2::{Digest as _, Sha256};
+
+    let bytes = std::fs::read(program).map_err(|error| {
+        std::io::Error::new(error.kind(), format!("{}: {error}", program.display()))
+    })?;
+    let digest = crate::skills_store::hex(&Sha256::digest(&bytes));
+    let folder = state_dir.join("programs");
+    let signed = folder.join("osascript");
+    // Which build `signed` was copied from.
+    let stamp = folder.join("osascript.from");
+    if signed.is_file() && std::fs::read_to_string(&stamp).is_ok_and(|from| from.trim() == digest) {
+        return Ok(folder);
+    }
+    std::fs::create_dir_all(&folder)?;
+    // Signed under a name of its own, then moved into place whole.
+    let fresh = folder.join(format!(".osascript-{}", std::process::id()));
+    let entitlements = folder.join(format!(".osascript-{}.plist", std::process::id()));
+    std::fs::write(&fresh, &bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::write(&entitlements, ENTITLEMENTS)?;
+    let signing = std::process::Command::new("/usr/bin/codesign")
+        .args(["--force", "--sign", "-", "--entitlements"])
+        .arg(&entitlements)
+        .arg(&fresh)
+        .output();
+    let _ = std::fs::remove_file(&entitlements);
+    let failed = match signing {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(format!(
+            "codesign: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Some(format!("codesign: {error}")),
+    };
+    if let Some(failed) = failed {
+        let _ = std::fs::remove_file(&fresh);
+        return Err(std::io::Error::other(failed));
+    }
+    std::fs::rename(&fresh, &signed)?;
+    std::fs::write(&stamp, digest)?;
+    Ok(folder)
+}
+
+/// The `PATH` a command gets: `LoomWatch`'s own programs first, once there are any, then the
+/// daemon's own `path`. `None` leaves the command the daemon's.
+pub(crate) fn path(path: Option<&OsStr>) -> Option<OsString> {
+    let programs = PROGRAMS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()?;
+    path_with(&programs, path)
+}
+
+/// Uses `folder` as `LoomWatch`'s own programs, as [`use_own_programs`] does once it has signed
+/// them.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn use_programs_folder(folder: PathBuf) {
+    *PROGRAMS.write().unwrap_or_else(PoisonError::into_inner) = Some(folder);
+}
+
+fn path_with(programs: &Path, path: Option<&OsStr>) -> Option<OsString> {
+    // Without a `PATH` the shell would look in its own default folders; keep them.
+    let rest = path.unwrap_or_else(|| OsStr::new("/usr/bin:/bin:/usr/sbin:/sbin"));
+    let rest = std::env::split_paths(rest).filter(|folder| folder != programs);
+    std::env::join_paths(std::iter::once(programs.to_path_buf()).chain(rest)).ok()
 }
 
 /// Whether a failed command's output reads like the sandbox stopped it.
@@ -280,6 +414,122 @@ mod tests {
         let refused = |path: &str| format!("Error: EPERM: operation not permitted, open '{path}'");
         assert!(!blocked(&refused("/Volumes/Shared/out/x"), &folders, false));
         assert!(blocked(&refused("/Volumes/Shared/x"), &folders, false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn loomwatchs_own_programs_come_first_on_the_path() {
+        let programs = Path::new("/s/programs");
+        let path = path_with(programs, Some(OsStr::new("/usr/bin:/s/programs:/bin"))).unwrap();
+        assert_eq!(path, "/s/programs:/usr/bin:/bin");
+        assert_eq!(
+            path_with(programs, None).unwrap(),
+            "/s/programs:/usr/bin:/bin:/usr/sbin:/sbin"
+        );
+    }
+
+    /// A folder for one test, removed after it.
+    #[cfg(target_os = "macos")]
+    struct Scratch(PathBuf);
+
+    #[cfg(target_os = "macos")]
+    impl Scratch {
+        fn new() -> Self {
+            let folder =
+                std::env::temp_dir().join(format!("loomwatch-programs-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&folder).unwrap();
+            Self(canonical(&folder))
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn entitled_for_apple_events(program: &Path) -> bool {
+        let shown = std::process::Command::new("/usr/bin/codesign")
+            .args(["--display", "--entitlements", "-", "--xml"])
+            .arg(program)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&shown.stdout)
+            .contains("<key>com.apple.security.temporary-exception.apple-events</key>")
+    }
+
+    /// The copy carries the entitlement macOS looks for, and is signed once for each build.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn on_a_mac_the_own_osascript_is_signed_for_apple_events_once_per_build() {
+        let scratch = Scratch::new();
+        let program = scratch.0.join(OSASCRIPT_PROGRAM);
+        let state = scratch.0.join("state");
+        // Any program stands in for the built one.
+        std::fs::copy("/bin/echo", &program).unwrap();
+        let folder = own_programs(&program, &state).unwrap();
+        let signed = folder.join("osascript");
+        assert!(entitled_for_apple_events(&signed));
+        assert!(
+            !entitled_for_apple_events(&program),
+            "the built one is left as it was"
+        );
+        let modified = || std::fs::metadata(&signed).unwrap().modified().unwrap();
+        let first = modified();
+        own_programs(&program, &state).unwrap();
+        assert_eq!(modified(), first, "signed again for the same build");
+
+        std::fs::copy("/bin/cat", &program).unwrap();
+        own_programs(&program, &state).unwrap();
+        assert!(entitled_for_apple_events(&signed));
+        let mut cat = std::process::Command::new(&signed)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut cat.stdin.take().unwrap(), b"the new build").unwrap();
+        let out = cat.wait_with_output().unwrap();
+        assert_eq!(
+            out.stdout, b"the new build",
+            "a new build replaces the copy"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .filter(|name| name.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    /// Inside the sandbox, a command's `osascript` is the signed copy.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn on_a_mac_a_sandboxed_command_finds_the_signed_osascript_first() {
+        let scratch = Scratch::new();
+        let program = scratch.0.join(OSASCRIPT_PROGRAM);
+        std::fs::copy("/bin/echo", &program).unwrap();
+        let folder = own_programs(&program, &scratch.0.join("state")).unwrap();
+        let work = scratch.0.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let script = "command -v osascript; osascript from LoomWatch";
+        let mut command = wrap(script, &work, &CommandSettings::default()).unwrap();
+        let path = path_with(&folder, std::env::var_os("PATH").as_deref()).unwrap();
+        let output = command
+            .current_dir(&work)
+            .env("PATH", path)
+            .output()
+            .await
+            .unwrap();
+        let printed = String::from_utf8_lossy(&output.stdout);
+        let expected = format!("{}\nfrom LoomWatch\n", folder.join("osascript").display());
+        assert_eq!(
+            printed,
+            expected,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[cfg(target_os = "macos")]

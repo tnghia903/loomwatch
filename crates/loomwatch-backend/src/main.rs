@@ -313,6 +313,13 @@ async fn main() -> Result<()> {
             // agents are given, go through the Notion tool's sign-in (ADR 0070), so both are
             // installed before anything can start a run.
             loomwatch_backend::notion::install(&state_dir);
+            // On a Mac, agents' commands find LoomWatch's own `osascript` first, signed so macOS
+            // lets it reach other apps from inside the sandbox (ADR 0087). In the background: the
+            // first start of each version signs a copy.
+            tokio::task::spawn_blocking({
+                let state_dir = state_dir.clone();
+                move || loomwatch_backend::agent::use_own_programs(&state_dir)
+            });
             // A Notion sign-in made in Connections before Notion was a tool becomes the Notion
             // tool's, once. It reads the old Keychain item only when its status says one is there.
             tokio::spawn(loomwatch_backend::notion::move_to_tools(
@@ -477,6 +484,12 @@ async fn main() -> Result<()> {
             prompt,
             exit_timeout_seconds,
         } => {
+            // As for `serve`, but before the one turn starts.
+            let state_dir = database.state_dir()?;
+            tokio::task::spawn_blocking(move || {
+                loomwatch_backend::agent::use_own_programs(&state_dir);
+            })
+            .await?;
             let outcome = loomwatch_backend::run_team_session(
                 &team,
                 &database.database()?,
