@@ -808,6 +808,9 @@ export class WorkbenchScene {
     this.height = size.height
     this.camera.aspect = this.width / this.height
     this.fit()
+    // A new size empties the canvas: drawn again now, before the page is painted, not at the next
+    // frame, so it never shows empty with its labels in a heap, as a bench set up out of sight would.
+    this.frame()
   }
 
   start() {

@@ -18,6 +18,11 @@ body {
 .island {
   /* A figure peeking out below the notch, and one tucked beside it. */
   --fig: calc(var(--bar) * 2.2);
+  /* How much of it shows below the notch: its whole face and a little of its body. It stands as
+     high as it can without a head going behind the camera (the tallest still keeps 7% of its
+     picture clear above it), and the island is as deep as the rest. */
+  --peek-up: calc(var(--fig) * .07);
+  --peek: calc(var(--fig) * .74);
   --head: calc(var(--bar) * 1.06);
   --edge: 0 0 0 1px var(--color-hairline);
   --shadow: 0 10px 24px color-mix(in srgb, var(--color-black) 30%, transparent);
@@ -109,7 +114,7 @@ body {
 .island:is([data-view="rest"], [data-view="tucked"]) .island-shape { --w: calc(var(--notch-w) + 2 * var(--ear)); }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-shape {
   --w: calc(var(--notch-w) + 24px);
-  --h: calc(var(--bar) + var(--fig) * .66);
+  --h: calc(var(--bar) + var(--peek));
   --r: calc(var(--bar) * .7);
 }
 .island[data-view="ask"] .island-shape { --h: calc(var(--bar) + 10px); --r: calc(var(--bar) * .38); }
@@ -125,7 +130,7 @@ body {
 .island[data-view="slot"] .island-shape { --w: calc(var(--notch-w) + 160px); --h: calc(var(--bar) + 64px); --r: 24px; }
 
 /* ---- Popping out: the agent at work peeks up below the notch ---- */
-.island-balcony { position: absolute; top: var(--bar); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; }
+.island-balcony { position: absolute; top: calc(var(--bar) - var(--peek-up)); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; }
 /* The list fills the island: whoever peeked last is not drawn over it. */
 .island:is([data-view="list"], [data-view="box"], [data-view="bench"]) .island-balcony { visibility: hidden; }
 .island-slot { position: absolute; inset: 0; translate: 0 calc(var(--fig) * 1.15); transition: translate var(--t-move) var(--ease-in); }
@@ -170,7 +175,7 @@ body {
 .island[data-view="ask"] .island-card { pointer-events: auto; }
 .island-slip {
   position: absolute;
-  top: calc(var(--bar) + var(--fig) * .66 + 8px);
+  top: calc(var(--bar) + var(--peek) + 8px);
   left: 50%;
   width: 350px;
   margin-left: -175px;
@@ -282,6 +287,33 @@ body {
 .island-field:hover { border-color: color-mix(in srgb, var(--color-ink) 60%, transparent); }
 .island-field:focus { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }
 .island-field:disabled { opacity: .5; }
+/* Send, as a gold arrow at the field's end (a return arrow for a note while it works): it comes
+   once something is written, as the line the message will go on, leaves on the way-out curve, and
+   dims while the message goes. It takes the field's whole height at its end, its ring inside. */
+.island-field-box { position: relative; display: flex; flex: 1; min-width: 0; }
+.island-field-box > .island-field { padding-right: 38px; }
+.island-send {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  opacity: 0;
+  scale: .6;
+  pointer-events: none;
+  transition: opacity calc(var(--t-quick) * .75) var(--ease-in), scale calc(var(--t-quick) * .75) var(--ease-in);
+}
+.island-field-box[data-written] > .island-send { opacity: 1; scale: 1; pointer-events: auto; transition: opacity var(--t-quick) var(--ease-out), scale var(--t-quick) var(--ease-out); }
+.island-field-box[data-written] > .island-send:disabled { opacity: .5; cursor: default; }
+.island-send:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -3px; }
 .island-sent { grid-column: 2 / -1; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 .island-sent-failed { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 /* A problem said in ink beside the failed mark: a message that didn't go, and what a drop left out
@@ -312,6 +344,15 @@ body {
 
 /* ---- The pinned agent's answer: an answer like any other, its opening lines and Copy. ---- */
 .island-answer { display: grid; gap: 10px; min-width: 0; }
+/* Copy, as a mark beside who answered; copied, a tick in the done green for a moment. */
+.island-answer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.island-copy { flex: none; display: grid; place-items: center; width: 26px; height: 26px; margin-block: -5px; margin-inline-end: -5px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--color-ink-2); cursor: pointer; transition: color var(--t-instant) var(--ease-out); }
+.island-copy:hover:not(:disabled) { color: var(--color-ink); }
+.island-copy:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.island-copy:disabled { opacity: .5; cursor: default; }
+.island-copy.is-copied, .island-copy.is-copied:hover:not(:disabled) { color: var(--color-ok); cursor: default; }
+/* Words for a screen reader only, where a mark says it on screen. */
+.island-unseen { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .island-row .island-answer { grid-column: 2 / -1; }
 .island-answer .island-words p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; white-space: pre-line; }
 .island-slip.is-answer { grid-template-columns: minmax(0, 1fr); }
@@ -442,6 +483,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .island *, .island *::before, .island *::after { animation: none !important; }
   .island-fold { display: none; }
+  .island-send { scale: 1; transition: opacity var(--t-quick) var(--ease-out); }
+  .island-field-box[data-written] > .island-send { transition: opacity var(--t-quick) var(--ease-out); }
   .island-stage-bead { transition: none; }
   .island-shape { transition: opacity var(--t-quick) var(--ease-out); }
   .island-body { transition: none; }

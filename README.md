@@ -427,8 +427,9 @@ To message one of your agents from any app, press **⌃⌥Space** (Control-Optio
 **Message** and its name at the top of LoomWatch's menu. A box opens at the top middle of the screen
 you are on; **Tab** switches to another of your agents, and its figure opens its workbench. When you
 send, the agent shows at its workbench for a moment, then waits at the top of the screen while it
-works: point at it to watch. Its answer drops down there; **Copy** keeps its headings, lists and
-links when you paste. The box opens with the agent you last wrote to.
+works: point at it to watch. Its answer drops down there: the copy button at its top right keeps
+its headings, lists and links when you paste, and **Open in LoomWatch** shows it whole. The box opens
+with the agent you last wrote to.
 
 To hand it a file, a picture, an email from Mail, a link or some text, drag it to the top middle of
 the screen: the box opens to take it and offers a few jobs that fit. iPhone photos go in as JPEGs. A

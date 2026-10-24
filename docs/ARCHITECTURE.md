@@ -512,15 +512,16 @@ that one (`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.
 and the island share one agent. Its figure opens its workbench under the box: the builder's 3D
 bench (`AgentFigure`, read only, always in the island's dark), from the same view and labels the
 builder makes (`components/agents/benchOf.tsx`), acting out the agent's newest run in its chat. It
-loads with three.js only when a bench first opens. After a message is sent, the box gives way to the
-agent at its workbench for a moment (`ISLAND_WAITS.bench`); without a notch it then tucks into a
-pill at the top of the screen, the agent at a little desk, whose workbench opens while it is
-pointed at. For the agent in the box:
+loads with three.js only once the box opens to write, and is set up out of sight while a message is
+written, so it is there when the message goes. After a message is sent, the box gives way to the
+agent at its workbench for a moment (`ISLAND_WAITS.bench`), and at a notch for as long as the
+pointer stays on it; without a notch it then tucks into a pill at the top of the screen, the agent
+at a little desk, whose workbench opens while it is pointed at. For the agent in the box:
 - the island's list opens with a box to message it, and ⌃⌥Space (a Carbon hot key), or Message
   in the app's menu, opens it from any app, on the screen the pointer is on; the message goes into that agent's own chat (`.jobs/.bench/<id>.yaml`, written as the
   agent is saved), as its Chat tab would send it, with anything dropped onto the notch as the
   chat's attachments. The panel takes the keyboard only while that message is written (focus may
-  move on to Copy, See answer or Start; Escape gives it back), without bringing `LoomWatch` to
+  move on to Copy, Open in LoomWatch or Start; Escape gives it back), without bringing `LoomWatch` to
   the front;
 - its answer is read whole before Copy can take it, and Copy carries it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
