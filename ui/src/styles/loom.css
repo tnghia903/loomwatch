@@ -235,7 +235,9 @@ span.story-schedule { cursor: default; }
 .chat-text :is(ul, ol) { padding-left: 18px; }
 .chat-text ul { list-style: disc; }
 .chat-text ol { list-style: decimal; }
-.chat-text code { padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); font: 400 12px/1.4 var(--font-mono); }
+/* Markdown inside one of the app's own lines (InlineMarkdown) shows its code and links as the chat does. */
+.md-inline { overflow-wrap: anywhere; }
+.chat-text code, .md-inline code { padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); font: 400 12px/1.4 var(--font-mono); }
 /* A message fits the chat's width, however narrow: code wraps rather than scrolling sideways. */
 .chat-text pre { padding: 8px; border-radius: 8px; background: var(--color-ground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-text pre code { padding: 0; background: none; }
@@ -243,7 +245,7 @@ span.story-schedule { cursor: default; }
 .chat-text table { border-collapse: collapse; font-size: 12px; line-height: 1.4; }
 .chat-text :is(th, td) { padding: 3px 6px; border: 1px solid var(--color-hairline); text-align: left; vertical-align: top; hyphens: auto; }
 .chat-text th { font-weight: 650; background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
-.chat-text a { color: var(--color-accent); text-decoration: underline; word-break: break-all; }
+.chat-text a, .md-inline a { color: var(--color-accent); text-decoration: underline; word-break: break-all; }
 .chat-text .markdown-fallback { white-space: pre-wrap; }
 .chat-more { margin-top: 4px; font-size: 12px; color: var(--color-accent); }
 .chat-more:hover, .chat-more:focus-visible { text-decoration: underline; }
@@ -785,6 +787,8 @@ span.story-schedule { cursor: default; }
   transition: border-color var(--t-quick) var(--ease-out), color var(--t-quick) var(--ease-out), background-color var(--t-quick) var(--ease-out);
 }
 .md-source-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Inside a line already set small, a source keeps the type scale's smallest step. */
+.md-inline .md-source:any-link { font-size: max(11px, 0.8em); }
 .md-source svg { flex: none; color: var(--color-ink-3); transition: color var(--t-quick) var(--ease-out); }
 .md-source:any-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); background: var(--color-accent-tint); color: var(--color-ink); }
 .md-source:any-link:hover svg { color: var(--color-accent); }

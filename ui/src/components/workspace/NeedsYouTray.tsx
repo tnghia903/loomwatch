@@ -1,11 +1,13 @@
 import { ArrowUpRight, BellDot, Check, CornerDownLeft, X } from 'lucide-react'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 
+import { plainWords } from '../../lib/chat/findWords'
 import type { PermissionDecision, SpendDecision } from '../../lib/runs/client'
 import { PERMISSION_SAID } from '../../lib/runs/permissionRequests'
 import { historyRunUrl } from '../../lib/runs/history'
 import { ago, APPROVAL_TEXT, type Ticket } from '../../lib/story/needsYou'
 import { goToTeam } from '../../lib/team-file/teamPage'
+import { InlineMarkdown } from '../ui/Markdown'
 
 interface NeedsYouTrayProps {
   tickets: readonly Ticket[]
@@ -23,6 +25,8 @@ interface NeedsYouTrayProps {
 }
 
 const TAG: Record<Ticket['kind'], string> = { review: 'Review step', question: 'Question', permission: 'Permission', spend: 'Spending', failed: 'Stopped' }
+/** A review's or a question's context is what an agent wrote, in Markdown; a permission's command is shown as it is. */
+const agentWrote = (ticket: Ticket) => ticket.kind === 'review' || ticket.kind === 'question'
 
 
 // Tickets the bell has already rung for, kept for the tab's session: Home, a team and an agent are
@@ -207,7 +211,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                 <p className="ticket-text">
                   {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
-                {ticket.context && <blockquote className="ticket-context" title={ticket.context}>{ticket.context}</blockquote>}
+                {ticket.context && <blockquote className="ticket-context" title={agentWrote(ticket) ? plainWords(ticket.context) : ticket.context}>{agentWrote(ticket) ? <InlineMarkdown clickable={false}>{ticket.context}</InlineMarkdown> : ticket.context}</blockquote>}
                 {onScreen(ticket) ? (
                   <p className="ticket-here t-meta">On this screen: answer it below.</p>
                 ) : replying === ticket.id ? (

@@ -1043,7 +1043,7 @@ describe('a piece of work', () => {
   })
 
   const checkStop = async () => {
-    const check = { checked: 'researcher', rounds: 2, reason: 'rounds' as const, met: 2, problems: 'Two figures are from 2023.', items: [{ verdict: 'not_met' as const, item: 'Cites the 2025 report', evidence: 'cites the 2023 one' }, { verdict: 'not_sure' as const, item: 'Under 200 words', evidence: '' }] }
+    const check = { checked: 'researcher', rounds: 2, reason: 'rounds' as const, met: 2, problems: 'Two figures are from 2023.', items: [{ verdict: 'not_met' as const, item: 'Cites the **2025** report', evidence: 'cites [the 2023 one](https://example.org/2023) in `table 4`' }, { verdict: 'not_sure' as const, item: 'Under 200 words', evidence: '' }] }
     const waitingOn = { node: 'writer', name: 'Writer', kind: 'review_stop' as const, since: '2026-10-06T02:01:00.000Z', question: 'Researcher’s work still misses 2 checks after going back 2 times.', context: 'Draft three.', handoverFrom: 'researcher', park: 'reloadable' as const, parkNote: '', sendBackAvailable: true, check }
     page = [{ kind: 'work', run: run({ status: 'running', reply: null, finishedAt: null, waitingOn }), request: message({}), notes: [] }]
     answer = () => new Response(JSON.stringify(run({ status: 'running' })), { status: 200 })
@@ -1076,8 +1076,13 @@ describe('a piece of work', () => {
     const card = await checkStop()
     expect(card).toHaveTextContent('Researcher’s work still misses 2 checks after going back 2 times.')
     expect(screen.getByText('Waiting for you').parentElement).toHaveTextContent('Waiting for you · Researcher’s work still misses 2 checks after going back 2 times')
-    expect(within(card).getByRole('list', { name: 'Checks still not met' })).toHaveTextContent('Not met Cites the 2025 report — cites the 2023 one')
-    expect(within(card).getByRole('list', { name: 'Checks still not met' })).toHaveTextContent('Not sure Under 200 words')
+    const misses = within(card).getByRole('list', { name: 'Checks still not met' })
+    expect(misses).toHaveTextContent('Not met Cites the 2025 report — cites the 2023 one in table 4')
+    expect(misses).toHaveTextContent('Not sure Under 200 words')
+    // The checker writes Markdown: its bold, code and links read as they would in the chat.
+    expect(within(misses).getByText('2025').tagName).toBe('STRONG')
+    expect(within(misses).getByText('table 4').tagName).toBe('CODE')
+    expect(within(misses).getByRole('link', { name: 'the 2023 one' })).toHaveAttribute('href', 'https://example.org/2023')
     expect(within(card).getByText('What Writer wrote about it')).toBeInTheDocument()
     expect(within(card).getByText('Read Researcher’s work')).toBeInTheDocument()
     // Not the plain review's card.

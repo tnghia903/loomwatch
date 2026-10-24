@@ -34,6 +34,30 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
   })
 })
 
+// A review's context is what the step before wrote, in Markdown, starting with a check's open lines.
+describe('what a review ticket quotes', () => {
+  it('shows the agent’s Markdown formatted, and its tooltip as plain words', () => {
+    const context = 'Not met: Gives **2 empty slots** — see [the code](https://example.org/q1) in `/tmp/q1.py`\n## Draft\nThe `idf()` line.'
+    const question: Ticket = { ...ticket, id: 'quote-q:question', kind: 'question', runId: 'quote-q', text: 'Which slot?', context: 'Use the **filled** slots', requestId: undefined }
+    render(<NeedsYouTray tickets={[{ ...review('quote-r'), context }, { ...ticket, context: 'Run `ls *.md` in **notes**' }, question]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /3 need you/ }))
+    const [quote, command, asked] = [...screen.getByRole('dialog').querySelectorAll('blockquote')]
+    expect(quote).toHaveTextContent('Not met: Gives 2 empty slots — see the code in /tmp/q1.py Draft The idf() line.')
+    expect(quote.querySelector('strong')).toHaveTextContent('2 empty slots')
+    expect([...quote.querySelectorAll('code')].map((code) => code.textContent)).toEqual(['/tmp/q1.py', 'idf()'])
+    expect(quote.querySelector('h2')).toBeNull()
+    // The quote is cut at three lines: a link or file past them would still take the Tab key.
+    expect(quote.querySelector('a, button')).toBeNull()
+    expect(quote).toHaveAttribute('title', 'Not met: Gives 2 empty slots — see the code in /tmp/q1.py Draft The idf() line.')
+    // A permission's command is the app's own words, kept exactly as they are.
+    expect(command).toHaveTextContent('Run `ls *.md` in **notes**')
+    expect(command.querySelector('.md-inline')).toBeNull()
+    // What an agent asking a question handed over is its Markdown too.
+    expect(asked.querySelector('strong')).toHaveTextContent('filled')
+    expect(asked).toHaveAttribute('title', 'Use the filled slots')
+  })
+})
+
 // Another team's run opens as the team rail opens a team: in place, where a team page follows the address.
 describe('Open run', () => {
   it('opens that team’s run in place', () => {
