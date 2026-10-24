@@ -1525,6 +1525,13 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const deliveryShown = runView || runSetup
   // ADR 0051: the Run tab is the team's chat. A run open beside it is its Details.
   const detailsOpen = deliveryShown && runView
+  // A card's "Agent details" in Details opens the agent panel, so it closes with Details, which
+  // left it standing over the chat. Leaving the Chat tab clears it on its own (above).
+  const detailsWereOpenRef = useRef(detailsOpen)
+  useLayoutEffect(() => {
+    if (detailsWereOpenRef.current && !detailsOpen && deliveryShown) clearSelection()
+    detailsWereOpenRef.current = detailsOpen
+  }, [detailsOpen, deliveryShown, clearSelection])
   // Details' timeline asks to read a message: the chat shows it, in the piece it belongs to.
   const [chatReveal, setChatReveal] = useState<{ runId: string; id: string; at: number } | null>(null)
   const savedJobs = useSavedJobs().jobs
