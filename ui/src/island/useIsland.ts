@@ -54,6 +54,8 @@ export interface Island {
   failed: string | null
   said: { ticket: string; text: string } | null
   figure: (teamPath: string, agent: string | null) => FigureChoice
+  /** The figures of a team's agents, from its file: none until it is read. */
+  crewFigures: (teamPath: string) => FigureChoice[]
   answer: (team: TeamNow, ticket: Ticket, decision: 'allow_once' | 'deny') => void
   open: (team: TeamNow) => void
   openApp: () => void
@@ -201,7 +203,7 @@ export function useIsland(): Island {
     }
   }, [waiting])
 
-  const figure = useFigures(teams, saved, pinned)
+  const { figure, crewFigures } = useFigures(teams, saved, pinned)
 
   // Writing to the pinned agent takes the keyboard from whatever had it. It goes back once the
   // message is sent, on Escape, or when the list closes; not as soon as the box loses it, because
@@ -365,6 +367,7 @@ export function useIsland(): Island {
     failed,
     said,
     figure,
+    crewFigures,
     answer,
     open,
     openApp,
@@ -415,24 +418,28 @@ async function toClipboard(answer: WholeAnswer): Promise<void> {
   await navigator.clipboard?.writeText(answer.plain)
 }
 
-function useFigures(teams: readonly TeamNow[], saved: readonly SavedJob[], pinned: PinnedNow | null): (teamPath: string, agent: string | null) => FigureChoice {
+function useFigures(teams: readonly TeamNow[], saved: readonly SavedJob[], pinned: PinnedNow | null): Pick<Island, 'figure' | 'crewFigures'> {
   const [crews, setCrews] = useState<ReadonlyMap<string, readonly CrewAgent[]>>(() => new Map())
   const asked = useRef(new Set<string>())
   useEffect(() => {
-    for (const team of teams) {
-      if (asked.current.has(team.teamPath)) continue
-      asked.current.add(team.teamPath)
-      fetchTeamFile(team.teamPath).then((file) => {
+    // Each team at work, and each team the pinned agent asks to start.
+    const paths = teams.flatMap((team) => [team.teamPath, ...(team.teamAsks ?? []).map((request) => request.team.path)])
+    for (const path of paths) {
+      if (asked.current.has(path)) continue
+      asked.current.add(path)
+      fetchTeamFile(path).then((file) => {
         const crew = crewOf(file.yaml)
-        if (crew) setCrews((was) => new Map(was).set(team.teamPath, crew.agents))
+        if (crew) setCrews((was) => new Map(was).set(path, crew.agents))
       }, () => {})
     }
   }, [teams])
-  return useCallback((teamPath: string, agent: string | null): FigureChoice => {
+  const figure = useCallback((teamPath: string, agent: string | null): FigureChoice => {
     // The pinned agent wears its own figure in its chat too.
     if (pinned && teamPath === pinned.chatPath) return figureFor(pinned.id, pinned.job.figure)
     if (!agent) return figureFor(teamPath)
     const placed = crews.get(teamPath)?.find((each) => each.id === agent)
     return agentFigure(placed ?? { id: agent }, saved)
   }, [crews, saved, pinned])
+  const crewFigures = useCallback((teamPath: string) => (crews.get(teamPath) ?? []).map((agent) => agentFigure(agent, saved)), [crews, saved])
+  return { figure, crewFigures }
 }

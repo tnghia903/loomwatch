@@ -819,11 +819,12 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const island = container.querySelector('.island')!
     await waitFor(() => expect(island.getAttribute('data-view')).toBe('ask'))
     const card = within(container.querySelector<HTMLElement>('.island-card')!)
-    expect(card.getByText('Maya wants Trip planner to do this')).toBeTruthy()
+    // Maya's words, the team they are to and that a run of it has no spending limit, from its file,
+    // and Start. No ×: putting the card away doesn't answer it.
     expect(card.getByText('Plan three gentle days in Đà Lạt')).toBeTruthy()
-    expect(card.getAllByRole('button').map((button) => button.textContent)).toEqual(['Not now', 'Start Trip planner'])
-    // What one run may spend, from the team's file: this one sets no limit.
-    expect(await card.findByText('No spending limit set')).toBeTruthy()
+    const toTeam = (within: ParentNode) => within.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()
+    await waitFor(() => expect(toTeam(container.querySelector('.island-card')!)).toBe('to Trip planner · no spending limit'))
+    expect(card.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Start Trip planner'])
     fireEvent.click(card.getByRole('button', { name: 'Start Trip planner' }))
     await waitFor(() => expect(answeredTeams).toEqual([{ id: 'tr1', decision: 'start' }]))
     expect(await card.findByText('Trip planner is starting.')).toBeTruthy()
@@ -838,5 +839,50 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     // Its work is on Maya's stage, not a row of its own.
     expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
   }, 20_000)
+
+  it('shows a request for a team in Maya’s row as her words, with Start in the box’s place until you write something else', async () => {
+    vi.stubGlobal('WebSocket', QuietSocket)
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    requests = [{ id: 'tr1', askedBy: { runId: 'c1', agent: 'maya', chatPath: '.jobs/.bench/maya.yaml' }, team: { path: 'school.yaml', name: 'First-principles school' }, request: 'Retry and complete this exact assignment, then send the lesson back', status: 'waiting', runId: null, problem: null, createdAt: iso(1), finishedAt: null }]
+    const { container } = render(<Island />)
+    place()
+    const island = container.querySelector('.island')!
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('ask'))
+    fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
+    await waitFor(() => expect(island.getAttribute('data-view')).toBe('list'))
+    const row = container.querySelector<HTMLElement>('.island-pinned')!
+    const inRow = within(row)
+    // Her words, the team they are to with its agents' figures, and × to say don't: no other line.
+    expect(inRow.getByText('Retry and complete this exact assignment, then send the lesson back')).toBeTruthy()
+    await waitFor(() => expect(row.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('to First-principles school · no spending limit'))
+    await waitFor(() => expect(row.querySelectorAll('.island-crew-figure')).toHaveLength(2))
+    expect(row.querySelector('.island-request')?.querySelectorAll('small')).toHaveLength(1)
+    // Start sits where Send would, and is the only other button.
+    const field = inRow.getByRole('textbox', { name: 'Or message Maya' })
+    expect(inRow.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Don’t start First-principles school', 'Start First-principles school'])
+    expect(field.closest('form')?.contains(inRow.getByRole('button', { name: 'Start First-principles school' }))).toBe(true)
+    // Writing something else brings Send back; an empty box, Start.
+    fireEvent.change(field, { target: { value: 'Make it shorter first' } })
+    expect(inRow.queryByRole('button', { name: 'Start First-principles school' })).toBeNull()
+    expect(inRow.getByRole('button', { name: 'Send' })).toBeTruthy()
+    fireEvent.change(field, { target: { value: '' } })
+    expect(inRow.getByRole('button', { name: 'Start First-principles school' })).toBeTruthy()
+    // The words take the row's width, four lines of them (no tooltip shows at the notch), with her
+    // figure at the bubble's corner.
+    const rules = rulesOf(readFileSync(resolve(process.cwd(), 'src/island/island.css'), 'utf8'))
+    expect(cascaded(row.querySelector(':scope > .island-request')!, 'grid-column', DESKTOP, rules)).toBe('2 / -1')
+    expect(cascaded(row.querySelector('.island-said-by .island-ask')!, 'line-clamp', DESKTOP, rules)).toBe('4')
+    expect(cascaded(row.querySelector(':scope > .island-row-figures')!, 'align-self', DESKTOP, rules)).toBe('start')
+    // While something dropped has the box, Start sits under her words.
+    tellPage({ kind: 'drag', near: true })
+    fireEvent.drop(container.querySelector<HTMLElement>('.island-shape')!, carrying([pdf]))
+    await waitFor(() => expect(container.querySelector('.island-pinned .island-intake')).toBeTruthy())
+    const dropped = container.querySelector<HTMLElement>('.island-pinned')!
+    expect(within(dropped).getByRole('textbox', { name: 'Or say what to do' })).toBeTruthy()
+    expect(dropped.querySelector('.island-request + .island-acts')?.contains(within(dropped).getByRole('button', { name: 'Start First-principles school' }))).toBe(true)
+    fireEvent.click(within(dropped).getByRole('button', { name: 'Don’t start First-principles school' }))
+    await waitFor(() => expect(answeredTeams).toEqual([{ id: 'tr1', decision: 'decline' }]))
+  }, 15_000)
 })
 

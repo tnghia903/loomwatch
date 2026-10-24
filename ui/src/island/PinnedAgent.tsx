@@ -1,20 +1,18 @@
 // The agent pinned to the notch, drawn (ADR 0083, decisions 9 and 10): the slot that opens when
 // something is dragged near, what went in waiting for a job, its answer with Copy, its request to
-// start one of your teams, and the team it started at work under the notch as its crew.
-import { useEffect, useState } from 'react'
-import { parse } from 'yaml'
-
+// start one of your teams in its own words, and the team it started at work under the notch as its
+// crew.
 import { FigureStill } from '../components/agents/FigureStill'
 import type { WorkPhase } from '../lib/library/figure'
 import { figureFor } from '../lib/library/figures'
 import { dollars } from '../lib/runs/spend'
 import type { TeamRequest } from '../lib/runs/teamRequests'
-import { fetchTeamFile } from '../lib/team-file/client'
 import { useRunSession } from '../lib/runs/useRunSession'
 import { workPhase } from '../lib/watch/workPhase'
 import { intakeLabel, jobsFor, kindOf } from './intake'
 import { plainText, type TeamNow } from './teams'
 import type { Island } from './useIsland'
+import { useRunLimit } from './useRunLimit'
 
 /** The open slot: a gold lip along the island's edge, and the pinned agent's eyes over it. */
 export function Slot({ island }: { island: Island }) {
@@ -76,48 +74,55 @@ export function AnswerSlip({ island, team }: { island: Island; team: TeamNow }) 
 }
 
 /**
- * The pinned agent asks one of your teams to do part of the job: nothing runs until Start, which
- * names the team and says what one run of it may spend, from its file. What an answer did shows
- * for a moment before the card goes.
+ * The pinned agent asks one of your teams to do part of the job, in its own words, to the team named
+ * under them, which says too when a run of it has no spending limit. Nothing runs until Start: under
+ * the words on the card that drops from the notch (`start`), and in the message box's place in the
+ * agent's row, where writing something turns it back into Send. In the row, × in the corner says
+ * don't (`decline`); the card has none, so putting it away never answers it. The island gets no
+ * pointer to show a tooltip with, so nothing a person needs is only in one. What an answer did
+ * shows for a moment before it goes.
  */
-export function TeamAskBody({ island, request, first }: { island: Island; request: TeamRequest; first: boolean }) {
-  const pinned = island.pinned
-  const busy = island.teamBusy === request.id
+export function TeamAskBody({ island, request, first, start, decline }: { island: Island; request: TeamRequest; first: boolean; start: boolean; decline: boolean }) {
   const failed = island.teamFailed === request.id
   const said = island.teamSaid?.id === request.id ? island.teamSaid.text : null
+  const crew = island.crewFigures(request.team.path).slice(0, 3)
   const limit = useRunLimit(request.team.path)
   return (
     <>
-      <div className="island-words">
-        <small>{pinned?.name ?? 'Your agent'} wants {request.team.name} to do this</small>
-        <p className="island-ask" title={request.request}>{request.request}</p>
-        {!said && limit !== undefined && <small className="island-detail">{limit === null ? 'No spending limit set' : `May spend up to ${dollars(limit)} on this run`}</small>}
+      <div className="island-words island-request">
+        <div className="island-said-by">
+          <p className="island-ask" title={request.request}>{request.request}</p>
+          {decline && !said && <button type="button" className="island-not-now" aria-label={`Don’t start ${request.team.name}`} title={`Don’t start ${request.team.name}`} disabled={island.teamBusy === request.id} onClick={() => island.answerTeam(request, 'decline')}>×</button>}
+        </div>
+        <small className="island-for">
+          to{' '}
+          {crew.length > 0 && (
+            <span className="island-crew" aria-hidden="true">
+              {crew.map((figure, index) => <span key={index} className="island-crew-figure"><FigureStill figure={figure} alt="" /></span>)}
+            </span>
+          )}
+          {' '}<span className="island-team">{request.team.name}</span>
+          {limit === null && ' · no spending limit'}
+        </small>
         {failed && <small className="island-problem" role="alert">That didn’t go through. Press Start again.</small>}
         {said && <small className="island-said" role="status">{said}</small>}
       </div>
-      {!said && (
+      {start && !said && (
         <div className="island-acts">
-          <button type="button" className="island-button" disabled={busy} onClick={() => island.answerTeam(request, 'decline')}>Not now</button>
-          <button type="button" className={`island-button${first ? ' is-primary' : ''}`} disabled={busy} onClick={() => island.answerTeam(request, 'start')}>Start {request.team.name}</button>
+          <StartTeam island={island} request={request} first={first} limit={limit} />
         </div>
       )}
     </>
   )
 }
 
-/** What one run of the team at `path` may spend, from its file: `null` when it sets no limit,
-    `undefined` until read. */
-function useRunLimit(path: string): number | null | undefined {
-  const [limit, setLimit] = useState<{ path: string; perRun: number | null } | null>(null)
-  useEffect(() => {
-    let live = true
-    fetchTeamFile(path).then((file) => {
-      const perRun = (parse(file.yaml) as { spend?: { perRun?: unknown } } | null)?.spend?.perRun
-      if (live) setLimit({ path, perRun: typeof perRun === 'number' && perRun > 0 ? perRun : null })
-    }, () => {})
-    return () => { live = false }
-  }, [path])
-  return limit?.path === path ? limit.perRun : undefined
+/** Start on what the pinned agent asked a team, naming the team and what one run of it may spend
+    for the screen reader and the tooltip, where there is one. */
+export function StartTeam({ island, request, first, limit }: { island: Island; request: TeamRequest; first: boolean; limit: number | null | undefined }) {
+  const said = `Start ${request.team.name}.${typeof limit === 'number' ? ` It may spend up to ${dollars(limit)}.` : ''}`
+  return (
+    <button type="button" className={`island-button${first ? ' is-primary' : ''}`} aria-label={`Start ${request.team.name}`} title={said} disabled={island.teamBusy === request.id} onClick={() => island.answerTeam(request, 'start')}>Start</button>
+  )
 }
 
 /** What an agent at work on the stage is doing, from its newest events, in a word or two. */
