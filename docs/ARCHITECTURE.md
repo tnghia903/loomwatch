@@ -21,11 +21,15 @@ instructions and tools.
   message ("Let me check the prices."), is recorded as said on the way, a paragraph of its own, and
   the turn's reply leaves it out unless it is all the turn wrote. A reply the length limit cut off
   is carried on (twice at most), and a tool call it cut off is sent back with the reason, so the
-  model makes it smaller instead of repeating it. A reply Claude's provider pauses part way through
+  model makes it smaller instead of repeating it. A reply may be 16,000 tokens long, or on a Claude
+  key as long as the model's list says it writes, up to 64,000 and the room the context has above
+  the point where it is summarised; a summary is never asked for more than 16,000. A reply Claude's provider pauses part way through
   the searches, page reads and code it runs itself is carried on within the same call, five times
   at most; one still paused after that is kept without the step the provider hadn't run (a
   conversation with a step that has no result is refused), and the model is told so and carries
-  on. How full the context is comes from the last of those requests, not their total. A long tool
+  on. How full the context is comes from the last of those requests, not their total, and within
+  one request from what was sent, what the model wrote and the size of what those steps brought
+  back: the provider's usage counts the conversation again for every step it ran. A long tool
   output is set aside behind an id the
   agent can read back. A conversation that nears the model's context window, or 160k tokens on a
   larger one, is replaced by a summary the model writes.
