@@ -37,7 +37,7 @@ function rail(overrides: Partial<TeamRailProps> = {}) {
   const go = vi.fn()
   const onNewTeam = vi.fn()
   render(<TeamRail open={{ path: '/Users/ana/LoomWatch/teams/blog.yaml', name: 'Blog post', agents: [{ id: 'researcher', name: 'Researcher' }, { id: 'writer', name: 'Writer' }, { id: 'editor', name: 'Editor' }] }} runs={[]} savedJobs={[]} view="chat" go={go} onNewTeam={onNewTeam} leave={() => null} {...overrides} />)
-  return { go, onNewTeam, nav: screen.getByRole('navigation', { name: 'Your teams' }) }
+  return { go, onNewTeam, nav: screen.getByRole('navigation', { name: 'My team' }) }
 }
 
 describe('TeamRail', () => {
@@ -80,7 +80,7 @@ describe('TeamRail', () => {
     const same = { runs: [], savedJobs: [], view: 'chat' as const, go: vi.fn(), onNewTeam: vi.fn(), leave: () => null }
     const blog = { path: '/Users/ana/LoomWatch/teams/blog.yaml', name: 'Blog post', agents: [{ id: 'researcher', name: 'Researcher' }, { id: 'writer', name: 'Writer' }, { id: 'editor', name: 'Editor' }] }
     const view = render(<TeamRail open={blog} {...same} />)
-    const nav = screen.getByRole('navigation', { name: 'Your teams' })
+    const nav = screen.getByRole('navigation', { name: 'My team' })
     await within(nav).findByRole('link', { name: 'Blog post' })
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     view.rerender(<TeamRail open={{ path: '/Users/ana/LoomWatch/teams/trip.yaml', name: 'Trip planner', agents: [{ id: 'planner', name: 'Planner' }] }} {...same} />)

@@ -45,18 +45,18 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(
 it('opens another team in place: the frame and its rail stay, and the team’s part starts again from the new address', async () => {
   render(<App />)
   expect(screen.getByRole('main', { name: 'Team' })).toHaveTextContent('demo.yaml · mount 1')
-  const rail = screen.getByRole('navigation', { name: 'Your teams' })
+  const rail = screen.getByRole('navigation', { name: 'My team' })
   fireEvent.click(await within(rail).findByRole('link', { name: 'Trip' }))
   expect(await screen.findByText('trip.yaml · mount 2 · run none')).toBeInTheDocument()
   expect(window.location.search).toBe('?path=trip.yaml')
-  expect(screen.getByRole('navigation', { name: 'Your teams' })).toBe(rail)
+  expect(screen.getByRole('navigation', { name: 'My team' })).toBe(rail)
 })
 
 it('follows Back to the team before, with the run its address names', async () => {
   window.history.replaceState({}, '', '/?path=demo.yaml&run=run-3')
   render(<App />)
   expect(screen.getByRole('main', { name: 'Team' })).toHaveTextContent('demo.yaml · mount 1 · run run-3')
-  fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
+  fireEvent.click(await within(screen.getByRole('navigation', { name: 'My team' })).findByRole('link', { name: 'Trip' }))
   await screen.findByText(/trip\.yaml · mount 2/)
   window.history.back()
   expect(await screen.findByText(/demo\.yaml · mount 3 · run run-3/)).toBeInTheDocument()

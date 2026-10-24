@@ -141,7 +141,7 @@ describe('Home', () => {
     const steps = within(screen.getByRole('list', { name: 'How it works' })).getAllByRole('listitem')
     expect(steps.map((step) => step.querySelector('strong')?.textContent)).toEqual(['Agents.', 'Workflow.', 'Chat.'])
     const agents = await screen.findByRole('heading', { name: /My agents/ })
-    const teams = screen.getByRole('heading', { name: /Your teams/ })
+    const teams = screen.getByRole('heading', { name: /My team/ })
     expect(agents.compareDocumentPosition(teams) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // A team with no agents opens on its agents, the first thing to set up; one with agents, on its workflow.
     fireEvent.click(await screen.findByRole('button', { name: /Empty desk/ }))

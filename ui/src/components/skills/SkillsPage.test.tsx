@@ -415,4 +415,11 @@ describe('the page’s words', () => {
     await screen.findByRole('checkbox', { name: /Writer/ })
     expect(document.body.textContent).not.toMatch(/sign[ -]?in|log[ -]?in|subscription|account/i)
   })
+
+  it('leads back to My agents and My team, named as their pages are', async () => {
+    daemon(on('GET', '/api/skills', () => folder([])))
+    render(<SkillsPage />)
+    expect(await screen.findByRole('link', { name: 'My agents' })).toHaveAttribute('href', '/agents')
+    expect(screen.getByRole('link', { name: 'My team' })).toHaveAttribute('href', '/')
+  })
 })

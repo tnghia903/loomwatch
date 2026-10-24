@@ -41,8 +41,8 @@ describe('An agent’s page in the team page’s frame', () => {
     const header = chip.closest('.workspace-chrome') as HTMLElement
     expect(header).not.toBeNull()
     // The brand is the way to your teams, and says so on hover.
-    expect(within(header).getByRole('link', { name: 'LoomWatch, your teams' })).toHaveAttribute('href', '/')
-    expect(within(header).getByRole('link', { name: 'LoomWatch, your teams' })).toHaveAttribute('title', 'Your teams')
+    expect(within(header).getByRole('link', { name: 'LoomWatch, my team' })).toHaveAttribute('href', '/')
+    expect(within(header).getByRole('link', { name: 'LoomWatch, my team' })).toHaveAttribute('title', 'My team')
     const tabs = within(header).getByRole('navigation', { name: 'Agent view' })
     expect(within(tabs).getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(header).getByRole('button', { name: 'All clear' })).toBeInTheDocument()
@@ -53,8 +53,8 @@ describe('An agent’s page in the team page’s frame', () => {
     expect(within(header).queryByRole('menuitem', { name: 'Team memory' })).not.toBeInTheDocument()
     // The page's own heading is the agent's name, for the reader that goes by headings.
     expect(screen.getByRole('heading', { level: 1, name: 'Writer' })).toBeInTheDocument()
-    // Home's header is gone from it: no second brand, no Your teams button.
-    expect(screen.queryByRole('link', { name: 'Your teams' })).not.toBeInTheDocument()
+    // Home's header is gone from it: no second brand, no My team button.
+    expect(screen.queryByRole('link', { name: 'My team' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: /LoomWatch/ })).toHaveLength(1)
   })
 
@@ -124,7 +124,7 @@ describe('An agent’s page in the team page’s frame', () => {
     view.unmount()
     window.history.replaceState({}, '', '/agents')
     page()
-    expect(screen.getByRole('link', { name: 'Your teams' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'My team' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'My agents' })).not.toBeInTheDocument()
   })
 })

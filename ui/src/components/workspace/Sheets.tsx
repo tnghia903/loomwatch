@@ -45,7 +45,7 @@ export function OpenTeamSheet({ onClose }: { onClose: () => void }) {
     <Sheet label="Open a team" onClose={onClose}>
       <form onSubmit={(event) => { event.preventDefault(); if (matches[0]) openTeam(matches[0].path) }} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
         <label className="field"><span className="t-micro" style={{ color: 'var(--color-ink-3)' }}>Open a team</span><input autoFocus className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a team by name" /></label>
-        <div className="pop-list" style={{ padding: 0, maxHeight: 280 }} aria-label="Your teams">
+        <div className="pop-list" style={{ padding: 0, maxHeight: 280 }} aria-label="My team">
           {teams === null && !error && <p role="status" className="pop-empty t-meta">Finding teams…</p>}
           {error && <p role="alert" className="pop-empty t-meta" style={{ color: 'var(--color-alert)' }}>{error}</p>}
           {teams !== null && matches.length === 0 && <p className="pop-empty t-meta">No team matches.</p>}

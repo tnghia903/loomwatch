@@ -168,7 +168,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: 'save',
     screen: 'agents',
-    // Going to Your teams is a new page, Home, where the guide carries on by itself.
+    // Going to My team is a new page, Home, where the guide carries on by itself.
     view: () => present('[data-tour="agent-builder"][data-tour-saved]')
       ? {
           title: 'Now put it in a team',

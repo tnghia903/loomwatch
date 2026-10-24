@@ -206,7 +206,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
 
         <section className="home-teams" aria-labelledby="home-teams-title">
           <div className="home-teams-head">
-            <h2 id="home-teams-title">Your teams<span className="home-section-says">Workflows and chats</span></h2>
+            <h2 id="home-teams-title">My team<span className="home-section-says">Workflows and chats</span></h2>
             {teams && teams.length > 6 && (
               <label className="home-filter"><Search size={14} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a team" aria-label="Find a team" /></label>
             )}

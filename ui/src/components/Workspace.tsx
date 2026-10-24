@@ -2680,7 +2680,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         <div className="workspace-chrome pointer-events-none absolute inset-x-0 z-40 flex flex-col items-center gap-2" style={{ top: 'var(--lw-panel-inset)' }}>
           {/* The brand is the way home: every team is one click from the list of all teams. */}
           {/* Home opens in place, as another team does; a click that asks for a new tab gets one. */}
-          <a className="delivery-brand" href="/" aria-label="LoomWatch, your teams" title="Your teams" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}
+          <a className="delivery-brand" href="/" aria-label="LoomWatch, my team" title="My team" style={{ pointerEvents: 'auto', color: 'inherit', textDecoration: 'none' }}
             onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); goToTeam('/') }}><LoomMark size={26} state={needsYou.mark} /><LoomWordmark height={19} /></a>
           <WorkspaceMenu runView={runView} onMemory={() => { clearSelection(); setMemoryOpen(true) }} />
           <div className="needs-you-anchor"><AskButton ask={ask} onToggle={toggleAsk} />{needsYouTray(runView ? activeRunId : null)}</div>

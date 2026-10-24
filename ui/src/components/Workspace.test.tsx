@@ -1761,7 +1761,7 @@ describe('the team rail', () => {
 
   it('lists the teams, this one as it is on screen, and opens another on the same tab', async () => {
     renderWorkspace()
-    const rail = screen.getByRole('navigation', { name: 'Your teams' })
+    const rail = screen.getByRole('navigation', { name: 'My team' })
     const trip = await within(rail).findByRole('link', { name: 'Trip' })
     // The open team's name and agents are the canvas's, saved or not.
     expect(within(rail).getByRole('link', { name: 'demo' })).toHaveAttribute('aria-current', 'page')
@@ -1780,19 +1780,19 @@ describe('the team rail', () => {
 
   it('opens another team in place, the rail staying with the keyboard on the team picked', async () => {
     render(<TeamPageFrame />)
-    const rail = screen.getByRole('navigation', { name: 'Your teams' })
+    const rail = screen.getByRole('navigation', { name: 'My team' })
     const trip = await within(rail).findByRole('link', { name: 'Trip' })
     trip.focus()
     fireEvent.click(trip)
     await waitFor(() => expect(real.search).toBe('?path=trip.yaml'))
     expect(assign).not.toHaveBeenCalled()
-    expect(screen.getByRole('navigation', { name: 'Your teams' })).toBe(rail)
+    expect(screen.getByRole('navigation', { name: 'My team' })).toBe(rail)
     expect(document.activeElement).toBe(trip)
   })
 
   it('goes Home in place from the LoomWatch mark', async () => {
     render(<TeamPageFrame />)
-    const mark = screen.getByRole('link', { name: 'LoomWatch, your teams' })
+    const mark = screen.getByRole('link', { name: 'LoomWatch, my team' })
     // A click that asks for a new tab is left to the browser.
     expect(fireEvent.click(mark, { metaKey: true })).toBe(true)
     expect(real.search).toBe('?path=demo.yaml')
@@ -1804,7 +1804,7 @@ describe('the team rail', () => {
   it('asks before leaving changes, and opens the other team once they are saved', async () => {
     Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
     const view = renderWorkspace()
-    fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
+    fireEvent.click(await within(screen.getByRole('navigation', { name: 'My team' })).findByRole('link', { name: 'Trip' }))
     expect(assign).not.toHaveBeenCalled()
     await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).getByRole('button', { name: 'Save first' })) })
     expect(documentState.save).toHaveBeenCalledOnce()
@@ -1821,7 +1821,7 @@ describe('the team rail', () => {
   it('drops the changes by reading the file again, then goes', async () => {
     Object.assign(documentState, { documentChipState: 'dirty', saveState: 'dirty' })
     const view = renderWorkspace()
-    fireEvent.click(await within(screen.getByRole('navigation', { name: 'Your teams' })).findByRole('link', { name: 'Trip' }))
+    fireEvent.click(await within(screen.getByRole('navigation', { name: 'My team' })).findByRole('link', { name: 'Trip' }))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Discard' })) })
     expect(document.activeElement).toHaveAttribute('href', '/?path=trip.yaml')
     expect(documentState.reloadFromDisk).toHaveBeenCalledOnce()
@@ -1835,7 +1835,7 @@ describe('the team rail', () => {
   // ADR 0043: the rail is the one way to another team or a new one; the team menu is this team's file.
   it('opens New team from the rail’s +, and the team menu lists no teams', async () => {
     renderWorkspace()
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Your teams' })).getByRole('button', { name: 'New team' }))
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'My team' })).getByRole('button', { name: 'New team' }))
     expect(await screen.findByRole('dialog', { name: 'Create a team' })).toBeInTheDocument()
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Create a team' }), { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: /open team menu/ }))
