@@ -592,14 +592,19 @@ fn many(count: usize, thing: &str) -> String {
 }
 
 /// A CSV file read as a spreadsheet app reads it: its rows and columns, the first row whose number
-/// of fields isn't the first row's, or the quote never closed.
+/// of fields isn't the first row's, or the quote never closed. Blank lines aren't rows, and a row
+/// is named by the line it starts on.
 fn table(text: &str) -> String {
-    let mut rows: Vec<usize> = Vec::new();
+    // Excel's "CSV UTF-8" starts with a byte-order mark, which isn't part of the first field.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    // Each row's number of fields, and the line it starts on.
+    let mut rows: Vec<(usize, usize)> = Vec::new();
     let mut fields = 1;
     let mut row_started = false;
     let mut field_start = true;
     let mut quoted = false;
     let mut line = 1;
+    let mut row_line = 1;
     let mut quote_line = 1;
     let mut chars = text.chars().peekable();
     while let Some(letter) = chars.next() {
@@ -629,12 +634,13 @@ fn table(text: &str) -> String {
             }
             '\n' => {
                 if row_started {
-                    rows.push(fields);
+                    rows.push((fields, row_line));
                 }
                 fields = 1;
                 field_start = true;
                 row_started = false;
                 line += 1;
+                row_line = line;
             }
             '\r' => {}
             _ => {
@@ -649,9 +655,9 @@ fn table(text: &str) -> String {
         );
     }
     if row_started {
-        rows.push(fields);
+        rows.push((fields, row_line));
     }
-    let Some(&columns) = rows.first() else {
+    let Some(&(columns, _)) = rows.first() else {
         return "it has no rows.".to_owned();
     };
     let shape = format!(
@@ -659,34 +665,106 @@ fn table(text: &str) -> String {
         many(rows.len(), "row"),
         many(columns, "column")
     );
-    match rows.iter().position(|&count| count != columns) {
-        Some(at) => format!(
-            "{shape}, but row {} has {} where the first row has {columns}.",
-            at + 1,
-            many(rows[at], "field")
+    match rows.iter().find(|(count, _)| *count != columns) {
+        Some((count, line)) => format!(
+            "{shape}, but the row on line {line} has {} where the first row has {columns}.",
+            many(*count, "field")
         ),
         None => format!("{shape}."),
     }
 }
 
-/// Whether a JSON file parses, and what it holds at the top.
+/// Whether a JSON file parses, and what it holds at the top. One with the comments and trailing
+/// commas that `tsconfig.json` and VS Code's settings allow is said to parse only that way, with
+/// why it isn't plain JSON, since a file such as `package.json` must be.
 fn json(text: &str) -> String {
-    match serde_json::from_str::<Value>(text) {
-        Ok(Value::Object(keys)) => {
-            format!(
-                "it parses as JSON: an object of {}.",
-                many(keys.len(), "key")
-            )
-        }
-        Ok(Value::Array(items)) => {
-            format!(
-                "it parses as JSON: a list of {}.",
-                many(items.len(), "item")
-            )
-        }
-        Ok(_) => "it parses as JSON.".to_owned(),
-        Err(error) => format!("it isn't valid JSON: {error}."),
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let holds = |value: &Value| match value {
+        Value::Object(keys) => format!("an object of {}", many(keys.len(), "key")),
+        Value::Array(items) => format!("a list of {}", many(items.len(), "item")),
+        _ => "one value".to_owned(),
+    };
+    let strict = match serde_json::from_str::<Value>(text) {
+        Ok(value) => return format!("it parses as JSON: {}.", holds(&value)),
+        Err(error) => error,
+    };
+    let plain = without_comments(text);
+    if plain == text {
+        return format!("it isn't valid JSON: {strict}.");
     }
+    match serde_json::from_str::<Value>(&plain) {
+        Ok(value) => format!(
+            "it parses as JSON with comments ({}), which tsconfig.json and VS Code's settings \
+             allow, but not as plain JSON: {strict}.",
+            holds(&value)
+        ),
+        Err(error) => format!("it isn't valid JSON, even with comments: {error}."),
+    }
+}
+
+/// `text` without `//` and `/* */` comments and without a comma just before a closing bracket,
+/// strings left as they are. Every line stays where it was, so a parse error names the right line.
+fn without_comments(text: &str) -> String {
+    let mut bare = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    while let Some(letter) = chars.next() {
+        if in_string {
+            bare.push(letter);
+            match letter {
+                '\\' => bare.extend(chars.next()),
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match letter {
+            '"' => {
+                in_string = true;
+                bare.push(letter);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                if chars.by_ref().any(|next| next == '\n') {
+                    bare.push('\n');
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut last = ' ';
+                for next in chars.by_ref() {
+                    if last == '*' && next == '/' {
+                        break;
+                    }
+                    if next == '\n' {
+                        bare.push('\n');
+                    }
+                    last = next;
+                }
+            }
+            _ => bare.push(letter),
+        }
+    }
+    let letters: Vec<char> = bare.chars().collect();
+    let mut out = String::with_capacity(bare.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for (at, &letter) in letters.iter().enumerate() {
+        if in_string {
+            in_string = escaped || letter != '"';
+            escaped = !escaped && letter == '\\';
+        } else if letter == '"' {
+            in_string = true;
+        } else if letter == ','
+            && letters[at + 1..]
+                .iter()
+                .find(|next| !next.is_whitespace())
+                .is_some_and(|next| matches!(next, '}' | ']'))
+        {
+            continue;
+        }
+        out.push(letter);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -991,10 +1069,10 @@ mod tests {
         )
     }
 
-    /// A table, JSON or a document written or edited is read back, and the answer says what it
-    /// holds or why it doesn't open. The write stands either way.
+    /// A table or a document written is read back, and the answer says what it holds or why it
+    /// doesn't open. The write stands either way.
     #[test]
-    fn a_written_table_json_or_document_is_read_back() {
+    fn a_written_table_or_document_is_read_back() {
         let folder = Folder::new();
         let cwd = &folder.0;
         let table = wrote(
@@ -1006,14 +1084,24 @@ mod tests {
             table.text,
             "Created sales.csv (34 bytes). Checked: it opens as a table of 3 rows and 2 columns."
         );
-        let ragged = wrote(cwd, "ragged.csv", "a,b\n1,2\n3,4,5\n");
+        let ragged = wrote(cwd, "ragged.csv", "a,b\n\n1,2\n3,4,5\n");
         assert!(!ragged.failed);
         assert!(
             ragged.text.ends_with(
-                "a table of 3 rows and 2 columns, but row 3 has 3 fields where the first row has 2."
+                "a table of 3 rows and 2 columns, but the row on line 4 has 3 fields where the \
+                 first row has 2."
             ),
             "{}",
             ragged.text
+        );
+        // As Excel's "CSV UTF-8" saves one: a byte-order mark before a quoted first field.
+        let marked = wrote(cwd, "marked.csv", "\u{feff}\"Name, full\",Age\nBob,30\n");
+        assert!(
+            marked
+                .text
+                .ends_with("Checked: it opens as a table of 2 rows and 2 columns."),
+            "{}",
+            marked.text
         );
         let open = wrote(cwd, "open.csv", "a,b\n\"never closed,2\n");
         assert!(
@@ -1025,6 +1113,34 @@ mod tests {
         );
         assert!(!open.failed && cwd.join("open.csv").exists());
 
+        let pdf = String::from_utf8(minimal_pdf(&["First page", "Second page"])).unwrap();
+        let paged = wrote(cwd, "out/brief.pdf", &pdf);
+        assert!(
+            paged
+                .text
+                .ends_with("Checked: it opens as a PDF of 2 pages."),
+            "{}",
+            paged.text
+        );
+        let word = wrote(cwd, "report.docx", "# Report\n\nWritten as text.");
+        assert!(!word.failed && cwd.join("report.docx").exists());
+        assert!(
+            word.text
+                .contains("Checked: it doesn't open. report.docx isn't a Word file")
+                && word
+                    .text
+                    .ends_with("A Word file isn't text, so write_file can't make one."),
+            "{}",
+            word.text
+        );
+    }
+
+    /// A JSON file written or edited is parsed; one with the comments `tsconfig.json` allows is
+    /// said to parse only that way, with why it isn't plain JSON.
+    #[test]
+    fn a_written_json_file_is_parsed() {
+        let folder = Folder::new();
+        let cwd = &folder.0;
         let settings = wrote(cwd, "settings.json", "{\"a\": 1, \"b\": [1, 2]}");
         assert!(
             settings
@@ -1048,25 +1164,27 @@ mod tests {
             broken.text
         );
 
-        let pdf = String::from_utf8(minimal_pdf(&["First page", "Second page"])).unwrap();
-        let paged = wrote(cwd, "out/brief.pdf", &pdf);
-        assert!(
-            paged
-                .text
-                .ends_with("Checked: it opens as a PDF of 2 pages."),
-            "{}",
-            paged.text
+        let commented = wrote(
+            cwd,
+            "tsconfig.json",
+            "{\n  // Where the build goes.\n  \"outDir\": \"dist\", /* \"x\": 1, */\n  \"lib\": [\"a//b\",],\n}\n",
         );
-        let word = wrote(cwd, "report.docx", "# Report\n\nWritten as text.");
-        assert!(!word.failed && cwd.join("report.docx").exists());
         assert!(
-            word.text
-                .contains("Checked: it doesn't open. report.docx isn't a Word file")
-                && word
-                    .text
-                    .ends_with("A Word file isn't text, so write_file can't make one."),
+            commented.text.contains(
+                "Checked: it parses as JSON with comments (an object of 2 keys), which \
+                 tsconfig.json and VS Code's settings allow, but not as plain JSON: key must be a \
+                 string at line 2 column 3."
+            ),
             "{}",
-            word.text
+            commented.text
+        );
+        let trailing = wrote(cwd, "package.json", "{\"name\": \"a\",}");
+        assert!(
+            trailing
+                .text
+                .contains("but not as plain JSON: trailing comma at line 1 column 14."),
+            "{}",
+            trailing.text
         );
     }
 

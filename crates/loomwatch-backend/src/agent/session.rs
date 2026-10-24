@@ -653,6 +653,7 @@ impl Session {
             let completion = match self.call_model(&cancel, call).await {
                 Ok(completion) => completion,
                 Err(CallError::Cancelled) => {
+                    self.take_back_last_answer();
                     return Ok(ended(StopReason::Cancelled, turn, &reply));
                 }
                 // Once a turn, room is made and the call made again; a second refusal is the
@@ -662,7 +663,10 @@ impl Session {
                     overflowed = true;
                     continue;
                 }
-                Err(CallError::Failed(error)) => return Err(error),
+                Err(CallError::Failed(error)) => {
+                    self.take_back_last_answer();
+                    return Err(error);
+                }
             };
             self.count(&completion, &mut turn, call).await?;
             self.record_server_tools(&completion.server_tool_calls)
@@ -721,6 +725,22 @@ impl Session {
                     });
                     continue;
                 }
+                // Paused part way through the provider's own searches, after "no more will run":
+                // asked again, with none it may call, rather than told to carry on searching.
+                if paused && let Some(asked) = last_answer {
+                    if asked != Call::LastAnswer {
+                        return Ok(ended(StopReason::MaxTurnRequests, turn, &reply));
+                    }
+                    if !wrote_nothing {
+                        self.emit(events::commentary(&self.message_id())).await?;
+                    }
+                    self.history.push(Message::User {
+                        content: LAST_ANSWER.to_owned(),
+                        pictures: Vec::new(),
+                    });
+                    last_answer = Some(Call::BareLastAnswer);
+                    continue;
+                }
                 if paused && paused_in_a_row <= MAX_PAUSES {
                     if !wrote_nothing {
                         self.emit(events::commentary(&self.message_id())).await?;
@@ -745,7 +765,9 @@ impl Session {
                 self.emit(events::commentary(&self.message_id())).await?;
             }
             self.run_calls(&calls, cut, &cancel).await?;
-            if paused {
+            // Past the limit nothing is carried on: the results say the calls didn't run, and the
+            // answer is asked for again below.
+            if paused && last_answer.is_none() {
                 // After its calls' results, in the same message to the model.
                 self.history.push(Message::User {
                     content: PAUSED.to_owned(),
@@ -849,6 +871,15 @@ impl Session {
             "\n\n{left} tool call{} left in this turn.",
             if left == 1 { "" } else { "s" }
         )
+    }
+
+    /// Takes back the request for the answer at the limit when the call made for it was cancelled
+    /// or failed: left last, it would join the next turn's prompt and tell it no calls will run.
+    fn take_back_last_answer(&mut self) {
+        if matches!(self.history.last(), Some(Message::User { content, .. }) if content == LAST_ANSWER)
+        {
+            self.history.pop();
+        }
     }
 
     /// Counts `pictures` among the ones the running message's calls opened.

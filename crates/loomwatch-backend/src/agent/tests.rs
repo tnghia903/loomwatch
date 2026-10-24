@@ -1591,7 +1591,7 @@ fn never_stops(answer: &'static str) -> Demo {
     })
 }
 
-/// A session that may make `max` tool calls a turn.
+/// A session allowed the web that may make `max` tool calls a turn.
 fn limited(folder: &Folder, demo: &Demo, max: usize, sink: Arc<Recorded>) -> Session {
     let mut config = SessionConfig::new(
         "session-1",
@@ -1600,6 +1600,7 @@ fn limited(folder: &Folder, demo: &Demo, max: usize, sink: Arc<Recorded>) -> Ses
         "anthropic/claude-haiku-5.5",
     );
     config.max_tool_calls = max;
+    config.tools = ToolSet::all(true);
     Session::open(
         config,
         Provider::Demo(demo.clone()),
@@ -1628,7 +1629,7 @@ async fn a_turn_at_its_tool_call_limit_still_ends_with_an_answer() {
     assert_eq!(requests[3].prompt(), LAST_ANSWER);
     assert_eq!(requests[3].tools, requests[0].tools);
     assert!(!requests[3].tools_off);
-    assert!(requests[4].tools.is_empty());
+    assert!(requests[4].tools.is_empty() && !requests[4].server_tools.web_search);
     let results = tool_results(&requests[4].messages);
     assert_eq!(results.len(), 4);
     assert_eq!(results[3].1, NOT_RUN_AT_LIMIT);
@@ -1662,6 +1663,7 @@ async fn a_model_that_answers_at_the_limit_is_asked_once() {
     let requests = demo.requests();
     assert_eq!(requests.len(), 3);
     assert_eq!(requests[2].tools, requests[0].tools);
+    assert!(requests[0].server_tools.web_search);
     assert_eq!(requests[2].server_tools, requests[0].server_tools);
     assert!(!requests[2].tools_off);
 }
@@ -1672,22 +1674,22 @@ async fn a_model_that_answers_at_the_limit_is_asked_once() {
 #[tokio::test]
 async fn a_turn_past_its_limit_ends_whatever_the_model_does() {
     let folder = Folder::new();
-    let demo = Demo::responder(|_| {
+    // A turn that never ends never yields to a timeout either, so the stand-in counts.
+    let demo = Demo::responder(|request| {
+        assert!(request.messages.len() < 20, "the turn should have ended");
         Some(Completion::calls(
             "Still looking.",
             vec![call("l", "list_files", &json!({}))],
         ))
     });
     let mut session = limited(&folder, &demo, 1, Arc::new(Recorded::default()));
-    let end = tokio::time::timeout(Duration::from_secs(10), session.prompt("Survey."))
-        .await
-        .expect("the turn should end")
-        .unwrap();
+    let end = session.prompt("Survey.").await.unwrap();
     assert_eq!(end.stop_reason, StopReason::MaxTurnRequests);
     assert_eq!(demo.requests().len(), 3);
 
     let folder = Folder::new();
     let demo = Demo::responder(|request| {
+        assert!(request.messages.len() < 20, "the turn should have ended");
         let asked = request.messages.iter().any(
             |message| matches!(message, Message::User { content, .. } if content == LAST_ANSWER),
         );
@@ -1700,10 +1702,7 @@ async fn a_turn_past_its_limit_ends_whatever_the_model_does() {
         ))
     });
     let mut session = limited(&folder, &demo, 1, Arc::new(Recorded::default()));
-    let end = tokio::time::timeout(Duration::from_secs(10), session.prompt("Survey."))
-        .await
-        .expect("the turn should end")
-        .unwrap();
+    let end = session.prompt("Survey.").await.unwrap();
     assert_eq!(end.stop_reason, StopReason::MaxTurnRequests);
     assert!(end.reply.starts_with("The answer so far"), "{}", end.reply);
 }
@@ -1749,6 +1748,135 @@ async fn the_request_for_the_answer_outlasts_a_summary() {
         bare.messages
     );
     assert_eq!(bare.prompt(), LAST_ANSWER);
+    let asked = bare
+        .messages
+        .iter()
+        .filter(
+            |message| matches!(message, Message::User { content, .. } if content == LAST_ANSWER),
+        )
+        .count();
+    assert_eq!(asked, 1);
+}
+
+/// A reply the provider paused part way through its own searches, when the answer was asked for,
+/// isn't told to carry on searching: it is asked again with none it may call.
+#[tokio::test]
+async fn a_paused_answer_at_the_limit_is_asked_for_with_no_tools() {
+    let folder = Folder::new();
+    let demo = Demo::responder(|request| {
+        if request.tools.is_empty() {
+            return Some(Completion::text("The answer, from what I had."));
+        }
+        if request.prompt() == LAST_ANSWER {
+            return Some(Completion {
+                finish: Finish::Paused,
+                ..Completion::text("Let me check one more page.")
+            });
+        }
+        Some(Completion::calls(
+            "",
+            vec![call("l", "list_files", &json!({}))],
+        ))
+    });
+    let sink = Arc::new(Recorded::default());
+    let mut session = limited(&folder, &demo, 1, sink.clone());
+    let end = session.prompt("Survey.").await.unwrap();
+
+    assert_eq!(end.stop_reason, StopReason::MaxTurnRequests);
+    assert_eq!(end.reply, "The answer, from what I had.");
+    let requests = demo.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[2].tools.is_empty() && !requests[2].server_tools.web_search);
+    assert_eq!(requests[2].prompt(), LAST_ANSWER);
+    let told_to_carry_on = requests[2].messages.iter().any(
+        |message| matches!(message, Message::User { content, .. } if content.contains("Carry on")),
+    );
+    assert!(!told_to_carry_on, "{:?}", requests[2].messages);
+    // What it wrote before the pause was said on the way, not part of the answer.
+    let phases = sink
+        .all()
+        .iter()
+        .filter(|update| update["phase"] == "commentary")
+        .count();
+    assert_eq!(phases, 1);
+}
+
+/// A request for the answer that was cancelled or failed is taken back, so it doesn't join the
+/// next prompt and tell that turn no calls will run.
+#[tokio::test]
+async fn a_request_for_the_answer_that_got_none_is_taken_back() {
+    let unanswered = |session: &Session| {
+        matches!(
+            session.snapshot().history.last(),
+            Some(Message::User { content, .. }) if content == LAST_ANSWER
+        )
+    };
+    let folder = Folder::new();
+    let demo = Demo::failing_after(
+        vec![Completion::calls(
+            "",
+            vec![call("l", "list_files", &json!({}))],
+        )],
+        "The provider is busy.",
+    );
+    let mut session = limited(&folder, &demo, 1, Arc::new(Recorded::default()));
+    assert!(session.prompt("Survey.").await.is_err());
+    assert_eq!(demo.requests().len(), 2);
+    assert!(!unanswered(&session));
+
+    let folder = Folder::new();
+    let (demo, hold) = Demo::responder_holding(
+        |_| {
+            Some(Completion::calls(
+                "",
+                vec![call("l", "list_files", &json!({}))],
+            ))
+        },
+        |request| request.prompt() == LAST_ANSWER,
+        "",
+    );
+    let mut session = limited(&folder, &demo, 1, Arc::new(Recorded::default()));
+    let cancel = session.cancel_handle();
+    let waiting = hold.clone();
+    tokio::spawn(async move {
+        until("the answer is asked for", || waiting.waiting() == 1).await;
+        cancel.cancel();
+    });
+    let end = session.prompt("Survey.").await.unwrap();
+    assert_eq!(end.stop_reason, StopReason::Cancelled);
+    assert!(!unanswered(&session));
+}
+
+/// Each turn has its own tool calls and its own warning.
+#[tokio::test]
+async fn each_turn_counts_its_own_tool_calls() {
+    let folder = Folder::new();
+    let demo = never_stops("Answer.");
+    let sink = Arc::new(Recorded::default());
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.max_tool_calls = 2;
+    config.warn_at_tool_calls = Some(1);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        sink.clone(),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    session.prompt("First.").await.unwrap();
+    session.prompt("Second.").await.unwrap();
+
+    let ran = tool_events(&sink)
+        .iter()
+        .filter(|(kind, _)| kind == "tool_call")
+        .count();
+    assert_eq!(ran, 4);
+    let results = tool_results(&demo.requests().last().unwrap().messages);
+    let warned = results
+        .iter()
+        .filter(|(_, content)| content.ends_with("\n\n1 tool call left in this turn."))
+        .count();
+    assert_eq!(warned, 2, "{results:?}");
 }
 
 /// Near the limit, the result of the call that reached the warning says how many calls are left
@@ -2982,6 +3110,9 @@ async fn a_claude_at_its_limit_is_asked_for_its_answer_with_its_tools_kept() {
         }
         assert_eq!(bodies[1]["tool_choice"], bodies[0]["tool_choice"]);
         assert_eq!(bodies[2]["tool_choice"], json!({"type": "none"}));
+        let messages = |at: usize| bodies[at]["messages"].as_array().unwrap().clone();
+        assert_eq!(messages(1)[..1], messages(0)[..], "{on_openrouter}");
+        assert_eq!(messages(2)[..3], messages(1)[..], "{on_openrouter}");
         let asked = &bodies[1]["messages"][2]["content"];
         assert_eq!(asked[1], json!({"type": "text", "text": LAST_ANSWER}));
         let unrun = &bodies[2]["messages"][4]["content"][0];
