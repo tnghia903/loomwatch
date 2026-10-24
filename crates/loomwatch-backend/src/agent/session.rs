@@ -69,6 +69,12 @@ const MAX_CUT_OFFS: usize = 2;
 /// How many replies in a row the provider may pause with nothing for the agent to run, with the
 /// turn still going on: each is carried on ([`PAUSED`]). One more ends the turn.
 const MAX_PAUSES: usize = 2;
+/// How many replies in a row may be carried on with nothing run, whether the length limit cut
+/// them off or the provider paused them, and whether or not a summary came between them. The two
+/// limits above count only their own kind and a summary starts the cut-offs again, so replies that
+/// took turns at being cut off and paused, or a reply cut off between summaries, never reached
+/// either. One more ends the turn.
+const MAX_CARRY_ONS: usize = MAX_CUT_OFFS + MAX_PAUSES;
 /// What the agent is told when the provider paused its reply part way through the searches, page
 /// reads and code it runs itself ([`Finish::Paused`]).
 const PAUSED: &str = "Your reply was paused after many web searches, page reads or code runs, and \
@@ -592,6 +598,8 @@ impl Session {
         let mut carrying_on = false;
         // Replies in a row the provider paused with no call for the agent to run.
         let mut paused_in_a_row = 0usize;
+        // Replies in a row carried on with nothing run, of either kind ([`MAX_CARRY_ONS`]).
+        let mut carried_on = 0usize;
         // Whether the provider just refused a call as too long for the model, the work's or a
         // summary's, and whether this turn has made room once already.
         let mut overflowed = false;
@@ -701,6 +709,11 @@ impl Session {
             } else {
                 0
             };
+            carried_on = if calls.is_empty() && (cut || paused) {
+                carried_on + 1
+            } else {
+                0
+            };
             carrying_on = false;
             // A turn that reached its limit says so however its answer went, so its record is
             // true about why it stopped.
@@ -713,6 +726,14 @@ impl Session {
             };
             if cut_offs > MAX_CUT_OFFS {
                 return Ok(ended(at_limit(StopReason::MaxTokens), turn, &reply));
+            }
+            if carried_on > MAX_CARRY_ONS {
+                let reason = if cut {
+                    StopReason::MaxTokens
+                } else {
+                    StopReason::EndTurn
+                };
+                return Ok(ended(reason, turn, &reply));
             }
             if calls.is_empty() {
                 if cut {

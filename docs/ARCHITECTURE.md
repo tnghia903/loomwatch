@@ -31,7 +31,9 @@ instructions and tools.
   the searches, page reads and code it runs itself is carried on within the same call, five times
   at most; one still paused after that is kept without the step the provider hadn't run (a
   conversation with a step that has no result is refused), and the model is told so and carries
-  on. How full the context is comes from the last of those requests, not their total, and within
+  on, twice at most. Of both kinds together, at most four replies in a row are carried on with
+  nothing run, whichever way they take turns and whether or not a summary comes between them;
+  the next one ends the turn. How full the context is comes from the last of those requests, not their total, and within
   one request from what was sent, what the model wrote and the size of what those steps brought
   back: the provider's usage counts the conversation again for every step it ran. A long tool
   output is set aside behind an id the
