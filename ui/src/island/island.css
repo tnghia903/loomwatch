@@ -30,17 +30,21 @@ body {
    done, red stopped), and its pose, as the team rail holds it, so no state is colour alone: it
    breathes and bobs while working, leans in to ask, sits down when done, and slumps, greyed, when
    stopped. On the notch's black the glow is wider than the app's, or it reads as a thin edge.
-   The glow is on the figure's holder and the picture is masked to the figure, so the glow follows
-   the figure and not the picture's square edge. */
+   The picture is masked to the figure, so the glow follows the figure and not the picture's
+   square edge. The glow is two lights, one to an element: a thin rim on the figure, and a wide
+   halo on its holder, cast by the figure and its rim. Safari's engine, which the Mac app draws the
+   island with, drops two lights on one element, or a light before another filter, while the
+   figure inside it moves: each light is the last of its filter. */
 .island [data-moment="work"] { --glow: var(--color-live); }
 .island [data-moment="ask"] { --glow: var(--color-accent); }
 .island [data-moment="done"] { --glow: var(--color-ok); }
 .island [data-moment="fail"] { --glow: var(--color-alert); }
 /* The agent pinned to the notch, free for a message. */
 .island [data-moment="ready"] { --glow: var(--color-ok); }
-.island .glow { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); }
+.island .glow { filter: drop-shadow(0 0 5px var(--glow)); }
+.island .glow > :is(img, .figure-still) { filter: drop-shadow(0 0 1px var(--glow)); }
 .island .glow[data-moment="work"] { animation: island-breathe var(--t-breathe) ease-in-out infinite; }
-.island .glow[data-moment="fail"] { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 5px var(--glow)); }
+.island .glow[data-moment="fail"] > :is(img, .figure-still) { filter: saturate(.35) drop-shadow(0 0 1px var(--glow)); }
 /* In a row it stands in front of its teammates: a closer breath keeps its light off them. */
 .island .island-row-figure.glow[data-moment="work"] { animation-name: island-breathe-near; }
 /* Out, a figure at work acts out what it is at, as on Team at work (StageFigure): it leans in to
@@ -419,8 +423,8 @@ body {
 
 .island-list-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 6px 0 4px; font: 400 12px/16px var(--font-sans); color: var(--color-ink-2); }
 
-@keyframes island-breathe { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 11px var(--glow)); } }
-@keyframes island-breathe-near { 50% { filter: drop-shadow(0 0 1px var(--glow)) drop-shadow(0 0 7px var(--glow)); } }
+@keyframes island-breathe { 50% { filter: drop-shadow(0 0 11px var(--glow)); } }
+@keyframes island-breathe-near { 50% { filter: drop-shadow(0 0 7px var(--glow)); } }
 @keyframes island-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
 @keyframes island-dip { 0%, 100% { translate: 0 0; } 50% { translate: 0 2px; } }
 @keyframes island-read { 50% { rotate: 6deg; translate: 0 3%; } }
