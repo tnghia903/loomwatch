@@ -196,6 +196,9 @@ pub enum Finish {
     Length,
     /// The provider's safety filter stopped it.
     ContentFilter,
+    /// The provider paused it part way through the searches, page reads and code it runs itself,
+    /// more times than one call carries on; the step it had begun last was taken out unrun.
+    Paused,
 }
 
 /// What one model call cost, in tokens and in dollars. `input_tokens` counts only the prompt
@@ -265,6 +268,10 @@ pub struct Completion {
     pub answer_from: usize,
     /// The message as the provider wrote it, when it is not `OpenRouter`: see [`Native`].
     pub native: Option<Native>,
+    /// How full the model's context was after the message, when `usage` adds up more than one
+    /// request (a paused reply carried on): the last request's prompt and what it wrote. `None`
+    /// when `usage` says it.
+    pub context_tokens: Option<u64>,
 }
 
 impl Completion {
@@ -280,6 +287,7 @@ impl Completion {
             server_tool_calls: Vec::new(),
             answer_from: 0,
             native: None,
+            context_tokens: None,
         }
     }
 

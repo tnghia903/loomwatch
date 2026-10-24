@@ -2576,6 +2576,201 @@ async fn a_paused_claude_reply_is_carried_on() {
     assert_eq!(carried["content"][0]["text"], "Searching… ");
 }
 
+/// One of the replies Anthropic paused in the run of 2026-10-23: a search it ran, and its result.
+fn paused_search(id: &str) -> Reply {
+    events(
+        &[
+            vec![message_start(10, 1_000)],
+            server_tool_block(0, id, "web_search", &json!({"query": "inverted index"})).to_vec(),
+            result_block(
+                1,
+                "web_search_tool_result",
+                id,
+                &json!([{"type": "web_search_result", "title": "IR book", "url": "https://nlp.stanford.edu/IR-book/"}]),
+            )
+            .to_vec(),
+            ended("pause_turn", 5).to_vec(),
+        ]
+        .concat(),
+    )
+}
+
+/// The assistant message a request sent back, and the user message after it.
+fn sent_back(body: &Value) -> (Vec<Value>, Vec<Value>) {
+    let messages = body["messages"].as_array().unwrap();
+    let at = messages
+        .iter()
+        .rposition(|message| message["role"] == "assistant")
+        .unwrap();
+    let content = |message: &Value| message["content"].as_array().cloned().unwrap_or_default();
+    (content(&messages[at]), content(&messages[at + 1]))
+}
+
+/// The run of 2026-10-23 that stopped with "`code_execution` tool use … was found without a
+/// corresponding `code_execution_tool_result` block": the tutor's reply was still paused after it
+/// was carried on five times, its last block code Anthropic hadn't run yet, beside a plan update.
+/// Sent back as it was, Anthropic refused the next call. Now the code that never ran is left out,
+/// the plan update runs, the tutor is told its reply was paused, and the next call is one Anthropic
+/// takes. How full the context is comes from the last request, not the six added up, so no summary
+/// is made for nothing.
+#[tokio::test]
+async fn a_claude_reply_still_paused_leaves_out_the_step_that_never_ran() {
+    let folder = Folder::new();
+    std::fs::write(folder.0.join("notes.md"), "hello").unwrap();
+    let mut replies: Vec<Reply> = (1..=5)
+        .map(|n| paused_search(&format!("srvtoolu_{n}")))
+        .collect();
+    replies.push(events(
+        &[
+            vec![message_start(10, 1_000)],
+            vec![
+                json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "toolu_read", "name": "read_file", "input": {}}}),
+                json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"notes.md\"}"}}),
+                json!({"type": "content_block_stop", "index": 0}),
+            ],
+            server_tool_block(1, "srvtoolu_unrun", "code_execution", &json!({"code": "print(1)"}))
+                .to_vec(),
+            ended("pause_turn", 5).to_vec(),
+        ]
+        .concat(),
+    ));
+    replies.push(events(
+        &[
+            vec![message_start(10, 1_200)],
+            text_block(0, "Done.").to_vec(),
+            ended("end_turn", 3).to_vec(),
+        ]
+        .concat(),
+    ));
+    let (stand, base) = stand(replies).await;
+    let sink = Arc::new(Recorded::default());
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        sink.clone(),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    let end = session.prompt("Teach indexing.").await.unwrap();
+    assert_eq!(end.reply, "Done.");
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    assert_eq!(bodies.len(), 7);
+    let (reply, after) = sent_back(&bodies[6]);
+    let ids: Vec<&str> = reply
+        .iter()
+        .filter_map(|block| block.get("id").or_else(|| block.get("tool_use_id")))
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "srvtoolu_1",
+            "srvtoolu_1",
+            "srvtoolu_2",
+            "srvtoolu_2",
+            "srvtoolu_3",
+            "srvtoolu_3",
+            "srvtoolu_4",
+            "srvtoolu_4",
+            "srvtoolu_5",
+            "srvtoolu_5",
+            "toolu_read"
+        ]
+    );
+    assert_eq!(after.len(), 2, "{after:?}");
+    assert_eq!(after[0]["type"], "tool_result");
+    assert_eq!(after[0]["tool_use_id"], "toolu_read");
+    assert_eq!(after[1]["type"], "text");
+    assert!(
+        after[1]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("paused") && text.contains("didn't run")),
+        "{after:?}"
+    );
+
+    let updates = sink.all();
+    assert!(
+        !updates
+            .iter()
+            .any(|update| update["toolCallId"] == "srvtoolu_unrun"),
+        "a step that never ran is not recorded as run"
+    );
+    let used: Vec<u64> = updates
+        .iter()
+        .filter(|update| update["sessionUpdate"] == "usage_update")
+        .filter_map(|update| update["used"].as_u64())
+        .collect();
+    // The sixth request read 1,010 tokens and wrote 5; the six together read 6,060.
+    assert_eq!(used, [1_015, 1_213]);
+}
+
+/// A reply still paused with no call of the agent's is carried on too: what it said on the way is
+/// not the answer, the code that never ran and the search that code made both come out, and the
+/// next call tells it why it is carrying on.
+#[tokio::test]
+async fn a_claude_reply_still_paused_with_no_call_is_carried_on() {
+    let folder = Folder::new();
+    let mut replies: Vec<Reply> = (1..=5)
+        .map(|n| paused_search(&format!("srvtoolu_{n}")))
+        .collect();
+    let made_by_code = json!({"type": "code_execution_20260120", "tool_id": "srvtoolu_unrun"});
+    replies.push(events(
+        &[
+            vec![message_start(10, 1_000)],
+            text_block(0, "Checking one more source.").to_vec(),
+            server_tool_block(1, "srvtoolu_unrun", "code_execution", &json!({"code": "await web_search()"}))
+                .to_vec(),
+            vec![
+                json!({"type": "content_block_start", "index": 2, "content_block": {"type": "server_tool_use", "id": "srvtoolu_inner", "name": "web_search", "input": {"query": "RRF"}, "caller": made_by_code}}),
+                json!({"type": "content_block_stop", "index": 2}),
+            ],
+            result_block(
+                3,
+                "web_search_tool_result",
+                "srvtoolu_inner",
+                &json!([{"type": "web_search_result", "title": "RRF", "url": "https://example.com/rrf"}]),
+            )
+            .to_vec(),
+            ended("pause_turn", 5).to_vec(),
+        ]
+        .concat(),
+    ));
+    replies.push(events(
+        &[
+            vec![message_start(10, 1_200)],
+            text_block(0, "The answer.").to_vec(),
+            ended("end_turn", 3).to_vec(),
+        ]
+        .concat(),
+    ));
+    let (stand, base) = stand(replies).await;
+    let mut session = session_on(
+        &folder,
+        claude(&base),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        "anthropic:claude-opus-5-5",
+    );
+    let end = session.prompt("Look it up.").await.unwrap();
+    assert_eq!(end.reply, "The answer.");
+
+    let bodies = stand.bodies.lock().unwrap().clone();
+    assert_eq!(bodies.len(), 7);
+    let (reply, after) = sent_back(&bodies[6]);
+    let sent = serde_json::to_string(&reply).unwrap();
+    assert!(!sent.contains("srvtoolu_unrun"), "{sent}");
+    assert!(!sent.contains("srvtoolu_inner"), "{sent}");
+    assert!(sent.contains("Checking one more source."), "{sent}");
+    assert_eq!(after.len(), 1);
+    assert!(
+        after[0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("paused")),
+        "{after:?}"
+    );
+}
+
 /// A busy Anthropic, before any word, is tried again; a used-up credit is said plainly with where
 /// to see it, and never retried.
 #[tokio::test]

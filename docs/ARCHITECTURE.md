@@ -21,7 +21,12 @@ instructions and tools.
   message ("Let me check the prices."), is recorded as said on the way, a paragraph of its own, and
   the turn's reply leaves it out unless it is all the turn wrote. A reply the length limit cut off
   is carried on (twice at most), and a tool call it cut off is sent back with the reason, so the
-  model makes it smaller instead of repeating it. A long tool output is set aside behind an id the
+  model makes it smaller instead of repeating it. A reply Claude's provider pauses part way through
+  the searches, page reads and code it runs itself is carried on within the same call, five times
+  at most; one still paused after that is kept without the step the provider hadn't run (a
+  conversation with a step that has no result is refused), and the model is told so and carries
+  on. How full the context is comes from the last of those requests, not their total. A long tool
+  output is set aside behind an id the
   agent can read back. A conversation that nears the model's context window, or 160k tokens on a
   larger one, is replaced by a summary the model writes.
 - **What the provider caches** stays the same from call to call: the tools offered (all of them

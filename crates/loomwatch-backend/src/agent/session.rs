@@ -58,6 +58,14 @@ const COMPACT_WINDOW_CAP: u64 = 200_000;
 /// How many replies in a row the length limit may cut off with the turn still going on: a cut reply
 /// is carried on, and a cut tool call is sent back to be made smaller. One more ends the turn.
 const MAX_CUT_OFFS: usize = 2;
+/// How many replies in a row the provider may pause with nothing for the agent to run, with the
+/// turn still going on: each is carried on ([`PAUSED`]). One more ends the turn.
+const MAX_PAUSES: usize = 2;
+/// What the agent is told when the provider paused its reply part way through the searches, page
+/// reads and code it runs itself ([`Finish::Paused`]).
+const PAUSED: &str = "Your reply was paused after many web searches, page reads or code runs, and \
+                      the last one it began didn't run. Carry on from where it stopped, and run \
+                      that step again if you still need it.";
 /// A tool result longer than this is set aside, and the model sees its start.
 const SET_ASIDE_CHARS: usize = 24_000;
 const SET_ASIDE_PREVIEW_CHARS: usize = 6_000;
@@ -534,6 +542,8 @@ impl Session {
         // Replies the length limit cut off in a row, and whether the last one was text to carry on.
         let mut cut_offs = 0usize;
         let mut carrying_on = false;
+        // Replies in a row the provider paused with no call for the agent to run.
+        let mut paused_in_a_row = 0usize;
         // Whether the provider just refused a call as too long for the model, the work's or a
         // summary's, and whether this turn has made room once already.
         let mut overflowed = false;
@@ -595,12 +605,15 @@ impl Session {
                 }
                 Err(CallError::Failed(error)) => return Err(error),
             };
-            self.count(&completion.usage, &mut turn, call).await?;
+            self.count(&completion, &mut turn, call).await?;
             self.record_server_tools(&completion.server_tool_calls)
                 .await?;
             let cut = completion.finish == Finish::Length;
+            // A reply the provider paused part way through its own searches and code isn't done:
+            // what it wrote was said on the way, and it carries on.
+            let paused = completion.finish == Finish::Paused;
             let calls = completion.tool_calls.clone();
-            if calls.is_empty() {
+            if calls.is_empty() && !paused {
                 // What it wrote before the provider's last search was said on the way to it, and
                 // words follow the search whenever there is one.
                 let split = completion.answer_from > 0;
@@ -621,6 +634,11 @@ impl Session {
                 native: completion.native,
             });
             cut_offs = if cut { cut_offs + 1 } else { 0 };
+            paused_in_a_row = if paused && calls.is_empty() {
+                paused_in_a_row + 1
+            } else {
+                0
+            };
             carrying_on = false;
             if cut_offs > MAX_CUT_OFFS {
                 return Ok(ended(StopReason::MaxTokens, turn, &reply));
@@ -635,9 +653,21 @@ impl Session {
                     });
                     continue;
                 }
+                if paused && paused_in_a_row <= MAX_PAUSES {
+                    if !wrote_nothing {
+                        self.emit(events::commentary(&self.message_id())).await?;
+                    }
+                    self.history.push(Message::User {
+                        content: PAUSED.to_owned(),
+                        pictures: Vec::new(),
+                    });
+                    continue;
+                }
                 let reason = match finish {
                     Finish::ContentFilter => StopReason::Refusal,
-                    Finish::Stop | Finish::ToolCalls | Finish::Length => StopReason::EndTurn,
+                    Finish::Stop | Finish::ToolCalls | Finish::Length | Finish::Paused => {
+                        StopReason::EndTurn
+                    }
                 };
                 return Ok(ended(reason, turn, &reply));
             }
@@ -648,6 +678,13 @@ impl Session {
             }
             self.run_calls(&calls, cut, &cancel, &mut calls_made)
                 .await?;
+            if paused {
+                // After its calls' results, in the same message to the model.
+                self.history.push(Message::User {
+                    content: PAUSED.to_owned(),
+                    pictures: Vec::new(),
+                });
+            }
             if calls_made >= self.config.max_tool_calls {
                 return Ok(ended(StopReason::MaxTurnRequests, turn, &reply));
             }
@@ -879,14 +916,17 @@ impl Session {
 
     async fn count(
         &mut self,
-        usage: &Usage,
+        completion: &Completion,
         turn: &mut Usage,
         call: Call,
     ) -> Result<(), AgentError> {
+        let usage = &completion.usage;
         turn.add(usage);
         self.usage.add(usage);
         self.spend.spent(usage);
-        self.last_prompt_tokens = usage.prompt_tokens() + usage.output_tokens;
+        self.last_prompt_tokens = completion
+            .context_tokens
+            .unwrap_or(usage.prompt_tokens() + usage.output_tokens);
         if self.provider.is_demo() && usage.total_tokens() == 0 {
             return Ok(());
         }
@@ -1570,7 +1610,7 @@ impl Session {
         let completion = self.call_model(cancel, call).await;
         self.history.pop();
         let completion = completion?;
-        self.count(&completion.usage, turn, call)
+        self.count(&completion, turn, call)
             .await
             .map_err(CallError::Failed)?;
         Ok(completion)

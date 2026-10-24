@@ -754,6 +754,7 @@ fn finish(message: Assembled) -> Completion {
             source: Source::ChatGpt,
             items: message.items,
         }),
+        context_tokens: None,
     }
 }
 
