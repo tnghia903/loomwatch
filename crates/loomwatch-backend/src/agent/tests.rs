@@ -631,6 +631,87 @@ fn cut_off(content: &str) -> Completion {
     }
 }
 
+/// A stand-in that answers with `reply`, the `at`th request it has been sent, and stops itself
+/// after 40: a turn that never ends never yields to a test's timeout either.
+fn counting(reply: impl Fn(usize, &SeenRequest) -> Completion + Send + Sync + 'static) -> Demo {
+    let asked = std::sync::atomic::AtomicUsize::new(0);
+    Demo::responder(move |request| {
+        let at = asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert!(at < 40, "the turn should have ended");
+        Some(reply(at, request))
+    })
+}
+
+/// Replies that take turns at being cut off and paused, with nothing run between them, end the
+/// turn after a few. Each kind's own limit counts only its kind, so neither was ever reached.
+#[tokio::test]
+async fn replies_cut_off_and_paused_by_turns_still_end_the_turn() {
+    for cut_first in [true, false] {
+        let folder = Folder::new();
+        let demo = counting(move |at, _| {
+            if (at % 2 == 0) == cut_first {
+                cut_off("A long reply")
+            } else {
+                Completion {
+                    finish: Finish::Paused,
+                    ..Completion::text("Searching on.")
+                }
+            }
+        });
+        let mut session = session(
+            &folder,
+            Provider::Demo(demo.clone()),
+            Arc::new(Recorded::default()),
+            Arc::new(AllowAll),
+        );
+        let end = session.prompt("Write it.").await.unwrap();
+
+        assert_eq!(demo.requests().len(), 5, "{cut_first}");
+        let ended = if cut_first {
+            StopReason::MaxTokens
+        } else {
+            StopReason::EndTurn
+        };
+        assert_eq!(end.stop_reason, ended);
+    }
+}
+
+/// A reply the length limit keeps cutting off ends the turn even when the conversation is
+/// summarised between the cut-offs, which starts their own count again.
+#[tokio::test]
+async fn a_reply_cut_off_between_summaries_still_ends_the_turn() {
+    let folder = Folder::new();
+    let demo = counting(|_, request| {
+        if request.prompt().contains("Write a summary of it") {
+            return Completion::text("Summary: writing the long reply.");
+        }
+        let mut cut = cut_off("A long reply");
+        cut.usage = Usage {
+            input_tokens: 900,
+            ..Usage::default()
+        };
+        cut
+    });
+    let mut config = SessionConfig::new("s", "writer", folder.0.clone(), "m");
+    config.context_window = Some(1000);
+    let mut session = Session::open(
+        config,
+        Provider::Demo(demo.clone()),
+        Arc::new(Recorded::default()),
+        Arc::new(AllowAll),
+        Arc::new(NoHostTools),
+    );
+    let end = session.prompt("Write it.").await.unwrap();
+
+    assert_eq!(end.stop_reason, StopReason::MaxTokens);
+    let requests = demo.requests();
+    let summaries = requests
+        .iter()
+        .filter(|request| request.prompt().contains("Write a summary of it"))
+        .count();
+    assert_eq!((requests.len() - summaries, summaries), (5, 4));
+}
+
 /// A reply the length limit cut off is carried on, and the parts join as the model wrote them,
 /// rather than the next stage being handed half a sentence.
 #[tokio::test]
