@@ -8,7 +8,9 @@
 //!    reads among them run at the same time, and every other call runs on its own in its place.
 //! 4. That repeats until the model replies without a tool call, the turn hits its tool-call cap,
 //!    the run's spool says no more ([`Spend`]), or someone cancels it. A reply the length limit cut
-//!    off is carried on instead of ending the turn.
+//!    off is carried on instead of ending the turn. Near the cap, a tool's result says how many
+//!    calls are left; at the cap, the model is asked for its answer from what it has, and no more
+//!    calls run (ADR 0088).
 //!
 //! The conversation is append-only (see [`Message`]), and the tools offered never change, so the
 //! provider's prompt cache holds for the whole session. A long output is set aside rather than put
@@ -72,6 +74,13 @@ const MAX_PAUSES: usize = 2;
 const PAUSED: &str = "Your reply was paused after many web searches, page reads or code runs, and \
                       the last one it began didn't run. Carry on from where it stopped, and run \
                       that step again if you still need it.";
+/// What the agent is told once its turn has made as many tool calls as it may (ADR 0088). A turn
+/// that stopped there with no answer spent everything it did for nothing.
+pub(super) const LAST_ANSWER: &str = "You have used this turn's tool calls, and no more will \
+                                      run. Write your answer now from what you have, and say \
+                                      what you could not finish.";
+/// What a tool call is answered with once the turn has made as many as it may.
+pub(super) const NOT_RUN_AT_LIMIT: &str = "Not run: this turn reached its limit of tool calls.";
 /// A tool result longer than this is set aside, and the model sees its start.
 const SET_ASIDE_CHARS: usize = 24_000;
 const SET_ASIDE_PREVIEW_CHARS: usize = 6_000;
@@ -215,8 +224,12 @@ pub struct SessionConfig {
     pub max_tokens: u32,
     /// The model's context size, from the model catalog.
     pub context_window: Option<u64>,
-    /// The most tool calls one turn may make before it stops.
+    /// The most tool calls one turn may make. Then the model is asked for its answer, with no more
+    /// calls run (ADR 0088).
     pub max_tool_calls: usize,
+    /// The call that brings a turn to this many tool calls has its result say how many are left,
+    /// once a turn. `None`: 90% of [`Self::max_tool_calls`].
+    pub warn_at_tool_calls: Option<usize>,
     /// The model can see pictures, so a picture `read_file` opens is shown to it. From the model
     /// list.
     pub sees_pictures: bool,
@@ -259,6 +272,7 @@ impl SessionConfig {
             max_tokens: DEFAULT_REPLY,
             context_window: None,
             max_tool_calls: 200,
+            warn_at_tool_calls: None,
             sees_pictures: false,
             max_pictures: MAX_PICTURES,
             max_picture_bytes: MAX_PICTURE_BYTES,
@@ -285,6 +299,12 @@ impl SessionConfig {
         let longest = room.min(MAX_REPLY).max(u64::from(DEFAULT_REPLY)).min(most);
         self.max_tokens = u32::try_from(longest).unwrap_or(DEFAULT_REPLY);
     }
+
+    /// How many tool calls a turn makes before it is told how many are left.
+    fn warns_at(&self) -> usize {
+        self.warn_at_tool_calls
+            .unwrap_or(self.max_tool_calls * 9 / 10)
+    }
 }
 
 /// Why a turn ended.
@@ -294,7 +314,8 @@ pub enum StopReason {
     EndTurn,
     /// The reply hit the length limit.
     MaxTokens,
-    /// The turn made as many tool calls as it may.
+    /// The turn made as many tool calls as it may. Its reply is the answer it was then asked for,
+    /// if it wrote one (ADR 0088).
     MaxTurnRequests,
     /// The provider's safety filter stopped the reply.
     Refusal,
@@ -405,6 +426,8 @@ pub struct Session {
     /// The pictures opened by the message whose calls are running, and their base64 bytes: they
     /// join the conversation only once all its calls are done, and count against its room before.
     unsent_pictures: (usize, usize),
+    /// The tool calls the turn under way has run.
+    turn_calls: ToolCalls,
 }
 
 impl Session {
@@ -446,6 +469,7 @@ impl Session {
             host,
             spend: Arc::new(Unmetered),
             unsent_pictures: (0, 0),
+            turn_calls: ToolCalls::default(),
         }
     }
 
@@ -480,6 +504,7 @@ impl Session {
             host,
             spend: Arc::new(Unmetered),
             unsent_pictures: (0, 0),
+            turn_calls: ToolCalls::default(),
         }
     }
 
@@ -561,7 +586,10 @@ impl Session {
         self.begin_turn(text, pictures);
         let mut turn = Usage::default();
         let mut reply = Words::default();
-        let mut calls_made = 0usize;
+        // Once the turn has made as many tool calls as it may, the call that asks for its answer
+        // (ADR 0088), and whether the conversation holds that request: a summary drops it.
+        let mut last_answer: Option<Call> = None;
+        let mut asked_for_answer = false;
         // Replies the length limit cut off in a row, and whether the last one was text to carry on.
         let mut cut_offs = 0usize;
         let mut carrying_on = false;
@@ -591,6 +619,7 @@ impl Session {
                     Ok(true) => {
                         cut_offs = 0;
                         carrying_on = false;
+                        asked_for_answer = false;
                     }
                     Ok(false) => {}
                     // The summary was refused too: the newest step added more than estimated.
@@ -609,10 +638,17 @@ impl Session {
                     return Ok(ended(stopped(&cancel), turn, &reply));
                 }
             }
-            let call = if cut_offs > 0 {
-                Call::CarryOn
-            } else {
-                Call::Work
+            if last_answer.is_some() && !asked_for_answer {
+                self.history.push(Message::User {
+                    content: LAST_ANSWER.to_owned(),
+                    pictures: Vec::new(),
+                });
+                asked_for_answer = true;
+            }
+            let call = match last_answer {
+                Some(call) => call,
+                None if cut_offs > 0 => Call::CarryOn,
+                None => Call::Work,
             };
             let completion = match self.call_model(&cancel, call).await {
                 Ok(completion) => completion,
@@ -663,8 +699,17 @@ impl Session {
                 0
             };
             carrying_on = false;
+            // A turn that reached its limit says so however its answer went, so its record is
+            // true about why it stopped.
+            let at_limit = |reason| {
+                if last_answer.is_some() {
+                    StopReason::MaxTurnRequests
+                } else {
+                    reason
+                }
+            };
             if cut_offs > MAX_CUT_OFFS {
-                return Ok(ended(StopReason::MaxTokens, turn, &reply));
+                return Ok(ended(at_limit(StopReason::MaxTokens), turn, &reply));
             }
             if calls.is_empty() {
                 if cut {
@@ -689,7 +734,7 @@ impl Session {
                 let reason = match finish {
                     Finish::ContentFilter => StopReason::Refusal,
                     Finish::Stop | Finish::ToolCalls | Finish::Length | Finish::Paused => {
-                        StopReason::EndTurn
+                        at_limit(StopReason::EndTurn)
                     }
                 };
                 return Ok(ended(reason, turn, &reply));
@@ -699,8 +744,7 @@ impl Session {
             if !wrote_nothing {
                 self.emit(events::commentary(&self.message_id())).await?;
             }
-            self.run_calls(&calls, cut, &cancel, &mut calls_made)
-                .await?;
+            self.run_calls(&calls, cut, &cancel).await?;
             if paused {
                 // After its calls' results, in the same message to the model.
                 self.history.push(Message::User {
@@ -708,20 +752,29 @@ impl Session {
                     pictures: Vec::new(),
                 });
             }
-            if calls_made >= self.config.max_tool_calls {
-                return Ok(ended(StopReason::MaxTurnRequests, turn, &reply));
+            if self.turn_calls.made >= self.config.max_tool_calls {
+                // The answer is asked for with the tools offered as before, so the provider reads
+                // the whole conversation from its cache. A model that calls one anyway has it
+                // answered unrun and is asked once more with none it may call; one that still
+                // calls a tool ends the turn with what it wrote.
+                last_answer = match last_answer {
+                    None => Some(Call::LastAnswer),
+                    Some(Call::LastAnswer) => Some(Call::BareLastAnswer),
+                    Some(_) => return Ok(ended(StopReason::MaxTurnRequests, turn, &reply)),
+                };
             }
         }
     }
 
     /// Runs the tool calls of one model message, and adds their results to the conversation in
-    /// the order the model asked for them. `calls_made` counts the calls the turn has run.
+    /// the order the model asked for them, counting them in [`Self::turn_calls`]. The result of the
+    /// call that brings the turn to [`SessionConfig::warn_at_tool_calls`] says how many are left
+    /// once the message's calls have run, once a turn.
     async fn run_calls(
         &mut self,
         calls: &[ToolCall],
         cut: bool,
         cancel: &Cancel,
-        calls_made: &mut usize,
     ) -> Result<(), AgentError> {
         // Reads are asked about one by one and then run at the same time. Any other call waits for
         // the reads before it and runs on its own, so the calls take effect in the model's order,
@@ -730,20 +783,23 @@ impl Session {
             std::iter::repeat_with(|| None).take(calls.len()).collect();
         let mut reads: Vec<Read> = Vec::new();
         self.unsent_pictures = (0, 0);
+        // The call whose result says how many are left.
+        let mut warned_at = None;
         for (place, call) in calls.iter().enumerate() {
             let read = self.read_tool(call, &reads);
             if read.is_none() {
                 self.run_reads(&mut reads, &mut answers, cancel).await?;
             }
-            let answer = if *calls_made >= self.config.max_tool_calls {
-                (
-                    "Not run: this turn reached its limit of tool calls.".to_owned(),
-                    Vec::new(),
-                )
+            let answer = if self.turn_calls.made >= self.config.max_tool_calls {
+                (NOT_RUN_AT_LIMIT.to_owned(), Vec::new())
             } else if cancel.is_cancelled() {
                 ("Not run: the turn was cancelled.".to_owned(), Vec::new())
             } else {
-                *calls_made += 1;
+                self.turn_calls.made += 1;
+                if !self.turn_calls.warned && self.turn_calls.made >= self.config.warns_at() {
+                    self.turn_calls.warned = true;
+                    warned_at = Some(place);
+                }
                 match read {
                     Some(tool) => match self.begin_read(tool, call, cut).await? {
                         Begun::Allowed(input) => {
@@ -765,6 +821,9 @@ impl Session {
         }
         self.run_reads(&mut reads, &mut answers, cancel).await?;
         self.unsent_pictures = (0, 0);
+        if let Some(Some((content, _))) = warned_at.and_then(|place| answers.get_mut(place)) {
+            content.push_str(&self.calls_left());
+        }
         for (call, answer) in calls.iter().zip(answers) {
             let (content, pictures) = answer.unwrap_or_default();
             self.history.push(Message::Tool {
@@ -774,6 +833,22 @@ impl Session {
             });
         }
         Ok(())
+    }
+
+    /// The line that tells the model how many tool calls its turn has left, once it was warned and
+    /// while it has any: at none left, it is asked for its answer instead.
+    fn calls_left(&self) -> String {
+        let left = self
+            .config
+            .max_tool_calls
+            .saturating_sub(self.turn_calls.made);
+        if !self.turn_calls.warned || left == 0 {
+            return String::new();
+        }
+        format!(
+            "\n\n{left} tool call{} left in this turn.",
+            if left == 1 { "" } else { "s" }
+        )
     }
 
     /// Counts `pictures` among the ones the running message's calls opened.
@@ -827,6 +902,7 @@ impl Session {
     /// The turn's prompt joins the conversation, dated, after any pictures it was sent with.
     fn begin_turn(&mut self, text: &str, pictures: Vec<Picture>) {
         text.clone_into(&mut self.task);
+        self.turn_calls = ToolCalls::default();
         // Nothing has been sent yet, so the instructions can still list the skills this work
         // calls for: the first message says what it is.
         if self.history.len() == 1
@@ -890,8 +966,8 @@ impl Session {
         self.messages_written += 1;
         self.message_part = 0;
         let message_id = self.message_id();
-        let bare = call == Call::BareSummary;
-        let offered = !bare || self.provider.keeps_tools_for_summaries(&self.config.model);
+        let bare = matches!(call, Call::BareSummary | Call::BareLastAnswer);
+        let offered = !bare || self.provider.keeps_tools_when_off(&self.config.model);
         let tools = if offered {
             self.tool_specs()
         } else {
@@ -914,7 +990,9 @@ impl Session {
             },
             max_tokens: match call {
                 Call::Summary | Call::BareSummary => self.config.max_tokens.min(DEFAULT_REPLY),
-                Call::Work | Call::CarryOn => self.config.max_tokens,
+                Call::Work | Call::CarryOn | Call::LastAnswer | Call::BareLastAnswer => {
+                    self.config.max_tokens
+                }
             },
             tools_off: bare && offered,
             session_key: &self.config.session_id,
@@ -1676,8 +1754,10 @@ impl Session {
             Message::User {
                 content: format!(
                     "## Where the work stands\n{}\n\n{brief}## Your current task, as you were given \
-                     it\n{task}\n\nCarry on from where the summary leaves off.\n\n{}",
+                     it\n{task}\n\nCarry on from where the summary leaves off.{}\n\n{}",
                     completion.content.trim(),
+                    // A warning the summary replaced still holds.
+                    self.calls_left(),
                     self.today()
                 ),
                 pictures: Vec::new(),
@@ -1840,6 +1920,12 @@ enum Call {
     Summary,
     /// The same summary with no tools, for a model that called one instead of writing it.
     BareSummary,
+    /// The answer once the turn has made as many tool calls as it may (ADR 0088), streamed as the
+    /// work is, with the same tools offered so the provider reads the conversation from its
+    /// cache. None of them runs.
+    LastAnswer,
+    /// The same answer with no tool the model may call, for a model that called one instead.
+    BareLastAnswer,
 }
 
 impl Call {
@@ -1849,8 +1935,17 @@ impl Call {
             Self::CarryOn => "carry_on",
             Self::Summary => "summary",
             Self::BareSummary => "bare_summary",
+            Self::LastAnswer => "last_answer",
+            Self::BareLastAnswer => "bare_last_answer",
         }
     }
+}
+
+/// The tool calls a turn has run, and whether a result has said how many are left.
+#[derive(Default)]
+struct ToolCalls {
+    made: usize,
+    warned: bool,
 }
 
 /// What a turn is for when nothing says otherwise.

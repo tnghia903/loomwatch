@@ -177,7 +177,8 @@ pub struct ChatRequest<'a> {
     pub server_tools: ServerTools,
     pub max_tokens: u32,
     /// The tools are offered only so the conversation stays as it was: the model must not call
-    /// one. A summary on a provider that signs its reasoning asks this rather than offering none,
+    /// one. A summary, or the answer at a turn's tool-call limit, on a provider that signs its
+    /// reasoning asks this rather than offering none,
     /// which would change what came before and undo the signatures and the prompt cache.
     pub tools_off: bool,
     /// Groups the calls of one session, so the provider keeps routing them to the same place and
@@ -437,11 +438,12 @@ impl Provider {
         matches!(self, Self::Demo(_))
     }
 
-    /// Whether a summary keeps the session's tools, asking the model not to call them
+    /// Whether a call that must not use a tool (a summary, or the answer at a turn's tool-call
+    /// limit) keeps the session's tools, asking the model not to call them
     /// ([`ChatRequest::tools_off`]), rather than going without: true where the conversation is signed
     /// and must not change under it, as it is for a Claude on `OpenRouter`'s `/messages`.
     #[must_use]
-    pub fn keeps_tools_for_summaries(&self, model: &str) -> bool {
+    pub fn keeps_tools_when_off(&self, model: &str) -> bool {
         match self {
             Self::OpenRouter(_) => through_messages(model),
             Self::Demo(_) => false,
