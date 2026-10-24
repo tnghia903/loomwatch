@@ -2669,22 +2669,45 @@
   // The download for the visitor's computer: Windows when the browser says it runs on Windows, the
   // Mac otherwise (a phone too, as before). The other one is a click away on the switch.
   const get = $('#get')
+  const osPick = $('.get-pick')
   const osButtons = $$('.get-pick [data-os]')
-  function setOs(os) {
+  // The switch's highlight is one pill under the buttons, set on the computer picked; it slides there
+  // once it has been placed (styles.css, .get-pick::before). A switch by hand brings that computer's
+  // download in from the side the pill went.
+  function placeOsPill() {
+    const on = osButtons.find((b) => b.dataset.os === get.dataset.os)
+    osPick.style.setProperty('--pill-x', `${on.offsetLeft}px`)
+    osPick.style.setProperty('--pill-w', `${on.offsetWidth}px`)
+  }
+  function setOs(os, byHand = false) {
+    const from = osButtons.findIndex((b) => b.dataset.os === get.dataset.os)
     get.dataset.os = os
     osButtons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.os === os)))
+    placeOsPill()
+    const to = osButtons.findIndex((b) => b.dataset.os === os)
+    if (!byHand || from === to) return
+    const shown = $(`.get-os[data-os="${os}"]`, get)
+    shown.classList.remove('get-in-left', 'get-in-right')
+    void shown.offsetWidth
+    shown.classList.add(to > from ? 'get-in-right' : 'get-in-left')
   }
-  osButtons.forEach((b) => b.addEventListener('click', () => setOs(b.dataset.os)))
-  $('.get-pick').addEventListener('keydown', (event) => {
+  osButtons.forEach((b) => b.addEventListener('click', () => setOs(b.dataset.os, true)))
+  osPick.addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
     const at = osButtons.findIndex((b) => b.dataset.os === get.dataset.os)
     const next = osButtons[(at + (event.key === 'ArrowRight' ? 1 : osButtons.length - 1)) % osButtons.length]
-    setOs(next.dataset.os); next.focus(); event.preventDefault()
+    setOs(next.dataset.os, true); next.focus(); event.preventDefault()
   })
   setOs(/\bwin/i.test(navigator.userAgentData?.platform || navigator.userAgent) ? 'windows' : 'mac')
+  // The buttons are their final width once the fonts are in; only then may the pill slide.
+  ;(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+    placeOsPill()
+    window.requestAnimationFrame(() => osPick.classList.add('ready'))
+  })
+  window.addEventListener('resize', placeOsPill)
 
   const SCREENS = {
-    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as a team, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
+    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as one team, They improve themselves, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
     agents: { w: 2880, h: 1600, alt: "LoomWatch's agent workbench for Writer, version 1: a sentence saying Writer thinks with Claude Opus 5.5, has one skill and asks before it may act, a mint-green figure at its desk with labels for its keys, its skills, the model it thinks with, its job and its tray, and on the right the blocks that make it, starting with Name and Instructions with a check of what good instructions say.", cap: 'An agent on its workbench: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
     workflow: { w: 2880, h: 1600, alt: 'LoomWatch Workflow for a daily tech digest: the team as one sentence, Every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer, each with its figure; on the left your saved agents ready to add; on the canvas a schedule trigger at 9 AM wired to Gatherer, Reader and Writer, and the team response.', cap: 'Workflow: your agents wired in order, read back as one sentence, with your saved agents one click away on the left.' },
     chat: { w: 2880, h: 1600, alt: "LoomWatch Chat: you ask the team for a short getting-started guide, Researcher hands its findings to you, and Approve waits under them; each agent's name and avatar wear its figure's colour. On the right, Details shows the run live on a timeline you can drag back to replay, and the team's handovers step by step.", cap: "Chat: who said what, in each agent's own colour, and Details beside it with every step on a timeline you can replay." },

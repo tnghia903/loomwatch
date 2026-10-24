@@ -182,7 +182,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
         {notice && <p role="alert" className="home-empty alert">{notice}</p>}
         <section className="home-hero">
           {/* The landing page's headline, word for word and in its type: the app opens on the promise that brought you here. */}
-          <h1 className="home-headline">Put AI agents to work as one team. <em>See&nbsp;every&nbsp;step. Step&nbsp;in&nbsp;any&nbsp;time.</em></h1>
+          <h1 className="home-headline">Put AI agents to work as one team. <em>They&nbsp;improve themselves.</em></h1>
           <p>Build each agent and chat with it on its own, connect your agents in a workflow, then give the team work in its chat and review what it hands back.</p>
           <div className="home-hero-acts">
             <a className="btn btn-primary btn-lg" href="/agents/new" data-tour="build-agent"><UserRoundPlus size={16} aria-hidden="true" />Build an agent</a>

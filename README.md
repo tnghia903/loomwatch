@@ -374,7 +374,7 @@ you built, then add, connect and rename agents to match. To run a team on a sche
 <td align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/assets/app/home-dark.webp">
-  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as one team. See every step. Step in any time. Build an agent, New team and the 3-minute guide, a box to describe the job, with an Ask button, the Agents, Workflow and Chat steps, a row of My agents with their figures and a link to tell them about you, and Your teams below, where the Review stop demo is Waiting for you. At the top right, the bell says 1 needs you, between search and the menu.">
+  <img src="site/assets/app/home-light.webp" alt="Home: Put AI agents to work as one team. They improve themselves. Build an agent, New team and the 3-minute guide, a box to describe the job, with an Ask button, the Agents, Workflow and Chat steps, a row of My agents with their figures and a link to tell them about you, and Your teams below, where the Review stop demo is Waiting for you. At the top right are search, Skills, Quests, the bell saying 1 needs you, and the menu.">
 </picture>
 <br><sub><strong>Home.</strong> Your agents first, each with its face, then the teams they work in.</sub>
 </td>
