@@ -226,14 +226,16 @@ impl Anthropic {
     ) -> Result<Completion, CallError> {
         let model = ModelRef::parse(request.model).id;
         let mut so_far: Vec<Value> = Vec::new();
+        let mut unparsed = HashMap::new();
         let mut usage = Usage::default();
         let mut continued = 0;
         loop {
             let call = self.call(request, &model, &so_far, deltas, cancel).await?;
             usage.add(&call.usage);
             so_far.extend(call.blocks);
+            unparsed.extend(call.unparsed);
             if call.stop != "pause_turn" || continued == MAX_CONTINUATIONS {
-                let mut completion = self.finish(&model, so_far, &call.stop, usage);
+                let mut completion = self.finish(&model, so_far, &unparsed, &call.stop, usage);
                 // Each request read the conversation again, so the totals count it once a request.
                 if continued > 0 {
                     completion.context_tokens =
@@ -372,11 +374,13 @@ impl Anthropic {
         }
     }
 
-    /// The finished message, from the blocks every call of it wrote.
+    /// The finished message, from the blocks every call of it wrote. `unparsed` is the input text,
+    /// by call id, of each tool call whose input wasn't a JSON object when its block ended.
     fn finish(
         &self,
         model: &str,
         mut blocks: Vec<Value>,
+        unparsed: &HashMap<String, String>,
         stop: &str,
         mut usage: Usage,
     ) -> Completion {
@@ -384,23 +388,38 @@ impl Anthropic {
         if self.route == Route::Anthropic && stop == "pause_turn" {
             leave_out_unrun(&mut blocks);
         }
+        let cut = matches!(stop, "max_tokens" | "model_context_window_exceeded");
         let mut written = Written::default();
         let mut tool_calls = Vec::new();
         let mut server_tool_calls = Vec::new();
-        for block in &blocks {
+        for (index, block) in blocks.iter().enumerate() {
             match block.get("type").and_then(Value::as_str) {
                 Some("text") => {
                     if let Some(text) = block.get("text").and_then(Value::as_str) {
                         written.text(text);
                     }
                 }
-                Some("tool_use") => tool_calls.push(ToolCall {
-                    id: text_of(block, "id"),
-                    name: text_of(block, "name"),
-                    arguments: block
-                        .get("input")
-                        .map_or_else(|| "{}".to_owned(), Value::to_string),
-                }),
+                Some("tool_use") => {
+                    let id = text_of(block, "id");
+                    // A call the length limit cut off part way goes to the session as it came, so
+                    // the model is told so instead of the call running with nothing in it. One
+                    // with no input at all is cut off only as the last thing the message wrote.
+                    let arguments = match unparsed.get(&id) {
+                        Some(text)
+                            if !text.trim().is_empty() || (cut && index + 1 == blocks.len()) =>
+                        {
+                            text.clone()
+                        }
+                        _ => block
+                            .get("input")
+                            .map_or_else(|| "{}".to_owned(), Value::to_string),
+                    };
+                    tool_calls.push(ToolCall {
+                        id,
+                        name: text_of(block, "name"),
+                        arguments,
+                    });
+                }
                 Some("server_tool_use") => {
                     written.tool();
                     let id = text_of(block, "id");
@@ -419,7 +438,7 @@ impl Anthropic {
         }
         let finish = match stop {
             "tool_use" => Finish::ToolCalls,
-            "max_tokens" | "model_context_window_exceeded" => Finish::Length,
+            _ if cut => Finish::Length,
             "refusal" => Finish::ContentFilter,
             "pause_turn" => Finish::Paused,
             _ if !tool_calls.is_empty() => Finish::ToolCalls,
@@ -817,6 +836,8 @@ fn written_by_another(content: &str, tool_calls: &[ToolCall]) -> Vec<Value> {
 /// One call's part of a message.
 struct Streamed {
     blocks: Vec<Value>,
+    /// The input text of each tool call it wrote that wasn't a JSON object, by call id.
+    unparsed: HashMap<String, String>,
     stop: String,
     usage: Usage,
 }
@@ -837,6 +858,8 @@ struct Assembled {
     blocks: Vec<Value>,
     /// The JSON text of each tool call's input, as it streams, by block index.
     inputs: HashMap<usize, String>,
+    /// Tool calls whose input text wasn't a JSON object when their block ended, by call id.
+    unparsed: HashMap<String, String>,
     stop: Option<String>,
     usage: Usage,
     begun: bool,
@@ -886,9 +909,36 @@ async fn read_stream(
 }
 
 impl Assembled {
-    fn into_streamed(self) -> Streamed {
+    /// Puts a tool call's input back together from the text it streamed as, once its block ends.
+    /// Text that isn't a JSON object, as when the length limit cut the call off part way, is kept
+    /// for the call's arguments; the block keeps an empty input, which is all Anthropic takes back.
+    fn close(&mut self, index: usize) {
+        let Some(text) = self.inputs.remove(&index) else {
+            return;
+        };
+        let Some(block) = self.blocks.get_mut(index) else {
+            return;
+        };
+        if let Some(input) = serde_json::from_str::<Value>(&text)
+            .ok()
+            .filter(Value::is_object)
+        {
+            block["input"] = input;
+        } else if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+            // An empty one may be a call with no input; the stop reason says which, later.
+            self.unparsed.insert(text_of(block, "id"), text);
+        }
+    }
+
+    fn into_streamed(mut self) -> Streamed {
+        // A block the stream never closed ended with it.
+        let open: Vec<usize> = self.inputs.keys().copied().collect();
+        for index in open {
+            self.close(index);
+        }
         Streamed {
             blocks: self.blocks,
+            unparsed: self.unparsed,
             stop: self.stop.unwrap_or_else(|| "end_turn".to_owned()),
             usage: self.usage,
         }
@@ -941,18 +991,7 @@ async fn take_event(
             let delta = event.get("delta").cloned().unwrap_or(Value::Null);
             take_delta(message, index, &delta, deltas).await?;
         }
-        Some("content_block_stop") => {
-            let index = block_index(&event);
-            if let Some(text) = message.inputs.remove(&index)
-                && !text.trim().is_empty()
-                && let Some(block) = message.blocks.get_mut(index)
-            {
-                block["input"] = serde_json::from_str::<Value>(&text)
-                    .ok()
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| json!({}));
-            }
-        }
+        Some("content_block_stop") => message.close(block_index(&event)),
         Some("message_delta") => {
             if let Some(stop) = event.pointer("/delta/stop_reason").and_then(Value::as_str) {
                 message.stop = Some(stop.to_owned());
