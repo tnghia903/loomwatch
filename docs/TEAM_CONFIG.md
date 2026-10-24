@@ -552,7 +552,12 @@ Every agent in a run works with LoomWatch's own tools:
   with `OPENROUTER_`, `ANTHROPIC_`, `OPENAI_`, `GEMINI_`, `GOOGLE_API`, `LOOMWATCH_` or `POSTGRES_`,
   and `DATABASE_URL` and `PGPASSWORD`. On a Mac a command also runs in a sandbox: it can change
   files only in the agent's folder and temporary folders, and it can reach the network only when the
-  agent is allowed the web. Windows and Linux have no such sandbox: there a command can change any
+  agent is allowed the web. A command can still work in your Mac's apps, such as Calendar, Mail or
+  Notes, through `osascript`. macOS asks you the first time an agent works in each app (for now,
+  again after each LoomWatch update); you can change your answer later in System Settings → Privacy
+  & Security → Automation → LoomWatch. An app you allow can do what the sandbox stops a command
+  doing itself: Mail can send email as you, Finder can move or delete any file, and Terminal can run
+  any command. Allow only the apps your agents' work needs. Windows and Linux have no such sandbox: there a command can change any
   file you can, so asking before each one is the only check. For an agent allowed the web, a Python
   script's page requests go out as `LoomWatch/<version> (+https://loomwatch.github.io/)` rather
   than Python's own name, which some sites refuse; a name the script sets itself still wins.

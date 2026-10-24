@@ -77,6 +77,15 @@ instructions and tools.
   (`platform::ProcessTree`), which also ends whatever it leaves running when it finishes. On a
   Mac they also run in a Seatbelt sandbox (`agent/sandbox.rs`): they can change files only in the
   work folder and temporary folders, and reach the network only when the agent may use the web.
+  macOS refuses Apple Events from a sandboxed program unless its signature carries an Apple Events
+  entitlement, which `/usr/bin/osascript` lacks. So at start the daemon signs a copy of
+  `loomwatch-osascript` into `programs/` in its state folder, once for each build, and puts that
+  folder first on commands' `PATH`. `loomwatch-osascript` (`crates/loomwatch-osascript`) is
+  LoomWatch's own `osascript`: the same command line and output, through macOS's OpenScripting. A
+  command can then work in Calendar, Mail or any other app once the person allows LoomWatch in
+  System Settings → Privacy & Security → Automation. The sandbox still holds the command's own
+  writes, but not what an app it controls does (`SECURITY.md`). The app bundle carries
+  `loomwatch-osascript` beside `loomwatchd`.
   Windows and Linux have no sandbox, so the permission check is the only line there. For an agent
   that may use the web, a `sitecustomize.py` written for each command and put first on
   `PYTHONPATH` gives Python's `urllib` the name `LoomWatch/<version>` in place of

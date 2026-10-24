@@ -67,6 +67,11 @@ pub(super) async fn run(input: &Value, context: &Context<'_>) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // On a Mac, `LoomWatch`'s own `osascript` first, which may reach other apps from inside the
+    // sandbox (ADR 0087).
+    if let Some(path) = sandbox::path(std::env::var_os("PATH").as_deref()) {
+        process.env("PATH", path);
+    }
     // Kept until the command ends. A folder that can't be made leaves Python its own name.
     let python = if context.command.network {
         PythonName::new().ok()
@@ -453,6 +458,33 @@ mod tests {
                 && !locked.text.contains(note),
             "{}",
             locked.text
+        );
+    }
+
+    /// An agent's `osascript` is `LoomWatch`'s own once there is one (ADR 0087).
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn on_a_mac_a_command_runs_loomwatchs_own_osascript() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let folder = Folder::new();
+        let programs = folder.0.join("programs");
+        std::fs::create_dir_all(&programs).unwrap();
+        let own = programs.join("osascript");
+        std::fs::write(&own, "#!/bin/sh\necho \"LoomWatch's osascript: $*\"\n").unwrap();
+        std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o755)).unwrap();
+        sandbox::use_programs_folder(programs);
+        let done = run_in(
+            &folder,
+            false,
+            &serde_json::json!({"command": "osascript -e 1"}),
+        )
+        .await;
+        assert_eq!(
+            done.text.trim(),
+            "LoomWatch's osascript: -e 1",
+            "{}",
+            done.text
         );
     }
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/loomwatch-backend", "crates/loomwatch-app"]
+members = ["crates/loomwatch-backend", "crates/loomwatch-app", "crates/loomwatch-osascript"]
 resolver = "3"
 
 [workspace.package]

@@ -100,6 +100,16 @@ jobs:
             target/aarch64-apple-darwin/release/LoomWatch \
             target/x86_64-apple-darwin/release/LoomWatch
           lipo -info build/LoomWatch
+      # What agents' commands run as `osascript` (ADR 0087).
+      - name: Build the osascript stand-in for Apple silicon and Intel
+        run: |
+          cargo build --release --locked -p loomwatch-osascript --target aarch64-apple-darwin
+          cargo build --release --locked -p loomwatch-osascript --target x86_64-apple-darwin
+          lipo -create -output build/loomwatch-osascript \
+            target/aarch64-apple-darwin/release/loomwatch-osascript \
+            target/x86_64-apple-darwin/release/loomwatch-osascript
+          lipo -info build/loomwatch-osascript
+          build/loomwatch-osascript -e 'return 1 + 1'
       # dmgbuild lays out the .dmg's window (packaging/macos/dmg-settings.py), pinned by hash.
       - name: Install dmgbuild
         run: |
@@ -135,7 +145,7 @@ jobs:
               export MACOS_NOTARY_PROFILE=loomwatch
             fi
           fi
-          scripts/package-macos-app.sh build/loomwatchd build/LoomWatch dist
+          scripts/package-macos-app.sh build/loomwatchd build/LoomWatch build/loomwatch-osascript dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-macos-universal
