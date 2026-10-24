@@ -780,6 +780,17 @@ describe('the box: any of My agents, and its workbench', () => {
     expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/maya.yaml' })
   }, 15_000)
 
+  it('with none pinned, a file brought near opens the slot for the first of My agents', async () => {
+    jobs = [maya, writer]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const pdf = new File(['%PDF'], 'Lease 2027.pdf', { type: 'application/pdf' })
+    fireEvent.dragEnter(container.querySelector<HTMLElement>('.island-shape')!, { dataTransfer: { files: [pdf], getData: () => '', dropEffect: 'none' } })
+    expect(view(container)).toBe('slot')
+    expect(within(container).getByRole('status', { name: 'Drop it here for Maya' })).toBeTruthy()
+  })
+
   it('switches to another of My agents with Tab, or a click on its figure, before anything is written; the message pins the one it goes to', async () => {
     pinnedAgent = 'maya'
     jobs = [maya, writer]
