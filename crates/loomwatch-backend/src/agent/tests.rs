@@ -2538,6 +2538,95 @@ async fn claude_streams_signed_thinking_and_tool_calls_and_sends_them_back_uncha
     assert!(!recorded.contains(CLAUDE_KEY));
 }
 
+/// A Claude reply the length limit cut off: a whole `list_files` call with no input, then the
+/// `write_file` call it opens, its input streamed as far as `partial` before the limit, and its
+/// block `closed` or left open as the stream ends.
+fn cut_claude_reply(partial: &str, closed: bool) -> Vec<Value> {
+    let mut reply = vec![
+        message_start(50, 0),
+        json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "toolu_list", "name": "list_files", "input": {}}}),
+        json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": ""}}),
+        json!({"type": "content_block_stop", "index": 0}),
+        json!({"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "toolu_cut", "name": "write_file", "input": {}}}),
+    ];
+    if !partial.is_empty() {
+        reply.push(json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": partial}}));
+    }
+    if closed {
+        reply.push(json!({"type": "content_block_stop", "index": 1}));
+    }
+    reply.extend(ended("max_tokens", 16_000));
+    reply
+}
+
+/// A tool call Claude's length limit cut off part way doesn't run with nothing in it: the model is
+/// told its reply reached the limit, so it can write the file in parts. Run 948bd594's tutor heard
+/// "`path` is required" instead, from a lesson file cut off at 16,000 tokens. The call goes back to
+/// Anthropic with an empty input, the only kind it takes, and the whole call before it still runs.
+#[tokio::test]
+async fn a_claude_tool_call_cut_off_at_the_length_limit_is_sent_back_with_the_reason() {
+    let partial = "{\"path\":\"lesson.html\",\"content\":\"<!doctype html><p>A very long les";
+    for (partial, closed) in [
+        (partial, true),
+        // Cut off before any of its input was written.
+        ("", true),
+        // The stream ended without closing the call's block.
+        (partial, false),
+    ] {
+        let folder = Folder::new();
+        let done: Vec<Value> = [
+            vec![message_start(80, 0)],
+            text_block(0, "Done.").to_vec(),
+            ended("end_turn", 3).to_vec(),
+        ]
+        .concat();
+        let (stand, base) = stand(vec![
+            events(&cut_claude_reply(partial, closed)),
+            events(&done),
+        ])
+        .await;
+        let sink = Arc::new(Recorded::default());
+        let mut session = session_on(
+            &folder,
+            claude(&base),
+            sink.clone(),
+            Arc::new(AllowAll),
+            "anthropic:claude-opus-5-5",
+        );
+        let end = session.prompt("Write lesson.html").await.unwrap();
+        assert_eq!(end.reply, "Done.", "{partial:?}");
+
+        let bodies = stand.bodies.lock().unwrap().clone();
+        assert_eq!(
+            bodies[1]["messages"][1]["content"][1],
+            json!({"type": "tool_use", "id": "toolu_cut", "name": "write_file", "input": {}}),
+            "{partial:?}"
+        );
+        let results = &bodies[1]["messages"][2]["content"];
+        assert_eq!(results[0]["tool_use_id"], "toolu_list");
+        assert!(
+            !results[0]["content"].to_string().contains("Not run"),
+            "{partial:?}: {}",
+            results[0]
+        );
+        assert_eq!(results[1]["tool_use_id"], "toolu_cut");
+        assert!(
+            results[1]["content"]
+                .to_string()
+                .contains("reached the length limit of one reply"),
+            "{partial:?}: {}",
+            results[1]
+        );
+        let recorded = serde_json::to_string(&*sink.0.lock().unwrap()).unwrap();
+        assert!(
+            recorded.contains("reached the length limit of one reply"),
+            "{partial:?}"
+        );
+        assert!(!recorded.contains("is required"), "{partial:?}");
+        assert!(!folder.0.join("lesson.html").exists());
+    }
+}
+
 /// A reply `pause_turn` stopped is carried on in the same call, and Claude is told what it wrote.
 #[tokio::test]
 async fn a_paused_claude_reply_is_carried_on() {
