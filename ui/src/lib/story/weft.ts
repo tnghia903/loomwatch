@@ -2,7 +2,7 @@ import type { Evidence, RunProjection } from '../watch/events'
 import { nameWithHelpers } from '../chat/helpers'
 import { baseName } from '../files/paths'
 import { commandName, commandOf } from './commands'
-import { failuresOf, mendOf, skillName, workCount, type MendHow, type WorkCount } from './reads'
+import { cameEmpty, failuresOf, mendOf, skillName, workCount, type MendHow, type WorkCount } from './reads'
 import { isProviderCode, isWebSearch, searchWords, webPageOf } from './webCalls'
 
 /**
@@ -103,7 +103,7 @@ export function shortName(name: string): string {
 }
 
 /** One recorded call as a sentence, in the words a person would use for that kind of call. */
-export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'> & Partial<Pick<Evidence, 'rawInput' | 'declined' | 'toolKind' | 'content' | 'rawOutput'>>): string {
+export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'relation' | 'name' | 'status' | 'target'> & Partial<Pick<Evidence, 'rawInput' | 'locations' | 'events' | 'declined' | 'toolKind' | 'content' | 'rawOutput'>>): string {
   const what = shortName(item.name)
   const failed = item.status === 'failed' || item.status === 'rejected'
   const quoted = what ? `“${what}”` : 'something'
@@ -126,7 +126,9 @@ export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'r
     case 'file': {
       const verb = item.relation.replace(/ file$/, '')
       const base: Record<string, string> = { read: 'read', edited: 'edit', deleted: 'delete', moved: 'move' }
-      return failed ? `${agent} couldn’t ${base[verb] ?? 'use'} ${what || 'a file'}.` : `${agent} ${verb} ${what || 'a file'}.`
+      // An empty call's title is its tool's name ("write_file"), not a file's.
+      const file = (!cameEmpty(item) && what) || 'a file'
+      return failed ? `${agent} couldn’t ${base[verb] ?? 'use'} ${file}.` : `${agent} ${verb} ${file}.`
     }
     case 'command': {
       // Named by the program it ran, not the folder it ran in: `cd /tmp/build && python3 build.py`

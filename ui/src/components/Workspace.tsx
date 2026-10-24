@@ -2820,7 +2820,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             onPending={setSchedulePending}
           />
         )}
-        {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} calls={projection.evidence.filter((item) => item.agentId === inspectedEvidence.agentId)} onInspectEvidence={setInspectedEvidenceId} onClose={() => setInspectedEvidenceId(null)} />}
+        {inspectedEvidence && <ActivityPanel evidence={inspectedEvidence} ownerLabel={ownerLabels.get(inspectedEvidence.agentId) ?? inspectedEvidence.agentId} calls={projection.evidence.filter((item) => item.agentId === inspectedEvidence.agentId)} finished={(runAgents.find((node) => node.id === inspectedEvidence.agentId)?.data.runtime?.status ?? projection.agents.find((agent) => agent.id === inspectedEvidence.agentId)?.status) === 'succeeded'} onInspectEvidence={setInspectedEvidenceId} onClose={() => setInspectedEvidenceId(null)} />}
         {handover && (
           <HandoverPanel
             modal
