@@ -416,27 +416,27 @@ you built, then add, connect and rename agents to match. To run a team on a sche
    (about 30 MB, for Apple silicon and Intel Macs) and open it.
 2. Drag **LoomWatch** to **Applications**, then open it from Applications.
 
-LoomWatch opens in your browser, where your first agent asks what to make first. It then waits at
-the notch at the top middle of each screen: the black notch around the camera on a MacBook with
-one, and a small black tab LoomWatch draws there on any other screen. LoomWatch's face sits beside
-it.
-Point at it to see your teams, and click **⋯** there for **Open LoomWatch**, **Start at login**,
-**Show at the notch**, **Show log** and **Quit LoomWatch**. Turn off **Show at the notch** to hide
-it: LoomWatch's face moves to the right side of the menu bar. Click the face for the same menu, and
-to turn the notch back on. There is no window to keep open; closing the browser tab leaves
-LoomWatch running until you quit it. Then follow [Try your first run](#try-your-first-run).
+LoomWatch opens in your browser, where your first agent asks what to make first. On a MacBook it
+then waits at the notch, the black notch around the camera: point at it to see your teams, and click
+**⋯** there for LoomWatch's menu. On a screen without a notch (a monitor, an iMac, a MacBook with its
+lid closed), LoomWatch's face sits at the right of the menu bar instead: click it for the same menu.
+There is no window to keep open; closing the browser tab leaves LoomWatch running until you choose
+**Quit LoomWatch** in that menu. Then follow [Try your first run](#try-your-first-run).
 
-To keep one of your agents at hand, open it in **My agents**, click its name at the top and choose
-**Pin to the notch**. Its figure then takes the place of LoomWatch's face. Press **⌃⌥Space**
-(Control-Option-Space) in any app, or point at the notch, and write to it. Both need **Show at the
-notch** turned on. Drag a file, a picture, an email from Mail, a link or some text to the notch to
-hand it over: the notch opens to take it, offers a few jobs that fit, and you can say your own.
-iPhone photos go in as JPEGs. A file your agent can't open, such as a Pages document or a video,
-stays out, and the notch says what to do instead, such as exporting it as a PDF; drop the PDF and
-it joins what is already there. Its answer shows
-at the notch: **Copy** it and paste it into any app, and it keeps its headings, lists and links
-where that app takes formatting. It can ask one of your teams to do part of the work; that team only
-starts when you press **Start**, and that run costs what any run of the team costs.
+To message one of your agents from any app, press **⌃⌥Space** (Control-Option-Space), or choose
+**Message** and its name at the top of LoomWatch's menu. A box opens at the top middle of the screen
+you are on; **Tab** switches to another of your agents, and its figure opens its workbench. When you
+send, the agent shows at its workbench for a moment, then waits at the top of the screen while it
+works: point at it to watch. Its answer drops down there; **Copy** keeps its headings, lists and
+links when you paste. The box opens with the agent you last wrote to.
+
+To hand it a file, a picture, an email from Mail, a link or some text, drag it to the top middle of
+the screen: the box opens to take it and offers a few jobs that fit. iPhone photos go in as JPEGs. A
+file your agent can't open, such as a Pages document or a video, stays out, and the box says what to
+do instead, such as exporting it as a PDF; drop the PDF and it joins what is already there. If your
+agent asks one of your teams for help, the team starts only when you press **Start**, and that run
+costs what any run of the team costs. Untick **Show at the notch** in the menu to turn all of this
+off.
 
 > [!NOTE]
 > LoomWatch is not notarized by Apple yet, so the first time you open it macOS may say it can't

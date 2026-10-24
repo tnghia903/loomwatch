@@ -94,7 +94,8 @@ function sentence(text: string): string {
 }
 
 /** Where the Mac or Windows app's menu, with Show log and Quit, is: on a Mac under the ⋯ of the
-    notch at the top of the screen, on every screen (ADR 0083); on Windows on its icon. */
+    notch at the top of the screen, or LoomWatch's face in the menu bar wherever a screen has no
+    notch (ADR 0083); on Windows on its icon. */
 function appMenu(): string {
   return isWindows() ? 'the menu of LoomWatch’s icon beside the clock' : 'LoomWatch’s menu (point at the notch at the top of the screen and click ⋯, or click LoomWatch’s face in the menu bar)'
 }

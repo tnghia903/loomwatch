@@ -10,11 +10,23 @@ import type { RunRecord } from '../lib/runs/client'
 import { cascaded, DESKTOP, rulesOf } from '../test/cascade'
 import { answering, at, failed, iso, maya, OUT_OF_CREDITS, permission, pinnedChat, run, said } from './fixtures'
 import { Island } from './Island'
+import { ISLAND_WAITS } from './waits'
+
+// The workbench is drawn with WebGL, which jsdom has none of: here it is what it was given.
+vi.mock('../components/agents/AgentFigure', () => ({
+  default: ({ view, readOnly, tone, labels }: { view: { look: { name: string }; mood: string }; readOnly?: boolean; tone?: string; labels: { anchor: string }[] }) => (
+    <div data-testid="bench" data-agent={view.look.name} data-mood={view.mood} data-read-only={String(Boolean(readOnly))} data-tone={tone ?? 'app'} data-labels={labels.map((label) => label.anchor).join(' ')} />
+  ),
+}))
+
+const writer: SavedJob = { id: 'writer', file: '.jobs/writer.yaml', name: 'Writer', instructions: 'Write a short draft.', model: 'fake/offline' }
 
 let runs: RunRecord[] = []
 let notes: NoteAnswering[] = []
 let noteReads = 0
 let pinnedAgent: string | null = null
+/** What the page pinned, through `PUT /api/pinned-agent`. */
+const pins: (string | null)[] = []
 let sendFails = false
 let requests: TeamRequest[] = []
 const answeredTeams: { id: string; decision: string }[] = []
@@ -53,6 +65,7 @@ beforeEach(() => {
   notes = []
   noteReads = 0
   pinnedAgent = null
+  pins.length = 0
   sendFails = false
   requests = []
   answeredTeams.length = 0
@@ -79,6 +92,11 @@ beforeEach(() => {
       return json(notes)
     }
     if (url === '/api/jobs') return json({ folder: '.jobs', jobs, problems: [] })
+    if (url === '/api/pinned-agent' && init?.method === 'PUT') {
+      pinnedAgent = (JSON.parse(String(init.body)) as { agent: string | null }).agent
+      pins.push(pinnedAgent)
+      return json({ agent: pinnedAgent, notchShown: true })
+    }
     if (url === '/api/pinned-agent') return json({ agent: pinnedAgent })
     if (url.startsWith('/api/team-requests?')) return json(requests)
     if (url.startsWith('/api/team-requests/') && init?.method === 'POST') {
@@ -412,15 +430,16 @@ describe('beside the notch at rest, on every screen', () => {
     }
   })
 
-  it('without a notch, the tab shrinks back to its figure and no further, nor shorter than the menu bar', async () => {
+  it('without a notch, nothing is drawn at rest, nor for the teams: nothing to point at, the face has their news', async () => {
+    runs = [run('r1', { permissionRequests: [permission('p1')] })]
     const { container } = render(<Island />)
     tellPage({ kind: 'place', notch: null, menuBar: 24 })
-    await waitFor(() => expect(view(container)).toBe('rest'))
-    const island = container.querySelector<HTMLElement>('.island')!
-    // As wide as LoomWatch's mark and its margin, which is all there is beside no notch.
-    const ear = island.style.getPropertyValue('--ear')
-    expect(Number.parseFloat(ear)).toBeLessThan(40)
-    expect([least(island, 'min-width'), least(island, 'min-height')]).toEqual([ear, '24px'])
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: null }))
+    await act(async () => { await new Promise((done) => setTimeout(done, 50)) })
+    expect(view(container)).toBe('hidden')
+    const areas = toApp.filter((message) => (message as { kind: string }).kind === 'areas')
+    expect(areas.at(-1)).toEqual({ kind: 'areas', rects: [] })
+    expect(container.querySelector('.island-ear .island-head')).toBeNull()
   })
 
   it('with reduced motion, a figure at work holds a pose, so it is not told from a ready one by colour alone', () => {
@@ -488,15 +507,14 @@ describe('beside the notch at rest, on every screen', () => {
     expect(heads[1].getAttribute('data-moment')).toBe('work')
   })
 
-  it('drops nothing out while another screen’s island is live, and the list opens only on the live one', async () => {
+  it('keeps the teams’ news out at the notch while the pointer is on another screen; the list opens only where the pointer is', async () => {
     runs = [run('r1', { permissionRequests: [permission('p1')] })]
     const { container } = render(<Island />)
     place()
     await waitFor(() => expect(view(container)).toBe('ask'))
     tellPage({ kind: 'live', on: false })
-    expect(view(container)).toBe('tucked')
-    tellPage({ kind: 'live', on: true })
     expect(view(container)).toBe('ask')
+    tellPage({ kind: 'live', on: true })
     fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
     expect(view(container)).toBe('list')
     tellPage({ kind: 'live', on: false })
@@ -530,7 +548,7 @@ describe('the agent pinned to the notch', () => {
     const { findByRole } = within(container)
     place()
     // The app hears an agent is pinned, so ⌃⌥Space has a box to open.
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     await waitFor(() => expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('tucked'))
     fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
     const field = await findByRole('textbox', { name: 'Message Maya' })
@@ -555,10 +573,12 @@ describe('the agent pinned to the notch', () => {
     expect(wrote[0].yaml).toContain('Help me with my day.')
     expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/maya.yaml', text: 'What is on my calendar today?', to: { kind: 'agent', agent: 'maya' }, expectedRevision: 'sha256:chat' })
     expect(typeof messages[0].startKey).toBe('string')
-    expect(await within(container.querySelector<HTMLElement>('.island-pinned')!).findByText('Sent to Maya.')).toBeTruthy()
-    expect((field as HTMLInputElement).value).toBe('')
-    // Sent: the keyboard goes back to whatever had it.
-    expect(toApp.at(-1)).toEqual({ kind: 'keyboard', on: false })
+    // Sent: the box gives way to Maya at her workbench, the words fold into her head, and the
+    // keyboard goes back to whatever had it.
+    await waitFor(() => expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('bench'))
+    expect(container.querySelector('.island-fold')?.textContent).toBe('What is on my calendar today?')
+    expect(await within(container).findByTestId('bench')).toBeTruthy()
+    expect(toApp.filter((message) => (message as { kind: string }).kind === 'keyboard').at(-1)).toEqual({ kind: 'keyboard', on: false })
   }, 15_000)
 
   it('while it works, a message joins its turn as a note, and its chat is not written again', async () => {
@@ -596,7 +616,7 @@ describe('the agent pinned to the notch', () => {
     const { container } = render(<Island />)
     const { findByRole, findByText } = within(container)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
     const field = await findByRole('textbox', { name: 'Message Maya' })
     fireEvent.focus(field)
@@ -706,7 +726,7 @@ describe('the agent pinned to the notch', () => {
     const { container } = render(<Island />)
     const { findByRole } = within(container)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     tellPage({ kind: 'compose' })
     expect(container.querySelector('.island')?.getAttribute('data-view')).toBe('list')
     const field = await findByRole('textbox', { name: 'Message Maya' })
@@ -729,16 +749,159 @@ describe('the agent pinned to the notch', () => {
     expect(toApp.slice(asked)).not.toContainEqual({ kind: 'keyboard', on: true })
   }, 15_000)
 
-  it('with none pinned, the app hears so, and the list has no box', async () => {
+  it('with none in My agents, the app hears there is no one to message, and the list has no box', async () => {
     runs = [run('r1', { working: ['writer'] })]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: null }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: null }))
     tellPage({ kind: 'compose' })
     expect(container.querySelector('.island')?.getAttribute('data-view')).not.toBe('list')
     fireEvent.pointerEnter(container.querySelector('.island-shape')!, { pointerType: 'mouse' })
     expect(container.querySelector('.island-pinned')).toBeNull()
     expect(container.querySelector('input')).toBeNull()
+  }, 15_000)
+})
+
+describe('the box: any of My agents, and its workbench', () => {
+  const place = () => tellPage({ kind: 'place', notch: { width: 188, height: 32 }, menuBar: 32 })
+  const view = (container: HTMLElement) => container.querySelector('.island')?.getAttribute('data-view')
+
+  it('with none pinned, opens with the first of My agents, and the first message pins it', async () => {
+    jobs = [maya, writer]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    fireEvent.change(field, { target: { value: 'What is on my calendar today?' } })
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(pins).toEqual(['maya'])
+    expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/maya.yaml' })
+  }, 15_000)
+
+  it('with none pinned, a file brought near opens the slot for the first of My agents', async () => {
+    jobs = [maya, writer]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    const pdf = new File(['%PDF'], 'Lease 2027.pdf', { type: 'application/pdf' })
+    fireEvent.dragEnter(container.querySelector<HTMLElement>('.island-shape')!, { dataTransfer: { files: [pdf], getData: () => '', dropEffect: 'none' } })
+    expect(view(container)).toBe('slot')
+    expect(within(container).getByRole('status', { name: 'Drop it here for Maya' })).toBeTruthy()
+  })
+
+  it('switches to another of My agents with Tab, or a click on its figure, before anything is written; the message pins the one it goes to', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya, writer]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    expect(container.querySelector('.island-box-name')?.textContent).toBe('Maya')
+    // Tab is the box's: the next agent, not the next button. Option-Tab still moves on.
+    expect(fireEvent.keyDown(field, { key: 'Tab', altKey: true })).toBe(true)
+    expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false)
+    await within(container).findByRole('textbox', { name: 'Message Writer' })
+    expect(container.querySelector('.island-box-name')?.textContent).toBe('Writer')
+    // Only for this message: nothing is pinned yet, and ⌃⌥Space still opens with Maya.
+    expect(pins).toEqual([])
+    expect(toApp.filter((message) => (message as { kind: string }).kind === 'agent').at(-1)).toEqual({ kind: 'agent', name: 'Maya' })
+    // Back by its figure among the others; Shift-Tab goes the other way round.
+    fireEvent.click(within(container).getByRole('button', { name: 'Message Maya instead' }))
+    const toMaya = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    fireEvent.keyDown(toMaya, { key: 'Tab', shiftKey: true })
+    const box = await within(container).findByRole('textbox', { name: 'Message Writer' })
+    // Once something is written, Tab moves on as anywhere: a habit Tab must not change who gets it.
+    fireEvent.change(box, { target: { value: 'Draft the invite' } })
+    expect(fireEvent.keyDown(box, { key: 'Tab' })).toBe(true)
+    expect(within(container).getByRole('textbox', { name: 'Message Writer' })).toBe(box)
+    fireEvent.submit(box.closest('form')!)
+    await waitFor(() => expect(messages).toHaveLength(1))
+    expect(messages[0]).toMatchObject({ teamPath: '.jobs/.bench/writer.yaml', text: 'Draft the invite', to: { kind: 'agent', agent: 'writer' } })
+    // The message pinned Writer: the box opens with the agent last written to.
+    expect(pins).toEqual(['writer'])
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Writer' }))
+  }, 15_000)
+
+  it('opens as it was when put away unsent: what was chosen was only for that message', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya, writer]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    fireEvent.keyDown(await within(container).findByRole('textbox', { name: 'Message Maya' }), { key: 'Tab' })
+    await within(container).findByRole('textbox', { name: 'Message Writer' })
+    tellPage({ kind: 'clickOutside' })
+    await waitFor(() => expect(view(container)).not.toBe('list'))
+    tellPage({ kind: 'compose' })
+    expect(await within(container).findByRole('textbox', { name: 'Message Maya' })).toBeTruthy()
+    expect(pins).toEqual([])
+  }, 15_000)
+
+  it('opens its agent’s workbench from its figure, to look at, in the island’s own dark; Escape folds it first', async () => {
+    try { localStorage.setItem('loomwatch:theme', 'light') } catch { /* no storage */ }
+    document.documentElement.setAttribute('data-theme', 'dark')
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    place()
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    tellPage({ kind: 'compose' })
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    const figure = within(container).getByRole('button', { name: 'See Maya’s workbench' })
+    expect(figure.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(figure)
+    const bench = await within(container).findByTestId('bench')
+    expect([bench.dataset.agent, bench.dataset.readOnly, bench.dataset.tone]).toEqual(['Maya', 'true', 'dark'])
+    expect(bench.dataset.labels).toContain('job')
+    expect(within(container).getByRole('button', { name: 'Hide Maya’s workbench' }).getAttribute('aria-expanded')).toBe('true')
+    // The bench never turns the island to the app's light theme.
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+    // The workbench takes the place of the teams' rows.
+    expect(container.querySelectorAll('.island-row:not(.island-pinned)')).toHaveLength(0)
+    // Escape folds the bench, and the box stays to write in; again, and the box goes.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(within(container).queryByTestId('bench')).toBeNull())
+    expect(field.isConnected).toBe(true)
+    expect(view(container)).toBe('list')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(view(container)).not.toBe('list'))
+    try { localStorage.removeItem('loomwatch:theme') } catch { /* no storage */ }
+  }, 15_000)
+
+  it('without a notch, opens as a box from the menu bar, shows its agent at its workbench once sent, then tucks it into a pill at its desk, open again while pointed at', async () => {
+    pinnedAgent = 'maya'
+    jobs = [maya]
+    const { container } = render(<Island />)
+    tellPage({ kind: 'place', notch: null, menuBar: 24 })
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
+    expect(view(container)).toBe('hidden')
+    tellPage({ kind: 'compose' })
+    expect(view(container)).toBe('box')
+    // Only the box: no teams, no foot with the menu.
+    expect(container.querySelector('.island-list-foot')).toBeNull()
+    const field = await within(container).findByRole('textbox', { name: 'Message Maya' })
+    fireEvent.change(field, { target: { value: 'What is on my calendar today?' } })
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(view(container)).toBe('bench'))
+    expect(await within(container).findByTestId('bench')).toBeTruthy()
+    runs = [pinnedChat('c1', { working: ['maya'] })]
+    // Its moment is up: it tucks into a pill, Maya at her little desk.
+    vi.setSystemTime(Date.now() + ISLAND_WAITS.bench)
+    tellPage({ kind: 'away', away: false })
+    expect(view(container)).toBe('pill')
+    expect(container.querySelector('.island-pill-desk .island-pill-figure')).toBeTruthy()
+    expect(within(container).queryByTestId('bench')).toBeNull()
+    // Pointed at, her workbench opens; left, it tucks away again.
+    tellPage({ kind: 'pointer', over: true, area: 0 })
+    expect(view(container)).toBe('pill')
+    await waitFor(() => expect(view(container)).toBe('bench'))
+    expect(await within(container).findByTestId('bench')).toBeTruthy()
+    tellPage({ kind: 'pointer', over: false, area: null })
+    await waitFor(() => expect(view(container)).toBe('pill'), { timeout: 3000 })
   }, 15_000)
 })
 
@@ -753,7 +916,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     const { container } = render(<Island />)
     const { findByRole, getByRole } = within(container)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     const island = container.querySelector('.island')!
     const shape = container.querySelector<HTMLElement>('.island-shape')!
     fireEvent.dragEnter(shape, carrying([pdf]))
@@ -783,7 +946,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     jobs = [maya]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     const island = container.querySelector('.island')!
     tellPage({ kind: 'drag', near: true })
     fireEvent.dragEnter(container.querySelector<HTMLElement>('.island-shape')!, carrying([]))
@@ -813,7 +976,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     jobs = [maya]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     const island = container.querySelector('.island')!
     const shape = container.querySelector<HTMLElement>('.island-shape')!
     const recording = new File([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00])], 'Call with landlord.m4a')
@@ -843,7 +1006,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     jobs = [maya]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     const shape = container.querySelector<HTMLElement>('.island-shape')!
     const plan = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])], 'Budget plan.pages')
     fireEvent.dragEnter(shape, carrying([pdf, plan]))
@@ -871,7 +1034,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     jobs = [maya]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     const island = container.querySelector('.island')!
     tellPage({ kind: 'drag', near: true })
     expect(island.getAttribute('data-view')).toBe('slot')
@@ -889,7 +1052,7 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     jobs = [maya]
     const { container } = render(<Island />)
     place()
-    await waitFor(() => expect(toApp).toContainEqual({ kind: 'pinned', name: 'Maya' }))
+    await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
     const island = container.querySelector('.island')!
     tellPage({ kind: 'drag', near: true })
     fireEvent.dragEnter(container.querySelector<HTMLElement>('.island-shape')!, carrying([pdf]))
@@ -948,9 +1111,9 @@ describe('the notch as the pinned agent’s slot, and its crew', () => {
     await waitFor(() => expect(row.querySelector('.island-for')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('to First-principles school · no spending limit'))
     await waitFor(() => expect(row.querySelectorAll('.island-crew-figure')).toHaveLength(2))
     expect(row.querySelector('.island-request')?.querySelectorAll('small')).toHaveLength(1)
-    // Start sits where Send would, and is the only other button.
+    // Start sits where Send would, and is the only other button but her figure, her workbench's.
     const field = inRow.getByRole('textbox', { name: 'Or message Maya' })
-    expect(inRow.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Don’t start First-principles school', 'Start First-principles school'])
+    expect(inRow.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['See Maya’s workbench', 'Don’t start First-principles school', 'Start First-principles school'])
     expect(field.closest('form')?.contains(inRow.getByRole('button', { name: 'Start First-principles school' }))).toBe(true)
     // Writing something else brings Send back; an empty box, Start.
     fireEvent.change(field, { target: { value: 'Make it shorter first' } })

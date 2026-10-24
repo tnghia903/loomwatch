@@ -196,7 +196,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       // shortcut, so the line stays true once it is on.
       if (save.kind === 'saved') setSave({ kind: 'idle' })
       const reach = now.notchShown
-        ? `Press ${PINNED_SHORTCUT_WORDS} in any app, or point at the top middle of your screen, to message ${name}.`
+        ? `Press ${PINNED_SHORTCUT_WORDS} in any app to message ${name}.`
         : `Click LoomWatch’s face in the menu bar and turn on Show at the notch. Then press ${PINNED_SHORTCUT_WORDS} in any app to message ${name}.`
       setPinSaid({ ok: true, text: pinning ? `Pinned${before ? ` in place of ${before}` : ''}. ${reach}` : 'Unpinned.' })
     } catch {

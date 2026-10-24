@@ -51,7 +51,7 @@ body {
 .island [data-phase="tools"] { --act: island-tool var(--t-flow) var(--ease-out) infinite; }
 .island [data-phase="typing"] { --act: island-bob var(--t-settle) ease-in-out infinite; }
 .island .island-row-figure.glow[data-moment="work"] > * { transform-origin: 50% 90%; animation: var(--act, island-bob calc(var(--t-breathe) / 2) ease-in-out infinite); }
-.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-slot-eyes, .island-stage-figure, .island-crew-figure) > :is(img, .figure-still) {
+.island :is(.island-head, .island-slot, .island-hang-figure, .island-row-figure, .island-slot-eyes, .island-stage-figure, .island-crew-figure, .island-pill-figure, .island-agent, .island-bench-figure) > :is(img, .figure-still) {
   display: block;
   width: 100%;
   height: 100%;
@@ -101,17 +101,16 @@ body {
 
 /* At rest and tucked the island is even either side of the camera: the pinned agent, or
    LoomWatch's mark, and the teams' figures on the left; on the right, what there is to say (the
-   count, the time, a new result), empty at rest. Without a notch the tab at rest is just its
-   figure, at the middle of the menu bar, and shrinks back no narrower than that figure. */
+   count, the time, a new result), empty at rest. */
 .island:is([data-view="rest"], [data-view="tucked"]) .island-shape { --w: calc(var(--notch-w) + 2 * var(--ear)); }
-.island[data-notch="none"][data-view="rest"] .island-shape { --w: var(--ear); min-width: var(--ear); }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-shape {
   --w: calc(var(--notch-w) + 24px);
   --h: calc(var(--bar) + var(--fig) * .66);
   --r: calc(var(--bar) * .7);
 }
 .island[data-view="ask"] .island-shape { --h: calc(var(--bar) + 10px); --r: calc(var(--bar) * .38); }
-.island[data-view="list"] .island-shape {
+/* The list, the box without a notch, and the box's agent at its workbench grow to what they hold. */
+.island:is([data-view="list"], [data-view="box"], [data-view="bench"]) .island-shape {
   --w: max(calc(var(--notch-w) + 2 * var(--ear)), 480px);
   --h: var(--list-h, calc(var(--bar) + 120px));
   --r: 26px;
@@ -124,7 +123,7 @@ body {
 /* ---- Popping out: the agent at work peeks up below the notch ---- */
 .island-balcony { position: absolute; top: var(--bar); left: 50%; width: var(--fig); height: var(--fig); translate: -50% 0; }
 /* The list fills the island: whoever peeked last is not drawn over it. */
-.island[data-view="list"] .island-balcony { visibility: hidden; }
+.island:is([data-view="list"], [data-view="box"], [data-view="bench"]) .island-balcony { visibility: hidden; }
 .island-slot { position: absolute; inset: 0; translate: 0 calc(var(--fig) * 1.15); transition: translate var(--t-move) var(--ease-in); }
 .island-slot > * { transform-origin: 50% 90%; }
 .island:is([data-view="work"], [data-view="done"], [data-view="fail"]) .island-slot.is-on {
@@ -319,6 +318,81 @@ body {
    don't, and the team under it. In its row the bubble takes the row's width, its figure at the
    bubble's corner; on the card, the card is the bubble. */
 .island-pinned > .island-request { grid-column: 2 / -1; }
+/* Its figure opens its workbench; the other agents, on its line at the right, switch the box to
+   one of them, as Tab does. What it is doing goes under them, beside its figure. */
+.island-bench-toggle { grid-row: 1; padding: 0; border: 0; border-radius: var(--r-md); background: transparent; text-align: start; cursor: pointer; }
+.island-bench-toggle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.island-box-head { grid-row: 1; grid-column: 2 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.island-box-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/20px var(--font-sans); color: var(--color-ink); }
+.island-agents { display: flex; flex: none; align-items: center; gap: 6px; }
+.island-pinned > .island-words:not(.island-request) { grid-column: 2; }
+/* The others at full strength: their size says they aren't the one written to, and a faded figure
+   would read as resting or not there. */
+.island-agent { width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; cursor: pointer; }
+.island-agent:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.island-key { font: 500 11px/1 var(--font-sans); color: var(--color-ink-2); padding: 3px 5px; border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent); border-radius: var(--r-xs); }
+/* Watching it at its workbench: what it is doing, on its figure's line. */
+.island-box-doing { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--font-sans); color: var(--color-ink); }
+
+/* ---- The box's agent at its workbench: the builder's bench, to look at ---- */
+.island-bench { grid-column: 1 / -1; margin-top: 2px; }
+.island-bench .bench-stage { aspect-ratio: 22 / 15; border-radius: var(--r-lg); }
+.island-bench-still { display: grid; place-items: center; align-content: center; gap: 8px; aspect-ratio: 22 / 15; border-radius: var(--r-lg); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+/* While it thinks, its thought bubble has the top of the bench: the labels up there step aside. */
+.island-bench .bench-stage:has(.bench-thought.on) .bench-tag.above > span { opacity: 0; transition: opacity var(--t-quick) var(--ease-out); }
+.island-bench-figure { width: 96px; height: 96px; }
+
+/* ---- The words just sent, folding into the agent's head ---- */
+.island-fold {
+  position: fixed;
+  left: var(--fx);
+  top: var(--fy);
+  z-index: 2;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 13px/18px var(--font-sans);
+  color: var(--color-ink);
+  pointer-events: none;
+  transform-origin: 0 50%;
+  animation: island-fold var(--t-spring) var(--ease-in) forwards;
+}
+
+/* ---- Without a notch (decision 11): only the box, hanging from under the menu bar while it is
+   called, its agent's workbench, and the agent tucked away in a pill, at a little desk ---- */
+.island[data-notch="none"] { --pill-h: 46px; }
+.island[data-notch="none"] .island-shape { top: var(--bar); min-width: 0; min-height: 0; }
+/* Hanging over whatever window is below, dark ones too, it keeps an edge, as the answer card does. */
+.island[data-notch="none"] .island-body { box-shadow: var(--edge), var(--shadow); }
+.island[data-notch="none"] .island-shape::before, .island[data-notch="none"] .island-shape::after { content: none; }
+.island[data-notch="none"] .island-list { top: 10px; }
+.island[data-notch="none"] .island-balcony { display: none; }
+/* The pill shrinks out of the box on the exit curve: a spring would overshoot it smaller than the
+   figure in it. Until there is a minute to say, it is only as wide as its figure. */
+.island[data-notch="none"]:is([data-view="pill"], [data-view="ask"], [data-view="done"], [data-view="fail"]) .island-shape {
+  --w: 132px;
+  --h: var(--pill-h);
+  --r: calc(var(--pill-h) / 2);
+  transition: width var(--t-move) var(--ease-in), height var(--t-move) var(--ease-in), opacity var(--t-quick) var(--ease-out);
+}
+.island[data-notch="none"][data-view="pill"] .island-shape:not(:has(.island-time)) { --w: 76px; }
+.island[data-notch="none"][data-view="slot"] .island-shape { --w: 300px; --h: 88px; --r: 24px; }
+.island[data-notch="none"] .island-drop { clip-path: inset(calc(var(--bar) + var(--pill-h)) 0 0 0); }
+.island[data-notch="none"] .island-slip { top: calc(var(--bar) + var(--pill-h) + 8px); }
+.island[data-notch="none"] .island-hang { top: calc(var(--bar) + var(--pill-h) + 10px); }
+/* The shape around it takes the pointer: the pill, there but unseen under the box and the bench, never does. */
+.island-pill { position: absolute; inset: 0; display: flex; align-items: center; gap: 10px; padding: 0 14px; opacity: 0; pointer-events: none; transition: opacity var(--t-quick) var(--ease-out); }
+.island:is([data-view="pill"], [data-view="ask"], [data-view="done"], [data-view="fail"]) .island-pill { opacity: 1; transition-delay: var(--t-quick); }
+.island-pill .island-time { margin-left: auto; }
+.island-pill-desk { position: relative; flex: none; width: 38px; height: 34px; }
+.island-pill-desk::before { content: ""; position: absolute; z-index: 1; left: 0; right: 0; bottom: 4px; height: 6px; border-radius: 2px; background: color-mix(in srgb, color-mix(in srgb, var(--color-ink) 88%, var(--color-accent)) 70%, var(--color-black)); }
+.island-pill-desk::after { content: ""; position: absolute; left: 3px; right: 3px; bottom: 0; height: 4px; border-radius: 0 0 2px 2px; background: color-mix(in srgb, var(--color-ink) 22%, var(--color-black)); }
+.island-pill-figure { position: absolute; left: 4px; top: 4px; width: 28px; height: 28px; }
+.island-pill-figure > * { transform-origin: 50% 90%; }
+.island[data-view="pill"] .island-pill-figure > * { animation: var(--act, island-bob calc(var(--t-breathe) / 2) ease-in-out infinite); }
+/* A pill is no taller than a menu bar and a half: its hop is a small one, inside it. */
+.island[data-view="done"] .island-pill-figure > * { animation: island-hop-small var(--t-settle) var(--ease-spring) var(--t-entrance) 2; }
 .island-pinned.is-asking > .island-row-figures { align-self: start; }
 .island-said-by { position: relative; padding: 8px 36px 8px 12px; border-radius: var(--r-xs) var(--r-lg) var(--r-lg) var(--r-lg); background: color-mix(in srgb, var(--color-ink) 8%, transparent); }
 .island-card .island-said-by { padding: 0; border-radius: 0; background: none; }
@@ -353,14 +427,17 @@ body {
 @keyframes island-sway { 0%, 100% { rotate: 0deg; } 25% { rotate: -5deg; } 75% { rotate: 5deg; } }
 @keyframes island-tool { 25% { translate: 0 -13%; } 50% { translate: 0 0; } }
 @keyframes island-hop { 0%, 70%, 100% { translate: 0 0; } 35% { translate: 0 -12px; } }
+@keyframes island-hop-small { 0%, 70%, 100% { translate: 0 0; } 35% { translate: 0 -4px; } }
 @keyframes island-swing { 0% { rotate: 0deg; } 18% { rotate: 2.4deg; } 42% { rotate: -1.5deg; } 68% { rotate: .7deg; } 100% { rotate: 0deg; } }
 @keyframes island-nudge { 0%, 100% { translate: 0 0; } 40% { translate: 0 -6px; } }
 @keyframes island-rise { from { opacity: 0; translate: 0 -6px; } to { opacity: 1; translate: 0 0; } }
+@keyframes island-fold { to { translate: calc(var(--tx) - var(--fx)) calc(var(--ty) - var(--fy)); scale: 0; } }
 
 /* Reduced motion: every moment still shows, and still says what it is by pose and words, but
    nothing travels, loops or grows. The island and what drops out of it appear where they belong. */
 @media (prefers-reduced-motion: reduce) {
   .island *, .island *::before, .island *::after { animation: none !important; }
+  .island-fold { display: none; }
   .island-stage-bead { transition: none; }
   .island-shape { transition: opacity var(--t-quick) var(--ease-out); }
   .island-body { transition: none; }

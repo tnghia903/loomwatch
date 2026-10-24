@@ -2,4 +2,5 @@
 @import 'tailwindcss/theme.css' layer(theme);
 @import '../styles/tokens.css';
 @import '../styles/mark.css';
+@import '../styles/bench.css';
 @import './island.css';

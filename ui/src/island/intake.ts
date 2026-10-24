@@ -1,6 +1,6 @@
-// What went into the notch's slot for the pinned agent (ADR 0083, decision 10): files, a picture,
-// a link or some text, dragged from any app. Pure: what it is, what to call it, the jobs that fit
-// it, and the words sent with it.
+// What went into the island's slot for the box's agent (ADR 0083, decisions 10 and 11): files, a
+// picture, a link or some text, dragged from any app. Pure: what it is, what to call it, the jobs
+// that fit it, and the words sent with it.
 
 export interface Intake {
   files: readonly File[]
@@ -12,7 +12,7 @@ export interface Intake {
 
 export type IntakeKind = 'email' | 'document' | 'picture' | 'table' | 'files' | 'link' | 'text'
 
-// The kinds the pinned agent opens (`readable`): a HEIC photo or a Numbers file never gets in.
+// The kinds the box's agent opens (`readable`): a HEIC photo or a Numbers file never gets in.
 const PICTURE = /\.(png|jpe?g|gif|webp)$/i
 const TABLE = /\.(csv|tsv|xlsx|xlsm|xlsb|xls|ods)$/i
 /** A message dragged from Mail comes as a file of this kind. */

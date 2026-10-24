@@ -14,14 +14,14 @@ import { plainText, type TeamNow } from './teams'
 import type { Island } from './useIsland'
 import { useRunLimit } from './useRunLimit'
 
-/** The open slot: a gold lip along the island's edge, and the pinned agent's eyes over it. */
+/** The open slot: a gold lip along the island's edge, and the box's agent's eyes over it. */
 export function Slot({ island }: { island: Island }) {
-  const pinned = island.pinned
-  if (!pinned) return null
+  const agent = island.box
+  if (!agent) return null
   return (
-    <div className="island-slot-open" role="status" aria-label={`Drop it here for ${pinned.name}`}>
+    <div className="island-slot-open" role="status" aria-label={`Drop it here for ${agent.name}`}>
       <span className="island-slot-eyes glow" data-moment="ready" aria-hidden="true">
-        <FigureStill figure={figureFor(pinned.id, pinned.job.figure)} alt="" />
+        <FigureStill figure={figureFor(agent.id, agent.job.figure)} alt="" />
       </span>
       <i className="island-slot-lip" aria-hidden="true" />
     </div>

@@ -468,16 +468,20 @@ with a per-node lock available to forbid it.
 `loomwatchd` serves a single-page web UI and a WebSocket for live events: you run the daemon and
 open a browser, with no Electron. On a Mac, `LoomWatch.app` is only a launcher. It starts
 `loomwatchd`, opens LoomWatch in the browser and stays in the notch (ADR 0083): a see-through panel
-at the top middle of every screen, around the camera on a MacBook, shows `island.html`, a second
-page of the same build. With the app's own API calls it reads the runs and the messages agents
-answer in the chat without starting a run (`GET /api/chat/answering`), and answers a permission.
+at the top middle of every screen shows `island.html`, a second page of the same build. Around a
+MacBook's camera it draws the island; on a screen without a notch it draws nothing until its box is
+called (decision 11), and the app keeps its menu bar face wherever a screen has no notch
+(`island::menu_bar_face_shows`). With the app's own API calls the page reads the runs and the
+messages agents answer in the chat without starting a run (`GET /api/chat/answering`), and answers
+a permission.
 A figure that is out (peeking below the notch, or in front in the list's row) follows its run's
 events, as the run view does, only while it is drawn, and acts out what its agent is at with the
 moves of the run view's figures (`workPhase`), bobbing until the events arrive; in the menu bar a
 figure at work only breathes and dips, with no connection. Each panel places its page, tells it where the pointer is, and takes the pointer only over what the
-page reports. Only the island on the screen the pointer is on is live: it opens the list and drops
-questions and answers out, while the others stay at rest beside their notch, so nothing comes and
-goes as the pointer moves between screens. A pointer at a screen's very top edge is on that screen
+page reports. The panel on the screen the pointer is on is live: the list and the box open there,
+and what the box's agent does drops out there. The teams' news (questions, results, stops) pops out
+only at the notch (`island::news_screen`), wherever the pointer is, so nothing comes and goes as the
+pointer moves between screens. A pointer at a screen's very top edge is on that screen
 (`Rect::holds_pointer`, as `NSMouseInRect` has it). Results looked at on one island leave the others
 (the app passes `seen` between the pages). When `WebKit` ends a page's process (a crash, or the
 page breaking one of `WebKit`'s rules), the app gives back the keyboard that page held, so another
@@ -488,10 +492,18 @@ work, and the right side empty until there is something to say. Unticking **Show
 writes `<state dir>/app-notch-off`, closes every panel, stops watching the pointer and gives
 ⌃⌥Space back; the face is in the menu bar instead until it is ticked again. `loomwatchd` reads the
 same file to answer `notchShown` with the pin, so My agents says to turn the notch on rather than
-promise ⌃⌥Space. One of My agents can be pinned to the notch
-(`GET`/`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`):
-- the island's list opens with a box to message it, and ⌃⌥Space (a Carbon hot key) opens it from
-  any app; the message goes into that agent's own chat (`.jobs/.bench/<id>.yaml`, written as the
+promise ⌃⌥Space. The box writes to the agent pinned to the notch, else the first of My agents;
+switching it to another (Tab, or one of the figures beside it) or sending to one not yet pinned pins
+that one (`PUT /api/pinned-agent`, kept in `<state dir>/pinned.json` by `pinned.rs`), so the box
+and the island share one agent. Its figure opens its workbench under the box: the builder's 3D
+bench (`AgentFigure`, read only, always in the island's dark), from the same view and labels the
+builder makes (`components/agents/benchOf.tsx`), acting out the agent's newest run in its chat. It
+loads with three.js only when a bench first opens. After a message is sent, the box gives way to the
+agent at its workbench for a moment (`ISLAND_WAITS.bench`); without a notch it then tucks into a
+pill at the top of the screen, the agent at a little desk, whose workbench opens while it is
+pointed at. For the agent in the box:
+- the island's list opens with a box to message it, and ⌃⌥Space (a Carbon hot key), or Message
+  in the app's menu, opens it from any app, on the screen the pointer is on; the message goes into that agent's own chat (`.jobs/.bench/<id>.yaml`, written as the
   agent is saved), as its Chat tab would send it, with anything dropped onto the notch as the
   chat's attachments. The panel takes the keyboard only while that message is written (focus may
   move on to Copy, See answer or Start; Escape gives it back), without bringing `LoomWatch` to
@@ -510,7 +522,7 @@ promise ⌃⌥Space. One of My agents can be pinned to the notch
   files are written into a new folder in the user's temporary folder, each kept once
   (`island::received_once`), and the page asks for them through a file picker the app answers
   (`ToPage::Dropped`, `island/dropped.ts`), so they arrive as a file from Finder does;
-- what is dropped goes in only as far as the pinned agent can open it (`island/readable.ts`, the
+- what is dropped goes in only as far as the box's agent can open it (`island/readable.ts`, the
   twin of `documents::Kind::of` and `read_file`'s check for text). A HEIC, TIFF or BMP picture is
   turned into a JPEG in the page first (`createImageBitmap` and a canvas, at most 2,576 px on its
   longest side, as a model is sent). A file it can't open, one over 25 MB, a folder, or an

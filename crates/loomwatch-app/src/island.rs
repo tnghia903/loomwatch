@@ -1,25 +1,29 @@
 //! The island at the notch (ADR 0083): where it goes, and what passes between the Mac app's
 //! see-through panels and the page drawn in each.
 //!
-//! Every screen has an island of its own, so none comes and goes as the pointer moves between
-//! screens; the one on the screen the pointer is on is the live one, which opens and drops things
-//! out (decision 1). The page (`ui/island.html`, served by `loomwatchd`) draws the island, decides
-//! when it pops out and tucks away, and answers a permission with the same calls the browser
-//! makes. The app only places a panel over each screen's notch, lets clicks through everywhere but
-//! the island itself, and tells each page whether it is live, where the pointer is, whether the
-//! person is away, and whether an app is full screen. A panel never takes the keyboard, except
-//! while a message to the agent pinned to the notch is written (decision 9), and then only because
-//! its page asked. Kept apart from `AppKit` so it is the same, and tested, everywhere.
+//! Every screen has a panel of its own, hanging from the middle of its top. At a notch it holds the
+//! island: the teams at rest beside the camera, and their news popping out (decision 1). Without a
+//! notch nothing is drawn there, and the menu bar face is in the menu bar instead; the panel only
+//! holds the box to message an agent, while it is called (decision 11). The panel on the screen the
+//! pointer is on is the live one: the box opens there, and what its agent does drops out there.
+//! The page (`ui/island.html`, served by `loomwatchd`) draws all of it, decides when it pops out
+//! and tucks away, and answers a permission with the same calls the browser makes. The app only
+//! places the panels, lets clicks through everywhere but what the page draws, and tells each page
+//! whether it is live, whether it shows the teams' news, where the pointer is, whether the person
+//! is away, and whether an app is full screen. A panel never takes the keyboard, except while a
+//! message to an agent is written (decision 9), and then only because its page asked. Kept apart
+//! from `AppKit` so it is the same, and tested, everywhere.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-/// The panel's size in points. The island and whatever drops out of it fit inside; everything
-/// else in the panel lets clicks through to the app underneath.
+/// The panel's size in points. The island and whatever drops out of it fit inside, an agent's
+/// workbench under its box included; everything else in the panel lets clicks through to the app
+/// underneath.
 pub const PANEL_WIDTH: f64 = 560.0;
-pub const PANEL_HEIGHT: f64 = 460.0;
+pub const PANEL_HEIGHT: f64 = 640.0;
 /// No mouse or key for this long and the person is away: a question that drops while they are
 /// waits for them instead of tucking away unseen.
 pub const AWAY_AFTER_SECONDS: f64 = 60.0;
@@ -107,17 +111,38 @@ pub fn notch_from(safe_top: f64, left: Rect, right: Rect) -> Option<Notch> {
         .then_some(notch)
 }
 
-/// Which screen's island is live, the one that opens and drops things out: the island on the
+/// The menu bar face is in the menu bar wherever a screen has no notch to hold the island, so the
+/// teams' work and the app's menu are on every screen: a monitor beside a `MacBook`, an iMac, a Mac
+/// mini, a `MacBook` with its lid closed. On a `MacBook` alone the island takes its place.
+pub fn menu_bar_face_shows(screens: &[Screen]) -> bool {
+    screens.is_empty() || screens.iter().any(|screen| screen.notch.is_none())
+}
+
+/// Which screen's panel is live, where the box opens and its agent's work drops out: the one on the
 /// screen the pointer is on, its top edge and notch included; with the pointer on none of them,
 /// the one that `was`, or else the main screen's (`screens[0]`, the one with the menu bar in
-/// Displays settings). Every other screen's island stays at rest, around its notch or at the
-/// middle of its menu bar.
+/// Displays settings).
 pub fn live_screen(screens: &[Screen], pointer: (f64, f64), was: Option<usize>) -> Option<usize> {
     screens
         .iter()
         .position(|screen| screen.frame.holds_pointer(pointer.0, pointer.1))
         .or_else(|| was.filter(|was| *was < screens.len()))
         .or_else(|| (!screens.is_empty()).then_some(0))
+}
+
+/// Which screen's island pops the teams' news out (a question, a result, a stop): the live one if
+/// it has a notch; else the notched one that `was`, so the news stays at the notch while the
+/// pointer is on a monitor beside it; else the first with a notch. None on a Mac without a notch,
+/// where the menu bar face has the news.
+pub fn news_screen(screens: &[Screen], live: Option<usize>, was: Option<usize>) -> Option<usize> {
+    let notched = |index: &usize| {
+        screens
+            .get(*index)
+            .is_some_and(|screen| screen.notch.is_some())
+    };
+    live.filter(notched)
+        .or_else(|| was.filter(notched))
+        .or_else(|| screens.iter().position(|screen| screen.notch.is_some()))
 }
 
 /// How far from the middle of the top of a screen, and how far down, something dragged is near
@@ -139,14 +164,14 @@ pub fn near_island(screen: &Screen, x: f64, y: f64) -> bool {
         && screen.frame.max_y() - y <= DROP_REACH.height
 }
 
-/// The shortcut that opens the box to write to the pinned agent, from any app: ⌃⌥Space. As
+/// The shortcut that opens the box to write to an agent, from any app: ⌃⌥Space. As
 /// `RegisterEventHotKey` takes it: the Space key's code, and Carbon's control and option bits.
 /// The app's pages write it as `PINNED_SHORTCUT` (ui/src/island/bridge.ts).
 pub const SHORTCUT_KEY: u32 = 49;
 pub const SHORTCUT_MODIFIERS: u32 = 0x1000 | 0x0800;
 
 /// The panel's frame on `screen`: hanging from its top edge, centred on the notch, or on the
-/// screen without one.
+/// screen without one, where the box hangs from the middle of the menu bar.
 pub fn panel_frame(screen: &Screen) -> Rect {
     let mid_x = screen.notch.map_or_else(
         || screen.frame.x + screen.frame.width / 2.0,
@@ -284,11 +309,11 @@ pub enum FromPage {
     Open { link: String },
     /// A right-click on the island at (`x`, `y`) in the panel: the app's menu.
     Menu { x: f64, y: f64 },
-    /// A message to the pinned agent is being written: the panel takes the keyboard; or it is
-    /// sent, put away or left, and the keyboard goes back to whatever had it.
+    /// A message to an agent is being written: the panel takes the keyboard; or it is sent, put
+    /// away or left, and the keyboard goes back to whatever had it.
     Keyboard { on: bool },
-    /// The agent pinned to the notch, by name, or none.
-    Pinned { name: Option<String> },
+    /// The agent the box opens with, by name, or none when there is no agent to message.
+    Agent { name: Option<String> },
     /// Put an answer on the clipboard, Copy on it: `text` for apps that take plain text, and
     /// `html`, when there is one, formatted for apps that take it.
     Copy {
@@ -332,14 +357,17 @@ pub enum ToPage {
     FullScreen { on: bool },
     /// A click somewhere other than the island.
     ClickOutside,
-    /// ⌃⌥Space was pressed: open the box to write to the pinned agent, or put it away. The panel
-    /// has the keyboard already when it opens.
+    /// ⌃⌥Space was pressed, or Message in the app's menu: open the box to write to an agent, or put
+    /// it away. The panel has the keyboard already when it opens.
     Compose,
     /// Something is being dragged near the island, so it opens to take it; or no longer is.
     Drag { near: bool },
-    /// This island is the live one, on the screen the pointer is on, and may open and drop things
-    /// out; or it is no longer, and stays at rest.
+    /// This panel is the live one, on the screen the pointer is on: the box opens here, and its
+    /// agent's work and answer drop out here; or it is no longer, and stays at rest.
     Live { on: bool },
+    /// This island pops the teams' news out (`news_screen`); or it no longer does, and only tucks
+    /// it beside the notch. A panel without a notch is never told to.
+    News { on: bool },
     /// Results looked at on another screen's island: they leave this one too.
     Seen { runs: Vec<String> },
     /// Files dropped on the island that the app took itself: files another app writes only once
@@ -420,6 +448,37 @@ mod tests {
             Rect::new(850.0, 945.0, 662.0, 37.0),
         );
         assert!((taller.expect("a notch").height - 37.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn the_face_is_in_the_menu_bar_wherever_a_screen_has_no_notch() {
+        // A MacBook alone: the island takes its place.
+        assert!(!menu_bar_face_shows(&[macbook()]));
+        // A monitor beside it, an iMac, a MacBook with its lid closed.
+        assert!(menu_bar_face_shows(&[external(ABOVE), macbook()]));
+        assert!(menu_bar_face_shows(&[external(ABOVE)]));
+        assert!(menu_bar_face_shows(&[]));
+    }
+
+    #[test]
+    fn the_news_stays_at_the_notch_wherever_the_pointer_is() {
+        let both = [external(ABOVE), macbook()];
+        // The pointer on the MacBook: its island, which is live too.
+        assert_eq!(news_screen(&both, Some(1), None), Some(1));
+        // On the monitor above, which has no notch: still the MacBook's, from the start too.
+        assert_eq!(news_screen(&both, Some(0), Some(1)), Some(1));
+        assert_eq!(news_screen(&both, Some(0), None), Some(1));
+        // A screen that is gone is no answer.
+        assert_eq!(news_screen(&both, Some(7), Some(9)), Some(1));
+        // No notch anywhere: the menu bar face has the news.
+        assert_eq!(news_screen(&[external(ABOVE)], Some(0), Some(0)), None);
+        assert_eq!(news_screen(&[], None, None), None);
+        // Two screens with a notch: the one the pointer is on, else the one that had it.
+        let mut above = macbook();
+        above.frame = ABOVE;
+        let two = [above, macbook()];
+        assert_eq!(news_screen(&two, Some(0), Some(1)), Some(0));
+        assert_eq!(news_screen(&two, None, Some(1)), Some(1));
     }
 
     #[test]
@@ -547,14 +606,14 @@ mod tests {
             Some(FromPage::Keyboard { on: true })
         );
         assert_eq!(
-            FromPage::parse(r#"{"kind":"pinned","name":"Maya"}"#),
-            Some(FromPage::Pinned {
+            FromPage::parse(r#"{"kind":"agent","name":"Maya"}"#),
+            Some(FromPage::Agent {
                 name: Some("Maya".into())
             })
         );
         assert_eq!(
-            FromPage::parse(r#"{"kind":"pinned","name":null}"#),
-            Some(FromPage::Pinned { name: None })
+            FromPage::parse(r#"{"kind":"agent","name":null}"#),
+            Some(FromPage::Agent { name: None })
         );
         assert_eq!(
             FromPage::parse(r#"{"kind":"copy","text":"Rent rises 4%.","html":null}"#),
@@ -611,6 +670,10 @@ mod tests {
         assert_eq!(
             ToPage::Live { on: false }.script(),
             r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"live","on":false})"#
+        );
+        assert_eq!(
+            ToPage::News { on: true }.script(),
+            r#"window.loomwatchIsland && window.loomwatchIsland.receive({"kind":"news","on":true})"#
         );
         assert_eq!(
             ToPage::Seen {

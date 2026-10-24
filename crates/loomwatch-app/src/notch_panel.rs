@@ -1,5 +1,5 @@
-//! The see-through panels over the notch that hold the island page (ADR 0083, `crate::island`):
-//! one on every screen, so no screen's island comes and goes as the pointer moves between them.
+//! The see-through panels at the top of every screen that hold the island page (ADR 0083,
+//! `crate::island`): the island at a notch, and the box to message an agent on any screen.
 //!
 //! `AppKit` and `WebKit` have no safe Rust interface for what the island needs: a panel above the
 //! menu bar that takes the keyboard only while a message to the pinned agent is written, a web
@@ -69,17 +69,22 @@ pub enum IslandEvent {
 
 type Sender = Rc<dyn Fn(IslandEvent)>;
 
-/// The island on every screen. Dropped, every panel closes and `LoomWatch` stops watching the
-/// pointer and gives ⌃⌥Space back: Show at the notch, unticked.
+/// A panel on every screen, while Show at the notch is ticked. Unticked there is none: `LoomWatch`
+/// stops watching the pointer and gives ⌃⌥Space back, and only watches the screens.
 pub struct NotchPanels {
     mtm: MainThreadMarker,
     send: Sender,
-    /// One island for each screen, in the order `NSScreen` lists them, the main screen first.
+    /// Show at the notch, ticked in the app's menu.
+    shown: bool,
+    /// While shown, one panel for each screen, in the order `NSScreen` lists them, the main screen
+    /// first.
     islands: Vec<ScreenIsland>,
     /// The number the next island made gets, so a page's message reaches only its own island.
     next_id: u32,
     /// Which of them is live: the one on the screen the pointer is on.
     live: Option<usize>,
+    /// Which of them pops the teams' news out: the one at a notch (`island::news_screen`).
+    news: Option<usize>,
     /// Every screen, as last measured.
     screens: Vec<Screen>,
     /// `loomwatchd`'s address, once it answers: the island of a screen plugged in later loads its
@@ -91,11 +96,11 @@ pub struct NotchPanels {
     /// What every page was last told, so they hear only of changes.
     away: bool,
     full_screen: bool,
-    /// Taken out when the islands go: the event monitors, the observers and their notification
-    /// centres, and ⌃⌥Space, `None` when another app holds it.
-    monitors: Vec<Retained<AnyObject>>,
+    /// While there are panels: the pointer, clicks and ⌃⌥Space.
+    listening: Option<Listening>,
+    /// The screen, space and frontmost-app observers and their notification centres, taken out as
+    /// the panels go.
     observers: Vec<Observer>,
-    _shortcut: Option<Shortcut>,
 }
 
 type Observer = (
@@ -104,25 +109,48 @@ type Observer = (
 );
 
 impl NotchPanels {
-    /// No islands yet: [`NotchPanels::place`] makes one for each screen, and
+    /// No panels yet: [`NotchPanels::place`] makes one for each screen, if `shown`, and
     /// [`NotchPanels::load`] shows them. `send` hands what they hear to the app's event loop.
-    pub fn new(mtm: MainThreadMarker, send: impl Fn(IslandEvent) + 'static) -> Self {
+    pub fn new(mtm: MainThreadMarker, shown: bool, send: impl Fn(IslandEvent) + 'static) -> Self {
         let send: Sender = Rc::new(send);
         Self {
             mtm,
+            shown,
             islands: Vec::new(),
             next_id: 0,
             live: None,
+            news: None,
             screens: Vec::new(),
             origin: None,
             pressed_at: None,
             away: false,
             full_screen: false,
-            monitors: monitors(&send),
+            listening: None,
             observers: observers(&send),
-            _shortcut: register_shortcut(&send),
             send,
         }
+    }
+
+    /// Show at the notch, ticked or unticked: the panels come, or they go and the face comes back
+    /// to the menu bar.
+    pub fn set_shown(&mut self, shown: bool) {
+        self.shown = shown;
+        self.place();
+    }
+
+    pub fn shown(&self) -> bool {
+        self.shown
+    }
+
+    /// Whether the menu bar face is wanted: wherever a screen has no notch to hold the island
+    /// (`island::menu_bar_face_shows`), and with Show at the notch unticked.
+    pub fn face_shows(&self) -> bool {
+        !self.shown || island::menu_bar_face_shows(&self.screens)
+    }
+
+    /// Whether there is a panel at all: with none, nothing needs checking.
+    pub fn any_island(&self) -> bool {
+        !self.islands.is_empty()
     }
 
     /// Show the island page from the `loomwatchd` at `origin` on every screen. Done again when
@@ -137,6 +165,11 @@ impl NotchPanels {
     /// One screen's page listens: tell it where it is and what it needs to know.
     pub fn page_ready(&mut self, from: u32) {
         let (away, full_screen) = (self.away, self.full_screen);
+        let news = self.news.is_some_and(|news| {
+            self.islands
+                .get(news)
+                .is_some_and(|island| island.id == from)
+        });
         if let Some(island) = self.island(from) {
             island.ready = true;
             if let Some(place) = island.place.clone() {
@@ -145,6 +178,7 @@ impl NotchPanels {
             island.send(&ToPage::Away { away });
             island.send(&ToPage::FullScreen { on: full_screen });
             island.send(&ToPage::Live { on: island.live });
+            island.send(&ToPage::News { on: news });
         }
     }
 
@@ -165,12 +199,14 @@ impl NotchPanels {
         self.pointer();
     }
 
-    /// Measure the screens again: an island for each, hanging from its top, and the one on the
-    /// screen the pointer is on live.
+    /// Measure the screens again: while shown, a panel hanging from the top of each, the one on the
+    /// screen the pointer is on live, the one at a notch with the news, and the pointer and ⌃⌥Space
+    /// watched only while there are panels.
     pub fn place(&mut self) {
         self.screens = screens(self.mtm);
-        self.islands.truncate(self.screens.len());
-        while self.islands.len() < self.screens.len() {
+        let wanted = if self.shown { self.screens.len() } else { 0 };
+        self.islands.truncate(wanted);
+        while self.islands.len() < wanted {
             let mut island = ScreenIsland::new(self.mtm, self.next_id, &self.send);
             self.next_id += 1;
             if let Some(origin) = &self.origin {
@@ -181,16 +217,24 @@ impl NotchPanels {
         for (island, screen) in self.islands.iter_mut().zip(&self.screens) {
             island.put(screen);
         }
+        if self.islands.is_empty() {
+            self.listening = None;
+        } else if self.listening.is_none() {
+            self.listening = Some(Listening::start(&self.send));
+        }
         if self.live.is_some_and(|live| live >= self.islands.len()) {
             self.live = None;
+        }
+        if self.news.is_some_and(|news| news >= self.islands.len()) {
+            self.news = None;
         }
         self.follow_pointer();
         self.check_full_screen();
     }
 
-    /// The island on the screen the pointer is on is live (`island::live_screen`), and the one
-    /// that was goes back to rest. The island a message is being written in stays live, wherever
-    /// the pointer goes.
+    /// The panel on the screen the pointer is on is live (`island::live_screen`), and the one that
+    /// was goes back to rest; the news stays at the notch (`island::news_screen`). The panel a
+    /// message is being written in stays live, wherever the pointer goes.
     fn follow_pointer(&mut self) {
         if self
             .islands
@@ -200,17 +244,27 @@ impl NotchPanels {
             return;
         }
         let at = NSEvent::mouseLocation();
-        let live = island::live_screen(&self.screens, (at.x, at.y), self.live);
-        if live == self.live {
-            return;
+        let screens = &self.screens[..self.islands.len()];
+        let live = island::live_screen(screens, (at.x, at.y), self.live);
+        let news = island::news_screen(screens, live, self.news);
+        if live != self.live {
+            if let Some(was) = self.live.and_then(|was| self.islands.get_mut(was)) {
+                was.set_live(false);
+            }
+            if let Some(now) = live.and_then(|now| self.islands.get_mut(now)) {
+                now.set_live(true);
+            }
+            self.live = live;
         }
-        if let Some(was) = self.live.and_then(|was| self.islands.get_mut(was)) {
-            was.set_live(false);
+        if news != self.news {
+            if let Some(was) = self.news.and_then(|was| self.islands.get(was)) {
+                was.send(&ToPage::News { on: false });
+            }
+            if let Some(now) = news.and_then(|now| self.islands.get(now)) {
+                now.send(&ToPage::News { on: true });
+            }
+            self.news = news;
         }
-        if let Some(now) = live.and_then(|now| self.islands.get_mut(now)) {
-            now.set_live(true);
-        }
-        self.live = live;
     }
 
     /// Where one screen's island and what dropped out of it are now.
@@ -309,8 +363,9 @@ impl NotchPanels {
         }
     }
 
-    /// ⌃⌥Space: the box to write to the pinned agent opens in the live island, with the keyboard;
-    /// pressed again while it is open, the page puts it away and gives the keyboard back.
+    /// ⌃⌥Space, or Message in the app's menu: the box to write to an agent opens in the live panel,
+    /// with the keyboard; pressed again while it is open, the page puts it away and gives the
+    /// keyboard back.
     pub fn compose(&mut self) {
         if let Some(island) = self.live_island() {
             island.take_keyboard();
@@ -392,17 +447,39 @@ impl NotchPanels {
 }
 
 impl Drop for NotchPanels {
-    /// Show at the notch, unticked: every panel closes, and nothing of the island is left
-    /// listening. ⌃⌥Space goes back with `Shortcut`'s own drop.
+    /// Every panel closes, and nothing of the island is left listening. The monitors and ⌃⌥Space go
+    /// with `Listening`'s own drop.
     fn drop(&mut self) {
         self.islands.clear();
-        for monitor in &self.monitors {
-            // SAFETY: a monitor `NSEvent` returned from `monitors`, removed once.
-            unsafe { NSEvent::removeMonitor(monitor) };
-        }
         for (centre, observer) in &self.observers {
             // SAFETY: an observer added to this centre in `observers`, removed once.
             unsafe { centre.removeObserver(AsRef::<AnyObject>::as_ref(&**observer)) };
+        }
+    }
+}
+
+/// What `LoomWatch` watches while there are panels: the pointer and clicks in every app, and
+/// ⌃⌥Space, `None` when another app holds it. Dropped, as the panels go, it stops watching and
+/// gives ⌃⌥Space back to macOS.
+struct Listening {
+    monitors: Vec<Retained<AnyObject>>,
+    _shortcut: Option<Shortcut>,
+}
+
+impl Listening {
+    fn start(send: &Sender) -> Self {
+        Self {
+            monitors: monitors(send),
+            _shortcut: register_shortcut(send),
+        }
+    }
+}
+
+impl Drop for Listening {
+    fn drop(&mut self) {
+        for monitor in &self.monitors {
+            // SAFETY: a monitor `NSEvent` returned from `monitors`, removed once.
+            unsafe { NSEvent::removeMonitor(monitor) };
         }
     }
 }
@@ -1044,7 +1121,7 @@ fn drag_pasteboard() -> &'static NSString {
     unsafe { NSPasteboardNameDrag }
 }
 
-/// ⌃⌥Space, held for as long as the islands are at the notch, and given back to macOS as they go:
+/// ⌃⌥Space, held for as long as the panels are up, and given back to macOS as they go:
 /// where it is "Select next source in Input menu" with more than one input source.
 struct Shortcut {
     hot_key: *mut c_void,

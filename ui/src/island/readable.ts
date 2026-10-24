@@ -1,4 +1,4 @@
-// What dropped onto the notch the pinned agent can open, decided before it goes (ADR 0083,
+// What dropped on the island the box's agent can open, decided before it goes (ADR 0083,
 // decision 10): the same rule `read_file` follows in the daemon (`documents::Kind::of`, and a NUL
 // in a file's first 8 KB for one that is none of those kinds). The daemon is the twin: a kind it
 // learns to read is taken here too. A photo or picture in a kind it can't open is turned into a

@@ -6,9 +6,9 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { fetchChatPage, fetchNotesAnswering } from '../lib/chat/client'
 import { agentFigure, figureFor, type FigureChoice } from '../lib/library/figures'
 import { fetchJobs, type SavedJob } from '../lib/library/jobs'
-import { fetchPinnedAgent } from '../lib/library/pinned'
+import { fetchPinnedAgent, pinAgent } from '../lib/library/pinned'
 import { crewOf, type CrewAgent } from '../lib/rail/teamCrews'
-import { answerPermission, fetchRecentRuns, fetchRun } from '../lib/runs/client'
+import { answerPermission, fetchRecentRuns, fetchRun, type RunRecord } from '../lib/runs/client'
 import { PERMISSION_SAID } from '../lib/runs/permissionRequests'
 import { answerTeamRequest, fetchTeamRequests, type TeamRequest } from '../lib/runs/teamRequests'
 import type { Ticket } from '../lib/story/needsYou'
@@ -44,7 +44,8 @@ export interface Island {
   shown: IslandState['shown']
   tucked: Tucked
   notch: { width: number; height: number }
-  /** The island is around a real notch; on a screen without one it draws its own. */
+  /** The panel is at a notch, where the island lives; on a screen without one only the box is drawn,
+      while it is called, hanging from the menu bar (`bar` tall). */
   atNotch: boolean
   bar: number
   now: number
@@ -63,15 +64,31 @@ export interface Island {
   openApp: () => void
   pointerOnIsland: (over: boolean) => void
   pointerOnDrop: (over: boolean) => void
-  /** The agent pinned to the notch, and writing to it: the message so far, whether it is at work
-      (a message then joins its turn), and what sending did. */
+  /** The agent pinned to the notch, beside it at rest. */
   pinned: PinnedNow | null
+  /** The agent the box writes to (one chosen in it, else the pinned one, else the first of My
+      agents), and writing to it:
+      the message so far, whether it is at work (a message then joins its turn), and what sending
+      did. */
+  box: PinnedNow | null
+  /** My agents, to switch the box to for this message; sending pins the one it went to. */
+  agents: readonly SavedJob[]
+  choose: (id: string) => void
+  /** Its newest run in its chat, which its workbench acts out while it works. */
+  boxRecord: RunRecord | null
+  /** Its workbench, open under the box, or folded away; opened from the pill, the box opens too. */
+  bench: boolean
+  setBench: (on: boolean) => void
+  openBench: () => void
   composing: boolean
   draft: string
   setDraft: (text: string) => void
   pinnedWorking: boolean
   sending: boolean
   sent: { ok: boolean; text: string } | null
+  /** What was just sent, for a moment, as it folds into the agent's head, from where it was
+      written (`from`, in the page; `null` when that couldn't be told). */
+  folding: { text: string; at: number; from: { x: number; y: number } | null } | null
   /** The message box has the keyboard, or lost it to another part of the island. */
   compose: (on: boolean) => void
   /** Escape: stop writing, and give the keyboard back to whatever had it. */
@@ -81,7 +98,7 @@ export interface Island {
   /** Its Chat tab in LoomWatch, where the message can be sent when the island couldn't. */
   openPinned: () => void
   /** What was dropped into the slot, waiting for a job; dropping, dragging over, and taking it out.
-      A drop's files and `folders` go only as far as the pinned agent can open them (`readable`). */
+      A drop's files and `folders` go only as far as the box's agent can open them (`readable`). */
   intake: Intake | null
   /** What a drop left out, and why, in one line. */
   away: string | null
@@ -117,6 +134,7 @@ export function useIsland(): Island {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState<{ ok: boolean; text: string } | null>(null)
+  const [folding, setFolding] = useState<Island['folding']>(null)
 
   // What the teams are doing, every couple of seconds: their runs, and the messages their agents
   // answer in the chat, which no run has. While `loomwatchd` doesn't answer, the island keeps what
@@ -161,21 +179,35 @@ export function useIsland(): Island {
     tellApp({ kind: 'seen', runs })
   }, [seen])
 
-  // My agents: read at the start, when another agent is pinned, and as the list opens, so the
-  // pinned agent's name, figure and instructions are as saved.
+  // My agents: read at the start, when another agent is pinned, and as the list or the box opens,
+  // so each agent's name, figure and instructions are as saved.
   const readSaved = useCallback(() => { fetchJobs().then((list) => setSaved(list?.jobs ?? []), () => {}) }, [])
   useEffect(readSaved, [readSaved, pinnedId])
   const listOpen = state.listOpen
   useEffect(() => { if (listOpen) readSaved() }, [readSaved, listOpen])
   const pinned = useMemo(() => pinnedNow(pinnedId ?? null, saved), [pinnedId, saved])
   useEffect(() => { dispatch({ type: 'pinned', pinned }) }, [pinned])
-  // The app hears whether an agent is pinned, so ⌃⌥Space has a box to open.
-  const pinnedName = pinned?.name ?? null
+  // The box opens with the pinned agent; with none pinned, with the first of My agents. Another
+  // can be chosen while it is open, for this message: sending pins the one it went to, so the box
+  // opens with the agent last written to. Put away unsent, it opens as before.
+  const opens = useMemo(() => pinned ?? pinnedNow(saved[0]?.id ?? null, saved), [pinned, saved])
+  const [chosenId, setChosenId] = useState<string | null>(null)
+  const [wasOpen, setWasOpen] = useState(listOpen)
+  if (listOpen !== wasOpen) {
+    setWasOpen(listOpen)
+    if (!listOpen) setChosenId(null)
+  }
+  const box = useMemo(() => (chosenId ? pinnedNow(chosenId, saved) : null) ?? opens, [chosenId, saved, opens])
+  useEffect(() => { dispatch({ type: 'box', box }) }, [box])
+  // The app hears whom the box opens with, so ⌃⌥Space and Message in its menu have a box to open.
+  const opensName = opens?.name ?? null
   useEffect(() => {
-    if (pinnedId !== undefined) tellApp({ kind: 'pinned', name: pinnedName })
-  }, [pinnedId, pinnedName])
-  // A drop goes in once its files are sorted (`sortDropped`): what the pinned agent can't open
+    if (pinnedId !== undefined) tellApp({ kind: 'agent', name: opensName })
+  }, [pinnedId, opensName])
+  const choose = useCallback((id: string) => setChosenId(id), [])
+  // A drop goes in once its files are sorted (`sortDropped`): what the box's agent can't open
   // stays out, and the box says why. Files already waiting count toward the ten a message carries.
+  const boxName = box?.name ?? null
   const waitingFiles = useRef(0)
   useEffect(() => { waitingFiles.current = state.intake?.files.length ?? 0 })
   const drop = useCallback((dropped: Intake, folders: readonly string[] = []) => {
@@ -183,10 +215,10 @@ export function useIsland(): Island {
       dispatch({ type: 'drop', intake: dropped })
       return
     }
-    void sortDropped(dropped.files, folders, pinnedName ?? 'It', waitingFiles.current).then(({ taken, away }) => {
+    void sortDropped(dropped.files, folders, boxName ?? 'It', waitingFiles.current).then(({ taken, away }) => {
       dispatch({ type: 'drop', intake: taken.length ? { ...dropped, files: taken } : null, away })
     })
-  }, [pinnedName])
+  }, [boxName])
   useEffect(() => { dropping.current = drop }, [drop])
 
   // The next moment to tuck away or bring out; and "4m" moving on.
@@ -200,14 +232,30 @@ export function useIsland(): Island {
     const id = window.setInterval(() => dispatch({ type: 'tick' }), 30_000)
     return () => window.clearInterval(id)
   }, [])
-
-  // The list stays open a moment after the pointer leaves it, or after a message to the pinned
-  // agent is no longer being written.
+  // The workbench shown after a message tucks away when its moment is up.
+  const benchUntil = state.benchUntil
   useEffect(() => {
-    if (state.onIsland || !state.listOpen || state.composing) return
+    if (!benchUntil) return
+    const id = window.setTimeout(() => dispatch({ type: 'tick' }), Math.max(0, benchUntil - Date.now()) + 20)
+    return () => window.clearTimeout(id)
+  }, [benchUntil])
+
+  // The list stays open a moment after the pointer leaves it, or after a message to the box's
+  // agent is no longer being written; and so does the workbench a pill opens, pointed at.
+  // Without a notch, the pointer resting on the pill opens its agent's workbench: a moment first,
+  // so a pointer on its way past opens nothing.
+  const restsOnPill = state.onIsland && state.following && !state.peeking && state.app.notch === null
+  useEffect(() => {
+    if (!restsOnPill) return
+    const id = window.setTimeout(() => dispatch({ type: 'peek' }), ISLAND_WAITS.peek)
+    return () => window.clearTimeout(id)
+  }, [restsOnPill])
+  const opened = state.listOpen || state.peeking
+  useEffect(() => {
+    if (state.onIsland || !opened || state.composing) return
     const id = window.setTimeout(() => dispatch({ type: 'closeList' }), ISLAND_WAITS.closeList)
     return () => window.clearTimeout(id)
-  }, [state.onIsland, state.listOpen, state.composing])
+  }, [state.onIsland, opened, state.composing])
 
   const view = viewOf(state)
   const teams = state.teams ?? NO_TEAMS
@@ -228,9 +276,9 @@ export function useIsland(): Island {
     }
   }, [waiting])
 
-  const { figure, crewFigures } = useFigures(teams, saved, pinned)
+  const { figure, crewFigures } = useFigures(teams, saved, box)
 
-  // Writing to the pinned agent takes the keyboard from whatever had it. It goes back once the
+  // Writing to the box's agent takes the keyboard from whatever had it. It goes back once the
   // message is sent, on Escape, or when the list closes; not as soon as the box loses it, because
   // the panel giving it back mid-click on another of the island's buttons could lose that click.
   const keyboard = useRef(false)
@@ -251,18 +299,24 @@ export function useIsland(): Island {
   }, [giveBack])
   useEffect(() => { if (!listOpen) giveBack() }, [listOpen, giveBack])
   // Escape while writing, wherever the keyboard is in the island (the box, a button reached from
-  // it, or nowhere once Copy has said "Copied."), puts it away and gives the keyboard back.
+  // it, or nowhere once Copy has said "Copied."), folds the workbench away if it is open, and else
+  // puts the box away and gives the keyboard back.
   const composing = state.composing
+  const benchOpen = state.bench
   useEffect(() => {
     if (!composing) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      if (benchOpen) {
+        dispatch({ type: 'bench', on: false })
+        return
+      }
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
       putAway()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [composing, putAway])
+  }, [composing, benchOpen, putAway])
   const records = useRef(state.records)
   useEffect(() => { records.current = state.records })
   const intake = state.intake
@@ -277,19 +331,29 @@ export function useIsland(): Island {
   }, [draggedNear, draggedOver])
   const send = useCallback((job?: string) => {
     const text = (job ?? draft).trim()
-    if (!text || !pinned || sending) return
+    if (!text || !box || sending) return
+    // The words fold from where they are written: the field's place now, before sending disables it.
+    const field = document.querySelector('.island-field')?.getBoundingClientRect()
+    const from = field ? { x: field.left + 14, y: field.top + 7 } : null
     setSending(true)
     setSent(null)
-    sendToPinned(pinned, text, records.current, intake)
+    // The first message from the box to an agent not yet pinned pins it: its work and answer then
+    // come back here, and the box opens with it next time.
+    const pinFirst = pinned?.id === box.id ? Promise.resolve() : pinAgent(box.id).then((now) => setPinnedId(now.agent))
+    pinFirst
+      .then(() => sendToPinned(box, text, records.current, intake))
       .then(() => {
         if (job === undefined) setDraft('')
         dispatch({ type: 'intakeDone' })
-        setSent({ ok: true, text: `Sent to ${pinned.name}.` })
+        setSent({ ok: true, text: `Sent to ${box.name}.` })
+        setFolding({ text, at: Date.now(), from })
+        window.setTimeout(() => setFolding(null), ISLAND_WAITS.fold)
         putAway()
+        dispatch({ type: 'sent' })
         read()
-      }, () => setSent({ ok: false, text: `That didn’t go through. Try again, or open ${pinned.name}’s chat.` }))
+      }, () => setSent({ ok: false, text: `That didn’t go through. Try again, or open ${box.name}’s chat.` }))
       .finally(() => setSending(false))
-  }, [draft, pinned, sending, intake, putAway, read])
+  }, [draft, box, pinned, sending, intake, putAway, read])
 
   // The whole answer of each finished turn of the pinned agent, read once: the run's reply, or for
   // a message it answered in the chat, its answer there. The island's own reading is cut short.
@@ -378,12 +442,14 @@ export function useIsland(): Island {
   }, [])
 
   const { notch, menuBar } = state.app
+  const boxPath = box?.chatPath ?? null
+  const boxRecord = useMemo(() => newestIn(state.records, boxPath), [state.records, boxPath])
   return {
     view,
     teams,
     shown: state.shown,
     tucked: summary,
-    notch: notch ?? { width: 160, height: menuBar },
+    notch: notch ?? { width: 0, height: menuBar },
     atNotch: notch !== null,
     bar: notch?.height ?? menuBar,
     now: state.now,
@@ -399,20 +465,31 @@ export function useIsland(): Island {
     pointerOnIsland: useCallback((over: boolean) => dispatch({ type: 'pointerOnIsland', over }), []),
     pointerOnDrop: useCallback((over: boolean) => dispatch({ type: 'pointerOnDrop', over }), []),
     pinned,
+    box,
+    agents: saved,
+    choose,
+    boxRecord,
+    bench: state.bench,
+    setBench: useCallback((on: boolean) => dispatch({ type: 'bench', on }), []),
+    openBench: useCallback(() => {
+      compose(true)
+      dispatch({ type: 'bench', on: true })
+    }, [compose]),
     composing: state.composing,
     draft,
     setDraft,
-    pinnedWorking: pinned ? pinnedWorking(state.records, pinned) : false,
+    pinnedWorking: box ? pinnedWorking(state.records, box) : false,
     sending,
     sent,
+    folding,
     compose,
     putAway,
     send,
     openPinned: useCallback(() => {
-      if (!pinned) return
-      openInLoomWatch(pinned.link)
+      if (!box) return
+      openInLoomWatch(box.link)
       dispatch({ type: 'closeList' })
-    }, [pinned]),
+    }, [box]),
     intake,
     away: state.away,
     drop,
@@ -442,6 +519,13 @@ async function toClipboard(answer: WholeAnswer): Promise<void> {
     return
   }
   await navigator.clipboard?.writeText(answer.plain)
+}
+
+/** The newest run in the chat at `path`, the agent's own; `null` when it has none here. */
+function newestIn(records: readonly RunRecord[], path: string | null): RunRecord | null {
+  if (!path) return null
+  const started = (record: RunRecord) => Date.parse(record.startedAt ?? '') || 0
+  return records.filter((record) => record.teamPath === path).reduce<RunRecord | null>((newest, record) => (!newest || started(record) > started(newest) ? record : newest), null)
 }
 
 function useFigures(teams: readonly TeamNow[], saved: readonly SavedJob[], pinned: PinnedNow | null): Pick<Island, 'figure' | 'crewFigures'> {

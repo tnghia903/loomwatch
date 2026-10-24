@@ -22,6 +22,14 @@ export const ISLAND_WAITS = {
   said: 1_200,
   /** How long "Sent to <agent>." shows under the message box. */
   sent: 2_500,
+  /** How long the words of a sent message are drawn folding into their agent's head: a little longer
+      than `island-fold` takes (`--t-spring`, island.css), by which time they are gone. */
+  fold: 600,
+  /** How long the pointer rests on the pill before its agent's workbench opens: passing over it on
+      the way to something else opens nothing. */
+  peek: 320,
+  /** After a message goes, how long its agent's workbench shows before it tucks away. */
+  bench: 3_000,
   /** How long the list stays open after the pointer leaves it. */
   closeList: 700,
   /** After a drag near the island is let go of elsewhere, how long the slot waits for its drop. */

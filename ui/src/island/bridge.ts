@@ -12,15 +12,18 @@ export type FromApp =
   | { kind: 'away'; away: boolean }
   | { kind: 'fullScreen'; on: boolean }
   | { kind: 'clickOutside' }
-  /** ⌃⌥Space: open the message box to the pinned agent, with the keyboard the app has given the
-      panel; or, pressed again while it is open, put it away. */
+  /** ⌃⌥Space, or Message in the app's menu: open the box to write to an agent, with the keyboard
+      the app has given the panel; or, pressed again while it is open, put it away. */
   | { kind: 'compose' }
   /** Something (a file, a picture, text, a link) is being dragged near the island, or no longer
       is: the island opens as a slot to take it. */
   | { kind: 'drag'; near: boolean }
-  /** This screen's island is the live one, on the screen the pointer is on: it opens and drops
-      things out. Every other screen's island stays at rest. Live until the app says. */
+  /** This screen's panel is the live one, on the screen the pointer is on: the box opens here, and
+      what its agent does drops out here. Live until the app says. */
   | { kind: 'live'; on: boolean }
+  /** This island pops the teams' news out: the one at a notch, wherever the pointer is. A panel
+      without a notch never does. On until the app says. */
+  | { kind: 'news'; on: boolean }
   /** Results looked at on another screen's island, by run: they leave this one too. */
   | { kind: 'seen'; runs: string[] }
   /** Files dropped on the island that the app took itself, files another app writes only once
@@ -41,11 +44,12 @@ export type ToApp =
   | { kind: 'areas'; rects: Area[] }
   | { kind: 'open'; link: string }
   | { kind: 'menu'; x: number; y: number }
-  /** Take the keyboard, for a message being written to the pinned agent, or give it back to
-      whatever had it. The panel takes it only while one is written. */
+  /** Take the keyboard, for a message being written to an agent, or give it back to whatever had
+      it. The panel takes it only while one is written. */
   | { kind: 'keyboard'; on: boolean }
-  /** The agent pinned to the notch, by name, so ⌃⌥Space has a box to open; `null` when none is. */
-  | { kind: 'pinned'; name: string | null }
+  /** The agent the box opens with, by name, so ⌃⌥Space and Message in the app's menu have a box to
+      open; `null` with no agent in My agents. */
+  | { kind: 'agent'; name: string | null }
   /** Put an answer on the clipboard, Copy on it: `text` for apps that take plain text, and `html`,
       when there is one, formatted for apps that take it. */
   | { kind: 'copy'; text: string; html: string | null }
@@ -59,12 +63,12 @@ declare global {
   }
 }
 
-/** The shortcut that opens the box to the pinned agent from any app (`island::SHORTCUT_KEY`). */
+/** The shortcut that opens the box to an agent from any app (`island::SHORTCUT_KEY`). */
 export const PINNED_SHORTCUT = '⌃⌥Space'
 /** The same, in words, for people who don't read ⌃ and ⌥. */
 export const PINNED_SHORTCUT_WORDS = 'Control-Option-Space'
 
-/** The page runs in the Mac app's panel at the notch. */
+/** The page runs in one of the Mac app's panels, at the notch or at the top of another screen. */
 export function inApp(): boolean {
   return Boolean(window.webkit?.messageHandlers?.island)
 }
