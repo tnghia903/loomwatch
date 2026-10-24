@@ -83,9 +83,14 @@ instructions and tools.
   folder first on commands' `PATH`. `loomwatch-osascript` (`crates/loomwatch-osascript`) is
   LoomWatch's own `osascript`: the same command line and output, through macOS's OpenScripting. A
   command can then work in Calendar, Mail or any other app once the person allows LoomWatch in
-  System Settings → Privacy & Security → Automation. The sandbox still holds the command's own
-  writes, but not what an app it controls does (`SECURITY.md`). The app bundle carries
-  `loomwatch-osascript` beside `loomwatchd`.
+  System Settings → Privacy & Security → Automation. Calendar, Reminders, Contacts and Photos also
+  ask macOS whether LoomWatch may have their data before they answer, so the app's `Info.plist`
+  (`packaging/macos/Info.plist`) carries a line for each, shown under macOS's question: without
+  that line macOS refuses at once and never asks the person. An app macOS quit to free memory
+  stays listed as running, so AppleScript sends to it instead of starting it and gets
+  "Application isn't running" (-600); `loomwatch-osascript` starts it again behind the front app
+  and sends once more. The sandbox still holds the command's own writes, but not what an app it
+  controls does (`SECURITY.md`). The app bundle carries `loomwatch-osascript` beside `loomwatchd`.
   Windows and Linux have no sandbox, so the permission check is the only line there. For an agent
   that may use the web, a `sitecustomize.py` written for each command and put first on
   `PYTHONPATH` gives Python's `urllib` the name `LoomWatch/<version>` in place of

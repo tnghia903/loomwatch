@@ -49,29 +49,8 @@ cp "$root/packaging/macos/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/TRADEMARKS.md" "$app/Contents/Resources/"
 printf '%s %s\n' "$version" "$commit" >"$app/Contents/Resources/VERSION"
 
-cat >"$app/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key><string>LoomWatch</string>
-  <key>CFBundleDisplayName</key><string>LoomWatch</string>
-  <key>CFBundleIdentifier</key><string>io.github.loomwatch</string>
-  <key>CFBundleExecutable</key><string>LoomWatch</string>
-  <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$version</string>
-  <key>CFBundleVersion</key><string>$version</string>
-  <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
-  <!-- A menu-bar app: no Dock icon. -->
-  <key>LSUIElement</key><true/>
-  <key>NSHighResolutionCapable</key><true/>
-  <!-- Under macOS's question the first time an agent works in an app (Automation). -->
-  <key>NSAppleEventsUsageDescription</key><string>Allow only if the work you gave your agents needs that app.</string>
-</dict>
-</plist>
-PLIST
+sed "s/@VERSION@/$version/g" "$root/packaging/macos/Info.plist" >"$app/Contents/Info.plist"
+plutil -lint -s "$app/Contents/Info.plist"
 
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
   # Inside out: the helper programs first, then the app around them. Under the hardened runtime,
