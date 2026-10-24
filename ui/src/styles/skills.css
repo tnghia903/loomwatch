@@ -2,7 +2,7 @@
    LoomWatch — the Skills page (components/skills/).
    One of the Home pages: it wears home.css's header, ground and hero, and
    adds its own parts here: the finder, topic tiles, result cards, the
-   review sheet, the Your skills shelf and the toast.
+   review sheet, the My skills shelf and the toast.
 
    Every class is `lw-skills-*`, so nothing here can restyle another surface
    (a bare `.ghost` once did). Built on tokens.css only: no hex values and
@@ -191,7 +191,7 @@
 .lw-skills-glyph.sm { width: 28px; height: 28px; border-radius: var(--r-sm); }
 .lw-skills-glyph.lg { width: 48px; height: 48px; border-radius: var(--r-lg); }
 
-/* ---- Your skills ---------------------------------------------------------- */
+/* ---- My skills ------------------------------------------------------------ */
 .lw-skills-shelf {
   display: flex;
   flex-direction: column;
@@ -201,7 +201,6 @@
   border-radius: var(--r-lg);
   background: var(--color-panel-solid);
 }
-.lw-skills-shelf-head { display: flex; align-items: center; justify-content: space-between; }
 .lw-skills-count {
   display: inline-grid;
   place-items: center;
@@ -213,6 +212,7 @@
   background: var(--color-accent-tint);
   color: var(--color-ink);
   font: 600 11px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
 .lw-skills-shelf-error { flex-direction: column; align-items: flex-start; padding: var(--sp-3); font-size: 13px; }
@@ -293,19 +293,9 @@
 }
 .lw-skills-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 
-/* The way to the skills other apps already have. */
-.lw-skills-bringin {
-  display: flex;
-  gap: var(--sp-3);
-  padding: var(--sp-4);
-  border: 1px dashed var(--color-accent-dim);
-  border-radius: var(--r-lg);
-  color: var(--color-accent);
-}
-.lw-skills-bringin svg { flex: none; margin-top: 1px; }
-.lw-skills-bringin > div { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
-.lw-skills-bringin h2 { margin: 0; font: 600 14px/1.3 var(--font-sans); color: var(--color-ink); }
-.lw-skills-bringin p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--color-ink-2); }
+/* The way to the skills other apps already have: above the list, so a long one never hides it.
+   As wide as its words, so it doesn't read as a second box beside the filter. */
+.lw-skills-look { align-self: flex-start; }
 
 /* ---- The review sheet ------------------------------------------------------ */
 .lw-skills-scrim {
@@ -507,6 +497,12 @@
 
 @media (max-width: 900px) {
   .lw-skills-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .lw-skills-look { align-self: stretch; justify-content: center; }
+  /* The "?" is the only way to what My skills is for: a thumb-sized target, the row unchanged. */
+  .lw-skills-shelf .explain-toggle { position: relative; }
+  .lw-skills-shelf .explain-toggle::before { content: ""; position: absolute; inset: -13px; }
 }
 @media (max-width: 560px) {
   /* The mark goes home already; the header keeps room for Your agents and the theme. */

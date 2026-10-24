@@ -536,7 +536,7 @@ beside the clock). The Mac app's log is in `~/Library/Logs/LoomWatch`, and the W
 `%LOCALAPPDATA%\LoomWatch\Logs`; **Show log** in the menu opens it.
 
 LoomWatch reads no other app's settings or sign-ins. Your skills live in LoomWatch's own folder (see
-[Where your work is saved](#where-your-work-is-saved)). On the **Skills** page (top of Home), **Look on this computer**
+[Where your work is saved](#where-your-work-is-saved)). On the **Skills** page (top of Home), **Find skills in your apps**
 copies in the skills your AI apps keep, and only when you click it.
 
 ### Every day
@@ -1158,7 +1158,7 @@ it came from.
 | "You signed in with ChatGPT but didn't allow LoomWatch to use your plan" | Click **Turn on plan use** on **Your ChatGPT plan** in **Connections…**, and allow it on ChatGPT's page. |
 | "Your OpenRouter account is out of credits" | Add credits at [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits), or choose a free model for the agent. |
 | "OpenRouter has no model called …" | The model was renamed or retired. Choose another model in the agent's panel. |
-| A skill is missing | Add it on the Skills page, or click **Look on this computer** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
+| A skill is missing | Add it on the Skills page, or click **Find skills in your apps** there to copy it from an AI app's skills. Skills that travel with a team go in `.agents/skills` beside its file. |
 | Ask or a team says a way of paying isn't connected | The agent's model is paid by your ChatGPT plan, your Claude credit or OpenRouter, and that one isn't connected. Connect it in **Connections…**, or choose a model you can run. When a connected one has the same models, the team offers to move its agents with one click. |
 | An agent's working folder is missing | Native teams should use a real folder on this computer. Container-run teams must use `/workspaces/...` and mount its host parent through `LOOMWATCH_WORKSPACES_DIR`. |
 | Agent cannot perform a tool action | While the run is going, answer its question in the run or the Needs-you tray before it is declined after 10 minutes. Afterwards, read the run receipt: it says what the agent wasn't allowed to do. Click **Allow from now on**, or switch it on under **Allowed without asking** in the agent's panel in Workflow. An edit outside the agent's own folder always asks, even with **Edit files** on. |

@@ -1,35 +1,39 @@
-import { ChevronDown, ExternalLink, FolderDown, Search } from 'lucide-react'
+import { ChevronDown, ExternalLink, Search } from 'lucide-react'
 import { useState } from 'react'
 
 import { describeOrigin, displayName, errorText, formatSize, licenseLabel, originShort, removeSkill, shortPath, type SkillRecord, type SkillsFolder } from '../../lib/library/skillStore'
+import { SectionHead } from '../ui/SectionHead'
 import { Glyph, NeedTags } from './SkillTags'
 
 /**
- * Your skills: what is in LoomWatch's folder, which every agent can use. Each row opens to say
+ * My skills: what is in LoomWatch's folder, which every agent can use. Each row opens to say
  * where it came from, its license and what it needs, and to remove it. A skill just added glows
- * for a moment, so you see where it went.
+ * for a moment, so you see where it went. Find skills in your apps sits above the list, so a long
+ * list never hides it.
  */
-export function Shelf({ folder, error, fresh, onRetry, onChanged }: {
+export function Shelf({ folder, error, fresh, onRetry, onChanged, onBringIn }: {
   folder: SkillsFolder | null
   error: string
   fresh: ReadonlySet<string>
   onRetry: () => void
   onChanged: () => void
+  onBringIn: () => void
 }) {
   const [filter, setFilter] = useState('')
   const skills = folder?.skills ?? []
   const needle = filter.trim().toLowerCase()
   const shown = needle ? skills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(needle)) : skills
   return (
-    <section className="lw-skills-shelf" aria-labelledby="skills-shelf-heading">
-      <div className="lw-skills-shelf-head">
-        <h2 id="skills-shelf-heading" className="lw-skills-label">Your skills {folder && <span className="lw-skills-count">{skills.length}</span>}</h2>
-      </div>
+    <section className="lw-skills-shelf" aria-label="My skills">
+      <SectionHead as="h2" title="My skills" className="lw-skills-label" explain={<>Every agent can use the skills here. Apps such as Claude Code or Codex may have skills too: <b>Find skills in your apps</b> copies them in, and your apps keep theirs.</>}>
+        {folder && <span className="lw-skills-count">{skills.length}</span>}
+      </SectionHead>
+      <button type="button" className="btn lw-skills-look" onClick={onBringIn}>Find skills in your apps</button>
       {error && <div className="home-empty alert lw-skills-shelf-error"><span role="alert">{error}</span><button type="button" className="btn" onClick={onRetry}>Try again</button></div>}
       {!folder && !error && <p role="status" className="lw-skills-quiet">Loading your skills…</p>}
       {folder && skills.length === 0 && <p className="lw-skills-empty">Nothing here yet. Skills you add show up here, and every agent can use them.</p>}
-      {skills.length > 6 && <label className="lw-skills-filter"><Search size={14} aria-hidden="true" /><input value={filter} placeholder="Filter your skills" aria-label="Filter your skills" onChange={(event) => setFilter(event.target.value)} /></label>}
-      {skills.length > 0 && <ul className="lw-skills-shelf-list" aria-label="Your skills">
+      {skills.length > 6 && <label className="lw-skills-filter"><Search size={14} aria-hidden="true" /><input value={filter} placeholder="Filter my skills" aria-label="Filter my skills" onChange={(event) => setFilter(event.target.value)} /></label>}
+      {skills.length > 0 && <ul className="lw-skills-shelf-list" aria-label="My skills">
         {shown.map((skill) => <Item key={skill.name} skill={skill} fresh={fresh.has(skill.name)} onChanged={onChanged} />)}
       </ul>}
       {needle && shown.length === 0 && <p className="lw-skills-quiet">None of your skills match “{filter}”.</p>}
@@ -79,19 +83,5 @@ function Item({ skill, fresh, onChanged }: { skill: SkillRecord; fresh: boolean;
           : <button type="button" className="link alert lw-skills-remove" onClick={() => setConfirming(true)}>Remove {name}</button>}
       </div>}
     </li>
-  )
-}
-
-/** The way to the skills apps on this computer already have. */
-export function BringInCard({ onOpen }: { onOpen: () => void }) {
-  return (
-    <section className="lw-skills-bringin" aria-labelledby="skills-bringin-heading">
-      <FolderDown size={20} aria-hidden="true" />
-      <div>
-        <h2 id="skills-bringin-heading">Skills you already have</h2>
-        <p>Apps on this computer, such as Claude Code or Codex, may have skills already. LoomWatch can copy them in, and your apps keep theirs.</p>
-        <button type="button" className="btn" onClick={onOpen}>Look on this computer</button>
-      </div>
-    </section>
   )
 }

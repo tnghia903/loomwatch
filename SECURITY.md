@@ -95,7 +95,7 @@ yourself.
   whose license says "All rights reserved" or "proprietary". It caps a download at 50 MB and a
   skill at 200 MB and 2,000 files, leaves out links, and refuses a download with a path outside its
   own folder. Nothing in a skill runs when it is installed: an agent can run a skill's script only
-  as a command, which asks like any other. **Look on this computer** copies skills from your AI
+  as a command, which asks like any other. **Find skills in your apps** copies skills from your AI
   apps' skill folders only when you click it, and reads nothing there but skill folders.
 - **Collect nothing about you.** LoomWatch has no account and no telemetry. It contacts only:
   - OpenAI, once you sign in with ChatGPT: `auth.openai.com` for the sign-in, and

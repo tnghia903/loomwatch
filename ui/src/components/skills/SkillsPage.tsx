@@ -12,7 +12,7 @@ import { AddSheet, type Adding } from './AddSheet'
 import { BringInSheet } from './BringInSheet'
 import { Finder, Topics } from './Finder'
 import { Results, type ResultState } from './Results'
-import { BringInCard, Shelf } from './Shelf'
+import { Shelf } from './Shelf'
 import { Toast } from './Toast'
 
 type Search = { query: string; loading: boolean; found: FoundSkills | null; error: string }
@@ -50,16 +50,16 @@ export interface SkillsStoreProps {
   initialQuery?: string
   /** Skills just added with Add, by name. Not a bring-in's: that can be all of an app's skills. */
   onAdded?: (names: string[]) => void
-  /** Each time Your skills is read: what the folder holds now (an Undo, a removal). */
+  /** Each time My skills is read: what the folder holds now (an Undo, a removal). */
   onFolder?: (folder: SkillsFolder) => void
 }
 
 /**
  * The store: one search box finds skills on skills.sh and ClawHub at once, or looks inside a
  * pasted link; topics give a start to someone who doesn't know what to search for. Add opens a
- * review that says what to know in plain words before anything is copied. Your skills sit beside
+ * review that says what to know in plain words before anything is copied. My skills sit beside
  * the search, so an added skill is seen arriving. Skills other apps on this computer already have
- * come in through one card, only when asked.
+ * come in through one button above that list, only when asked.
  *
  * The Skills page shows it under Home's header; the builder opens it over an agent's bench
  * (SkillsMarket), so what was added can be given to that agent on the way back.
@@ -180,9 +180,8 @@ export function SkillsStore({ heading, intro, initialQuery = '', onAdded, onFold
                 onClear={() => { searchTurn.current += 1; setSearch(null) }} />
               : <Topics onPick={(query) => void runSearch(query)} />}
           </div>
-          <aside className="lw-skills-rail" aria-label="Your skills and the ones on this computer">
-            <Shelf folder={folder} error={folderError} fresh={fresh} onRetry={() => void load()} onChanged={() => void load()} />
-            <BringInCard onOpen={() => setBringingIn(true)} />
+          <aside className="lw-skills-rail">
+            <Shelf folder={folder} error={folderError} fresh={fresh} onRetry={() => void load()} onChanged={() => void load()} onBringIn={() => setBringingIn(true)} />
           </aside>
         </div>
       </main>
