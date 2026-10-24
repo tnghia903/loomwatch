@@ -3,10 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { NOTION_TOOL_URL, actionCount, checkTool, keptInWords, removeTool, useConnectedTools, type ConnectedTool } from '../../lib/tools/client'
 import { ConnectTool } from '../tools/ConnectTool'
 import { ToolIcon } from '../tools/ToolIcon'
+import { InlineMarkdown } from '../ui/Markdown'
 import { NotionAnswers } from './NotionAnswers'
-
-/** The longest description of a call shown in the list. */
-const DESCRIPTION_CHARS = 140
 
 /**
  * `?tool=notion`: where the canvas sends you to connect Notion or choose the page answers go
@@ -84,7 +82,7 @@ export function ConnectedTools() {
             {tool.example && !tool.pending && <p className="t-meta">Try asking an agent: “{tool.example}”</p>}
             {tool.calls.length > 0 && <details>
               <summary>What it can do</summary>
-              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.description ? ` — ${call.description.length > DESCRIPTION_CHARS ? `${call.description.slice(0, DESCRIPTION_CHARS - 1).trimEnd()}…` : call.description}` : ''}</li>)}</ul>
+              <ul>{tool.calls.map((call) => <li key={call.name}><strong>{call.label}</strong>{call.readOnly ? ' · only reads' : ''}{call.description ? <span className="lw-call-desc"><InlineMarkdown>{call.description}</InlineMarkdown></span> : null}</li>)}</ul>
             </details>}
             {tool.notion && !tool.pending && <NotionAnswers choosing={choosingFor === tool.id} />}
             <div className="lw-settings-actions">

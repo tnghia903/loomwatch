@@ -1,11 +1,12 @@
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-import { useMemo } from 'react'
+import { useContext, useMemo, type ReactNode } from 'react'
 import { BACKED, CLAIM_MARK } from '../../lib/chat/claims'
 import { segments, useFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { filePathFrom, filePathFromLink } from '../../lib/files/fileRefs'
 import { FileChip } from './FileChip'
+import { SaidMention, type SaidMarks } from './saidMention'
 
 /**
  * The real Markdown renderer, shown by [`Markdown`](./Markdown.tsx). Its own download
@@ -28,16 +29,83 @@ import { FileChip } from './FileChip'
  * `inline` keeps it inside a sentence: bold, code and links are shown, and a paragraph, heading or
  * list is kept as its words. With `clickable={false}` as well, a link is its words and a file path
  * stays code: for a quote cut short, where a hidden link would still take the Tab key.
+ *
+ * `said` is for words a person typed in the chat: a line they broke stays broken, as they see it in
+ * the box they typed in, and each @mention `said.find` names in the words is drawn by the
+ * [`SaidMention`] around it (the agent's chip).
  */
-export default function MarkdownRenderer({ children, inline = false, clickable = true }: { children: string; inline?: boolean; clickable?: boolean }) {
+export default function MarkdownRenderer({ children, inline = false, clickable = true, said = null }: { children: string; inline?: boolean; clickable?: boolean; said?: SaidMarks | null }) {
   // The words a chat search found, while the chat shows where one was said (ADR 0081).
   const found = useFoundWords()
-  const rehype = useMemo(() => (found ? [...REHYPE_PLUGINS, () => (tree: { children: HastChild[] }) => markFound(tree, found)] : REHYPE_PLUGINS), [found])
+  const rehype = useMemo(() => {
+    const plugins = [...REHYPE_PLUGINS]
+    if (said) plugins.push(() => (tree: { children: HastChild[] }) => markSaid(tree, said))
+    if (found) plugins.push(() => (tree: { children: HastChild[] }) => markFound(tree, found))
+    return plugins
+  }, [found, said])
   return (
     <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehype} skipHtml components={clickable ? COMPONENTS : WORDS_ONLY} allowedElements={inline ? (clickable ? INLINE_ELEMENTS : INLINE_WORDS) : undefined} unwrapDisallowed={inline}>
-      {children}
+      {inline ? numbersAsWords(children) : children}
     </ReactMarkdown>
   )
+}
+
+/**
+ * A person's words, as they typed them: a line break inside a paragraph is kept, and each @mention
+ * becomes a `span` the components draw with [`SaidMention`]. Code is left as it is.
+ */
+function markSaid(tree: { children: HastChild[] }, said: SaidMarks) {
+  const visit = (parent: { children: HastChild[] }) => {
+    parent.children = parent.children.flatMap((node): HastChild[] => {
+      if (node.type === 'element') {
+        if (node.tagName !== 'pre' && node.tagName !== 'code') visit(node)
+        return [node]
+      }
+      // Only words carry a person's line breaks: the line breaks between a paragraph and a list,
+      // or between two items, are the renderer's own.
+      if (node.type !== 'text' || node.value.trim() === '') return [node]
+      return node.value.split('\n').flatMap((line, index, lines): HastChild[] => {
+        const parts: HastChild[] = []
+        let at = 0
+        for (const mention of said.find(line)) {
+          const from = Math.max(at, Math.min(mention.from ?? mention.start, mention.start))
+          const until = Math.max(mention.end, mention.until ?? mention.end)
+          if (from > at) parts.push({ type: 'text', value: line.slice(at, from) })
+          const chip: HastChild = { type: 'element', tagName: 'span', properties: { className: ['md-said-mention'], dataAgent: mention.agent ?? '' }, children: [{ type: 'text', value: line.slice(mention.start, mention.end) }] }
+          // The words touching a mention stay on its line with it.
+          const kept: HastChild[] = [
+            ...(from < mention.start ? [{ type: 'text' as const, value: line.slice(from, mention.start) }] : []),
+            chip,
+            ...(until > mention.end ? [{ type: 'text' as const, value: line.slice(mention.end, until) }] : []),
+          ]
+          parts.push(kept.length > 1 ? { type: 'element', tagName: 'span', properties: { className: ['md-said-keep'] }, children: kept } : chip)
+          at = until
+        }
+        if (at < line.length) parts.push({ type: 'text', value: line.slice(at) })
+        return index < lines.length - 1 ? [...parts, { type: 'element', tagName: 'br', properties: {}, children: [] }] : parts
+      })
+    })
+  }
+  visit(tree)
+}
+
+/**
+ * Inside a sentence a list is kept as its words, and a numbered item's number is no word of its
+ * own: "2025." alone would read as nothing. So a number that would start a list stays a number.
+ */
+function numbersAsWords(text: string): string {
+  return text.replace(/^( {0,3})(\d{1,9})([.)])(?=\s|$)/gm, '$1$2\\$3')
+}
+
+/** A span, or a person's @mention drawn as [`SaidMention`] says. */
+function Span({ children, className, title, node }: { children?: ReactNode; className?: string; title?: string; node?: HastElement }) {
+  const draw = useContext(SaidMention)
+  if (className === 'md-said-mention' && draw) {
+    const agent = String(node?.properties.dataAgent ?? '')
+    const text = node?.children.map((child) => (child.type === 'text' ? child.value : '')).join('') ?? ''
+    return <>{draw(agent || undefined, text)}</>
+  }
+  return <span className={className} title={title}>{children}</span>
 }
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -162,6 +230,7 @@ const COMPONENTS: Components = {
     return path ? <FileChip path={path} /> : <code className={className}>{text}</code>
   },
   img: ({ alt }) => <span className="delivery-image-reference">[Image: {alt || 'reference'}]</span>,
+  span: Span,
 }
 // Nothing to click: inline code stays code, a path in it too.
 const WORDS_ONLY: Components = { ...COMPONENTS, code: ({ children: text, className }) => <code className={className}>{text}</code> }

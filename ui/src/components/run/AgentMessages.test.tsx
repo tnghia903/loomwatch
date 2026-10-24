@@ -314,6 +314,31 @@ describe('Team chat', () => {
     expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()
   })
 
+  it('shows what you typed instead of allowing a request with its Markdown, inside the app’s sentence', async () => {
+    setup([message({
+      id: 'permission:p7', kind: 'permission', from: 'researcher', to: 'operator', text: 'Web search', seq: 7, ts: at(7), offsetMs: 7000, state: 'answered', reply: answer('operator', 'Use **the cached** copy in `notes.md`', 12),
+      permission: { requestId: 'p7', switch: 'web', detail: null, outcome: 'answered', written: 'Use **the cached** copy in `notes.md`', settled: { eventId: 's7', seq: 8, ts: at(12), offsetMs: 12_000 } },
+    })], { bare: true })
+    const strong = await screen.findByText('the cached', { selector: 'strong' })
+    expect(screen.getByText('notes.md', { selector: 'code' })).toBeInTheDocument()
+    expect(strong.closest('.chat-notice')).toHaveTextContent('You answered instead: “Use the cached copy in notes.md”. Researcher carries on with that')
+  })
+
+  it('shows what a question added as context with its Markdown, a line beside its label and a list under it', async () => {
+    const asked = (id: string, context: string) => message({ id, kind: 'question', from: 'writer', to: 'operator', text: 'Which one?', context, seq: 3 })
+    setup([asked('writer:q2', 'The **second** draft uses `ACP`.')])
+    fireEvent.click(screen.getByRole('button', { name: 'Info' }))
+    const strong = await screen.findByText('second', { selector: 'strong' })
+    expect(screen.getByText('ACP', { selector: 'code' })).toBeInTheDocument()
+    expect(strong.closest('p')).toHaveTextContent('Context: The second draft uses ACP.')
+    cleanup()
+    setup([asked('writer:q3', '- Not met: **sources** cited\n- Not sure: `ACP` spelled out')])
+    fireEvent.click(screen.getByRole('button', { name: 'Info' }))
+    expect(await screen.findByText('sources', { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByText('ACP', { selector: 'code' })).toBeInTheDocument()
+    expect(screen.getByText('Context:').closest('.chat-text')?.querySelectorAll('li')).toHaveLength(2)
+  })
+
   it('says a permission request got no answer once the run is over', () => {
     setup([message({ id: 'permission:p9', kind: 'permission', from: 'researcher', to: 'operator', text: 'mcp__claude_ai_Notion__notion-fetch', state: 'pending', permission: { requestId: 'p9', switch: null, detail: null, outcome: null, settled: null } })], { bare: true })
     expect(screen.getByText('Asks your permission for')).toBeInTheDocument()

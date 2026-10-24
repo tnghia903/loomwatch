@@ -7,6 +7,7 @@ import { FigureStill } from './FigureStill'
 import { ALLOW_SWITCHES } from '../../lib/team-file/allow'
 import type { AllowSwitch } from '../../lib/team-file/types'
 import { AgentMark } from '../ui/AgentMark'
+import { InlineMarkdown } from '../ui/Markdown'
 
 const ICONS: Record<AllowSwitch, typeof Globe> = { web: Globe, edits: FilePen, commands: SquareTerminal }
 
@@ -44,7 +45,7 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
           : <AgentMark id={markId} name={name} size={compact ? 26 : 34} animate={false} />}
         <div className="agent-badge-who">
           <strong>{name}{pinned && <Pin className="agent-badge-pin" size={13} role="img" aria-label="pinned to the notch"><title>Pinned to the notch</title></Pin>}</strong>
-          {draft.does.trim() && <span className="agent-badge-does">{draft.does.trim()}</span>}
+          {draft.does.trim() && <span className="agent-badge-does"><InlineMarkdown clickable={false}>{draft.does.trim()}</InlineMarkdown></span>}
           <span className="agent-badge-app t-mono-sm">{modelName || modelNameFromId(draft.model)}{effortName ? ` · ${effortName.toLowerCase()} effort` : ''}</span>
         </div>
       </div>

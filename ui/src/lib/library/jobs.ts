@@ -196,10 +196,10 @@ export function toolAllowOf(agent: Pick<AgentConfig, 'capabilities'>): Record<st
   return allow
 }
 
-/** A short line for a job saved without one: the first sentence of its instructions. */
+/** A short line for a job saved without one: the first sentence of its instructions, whole, with
+ * its Markdown; the palette's line cuts it, so a mark is never split. */
 function summary(instructions: string): string {
-  const first = instructions.trim().split(/(?<=[.!?])\s|\n/)[0] ?? ''
-  return first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first
+  return instructions.trim().split(/(?<=[.!?])\s|\n/)[0] ?? ''
 }
 
 /** A saved job as a palette preset, placed like a built-in one, plus a link to this version. */

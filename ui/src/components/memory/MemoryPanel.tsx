@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { isAbsolutePath } from '../../lib/files/paths'
 import type { MemoryEntry, MemoryView, Note, NotebookView } from '../../lib/memory/client'
 import { NotebookTab } from './NotebookTab'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /**
  * The Memory panel, Brief tab (docs/TEAM_MEMORY.md → "The Memory panel").
@@ -331,7 +332,7 @@ function InheritedRow({
   return (
     <div className="rt-strip t-meta" style={{ borderTop: 0, padding: '8px 10px', borderRadius: 'var(--r-sm)', background: 'var(--color-panel-solid)', border: '1px dashed var(--color-hairline)', alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}>
       <span style={{ display: 'flex', width: '100%', gap: 'var(--sp-3)', alignItems: 'baseline' }}>
-        <b className="t-body-m" style={{ color: 'var(--color-ink)', flex: 1, minWidth: 0 }}>{entry.title}</b>
+        <b className="t-body-m" style={{ color: 'var(--color-ink)', flex: 1, minWidth: 0 }}><InlineMarkdown>{entry.title}</InlineMarkdown></b>
         <button type="button" className="link t-meta" onClick={() => setOpen((value) => !value)} aria-expanded={open}>{open ? 'Hide' : 'Show'}</button>
         {onOpen && <button type="button" className="link t-meta" onClick={onOpen} title={`Edit this where it lives, on ${origin}`}>Open there</button>}
         {onExclude && (
@@ -363,7 +364,7 @@ function BriefRow({ title, meta, body, editable, onRemove, onEdit }: { title: st
   return (
     <div className="rt-strip t-meta" style={{ borderTop: 0, padding: '8px 10px', borderRadius: 'var(--r-sm)', background: 'var(--color-panel-solid)', border: '1px solid var(--color-hairline)', alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}>
       <span style={{ display: 'flex', width: '100%', gap: 'var(--sp-3)', alignItems: 'baseline' }}>
-        <b className="t-body-m" style={{ color: 'var(--color-ink)', flex: 1, minWidth: 0 }}>{title}</b>
+        <b className="t-body-m" style={{ color: 'var(--color-ink)', flex: 1, minWidth: 0 }}><InlineMarkdown>{title}</InlineMarkdown></b>
         <button type="button" className="link t-meta" onClick={() => setOpen((value) => !value)} aria-expanded={open}>{open ? 'Hide' : 'Show'}</button>
         {onEdit && <button type="button" className="link t-meta" disabled={!editable} onClick={onEdit} title="Rewrite this Brief file">Edit</button>}
         {/* Removing the entry leaves the Markdown on disk: deleting an operator's own writing

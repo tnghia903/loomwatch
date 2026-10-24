@@ -1,7 +1,9 @@
 import { Lightbulb, X } from 'lucide-react'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
+import { plainWords } from '../../lib/chat/findWords'
 import { fetchLessons, learnedFrom, tellAllAgents, undoLesson, undoTellAllAgents, type AgentLessons, type Lesson, type LessonsOf } from '../../lib/lessons/client'
+import { InlineMarkdown } from '../ui/Markdown'
 import { TELL_ALL, TellAllAsk } from '../you/TellAllAsk'
 
 /** "20 Oct": when a lesson was learned, short. */
@@ -91,8 +93,8 @@ export function LearnedBlock({ of, name, readOnly = false }: { of: LessonsOf; na
             <li key={lesson.id} className="learned-item">
               <Lightbulb size={14} className="learned-mark" aria-hidden="true" />
               <div className="learned-body">
-                <p className="learned-text">{lesson.text}</p>
-                <p className="learned-from" title={lesson.feedback}>
+                <p className="learned-text"><InlineMarkdown>{lesson.text}</InlineMarkdown></p>
+                <p className="learned-from" title={plainWords(lesson.feedback)}>
                   {learnedFrom(lesson)}{lesson.createdAt ? ` · ${day(lesson.createdAt)}` : ''}
                   {lesson.backed > 0 ? ` · liked ${lesson.backed}×` : ''}
                   {lesson.missed > 0 ? ` · missed ${lesson.missed}×` : ''}
@@ -100,14 +102,14 @@ export function LearnedBlock({ of, name, readOnly = false }: { of: LessonsOf; na
                 {lesson.aboutYou && !readOnly && (
                   <button id={`${heading}-tell-${lesson.id}`} type="button" className="link learned-tell" disabled={busy === lesson.id}
                     onClick={(event) => { asked.current = event.currentTarget; setAsking((open) => (open === lesson.id ? null : lesson.id)) }}
-                    aria-expanded={asking === lesson.id} aria-controls={asking === lesson.id ? `${heading}-ask` : undefined} aria-label={`${TELL_ALL}: ${lesson.text}`}>
+                    aria-expanded={asking === lesson.id} aria-controls={asking === lesson.id ? `${heading}-ask` : undefined} aria-label={`${TELL_ALL}: ${plainWords(lesson.text)}`}>
                     {TELL_ALL}
                   </button>
                 )}
                 {asking === lesson.id && <p className="learned-ask"><TellAllAsk id={`${heading}-ask`} busy={busy === lesson.id} onAdd={() => void tellAll(lesson)} onCancel={cancel} /></p>}
               </div>
               {!readOnly && (
-                <button type="button" className="iconbtn learned-forget" disabled={busy === lesson.id} onClick={() => void forget(lesson)} aria-label={`Forget: ${lesson.text}`} title="Forget">
+                <button type="button" className="iconbtn learned-forget" disabled={busy === lesson.id} onClick={() => void forget(lesson)} aria-label={`Forget: ${plainWords(lesson.text)}`} title="Forget">
                   <X size={14} aria-hidden="true" />
                 </button>
               )}
@@ -118,8 +120,8 @@ export function LearnedBlock({ of, name, readOnly = false }: { of: LessonsOf; na
       {moved.map((lesson) => (
         <p key={lesson.id} className="learned-moved" role="status">
           <Lightbulb size={14} className="learned-mark" aria-hidden="true" />
-          <span className="learned-moved-words"><b>All your agents</b> know: {lesson.text}</span>
-          <button id={`${heading}-moved-${lesson.id}`} type="button" className="link" disabled={busy === lesson.id} onClick={() => void moveBack(lesson)} aria-label={`Undo: ${lesson.text}`}>Undo</button>
+          <span className="learned-moved-words"><b>All your agents</b> know: <InlineMarkdown>{lesson.text}</InlineMarkdown></span>
+          <button id={`${heading}-moved-${lesson.id}`} type="button" className="link" disabled={busy === lesson.id} onClick={() => void moveBack(lesson)} aria-label={`Undo: ${plainWords(lesson.text)}`}>Undo</button>
         </p>
       ))}
       {current?.error && <p className="t-meta" role="alert">{current.error}</p>}

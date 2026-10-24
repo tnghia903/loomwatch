@@ -15,6 +15,8 @@ import { intakeLabel, jobsFor, kindOf } from './intake'
 import { plainText, type TeamNow } from './teams'
 import type { Island } from './useIsland'
 import { useRunLimit } from './useRunLimit'
+import { InlineMarkdown } from '../components/ui/Markdown'
+import { plainWords } from '../lib/chat/findWords'
 
 /** The open slot: a gold lip along the island's edge, and the box's agent's eyes over it. */
 export function Slot({ island }: { island: Island }) {
@@ -100,7 +102,7 @@ export function TeamAskBody({ island, request, first, start, decline }: { island
     <>
       <div className="island-words island-request">
         <div className="island-said-by">
-          <p className="island-ask" title={request.request}>{request.request}</p>
+          <p className="island-ask" title={plainWords(request.request)}><InlineMarkdown clickable={false}>{request.request}</InlineMarkdown></p>
           {decline && !said && <button type="button" className="island-not-now" aria-label={`Don’t start ${request.team.name}`} title={`Don’t start ${request.team.name}`} disabled={island.teamBusy === request.id} onClick={() => island.answerTeam(request, 'decline')}>×</button>}
         </div>
         <small className="island-for">

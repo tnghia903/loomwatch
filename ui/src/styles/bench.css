@@ -47,8 +47,8 @@
    smaller type (--chars, its length) so it fits whole. */
 .bench-face-name p { display: flex; align-items: baseline; justify-content: center; gap: .4em; max-width: 94%; white-space: nowrap; }
 .bench-face-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 400 min(62cqh, 170cqw / var(--chars, 10))/1.15 var(--font-serif); }
-.bench-face-name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 38cqh/1.15 var(--font-sans); color: #38352E; }
-.bench-face-name span::before { content: '·'; margin-right: .4em; }
+.bench-face-name p > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 38cqh/1.15 var(--font-sans); color: #38352E; }
+.bench-face-name p > span::before { content: '·'; margin-right: .4em; }
 /* Below the clip, and faded where it runs off the sheet: the whole of it is in the Instructions block. */
 .bench-face-job { justify-content: flex-start; align-items: stretch; text-align: left; -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 97%); mask-image: linear-gradient(to bottom, #000 78%, transparent 97%); }
 /* Its margins, not the face's padding: container units on the face itself measure the page, not the face. */

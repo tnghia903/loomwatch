@@ -110,12 +110,16 @@
 
 .ask-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
 .ask-you { display: flex; justify-content: flex-end; }
-.ask-you p {
-  margin: 0; max-width: 88%; padding: 8px 12px; border-radius: 14px 14px 4px 14px;
+/* Your words as you typed them, Markdown and all (SaidText): the bubble holds its paragraphs. */
+.ask-you-said {
+  max-width: 88%; padding: 8px 12px; border-radius: 14px 14px 4px 14px; overflow-wrap: anywhere;
   background: var(--color-accent-tint); border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
-  font: 400 13px/19px var(--font-sans); color: var(--color-ink); white-space: pre-wrap;
+  font: 400 13px/19px var(--font-sans); color: var(--color-ink);
 }
-.ask-you.pending p { opacity: .7; }
+.ask-you-said > * { margin: 0; }
+.ask-you-said > * + * { margin-top: 6px; }
+.ask-you-said :is(ul, ol) { padding-left: 18px; }
+.ask-you.pending .ask-you-said { opacity: .7; }
 .ask-turn { display: flex; flex-direction: column; gap: var(--sp-2); }
 .ask-reply {
   padding: 10px 12px; border-radius: 4px 14px 14px 14px;
@@ -168,11 +172,15 @@
 .ask-card-text { margin: 0; }
 .ask-card-meta { margin: 0; color: var(--color-ink-3); }
 .ask-card-lines { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; color: var(--color-ink); }
+/* A drafted request or note, as it will be sent: Markdown and all, its line breaks kept (SaidText). */
 .ask-card-quote {
   margin: 0; padding: 6px 10px; border-left: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   background: color-mix(in srgb, var(--color-ink) 3%, transparent); border-radius: 0 6px 6px 0;
-  color: var(--color-ink); white-space: pre-wrap;
+  color: var(--color-ink); overflow-wrap: anywhere;
 }
+.ask-card-quote > * { margin: 0; }
+.ask-card-quote > * + * { margin-top: 4px; }
+.ask-card-quote :is(ul, ol) { padding-left: 18px; }
 .ask-card-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
 .ask-card-hint { flex: 1 1 100%; color: var(--color-ink-3); font-size: 11px; line-height: 15px; }
 .ask-card-acts .ask-card-hint:first-child { order: 2; }

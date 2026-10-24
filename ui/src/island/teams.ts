@@ -160,15 +160,12 @@ function teamFromPath(path: string): string {
   return (path.split('/').at(-1) ?? path).replace(/\.ya?ml$/, '')
 }
 
-/** The answer's first line of text, without its Markdown, short enough for one line or two. */
+/** The answer's first line of text, as written: its bold, code and links are shown at the notch
+ * (InlineMarkdown), less a heading's, quote's or list's mark, and the line it sits in cuts it. */
 export function firstLine(reply: string | null | undefined): string {
   for (const raw of (reply ?? '').split('\n')) {
-    const line = raw
-      .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '')
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/[*_`~]+/g, '')
-      .trim()
-    if (line && !/^-{3,}$/.test(line)) return line.length > 120 ? `${line.slice(0, 119).trimEnd()}…` : line
+    const line = raw.replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '').trim()
+    if (line && !/^-{3,}$/.test(line)) return line
   }
   return ''
 }

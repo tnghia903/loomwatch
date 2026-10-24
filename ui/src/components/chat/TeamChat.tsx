@@ -39,7 +39,7 @@ import { Learned } from './Learned'
 import { ReplyQuote } from './ReplyQuote'
 import { ChatFiles } from './ChatFiles'
 import { FixIt, WorkPiece, type TeamView } from './WorkPiece'
-import { Markdown } from '../ui/Markdown'
+import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { earlierTries, triedAgain, tryingAgain } from '../../lib/chat/tries'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
@@ -768,7 +768,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
             </>}
             {suggestion && (
               <button type="button" className="btn tc-suggest" onClick={() => setDraft(soloAgent ? suggestion : `@team ${suggestion}`)}>
-                <Play size={13} aria-hidden="true" />{soloAgent ? suggestion : `@team ${suggestion}`}
+                <Play size={13} aria-hidden="true" />{soloAgent ? '' : '@team '}<InlineMarkdown clickable={false}>{suggestion}</InlineMarkdown>
               </button>
             )}
           </div>
@@ -1020,7 +1020,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             {yours(<div className="chat-bubble">
               {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
               {message.files && <ChatFiles files={message.files} />}
-              <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
+              <div className="chat-text"><SaidText text={message.text} /></div>
             </div>)}
           </div>
         </li>
@@ -1075,7 +1075,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
         {yours(<div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} onShow={onShowReplied(message.replyTo)} />}
           {message.files && <ChatFiles files={message.files} />}
-          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
+          <div className="chat-text"><SaidText text={message.text} /></div>
         </div>)}
         <div className="chat-under">
           <span>Starts nothing · the team reads it next time</span>
@@ -1129,7 +1129,7 @@ function Pending({ message, name, onRetry, onEdit, onDismiss }: { message: Pendi
         <div className="chat-bubble">
           {message.replyTo && <ReplyQuote reply={message.replyTo} name={name} />}
           <ChatFiles files={message.files} />
-          <div className="chat-text tc-plain"><SaidText text={message.text} /></div>
+          <div className="chat-text"><SaidText text={message.text} /></div>
         </div>
         {message.state === 'failed' && (
           <div className="chat-under tc-pending-acts">

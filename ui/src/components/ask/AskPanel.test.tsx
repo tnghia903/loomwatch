@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODEL } from '../../lib/ai/modelIds'
 import { forgetKeyStatus } from '../../lib/ai/useKeyStatus'
 import { forgetModels } from '../../lib/ai/useModels'
-import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard } from '../../lib/ask/thread'
+import { EMPTY_THREAD, type AskThread, type ProposalCard, type ReviewNoteCard, type RunRequestCard, type RunStartedCard } from '../../lib/ask/thread'
 import type { AskController } from '../../lib/ask/useAsk'
 import type { CardActions } from './AskCards'
 import { AskButton } from './AskButton'
@@ -51,7 +51,7 @@ const proposal: ProposalCard = { kind: 'proposal', id: 'p1', at: '2026-10-02T09:
 const request: RunRequestCard = { kind: 'run-request', id: 'r1', file: 'brief.yaml', name: 'Brief', request: 'Today’s news', steps: 2, decision: null, runId: null }
 const note: ReviewNoteCard = { kind: 'review-note', id: 'n1', runId: 'run-1', file: 'brief.yaml', name: 'You', question: 'Approve the brief?', text: 'Approved. Keep it short.' }
 
-function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteCard)[]): AskThread {
+function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteCard | RunStartedCard)[]): AskThread {
   return {
     state: 'ready', error: null, appName: 'LoomWatch', appId: 'loomwatch', model: DEFAULT_MODEL,
     items: [
@@ -62,6 +62,25 @@ function threadWith(...cardsInTurn: (ProposalCard | RunRequestCard | ReviewNoteC
 }
 
 describe('AskPanel', () => {
+  it('shows what you typed and the request it drafted as Markdown, keeping your lines', async () => {
+    const thread = threadWith({ ...request, request: 'Today’s **AI** news\nfrom `feeds.txt`' })
+    thread.items[0] = { kind: 'person', id: 'm1', text: 'Make me a team that:\nhas two agents\n- gathers **news**\n- writes it up' }
+    render(<AskPanel ask={controller({ thread })} view="home" cards={cards()} />)
+    const yours = (await screen.findByText('news', { selector: 'strong' })).closest('.ask-you-said') as HTMLElement
+    expect(yours.querySelectorAll('li')).toHaveLength(2)
+    expect(yours.querySelectorAll('br')).toHaveLength(1)
+    const drafted = screen.getByText('AI', { selector: 'strong' }).closest('blockquote') as HTMLElement
+    expect(drafted.querySelector('code')).toHaveTextContent('feeds.txt')
+    expect(drafted.querySelector('br')).not.toBeNull()
+  })
+
+  it('shows the request of a run it started with its Markdown', async () => {
+    const started: RunStartedCard = { kind: 'run-started', id: 's1', runId: 'run-9', file: 'brief.yaml', request: 'Today’s **AI** news from `feeds.txt`' }
+    render(<AskPanel ask={controller({ thread: threadWith(started) })} view="home" cards={cards()} />)
+    const quote = (await screen.findByText('AI', { selector: 'strong' })).closest('blockquote') as HTMLElement
+    expect(quote.querySelector('code')).toHaveTextContent('feeds.txt')
+  })
+
   it('opens with what Ask can do and suggestions for where the person is, which send at a click', () => {
     const ask = controller()
     render(<AskPanel ask={ask} view="home" cards={cards()} />)

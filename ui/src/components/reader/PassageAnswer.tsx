@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, type CSSProperties, type Ref } from 'react'
 import { clockTime, dayLabel } from '../../lib/chat/format'
 import { askedInChat, partLook, partQuote, yourWords, type AskedPassage, type PassageAnswer as Answer } from '../../lib/files/passage'
 import { AvatarFace } from '../agents/AvatarFace'
-import { Markdown } from '../ui/Markdown'
+import { InlineMarkdown, Markdown } from '../ui/Markdown'
 
 interface PassageAnswerProps {
   passage: AskedPassage
@@ -102,7 +102,7 @@ export function PassageAnswer({ passage, earlier = NO_TURNS, name, hue, place, g
 /** Your words in the talk, as a comment's: quiet, over the answer they got. */
 function Asked({ words, ref }: { words: string; ref?: Ref<HTMLParagraphElement> }) {
   if (!words) return null
-  return <p ref={ref} className="rd-answer-asked"><span className="visually-hidden">You asked: </span>{words}</p>
+  return <p ref={ref} className="rd-answer-asked"><span className="visually-hidden">You asked: </span><InlineMarkdown>{words}</InlineMarkdown></p>
 }
 
 /** What came back: the answer drawn as the chat draws it, the agent still at it, or why there is none. */

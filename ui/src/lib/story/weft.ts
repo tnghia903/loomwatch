@@ -145,6 +145,9 @@ export function describeEvidence(agent: string, item: Pick<Evidence, 'kind' | 'r
       // A skill read as its SKILL.md is named by its folder; Claude's Skill tool ("Load skill: x") by its input.
       const named = skillName(item)
       const skill = named ? `“${named}”` : quoted
+      // Put in its prompt is delivery, not use (CONTRACT §12): the record shows it
+      // used only once the agent opens or invokes it, which the receipt says when it never does.
+      if (item.relation === 'loaded into prompt') return `${agent} was given the skill ${skill} in its prompt.`
       return failed ? `${agent} couldn’t use the skill ${skill}.` : `${agent} used the skill ${skill}.`
     }
     case 'permission': {

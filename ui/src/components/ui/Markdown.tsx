@@ -1,6 +1,7 @@
 import { memo, Suspense } from 'react'
 
 import { plainWords } from '../../lib/chat/findWords'
+import type { SaidMarks } from './saidMention'
 import { MarkdownRenderer } from './markdownCode'
 
 /**
@@ -9,11 +10,14 @@ import { MarkdownRenderer } from './markdownCode'
  *
  * Kept while its text is the same: parsing is the costly part, and a live run re-renders the chat
  * with every batch of events while only the message being written has changed.
+ *
+ * `said` is for a person's own words in the chat: their line breaks kept, their @mentions marked
+ * (MarkdownRenderer).
  */
-export const Markdown = memo(function Markdown({ children }: { children: string }) {
+export const Markdown = memo(function Markdown({ children, said = null }: { children: string; said?: SaidMarks | null }) {
   return (
     <Suspense fallback={<div className="markdown-fallback">{children}</div>}>
-      <MarkdownRenderer>{children}</MarkdownRenderer>
+      <MarkdownRenderer said={said}>{children}</MarkdownRenderer>
     </Suspense>
   )
 })

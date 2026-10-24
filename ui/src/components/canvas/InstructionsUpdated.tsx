@@ -1,6 +1,7 @@
 import { sentencesNaming } from '../../lib/team-file/mentions'
 import type { AgentConfig } from '../../lib/team-file/types'
 import { wordDiff } from '../../lib/wordDiff'
+import { InlineMarkdown } from '../ui/Markdown'
 import type { InstructionUpdate } from '../workspace/useInstructionUpdates'
 
 export interface InstructionsUpdatedProps {
@@ -25,7 +26,7 @@ export function InstructionsUpdated({ update, agent, readOnly = false, onKeep, o
     const sentences = sentencesNaming(agent, update.source)
     return <section className={update.state === 'failed' ? 'instructions-updated failed' : 'instructions-updated'} aria-label="Instructions that still name what you removed">
       <p>These instructions still name {what}, which you removed.{update.error ? ` ${update.error}` : ''}</p>
-      {sentences.length > 0 && <ul>{sentences.map((sentence) => <li key={sentence}>{sentence}</li>)}</ul>}
+      {sentences.length > 0 && <ul>{sentences.map((sentence) => <li key={sentence}><InlineMarkdown>{sentence}</InlineMarkdown></li>)}</ul>}
       {!readOnly && <div className="instructions-updated-actions"><button type="button" className="btn" onClick={onKeep}>Keep as is</button></div>}
     </section>
   }

@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { compactCount, displayName, ownerOf, publisherOf, resultKey, skillNameOf, sourceName, type SearchResult, type SearchSource } from '../../lib/library/skillStore'
 import { By, Glyph } from './SkillTags'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /** Where one result stands: already yours, just added, being checked, or not addable. */
 export type ResultState = { kind: 'have' | 'added' | 'checking' } | { kind: 'blocked'; reason: string }
@@ -58,7 +59,7 @@ function Card({ result, state, onAdd }: { result: SearchResult; state: ResultSta
           <By publisher={publisherOf(result)} />
         </div>
       </div>
-      <p className="lw-skills-card-desc">{result.description ?? (collection ? `Part of the ${collection} collection on GitHub.` : 'No description given.')}</p>
+      <p className="lw-skills-card-desc">{result.description ? <InlineMarkdown clickable={false}>{result.description}</InlineMarkdown> : collection ? `Part of the ${collection} collection on GitHub.` : 'No description given.'}</p>
       <div className="lw-skills-card-foot">
         <span className="lw-skills-card-meta">
           {result.installs !== undefined && <>{compactCount(result.installs)} installs · </>}

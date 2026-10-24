@@ -1,7 +1,9 @@
 import { Lightbulb } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { plainWords } from '../../lib/chat/findWords'
 import { inAboutYou, learnedFrom, type Lesson } from '../../lib/lessons/client'
+import { InlineMarkdown } from '../ui/Markdown'
 import { TELL_ALL, TellAllAsk } from '../you/TellAllAsk'
 import { Appearing } from './Appearing'
 
@@ -63,22 +65,24 @@ function LearnedLine({ lesson, name, onUndo, onTellAll }: { lesson: Lesson; name
       setBusy(false)
     }
   }
-  const from = `${learnedFrom(lesson)}: ${lesson.feedback}`
+  // The lesson shows its Markdown on the line; a tooltip or a button's name reads it as words.
+  const from = `${learnedFrom(lesson)}: ${plainWords(lesson.feedback)}`
+  const words = plainWords(lesson.text)
   const offer = !done && onTellAll !== undefined && lesson.aboutYou && !moved
   const canUndo = !asking && !done && onUndo !== undefined
   return (
     <>
       <p className="tc-learned-line" title={moved ? `In About you, for all your agents. ${from}` : from}>
         <Lightbulb size={14} className="tc-learned-mark" aria-hidden="true" />
-        <span className="tc-learned-words">{moved ? <b>All your agents</b> : <b>{name(lesson.agentId)}</b>}{moved ? ' know: ' : ' learned: '}{lesson.text}</span>
+        <span className="tc-learned-words">{moved ? <b>All your agents</b> : <b>{name(lesson.agentId)}</b>}{moved ? ' know: ' : ' learned: '}<InlineMarkdown>{lesson.text}</InlineMarkdown></span>
         {offer && (
-          <button ref={trigger} type="button" className="link tc-learned-act" disabled={busy} onClick={() => setAsking((open) => !open)} aria-expanded={asking} aria-controls={asking ? askId : undefined} aria-label={`${TELL_ALL}: ${lesson.text}`}>
+          <button ref={trigger} type="button" className="link tc-learned-act" disabled={busy} onClick={() => setAsking((open) => !open)} aria-expanded={asking} aria-controls={asking ? askId : undefined} aria-label={`${TELL_ALL}: ${words}`}>
             {TELL_ALL}
           </button>
         )}
         {offer && canUndo && <span className="tc-learned-dot" aria-hidden="true">·</span>}
         {canUndo && (
-          <button ref={undo} type="button" className="link tc-learned-act" disabled={busy} onClick={() => void act(onUndo, moved ? 'active' : null)} aria-label={`Undo: ${lesson.text}`}>
+          <button ref={undo} type="button" className="link tc-learned-act" disabled={busy} onClick={() => void act(onUndo, moved ? 'active' : null)} aria-label={`Undo: ${words}`}>
             Undo
           </button>
         )}

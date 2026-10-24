@@ -536,9 +536,23 @@ describe('the team’s chat', () => {
     expect(note.querySelector('.tc-mention-team')).toHaveTextContent('@team')
     expect(note.querySelectorAll('.tc-mention')).toHaveLength(1)
     // A line never breaks between a chip and the letters or bracket touching it.
-    const keep = [...said('and @Researcher’s source (@Writer too)').querySelectorAll('.tc-mention-keep')]
+    const keep = [...said('and @Researcher’s source (@Writer too)').querySelectorAll('.md-said-keep')]
     expect(keep.map((group) => group.textContent)).toEqual(['@Researcher’s', '(@Writer'])
     expect(keep.map((group) => group.querySelector('.tc-mention')?.className)).toEqual(['tc-mention hue-1', 'tc-mention hue-2'])
+  })
+
+  it('shows your message’s Markdown, keeps the lines you broke, and still draws its @mentions', async () => {
+    page = [{ kind: 'work', run: run({}), request: message({ text: '@team please:\nkeep it short\n\n- the **sales** totals\n- from `q4.csv`, then ask **@Writer**' }), notes: [] }]
+    renderChat()
+    const log = await screen.findByRole('log', { name: 'Messages' })
+    const strong = await within(log).findByText('sales', { selector: 'strong' })
+    const said = strong.closest('.chat-text') as HTMLElement
+    // The one line you broke, and none between the list's items.
+    expect(said.querySelectorAll('br')).toHaveLength(1)
+    expect(said.querySelectorAll('li')).toHaveLength(2)
+    expect(within(said).getByText('q4.csv', { selector: 'code' })).toBeTruthy()
+    expect(said.querySelector('.tc-mention-team')).toHaveTextContent('@team')
+    expect(said.querySelector('strong .tc-mention')).toHaveClass('hue-2')
   })
 
   it('an empty chat suggests an @team first message, and starts nothing until you send it', async () => {
@@ -1465,7 +1479,7 @@ describe('one agent’s own chat', () => {
     page = [{ kind: 'work', run: run({ onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'] }), request: message({ text: '@Ada sum it up for @team', route: 'agent', agentId: 'ada' }), notes: [] }]
     renderSolo()
     const log = await screen.findByRole('log')
-    await waitFor(() => expect(within(log).getByText('@Ada sum it up for @team')).toHaveClass('chat-text'))
+    await waitFor(() => expect(within(log).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@Ada sum it up for @team')).toBeTruthy())
     expect(log.querySelector('.tc-mention, .tc-mention-team')).toBeNull()
   })
 
@@ -1744,7 +1758,7 @@ describe('what the agents learned', () => {
     fireEvent.click(await screen.findByRole('button', { name: `Tell all my agents: ${vietnamese}` }))
     expect(posted).toEqual([])
     fireEvent.click(within(screen.getByRole('group', { name: 'Tell all my agents' })).getByRole('button', { name: 'Add' }))
-    expect(await screen.findByText(`know: ${vietnamese}`, { exact: false })).toBeInTheDocument()
+    expect(await screen.findByText((_, element) => element?.classList.contains('tc-learned-words') === true && element.textContent === `All your agents know: ${vietnamese}`)).toBeInTheDocument()
     expect(posted).toEqual([{ url: '/api/lessons/tell-all', body: { teamPath: 'news.yaml', agent: 'writer', id: 'l1' } }])
     fireEvent.click(screen.getByRole('button', { name: `Undo: ${vietnamese}` }))
     expect(await screen.findByRole('button', { name: `Tell all my agents: ${vietnamese}` })).toBeInTheDocument()

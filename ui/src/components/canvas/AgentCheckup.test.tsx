@@ -17,6 +17,13 @@ const thin: CheckupFinding = {
 }
 
 describe('AgentCheckup', () => {
+  it('quotes what it found with its Markdown, never cut mid-mark', async () => {
+    const asked: CheckupFinding = { ...thin, id: 'asked-again:writer+editor', rule: 'asked-again', title: 'Editor keeps asking Writer for more', why: `Editor asked Writer 4 questions, such as “Which **${'very long '.repeat(15).trim()}** figure from \`q4.csv\`?”.` }
+    render(<AgentCheckup findings={[asked]} onFix={vi.fn()} />)
+    expect(await screen.findByText(/very long/, { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByText('q4.csv', { selector: 'code' })).toBeInTheDocument()
+  })
+
   it('says nothing when there is nothing to improve', () => {
     const { container } = render(<AgentCheckup findings={[]} onFix={vi.fn()} />)
     expect(container).toBeEmptyDOMElement()

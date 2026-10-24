@@ -2,6 +2,7 @@ import { Plus, Search } from 'lucide-react'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 
 import { PRESENCE_WORDS, type Presence } from '../../lib/rail/presence'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /** One agent or team in the rail. */
 export interface RailItem {
@@ -226,7 +227,7 @@ function FindBox({ id, label, none, items, place, onPick, onClose }: { id: strin
           <li key={item.key} id={`${id}-${item.key}`} role="option" aria-selected={index === shown} aria-current={item.current ? 'page' : undefined} className={`crew-rail-hit ${item.presence}${index === shown ? ' active' : ''}`}
             onPointerMove={() => setActive(index)} onClick={() => onPick(item)}>
             <span className="crew-rail-art">{item.art}</span>
-            <span className="crew-rail-hit-text"><b>{item.name}</b>{item.detail && <em>{item.detail}</em>}</span>
+            <span className="crew-rail-hit-text"><b>{item.name}</b>{item.detail && <em><InlineMarkdown clickable={false}>{item.detail}</InlineMarkdown></em>}</span>
             {PRESENCE_WORDS[item.presence] && <span className="crew-rail-hit-state">{PRESENCE_WORDS[item.presence]}</span>}
           </li>
         ))}

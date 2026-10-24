@@ -41,6 +41,15 @@ describe('RunReceipt', () => {
     expect(within(earned).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/agents', '/quests'])
   })
 
+  it('shows what was asked with its Markdown, not its marks', async () => {
+    render(<RunReceipt receipt={{ ...receipt(false), asked: 'Add up the **Q4** sales from `sales.csv`.' }} onInspectEvidence={vi.fn()} />)
+    const asked = screen.getByText('Asked').nextElementSibling as HTMLElement
+    expect(await within(asked).findByText('Q4', { selector: 'strong' })).toBeTruthy()
+    expect(within(asked).getByText('sales.csv', { selector: 'code' })).toBeTruthy()
+    expect(asked.textContent).toBe('Add up the Q4 sales from sales.csv.')
+    expect(asked.title).toBe('Add up the Q4 sales from sales.csv.')
+  })
+
   it('shows no earned block on a run that earned nothing', () => {
     render(<RunReceipt receipt={receipt(false)} onInspectEvidence={vi.fn()} />)
     expect(screen.queryByRole('region', { name: 'Earned on this run' })).toBeNull()

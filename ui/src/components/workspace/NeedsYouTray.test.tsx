@@ -38,7 +38,7 @@ describe('a permission ticket in the tray (ADR 0040)', () => {
 describe('what a review ticket quotes', () => {
   it('shows the agent’s Markdown formatted, and its tooltip as plain words', () => {
     const context = 'Not met: Gives **2 empty slots** — see [the code](https://example.org/q1) in `/tmp/q1.py`\n## Draft\nThe `idf()` line.'
-    const question: Ticket = { ...ticket, id: 'quote-q:question', kind: 'question', runId: 'quote-q', text: 'Which slot?', context: 'Use the **filled** slots', requestId: undefined }
+    const question: Ticket = { ...ticket, id: 'quote-q:question', kind: 'question', runId: 'quote-q', text: 'Which **slot**, `a` or `b`?', context: 'Use the **filled** slots', requestId: undefined }
     render(<NeedsYouTray tickets={[{ ...review('quote-r'), context }, { ...ticket, context: 'Run `ls *.md` in **notes**' }, question]} working={0} onAnswer={vi.fn()} onPermission={vi.fn()} onDismiss={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /3 need you/ }))
     const [quote, command, asked] = [...screen.getByRole('dialog').querySelectorAll('blockquote')]
@@ -55,6 +55,11 @@ describe('what a review ticket quotes', () => {
     // What an agent asking a question handed over is its Markdown too.
     expect(asked.querySelector('strong')).toHaveTextContent('filled')
     expect(asked).toHaveAttribute('title', 'Use the filled slots')
+    // The question the agent asks is its Markdown too.
+    const line = asked.parentElement?.querySelector('.ticket-text') as HTMLElement
+    expect(line).toHaveTextContent('asks: “Which slot, a or b?”')
+    expect(line.querySelector('strong')).toHaveTextContent('slot')
+    expect(line.querySelectorAll('code')).toHaveLength(2)
   })
 })
 

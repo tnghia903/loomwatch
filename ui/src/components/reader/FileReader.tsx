@@ -10,7 +10,7 @@ import { fileIcon } from '../../lib/files/icons'
 import { answerRead, markAnswerRead } from '../../lib/files/answersRead'
 import { markParts, type MarkedPart, type PartMarks } from '../../lib/files/partMarks'
 import type { PageMark, PagePart } from '../../lib/files/pageFrame'
-import { answerPlace, askKey, bubbleAgent, bubbleCardLine, bubbleLabel, bubblePlace, bubbleTitle, fileAsks, findPassage, pageText, partBox, partLines, partLook, partTexts, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage, type PartLook } from '../../lib/files/passage'
+import { answerPlace, askKey, bubbleAgent, bubbleCardParts, bubbleLabel, bubblePlace, bubbleTitle, fileAsks, findPassage, pageText, partBox, partLines, partLook, partTexts, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage, type PartLook } from '../../lib/files/passage'
 import { figureStill } from '../../lib/library/figures'
 import { wearerOf } from '../../lib/chat/helpers'
 import { TeamFiguresContext } from '../agents/figureContext'
@@ -22,7 +22,8 @@ import { relativeTime } from '../../lib/format'
 import { AvatarFace } from '../agents/AvatarFace'
 import { AgentCardPopup } from '../chat/AgentFace'
 import { useAgentCard } from '../../lib/chat/useAgentCard'
-import { Markdown } from '../ui/Markdown'
+import { InlineMarkdown, Markdown } from '../ui/Markdown'
+import { plainWords } from '../../lib/chat/findWords'
 import { CodeView, DocumentView, TableView } from './formats'
 import { PageFrame, type Marked } from './PageFrame'
 import { PassageAnswer } from './PassageAnswer'
@@ -405,7 +406,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   }
   const cardAsk = agentCard.shown && cardFor ? mine.find((passage) => askKey(passage) === cardFor) ?? null : null
   const cardFacts = cardAsk ? factsOf(bubbleAgent(cardAsk)) : null
-  const cardLine = cardAsk ? bubbleCardLine(cardAsk, lookOfAsk(cardAsk), name) : ''
+  const cardLine = cardAsk ? bubbleCardParts(cardAsk, lookOfAsk(cardAsk), name) : null
   const closeAnswer = () => setAnswerFor(null)
   // The open answer's talk before it: what the same agent was asked about the same words, oldest first.
   const earlierTalk = answerShown ? asked.filter((passage) => passage !== answerShown && passage.file === path && askKey(passage) === shownKey) : NO_PASSAGES
@@ -572,10 +573,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
                   const job = role ? roleLine(role(id)) : ''
                   return (
                     <li key={id}>
-                      <button type="button" onClick={() => choose(id)} aria-label={`Ask ${name(id)}${id === from ? ', who made this,' : ''} instead${job ? `: ${job}` : ''}`}>
+                      <button type="button" onClick={() => choose(id)} aria-label={`Ask ${name(id)}${id === from ? ', who made this,' : ''} instead${job ? `: ${plainWords(job)}` : ''}`}>
                         <AvatarFace id={id} hue={hue(id)} size={22} fontSize={8} text={initials(name(id))} />
                         <span className="rd-ask-who"><b>{name(id)}</b>{id === from && <i>made this</i>}</span>
-                        {job && <span className="rd-ask-job" title={job}>{job}</span>}
+                        {job && <span className="rd-ask-job" title={plainWords(job)}><InlineMarkdown clickable={false}>{job}</InlineMarkdown></span>}
                       </button>
                     </li>
                   )
@@ -586,7 +587,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         )}
         {cardAsk && cardFacts && agentCard.place && (
           <AgentCardPopup id={cardId} facts={cardFacts} place={agentCard.place} leaving={agentCard.phase === 'leaving'}
-            hint={cardLine ? <p className="tc-agent-card-asked">{cardLine}</p> : null} />
+            hint={cardLine && (cardLine.said || cardLine.words) ? <p className="tc-agent-card-asked">{cardLine.said}{cardLine.said && cardLine.words ? ' · ' : ''}{cardLine.words && <>You asked: <InlineMarkdown>{cardLine.words}</InlineMarkdown></>}</p> : null} />
         )}
         {answerShown && (answerPart || answerLost) && (
           <PassageAnswer ref={card} passage={answerShown} earlier={earlierTalk} name={name} hue={hue} place={answerAt} gone={answerLost} maxHeight={answerMax} about={answerAbout}
@@ -606,11 +607,11 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   )
 }
 
-/** An agent's job in a line, as the team list shows it: the first line of its role that is not a heading. */
+/** An agent's job in a line, as the team list shows it: the first line of its role that is not a
+ * heading, whole and with its Markdown (its line cuts it), less a heading's, quote's or list's mark. */
 function roleLine(role: string): string {
   const lines = role.split('\n').map((part) => part.trim()).filter(Boolean)
-  const line = (lines.find((part) => !part.startsWith('#')) ?? lines[0] ?? '').replace(/^[#>*\-\s]+/, '')
-  return line.length > 120 ? `${line.slice(0, 119).trimEnd()}…` : line
+  return (lines.find((part) => !part.startsWith('#')) ?? lines[0] ?? '').replace(/^(#{1,6}\s+|>\s*|[-*+]\s+)/, '')
 }
 
 /** How each part's words look, on its marks, from the parts marked with them; and its slot's lightness, for its bubbles. */
