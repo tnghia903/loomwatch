@@ -92,6 +92,63 @@ export const specificity = (selector: string): number => {
   return inner + (rest.match(/#[\w-]+/g) ?? []).length * 10_000 + classes.length * 100 + types.length
 }
 
+/** A rule that sets a property: its last value for it, and each of its selectors ready to match. */
+type Declaring = { media: string[]; important: boolean; value: string; selectors: { selector: string; weight: number; classes: string[]; unmatchable?: boolean }[] }
+
+const needed = new Map<string, string[]>()
+
+/**
+ * The classes an element must have for `selector` to match it: those written plainly in its last
+ * compound, outside brackets and any `:not()`, `:is()` or `:where()`. An element without one of
+ * them can't match, so `matches` isn't asked. None when a name is escaped, to stay safe.
+ */
+export function neededClasses(selector: string): string[] {
+  const known = needed.get(selector)
+  if (known) return known
+  let plain = ''
+  let depth = 0
+  for (const char of selector) {
+    if (char === '(' || char === '[') depth += 1
+    else if (char === ')' || char === ']') depth -= 1
+    else if (depth === 0) plain += char
+  }
+  const last = plain.trim().split(/\s*[\s>+~]\s*/).at(-1) ?? ''
+  const classes = last.includes('\\') ? [] : [...last.matchAll(/\.([\w-]+)/g)].map(([, name]) => name)
+  needed.set(selector, classes)
+  return classes
+}
+
+// Which rules set a property depends on the rules alone, so it is worked out once per set of rules
+// and property. Asking it of every rule for every element made a screen's `goldFilled` take
+// seconds on a busy computer: thousands of rules for each of dozens of buttons.
+const declaringByRules = new WeakMap<Rule[], Map<string, Declaring[]>>()
+
+function declaring(rules: Rule[], property: string | string[]): Declaring[] {
+  const names = [property].flat().join('|')
+  let byProperty = declaringByRules.get(rules)
+  if (!byProperty) declaringByRules.set(rules, (byProperty = new Map()))
+  const known = byProperty.get(names)
+  if (known) return known
+  const declared = new RegExp(`(?:^|;)\\s*(?:${names}):\\s*([^;]+)`, 'g')
+  const found: Declaring[] = []
+  for (const { selectors, body, media } of rules) {
+    const raw = [...body.matchAll(declared)].at(-1)?.[1].trim()
+    if (raw === undefined) continue
+    found.push({
+      media,
+      important: /!important$/.test(raw),
+      value: raw.replace(/\s*!important$/, ''),
+      selectors: topLevel(selectors).map((selector) => ({
+        selector: selector.replace(/:hover\b/g, '[data-hovered]').replace(/:focus-visible\b/g, '[data-focus-visible]'),
+        weight: specificity(selector),
+        classes: neededClasses(selector),
+      })),
+    })
+  }
+  byProperty.set(names, found)
+  return found
+}
+
 /**
  * The value of `property` the cascade gives `element` at `viewport`, or null if no rule sets it.
  * Given several names (a shorthand and its longhand), they cascade as one. `:hover` and
@@ -101,18 +158,15 @@ export const specificity = (selector: string): number => {
  */
 export function cascaded(element: Element, property: string | string[], viewport: Viewport = DESKTOP, rules: Rule[] = appRules): string | null {
   let won: { important: boolean; weight: number; value: string } | null = null
-  const declared = new RegExp(`(?:^|;)\\s*(?:${[property].flat().join('|')}):\\s*([^;]+)`, 'g')
-  for (const { selectors, body, media } of rules) {
-    const values = [...body.matchAll(declared)].map(([, value]) => value.trim())
-    if (values.length === 0 || !media.every((prelude) => mediaHolds(prelude, viewport))) continue
-    const raw = values.at(-1)!
-    const important = /!important$/.test(raw)
-    const value = raw.replace(/\s*!important$/, '')
-    for (const selector of topLevel(selectors)) {
+  for (const { media, important, value, selectors } of declaring(rules, property)) {
+    if (!media.every((prelude) => mediaHolds(prelude, viewport))) continue
+    for (const one of selectors) {
+      if (one.unmatchable || !one.classes.every((name) => element.classList.contains(name))) continue
       let matches = false
-      try { matches = element.matches(selector.replace(/:hover\b/g, '[data-hovered]').replace(/:focus-visible\b/g, '[data-focus-visible]')) } catch { /* ::before, keyframe steps */ }
+      // A selector no element can match (::before, keyframe steps) throws; it is not tried again.
+      try { matches = element.matches(one.selector) } catch { one.unmatchable = true }
       if (!matches) continue
-      const weight = specificity(selector)
+      const weight = one.weight
       if (!won || (important && !won.important) || (important === won.important && weight >= won.weight)) won = { important, weight, value }
     }
   }
