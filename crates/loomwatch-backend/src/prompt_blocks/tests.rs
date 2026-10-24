@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use super::{ALL, fill, placeholders};
 use crate::agent::prompt::{Abilities, system_prompt};
 use crate::agent::tools::Builtin;
 use crate::config::TeamConfig;
@@ -164,8 +166,8 @@ fn tool_specs(out: &mut String) {
     for tool in Builtin::ALL {
         let spec = tool.spec();
         // Its words differ by system (`RUN_COMMAND`), and this file is the same on every one.
-        let description = if tool == Builtin::RunCommand {
-            assert_eq!(spec.description, crate::agent::tools::RUN_COMMAND);
+        let description = if spec.description == crate::agent::tools::RUN_COMMAND.default {
+            assert_eq!(tool, Builtin::RunCommand);
             "(RUN_COMMAND for this system)".to_owned()
         } else {
             spec.description
@@ -350,9 +352,239 @@ fn without_overrides_every_prompt_is_what_it_was() {
         std::fs::write(Path::new(env!("CARGO_MANIFEST_DIR")).join(RENDERED), &now)
             .expect("rendered.txt");
     }
-    // A Windows checkout may end its lines with CR LF.
-    let was = include_str!("rendered.txt").replace('\r', "");
-    if let Some(difference) = first_difference(&now, &was) {
+    if let Some(difference) = first_difference(&now, &was()) {
         panic!("a prompt changed from {RENDERED}: {difference}");
+    }
+}
+
+/// `rendered.txt`. A Windows checkout may end its lines with CR LF.
+fn was() -> String {
+    include_str!("rendered.txt").replace('\r', "")
+}
+
+/// Every id names a file on any system and belongs to one block, and no block's words start or end
+/// with a space or line break: the code that uses a block puts in the breaks around it, so a file
+/// read back without the line break an editor leaves at its end is the same text.
+#[test]
+fn every_block_has_an_id_of_its_own_and_no_space_at_either_end() {
+    let shape = regex::Regex::new(r"^[a-z]+(\.[a-z][a-z_]*)+$").expect("pattern");
+    let mut seen = BTreeSet::new();
+    for block in ALL {
+        assert!(shape.is_match(block.id), "{}", block.id);
+        assert!(seen.insert(block.id), "{} names two blocks", block.id);
+        assert!(!block.default.is_empty(), "{}", block.id);
+        assert_eq!(block.default.trim(), block.default, "{}", block.id);
+    }
+}
+
+/// A block written anywhere in the daemon is in [`ALL`], so the dump writes it and a file for it is
+/// accepted.
+#[test]
+fn every_block_in_the_source_is_listed() {
+    let made = regex::Regex::new(r#"Block::new\(\s*"([^"]+)""#).expect("pattern");
+    let mut found = BTreeSet::new();
+    let mut folders = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder).expect("source folder") {
+            let path = entry.expect("source entry").path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let source = std::fs::read_to_string(&path).expect("source file");
+                found.extend(made.captures_iter(&source).map(|made| made[1].to_owned()));
+            }
+        }
+    }
+    let listed: BTreeSet<String> = ALL.iter().map(|block| block.id.to_owned()).collect();
+    assert_eq!(found, listed);
+}
+
+#[test]
+fn a_placeholder_is_filled_once_and_other_braces_stay_as_written() {
+    // A value is never read again, even when it looks like a placeholder.
+    assert_eq!(
+        fill(
+            "You are {name}, on {team}.",
+            &[("name", "{team}"), ("team", "the Desk team")]
+        ),
+        "You are {team}, on the Desk team."
+    );
+    assert_eq!(
+        fill(
+            "{lead} asked {lead}. {other} {\"json\": 1} {",
+            &[("lead", "Ada")]
+        ),
+        "Ada asked Ada. {other} {\"json\": 1} {"
+    );
+    assert_eq!(fill("{{name}}", &[("name", "Mai")]), "{Mai}");
+    assert_eq!(
+        placeholders("For {lead}: {lead}'s {at_once}, not {Lead}, {x-y}, {} or {\"a\": 1}"),
+        ["at_once", "lead"]
+    );
+}
+
+/// Overrides, which only a build with the `prompt-overrides` feature has.
+#[cfg(feature = "prompt-overrides")]
+mod overriding {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::prompt_blocks::Block;
+    use crate::prompt_blocks::overrides::{Overrides, dump, scoped};
+
+    struct Folder(PathBuf);
+
+    impl Folder {
+        fn new() -> Self {
+            let path =
+                std::env::temp_dir().join(format!("loomwatch-blocks-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&path).expect("folder");
+            Self(path)
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The parts of a block's own words between its placeholders, long enough to be its alone.
+    fn own_words(block: &Block) -> Vec<&'static str> {
+        regex::Regex::new(r"\{[a-z_]+\}")
+            .expect("pattern")
+            .split(block.default)
+            .filter(|words| words.len() > 30)
+            .collect()
+    }
+
+    /// Each block replaced by a mark with its id and every placeholder it fills reaches what agents
+    /// are given, filled in, and none of its own words are left there: no prompt or tool keeps a
+    /// copy of a block's text beside it.
+    #[test]
+    fn every_block_s_file_replaces_it_wherever_agents_are_given_it() {
+        let marked = Overrides::of(ALL.iter().map(|block| {
+            let filled: Vec<String> = placeholders(block.default)
+                .iter()
+                .map(|name| format!("{{{name}}}"))
+                .collect();
+            (block.id, format!("[[{}]] {}", block.id, filled.join(" ")))
+        }));
+        let now = scoped(marked, rendered);
+        for block in ALL {
+            assert!(
+                now.contains(&format!("[[{}]]", block.id)),
+                "{} is not where agents read it",
+                block.id
+            );
+            for words in own_words(block) {
+                assert!(
+                    !now.contains(words),
+                    "{} is still given as written: {words:?}",
+                    block.id
+                );
+            }
+        }
+        // Filled in from the file, as from the block's own words.
+        assert!(
+            now.contains("[[orientation.lead]] Lead the Desk team\n"),
+            "{now}"
+        );
+        assert!(now.contains("[[system.web]] 6,000\n"), "{now}");
+    }
+
+    /// What `--dump-prompt-blocks` writes, read back as overrides, gives every prompt and tool
+    /// exactly as without them: an improver starts from the words agents have now.
+    #[test]
+    fn the_dump_read_back_changes_nothing() {
+        let folder = Folder::new();
+        let listed = dump(&folder.0).expect("dump");
+        assert_eq!(listed.len(), ALL.len());
+        assert!(listed.contains(&"orientation.lead  {name} {team}".to_owned()));
+        assert!(listed.contains(&"orientation.delegation".to_owned()));
+        let read = Overrides::read(&folder.0).expect("the dump reads back");
+        for block in ALL {
+            assert_eq!(read.get(block.id), Some(block.default), "{}", block.id);
+        }
+        let now = scoped(read, rendered);
+        assert_eq!(first_difference(&now, &was()), None);
+    }
+
+    /// The dump writes the words agents are given now, so an override is in it.
+    #[test]
+    fn the_dump_writes_what_overrides_left() {
+        let folder = Folder::new();
+        let changed = Overrides::of([("orientation.delegation", "Hand out the work.".to_owned())]);
+        scoped(changed, || dump(&folder.0)).expect("dump");
+        let written = |id: &str| std::fs::read_to_string(folder.0.join(format!("{id}.md")));
+        assert_eq!(
+            written("orientation.delegation").expect("delegation"),
+            "Hand out the work.\n"
+        );
+        assert_eq!(
+            written("check.contradiction").expect("contradiction"),
+            "No claim contradicts its source or the request\n"
+        );
+    }
+
+    /// A file for a block, with its editor's last line break; hidden files such as `.DS_Store` are
+    /// passed over; anything else stops the start, named, so a misspelt id never runs quietly as the
+    /// default.
+    #[test]
+    fn a_folder_holding_anything_but_known_blocks_is_refused() {
+        let folder = Folder::new();
+        std::fs::write(folder.0.join("system.intro.md"), "Hello, {the_person}.\n\n").expect("file");
+        std::fs::write(folder.0.join(".DS_Store"), "").expect("hidden");
+        let read = Overrides::read(&folder.0).expect("a known block");
+        assert_eq!(read.get("system.intro"), Some("Hello, {the_person}."));
+        assert_eq!(read.get("system.plan"), None);
+        for (name, a_folder) in [
+            ("sytem.intro.md", false),
+            ("system.intro.txt", false),
+            ("system.intro", false),
+            ("drafts", true),
+            ("system.plan.md", true),
+        ] {
+            let other = Folder::new();
+            std::fs::write(other.0.join("system.intro.md"), "Hello.").expect("file");
+            if a_folder {
+                std::fs::create_dir(other.0.join(name)).expect("inner folder");
+            } else {
+                std::fs::write(other.0.join(name), "Hello.").expect("file");
+            }
+            let refused = format!("{:#}", Overrides::read(&other.0).expect_err(name));
+            assert!(
+                refused.contains(&format!("holds {name}, which is not a prompt block")),
+                "{refused}"
+            );
+        }
+        let missing = format!(
+            "{:#}",
+            Overrides::read(&folder.0.join("missing")).expect_err("no folder")
+        );
+        assert!(
+            missing.contains("could not read the prompt overrides"),
+            "{missing}"
+        );
+    }
+
+    /// A `{placeholder}` its block doesn't fill would reach the agent as written, so it is refused.
+    /// Leaving one out, and braces around anything else, are the improver's to choose.
+    #[test]
+    fn a_file_may_use_only_the_placeholders_its_block_fills() {
+        let folder = Folder::new();
+        let file = folder.0.join("orientation.lead.md");
+        std::fs::write(&file, "You are {name}, for {person}.").expect("file");
+        let refused = format!("{:#}", Overrides::read(&folder.0).expect_err("{person}"));
+        assert!(
+            refused.contains("orientation.lead.md uses {person}, which orientation.lead does not fill: it fills {name} {team}"),
+            "{refused}"
+        );
+        std::fs::write(&file, "Lead {team}, replying as {\"answer\": \"…\"}.").expect("file");
+        assert!(Overrides::read(&folder.0).is_ok());
+        std::fs::remove_file(&file).expect("removed");
+        std::fs::write(folder.0.join("system.plan.md"), "- Plan for {the_person}.").expect("file");
+        let refused = format!("{:#}", Overrides::read(&folder.0).expect_err("none"));
+        assert!(refused.ends_with("it fills none"), "{refused}");
     }
 }

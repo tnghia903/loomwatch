@@ -21,6 +21,7 @@ use crate::memory::{
     TeamMemory,
 };
 use crate::operator::LiveTurn;
+use crate::prompt_blocks::Block;
 use crate::{EventKind, SessionOutcome, resolve_cwd};
 
 /// The `turn_interrupted` reason when a kept-alive agent's answer is stopped because the agent
@@ -3320,7 +3321,7 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     if hands_out || asks {
         tools.push(tool(
             "roster",
-            "List the team, capabilities, and live status",
+            ROSTER.text(),
             &json!({"type": "object", "additionalProperties": false}),
         ));
     }
@@ -3330,53 +3331,28 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     if hands_out {
         tools.push(tool(
             "dispatch",
-            "Hand part of the work to a teammate without waiting for it. Hand out parts that do \
-             not depend on each other together. What each one sends back reaches you in one more \
-             turn after this one ends. A teammate that already finished work in this run carries \
-             on in the same conversation and remembers it; one still working starts as a separate \
-             copy that does not.",
-            &two_strings(
-                "agent",
-                "Target agent ID",
-                "task",
-                "The whole brief: the goal, what you already know, what to send back and where \
-                 to stop. The teammate sees none of your conversation.",
-            ),
+            DISPATCH.text(),
+            &two_strings("agent", "Target agent ID", "task", DISPATCH_TASK.text()),
         ));
     }
     if asks {
         tools.push(tool(
             "ask",
-            ask_description(team),
-            &two_strings(
-                "agent",
-                "Target agent ID",
-                "question",
-                "A question it can answer from this text alone: it does not see your conversation.",
-            ),
+            &ask_description(team),
+            &two_strings("agent", "Target agent ID", "question", ASK_QUESTION.text()),
         ));
     }
     if hands_out {
         tools.push(tool(
             "handoff",
-            "Pass the rest of the task to a teammate and stop: it carries on, and you end this \
-             turn.",
-            &two_strings(
-                "agent",
-                "Target agent ID",
-                "task",
-                "Everything it needs to carry on: the goal, what is done, what is left and what \
-                 to send back. It sees none of your conversation.",
-            ),
+            HANDOFF.text(),
+            &two_strings("agent", "Target agent ID", "task", HANDOFF_TASK.text()),
         ));
     }
     if seat.operator {
         tools.push(tool(
             "ask_user",
-            "Put a question to the person running this team. Returns immediately: end your turn \
-             after calling it, and their answer arrives as your next turn. Ask only for a decision \
-             you cannot reasonably make yourself and that would change the result; otherwise make \
-             the most reasonable assumption, say which one you made, and carry on.",
+            ASK_USER.text(),
             &object(
                 &[
                     (
@@ -3405,13 +3381,82 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     if seat.operator && seat.conversation {
         tools.push(tool(
             "earlier_work",
-            "Read one earlier piece of this team's work in full: what the operator asked and the \
-             team's whole answer. Use a work id from `## Conversation so far`.",
+            EARLIER_WORK.text(),
             &one_string("work", "The work id, such as 3f2a9c1e"),
         ));
     }
     tools
 }
+
+/// `roster`.
+pub(crate) const ROSTER: Block =
+    Block::new("bus.roster", "List the team, capabilities, and live status");
+
+/// `dispatch`.
+pub(crate) const DISPATCH: Block = Block::new(
+    "bus.dispatch",
+    "Hand part of the work to a teammate without waiting for it. Hand out parts that do not depend \
+     on each other together. What each one sends back reaches you in one more turn after this one \
+     ends. A teammate that already finished work in this run carries on in the same conversation \
+     and remembers it; one still working starts as a separate copy that does not.",
+);
+
+/// `dispatch`'s `task`: the brief.
+pub(crate) const DISPATCH_TASK: Block = Block::new(
+    "bus.dispatch.task",
+    "The whole brief: the goal, what you already know, what to send back and where to stop. The \
+     teammate sees none of your conversation.",
+);
+
+/// `ask`, wherever it is offered.
+pub(crate) const ASK: Block = Block::new(
+    "bus.ask",
+    "Ask another agent and wait for its reply. Use it when you need the answer before you can go \
+     on.",
+);
+
+/// After [`ASK`] in team mode: who answers from the conversation it already has
+/// (`TeamBus::reach`), so a lead knows whether to repeat itself.
+pub(crate) const ASK_IN_TEAM: Block = Block::new(
+    "bus.ask.in_team",
+    "A teammate that already finished work in this run answers in the same conversation and \
+     remembers it; one still working answers as a separate copy that does not.",
+);
+
+/// `ask`'s `question`.
+pub(crate) const ASK_QUESTION: Block = Block::new(
+    "bus.ask.question",
+    "A question it can answer from this text alone: it does not see your conversation.",
+);
+
+/// `handoff`.
+pub(crate) const HANDOFF: Block = Block::new(
+    "bus.handoff",
+    "Pass the rest of the task to a teammate and stop: it carries on, and you end this turn.",
+);
+
+/// `handoff`'s `task`: the brief.
+pub(crate) const HANDOFF_TASK: Block = Block::new(
+    "bus.handoff.task",
+    "Everything it needs to carry on: the goal, what is done, what is left and what to send back. \
+     It sees none of your conversation.",
+);
+
+/// `ask_user`.
+pub(crate) const ASK_USER: Block = Block::new(
+    "bus.ask_user",
+    "Put a question to the person running this team. Returns immediately: end your turn after \
+     calling it, and their answer arrives as your next turn. Ask only for a decision you cannot \
+     reasonably make yourself and that would change the result; otherwise make the most \
+     reasonable assumption, say which one you made, and carry on.",
+);
+
+/// `earlier_work` (ADR 0051).
+pub(crate) const EARLIER_WORK: Block = Block::new(
+    "bus.earlier_work",
+    "Read one earlier piece of this team's work in full: what the operator asked and the team's \
+     whole answer. Use a work id from `## Conversation so far`.",
+);
 
 /// `my_teams` and `ask_team`: the agent pinned to the notch, in its own chat, may ask the person's
 /// teams, each started only when they press Start (ADR 0083, decision 9).
@@ -3419,51 +3464,65 @@ fn front_desk_tools() -> [Value; 2] {
     [
         tool(
             "my_teams",
-            MY_TEAMS_DESCRIPTION,
+            MY_TEAMS.text(),
             &json!({"type": "object", "additionalProperties": false}),
         ),
         tool(
             "ask_team",
-            ASK_TEAM_DESCRIPTION,
+            ASK_TEAM.text(),
             &two_strings(
                 "team",
                 "The team's file, as my_teams lists it",
                 "request",
-                "What the team should do, in full: what you were asked, what you already know \
-                     and what to send back. The team sees none of this conversation.",
+                ASK_TEAM_REQUEST.text(),
             ),
         ),
     ]
 }
 
 /// What `my_teams` is for (ADR 0083, decision 9).
-const MY_TEAMS_DESCRIPTION: &str = "List the person's teams: each one's file, its name, and its \
-     agents with what each does. Use it to see whether one of them is made for what you were asked.";
+pub(crate) const MY_TEAMS: Block = Block::new(
+    "bus.my_teams",
+    "List the person's teams: each one's file, its name, and its agents with what each does. Use \
+     it to see whether one of them is made for what you were asked.",
+);
 
 /// What `ask_team` is for (ADR 0083, decision 9): when to use it, and what happens after.
-const ASK_TEAM_DESCRIPTION: &str = "Ask one of the person's teams to do a job it is made for, \
-     when it will clearly do it better than you alone: their Trip planner for a trip, their \
-     Research desk for a sourced report. The person sees your request and decides; nothing runs \
-     until they press Start. It returns at once: tell them in one sentence what you asked and \
-     why, then end your turn. The team's answer comes to you in this chat when it finishes, and \
-     you then write them their answer from it. When no team is clearly made for the job, answer \
-     yourself.";
+pub(crate) const ASK_TEAM: Block = Block::new(
+    "bus.ask_team",
+    "Ask one of the person's teams to do a job it is made for, when it will clearly do it better \
+     than you alone: their Trip planner for a trip, their Research desk for a sourced report. The \
+     person sees your request and decides; nothing runs until they press Start. It returns at \
+     once: tell them in one sentence what you asked and why, then end your turn. The team's answer \
+     comes to you in this chat when it finishes, and you then write them their answer from it. \
+     When no team is clearly made for the job, answer yourself.",
+);
+
+/// `ask_team`'s `request`.
+pub(crate) const ASK_TEAM_REQUEST: Block = Block::new(
+    "bus.ask_team.request",
+    "What the team should do, in full: what you were asked, what you already know and what to \
+     send back. The team sees none of this conversation.",
+);
 
 /// `start_helper` (ADR 0079): the part's title the person reads, then the brief in its two halves.
 fn start_helper_tool() -> Value {
     tool(
         "start_helper",
-        crate::helpers::TOOL_DESCRIPTION,
+        crate::helpers::START_HELPER.text(),
         &object(
             &[
                 (
                     "title",
-                    string_property(crate::helpers::TITLE_DESCRIPTION, 1),
+                    string_property(crate::helpers::START_HELPER_TITLE.text(), 1),
                 ),
-                ("task", string_property(crate::helpers::TASK_DESCRIPTION, 1)),
+                (
+                    "task",
+                    string_property(crate::helpers::START_HELPER_TASK.text(), 1),
+                ),
                 (
                     "send_back",
-                    string_property(crate::helpers::SEND_BACK_DESCRIPTION, 1),
+                    string_property(crate::helpers::START_HELPER_SEND_BACK.text(), 1),
                 ),
             ],
             &["title", "task", "send_back"],
@@ -3471,16 +3530,12 @@ fn start_helper_tool() -> Value {
     )
 }
 
-/// What `ask` is for. In team mode it also says who answers from the conversation it already has
-/// (`TeamBus::reach`), so a lead knows whether to repeat itself.
-fn ask_description(team: bool) -> &'static str {
+/// What `ask` is for. In team mode it also says who answers from the conversation it already has.
+fn ask_description(team: bool) -> String {
     if team {
-        "Ask another agent and wait for its reply. Use it when you need the answer before you can \
-         go on. A teammate that already finished work in this run answers in the same conversation \
-         and remembers it; one still working answers as a separate copy that does not."
+        format!("{} {}", ASK.text(), ASK_IN_TEAM.text())
     } else {
-        "Ask another agent and wait for its reply. Use it when you need the answer before you can \
-         go on."
+        ASK.text().to_owned()
     }
 }
 
@@ -3500,7 +3555,7 @@ fn memory_tool_definitions() -> Vec<Value> {
     vec![
         tool(
             "memory_search",
-            "Search the team's notebook: this run's notes, the team's kept notes, and anything it inherits. Returns bounded snippets with revision ids.",
+            MEMORY_SEARCH.text(),
             &object(
                 &[
                     ("query", string_property("Words to search for", 0)),
@@ -3519,7 +3574,7 @@ fn memory_tool_definitions() -> Vec<Value> {
         ),
         tool(
             "memory_read",
-            "Read one notebook revision by the id a search returned. An id outside what this session can see reads as not found.",
+            MEMORY_READ.text(),
             &object(
                 &[(
                     "id",
@@ -3530,7 +3585,7 @@ fn memory_tool_definitions() -> Vec<Value> {
         ),
         tool(
             "memory_write",
-            "Record one observation in the team's notebook, attributed to you and to this run. It becomes evidence in the run story, and the operator decides whether it outlives the run.",
+            MEMORY_WRITE.text(),
             &object(
                 &[
                     ("kind", enum_property("What kind of observation", &kinds)),
@@ -3556,7 +3611,7 @@ fn memory_tool_definitions() -> Vec<Value> {
         ),
         tool(
             "checkpoint",
-            "Record where you are, so work that stops can be continued rather than restarted.",
+            CHECKPOINT.text(),
             &object(
                 &[
                     ("done", string_property("What is finished", 1)),
@@ -3578,6 +3633,33 @@ fn memory_tool_definitions() -> Vec<Value> {
         ),
     ]
 }
+
+/// `memory_search`.
+pub(crate) const MEMORY_SEARCH: Block = Block::new(
+    "bus.memory_search",
+    "Search the team's notebook: this run's notes, the team's kept notes, and anything it \
+     inherits. Returns bounded snippets with revision ids.",
+);
+
+/// `memory_read`.
+pub(crate) const MEMORY_READ: Block = Block::new(
+    "bus.memory_read",
+    "Read one notebook revision by the id a search returned. An id outside what this session can \
+     see reads as not found.",
+);
+
+/// `memory_write`.
+pub(crate) const MEMORY_WRITE: Block = Block::new(
+    "bus.memory_write",
+    "Record one observation in the team's notebook, attributed to you and to this run. It becomes \
+     evidence in the run story, and the operator decides whether it outlives the run.",
+);
+
+/// `checkpoint`.
+pub(crate) const CHECKPOINT: Block = Block::new(
+    "bus.checkpoint",
+    "Record where you are, so work that stops can be continued rather than restarted.",
+);
 
 fn object(properties: &[(&str, Value)], required: &[&str]) -> Value {
     let mut map = serde_json::Map::new();

@@ -101,6 +101,18 @@ instructions and tools.
   (`.agents/skills`, `.claude/skills`) and LoomWatch's skills folder. The agent reads a skill's
   `SKILL.md` itself when the task calls for it. An `AGENTS.md` in the work folder is read in as
   project notes.
+- **Fixed texts have ids** (`src/prompt_blocks/`). What an agent reads that its team file doesn't
+  hold (the habits above, its place in the team, helpers, the built-in and Team Bus tools'
+  descriptions, the items every check step checks) is made of `Block`s: a stable id such as
+  `orientation.delegation`, and words with `{placeholders}` the code fills. `rendered.txt` there
+  holds them as agents get them; a test fails at the first byte that differs, and
+  `WRITE_RENDERED_PROMPTS=1` rewrites it after a change made on purpose. For the quality bench, a
+  build with `--features prompt-overrides` can swap any block for a file:
+  `loomwatchd --dump-prompt-blocks <dir>` writes each as `<id>.md` and lists the ids with their
+  placeholders, and `LOOMWATCH_PROMPT_OVERRIDES=<dir>` starts the daemon with every file there in
+  place of its block, for every agent. Any other file, or a placeholder the block doesn't fill,
+  stops the start. Only the CI job that tests it turns the feature on, and a test checks that the
+  program built without it holds no trace of the setting.
 
 `src/engine/` is the run engine, built on the `agent::Session` API. `AgentRun` is what the
 pipeline, team mode, the Team Bus, chat and Ask hold for one agent: open a session, take a turn,

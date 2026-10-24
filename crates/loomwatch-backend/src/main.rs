@@ -15,6 +15,17 @@ use loomwatch_backend::runs::RunRegistry;
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Cli {
+    /// A folder of `<id>.md` files, each in place of the fixed text agents are given under that
+    /// id, for `serve` and `run` (`--dump-prompt-blocks` writes them all). For the quality bench:
+    /// only a build with the `prompt-overrides` feature has this.
+    #[cfg(feature = "prompt-overrides")]
+    #[arg(
+        long,
+        env = "LOOMWATCH_PROMPT_OVERRIDES",
+        global = true,
+        value_name = "DIR"
+    )]
+    prompt_overrides: Option<PathBuf>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -114,6 +125,12 @@ enum Commands {
     /// opens this way, in a process of its own, so a damaged file costs nothing else.
     #[command(hide = true)]
     ReadDocument { path: PathBuf },
+    /// Write every fixed text agents are given, as `--prompt-overrides` leaves it, to
+    /// `<DIR>/<id>.md`, and list the ids with the placeholders each one fills. For the quality
+    /// bench: only a build with the `prompt-overrides` feature has this.
+    #[cfg(feature = "prompt-overrides")]
+    #[command(long_flag = "dump-prompt-blocks")]
+    DumpPromptBlocks { dir: PathBuf },
 }
 
 /// A durable registry with its cache already filled from the `runs` table, and every run the last
@@ -255,7 +272,23 @@ async fn main() -> Result<()> {
     if let Ok(program) = std::env::current_exe() {
         loomwatch_backend::documents::use_helper(program);
     }
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    // Before anything gives an agent a prompt. A folder that holds anything but known blocks stops
+    // the start here.
+    #[cfg(feature = "prompt-overrides")]
+    if let Some(dir) = &cli.prompt_overrides
+        && matches!(
+            cli.command,
+            Commands::Serve { .. } | Commands::Run { .. } | Commands::DumpPromptBlocks { .. }
+        )
+    {
+        let replaced = loomwatch_backend::prompt_blocks::install(dir)?;
+        eprintln!(
+            "prompt overrides: {replaced} block(s) replaced from {}",
+            dir.display()
+        );
+    }
+    match cli.command {
         Commands::Serve {
             listen,
             teams_root,
@@ -523,6 +556,12 @@ async fn main() -> Result<()> {
         }
         Commands::ReadDocument { path } => {
             println!("{}", loomwatch_backend::documents::answer(&path));
+        }
+        #[cfg(feature = "prompt-overrides")]
+        Commands::DumpPromptBlocks { dir } => {
+            for line in loomwatch_backend::prompt_blocks::dump(&dir)? {
+                println!("{line}");
+            }
         }
     }
     Ok(())
