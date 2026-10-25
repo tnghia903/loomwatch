@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { BookmarkCheck, Box, ChartColumn, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Puzzle, RefreshCw, ScanEye, Scissors, Search, Shapes, Telescope, Trash2, UserCheck, UserRound, type LucideIcon } from 'lucide-react'
+import { BookmarkCheck, Box, ChartColumn, ChartSpline, Clapperboard, Code2, ExternalLink, FileText, Folder, GripVertical, Info, LayoutDashboard, LocateFixed, NotebookText, PanelLeftClose, PanelLeftOpen, PenLine, Plug, Plus, Presentation, Puzzle, RefreshCw, ScanEye, Scissors, ScrollText, Search, Shapes, Sheet, Telescope, Trash2, UserCheck, UserRound, type LucideIcon } from 'lucide-react'
 import { DEFAULT_MODEL, modelNameFromId } from '../../lib/ai/modelIds'
 import { OPERATOR_SOURCE } from '../../lib/library/fixtures'
 import { removeJob, savedJobPreset, useSavedJobs } from '../../lib/library/jobs'
@@ -19,7 +19,7 @@ import { keys } from '../../lib/platform'
 import { InlineMarkdown } from '../ui/Markdown'
 import { plainWords } from '../../lib/chat/findWords'
 
-const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn }
+const ROLE_ICONS: Record<RoleIcon, LucideIcon> = { research: Telescope, write: PenLine, edit: Scissors, review: ScanEye, code: Code2, design: Shapes, analyse: ChartColumn, slides: Presentation, document: ScrollText, sheet: Sheet, chart: ChartSpline, dashboard: LayoutDashboard, video: Clapperboard }
 
 const YOURS = 'My agents'
 const STEPS = 'Workflow steps'

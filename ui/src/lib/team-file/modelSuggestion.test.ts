@@ -45,7 +45,7 @@ describe('suggestModel', () => {
 
   it('gives work that decides the result the strongest model, and says why in the job’s words', () => {
     expect(suggestModel({ agent: writer })).toEqual({ model: DEFAULT_MODEL, tier: 'strong', why: 'A writer drafts the finished piece. That work decides the result, so it gets the strongest model.' })
-    expect(suggestModel({ agent: { id: 'a', name: 'Numbers', role: 'Analyse the sales sheet.' } }).why).toMatch(/^An analyst makes sense of data\./)
+    expect(suggestModel({ agent: { id: 'a', name: 'Numbers', role: 'Analyse the sales sheet.' } }).why).toMatch(/^An analyst answers questions about your data\./)
   })
 
   it('falls back to the strongest all-rounder when nothing says what the agent does', () => {
