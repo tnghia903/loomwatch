@@ -294,7 +294,7 @@ mod tests {
         save(
             root.path(),
             "researcher",
-            "name: Researcher\ninstructions: Find facts.\nmodel: anthropic/claude-sonnet-5.5\nskills: [cite]\nreads:\n  - name: Notes\n    path: /notes\nallow:\n  web: true\nhelpers: false\n",
+            "name: Researcher\ninstructions: Find facts.\nmodel: anthropic/claude-sonnet-5.5\nskills: [cite]\nreads:\n  - name: Notes\n    path: ~/notes\nallow:\n  web: true\nhelpers: false\n",
         );
         save(
             root.path(),
