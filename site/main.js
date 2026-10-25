@@ -759,9 +759,11 @@
       reply: 'The brief is in brief.md: five lines, the biggest story first, every claim with its link.', without: 'Here is the brief in my reply instead of a file: five lines, the biggest story first.' },
     { id: 'check', label: 'Check the facts', does: 'Checks each claim', instructions: 'Check every claim in the draft against its source. Reply with what holds and what does not.', skills: ['fact-check', 'web-research'], needs: 'web', tool: 'checking 3 sources', ask: 'open the 3 sources the draft links to',
       reply: 'Two claims hold. One quotes the wrong benchmark: the model card says 61%, not 67%.', without: 'Without opening the sources, I can only say which claims have a link, not whether they hold.' },
+    { id: 'slides', label: 'Make the slides', does: 'Makes the slides', instructions: 'Turn the brief into slides, one story on each. Reply with where the file is.', skills: ['house-style'], needs: 'commands', tool: 'making brief.pptx', ask: 'run a command that makes brief.pptx from the brief',
+      reply: 'The slides are in brief.pptx: five slides, one story on each, the biggest first.', without: 'Without running a command I can’t make the file, so here are the five slides as an outline.' },
   ]
   const agent = { name: 'Scout', kind: 'pincushion', color: 'rose', model: 'sonnet', job: 'sources', keys: { web: false, edits: false, commands: false } }
-  const shelf = [] // { name, version, job, kind, color }
+  const shelf = [] // { name, job, kind, color }
   let trial = 0 // the test run in flight, or 0; a newer one or an edit ends it
   let trials = 0
   let mood = 'still'
@@ -954,14 +956,16 @@
   function paintSaved() {
     const saved = shelved()
     const badge = $('#ag-badge')
-    const changed = saved && (saved.job !== agentJob())
-    // A new face is saved too, but it keeps the version: the job is what versions an agent.
-    const newFace = saved && !changed && (saved.kind !== agent.kind || saved.color !== agent.color)
-    $('#ag-version').textContent = saved ? `${saved.name} · v${saved.version}` : 'New agent'
-    badge.textContent = !saved ? 'Not saved yet' : changed ? `Changed since v${saved.version}` : newFace ? `New face · v${saved.version}` : `Saved · v${saved.version}`
+    const changed = saved && changedSince(saved)
+    $('#ag-name-saved').textContent = saved ? saved.name : 'New agent'
+    badge.textContent = !saved ? 'Not saved yet' : changed ? 'Unsaved changes' : 'Saved'
     if (trial) return
-    badge.dataset.state = changed || newFace ? 'waiting' : ''
-    $('#ag-save').textContent = !saved ? 'Save to Your agents' : changed ? `Save as v${saved.version + 1}` : newFace ? 'Save the new face' : 'Saved'
+    badge.dataset.state = changed ? 'waiting' : ''
+    $('#ag-save').textContent = !saved ? 'Save to My agents' : 'Save'
+  }
+  // An agent lives once, in My agents, with no versions: every team uses it as it was last saved.
+  function changedSince(saved) {
+    return saved.job !== agentJob() || saved.kind !== agent.kind || saved.color !== agent.color
   }
 
   // Any edit ends a test run: what was being tried is no longer this agent.
@@ -1056,21 +1060,17 @@
     const saved = shelved()
     const note = $('#ag-shelf-note')
     if (!saved) {
-      shelf.push({ name: agentName(), version: 1, job: agentJob(), kind: agent.kind, color: agent.color })
-      note.replaceChildren(`${agentName()} is in Your agents as v1. `, el('a', { href: '#act-workflow', text: 'Put it in a team ↓' }))
-    } else if (saved.job !== agentJob()) {
-      saved.version += 1
+      shelf.push({ name: agentName(), job: agentJob(), kind: agent.kind, color: agent.color })
+      note.replaceChildren(`${agentName()} is in My agents. `, el('a', { href: '#act-workflow', text: 'Put it in a team ↓' }))
+    } else if (changedSince(saved)) {
       Object.assign(saved, { job: agentJob(), kind: agent.kind, color: agent.color })
-      note.textContent = `${saved.name} is now v${saved.version}. A team using v${saved.version - 1} keeps it until you choose Update in that team.`
-    } else if (saved.kind !== agent.kind || saved.color !== agent.color) {
-      Object.assign(saved, { kind: agent.kind, color: agent.color })
-      note.textContent = `A new face keeps the version: ${saved.name} is still v${saved.version}, and every team shows it at once.`
+      note.textContent = `Saved. Every team ${saved.name} is in uses the change from its next run.`
     } else {
-      note.textContent = `Nothing changed since v${saved.version}.`
+      note.textContent = `Nothing changed since you saved ${saved.name}.`
     }
     $('#ag-shelf').hidden = false
     $('#ag-shelf-list').replaceChildren(...shelf.map((s) => el('li', {},
-      el('img', { src: figureSrc(s.kind, s.color), width: '60', height: '60', alt: '' }), s.name, el('span', { text: `v${s.version}` }))))
+      el('img', { src: figureSrc(s.kind, s.color), width: '60', height: '60', alt: '' }), s.name)))
     paintSaved()
   }
 
@@ -1317,8 +1317,7 @@
       readers.length > 1 ? el('span', { class: 'g-shared', text: `shared · ${readers.length}` }) : null)
     }))
     giveBox.classList.toggle('picking', Boolean(picked))
-    const threads = GIVEN_TO.reduce((n, who) => n + state.give[who].length, 0)
-    $('#give-count').textContent = `${threads} thread${threads === 1 ? '' : 's'}`
+    $('#give-count').textContent = String(GIVEN_TO.reduce((n, who) => n + state.give[who].length, 0))
     drawGiveThreads()
     renderPacket()
   }
@@ -1369,7 +1368,7 @@
     else {
       state.give[who] = SOURCES.map((x) => x.id).filter((x) => x === id || state.give[who].includes(x))
       const readers = readersOf(id)
-      say(readers.length > 1 ? `${source(id).name} is shared now: one card, ${['', '', 'two', 'three'][readers.length] || readers.length} threads.` : `${LANE[who]} is handed ${source(id).name}${readOnly(source(id)) ? ', read only' : ''}.`)
+      say(readers.length > 1 ? `${source(id).name} is shared now: one card, given to ${['', '', 'two', 'three'][readers.length] || readers.length} agents.` : `${LANE[who]} is handed ${source(id).name}${readOnly(source(id)) ? ', read only' : ''}.`)
     }
     giveFor = who
     renderCanvas(); renderYaml(); renderGive()
@@ -2707,8 +2706,8 @@
   window.addEventListener('resize', placeOsPill)
 
   const SCREENS = {
-    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as one team, They improve themselves, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, a row of your saved agents each with its little figure and version, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row, each with its figure and its version.' },
-    agents: { w: 2880, h: 1600, alt: "LoomWatch's agent workbench for Writer, version 1: a sentence saying Writer thinks with Claude Opus 5.5, has one skill and asks before it may act, a mint-green figure at its desk with labels for its keys, its skills, the model it thinks with, its job and its tray, and on the right the blocks that make it, starting with Name and Instructions with a check of what good instructions say.", cap: 'An agent on its workbench: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
+    home: { w: 2880, h: 1600, alt: 'LoomWatch Home: the headline Put AI agents to work as one team, They improve themselves, a gold Build an agent button beside New team, a box to describe the job in plain words, the three steps Agents, Workflow and Chat, My agents as a row of your saved agents each with its little figure, and your teams as cards below.', cap: 'Home: start with an agent, then a team. Your agents sit in a row under My agents, each with its figure.' },
+    agents: { w: 2880, h: 1600, alt: "LoomWatch's agent workbench for Writer: a sentence saying Writer thinks with Claude Opus 5.5, has one skill and asks before it may act, a mint-green figure at its desk with labels for its keys, its skills, the model it thinks with, its job and its tray, and on the right the blocks that make it, starting with Name and Instructions with a check of what good instructions say.", cap: 'An agent on its workbench: the figure shows what it has, the blocks beside it change it, and the sentence on top says what it all adds up to.' },
     workflow: { w: 2880, h: 1600, alt: 'LoomWatch Workflow for a daily tech digest: the team as one sentence, Every day at 9:00 AM and whenever you ask, Gatherer collects what is needed, then Reader does its part, and finally Writer writes the answer, each with its figure; on the left your saved agents ready to add; on the canvas a schedule trigger at 9 AM wired to Gatherer, Reader and Writer, and the team response.', cap: 'Workflow: your agents wired in order, read back as one sentence, with your saved agents one click away on the left.' },
     chat: { w: 2880, h: 1600, alt: "LoomWatch Chat: you ask the team for a short getting-started guide, Researcher hands its findings to you, and Approve waits under them; each agent's name and avatar wear its figure's colour. On the right, Details shows the run live on a timeline you can drag back to replay, and the team's handovers step by step.", cap: "Chat: who said what, in each agent's own colour, and Details beside it with every step on a timeline you can replay." },
   }
