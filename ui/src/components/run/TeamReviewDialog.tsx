@@ -42,7 +42,7 @@ export function TeamReviewDialog({ review, onTrust, onClose }: TeamReviewDialogP
     <div className="lw-scrim dim" onMouseDown={() => { if (!busy) onClose() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="pop e2 lw-deleteteam lw-teamreview" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); onClose() } }}>
         <h2 id={titleId}>Check “{review.teamName}” before it runs</h2>
-        <p>This team was added or changed outside LoomWatch, so LoomWatch hasn’t run this version of it. Here is what it will do on this computer:</p>
+        <p>This team, or one of its agents, was added or changed outside LoomWatch, so LoomWatch hasn’t run this version of it. Here is what it will do on this computer:</p>
         <ul className="tr-lines">
           {review.review.map((line, index) => (
             <li key={index} className={line.warn ? 'tr-warn' : undefined}>

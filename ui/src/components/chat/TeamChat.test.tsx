@@ -1965,3 +1965,39 @@ describe('finding words in the whole chat (ADR 0081)', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 })
+
+describe('what the move onto My agents changed (ADR 0094)', () => {
+  const line = 'Researcher now works as you last saved it in My agents, not as this team’s older copy.'
+  const moved = () => {
+    const stubbed = vi.mocked(fetch)
+    const before = stubbed.getMockImplementation()
+    stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/my-agents/move'
+      ? new Response(JSON.stringify({ moved: true, teams: [], changed: { 'news.yaml': [line] } }), { status: 200 })
+      : before!(input, init))
+  }
+  beforeEach(() => { window.localStorage.removeItem('loomwatch:moved-said:news.yaml') })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('says it over the message box until it is let go, even across visits', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    moved()
+    renderChat()
+    expect(await screen.findByText(line)).toBeInTheDocument()
+    // A note about something just done goes by itself; this one stays to be read.
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+    expect(screen.getByText(line)).toBeInTheDocument()
+
+    // Not let go yet: opening the chat again says it again.
+    cleanup()
+    renderChat()
+    expect(await screen.findByText(line)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss this note' }))
+    expect(screen.queryByText(line)).toBeNull()
+
+    // Let go: opening the chat again says nothing.
+    cleanup()
+    renderChat()
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    expect(screen.queryByText(line)).toBeNull()
+  })
+})

@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { baseName, isAbsolutePath, joinUnderRoot, safeFileStem, splitPath } from '../files/paths'
 import type { AgentNode } from '../library/nodeFromDrop'
 import { nodeFromDrop } from '../library/nodeFromDrop'
+import { fetchJobs, saveJob, type SavedJob } from '../library/jobs'
 import { fetchConfigSchema, fetchTeamFile, fetchTeamsDiscovery, saveTeamFile, TeamFileApiError } from './client'
 import { TeamFileModel, TeamFileParseError } from './document'
+import { diskYamlOf, filledAgent, fillModel, pointerEntry, settleAgents, writeEntry, type FilledAgents } from './myAgents'
 import { type EdgeRefusal, validateConfiguredEdge } from './edgeRules'
 import { holdPage } from './inPlace'
 import { autoLayout, offsetCollision, seededLayout } from './layout'
@@ -67,7 +69,7 @@ interface HistoryEntry {
 const EXTERNAL_CHANGE_MESSAGE =
   'This team file changed on disk while you had unsaved edits. Reload it before saving.'
 
-async function hashTeamYaml(yaml: string): Promise<string> {
+export async function hashTeamYaml(yaml: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(yaml))
   return 'sha256:' + Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
@@ -207,25 +209,49 @@ function nodeFromAgent(
   }
 }
 
-/** A team file as the daemon gave it: its words, its revision, and the teams folder it is named under. */
+/**
+ * A team file as the daemon gave it: its words, its revision, the teams folder it is named under,
+ * and My agents, whose agents it points at (ADR 0094).
+ */
 export interface TeamRead {
   yaml: string
   revision: string
   root: string | null
+  jobs: SavedJob[]
+}
+
+/** My agents as they are now; none when the daemon can't say, so a team still opens. */
+async function myAgentsNow(): Promise<SavedJob[]> {
+  try {
+    return (await fetchJobs())?.jobs ?? []
+  } catch {
+    return []
+  }
 }
 
 /** Reads the team a `?path=` names, as its page does when it opens. */
 export async function readTeam(requestedPath: string): Promise<TeamRead> {
-  const [{ yaml, revision }, discovery] = await Promise.all([
+  const [{ yaml, revision }, discovery, jobs] = await Promise.all([
     fetchTeamFile(requestedPath),
     isAbsolutePath(requestedPath) ? Promise.resolve(null) : fetchTeamsDiscovery(),
+    myAgentsNow(),
   ])
-  return { yaml, revision: revision ?? await hashTeamYaml(yaml), root: discovery?.root ?? null }
+  return { yaml, revision: revision ?? await hashTeamYaml(yaml), root: discovery?.root ?? null, jobs }
+}
+
+/**
+ * The document a team's page edits: the file with each agent that points at one of My agents filled
+ * in from there. Its text is what the page compares edits with; `revision` stays the file's.
+ */
+function filledDocument(yaml: string, jobs: readonly SavedJob[]) {
+  const model = TeamFileModel.parse(yaml)
+  const filled = fillModel(model, jobs)
+  return { model, filled, text: model.toYaml() }
 }
 
 /** What a team's page starts from once its file is read. Throws `TeamFileParseError` for a file that isn't a team. */
 function openedTeam(requestedPath: string, read: TeamRead) {
-  const model = TeamFileModel.parse(read.yaml)
+  const { model, filled, text } = filledDocument(read.yaml, read.jobs)
   const snapshot = model.snapshot()
   const { agents, configured } = drawableParts(snapshot)
   const positions = seededLayout(
@@ -236,6 +262,8 @@ function openedTeam(requestedPath: string, read: TeamRead) {
   const schemaVersion = (snapshot as { schemaVersion?: unknown }).schemaVersion
   return {
     model,
+    filled,
+    text,
     snapshot,
     read,
     path: read.root !== null ? absoluteTeamPath(read.root, requestedPath) : requestedPath,
@@ -282,6 +310,10 @@ export function useTeamDocument() {
   const [opened] = useState(() => handedOverTeam(new URLSearchParams(window.location.search).get('path')))
   const saveInFlightRef = useRef(false)
   const modelRef = useRef<TeamFileModel | null>(opened?.model ?? null)
+  // My agents, and where each agent on this team is there and how it looked when filled in or
+  // last saved: a save takes only what changed here to the agent (ADR 0094).
+  const jobsRef = useRef<SavedJob[]>(opened?.read.jobs ?? [])
+  const filledRef = useRef<FilledAgents>(opened?.filled ?? new Map())
   const loadedRevisionRef = useRef<string | null>(opened?.read.revision ?? null)
   const [path, setPath] = useState<string | null>(opened?.path ?? null)
   const [teamsRoot, setTeamsRoot] = useState<string | null>(opened?.read.root ?? null)
@@ -305,9 +337,10 @@ export function useTeamDocument() {
   const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null)
   const [externalChange, setExternalChange] = useState<ExternalChange | null>(null)
   const [diskNotice, setDiskNotice] = useState<string | null>(null)
-  const [yamlPreview, setYamlPreview] = useState(opened?.read.yaml ?? '')
-  /** The bytes last read from or written to disk, so the chip can state a magnitude (§9.1). */
-  const [loadedYaml, setLoadedYaml] = useState<string | null>(opened?.read.yaml ?? null)
+  const [yamlPreview, setYamlPreview] = useState(opened?.text ?? '')
+  /** The document as last read from or written to disk, its agents filled in from My agents, so the
+      chip can state a magnitude (§9.1). */
+  const [loadedYaml, setLoadedYaml] = useState<string | null>(opened?.text ?? null)
   const isNewRef = useRef(false)
   const undoRef = useRef<HistoryEntry[]>([])
   const redoRef = useRef<HistoryEntry[]>([])
@@ -462,13 +495,22 @@ export function useTeamDocument() {
    */
   const applyYaml = useCallback((yaml: string, newFile?: string): boolean => {
     let model: TeamFileModel
+    let filled: FilledAgents
     try {
-      model = TeamFileModel.parse(yaml)
+      ;({ model, filled } = filledDocument(yaml, jobsRef.current))
     } catch {
       return false
     }
     const snapshot = model.snapshot()
     const { agents, configured } = drawableParts(snapshot)
+    // An agent the proposal writes out in full that was already here keeps how it looked here, so
+    // what the proposal changes on it reaches the agent when saved (ADR 0094).
+    if (!newFile) {
+      for (const [id, entry] of filledRef.current) {
+        if (!filled.has(id) && agents.some((agent) => agent.id === id)) filled.set(id, entry)
+      }
+    }
+    filledRef.current = filled
     const placed = new Map(newFile ? [] : nodes.map((node) => [node.id, node.position]))
     const laidOut = agents.some((agent) => !placed.has(agent.id))
       ? seededLayout(agents.map((agent) => agent.id), configured.map((edge) => ({ from: edge.from, to: edge.to })), snapshot.id)
@@ -515,6 +557,8 @@ export function useTeamDocument() {
           }
           const team = openedTeam(requestedPath, read)
           modelRef.current = team.model
+          jobsRef.current = read.jobs
+          filledRef.current = team.filled
           loadedRevisionRef.current = read.revision
           isNewRef.current = false
           if (read.root !== null) setTeamsRoot(read.root)
@@ -524,8 +568,8 @@ export function useTeamDocument() {
           setNodes(team.nodes)
           setEdges(team.edges)
           setDocumentSnapshot(team.snapshot)
-          setYamlPreview(read.yaml)
-          setLoadedYaml(read.yaml)
+          setYamlPreview(team.text)
+          setLoadedYaml(team.text)
           resetHistory()
           setFileGone(false)
           if (team.readOnlyReason) {
@@ -571,8 +615,11 @@ export function useTeamDocument() {
   const applyDiskYaml = useCallback(
     async (yaml: string, notice?: string, revision?: string) => {
       let model: TeamFileModel
+      let filled: FilledAgents
+      let text: string
+      const jobs = await myAgentsNow()
       try {
-        model = TeamFileModel.parse(yaml)
+        ;({ model, filled, text } = filledDocument(yaml, jobs))
       } catch (error) {
         if (error instanceof TeamFileParseError) {
           setLoadFailure(parseFailure(error, yaml))
@@ -591,6 +638,8 @@ export function useTeamDocument() {
       )
       const currentPositions = new Map(nodes.map((node) => [node.id, node.position]))
       modelRef.current = model
+      jobsRef.current = jobs
+      filledRef.current = filled
       loadedRevisionRef.current = revision ?? await hashTeamYaml(yaml)
       isNewRef.current = false
       setEntrypointState(snapshot.entrypoint)
@@ -607,8 +656,8 @@ export function useTeamDocument() {
       )
       setEdges(configured.map(edgeFromConfig))
       setDocumentSnapshot(snapshot)
-      setYamlPreview(yaml)
-      setLoadedYaml(yaml)
+      setYamlPreview(text)
+      setLoadedYaml(text)
       resetHistory()
       setExternalChange(null)
       setSaveError(null)
@@ -702,6 +751,62 @@ export function useTeamDocument() {
     await applyDiskYaml(externalChange.diskYaml, undefined, externalChange.diskRevision)
   }, [externalChange, applyDiskYaml])
 
+  /**
+   * One of My agents was saved (in the team's Agents tab, or on its own page): every agent of this
+   * team that is it shows it as it is now. Nothing of the team's changed, so a clean team stays
+   * clean (ADR 0094).
+   */
+  const refillAgent = useCallback((job: SavedJob) => {
+    const model = modelRef.current
+    if (!model) return
+    const wasClean = saveState === 'clean' || saveState === 'saved'
+    const agents = model.snapshot().agents
+    const changed = new Map<string, AgentConfig>()
+    for (const entry of Array.isArray(agents) ? agents : []) {
+      if (entry.kind === 'operator' || entry.from?.agent !== job.id) continue
+      const current = entry as unknown as Record<string, unknown>
+      const after = filledAgent(pointerEntry(current, job.id, job), job.id, job)
+      writeEntry(model, entry.id, current, after)
+      filledRef.current = new Map(filledRef.current).set(entry.id, { agent: job.id, before: after as unknown as AgentConfig })
+      changed.set(entry.id, withDaemonDefaults(after as unknown as AgentConfig))
+    }
+    jobsRef.current = [...jobsRef.current.filter((candidate) => candidate.id !== job.id), job]
+    if (changed.size === 0) return
+    setNodes((current) => current.map((node) => {
+      const agent = changed.get(node.id)
+      return agent ? { ...node, data: { ...node.data, label: agent.name, agent } } : node
+    }))
+    const text = model.toYaml()
+    setDocumentSnapshot(model.snapshot())
+    setYamlPreview(text)
+    if (wasClean) setLoadedYaml(text)
+  }, [saveState])
+
+  /**
+   * Every agent on the team becomes, or stays, one of My agents before the file is written (ADR
+   * 0094): what was changed on one here is saved to it, for every team, and an agent of the team's
+   * own becomes one. The canvas then shows each as My agents has it. Returns the document's text.
+   */
+  const settleIntoMyAgents = useCallback(async (): Promise<string> => {
+    const model = modelRef.current
+    if (!model) return ''
+    const settled = await settleAgents(model, jobsRef.current, filledRef.current, model.snapshot().name ?? '', saveJob)
+    jobsRef.current = settled.jobs
+    filledRef.current = settled.filled
+    const snapshot = model.snapshot()
+    const agents = new Map((Array.isArray(snapshot.agents) ? snapshot.agents : []).map((agent) => [agent.id, withDaemonDefaults(agent)]))
+    // Only a card whose agent changed gets a new node: React Flow measures each node object once.
+    setNodes((current) => current.map((node) => {
+      const agent = agents.get(node.id)
+      if (!agent || JSON.stringify(agent) === JSON.stringify(node.data.agent)) return node
+      return { ...node, data: { ...node.data, label: agent.name, agent } }
+    }))
+    setDocumentSnapshot(snapshot)
+    const text = model.toYaml()
+    setYamlPreview(text)
+    return text
+  }, [])
+
   const saveCopy = useCallback(async (requestedPath: string) => {
     const targetPath = requestedPath.trim()
     if (!targetPath || !modelRef.current || saveInFlightRef.current) return false
@@ -716,16 +821,17 @@ export function useTeamDocument() {
         const fromFile = teamIdForPath(targetPath)
         modelRef.current.setId(fromFile !== currentId ? fromFile : slugifyTeamName(targetPath.replace(/\.ya?ml$/i, '')))
       }
-      const yaml = modelRef.current.toYaml()
+      const yaml = await settleIntoMyAgents()
       let root = teamsRoot
       if (!isAbsolutePath(targetPath) && !root) {
         const discovery = await fetchTeamsDiscovery()
         root = discovery.root
         setTeamsRoot(root)
       }
-      const saved = await saveTeamFile(targetPath, yaml, null)
+      const diskYaml = diskYamlOf(modelRef.current, jobsRef.current)
+      const saved = await saveTeamFile(targetPath, diskYaml, null)
       const displayPath = root ? absoluteTeamPath(root, saved.path) : saved.path
-      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(yaml)
+      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(diskYaml)
       isNewRef.current = false
       setLoadedYaml(yaml)
       setPath(displayPath)
@@ -743,7 +849,7 @@ export function useTeamDocument() {
     } finally {
       saveInFlightRef.current = false
     }
-  }, [teamsRoot])
+  }, [teamsRoot, settleIntoMyAgents])
 
   // Batched so a multi-select delete (several 'remove' NodeChanges in one call) computes the
   // survivor set once, instead of each single-id removal racing the others over stale state.
@@ -1146,14 +1252,24 @@ export function useTeamDocument() {
   }, [markDirty, captureHistory])
 
   const turnBackOn = useCallback((id: string, entry: TurnedOff) => {
-    const before = modelRef.current?.snapshot().agents.find((agent) => agent.id === id)?.turnedOff ?? []
+    const agent = modelRef.current?.snapshot().agents.find((candidate) => candidate.id === id)
+    const before = agent?.turnedOff ?? []
     const kept = before.filter((existing) => existing.kind !== entry.kind || existing.name !== entry.name)
     if (kept.length === before.length) return
     captureHistory()
     const turnedOff = kept.length > 0 ? kept : undefined
     modelRef.current?.setAgentField(id, 'turnedOff', turnedOff)
+    // One of the agent's own in My agents is back on its card at once (ADR 0094).
+    const mine = jobsRef.current.find((job) => job.id === (filledRef.current.get(id)?.agent ?? agent?.from?.agent))
+    const own = mine && (entry.kind === 'skill' ? mine.skills : mine.tools)?.includes(entry.name)
+    const shown = (agent?.capabilities ?? []).some((capability) => capability.kind === entry.kind && capability.name === entry.name)
+    const allowed = entry.kind === 'tool' ? mine?.toolAllow?.[entry.name] : undefined
+    const capabilities = mine && own && !shown
+      ? [...(agent?.capabilities ?? []), { kind: entry.kind, name: entry.name, ...(allowed?.length ? { alwaysAllow: [...allowed] } : {}) }]
+      : agent?.capabilities
+    if (capabilities !== agent?.capabilities) modelRef.current?.setAgentField(id, 'capabilities', capabilities)
     setNodes((current) => current.map((node) => node.id === id
-      ? { ...node, data: { ...node.data, agent: { ...node.data.agent, turnedOff } } }
+      ? { ...node, data: { ...node.data, agent: { ...node.data.agent, turnedOff, capabilities } } }
       : node))
     markDirty()
   }, [markDirty, captureHistory])
@@ -1545,7 +1661,6 @@ export function useTeamDocument() {
     setSaveState('saving')
     try {
       const loadedRevision = loadedRevisionRef.current
-      const yaml = modelRef.current.toYaml()
       if (!isNewRef.current) {
         if (!loadedRevision) {
           throw new Error('Cannot verify whether the team file changed on disk.')
@@ -1560,9 +1675,11 @@ export function useTeamDocument() {
         }
       }
 
+      const yaml = await settleIntoMyAgents()
       const wasNew = isNewRef.current
-      const saved = await saveTeamFile(path, yaml, wasNew ? null : loadedRevision)
-      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(yaml)
+      const diskYaml = diskYamlOf(modelRef.current, jobsRef.current)
+      const saved = await saveTeamFile(path, diskYaml, wasNew ? null : loadedRevision)
+      loadedRevisionRef.current = saved.revision ?? await hashTeamYaml(diskYaml)
       isNewRef.current = false
       setLoadedYaml(yaml)
       if (wasNew) {
@@ -1612,7 +1729,7 @@ export function useTeamDocument() {
     } finally {
       saveInFlightRef.current = false
     }
-  }, [path, schemaLoading, readOnlyReason, entrypointProblem, validation])
+  }, [path, schemaLoading, readOnlyReason, entrypointProblem, validation, settleIntoMyAgents])
 
   return {
     path,
@@ -1699,6 +1816,7 @@ export function useTeamDocument() {
     turnOff,
     turnBackOn,
     applyAgentFields,
+    refillAgent,
     promoteEntrypoint,
     promoteResponder,
     updateTeamSchedule,

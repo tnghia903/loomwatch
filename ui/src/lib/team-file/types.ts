@@ -50,13 +50,13 @@ export type AgentStatus =
  * 0029). Team memory is never a capability: it is wired through `memory.inherits`.
  */
 /**
- * A versioned link to one of Your agents (`<teams root>/.jobs/<agent>.yaml`). The team keeps a
- * copy of that version's fields, so it runs exactly what it was approved with; a newer version
- * reaches the team only when the operator chooses Update.
+ * The agent in My agents this one is (`<teams root>/.jobs/<agent>.yaml`, ADR 0094). Its own fields
+ * are filled in from there when the team is read (`lib/team-file/myAgents.ts`); the team file keeps
+ * only what is the team's. `version` is what an earlier LoomWatch wrote, read and ignored.
  */
 export interface AgentLink {
   agent: string
-  version: number
+  version?: number
 }
 
 export interface CapabilityRef {
@@ -176,8 +176,8 @@ export interface AgentConfig {
   /** Skills and tools the operator turned off for it by taking them off the canvas (ADR 0060).
       Absent means none: the agent chooses from every skill in LoomWatch's library. */
   turnedOff?: TurnedOff[]
-  /** The agent in Your agents this one was placed from, and the version its fields copy. Absent
-      means the agent is this team's own. */
+  /** The agent in My agents this one is. Absent only on a team not yet saved since ADR 0094, or
+      one from elsewhere: saving it makes each of its agents one of My agents. */
   from?: AgentLink
   // Runtime-only annotation. Team-file writers must never set this field;
   // it is exposed here only because readers must tolerate it on load.

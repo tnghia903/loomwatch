@@ -1155,6 +1155,8 @@ fn inherit_pack(
 /// about once, clearly, rather than as whichever file the walk happened to reach first.
 struct TeamIndex {
     by_id: BTreeMap<String, Vec<PathBuf>>,
+    /// The teams folder, whose My agents fill in the teams it finds (ADR 0094).
+    root: PathBuf,
 }
 
 impl TeamIndex {
@@ -1199,7 +1201,7 @@ impl TeamIndex {
                 };
                 // A file that is not a valid team is not an error here: the teams root holds
                 // layout sidecars and whatever else the operator keeps beside their teams.
-                let Ok(team) = crate::config::TeamConfig::parse(&source) else {
+                let Ok(team) = crate::config::TeamConfig::parse_in(&source, teams_root) else {
                     continue;
                 };
                 let id = if team.id.is_empty() {
@@ -1214,7 +1216,10 @@ impl TeamIndex {
                 }
             }
         }
-        Self { by_id }
+        Self {
+            by_id,
+            root: teams_root.to_path_buf(),
+        }
     }
 
     /// The id the index knows this file by.
@@ -1260,7 +1265,7 @@ impl TeamIndex {
                 path.display()
             ))
         })?;
-        let team = crate::config::TeamConfig::parse(&source).map_err(|error| {
+        let team = crate::config::TeamConfig::parse_in(&source, &self.root).map_err(|error| {
             MemoryError::new(format!(
                 "team {team_id:?} at {} is invalid: {error:#}",
                 path.display()

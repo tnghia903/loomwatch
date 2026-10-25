@@ -39,7 +39,7 @@ fn team(yaml: &str) -> TeamConfig {
 
 const TEAM: &str = "schemaVersion: 1\nid: news-desk\nentrypoint: writer\nagents:\n  \
      - id: writer\n    name: Writer\n    model: test/model\n  \
-     - id: reader\n    model: test/model\n    from: {agent: reader, version: 3}\n  \
+     - id: reader\n    role: Read it.\n    model: test/model\n    from: {agent: reader, version: 3}\n  \
      - id: quiet\n    model: test/model\n    learns: false\n";
 
 #[test]
@@ -241,6 +241,54 @@ async fn a_lesson_is_kept_with_where_it_came_from_and_a_repeat_counts_as_missed(
     assert_eq!(now[0].missed, 1);
     // Another agent's list is its own.
     assert!(lessons.active("team:t#reader").await.unwrap().is_empty());
+}
+
+/// ADR 0094: a team's own agent that becomes one of My agents takes its lessons along, history
+/// and all, and when they join the agent's own the list keeps its limit, the least backed going.
+#[tokio::test]
+async fn a_teams_own_agent_that_becomes_one_of_my_agents_takes_its_lessons_along() {
+    let lessons = store().await;
+    let team = "team:news-desk#writer";
+    lessons
+        .apply(&from(team), &[], &[add("Use three bullets.")])
+        .await
+        .unwrap();
+    let shown = lessons.active(team).await.unwrap();
+    lessons
+        .apply(
+            &from(team),
+            &shown,
+            &[change(1, "Use three short bullets.")],
+        )
+        .await
+        .unwrap();
+    // The person liked the work it was given in, so it is the better backed.
+    let kept = lessons.active(team).await.unwrap();
+    lessons.give(&kept, "run-liked", "writer").await.unwrap();
+    lessons.back("run-liked", true).await.unwrap();
+    let mine = "agent:writer";
+    for number in 1..=MAX_LESSONS {
+        lessons
+            .apply(&from(mine), &[], &[add(&format!("Lesson {number}."))])
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(
+        lessons.move_to(team, mine).await.unwrap(),
+        2,
+        "the lesson and the one it replaced"
+    );
+    assert!(lessons.active(team).await.unwrap().is_empty());
+    let active = lessons.active(mine).await.unwrap();
+    assert_eq!(active.len(), MAX_LESSONS, "the joined list keeps its limit");
+    assert!(
+        active
+            .iter()
+            .any(|lesson| lesson.text == "Use three short bullets."),
+        "the backed lesson stays: {active:?}"
+    );
+    assert_eq!(lessons.move_to(mine, mine).await.unwrap(), 0);
 }
 
 #[tokio::test]

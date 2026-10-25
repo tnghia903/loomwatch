@@ -361,6 +361,23 @@ async fn main() -> Result<()> {
                 state_dir.clone(),
                 connected_tools.clone(),
             ));
+            // Every agent lives in My agents (ADR 0094): before anything moves a team onto them,
+            // a copy of every team file and agent file is kept in the state folder, once.
+            if let Some(folder) = loomwatch_backend::my_agents::back_up_once(
+                &state_dir,
+                &teams_root,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to keep a copy of your teams in {} before moving them onto My agents",
+                    state_dir.display()
+                )
+            })? {
+                println!(
+                    "loomwatchd kept a copy of your teams and agents in {}",
+                    folder.display()
+                );
+            }
             // Which team files may run (ADR 0048), kept outside the teams folder. Opened before
             // anything can start a run, and the first time, it approves the teams already there.
             let approvals =

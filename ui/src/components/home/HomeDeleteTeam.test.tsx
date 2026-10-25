@@ -87,7 +87,8 @@ describe('Deleting a team from Home', () => {
   })
 
   it('never files a new team where a deleted team used to live', async () => {
-    fetchMock.mockImplementation(() => respond({ root: '/teams', files: [], teams: [], trashed: ['blog-writer.yaml'] }))
+    // A server with no My agents yet: the new team is written as it is.
+    fetchMock.mockImplementation((url: string) => url === '/api/jobs' ? respond({ error: 'unexpected' }, 404) : respond({ root: '/teams', files: [], teams: [], trashed: ['blog-writer.yaml'] }))
     renderHome()
     await screen.findByText(/No teams yet/)
     expect(await createTeam('Blog writer')).toBe('blog-writer-2.yaml')

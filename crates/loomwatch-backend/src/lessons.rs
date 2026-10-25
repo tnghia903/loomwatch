@@ -652,6 +652,35 @@ impl Lessons {
         Ok(kept)
     }
 
+    /// Move every lesson of `from` to `to`, its history with it: a team's own agent became one of
+    /// My agents (ADR 0094), whose lessons are its own in every team. When the two lists join,
+    /// the least backed go first past [`MAX_LESSONS`], as when one is learned. Returns how many
+    /// moved.
+    ///
+    /// # Errors
+    ///
+    /// When the database fails; then nothing moved.
+    pub async fn move_to(&self, from: &str, to: &str) -> Result<u64, StoreError> {
+        if from == to {
+            return Ok(0);
+        }
+        let mut tx = self.db.writer().begin_with("BEGIN IMMEDIATE").await?;
+        let now = crate::operator::now_rfc3339();
+        let moved =
+            sqlx::query("UPDATE agent_lessons SET scope = $2, updated_at = $3 WHERE scope = $1")
+                .bind(from)
+                .bind(to)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        if moved > 0 {
+            make_room(&mut tx, to, &[], &now).await?;
+        }
+        tx.commit().await?;
+        Ok(moved)
+    }
+
     /// Undo a lesson: it is dropped by the person, and a lesson it changed comes back.
     ///
     /// # Errors
@@ -1528,7 +1557,7 @@ fn scope_for(state: &LessonsState, whose: &Whose) -> Result<(String, bool), crat
         ));
     };
     let resolved = crate::api::resolve_existing_team_path(&state.teams_root, Path::new(team_path))?;
-    let team = TeamConfig::load(&resolved)
+    let team = TeamConfig::load_in(&resolved, &state.teams_root)
         .map_err(|error| api_error(StatusCode::UNPROCESSABLE_ENTITY, &format!("{error:#}")))?;
     let agent = team
         .agents

@@ -412,7 +412,7 @@ async fn propose_team(
         .to_owned();
     let summary = text(arguments, "summary").unwrap_or_else(|_| "A proposed team.".to_owned());
     let path = proposal_path(control, &file)?;
-    let team = TeamConfig::parse(&yaml).map_err(|error| {
+    let team = TeamConfig::parse_in(&yaml, &control.inner.teams_root).map_err(|error| {
         format!("The team file has a problem: {error:#}. Fix it and propose again.")
     })?;
     let problems = schema_problems(&yaml);
@@ -506,7 +506,7 @@ async fn missing_skills(
     }
     let kept = existing
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .and_then(|yaml| TeamConfig::parse(yaml).ok())
+        .and_then(|yaml| TeamConfig::parse_in(yaml, &control.inner.teams_root).ok())
         .map(|saved| wired(&saved))
         .unwrap_or_default();
     let installed = installed_skills(control).await?;
@@ -613,7 +613,8 @@ async fn start_run(control: &Control, caller: &Caller, arguments: &Value) -> Res
             }
         })?;
     let yaml = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    let team = TeamConfig::parse(&yaml).map_err(|error| format!("{file} can't run: {error:#}"))?;
+    let team = TeamConfig::parse_in(&yaml, &control.inner.teams_root)
+        .map_err(|error| format!("{file} can't run: {error:#}"))?;
     let Caller::Conversation(id) = caller;
     let ask_first = control
         .conversation(id)

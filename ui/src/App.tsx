@@ -18,6 +18,7 @@ import { useAiStatus } from './lib/ai/useKeyStatus'
 import { connectedSources } from './lib/ai/sources'
 import { fetchCapabilities, SKILLS_CHANGED_EVENT, type CapabilityInventory } from './lib/library/client'
 import { useNeedsYou } from './lib/story/useNeedsYou'
+import { useMoveOntoMyAgents } from './lib/team-file/moveOntoMyAgents'
 import { useTeamPage } from './lib/team-file/teamPage'
 import { useTheme } from './lib/theme'
 
@@ -119,7 +120,14 @@ function Quests() {
 
 export default function App() {
   useTheme()
+  // The first open after every agent became one of My agents moves the teams there (ADR 0094).
+  // Pages draw at once; only a move that is needed holds them, and they draw afresh after it.
+  const move = useMoveOntoMyAgents()
   const { pathname, search } = window.location
+  const showsTeams = pathname === '/' || pathname === '/watch' || pathname === '/agents' || pathname.startsWith('/agents/')
+  if (move === 'moving' && showsTeams) {
+    return <p className="t-meta" role="status" style={{ padding: 32, color: 'var(--color-ink-3)' }}>Adding your teams’ agents to My agents…</p>
+  }
   if (pathname === '/agents' || pathname.startsWith('/agents/')) return <Agents />
   if (pathname === '/quests') return <Quests />
   if (pathname === '/skills') return <Skills />

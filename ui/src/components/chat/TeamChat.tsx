@@ -41,6 +41,7 @@ import { ChatFiles } from './ChatFiles'
 import { FixIt, WorkPiece, type TeamView } from './WorkPiece'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { earlierTries, triedAgain, tryingAgain } from '../../lib/chat/tries'
+import { fetchMoveStatus, movedLine } from '../../lib/team-file/moveOntoMyAgents'
 
 /** Saving the team before work starts: the revision the run is pinned to, or why it could not. */
 export type Prepared = { ok: true; revision: string | null } | { ok: false; error: string }
@@ -361,22 +362,48 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
 
   useEffect(() => { resend.current = send }, [send])
 
-  // What happened to a dropped folder, said over the message box for a while.
-  const [folderNote, setFolderNote] = useState<string | null>(null)
+  // What happened, such as to a dropped folder, said over the message box for a while.
+  const [boxNote, setBoxNote] = useState<string | null>(null)
   useEffect(() => {
-    if (!folderNote) return
-    const timer = window.setTimeout(() => setFolderNote(null), 8000)
+    if (!boxNote) return
+    const timer = window.setTimeout(() => setBoxNote(null), 8000)
     return () => window.clearTimeout(timer)
-  }, [folderNote])
+  }, [boxNote])
+  // The move onto My agents changed what an agent of this team runs (ADR 0094): said here each time
+  // the chat opens, until it is let go or a message is sent.
+  const [moved, setMoved] = useState<{ line: string; said: string } | null>(null)
+  useEffect(() => {
+    let live = true
+    fetchMoveStatus().then((status) => {
+      const key = Object.keys(status?.changed ?? {}).find((path) => path === teamPath || teamPath.endsWith(`/${path}`))
+      if (!live || !status || !key) return
+      const said = `loomwatch:moved-said:${key}`
+      try {
+        if (window.localStorage.getItem(said)) return
+      } catch {
+        // Nowhere to remember it was let go: it is said each time.
+      }
+      setMoved({ line: movedLine(status.changed[key]), said })
+    }, () => {})
+    return () => { live = false }
+  }, [teamPath])
+  const letMovedGo = useCallback(() => {
+    setMoved((current) => {
+      if (current) {
+        try { window.localStorage.setItem(current.said, '1') } catch { /* said again next time */ }
+      }
+      return null
+    })
+  }, [])
   const connectFolder = useCallback(async (names: readonly string[]) => {
     if (names.length === 0) return
     if (!onConnectFolder) {
       const who = team.solo ? team.names.get(team.solo) ?? team.solo : null
-      setFolderNote(who ? `A folder can’t go in a chat. Give it to ${who} in Build, under Folder.` : 'A folder can’t go in a chat. Give it to your agents in Build, under Folder.')
+      setBoxNote(who ? `A folder can’t go in a chat. Give it to ${who} in Build, under Folder.` : 'A folder can’t go in a chat. Give it to your agents in Build, under Folder.')
       return
     }
     const said = await onConnectFolder(names[0])
-    if (said) setFolderNote(said)
+    if (said) setBoxNote(said)
   }, [onConnectFolder, team.solo, team.names])
   useEffect(() => {
     takeFiles.current = (transfer) => {
@@ -852,12 +879,14 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
           setReplyTo(null)
           attachments.clear()
           const ok = await send(text, to, now, undefined, reply, files)
+          if (ok) letMovedGo()
           if (!ok && reply) setReplyTo((current) => current ?? reply)
           if (!ok && files.length > 0) attachments.restore(files)
           return ok
         }}
         attachments={attachments}
-        notice={folderNote}
+        notice={boxNote ?? moved?.line ?? null}
+        onDismissNotice={boxNote ? undefined : letMovedGo}
         onAnswer={answer}
         mentioned={mentioned}
         solo={soloAgent}

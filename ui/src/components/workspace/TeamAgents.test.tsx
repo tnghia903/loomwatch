@@ -39,7 +39,7 @@ function renderTeamAgents(extra: Partial<TeamAgentsProps> = {}) {
   const props: TeamAgentsProps = {
     agents: [], responder: null, selected: null, onSelect: vi.fn(), teamName: 'Digest', teamPath: 'digest.yaml', editable: true,
     skills: [], skillsLoading: false, savedJobs: [reader, elsewhere],
-    onEdit: vi.fn(), onApplyVersion: vi.fn(), onUnlink: vi.fn(), onShowWorkflow: vi.fn(), onAdd: vi.fn(), ...extra,
+    onEdit: vi.fn(), onAgentSaved: vi.fn(), onShowWorkflow: vi.fn(), onAdd: vi.fn(), ...extra,
   }
   render(<TeamAgents {...props} />)
   return props
@@ -251,11 +251,14 @@ describe('a team’s agents, the first of its views', () => {
   })
 
   // Versions stay behind the scenes: the strip says an update is ready, never which number.
-  it('says an agent from My agents has an update ready, with no version number', () => {
-    renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader', version: 1 } }], selected: 'scope', savedJobs: [{ ...reader, version: 2 }] })
+  // ADR 0094: every agent is one of My agents, so nothing says "update"; one the team hasn't saved
+  // yet says it joins them when the team is saved.
+  it('names what each agent does, and says an agent not saved yet joins My agents with the team', () => {
+    renderTeamAgents({ agents: [{ ...scoper, from: { agent: 'reader' } }, { ...scoper, id: 'new', name: 'New one', from: undefined }], selected: 'scope', savedJobs: [{ ...reader, does: 'Reads the news', version: 2 }] })
     const strip = screen.getByRole('navigation', { name: 'Digest’s agents' })
-    expect(within(strip).getByText('From My agents · update ready')).toBeInTheDocument()
-    expect(strip.textContent).not.toMatch(/\bv\d/)
+    expect(within(strip).getByText('Reads the news')).toBeInTheDocument()
+    expect(within(strip).getByText('Joins My agents when you save')).toBeInTheDocument()
+    expect(strip.textContent).not.toMatch(/update|\bv\d/i)
   })
 
   it('chats with an agent placed from My agents with what this team gives it to read', async () => {

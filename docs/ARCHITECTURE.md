@@ -620,7 +620,10 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
 
 ```
 Agent    { id, name, role, kind: harness|operator, spawn{cwd}, model,
-           allow{web,commands,edits}, status }
+           allow{web,commands,edits}, from{agent}, status }
+           # from: one of My agents (.jobs/<agent>.yaml, ADR 0094). The team file then holds only
+           # the team's fields; name, role, model, skills, tools, reads, doneWhen and allow are
+           # filled in from the agent's file when the team is read (my_agents.rs, myAgents.ts).
 Edge     { from, to, layer: configured|observed, kind: sequence|dispatch|ask|handoff, ts }
 RunEvent { id, sessionId, agentId, seq, ts, kind: message|thought|tool_call|tool_update|
                                                    plan|permission|session_meta|usage|

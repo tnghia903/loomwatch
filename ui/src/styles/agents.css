@@ -52,7 +52,6 @@
 .agent-badge-warn { margin: 0; font-size: 12px; color: var(--color-alert); }
 .agent-badge-after { color: var(--color-ink-3); }
 .agent-badge-after.live { color: var(--color-ink-2); }
-.agent-badge-behind { font-style: normal; color: var(--color-accent); }
 
 /* ---------- the builder ---------- */
 .agent-builder { position: relative; display: flex; flex-direction: column; gap: var(--sp-5); }
@@ -119,8 +118,6 @@
 .agent-uses li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); font-size: 13.5px; }
 .agent-uses a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-ink); text-decoration: none; font-weight: 500; }
 .agent-uses a:hover { color: var(--color-accent); }
-.agent-use-version { font: 500 12px var(--font-mono); color: var(--color-ink-3); }
-.agent-use-version.behind { color: var(--color-accent); }
 
 /* ---------- Home's row of agents ---------- */
 .home-agents-all { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
@@ -134,16 +131,6 @@
 /* A team's own agent says which team, in words rather than a version number. */
 .home-agent-chip .home-agent-team { font: 400 12px var(--font-sans); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agents-in-teams-note { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--color-ink-3); }
-
-/* ---------- the agent panel: From Your agents ---------- */
-.linked-agent { display: flex; flex-direction: column; gap: 8px; padding: var(--sp-3); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline)); border-radius: var(--r-md); background: var(--color-accent-tint); }
-.linked-agent p { margin: 0; }
-.linked-agent-line { font-size: 13.5px; color: var(--color-ink); }
-.linked-agent-update, .linked-agent-changed { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--color-ink-2); }
-.linked-agent-changed p { color: var(--color-alert); }
-.linked-agent-acts { display: flex; flex-wrap: wrap; gap: 6px; }
-.linked-agent .btn { gap: 5px; font-size: 12.5px; text-decoration: none; }
-.linked-agent-note { color: var(--color-ink-3); }
 
 @media (max-width: 900px) {
   .agent-builder-side { grid-template-columns: minmax(0, 1fr); }

@@ -582,16 +582,22 @@ $defs:
     additionalProperties: false
     required:
       - id
-      - role
     oneOf:
       - title: Harness node
-        description: An agent, so it must say which model it runs on.
+        description: >-
+          An agent. Either one of My agents (`from`, ADR 0094), whose own fields are filled in
+          from `<teams root>/.jobs/<agent>.yaml` when the team is read, or an agent written out in
+          full, which must say what it is told and which model it runs on.
         properties:
           kind:
             const: harness
-        required:
-          - name
-          - model
+        anyOf:
+          - title: One of My agents
+            required: [from]
+            not:
+              required: [role]
+          - title: Written out in full
+            required: [name, role, model]
         not:
           required: [sendBack, sendBackOnce]
       - title: Operator node
@@ -604,6 +610,7 @@ $defs:
             const: operator
         required:
           - kind
+          - role
         not:
           anyOf:
             - required: [spawn]
@@ -795,17 +802,16 @@ $defs:
                 const: loomwatch-team-bus
       from:
         description: >-
-          The agent in "Your agents" this one was placed from (`<teams root>/.jobs/<agent>.yaml`),
-          and the version it copies. The fields above are that version's, so the team runs exactly
-          what it was approved with: editing the agent there makes a new version, which reaches
-          this team only when the operator chooses Update here. The daemon reads only `agent`: it
-          names whose lessons the agent reads and adds to, the same in every team (ADR 0078).
-          Removing it makes the agent this team's own.
+          The agent in My agents this one is (`<teams root>/.jobs/<agent>.yaml`, ADR 0094). Its
+          name, instructions, model, skills, tools, what it reads, Done when, switches and helpers
+          switch are that agent's, the same in every team, and are filled in from there when the
+          team is read; the entry keeps only what is this team's. An entry that writes its own
+          `role` runs as it is written, and `from` then only names whose lessons it reads and
+          adds to (ADR 0078). `version` is what an earlier LoomWatch wrote: read and ignored.
         type: object
         additionalProperties: false
         required:
           - agent
-          - version
         properties:
           agent:
             $ref: "#/$defs/Identifier"

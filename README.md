@@ -72,8 +72,8 @@ and asks.
 
 **Build an agent** once: its job, the model it thinks with, its skills, and the keys it may use
 without asking, such as the web or running commands. Pick it a face, **try it on its own**
-with a real request, and save it to **My agents**. Change its job later and each team keeps the
-copy it was given until you choose **Update** in that team.
+with a real request, and save it to **My agents**. It is the same agent in every team it's in:
+change its job later and every team uses the change the next time it works.
 
 </td>
 </tr>
@@ -155,7 +155,7 @@ you decide**, and the finished answer comes with the evidence to check before yo
 | You find out what an agent did by scrolling back through its terminal. | Every message, tool call and file it touched is recorded, and you can replay it. |
 | A weak first step quietly shapes everything after it. | A review step stops the team until you approve, or send the work back. |
 | Each AI app keeps its own skills and folders. | Skills and the folders and files you choose are delivered to the agents that need them. Take one off and it is turned off for that agent. |
-| You set the same agent up again in every project. | Build it once in My agents, try it on its own, and add it to any team. Each team keeps its copy until you choose Update. |
+| You set the same agent up again in every project. | Build it once in My agents, try it on its own, and add it to any team. It is the same agent in every team, and what it learns goes with it. |
 | Doing the job again means retyping the prompt. | One chat per team that remembers the conversation, **@** an agent to redo one step, and daily schedules. |
 
 ## How a run works
@@ -214,8 +214,7 @@ with a lead that hands out work and asks its teammates questions as it goes.
 ### 🧑‍🔧 My agents
 
 Build an agent once: its job, model, skills and the keys it may use. Try it on its own in its
-**Chat** tab, then add it to any team. Change it later and each team keeps the copy it has until
-you choose **Update** there. Tell them about you once, in **About you**, and every agent fits its answers
+**Chat** tab, then add it to any team: it is the same agent in every team it's in. Tell them about you once, in **About you**, and every agent fits its answers
 to you. Your agents line the left of each agent's page, and your teams the left of each team's:
 one click moves to another, and each glows while it works or waits for you.
 
@@ -1075,7 +1074,7 @@ host paths such as `/Users/name/project` do not exist inside the Linux container
 | Team definitions and canvas layouts | `~/LoomWatch/teams`; Compose-only deployments use `LOOMWATCH_TEAMS_DIR` |
 | Brief files | Paths configured by the team, usually beside its YAML file |
 | Deleted teams | `.trash` inside your teams folder, one folder per deleted team |
-| My agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Earlier versions are in `.jobs/.versions/<agent>/`, removed agents move to `.jobs/.removed`, and the one-agent teams that an agent's **Chat** runs are in `.jobs/.bench` |
+| My agents | `.jobs` inside your teams folder, one `<agent>.yaml` per agent. Removed agents move to `.jobs/.removed`, and the one-agent teams that an agent's **Chat** runs are in `.jobs/.bench`. Earlier versions an older LoomWatch kept are left in `.jobs/.versions/<agent>/` |
 | Files you add to an agent (**File** under **Given**) | `<team>.files/` beside the team file |
 | Agents' working folders, and Ask's | `.loomwatch/` inside your teams folder |
 | Your keys and ChatGPT sign-in | This Mac's Keychain: the OpenRouter key as `LoomWatch.OpenRouter`, the Claude key and ChatGPT sign-in together as `LoomWatch.Plans`. On Windows, Windows Credential Manager, as `api-key.LoomWatch.OpenRouter` and `plans.LoomWatch.Plans`. On Linux and in Compose, `keys.json` and `plans.json` in LoomWatch's state folder, readable only by your user |
@@ -1117,20 +1116,25 @@ delete its folder from `.trash`.
 Build an agent in **My agents** (**Build an agent** on Home). It appears under **My agents** in
 every team's add panel, with its instructions, model, skills and what it may do without asking.
 
-Placing it copies the agent into the team, so a team runs exactly what it was approved with.
-Saving a change to what a team copies, such as its job, leaves the teams' copies as they are; a
-new face changes nothing in them. The agent's panel in a team says **Changed in My agents** when
-there is something new, and offers **Update**, **Edit in My agents**, or **Make it this team's
-own** to change it there alone. The builder lists the teams that use the agent and which of them
-have an update ready. LoomWatch keeps earlier copies on disk so it can tell which teams have an
-update ready; it shows no version numbers.
-Removing an agent from My agents leaves the teams' copies alone. An agent is one small file, so
-you can share it by copying it into another teams folder's `.jobs`.
+Every agent a team has is one of My agents, and it is the same agent in every team it's in. A
+change you save to it, in My agents or in a team, reaches every team that uses it from that
+team's next run, and what it learns from your feedback goes with it. Each team keeps what is its
+own: where the agent works there, what that team connects to it, its place in the workflow, what
+the team turned off for it, and its spending guard there. The builder lists the teams that use
+the agent. A run's record keeps the agent as it ran.
 
-An agent made inside a team, such as one from a ready-made team, is listed under **My agents** too,
-with its team's name. In the add panel, one of this team's own finds its card on the canvas, and
-another team's is added as a copy this team owns. Its knowledge and work folder stay with the team
-it came from.
+An agent you add to a team from a ready-made team, or build in a team, joins My agents when you
+save the team: one with exactly the same setup as an agent already there joins that one, and one
+whose name is taken gets its team's name after it, as in **Writer · Market brief**.
+
+To remove an agent from My agents, take it off the teams that use it first. An agent is one small
+file, so you can share it by copying it into another teams folder's `.jobs`. An agent file that
+appears there, or changes there, outside LoomWatch is shown for your review before a team that
+uses it runs, as a team file is.
+
+The first time this version opens your teams, it keeps a copy of every team and agent file in
+LoomWatch's state folder, under `backups/`, then moves each team's agents into My agents. A team
+whose agent was behind a newer save of it in My agents says so once in its chat.
 
 </details>
 

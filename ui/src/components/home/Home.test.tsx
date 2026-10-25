@@ -279,10 +279,13 @@ describe('Home', () => {
     expect(await screen.findByText('OpenRouter: OpenRouter refused the key.')).toBeInTheDocument()
   })
 
-  it('creates a ready-to-run team from a template and opens it', async () => {
+  it('creates a ready-to-run team from a template, its agent in My agents, and opens it', async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/teams') return respond({ root: '/teams', files: ['blog-writer.yaml'], teams: [{ path: 'blog-writer.yaml', name: 'Blog writer', agentCount: 1 }] })
       if (url === '/api/team' && init?.method === 'PUT') return respond({ path: 'blog-writer-2.yaml', yaml: '', revision: 'r1' })
+      if (url === '/api/jobs') return respond({ folder: '/teams/.jobs', jobs: [], problems: [] })
+      const job = /^\/api\/jobs\/([^/]+)$/.exec(url)
+      if (job && init?.method === 'PUT') return respond({ ...JSON.parse(String(init.body)) as object, id: job[1], file: `.jobs/${job[1]}.yaml`, version: 1 })
       return respond({ error: 'unexpected' }, 404)
     })
     renderHome()
@@ -297,9 +300,12 @@ describe('Home', () => {
     const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
     expect(put?.[1]?.headers).toMatchObject({ 'If-None-Match': '*' })
     const body = JSON.parse(String(put?.[1]?.body)) as { path: string; yaml: string }
-    // The existing file is never overwritten, and the assistant runs on the default model.
+    // The existing file is never overwritten, and the assistant joins My agents on the default model.
     expect(body.path).toBe('blog-writer-2.yaml')
-    expect(body.yaml).toContain(`model: ${DEFAULT_MODEL}`)
+    const saved = fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith('/api/jobs/') && init?.method === 'PUT')
+    expect(saved).toHaveLength(1)
+    expect(JSON.parse(String(saved[0][1]?.body))).toMatchObject({ name: 'Assistant', model: DEFAULT_MODEL })
+    expect((parse(body.yaml) as TeamDocument).agents).toEqual([{ id: 'assistant', from: { agent: 'assistant' } }])
     expect(body.yaml).not.toContain('spawn')
     expect(body.yaml).toContain('name: Blog writer')
     // Same name, own id: the Notebook is filed by id, so sharing one shared the first team's notes.
@@ -337,7 +343,7 @@ describe('Home', () => {
   })
 
   // A team always starts with agents: the ones you built, or a template's. There is no empty team.
-  it('starts a team with the agents you tick, linked to the versions you saved, and never with none', async () => {
+  it('starts a team with the agents you tick, pointing at them in My agents, and never with none', async () => {
     const reader = { id: 'reader', file: 'reader.yaml', name: 'Reader', instructions: 'Read the sources.', version: 2 }
     const writer = { id: 'writer', file: 'writer.yaml', name: 'Writer', instructions: 'Write the brief.', version: 1 }
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -364,11 +370,12 @@ describe('Home', () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/?path=digest.yaml'))
     const put = fetchMock.mock.calls.find(([url, init]) => url === '/api/team' && init?.method === 'PUT')
     const doc = parse(JSON.parse(String(put?.[1]?.body)).yaml as string) as TeamDocument
-    // In the order they are listed in Your agents, each a copy of the version saved.
+    // In the order they are listed in My agents, each the agent itself, not a copy (ADR 0094).
     expect(doc.agents.map((agent) => [agent.id, agent.role, agent.from])).toEqual([
-      ['reader', 'Read the sources.', { agent: 'reader', version: 2 }],
-      ['writer', 'Write the brief.', { agent: 'writer', version: 1 }],
+      ['reader', undefined, { agent: 'reader' }],
+      ['writer', undefined, { agent: 'writer' }],
     ])
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith('/api/jobs/') && init?.method === 'PUT')).toHaveLength(0)
     expect(doc.entrypoint).toBe('reader')
   })
 

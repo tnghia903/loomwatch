@@ -223,6 +223,11 @@ pub fn router_with_archive(
             axum::routing::put(put_job).delete(delete_job),
         )
         .route("/api/jobs/{id}/versions", get(get_job_versions))
+        // The one-time move of every team onto My agents (ADR 0094), which the app makes.
+        .route(
+            "/api/my-agents/move",
+            get(get_my_agents_move).post(post_my_agents_moved),
+        )
         // The agent builder's test bench: where its one-agent teams are written.
         .route("/api/bench", axum::routing::post(post_bench))
         // ADR 0035: the folder picker, and adding a file to a team as knowledge.
@@ -678,9 +683,27 @@ async fn put_job(
             "job write lock unavailable".into(),
         )
     })?;
-    crate::jobs::save_job(&state.teams_root, &id, spec, create_only, expected_version)
-        .map(Json)
-        .map_err(job_error)
+    let previous = crate::jobs::job_bytes(&state.teams_root, &id)
+        .map(|bytes| crate::approvals::revision(&bytes));
+    let saved = crate::jobs::save_job(&state.teams_root, &id, spec, create_only, expected_version)
+        .map_err(job_error)?;
+    // An agent made here, or changed here from a file the operator approved, is theirs to run in
+    // every team (ADR 0094). Saving one that came from outside doesn't stand in for reviewing it,
+    // as with a team file (ADR 0048).
+    if let Some(approvals) = state.runs.approvals()
+        && previous
+            .as_deref()
+            .is_none_or(|revision| approvals.is_agent_approved(&id, revision))
+        && let Some(bytes) = crate::jobs::job_bytes(&state.teams_root, &id)
+        && let Err(error) = approvals.approve_agent(
+            &id,
+            &crate::approvals::revision(&bytes),
+            crate::approvals::Approval::Saved,
+        )
+    {
+        eprintln!("warning: could not record that agent {id} was saved in LoomWatch: {error}");
+    }
+    Ok(Json(saved))
 }
 
 /// Every version of one saved job, newest first, each with its fields.
@@ -697,6 +720,66 @@ async fn get_job_versions(
     Ok(Json(json!({ "versions": versions })))
 }
 
+/// Where the move onto My agents stands (ADR 0094), and every listed team with whether it may be
+/// moved: one that waits for the person's review (ADR 0048) isn't, so its agents never reach My
+/// agents unseen. Without a state folder (no approvals kept) there is nothing to move.
+async fn get_my_agents_move(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
+    let Some((approvals, state_dir)) = approvals_and_state(&state) else {
+        return Ok(Json(json!({ "moved": true, "teams": [], "changed": {} })));
+    };
+    let record = crate::my_agents::moved(&state_dir, &state.teams_root);
+    let teams: Vec<Value> = discover_team_files(&state.teams_root)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| {
+            let approved = fs::read(state.teams_root.join(&path)).is_ok_and(|bytes| {
+                approvals.is_approved(&path, &crate::approvals::revision(&bytes))
+            });
+            json!({ "path": path, "approved": approved })
+        })
+        .collect();
+    Ok(Json(json!({
+        "moved": record.moved_at.is_some(),
+        "teams": teams,
+        "changed": record.changed,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct MovedRequest {
+    /// What the move changed in each team, by the team's path: the lines its chat says once.
+    #[serde(default)]
+    changed: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// The app moved every team it could onto My agents: keep that, and what it changed where.
+async fn post_my_agents_moved(
+    State(state): State<ApiState>,
+    Json(request): Json<MovedRequest>,
+) -> Result<StatusCode, ApiError> {
+    let Some((_, state_dir)) = approvals_and_state(&state) else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    crate::my_agents::record_moved(&state_dir, &state.teams_root, request.changed).map_err(
+        |error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("LoomWatch could not keep that your teams moved onto My agents: {error}"),
+            )
+        },
+    )?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The approvals record and the state folder it is kept in, when this daemon keeps them.
+fn approvals_and_state(
+    state: &ApiState,
+) -> Option<(std::sync::Arc<crate::approvals::TeamApprovals>, PathBuf)> {
+    let approvals = state.runs.approvals()?;
+    let state_dir = approvals.path().parent()?.to_path_buf();
+    Some((approvals, state_dir))
+}
+
 /// The folder the agent builder writes its test teams to, made when missing. It is hidden, so the
 /// team list and the scheduler never pick its teams up.
 async fn post_bench(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
@@ -710,7 +793,8 @@ async fn post_bench(State(state): State<ApiState>) -> Result<Json<Value>, ApiErr
     Ok(Json(json!({ "folder": folder })))
 }
 
-/// Remove a saved job: its file moves to `.jobs/.removed/`. No team changes.
+/// Remove a saved job: its file moves to `.jobs/.removed/`. Refused (409) while a team uses it
+/// (ADR 0094): the team would have no agent to run, so it is taken off those teams first.
 async fn delete_job(
     State(state): State<ApiState>,
     AxumPath(id): AxumPath<String>,
@@ -721,6 +805,23 @@ async fn delete_job(
             "job write lock unavailable".into(),
         )
     })?;
+    let using = crate::my_agents::teams_using(&state.teams_root, &id);
+    if !using.is_empty() {
+        let name = crate::jobs::read_job(&state.teams_root, &id).map_or(id.clone(), |job| job.name);
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "{name} is in {}. In {} Workflow, select {name}, press Delete and save. Then \
+                 remove it here.",
+                crate::my_agents::listed(&using),
+                if using.len() == 1 {
+                    "that team’s"
+                } else {
+                    "each one’s"
+                }
+            ),
+        ));
+    }
     let moved = crate::jobs::remove_job(&state.teams_root, &id).map_err(job_error)?;
     Ok(Json(json!({ "id": id, "movedTo": moved })))
 }
@@ -963,8 +1064,37 @@ async fn put_team(
     headers: HeaderMap,
     Json(team_file): Json<TeamFile>,
 ) -> Result<Response, ApiError> {
-    TeamConfig::parse(&team_file.yaml)
+    let team = TeamConfig::parse_in(&team_file.yaml, &state.teams_root)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    let (resolved_path, before) = write_team_file(&state, &headers, &team_file)?;
+    // A team's own agent that became one of My agents takes its lessons along (ADR 0094).
+    let became_mine = before
+        .as_deref()
+        .map(|before| crate::my_agents::became_mine(before, &team_file.yaml))
+        .unwrap_or_default();
+    if !became_mine.is_empty()
+        && let Some(lessons) = state.runs.lessons()
+    {
+        let scope = crate::memory::scope_id(&team.id, &resolved_path);
+        for (agent, mine) in became_mine {
+            if let Err(error) = lessons
+                .move_to(&format!("team:{scope}#{agent}"), &format!("agent:{mine}"))
+                .await
+            {
+                eprintln!("warning: {agent}'s lessons stayed with the team: {error}");
+            }
+        }
+    }
+    Ok(team_response(&team_file))
+}
+
+/// Write `team_file` under the write lock, approving it when it was built here or changed from an
+/// approved revision (ADR 0048). Returns where it went and the text it replaced, if any.
+fn write_team_file(
+    state: &ApiState,
+    headers: &HeaderMap,
+    team_file: &TeamFile,
+) -> Result<(PathBuf, Option<String>), ApiError> {
     // Serialize the precondition check and replacement across all API clients.
     let _write = state.writes.lock().map_err(|_| {
         ApiError::new(
@@ -973,10 +1103,9 @@ async fn put_team(
         )
     })?;
     let resolved_path = resolve_writable_team_path(&state.teams_root, &team_file.path)?;
-    let create = check_precondition(&headers, &resolved_path)?;
-    let previous = fs::read(&resolved_path)
-        .ok()
-        .map(|bytes| crate::approvals::revision(&bytes));
+    let create = check_precondition(headers, &resolved_path)?;
+    let before = fs::read(&resolved_path).ok();
+    let previous = before.as_deref().map(crate::approvals::revision);
     atomic_write(&resolved_path, team_file.yaml.as_bytes(), create).map_err(|error| {
         ApiError::new(
             if error.kind() == io::ErrorKind::AlreadyExists {
@@ -1006,7 +1135,10 @@ async fn put_team(
     {
         eprintln!("warning: could not record that {relative} was saved in LoomWatch: {error}");
     }
-    Ok(team_response(&team_file))
+    Ok((
+        resolved_path,
+        before.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+    ))
 }
 
 /// Where `DELETE /api/team` puts a team: a hidden folder under the teams root, so the team list,
@@ -1143,7 +1275,7 @@ fn listed_team_path(teams_root: &Path, team: &Path) -> Option<String> {
 fn teams_inheriting(teams_root: &Path, team: &Path, relative: &str) -> io::Result<Vec<String>> {
     let Some(config) = fs::read_to_string(team)
         .ok()
-        .and_then(|source| TeamConfig::parse(&source).ok())
+        .and_then(|source| TeamConfig::parse_in(&source, teams_root).ok())
     else {
         // A file that does not load is not in the memory index, so nothing can inherit it.
         return Ok(Vec::new());
@@ -1161,7 +1293,7 @@ fn teams_inheriting(teams_root: &Path, team: &Path, relative: &str) -> io::Resul
         .filter(|file| {
             fs::read_to_string(teams_root.join(file))
                 .ok()
-                .and_then(|source| TeamConfig::parse(&source).ok())
+                .and_then(|source| TeamConfig::parse_in(&source, teams_root).ok())
                 .and_then(|other| other.memory)
                 .is_some_and(|memory| {
                     memory.enabled
@@ -1372,7 +1504,7 @@ async fn get_memory(
     Query(query): Query<TeamPath>,
 ) -> Result<Json<MemoryView>, ApiError> {
     let resolved = resolve_existing_team_path(&state.teams_root, &query.path)?;
-    let team = TeamConfig::load(&resolved).map_err(|error| {
+    let team = TeamConfig::load_in(&resolved, &state.teams_root).map_err(|error| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!(
@@ -2396,6 +2528,29 @@ mod tests {
                 .body(Body::empty())
                 .expect("request")
         };
+        // ADR 0094: a team that has it on would have no agent to run, so it is refused, naming the team.
+        fs::write(
+            root.0.join("launch.yaml"),
+            "schemaVersion: 1\nname: Launch notes\nentrypoint: notes\nagents:\n  - id: notes\n    from:\n      agent: release-notes\nedges: []\n",
+        )
+        .expect("a team that uses it");
+        let response = test_router(&root.0)
+            .oneshot(delete())
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let refused = response_json(response).await;
+        assert!(
+            refused["error"]
+                .as_str()
+                .is_some_and(|error| error.contains(
+                    "Release notes is in Launch notes. In that team’s Workflow, select Release \
+                     notes, press Delete and save. Then remove it here."
+                )),
+            "{refused}"
+        );
+        assert!(root.0.join(".jobs/release-notes.yaml").is_file());
+        fs::remove_file(root.0.join("launch.yaml")).expect("the team goes");
         let response = test_router(&root.0)
             .oneshot(delete())
             .await
@@ -3302,6 +3457,55 @@ mod tests {
         assert_eq!(entries.len(), 1, "temporary file should be renamed away");
         assert_eq!(entries[0].path(), path);
         assert_eq!(response_json(response).await["yaml"], VALID_TEAM);
+    }
+
+    /// ADR 0094: a save that makes a team's own agent one of My agents takes its lessons from the
+    /// team's list to the agent's own, so what it learned in the team goes with it.
+    #[tokio::test]
+    async fn a_save_that_makes_a_teams_own_agent_one_of_my_agents_takes_its_lessons_along() {
+        let root = TempDirectory::new();
+        let db = crate::db::Db::temp().await;
+        let lessons = crate::lessons::Lessons::new(db.clone());
+        let runs = crate::runs::RunRegistry::durable(crate::runs::RunStore::new(db));
+        let own = "schemaVersion: 1\nid: blog\nname: Blog\nentrypoint: writer\nagents:\n  - id: writer\n    name: Writer\n    role: Write.\n    model: fake/offline\nedges: []\n";
+        fs::write(root.0.join("team.yaml"), own).expect("the team as it was");
+        let learned = crate::lessons::LearnedFrom {
+            scope: "team:blog#writer".to_owned(),
+            agent_id: "writer".to_owned(),
+            source: crate::lessons::LessonSource::You,
+            feedback: "Shorter.".to_owned(),
+            run_id: None,
+        };
+        lessons
+            .apply(
+                &learned,
+                &[],
+                &[crate::lessons::Edit::Add {
+                    text: "Keep it short.".to_owned(),
+                    about_you: false,
+                }],
+            )
+            .await
+            .expect("a lesson learned in the team");
+        fs::create_dir(root.0.join(".jobs")).expect("My agents");
+        fs::write(
+            root.0.join(".jobs/writer.yaml"),
+            "name: Writer\ninstructions: Write.\nmodel: fake/offline\n",
+        )
+        .expect("the agent it became");
+        let pointer = "schemaVersion: 1\nid: blog\nname: Blog\nentrypoint: writer\nagents:\n  - id: writer\n    from:\n      agent: writer\nedges: []\n";
+        let condition = format!("\"{}\"", revision(own.as_bytes()));
+        let response = save_request(
+            router_with_runs(&root.0, runs),
+            Some(("if-match", &condition)),
+            pointer,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(lessons.active("team:blog#writer").await.unwrap().is_empty());
+        let mine = lessons.active("agent:writer").await.unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].text, "Keep it short.");
     }
 
     async fn save_request(router: Router, condition: Option<(&str, &str)>, yaml: &str) -> Response {

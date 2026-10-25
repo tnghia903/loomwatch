@@ -53,6 +53,15 @@ struct Record {
     teams_root: String,
     /// Keyed by the team file's path relative to the teams folder.
     teams: BTreeMap<String, Approved>,
+    /// The files of My agents (`.jobs/<id>.yaml`), keyed by agent id (ADR 0094). A team that
+    /// points at an agent runs what that file says, so a file that came from outside `LoomWatch`,
+    /// or changed there, needs the same look before it runs as a team file does.
+    #[serde(default)]
+    agents: BTreeMap<String, Approved>,
+    /// Whether the agents already in the folder were approved as they are, which happens once:
+    /// when the folder is first opened, or the first time a `LoomWatch` that reads them opens it.
+    #[serde(default)]
+    agents_seen: bool,
 }
 
 /// The approvals for one teams folder.
@@ -71,7 +80,7 @@ impl TeamApprovals {
     /// Returns an error when the state folder or the record cannot be read or written.
     pub fn open(state_dir: &Path, teams_root: &Path) -> io::Result<Self> {
         let path = state_dir.join(file_name(teams_root));
-        let record = match fs::read(&path) {
+        let mut record = match fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -85,7 +94,7 @@ impl TeamApprovals {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let mut record = Record {
                     teams_root: teams_root.display().to_string(),
-                    teams: BTreeMap::new(),
+                    ..Record::default()
                 };
                 let at = now();
                 for (key, file) in crate::schedule::team_files(teams_root) {
@@ -105,9 +114,67 @@ impl TeamApprovals {
             }
             Err(error) => return Err(error),
         };
+        // The agents in My agents could already run in every team that copied them, so they are
+        // approved as they are, once, like the teams were.
+        if !record.agents_seen {
+            let at = now();
+            for job in crate::jobs::list_jobs(teams_root)
+                .map(|list| list.jobs)
+                .unwrap_or_default()
+            {
+                if let Some(bytes) = crate::jobs::job_bytes(teams_root, &job.id) {
+                    record.agents.insert(
+                        job.id,
+                        Approved {
+                            revision: revision(&bytes),
+                            how: Approval::Existing,
+                            at: at.clone(),
+                        },
+                    );
+                }
+            }
+            record.agents_seen = true;
+            write_record(&path, &record)?;
+        }
         Ok(Self {
             path,
             record: Mutex::new(record),
+        })
+    }
+
+    /// Whether `revision` of agent `agent`'s file in My agents is approved (ADR 0094).
+    #[must_use]
+    pub fn is_agent_approved(&self, agent: &str, revision: &str) -> bool {
+        self.record
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .agents
+            .get(agent)
+            .is_some_and(|approved| approved.revision == revision)
+    }
+
+    /// Approve `revision` of agent `agent`'s file in My agents, replacing any earlier one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the record cannot be written; the approval is then not kept.
+    pub fn approve_agent(&self, agent: &str, revision: &str, how: Approval) -> io::Result<()> {
+        let mut record = self.record.lock().unwrap_or_else(PoisonError::into_inner);
+        let previous = record.agents.insert(
+            agent.to_owned(),
+            Approved {
+                revision: revision.to_owned(),
+                how,
+                at: now(),
+            },
+        );
+        write_record(&self.path, &record).inspect_err(|_| match previous {
+            Some(previous) => {
+                record.agents.insert(agent.to_owned(), previous);
+            }
+            None => {
+                record.agents.remove(agent);
+            }
         })
     }
 

@@ -5,7 +5,8 @@ import { BOBBIN_LINE, questsEarned, wholeCraft, type Award } from '../../lib/que
 import { earnItem, fetchWardrobe, useWardrobe } from '../../lib/quests/wardrobe'
 import { fetchRuns, type RunRecord } from '../../lib/runs/client'
 import { fetchTeamFile } from '../../lib/team-file/client'
-import { TeamFileModel } from '../../lib/team-file/document'
+import { fetchJobs } from '../../lib/library/jobs'
+import { filledTeam } from '../../lib/team-file/myAgents'
 import { LESSON_RUNS, lessonRun } from '../../lib/team-file/runLessons'
 import type { AgentConfig } from '../../lib/team-file/types'
 import type { RunProjection } from '../../lib/watch/events'
@@ -53,9 +54,10 @@ export function earlierRecords(records: readonly RunRecord[], record: RunRecord)
  */
 export async function agentsRunWith(record: Pick<RunRecord, 'teamPath' | 'teamRevision'>): Promise<AgentConfig[] | null> {
   if (!record.teamRevision) return null
-  const file = await fetchTeamFile(record.teamPath)
+  const [file, jobs] = await Promise.all([fetchTeamFile(record.teamPath), fetchJobs().then((list) => list?.jobs ?? [], () => [])])
   if (file.revision !== record.teamRevision) return null
-  return TeamFileModel.parse(file.yaml).snapshot().agents ?? []
+  // Its agents as My agents has them (ADR 0094): what changed there since is as near as is known.
+  return filledTeam(file.yaml, jobs)?.agents ?? []
 }
 
 /**

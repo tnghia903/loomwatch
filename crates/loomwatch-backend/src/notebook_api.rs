@@ -365,7 +365,7 @@ impl NotebookState {
             )
         })?;
         let resolved = resolve_existing_team_path(&self.teams_root, team)?;
-        let config = TeamConfig::load(&resolved).map_err(|error| {
+        let config = TeamConfig::load_in(&resolved, &self.teams_root).map_err(|error| {
             ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 format!("failed to read team file {}: {error:#}", team.display()),

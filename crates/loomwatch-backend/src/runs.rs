@@ -2079,8 +2079,8 @@ impl LaunchError {
             Self::NeedsReview(review) => ApiError::new(
                 StatusCode::CONFLICT,
                 format!(
-                    "{} was added or changed outside LoomWatch, so it doesn't run until you've \
-                     checked what it runs. Open it in LoomWatch and run it once to review it.",
+                    "{0}, or one of its agents, changed outside LoomWatch. Open {0} and press Run \
+                     team: you’ll see what it will do before anything runs.",
                     review.team_name
                 ),
             ),
@@ -2147,8 +2147,8 @@ pub(crate) async fn start_response(
         Err(LaunchError::NeedsReview(review)) => {
             let mut body = serde_json::to_value(&*review).unwrap_or_else(|_| json!({}));
             body["error"] = json!(
-                "This team came from outside LoomWatch, or changed there. Open it and press Run to \
-                 check what it runs before it starts."
+                "This team, or one of its agents, changed outside LoomWatch. Press Run team: \
+                 you’ll see what it will do before anything runs."
             );
             body["code"] = json!(TEAM_NEEDS_REVIEW);
             Ok((StatusCode::CONFLICT, Json(body)).into_response())
@@ -2208,14 +2208,23 @@ async fn approve_team(
             .into_response());
     }
     if let Some(approvals) = state.registry.approvals() {
+        let kept = |error: std::io::Error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("LoomWatch could not keep your approval: {error}"),
+            )
+        };
         approvals
             .approve(&relative, &current, Approval::Reviewed)
-            .map_err(|error| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("LoomWatch could not keep your approval: {error}"),
-                )
-            })?;
+            .map_err(kept)?;
+        // The review showed its agents from My agents as their files say now (ADR 0094).
+        for (agent, revision) in
+            agents_approval(&state.teams_root, &String::from_utf8_lossy(&bytes))
+        {
+            approvals
+                .approve_agent(&agent, &revision, Approval::Reviewed)
+                .map_err(kept)?;
+        }
     }
     Ok((
         StatusCode::OK,
@@ -2948,9 +2957,16 @@ fn prepare_run(
             format!("team file {} is not UTF-8: {error}", resolved.display()),
         )
     })?;
-    let team = TeamConfig::parse(source)
+    let team = TeamConfig::parse_in(source, teams_root)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("{error:#}")))?;
-    check_approved(approvals, &relative, &current_revision, &team, &resolved)?;
+    check_approved(
+        approvals,
+        &relative,
+        &current_revision,
+        &team,
+        &resolved,
+        &agents_approval(teams_root, source),
+    )?;
     let Some(archive) = archive else {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -3009,17 +3025,36 @@ fn prepare_run(
     })
 }
 
+/// The agents of My agents a team's text is filled in from, each with the revision of its file
+/// now (ADR 0094). An agent whose file is gone has none: reading the team already refused it.
+fn agents_approval(teams_root: &Path, source: &str) -> Vec<(String, String)> {
+    crate::my_agents::filled_from(source)
+        .into_iter()
+        .filter_map(|agent| {
+            let bytes = crate::jobs::job_bytes(teams_root, &agent)?;
+            Some((agent, crate::approvals::revision(&bytes)))
+        })
+        .collect()
+}
+
 /// A team file nobody approved here starts nothing, scheduled or not (ADR 0048): it came from
-/// outside `LoomWatch`, or changed there, and the operator has not seen what it runs.
+/// outside `LoomWatch`, or changed there, and the operator has not seen what it runs. Nor does a
+/// team one of whose agents in My agents did (ADR 0094): the team runs what that file says.
 fn check_approved(
     approvals: Option<&TeamApprovals>,
     relative: &str,
     revision: &str,
     team: &TeamConfig,
     resolved: &Path,
+    agents: &[(String, String)],
 ) -> Result<(), LaunchError> {
     match approvals {
-        Some(approvals) if !approvals.is_approved(relative, revision) => {
+        Some(approvals)
+            if !approvals.is_approved(relative, revision)
+                || agents
+                    .iter()
+                    .any(|(agent, revision)| !approvals.is_agent_approved(agent, revision)) =>
+        {
             Err(LaunchError::NeedsReview(Box::new(NeedsReview {
                 team_name: team_display_name(team, resolved),
                 team_path: relative.to_owned(),
@@ -3257,7 +3292,7 @@ async fn deliver_run(
 fn default_delivery_title(teams_root: &Path, team_path: &str) -> String {
     let path = teams_root.join(team_path);
     let now = Utc::now();
-    if let Ok(team) = TeamConfig::load(&path) {
+    if let Ok(team) = TeamConfig::load_in(&path, teams_root) {
         let name = team_display_name(&team, &path);
         return team
             .notion_delivery_title(false, &name, now)
@@ -4030,7 +4065,7 @@ fn learn_from_review(
         return;
     };
     let path = state.teams_root.join(&record.team_path);
-    let Ok(team) = TeamConfig::load(&path) else {
+    let Ok(team) = TeamConfig::load_in(&path, &state.teams_root) else {
         return;
     };
     let Some(agent) = team
@@ -6178,6 +6213,77 @@ pub(crate) mod tests {
         let changed = app.oneshot(post_json("/api/runs", &start)).await.unwrap();
         assert_eq!(changed.status(), StatusCode::CONFLICT);
         assert_eq!(json_body(changed).await["code"], TEAM_NEEDS_REVIEW);
+    }
+
+    /// ADR 0094: a team runs its agents from My agents as their files say, so an agent file
+    /// changed outside `LoomWatch` holds every team that uses it until the operator has looked, as
+    /// a changed team file does. Approving the team approves the agent as it was shown.
+    #[tokio::test]
+    async fn an_agent_changed_outside_loomwatch_holds_its_teams_until_reviewed() {
+        let dir = TeamsDir::new();
+        let approvals_home = TeamsDir::new();
+        let harness = completing();
+        fs::create_dir(dir.0.join(".jobs")).unwrap();
+        let agent = dir.0.join(".jobs/solo.yaml");
+        fs::write(
+            &agent,
+            format!("name: Solo\ninstructions: answer directly\nmodel: {harness}\n"),
+        )
+        .unwrap();
+        let team_path = dir.0.join("mine.yaml");
+        fs::write(
+            &team_path,
+            "schemaVersion: 1\nid: fake\nname: Fake harness team\nentrypoint: solo\nagents:\n  - id: solo\n    from:\n      agent: solo\n",
+        )
+        .unwrap();
+        let registry = RunRegistry::default();
+        registry.set_approvals(Arc::new(
+            TeamApprovals::open(&approvals_home.0, &dir.0).expect("open approvals"),
+        ));
+        let app = router(None, dir.0.clone(), registry.clone());
+        let start = json!({"teamPath": "mine.yaml", "prompt": "hello"});
+
+        // Both were there when the folder was opened.
+        let runs = app
+            .clone()
+            .oneshot(post_json("/api/runs", &start))
+            .await
+            .unwrap();
+        assert_eq!(runs.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        fs::write(
+            &agent,
+            format!("name: Solo\ninstructions: answer directly\nmodel: {harness}\nallow:\n  commands: true\n"),
+        )
+        .unwrap();
+        let held = app
+            .clone()
+            .oneshot(post_json("/api/runs", &start))
+            .await
+            .unwrap();
+        assert_eq!(held.status(), StatusCode::CONFLICT);
+        let body = json_body(held).await;
+        assert_eq!(body["code"], TEAM_NEEDS_REVIEW);
+        assert!(
+            body["review"].as_array().unwrap().iter().any(
+                |line| line["text"] == "Solo may run commands on this computer without asking."
+            ),
+            "the review shows what the agent's file says now: {body}"
+        );
+
+        let approve = json!({"teamPath": "mine.yaml", "teamRevision": body["teamRevision"]});
+        let approved = app
+            .clone()
+            .oneshot(post_json("/api/team/approve", &approve))
+            .await
+            .unwrap();
+        assert_eq!(approved.status(), StatusCode::OK);
+        let runs = app.oneshot(post_json("/api/runs", &start)).await.unwrap();
+        assert_eq!(
+            runs.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "past the review, the run only lacks a database"
+        );
     }
 
     /// Teams already in the folder when `LoomWatch` first opened it keep running unreviewed, and

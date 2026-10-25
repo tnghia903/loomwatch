@@ -326,7 +326,7 @@ fn unconnected_source(
     connected: &[crate::ai::Source],
 ) -> Option<String> {
     let text = fs::read_to_string(teams_root.join(key)).ok()?;
-    let team = TeamConfig::parse(&text).ok()?;
+    let team = TeamConfig::parse_in(&text, teams_root).ok()?;
     team.agents
         .iter()
         .filter(|agent| agent.kind != crate::config::AgentKind::Operator)
@@ -375,7 +375,7 @@ fn scan(teams_root: &Path) -> Vec<(String, Scanned)> {
     team_files(teams_root)
         .into_iter()
         .map(|(key, path)| {
-            let scanned = inspect(&path);
+            let scanned = inspect(&path, teams_root);
             (key, scanned)
         })
         .collect()
@@ -428,8 +428,8 @@ pub(crate) fn team_files(teams_root: &Path) -> Vec<(String, PathBuf)> {
     found
 }
 
-fn inspect(path: &Path) -> Scanned {
-    match TeamConfig::load(path) {
+fn inspect(path: &Path, teams_root: &Path) -> Scanned {
+    match TeamConfig::load_in(path, teams_root) {
         Ok(team) => match team.schedule {
             Some(schedule) => Scanned::Scheduled {
                 team_name: display_name(&team.name, path),

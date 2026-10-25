@@ -11,12 +11,12 @@ import type { DetectedCapability } from '../../lib/library/client'
 import { BLANK_DRAFT, blankDraft, draftChanged, draftFromJob, draftFromPreset, specFromDraft, type AgentDraft } from '../../lib/library/draft'
 import type { ReadSource } from '../../lib/library/figure'
 import { figureFor, freshFigure } from '../../lib/library/figures'
-import { JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type JobSpec, type SavedJob } from '../../lib/library/jobs'
+import { JobApiError, jobIdFor, removeJob, saveJob, useSavedJobs, versionOf, type SavedJob } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { ROLE_PRESETS } from '../../lib/library/roles'
 import type { TeamKnowledge } from '../../lib/library/teamDraft'
 import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
-import { relativeTime } from '../../lib/format'
+import { listNames, relativeTime } from '../../lib/format'
 import { isMac } from '../../lib/platform'
 import { PINNED_SHORTCUT_WORDS } from '../../island/bridge'
 import type { RunRecord } from '../../lib/runs/client'
@@ -45,13 +45,12 @@ export interface AgentBuilderProps {
   /** Which tab of its page is open, from the address: Build, or its Chat. Inside a team the page keeps it. */
   view?: AgentView
   /**
-   * Shown inside a team's Agents tab, for an agent placed from Your agents: there is no page to
-   * go back to, and every save is followed by moving that team to the version just saved, from the
-   * version it had (`previous`). What the team gives it to read besides its own stays the team's
-   * (lib/library/link.ts), so its file drawer shows both, and what its chat sends from here reads
-   * the same (`knowledge`); its tools are the version's, like its skills.
+   * Shown inside a team's Agents tab: there is no page to go back to, and after each save the team
+   * shows the agent as it is now (ADR 0094). What the team gives it to read besides its own stays
+   * the team's (lib/team-file/myAgents.ts), so its file drawer shows both, and what its chat sends
+   * from here reads the same (`knowledge`).
    */
-  inTeam?: { name: string; onSaved: (job: SavedJob, previous: Pick<JobSpec, 'reads'> | null) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
+  inTeam?: { name: string; onSaved: (job: SavedJob) => void; reads: readonly ReadSource[]; knowledge: TeamKnowledge; onShowWorkflow?: () => void }
   /** Kept up to date with what moving to another agent would lose (the rail asks it first). */
   leaveRef?: MutableRefObject<LeaveGuard | null>
   /**
@@ -62,17 +61,16 @@ export interface AgentBuilderProps {
   bar?: AgentBarSlots
 }
 
-/** `bumped`: the save changed what teams copy, so the teams that use it have an update ready. */
-type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; bumped: boolean } | { kind: 'error'; message: string }
+type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string; removing?: boolean }
 
 /**
- * One of Your agents, on its own page with two tabs, as a team has its own: Build and Chat.
+ * One of My agents, on its own page with two tabs, as a team has its own: Build and Chat.
  *
  * Build is its workbench (ByHand): every setting, each in one place, with what you picked open
- * beside it, then what its settings add up to (the ID card), where it is used and how it got here
- * (its versions). Chat is where you work with it before any team depends on it, and after (AgentChat):
- * the same bench, with the figure working as the chat's newest work says, beside the conversation.
- * Saving a change a team would copy makes the next version; teams keep theirs until they Update.
+ * beside it, then what its settings add up to (the ID card) and the teams it is in. Chat is where
+ * you work with it before any team depends on it, and after (AgentChat): the same bench, with the
+ * figure working as the chat's newest work says, beside the conversation. There is one of it
+ * (ADR 0094): a save reaches every team it is in from that team's next run.
  *
  * Inside a team (`inTeam`) it has the same two tabs, and its Chat is the one it has in Your agents:
  * talking to one agent on its own is a different thing from giving the team work in the team's chat.
@@ -131,9 +129,6 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
   const { uses } = useAgentUses()
   const mine = (uses ?? []).filter((use) => saved && use.agent === saved.id)
-  // Versions are kept behind the scenes, so a team knows when it has an older copy to update;
-  // nobody reads a number.
-  const version = saved ? versionOf(saved) : null
 
   const changed = base ? draftChanged(draft, base) : true
   const problem = !draft.name.trim() ? 'Give it a name.' : !draft.instructions.trim() ? 'Write its instructions.' : null
@@ -160,8 +155,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
       const next = draftFromJob(result)
       setBase(next)
       setDraft(next)
-      setSave({ kind: 'saved', bumped: Boolean(saved) && versionOf(result) > versionOf(saved!) })
-      inTeam?.onSaved(result, base ? { reads: base.reads } : null)
+      setSave({ kind: 'saved' })
+      inTeam?.onSaved(result)
       if (!saved) {
         setStartedFor(result.id)
         const query = new URLSearchParams(cameFrom ? { team: cameFrom } : {})
@@ -206,7 +201,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
 
   async function doRemove() {
     if (!saved) return
-    try { await removeJob(saved.id); navigate('/agents') } catch (failed) { setSave({ kind: 'error', message: failed instanceof Error ? failed.message : String(failed) }); setRemoving(false) }
+    try { await removeJob(saved.id); navigate('/agents') } catch (failed) { setSave({ kind: 'error', message: failed instanceof Error ? failed.message : String(failed), removing: true }); setRemoving(false) }
   }
 
   if (id && !saved) {
@@ -223,18 +218,17 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   // The team the operator came from, which the team panel names by its file, absolute or not.
   const cameFromUse = cameFrom ? mine.find((use) => use.teamPath === cameFrom || cameFrom.endsWith(`/${use.teamPath}`)) ?? null : null
   const scheduledUses = mine.filter((use) => use.scheduled).length
-  const behindUses = version ? mine.filter((use) => use.version < version).length : 0
   const saveLabel = !saved ? 'Save to My agents' : 'Save'
   const markId = saved?.id ?? (draft.name || 'new')
   const figure = figureFor(saved?.id ?? startKey, draft.figure)
-  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses, behind: behindUses } : undefined} />
+  const badge = <AgentBadge markId={markId} figure={figure} draft={draft} modelName={modelName} effortName={effortName} usedIn={saved ? { teams: mine.length, scheduled: scheduledUses } : undefined} />
 
   const name = draft.name.trim() || 'New agent'
   const saveButton = <button type="button" className="btn btn-primary" data-tour="save-agent" disabled={!changed || Boolean(problem) || save.kind === 'saving'} title={problem ?? undefined} onClick={() => void doSave()}>{save.kind === 'saving' ? 'Saving…' : saveLabel}</button>
-  const saveSaid = save.kind === 'saved' ? (save.bumped ? (inTeam ? `Saved, and ${inTeam.name} now uses it. Save the team to keep that.` : mine.length > 0 ? 'Saved. Each team that uses it keeps its copy until you press Update in that team.' : 'Saved.') : 'Saved.')
+  const saveSaid = save.kind === 'saved' ? 'Saved.'
     : save.kind === 'error' ? <span className="agent-save-error">{save.message}</span> : null
-  // Back to the team's agents: that is where an agent is added, or updated.
-  const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}{save.kind === 'saved' && save.bumped ? ' to update it' : ''}</a>
+  // Back to the team's agents, where an agent is added.
+  const backToTeam = cameFrom && <a className="link agent-back" href={`/?path=${encodeURIComponent(cameFromUse?.teamPath ?? cameFrom)}&view=agents`}>Back to {cameFromUse?.teamName ?? 'the team'}</a>
   const bench = (
     <ByHand
       draft={draft} set={set} skills={skills} skillsLoading={skillsLoading} roleField={roleField} figure={figure} record={benchRecord} reads={inTeam?.reads} onShowWorkflow={inTeam?.onShowWorkflow}
@@ -259,9 +253,8 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
                 : <ul className="agent-uses">
                   {mine.map((use) => (
                     <li key={`${use.teamPath}#${use.agentId}`}>
-                      {/* To the team's Agents tab with this agent open, where its Update is. */}
+                      {/* To the team's Agents tab with this agent open. */}
                       <a href={teamAgentHref(use)}>{use.teamName}<ExternalLink size={12} aria-hidden="true" /></a>
-                      <span className={`agent-use-version${version && use.version < version ? ' behind' : ''}`}>{version && use.version < version ? 'Update ready there' : 'Up to date'}</span>
                       {use.scheduled && <span className="t-meta">on a schedule</span>}
                     </li>
                   ))}
@@ -270,10 +263,11 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
           )}
 
           {/* On its own page, Remove is in its name chip's menu, as Delete team is in a team's (ADR 0043). */}
-          {saved && !bar && (
+          {/* Inside a team it can't be removed: that team uses it. */}
+          {saved && !bar && !inTeam && (
             <div className="agent-remove">
               {removing
-                ? <><span className="t-meta">Remove it from My agents? Teams keep their copies.</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
+                ? <><span className="t-meta">Remove it from My agents?</span><button type="button" className="btn" onClick={() => void doRemove()}>Remove</button><button type="button" className="btn" onClick={() => setRemoving(false)}>Keep it</button></>
                 : <button type="button" className="link" onClick={() => setRemoving(true)}><Trash2 size={12} aria-hidden="true" />Remove from My agents</button>}
             </div>
           )}
@@ -289,14 +283,14 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
     const state: ChipState = save.kind === 'saving' ? 'saving' : save.kind === 'error' ? 'failed' : problem ? 'incomplete' : !saved ? 'new' : changed ? 'dirty' : save.kind === 'saved' ? 'saved' : 'clean'
     // A saved agent can be kept at the notch of a Mac (ADR 0083): only the island there shows it.
     const pin = saved && isMac() ? { pinned: pinned.pinned === saved.id, notchShown: pinned.notchShown, onToggle: () => void togglePin(saved.id, name) } : undefined
-    const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? 'Couldn’t save' : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
+    const detail = save.kind === 'saving' ? 'Saving…' : save.kind === 'error' ? (save.removing ? 'Couldn’t remove' : 'Couldn’t save') : problem ?? (!saved ? 'Not saved yet' : changed ? 'Unsaved changes' : saved.savedAt ? `Saved ${relativeTime(new Date(saved.savedAt))}` : 'Saved')
     return (
       <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
-        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => void doRemove() : undefined} pin={pin} />, bar.chip)}
+        {bar.chip && createPortal(<AgentChip name={name} state={state} detail={detail} action={changed || save.kind === 'saving' ? saveButton : undefined} onRemove={saved ? () => void doRemove() : undefined} inTeams={mine.map((use) => use.teamName)} pin={pin} />, bar.chip)}
         {bar.tabs && createPortal(<AgentViewTabs view={view} onView={showView} tour inBar />, bar.tabs)}
         <h1 className="visually-hidden">{name}</h1>
         {/* The way back to a team, and what a save did. Always there, so a save is announced. */}
-        <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>))}</span></div>
+        <div className="agent-notices">{backToTeam}<span className={`agent-save-state t-meta${saveSaid === 'Saved.' ? ' quiet' : ''}`} role="status">{saveSaid ?? (changed && mine.length > 0 ? `Saving changes it in ${listNames(mine.map((use) => use.teamName))} too.` : pinSaid && (pinSaid.ok ? pinSaid.text : <span className="agent-save-error">{pinSaid.text}</span>))}</span></div>
         {bench}
         {side}
       </div>
@@ -306,7 +300,7 @@ export function AgentBuilder({ id, startFrom = null, skills, skillsLoading, came
   return (
     <div className="agent-builder" data-tour="agent-builder" data-tour-saved={saved && !changed ? true : undefined}>
       <AgentHead
-        above={inTeam ? <span className="agent-backs t-meta">From My agents. Saving changes it there too. Other teams keep their copy until you update them.</span> : <span className="agent-backs">
+        above={inTeam ? <span className="agent-backs t-meta">One of My agents: saving changes it in every team it’s in.</span> : <span className="agent-backs">
           <a className="link agent-back" href="/agents" onClick={(event) => { event.preventDefault(); navigate('/agents') }}><ArrowLeft size={14} aria-hidden="true" />My agents</a>
           {backToTeam}
         </span>}
