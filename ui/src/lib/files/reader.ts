@@ -39,7 +39,9 @@ const FORMATS: Array<[RegExp, ReaderFormat]> = [
   // alone where it can't be. An old .ppt or a LibreOffice deck has no words LoomWatch reads, so
   // without LibreOffice it would show nothing: it opens in its own app.
   [/^(pptx|pptm)$/, 'slides'],
-  [/^(docx|docm|xlsx|xlsm)$/, 'document'],
+  // A Word document is drawn as its pages in the same way. An old .doc, an .odt or an .rtf has no
+  // words LoomWatch reads either: it opens in its own app.
+  [/^(docx|docm)$/, 'document'],
   [/^(png|jpe?g|gif|webp|svg|bmp)$/, 'picture'],
   [/^(mp3|wav|m4a|mp4|mov|webm)$/, 'media'],
 ]
