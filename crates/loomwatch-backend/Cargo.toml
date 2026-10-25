@@ -45,7 +45,7 @@ regex = "1.11"
 unicode-normalization = "0.1"
 # The archive keeps raw ACP frames compressed (archive/codec.rs).
 zstd = { version = "0.13", default-features = false }
-tokio = { version = "1.47", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.47", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 # Skills installed from GitHub arrive as a .tar.gz (marketplace.rs).
 flate2 = "1.1"
 tar = "0.4"

@@ -85,6 +85,49 @@
 .rd-picture img { max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 4px color-mix(in srgb, var(--lw-ink-950) 8%, transparent), 0 16px 40px color-mix(in srgb, var(--lw-ink-950) 14%, transparent); }
 .rd-media { display: block; width: calc(100% - 48px); max-width: 720px; margin: 40px auto; }
 
+/* ---------- A part of a recording (ADR 0091, MediaView.tsx) ----------
+   Under the recording, its bar: a press marks a moment, a drag along it a span. Each part asked
+   about is a mark on the bar (a tick, a bar, or a full-height mark for a box on a frame) with its
+   agents' bubbles above it. On a paused video a drag over the picture marks a box on that frame,
+   drawn as a picture's box is; the bottom of the picture is left to the player's own controls. */
+.rd-as-media { user-select: none; -webkit-user-select: none; }
+.rd-media-view { box-sizing: border-box; width: calc(100% - 48px); max-width: 720px; margin: 32px auto 96px; }
+.rd-media-view .rd-media { width: 100%; margin: 0; }
+.rd-media-frame { position: relative; line-height: 0; }
+/* The whole frame, where boxes are placed; only its catch above the controls takes the pointer. A
+   finger scrolls rather than draws, as on a picture. */
+.rd-media-drawing { position: absolute; inset: 0; pointer-events: none; isolation: isolate; }
+.rd-media-catch { position: absolute; top: 0; left: 0; right: 0; cursor: crosshair; pointer-events: auto; touch-action: manipulation; }
+/* Safari puts a video's mute and volume at its top right: that corner is left to them as well. */
+.rd-media-catch { clip-path: polygon(0 0, calc(100% - 200px) 0, calc(100% - 200px) 48px, 100% 48px, 100% 100%, 0 100%); }
+.rd-media-line { position: relative; height: 28px; margin-top: 32px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-ink) 6%, transparent); box-shadow: inset 0 0 0 1px var(--color-warp); isolation: isolate; }
+.rd-media-line.askable { cursor: pointer; touch-action: pan-y; }
+.rd-media-line.askable:hover { background: color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.rd-media-line.askable:active { background: color-mix(in srgb, var(--color-ink) 14%, transparent); }
+.rd-media-line:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-media-now { position: absolute; top: 3px; bottom: 3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--color-ink-3); pointer-events: none; }
+/* The agent asked, at the bar's start until a part of the recording has been asked about. */
+.rd-media-face { position: absolute; top: 50%; left: 6px; translate: 0 -50%; line-height: 0; pointer-events: none; }
+/* Where a press would mark, with its time above it. */
+.rd-media-hover { position: absolute; top: 3px; bottom: 3px; width: 1px; margin-left: -0.5px; background: var(--color-ink-2); pointer-events: none; }
+.rd-media-hover > span { position: absolute; bottom: calc(100% + 7px); left: 50%; translate: -50% 0; font: 400 11px/15px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-ink-2); white-space: nowrap; }
+.rd-box.rd-moment { --rd-rim: 0 0 transparent; top: 6px; bottom: 6px; min-width: 4px; min-height: 0; margin-left: -2px; border-color: var(--color-accent); border-radius: var(--r-xs); cursor: pointer; }
+/* A box on a frame stands the bar's full height: neither a span's bar nor a moment's tick. */
+.rd-box.rd-moment.frame { top: 2px; bottom: 2px; width: 12px; margin-left: -6px; }
+/* A finger's worth to press around a thin mark. */
+.rd-box.rd-moment[data-part]::after { content: ''; position: absolute; inset: -6px -8px; }
+.rd-box.rd-moment:is(.marking, .drawing) { pointer-events: none; }
+/* Above its mark, clear of the bar and of the player's controls; MediaView moves bubbles that
+   would cover one another to rows under the bar, and keeps them inside its ends. */
+.rd-box.rd-moment > .rd-slot { top: -28px; right: auto; left: 50%; translate: -50% 0; }
+/* The bubble sits over its mark: there are no words for its point to lean to. */
+.rd-box.rd-moment .rd-bubble-point { display: none; }
+@media (pointer: coarse) {
+  .rd-media-line { height: 44px; }
+  .rd-box.rd-moment { top: 10px; bottom: 10px; }
+  .rd-box.rd-moment.frame { top: 4px; bottom: 4px; }
+}
+
 /* ---------- A part of a picture: a box (ADR 0091, PictureView.tsx) ----------
    Dragged over the picture, or the whole of it for a click. Drawn as the marker draws words: a gold
    tint edged in the marker's deeper gold, with a thin dark and light rim so it shows on any picture;
@@ -131,11 +174,11 @@
 /* A sheet holding cells asked about: a small box after its name, the range's own shape. */
 .rd-sheet-asked { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border: 1.5px solid var(--color-accent); border-radius: 2px; background: color-mix(in srgb, var(--color-marker) 30%, transparent); vertical-align: 0; }
 /* On a sheet the range's edge is the accent line alone: the rim was for any picture under a box. */
-.rd-box.rd-range { --rd-rim: none; border-radius: 3px; border-color: var(--color-accent); pointer-events: none; }
+.rd-box.rd-range { --rd-rim: 0 0 transparent; border-radius: 3px; border-color: var(--color-accent); pointer-events: none; }
 .rd-box.rd-range.corner { border-bottom-right-radius: 10px; }
 /* Beside the range's top row, not over its cells: a bubble at the corner would cover a number. */
 .rd-box.rd-range > .rd-slot { top: 1px; right: auto; left: calc(100% + 8px); pointer-events: auto; }
- (pointer: coarse) {
+@media (pointer: coarse) {
   .rd-sheet-tabs button { min-height: 44px; }
   .rd-grid.askable thead th, .rd-grid.askable .rd-row-name { min-width: 44px; height: 44px; }
 }
@@ -192,6 +235,7 @@
 .rd-bubble-point-edge { fill: none; stroke: var(--rd-b-edge); stroke-width: 1px; stroke-linejoin: round; stroke-linecap: round; }
 .rd-bubble:is(.read, .failed) { padding-right: 2px; }
 .rd-bubble:hover, .rd-bubble:focus-visible, .rd-bubble.lit { scale: 1.08; }
+.rd-bubble:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 /* Several agents asked about the same words: their bubbles stack, each over the one before, and
    only the first points at the words. The one pointed at comes up over the rest, with its agent's
    card (FileReader); the one whose answer is open stays above the others. Inside the stack each

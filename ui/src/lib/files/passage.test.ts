@@ -41,6 +41,9 @@ describe('a marked part, as it is asked about', () => {
     expect(partId({ text: 'x', at: { ...topRight, page: 3 } })).toBe('x\u0001box:5000,0,5000,5000@3')
     expect(partId({ text: 'x', at: { kind: 'cells', top: 2, left: 1, bottom: 9, right: 4 } })).toBe('x\u0001cells:2,1,9,4')
     expect(partId({ text: 'x', at: { kind: 'cells', sheet: 'Q3', top: 2, left: 1, bottom: 9, right: 4 } })).toBe('x\u0001cells:2,1,9,4@Q3')
+    expect(partId({ text: 'x', at: { kind: 'time', start: 42_000 } })).toBe('x\u0001time:42000')
+    expect(partId({ text: 'x', at: { kind: 'time', start: 42_000, end: 51_000 } })).toBe('x\u0001time:42000-51000')
+    expect(partId({ text: 'x', at: { ...topRight, ms: 7_000 } })).toBe('x\u0001box:5000,0,5000,5000@t7000')
     const asked = { text: 'The top right of the picture', from: 'writer' }
     expect(askKey({ ...asked, at: topRight })).not.toBe(askKey({ ...asked, at: smaller }))
     expect(askKey({ text: 'Sales grew', from: 'writer' })).toBe('writer\u0000Sales grew')

@@ -403,32 +403,97 @@ async fn get_file_read(
         .map(Json)
 }
 
-/// A produced picture or recording as it is (ADR 0077). Answered sandboxed: opened on its own, an
-/// SVG's scripts would otherwise run as this daemon's page.
+/// A produced picture or recording as it is (ADR 0077), all of it or the part a player asks for
+/// with `Range` (ADR 0091), read from disk as it goes, so a recording of any size plays and seeks,
+/// in Safari too. Answered sandboxed: opened on its own, an SVG's scripts would otherwise run as
+/// this daemon's page.
 async fn get_file_raw(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(query): Query<TeamPath>,
 ) -> Result<Response, ApiError> {
+    use crate::files::Wanted;
     let teams_root = state.teams_root.clone();
-    let (media_type, bytes) =
-        tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
-            .await
-            .map_err(|error| {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
-            })??;
-    Ok((
+    let file = tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok());
+    let wanted = crate::files::wanted(range, file.size);
+    let (status, start, length, content_range) = match wanted {
+        Wanted::Whole => (StatusCode::OK, 0, file.size, None),
+        Wanted::Part { start, end } => (
+            StatusCode::PARTIAL_CONTENT,
+            start,
+            end - start + 1,
+            Some(format!("bytes {start}-{end}/{}", file.size)),
+        ),
+        Wanted::Unsatisfiable => (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            0,
+            0,
+            Some(format!("bytes */{}", file.size)),
+        ),
+    };
+    let body = if length == 0 {
+        axum::body::Body::empty()
+    } else {
+        file_body(&file.path, start, length).await?
+    };
+    let mut response = (
+        status,
         [
-            (header::CONTENT_TYPE, media_type),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_TYPE, file.media_type.to_owned()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
             (
                 header::CONTENT_SECURITY_POLICY,
-                "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+                "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'".to_owned(),
             ),
-            (header::CACHE_CONTROL, "no-store"),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+            (header::ACCEPT_RANGES, "bytes".to_owned()),
+            (header::CONTENT_LENGTH, length.to_string()),
         ],
-        bytes,
+        body,
     )
-        .into_response())
+        .into_response();
+    if let Some(content_range) = content_range
+        && let Ok(value) = content_range.parse()
+    {
+        response.headers_mut().insert(header::CONTENT_RANGE, value);
+    }
+    Ok(response)
+}
+
+/// `length` bytes of the file at `path` from byte `start`, read as they are sent, a piece at a time.
+async fn file_body(path: &Path, start: u64, length: u64) -> Result<axum::body::Body, ApiError> {
+    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+    let failed = |error: io::Error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read it: {error}"),
+        )
+    };
+    let mut file = tokio::fs::File::open(path).await.map_err(failed)?;
+    if start > 0 {
+        file.seek(io::SeekFrom::Start(start))
+            .await
+            .map_err(failed)?;
+    }
+    // After a read fails, the stream ends: the player asks again for what it still needs.
+    let pieces = futures_util::stream::unfold(Some(file.take(length)), |reader| async move {
+        let mut reader = reader?;
+        let mut piece = vec![0; 64 * 1024];
+        match reader.read(&mut piece).await {
+            Ok(0) => None,
+            Ok(read) => {
+                piece.truncate(read);
+                Some((Ok::<_, io::Error>(piece), Some(reader)))
+            }
+            Err(error) => Some((Err(error), None)),
+        }
+    });
+    Ok(axum::body::Body::from_stream(pieces))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1927,6 +1992,71 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// **A recording is answered a part at a time (ADR 0091).** Safari plays only what it can ask
+    /// for by byte range; every answer keeps the sandbox, and says the file can be asked so.
+    #[tokio::test]
+    async fn raw_answers_the_bytes_a_player_asks_for() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        let bytes: Vec<u8> = (0..200_000u32)
+            .map(|at| u8::try_from(at % 251).unwrap_or(0))
+            .collect();
+        fs::write(workspace.join("talk.mp4"), &bytes).expect("write recording");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let clip = canonical.join(".loomwatch/team/writer/talk.mp4");
+        let ask = |range: Option<&str>| {
+            let mut request = Request::builder()
+                .uri(format!("/api/files/raw?path={}", clip.display()))
+                .header(header::HOST, "localhost");
+            if let Some(range) = range {
+                request = request.header(header::RANGE, range);
+            }
+            test_router(&root.0).oneshot(request.body(Body::empty()).expect("request"))
+        };
+        let body = |response: Response| async move {
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("collect response body")
+                .to_bytes()
+                .to_vec()
+        };
+
+        let whole = ask(None).await.expect("response");
+        assert_eq!(whole.status(), StatusCode::OK);
+        assert_eq!(whole.headers()[header::CONTENT_TYPE], "video/mp4");
+        assert_eq!(whole.headers()[header::ACCEPT_RANGES], "bytes");
+        assert_eq!(whole.headers()[header::CONTENT_LENGTH], "200000");
+        assert!(
+            whole.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .expect("policy")
+                .starts_with("sandbox")
+        );
+        assert_eq!(body(whole).await, bytes, "read whole, past one piece");
+
+        let middle = ask(Some("bytes=70000-150000")).await.expect("response");
+        assert_eq!(middle.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            middle.headers()[header::CONTENT_RANGE],
+            "bytes 70000-150000/200000"
+        );
+        assert_eq!(middle.headers()[header::CONTENT_LENGTH], "80001");
+        assert_eq!(middle.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(body(middle).await, &bytes[70_000..=150_000]);
+
+        let end = ask(Some("bytes=-10")).await.expect("response");
+        assert_eq!(end.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body(end).await, &bytes[199_990..]);
+
+        let past = ask(Some("bytes=200000-")).await.expect("response");
+        assert_eq!(past.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(past.headers()[header::CONTENT_RANGE], "bytes */200000");
+        assert!(body(past).await.is_empty());
     }
 
     /// A file read inside `LoomWatch`: its text as JSON, and a picture as it is — sandboxed, so an
