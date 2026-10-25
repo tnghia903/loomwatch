@@ -185,6 +185,9 @@
 
 /* The tip's mark on a picture is the box the drag draws, still. */
 .rd-hint mark.box { padding: 0 3px; border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-marker) 14%, transparent); }
+/* The mark at a thing's corner in a web page (pageFrame.ts .lw-thing-mark), drawn small in its tip:
+   the asked agent's face in a dashed chip. */
+.rd-hint-thing { display: inline-grid; place-items: center; box-sizing: border-box; width: 20px; height: 20px; margin: 0 2px; border: 1.5px dashed var(--color-accent); border-radius: 6px; vertical-align: -5px; line-height: 0; }
 
 /* ---------- The parts asked about: a marker stroke on the words, the agent's bubble after them ----------
    lib/files/partMarks.ts wraps each part's words in .rd-mark and leaves a .rd-slot after the last
