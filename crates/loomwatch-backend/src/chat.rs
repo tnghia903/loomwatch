@@ -340,6 +340,80 @@ pub struct ReplyTo {
     /// The file a [`ReplyKind::Passage`] is a part of, by its full path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// Where a [`ReplyKind::Passage`] that isn't words is in its file (ADR 0091); `None` for words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<PartAt>,
+}
+
+/// The whole of a picture's width or height in [`PartAt`]'s units: ten-thousandths.
+const PART_WHOLE: u16 = 10_000;
+
+/// Where a part of a file that isn't words is (ADR 0091), as the reader marked it.
+///
+/// A place on a picture, page, slide or frame is in ten-thousandths of its width and height from its
+/// top left, so the part keeps its place however large the reader drew it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PartAt {
+    /// A box on a picture, or on page `page` (from 1) of a document.
+    Box {
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        page: Option<u32>,
+    },
+    /// A kind a newer version wrote: the part reads as its words.
+    #[serde(other)]
+    Unknown,
+}
+
+impl PartAt {
+    /// Whether the place is one the reader could have marked: a box inside its picture.
+    fn usable(&self) -> bool {
+        match *self {
+            Self::Box { x, y, w, h, page } => {
+                w > 0
+                    && h > 0
+                    && u32::from(x) + u32::from(w) <= u32::from(PART_WHOLE)
+                    && u32::from(y) + u32::from(h) <= u32::from(PART_WHOLE)
+                    && page != Some(0)
+            }
+            Self::Unknown => false,
+        }
+    }
+
+    /// Where it is, as the agent is told: "the box from 50% to 100% of the way across from the
+    /// left, and 0% to 50% of the way down from the top".
+    fn described(&self) -> Option<String> {
+        match *self {
+            Self::Box { x, y, w, h, page } => {
+                let page = page
+                    .map(|page| format!("on page {page}, "))
+                    .unwrap_or_default();
+                Some(format!(
+                    "{page}the box from {} to {} of the way across from the left, and {} to {} of \
+                     the way down from the top",
+                    percent(x),
+                    percent(x.saturating_add(w)),
+                    percent(y),
+                    percent(y.saturating_add(h)),
+                ))
+            }
+            Self::Unknown => None,
+        }
+    }
+}
+
+/// Ten-thousandths as a percent with at most one decimal: `1250` is "12.5%".
+fn percent(units: u16) -> String {
+    let tenths = (u32::from(units) + 5) / 10;
+    if tenths % 10 == 0 {
+        format!("{}%", tenths / 10)
+    } else {
+        format!("{}.{}%", tenths / 10, tenths % 10)
+    }
 }
 
 impl ReplyTo {
@@ -379,8 +453,14 @@ impl ReplyTo {
             (ReplyKind::Passage, Some(path)) => format!(", in the file {path}"),
             _ => String::new(),
         };
+        // A part that isn't words is told by its place too: its words only name it ("The top right
+        // of the picture"), and its picture, when it has one, goes with the message (ADR 0091).
+        let place = match (self.kind, self.at.as_ref().and_then(PartAt::described)) {
+            (ReplyKind::Passage, Some(place)) => format!(", {place}"),
+            _ => String::new(),
+        };
         crate::Replied {
-            named: format!("{}{work}{file}", capitalized(&self.described(team))),
+            named: format!("{}{work}{file}{place}", capitalized(&self.described(team))),
             text: crate::cap_middle_text(self.text.trim(), QUOTE_HANDED_CHARS),
             of_file: self.kind == ReplyKind::Passage,
         }
@@ -2130,6 +2210,14 @@ fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
     reply.file = named_file
         .filter(|_| reply.kind == ReplyKind::Passage)
         .map(str::to_owned);
+    // Only a passage has a place (ADR 0091); one this version can't read is left out, and the part
+    // reads as its words.
+    if reply.kind != ReplyKind::Passage || reply.at == Some(PartAt::Unknown) {
+        reply.at = None;
+    }
+    if reply.at.as_ref().is_some_and(|at| !at.usable()) {
+        return bad("A part of a file is marked inside it.");
+    }
     let yours = reply.from == crate::config::RESERVED_OPERATOR_ID
         || team
             .agents
@@ -5151,6 +5239,7 @@ mod tests {
             kind,
             text: text.to_owned(),
             file: None,
+            at: None,
         };
         assert_eq!(
             reply(ReplyKind::Handover, Some("writer"), "x").described(&team),
@@ -5189,6 +5278,7 @@ mod tests {
         // A part of a file read in LoomWatch names the file, and the agent is told where it is.
         let passage = ReplyTo {
             file: Some("/Users/mai/reports/market.md".to_owned()),
+            at: None,
             ..reply(ReplyKind::Passage, None, "Sales grew 12%\nin Q3.")
         };
         assert_eq!(
@@ -5225,6 +5315,7 @@ mod tests {
             kind: ReplyKind::Passage,
             text: "Sales grew".to_owned(),
             file: None,
+            at: None,
         };
         assert!(check_reply(&mut passage.clone(), &team).is_err());
         passage.file = Some(" /a/market.md ".to_owned());
@@ -5236,6 +5327,94 @@ mod tests {
         };
         check_reply(&mut answer, &team).expect("an answer");
         assert_eq!(answer.file, None);
+    }
+
+    /// **A box on a picture is a part of its own (ADR 0091).** It keeps its place, the agent is
+    /// told exactly where it is, and a place outside the picture is refused.
+    #[test]
+    fn a_box_on_a_picture_keeps_its_place_and_the_agent_is_told_it() {
+        let team = team();
+        let parsed: ReplyTo = serde_json::from_value(json!({
+            "runId": "3f2a9c1e-0000", "messageId": "passage:b", "from": "researcher", "kind": "passage",
+            "text": "The top right of the picture", "file": "/w/chart.png",
+            "at": {"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000}
+        }))
+        .expect("a box reads");
+        assert_eq!(
+            parsed.at,
+            Some(PartAt::Box {
+                x: 5000,
+                y: 0,
+                w: 5000,
+                h: 5000,
+                page: None
+            })
+        );
+        let mut checked = parsed.clone();
+        check_reply(&mut checked, &team).expect("a box inside its picture");
+        assert_eq!(checked.at, parsed.at, "kept as it was marked");
+        assert_eq!(
+            serde_json::to_value(&checked).expect("written")["at"],
+            json!({"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000})
+        );
+        let handed = checked.for_agents(&team);
+        assert_eq!(
+            handed.named,
+            "A part of chart.png from Researcher (work 3f2a9c1e), in the file /w/chart.png, the box \
+             from 50% to 100% of the way across from the left, and 0% to 50% of the way down from \
+             the top"
+        );
+        assert_eq!(
+            handed.quoted(),
+            format!("{}:\n> The top right of the picture", handed.named)
+        );
+
+        // Percents to the nearest tenth: 12.55% is 12.6%, 3.35% is 3.4%.
+        let on_a_page = PartAt::Box {
+            x: 1250,
+            y: 335,
+            w: 5,
+            h: 9665,
+            page: Some(3),
+        };
+        assert_eq!(
+            on_a_page.described().as_deref(),
+            Some(
+                "on page 3, the box from 12.5% to 12.6% of the way across from the left, and 3.4% \
+                 to 100% of the way down from the top"
+            )
+        );
+
+        for outside in [
+            json!({"kind": "box", "x": 6000, "y": 0, "w": 5000, "h": 100}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 0, "h": 100}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 100, "h": 0}),
+            json!({"kind": "box", "x": 0, "y": 9000, "w": 100, "h": 1001}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 100, "h": 100, "page": 0}),
+        ] {
+            let mut bad = parsed.clone();
+            bad.at = serde_json::from_value(outside.clone()).expect("reads");
+            assert!(check_reply(&mut bad, &team).is_err(), "{outside}");
+        }
+
+        // A kind a newer version wrote still reads, as the part's words.
+        let mut newer: ReplyTo = serde_json::from_value(json!({
+            "messageId": "passage:m", "from": "researcher", "kind": "passage", "text": "0:42",
+            "file": "/w/talk.mp4", "at": {"kind": "moment", "ms": 42000}
+        }))
+        .expect("an unknown place still reads");
+        assert_eq!(newer.at, Some(PartAt::Unknown));
+        check_reply(&mut newer, &team).expect("read as words");
+        assert_eq!(newer.at, None);
+        assert!(!newer.for_agents(&team).named.contains("box"));
+
+        // Only a part of a file has a place.
+        let mut answer = ReplyTo {
+            kind: ReplyKind::Answer,
+            ..parsed
+        };
+        check_reply(&mut answer, &team).expect("an answer");
+        assert_eq!(answer.at, None);
     }
 
     /// **"Explain" answered in the chat is told the whole part, not its first line.** The answer
@@ -5252,6 +5431,7 @@ mod tests {
             kind: ReplyKind::Passage,
             text: "Region\tSales\nWest\t120\nEast\t80".to_owned(),
             file: Some("/teams/.loomwatch/news/researcher/sales.md".to_owned()),
+            at: None,
         };
         let context = in_chat_context(Some("You: hi".to_owned()), Some(&passage), &team);
         assert_eq!(context.conversation.as_deref(), Some("You: hi"));

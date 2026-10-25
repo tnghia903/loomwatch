@@ -107,7 +107,8 @@ export function useChatAttachments(teamPath: string) {
   // Another team's box starts empty; leaving lets every preview go.
   useEffect(() => clear, [teamPath, clear])
 
-  const add = useCallback((files: readonly File[], name: (file: File) => string = (file) => file.name) => {
+  /** Adds files to the box and uploads them; answers the ids they are kept under there, to remove them by. */
+  const add = useCallback((files: readonly File[], name: (file: File) => string = (file) => file.name): string[] => {
     const room = MAX_CHAT_FILES - live.current.size
     const added = files.map((file, index): [Attachment, File] => {
       const id = `attach-${++next}`
@@ -133,6 +134,7 @@ export function useChatAttachments(teamPath: string) {
           setItems((list) => list.map((item) => (item.id === attachment.id ? { ...item, state: 'failed', problem, detail } : item)))
         })
     }
+    return added.map(([attachment]) => attachment.id)
   }, [teamPath])
 
   const remove = useCallback((id: string) => {

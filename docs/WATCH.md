@@ -120,7 +120,13 @@ face in the chat does, and what you asked it. Ask about words that overlap words
 before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
 answer then opens at the newer words and says which words it is about. A bubble opens its own
 answer, and the marked words open the one still waiting for you, or else the newest; Esc or ×
-closes it. A web page the agent made is marked the same way. Drag the edge between the
+closes it. A web page the agent made is marked the same way. On a picture (ADR 0091), drag over any
+part of it to mark a box, or click to mark all of it: the bubble leans in over the box, and the part
+goes with its picture, the box cut out of the picture, which the agent you ask sees when its model
+sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the
+chat. The agent is told where the box is as well, so it can open the file itself. The box stays on
+the picture with the bubble of each agent asked at its corner, and the box or its bubble opens the
+answer. Drag the edge between the
 chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.

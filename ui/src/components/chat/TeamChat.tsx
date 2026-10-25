@@ -1,7 +1,7 @@
 import { ArrowDown, ChevronDown, ChevronRight, Play, Reply, RotateCcw, Search, X } from 'lucide-react'
 import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
+import { continueWithTeam, findInChat, sendChatMessage, startFromNote, stillAnswering, uploadChatFile, type ChatFile, type ChatItem, type ChatMessage, type ChatTarget, type Found, type FoundPassage, type FoundPiece, type NoteFailure, type ReplyTo } from '../../lib/chat/client'
 import { carriesFiles, dropped, useChatAttachments } from '../../lib/chat/attachments'
 import { FindScopeContext, showFoundWords, type FindTerm } from '../../lib/chat/findWords'
 import { isDocument } from '../../lib/chat/document'
@@ -9,7 +9,7 @@ import { nameWithHelpers } from '../../lib/chat/helpers'
 import { clockTime, dayKey, dayLabel, listNames } from '../../lib/chat/format'
 import { destination, withMention, type ChatAgent } from '../../lib/chat/route'
 import { replyOf } from '../../lib/chat/reply'
-import { answerReply, askedPassages, type AskedPassage } from '../../lib/files/passage'
+import { answerReply, askedPassages, partId, type AskedPassage } from '../../lib/files/passage'
 import { FileReaderContext } from '../../lib/files/reader'
 import { markSeen } from '../../lib/chat/seen'
 import { targets, yoursOn, type Face, type Reaction, type ReactionAbout } from '../../lib/chat/reactions'
@@ -88,9 +88,10 @@ interface TeamChatProps {
   /**
    * A part of a file marked in the reader beside the chat (ADR 0077): the box takes it as a reply
    * to write about, or — with `words` — it is sent at once, to `agent` (the agent who made the file
-   * unless another was chosen). `at` tells one ask from the next.
+   * unless another was chosen). A part that isn't words brings its `pictures` (ADR 0091), which go
+   * with it: in the box as files, or sent with it. `at` tells one ask from the next.
    */
-  ask?: { reply: ReplyTo; words?: string; agent?: string; at: number } | null
+  ask?: { reply: ReplyTo; words?: string; agent?: string; pictures?: readonly File[]; at: number } | null
   /**
    * The parts of files asked about in this chat, the one in the box now, and the team's agents as
    * their cards show them (for the reader's bubbles), whenever they change.
@@ -127,7 +128,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   const chat = useTeamChat(teamPath)
   // Pictures and files pasted or dropped in, kept as they are added (ADR 0082).
   const attachments = useChatAttachments(teamPath)
-  const { add: addFiles, clear: clearFiles } = attachments
+  const { add: addFiles, clear: clearFiles, remove: removeFile } = attachments
   // A drag of files from outside the page over the chat: drawn as the gold stitch round it. Set on
   // the way in and out only, never on every move, so nothing re-renders while it is dragged about.
   const [dropping, setDropping] = useState(false)
@@ -525,13 +526,35 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // asks the teammate whose job it is (ADR 0077). A box that cannot send shows why with the part
   // in it.
   const asked = useRef<number | null>(null)
+  // The pictures a part that isn't words put in the box (ADR 0091), by the quote they came with:
+  // letting go of the quote lets go of them.
+  const partFiles = useRef<{ messageId: string; ids: string[] } | null>(null)
+  useEffect(() => {
+    const brought = partFiles.current
+    if (!brought || replyTo?.messageId === brought.messageId) return
+    for (const id of brought.ids) removeFile(id)
+    partFiles.current = null
+  }, [replyTo, removeFile])
   const takeAsk = useRef<(next: NonNullable<typeof ask>) => void>(() => {})
   useEffect(() => {
     takeAsk.current = (next) => {
       const author = members.find((agent) => agent.id === (next.agent ?? next.reply.from))
-      if (!next.words || blocked || !author) { startReply(next.reply, author?.id); return }
+      const pictures = next.pictures ?? []
+      // Written about in the box: the part's pictures wait in it with the quote, as files you added
+      // do, and go with the quote when it is replaced or let go of.
+      const inTheBox = (to?: string) => {
+        startReply(next.reply, to)
+        for (const id of partFiles.current?.ids ?? []) removeFile(id)
+        partFiles.current = pictures.length > 0 ? { messageId: next.reply.messageId, ids: addFiles([...pictures]) } : null
+      }
+      if (!next.words || blocked || !author) { inTheBox(author?.id); return }
       const text = soloAgent ? next.words : withMention(next.words, author, agents)
-      void send(text, { kind: 'agent', agent: author.id }, false, undefined, replyOf(next.reply))
+      const to = { kind: 'agent', agent: author.id } as const
+      if (pictures.length === 0) { void send(text, to, false, undefined, replyOf(next.reply)); return }
+      // Sent at once with its pictures, kept first; a picture that can't be kept leaves the question
+      // in the box, which says why and sends it from there.
+      void Promise.all(pictures.map((picture) => uploadChatFile(teamPath, picture, picture.name)))
+        .then((kept) => send(text, to, false, undefined, replyOf(next.reply), kept), () => { inTheBox(author.id); setDraft(text) })
     }
   })
   useEffect(() => {
@@ -542,7 +565,7 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
   // The parts of files asked about here, for the reader to light; compared by what they say, so a
   // page of the chat read again changes nothing.
   const passagesSaid = useMemo(() => JSON.stringify(askedPassages(chat.items, chat.pending)), [chat.items, chat.pending])
-  const askingNow = replyTo?.kind === 'passage' ? replyTo.text : null
+  const askingNow = replyTo?.kind === 'passage' ? partId(replyTo) : null
   const facesSaid = JSON.stringify(members.flatMap((member) => faces.facts(member.id) ?? []))
   useEffect(() => {
     onPassages?.(JSON.parse(passagesSaid) as AskedPassage[], askingNow, JSON.parse(facesSaid) as AgentFacts[])
