@@ -2612,10 +2612,7 @@ async fn answer_instead(
         whole_team,
     };
     let (conversation, newest_work) = conversation_now(state, team, &message.team_path).await;
-    let context = crate::intent::Context {
-        conversation,
-        replying: message.reply_to.as_ref().map(|reply| reply.mentioned(team)),
-    };
+    let context = in_chat_context(conversation, message.reply_to.as_ref(), team);
     let task = task_text(text, team);
     let model = crate::control::tier_model("fast");
     let Some(who) = crate::intent::read(
@@ -2649,6 +2646,23 @@ async fn answer_instead(
         Answering::new(state, team, whole_team, task, context, newest_work),
         message.clone(),
     ));
+}
+
+/// What an answer in the chat is told around the message: the conversation, the message it
+/// replies to by name, and a part of a file quoted whole, as a run is handed it. "Explain" on a
+/// part is mostly answered here, with no tools to open the file.
+fn in_chat_context(
+    conversation: Option<String>,
+    reply: Option<&ReplyTo>,
+    team: &TeamConfig,
+) -> crate::intent::Context {
+    crate::intent::Context {
+        conversation,
+        replying: reply.map(|reply| reply.mentioned(team)),
+        part: reply
+            .filter(|reply| reply.kind == ReplyKind::Passage)
+            .map(|reply| reply.for_agents(team).quoted()),
+    }
 }
 
 /// Why an agent did not answer, when `LoomWatch` itself failed part way through its answer.
@@ -5222,6 +5236,47 @@ mod tests {
         };
         check_reply(&mut answer, &team).expect("an answer");
         assert_eq!(answer.file, None);
+    }
+
+    /// **"Explain" answered in the chat is told the whole part, not its first line.** The answer
+    /// has no tools to open the file, and the reply's name in the conversation keeps only the first
+    /// 100 characters of its first line, so a paragraph or a table was explained by its opening.
+    #[test]
+    fn an_answer_in_the_chat_is_told_the_whole_part_of_a_file() {
+        let team = team();
+        let passage = ReplyTo {
+            run_id: Some("3f2a9c1e-0000-0000-0000-000000000000".to_owned()),
+            message_id: "passage:1".to_owned(),
+            from: "researcher".to_owned(),
+            to: None,
+            kind: ReplyKind::Passage,
+            text: "Region\tSales\nWest\t120\nEast\t80".to_owned(),
+            file: Some("/teams/.loomwatch/news/researcher/sales.md".to_owned()),
+        };
+        let context = in_chat_context(Some("You: hi".to_owned()), Some(&passage), &team);
+        assert_eq!(context.conversation.as_deref(), Some("You: hi"));
+        assert_eq!(
+            context.replying.as_deref(),
+            Some("a part of sales.md from Researcher (\u{201c}Region\tSales\u{201d})")
+        );
+        assert_eq!(
+            context.part.as_deref(),
+            Some(
+                "A part of sales.md from Researcher (work 3f2a9c1e), in the file \
+                 /teams/.loomwatch/news/researcher/sales.md:\n\
+                 > Region\tSales\n> West\t120\n> East\t80"
+            )
+        );
+
+        let answer = ReplyTo {
+            kind: ReplyKind::Answer,
+            file: None,
+            ..passage
+        };
+        let context = in_chat_context(None, Some(&answer), &team);
+        assert_eq!(context.part, None, "only a part of a file is quoted whole");
+        assert!(context.replying.is_some());
+        assert_eq!(in_chat_context(None, None, &team).part, None);
     }
 
     /// What the person told their agents (ADR 0074) reaches every agent a message reaches: each
