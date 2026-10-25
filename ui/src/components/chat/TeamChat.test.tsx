@@ -1744,6 +1744,14 @@ describe('asking about a part of a file', () => {
       await waitFor(() => expect(screen.queryByRole('list', { name: 'Going with your message' })).toBeNull())
     })
 
+    it('quotes cells with their rows kept and their sheet first, in the box and under the message', async () => {
+      const cells = { ...part, messageId: 'passage:cells', text: 'Region\tQ1\nWest\t120\nEast\t80', file: '/w/sales.xlsx', at: { kind: 'cells' as const, sheet: 'By region', top: 3, left: 2, bottom: 4, right: 2 } }
+      page = [{ kind: 'work', run: run({ runId: 'run-3' }), request: message({ id: 'm-3', runId: 'run-3', text: '@Writer why?', replyTo: cells }), notes: [] }]
+      renderChat({ ask: { reply: cells, at: 10 } })
+      expect(await screen.findByRole('group', { name: 'Asking about a part of sales.xlsx from Writer' })).toHaveTextContent('By region · Region, Q1 · West, 120 · East, 80')
+      expect(await screen.findByLabelText('Replying to a part of sales.xlsx from Writer')).toHaveTextContent('By region · Region, Q1 · West, 120 · East, 80')
+    })
+
     it('leaves Explain in the box, with its picture, when the picture can’t be kept', async () => {
       page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
       keeps = false

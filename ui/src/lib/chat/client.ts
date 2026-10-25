@@ -182,6 +182,13 @@ export interface ReplyTo {
 export type PartAt =
   /** A box: on a picture, or on page `page` (from 1) of a document. */
   | { kind: 'box'; x: number; y: number; w: number; h: number; page?: number }
+  /** A range of cells, by the sheet's own row and column numbers from 1, corners included; `sheet` names it in a workbook. */
+  | { kind: 'cells'; sheet?: string; top: number; left: number; bottom: number; right: number }
+
+/** A box on a picture or a page. */
+export type BoxAt = Extract<PartAt, { kind: 'box' }>
+/** A range of cells on a sheet. */
+export type CellsAt = Extract<PartAt, { kind: 'cells' }>
 
 /** One item of the chat, newest first from the daemon. */
 export type ChatItem =

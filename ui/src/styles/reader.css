@@ -54,7 +54,7 @@
 .rd-lines .rd-line:hover::before { opacity: 1; color: var(--color-accent); }
 
 /* A table as a sheet: its header stays as you scroll, numbers sit right, rows are counted. */
-.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
+.tc-document .tc-document-page:is(.rd-as-table, .rd-as-sheet) { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
 .rd-table-wrap { max-width: 100%; overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel-solid); }
 .rd-as-table .rd-table-wrap { overflow: visible; max-width: none; }
 .rd-table { min-width: 100%; border-collapse: separate; border-spacing: 0; counter-reset: row; font: 13px/1.45 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
@@ -110,7 +110,36 @@
 .rd-box:is(.lit, .asking) { outline: 2px solid var(--color-accent); outline-offset: 1px; box-shadow: var(--rd-rim), 0 0 0 4px color-mix(in srgb, var(--color-black) 40%, transparent); }
 .rd-box.asking:not(.lit) { outline-style: dashed; }
 .rd-box:is(.marking, .drawing) { --rd-a: 14%; border-style: dashed; border-color: var(--color-accent); pointer-events: none; }
-.rd-box > .rd-slot { position: absolute; z-index: 1; top: -11px; right: -11px; margin: 0; translate: none; }
+.rd-box > .rd-slot { position: absolute; z-index: 1; top: -11px; right: -11px; width: max-content; margin: 0; translate: none; }
+/* ---------- Cells of a sheet (ADR 0091, SheetView.tsx) ----------
+   A CSV or TSV file, or a workbook's sheets behind tabs, as a spreadsheet shows it: the first row
+   as the column names, the rows numbered. Cells are marked by dragging across them (no text
+   selection), a column by its name, a row by its number; a range is drawn as a box is, over its
+   cells, which stay reachable under it; the sticky column names pass over both. Words in a sheet are
+   selected only while it can't be asked about: then ⌘C copies the marked cells (SheetView). */
+.rd-as-sheet .rd-table-wrap { overflow: visible; max-width: none; }
+.rd-grid { position: relative; isolation: isolate; }
+.rd-grid.askable { user-select: none; -webkit-user-select: none; }
+.rd-grid .rd-table thead th { z-index: 3; }
+.rd-grid.askable td { cursor: cell; }
+.rd-table .rd-row-name { width: 1%; padding: 7px 8px; background: var(--color-panel); color: var(--color-ink-3); font: 11px/1.7 var(--font-mono); text-align: right; }
+/* A column's name and a row's number are buttons: a press marks the whole column or row. */
+.rd-line-name { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; font: inherit; color: inherit; text-align: inherit; border-radius: 3px; }
+.rd-line-name:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-sheet-bar { flex: none; padding: 8px 16px 0; }
+.rd-sheet-bar .rd-sheet-tabs { flex-wrap: wrap; }
+/* A sheet holding cells asked about: a small box after its name, the range's own shape. */
+.rd-sheet-asked { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border: 1.5px solid var(--color-accent); border-radius: 2px; background: color-mix(in srgb, var(--color-marker) 30%, transparent); vertical-align: 0; }
+/* On a sheet the range's edge is the accent line alone: the rim was for any picture under a box. */
+.rd-box.rd-range { --rd-rim: none; border-radius: 3px; border-color: var(--color-accent); pointer-events: none; }
+.rd-box.rd-range.corner { border-bottom-right-radius: 10px; }
+/* Beside the range's top row, not over its cells: a bubble at the corner would cover a number. */
+.rd-box.rd-range > .rd-slot { top: 1px; right: auto; left: calc(100% + 8px); pointer-events: auto; }
+ (pointer: coarse) {
+  .rd-sheet-tabs button { min-height: 44px; }
+  .rd-grid.askable thead th, .rd-grid.askable .rd-row-name { min-width: 44px; height: 44px; }
+}
+
 /* The tip's mark on a picture is the box the drag draws, still. */
 .rd-hint mark.box { padding: 0 3px; border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-marker) 14%, transparent); }
 
@@ -338,7 +367,7 @@
 .agent-file .rd { position: relative; inset: auto; flex: 1; min-height: 0; margin-top: var(--sp-3); border-top: 1px solid var(--color-hairline); background: transparent; }
 .agent-file .rd .rd-scroll.tc-document { position: absolute; inset: 0; flex: none; }
 .agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px; }
-.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px; }
+.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table, .rd-as-sheet) { padding: 16px 16px 96px; }
 
 @container details (max-width: 560px) {
   .rd-bar { padding-left: 14px; }
