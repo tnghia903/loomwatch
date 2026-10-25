@@ -120,7 +120,10 @@ face in the chat does, and what you asked it. Ask about words that overlap words
 before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
 answer then opens at the newer words and says which words it is about. A bubble opens its own
 answer, and the marked words open the one still waiting for you, or else the newest; Esc or ×
-closes it. A web page the agent made is marked the same way. On a picture (ADR 0091), drag over any
+closes it. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
+the data, clips, pictures and fonts beside it load as they would from the page's folder (a
+dashboard's `fetch('sales.csv')` works; LoomWatch reads them for it): its own folder and the folders
+in it only, never anything above it. On a picture (ADR 0091), drag over any
 part of it to mark a box, or click to mark all of it: the bubble leans in over the box, and the part
 goes with its picture, the box cut out of the picture, which the agent you ask sees when its model
 sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the

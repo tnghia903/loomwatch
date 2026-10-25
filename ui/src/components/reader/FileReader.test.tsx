@@ -978,6 +978,30 @@ describe('a web page in the reader', () => {
     expect(await screen.findByText('<h1>Hello</h1>')).toBeInTheDocument()
   })
 
+  it('hands the page the files beside it that it asks for as it runs, inside its own folder only', async () => {
+    const SITE = '/w/site/page.html'
+    answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: SITE, name: 'page.html', kind: 'web', text: '<p>Sales</p>' }))
+      : url.startsWith('/api/files/raw') && url.includes(encodeURIComponent('/w/site/data/sales.csv'))
+        ? Promise.resolve(new Response('region,q3\nNorth,190\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8' } }))
+        : respond(404, {}))
+    renderReader({ file: { path: SITE, runId: 'run-1', from: 'writer' } })
+    const frame = await waitFor(() => {
+      const element = document.querySelector('iframe')
+      if (!element?.contentWindow) throw new Error('no frame yet')
+      return element
+    })
+    const told = vi.spyOn(frame.contentWindow!, 'postMessage')
+    const fromPage = (data: Record<string, unknown>) => act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', ...data }, source: frame.contentWindow })) })
+    fromPage({ type: 'load', id: 7, url: 'data/sales.csv' })
+    await waitFor(() => expect(told).toHaveBeenCalledWith(expect.objectContaining({ lw: 'reader', type: 'loaded', id: 7, status: 200, mediaType: 'text/csv; charset=utf-8' }), '*', [expect.any(ArrayBuffer)]))
+    const [sent] = told.mock.calls.find(([message]) => (message as { id?: number }).id === 7)!
+    expect(new TextDecoder().decode((sent as { body: ArrayBuffer }).body)).toBe('region,q3\nNorth,190\n')
+    // Above the page's folder: not found, and the daemon is never asked.
+    fromPage({ type: 'load', id: 8, url: '../other-team/secret.csv' })
+    await waitFor(() => expect(told).toHaveBeenCalledWith({ lw: 'reader', type: 'loaded', id: 8, status: 404, mediaType: '', body: null }, '*', []))
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => decodeURIComponent(String(input))).join(' ')).not.toContain('secret')
+  })
+
   it('opens a part’s answer when the page says its lit words were clicked, and places it where the page says the part is', async () => {
     answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: '/w/site.html', name: 'site.html', kind: 'web', text: `<p>${SALES}</p>` })) : respond(404, {}))
     const asked = [part({ state: 'said', by: 'writer', text: 'Up by twelve.', at: null }, { file: '/w/site.html' }), part({ state: 'working', by: 'research' }, { file: '/w/site.html', from: 'research', asked: '@Researcher why?', messageId: 'n-2' })]
