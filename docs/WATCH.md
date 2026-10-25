@@ -126,7 +126,15 @@ goes with its picture, the box cut out of the picture, which the agent you ask s
 sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the
 chat. The agent is told where the box is as well, so it can open the file itself. The box stays on
 the picture with the bubble of each agent asked at its corner, and the box or its bubble opens the
-answer. Drag the edge between the
+answer. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's sheets behind
+tabs, the first row as the column names, the rows numbered. Drag across any cells to ask about them,
+or press (or drag across) column names or row numbers for whole columns or rows; from the keyboard,
+Enter on a column's name or a row's number does the same, and ⌘C copies the marked cells. The agent
+is given the cells' words under their column names and after their row names, and told which cells
+they are and on which sheet (the workbook's sheets are drawn from the words LoomWatch reads out of
+it, as the agents read them). The cells stay marked with the agent's bubble beside them; a press on
+them opens the answer, and a sheet's tab shows a small box while it holds cells asked about. The chat
+quotes cells with their rows kept ("By region · Q1, Q2 · 120, 140"). Drag the edge between the
 chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.

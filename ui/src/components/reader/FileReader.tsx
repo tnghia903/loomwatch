@@ -2,7 +2,7 @@ import { ExternalLink, FolderOpen, X } from 'lucide-react'
 import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { PartAt, ReplyTo } from '../../lib/chat/client'
+import type { BoxAt, ReplyTo } from '../../lib/chat/client'
 import type { AgentFacts } from '../../lib/chat/faces'
 import { quoteLine } from '../../lib/chat/reply'
 import { baseName, extensionOf, fileLabel, fileTitle, formatBytes, withFolderPaths } from '../../lib/files/fileRefs'
@@ -12,6 +12,7 @@ import { markParts, type MarkedPart, type PartMarks } from '../../lib/files/part
 import type { PageMark, PagePart } from '../../lib/files/pageFrame'
 import { answerPlace, askKey, bubbleAgent, bubbleCardParts, bubbleLabel, bubblePlace, bubbleTitle, fileAsks, findPassage, pageText, partBox, partId, partLines, partLook, partTexts, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage, type PartLook } from '../../lib/files/passage'
 import { partPictureName, pictureInside } from '../../lib/files/parts'
+import { cellsText, parseWorkbook, tableSheet } from '../../lib/files/cells'
 import { figureStill } from '../../lib/library/figures'
 import { wearerOf } from '../../lib/chat/helpers'
 import { TeamFiguresContext } from '../agents/figureContext'
@@ -25,11 +26,12 @@ import { AgentCardPopup } from '../chat/AgentFace'
 import { useAgentCard } from '../../lib/chat/useAgentCard'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { plainWords } from '../../lib/chat/findWords'
-import { CodeView, DocumentView, TableView } from './formats'
+import { CodeView, DocumentView } from './formats'
 import { PageFrame, type Marked } from './PageFrame'
 import { PassageAnswer } from './PassageAnswer'
 import { PartBubble } from './PartBubble'
 import { PictureView } from './PictureView'
+import { SheetView, type MarkedCells } from './SheetView'
 
 export interface FileReaderProps {
   file: FileToRead
@@ -60,6 +62,8 @@ export const EXPLAIN_WORDS = 'Explain this part in plain words.'
 const HINT_KEY = 'loomwatch.readerHint'
 /** The same for a picture, whose gesture is a drag: a person who has marked words has not learnt it. */
 const PICTURE_HINT_KEY = 'loomwatch.readerHint.picture'
+/** And for a sheet, whose drag is across cells. */
+const CELLS_HINT_KEY = 'loomwatch.readerHint.cells'
 /** How long "Updated" stays lit after the file changed on disk. */
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
@@ -101,6 +105,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const [view, setView] = useState<'page' | 'code'>('page')
   const shown = format === 'page' && view === 'code' ? 'code' : format
   const askable = Boolean(onAsk && from && canMark(format))
+  // Views that mark their parts themselves, by pointer, rather than by selecting words: a picture
+  // (a box) and a sheet (cells). A web page reports its own marked words.
+  const cellsView = shown === 'table' || shown === 'sheet'
+  const selfMarking = !words || cellsView
 
   const stage = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -122,8 +130,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     setMarked({ text: passage, rect: { top: box.top, bottom: box.bottom, left: box.left, right: box.right } })
   }, [])
   useEffect(() => {
-    // A web page reports its own marked words; a picture marks a box itself (PictureView).
-    if (!askable || shown === 'page' || !words) return
+    if (!askable || shown === 'page' || selfMarking) return
     let timer = 0
     const changed = () => {
       window.clearTimeout(timer)
@@ -148,7 +155,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       document.removeEventListener('pointerdown', down, true)
       document.removeEventListener('pointerup', up, true)
     }
-  }, [askable, shown, words, readSelection])
+  }, [askable, shown, selfMarking, readSelection])
   useEffect(() => {
     if (!marked) return
     const away = (event: KeyboardEvent) => {
@@ -212,15 +219,15 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     if (marked?.at && place && page.current?.contains(document.activeElement)) bubble.current?.querySelector<HTMLButtonElement>('.rd-ask-main')?.focus()
   }, [marked, place])
 
-  // What a part that isn't words is seen as, sent with the question: the picture inside its box.
-  const picturesOf = async (at: PartAt): Promise<File[]> => {
+  // What a box is seen as, sent with the question: the picture inside it. Cells go as their words.
+  const picturesOf = async (at: BoxAt): Promise<File[]> => {
     const image = page.current?.querySelector('img')
     const picture = image ? await pictureInside(image, at, partPictureName(baseName(path))) : null
     return picture ? [picture] : []
   }
   const askAbout = (reply: ReplyTo, words: string | undefined, agent: string) => {
     if (!onAsk) return
-    if (!reply.at) { onAsk(reply, words, agent); return }
+    if (reply.at?.kind !== 'box') { onAsk(reply, words, agent); return }
     void picturesOf(reply.at).then((pictures) => onAsk(reply, words, agent, pictures))
   }
 
@@ -279,10 +286,16 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   // The reader marks its own text (lib/files/partMarks.ts); a web page marks itself (pageFrame.ts)
   // and says where its parts are. A part the file no longer has is `missing`.
   // Marked again only when the words change, not when an answer comes in or another agent is asked.
-  // A picture's parts are boxes, each known by its id (`partId`); a file of words marks its words.
-  const partsKey = (words ? partTexts(mine.filter((passage) => !passage.at)) : partTexts(mine.filter((passage) => passage.at).map((passage) => ({ text: partId(passage) })))).join('\u0000')
+  // Parts with a place (a box, cells: ADR 0091) are drawn by their view, each known by its id
+  // (`partId`); parts of words are marked in the words, in a file of words.
+  const partsKey = (words ? partTexts(mine.filter((passage) => !passage.at)) : []).join('\u0000')
   const texts = useMemo(() => (partsKey ? partsKey.split('\u0000') : []), [partsKey])
+  const placesKey = partTexts(mine.filter((passage) => passage.at).map((passage) => ({ text: partId(passage) }))).join('\u0000')
+  const places = useMemo(() => (placesKey ? placesKey.split('\u0000') : []), [placesKey])
   const [measured, setMeasured] = useState<Measured | null>(null)
+  // Whether the page is dark under a sheet's ranges, for their bubbles; where a workbook's tabs go.
+  const [pageDark, setPageDark] = useState(false)
+  const [sheetBar, setSheetBar] = useState<HTMLDivElement | null>(null)
   const takeMeasured = useCallback((next: Measured) => setMeasured((current) => (current && sameMeasure(current, next) ? current : next)), [])
   const takeParts = useCallback((parts: PagePart[], view: Rect) => takeMeasured({ page: true, parts, view, slots: NO_SLOTS }), [takeMeasured])
   // What was measured in the view now on screen: the page's own report, or the text's.
@@ -298,35 +311,36 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     const box = scrolling.getBoundingClientRect()
     // What is in view: the scroller less its scroll bars.
     const view = { top: box.top, left: box.left, right: box.left + (scrolling.clientWidth || box.width), bottom: box.top + (scrolling.clientHeight || box.height) }
-    if (!words) {
-      // A picture draws its boxes itself (PictureView), each with the slot for its bubbles.
-      const boxes = new Map([...element.querySelectorAll<HTMLElement>('.rd-box[data-part]')].map((drawn) => [drawn.dataset.part ?? '', drawn]))
-      takeMeasured({
-        page: false,
-        parts: texts.map((id) => {
-          const rect = boxes.get(id)?.getBoundingClientRect()
-          return { text: id, rects: rect ? [{ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }] : [], missing: !rect, as: id, dark: false }
-        }),
-        view,
-        slots: new Map([...boxes].flatMap(([id, drawn]) => { const slot = drawn.querySelector<HTMLElement>('.rd-slot'); return slot ? [[id, slot] as const] : [] })),
-      })
-      return
-    }
     const dark = darkBehind(element)
+    setPageDark(dark)
     const marked = marks.current?.parts ?? new Map<string, MarkedPart>()
+    // A box or a range is drawn by its view (PictureView, SheetView), each with the slot for its
+    // bubbles; one on a sheet not shown (`data-away`) is not lost, only out of sight.
+    const drawn = new Map([...element.querySelectorAll<HTMLElement>('.rd-box[data-part]')].map((each) => [each.dataset.part ?? '', each]))
     takeMeasured({
       page: false,
-      parts: texts.map((text) => ({
-        text,
-        rects: (marked.get(text)?.marks ?? []).flatMap((mark) => [...mark.getClientRects()].map((rect) => ({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }))),
-        missing: !found.current.has(text),
-        as: marked.get(text)?.key ?? text,
-        dark,
-      })),
+      parts: [
+        ...texts.map((text) => ({
+          text,
+          rects: (marked.get(text)?.marks ?? []).flatMap((mark) => [...mark.getClientRects()].map((rect) => ({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }))),
+          missing: !found.current.has(text),
+          as: marked.get(text)?.key ?? text,
+          dark,
+        })),
+        ...places.map((id) => {
+          const each = drawn.get(id)
+          const away = each?.hasAttribute('data-away') ?? false
+          const rect = each && !away ? each.getBoundingClientRect() : null
+          return { text: id, rects: rect ? [{ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }] : [], missing: !each, as: id, dark: false }
+        }),
+      ],
       view,
-      slots: new Map([...marked].map(([key, part]) => [key, part.slot])),
+      slots: new Map([
+        ...[...marked].map(([key, part]) => [key, part.slot] as const),
+        ...[...drawn].flatMap(([id, each]) => { const slot = each.querySelector<HTMLElement>('.rd-slot'); return slot ? [[id, slot] as const] : [] }),
+      ]),
     })
-  }, [texts, takeMeasured, words])
+  }, [texts, places, takeMeasured])
   // A click on marked words, with nothing marked now, opens an answer to them (`wordsOpen`).
   const openAt = (event: { target: EventTarget }) => {
     if (document.getSelection()?.isCollapsed === false) return
@@ -380,10 +394,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       changes.current?.takeRecords()
     }
   }, [partsKey, asking, layout, shown, words, text, measure])
-  // A picture's boxes are measured as they are drawn, and again as the picture is laid out.
+  // Boxes and ranges are measured as they are drawn, and again as the file is laid out.
   useLayoutEffect(() => {
-    if (!words) measure()
-  }, [words, layout, measure])
+    if (shown !== 'page') measure()
+  }, [shown, layout, measure])
 
   // How each part's words look, from what came of the asks on them: set on its marks as it changes.
   const dark = onScreen?.parts[0]?.dark ?? false
@@ -477,7 +491,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   }
 
   // The tip under a file, until a part of one has been asked about.
-  const hintKey = words ? HINT_KEY : PICTURE_HINT_KEY
+  const hintKey = !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : HINT_KEY
   const unseen = useMemo(() => {
     try { return window.localStorage.getItem(hintKey) !== 'seen' } catch { return true }
   }, [hintKey])
@@ -505,7 +519,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const actions = useFileActions(path)
   const modifiedAt = content.file?.modifiedAt ?? content.modifiedAt
   const meta = [
-    content.file?.extracted ? `Words from a ${fileLabel(path).toLowerCase()}` : fileLabel(path),
+    content.file?.extracted && shown !== 'sheet' ? `Words from a ${fileLabel(path).toLowerCase()}` : fileLabel(path),
     content.file ? formatBytes(content.file.sizeBytes) : null,
     modifiedAt ? `changed ${relativeTime(new Date(modifiedAt))}` : null,
   ].filter(Boolean).join(' · ')
@@ -540,13 +554,25 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     scrolled.current = requestAnimationFrame(() => { scrolled.current = 0; measure() })
   }
 
+  // A part with a place (ADR 0091): where it is, and the answer a press on it opens.
+  const atOf = (id: string) => mine.find((passage) => partId(passage) === id)?.at
+  const openPlace = (id: string) => {
+    const opens = wordsOpen(mine.filter((passage) => partId(passage) === id), lookOfAsk)
+    if (opens) setAnswerFor(askKey(opens))
+  }
+  // A CSV or TSV file is one sheet; a workbook's sheets are read out of its words (lib/files/cells.ts).
+  const sheets = useMemo(() => (text === null || !cellsView ? null : shown === 'sheet' ? parseWorkbook(text) : [tableSheet(text, path)]), [text, cellsView, shown, path])
+  const markCells = (cells: MarkedCells | null) => {
+    const sheet = cells && sheets?.find((each) => each.name === cells.sheet)
+    setMarked(cells && sheet ? { text: cellsText(sheet, cells.range), rect: cells.rect, at: { kind: 'cells', ...(cells.sheet ? { sheet: cells.sheet } : {}), ...cells.range } } : null)
+  }
+
   let body: ReactNode
   if (content.error) body = <div className="rd-failed" role="alert"><p>{content.error}</p></div>
   else if (format === 'picture') body = (
     <div ref={page} className="rd-page rd-as-picture">
-      <PictureView src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} alt={fileTitle(fileName)} askable={askable} asking={asking} marking={marked?.at ?? null} onMarked={setMarked}
-        boxes={texts.flatMap((id) => { const at = mine.find((passage) => partId(passage) === id)?.at; return at ? [{ id, at, look: wordsLookOf([id]) }] : [] })}
-        onOpen={(id) => { const opens = wordsOpen(mine.filter((passage) => partId(passage) === id), lookOfAsk); if (opens) setAnswerFor(askKey(opens)) }} />
+      <PictureView src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} alt={fileTitle(fileName)} askable={askable} asking={asking} marking={marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked}
+        boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' ? [{ id, at, look: wordsLookOf([id]) }] : [] })} onOpen={openPlace} />
     </div>
   )
   else if (format === 'media') body = /^(mp3|wav|m4a)$/.test(extensionOf(path))
@@ -555,11 +581,19 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   else if (text === null) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
   else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={closeAnswer} cleared={cleared}
     onHover={(key, at, now) => { const passage = key ? mine.find((item) => askKey(item) === key) : undefined; if (key && passage && hasCard(passage)) cardAt(key, at, now); else cardAt('', null, now) }} />
+  else if (cellsView && sheets) body = (
+    // Drawn afresh when the file changes. Words asked about in a table before it could be marked by
+    // its cells are still marked in them (lib/files/partMarks.ts).
+    <div key={content.changes} ref={page} className="tc-document-page rd-page rd-as-sheet" onClick={openAt}>
+      <SheetView sheets={sheets} askable={askable} asking={asking} open={answerShown ? partId(answerShown) : null} onMarked={markCells} onOpen={openPlace} onDrawn={measure} dark={pageDark} tabsInto={sheetBar}
+        marking={marked?.at?.kind === 'cells' ? { sheet: marked.at.sheet ?? null, range: marked.at } : null}
+        ranges={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'cells' ? [{ id, sheet: at.sheet ?? null, range: at, look: wordsLookOf([id]) }] : [] })} />
+    </div>
+  )
   else body = (
     // Drawn afresh when the file changes, never updated around the marks in it (lib/files/partMarks.ts).
     <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
       {shown === 'markdown' ? <Markdown>{withFolderPaths(text)}</Markdown>
-        : shown === 'table' ? <TableView text={text} path={path} />
           : shown === 'document' ? <DocumentView text={text} />
             : <CodeView text={text} language={shown === 'code' && format === 'page' ? 'html' : extensionOf(path)} />}
     </div>
@@ -592,13 +626,15 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         </span>
         <span className="visually-hidden" role="status">{actions.said}</span>
       </header>
-      {(content.file?.extracted || content.file?.truncated) && (
+      {((content.file?.extracted && shown !== 'sheet') || content.file?.truncated) && (
         <p className="rd-note">
-          {content.file.extracted
+          {content.file.extracted && shown !== 'sheet'
             ? `These are the words of the ${fileLabel(path).toLowerCase()}, as your agents read them, without its layout. Open it in its own app to see it as it looks.`
-            : 'Only the start of this file is shown: it is larger than 2 MB. Open it in its own app for the rest.'}
+            : shown === 'sheet' ? 'This workbook is too big to show whole here. Open it in its own app for the rest.'
+              : 'Only the start of this file is shown: it is larger than 2 MB. Open it in its own app for the rest.'}
         </p>
       )}
+      {cellsView && sheets && sheets.length > 1 && <div ref={setSheetBar} className="rd-sheet-bar" />}
       <div ref={stage} className="rd-stage">
         <div ref={scroller} className={`rd-scroll${shown === 'page' ? ' rd-scroll-frame' : ' tc-document'}`} onScroll={onScroll}>
           {body}
@@ -615,7 +651,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           slot, slot.dataset.part,
         ))}
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>
@@ -667,8 +703,9 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         {askable && hint && !marked && from && (text !== null || !words) && (
           <p className="rd-hint" data-reader-chrome>
             <AvatarFace id={from} hue={hue(from)} size={20} fontSize={8} text={initials(name(from))} />
-            {words ? <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>
-              : <span><mark className="box">Drag over any part</mark> to ask <b>{name(from)}</b> about it</span>}
+            {!words ? <span><mark className="box">Drag over any part</mark> to ask <b>{name(from)}</b> about it</span>
+              : cellsView ? <span><mark className="box">Drag across any cells</mark> to ask <b>{name(from)}</b> about them</span>
+                : <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>}
             <button type="button" className="rd-hint-close" onClick={hideHint} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>
           </p>
         )}

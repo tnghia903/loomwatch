@@ -347,11 +347,17 @@ pub struct ReplyTo {
 
 /// The whole of a picture's width or height in [`PartAt`]'s units: ten-thousandths.
 const PART_WHOLE: u16 = 10_000;
+/// The most rows and columns a sheet has, as Excel counts them.
+const SHEET_ROWS: u32 = 1_048_576;
+const SHEET_COLUMNS: u32 = 16_384;
+/// The longest sheet name a part names; Excel keeps 31 characters, other programs more.
+const SHEET_NAME_CHARS: usize = 255;
 
 /// Where a part of a file that isn't words is (ADR 0091), as the reader marked it.
 ///
 /// A place on a picture, page, slide or frame is in ten-thousandths of its width and height from its
-/// top left, so the part keeps its place however large the reader drew it.
+/// top left, so the part keeps its place however large the reader drew it. Cells are by the sheet's
+/// own row and column numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PartAt {
@@ -364,13 +370,24 @@ pub enum PartAt {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         page: Option<u32>,
     },
+    /// A range of cells, from row `top` and column `left` to row `bottom` and column `right`, all
+    /// from 1 and included; `sheet` names its sheet in a workbook, and is `None` for a CSV or TSV.
+    Cells {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sheet: Option<String>,
+        top: u32,
+        left: u32,
+        bottom: u32,
+        right: u32,
+    },
     /// A kind a newer version wrote: the part reads as its words.
     #[serde(other)]
     Unknown,
 }
 
 impl PartAt {
-    /// Whether the place is one the reader could have marked: a box inside its picture.
+    /// Whether the place is one the reader could have marked: a box inside its picture, cells inside
+    /// a sheet.
     fn usable(&self) -> bool {
         match *self {
             Self::Box { x, y, w, h, page } => {
@@ -379,6 +396,25 @@ impl PartAt {
                     && u32::from(x) + u32::from(w) <= u32::from(PART_WHOLE)
                     && u32::from(y) + u32::from(h) <= u32::from(PART_WHOLE)
                     && page != Some(0)
+            }
+            Self::Cells {
+                ref sheet,
+                top,
+                left,
+                bottom,
+                right,
+            } => {
+                top >= 1
+                    && top <= bottom
+                    && bottom <= SHEET_ROWS
+                    && left >= 1
+                    && left <= right
+                    && right <= SHEET_COLUMNS
+                    && sheet.as_deref().is_none_or(|name| {
+                        !name.trim().is_empty()
+                            && name.chars().count() <= SHEET_NAME_CHARS
+                            && !name.contains(['\n', '\r'])
+                    })
             }
             Self::Unknown => false,
         }
@@ -399,6 +435,34 @@ impl PartAt {
                     percent(x.saturating_add(w)),
                     percent(y),
                     percent(y.saturating_add(h)),
+                ))
+            }
+            Self::Cells {
+                ref sheet,
+                top,
+                left,
+                bottom,
+                right,
+            } => {
+                let cell = |row: u32, column: u32| {
+                    format!(
+                        "{}{row}",
+                        crate::documents::column_name(column.saturating_sub(1))
+                    )
+                };
+                let cells = if top == bottom && left == right {
+                    format!("the cell {}", cell(top, left))
+                } else {
+                    format!("the cells {} to {}", cell(top, left), cell(bottom, right))
+                };
+                let sheet = sheet
+                    .as_deref()
+                    .map(|name| format!(" on the sheet \u{201c}{name}\u{201d}"))
+                    .unwrap_or_default();
+                // The reader shows no letters: an answer that says "C4" sends the person hunting.
+                Some(format!(
+                    "{cells}{sheet} (given below with the sheet's column and row names; the person \
+                     sees columns by their names and rows by number, not by letter)"
                 ))
             }
             Self::Unknown => None,
@@ -5415,6 +5479,64 @@ mod tests {
         };
         check_reply(&mut answer, &team).expect("an answer");
         assert_eq!(answer.at, None);
+    }
+
+    /// **Cells of a sheet are a part of their own (ADR 0091).** The agent is told which cells, as a
+    /// spreadsheet names them, and on which sheet; cells outside any sheet are refused.
+    #[test]
+    fn cells_of_a_sheet_keep_their_place_and_the_agent_is_told_them() {
+        let team = team();
+        let cells = |at: serde_json::Value| -> ReplyTo {
+            serde_json::from_value(json!({
+                "runId": "3f2a9c1e-0000", "messageId": "passage:c", "from": "researcher",
+                "kind": "passage", "text": "Region\tSales\nWest\t120", "file": "/w/sales.xlsx", "at": at
+            }))
+            .expect("cells read")
+        };
+        let mut range = cells(
+            json!({"kind": "cells", "sheet": "Q3 (sales)", "top": 2, "left": 1, "bottom": 9, "right": 28}),
+        );
+        check_reply(&mut range, &team).expect("cells inside a sheet");
+        assert_eq!(
+            range.at,
+            Some(PartAt::Cells {
+                sheet: Some("Q3 (sales)".to_owned()),
+                top: 2,
+                left: 1,
+                bottom: 9,
+                right: 28
+            })
+        );
+        assert_eq!(
+            range.for_agents(&team).named,
+            "A part of sales.xlsx from Researcher (work 3f2a9c1e), in the file /w/sales.xlsx, the \
+             cells A2 to AB9 on the sheet \u{201c}Q3 (sales)\u{201d} (given below with the sheet's column and \
+             row names; the person sees columns by their names and rows by number, not by letter)"
+        );
+        let mut one = cells(json!({"kind": "cells", "top": 3, "left": 2, "bottom": 3, "right": 2}));
+        check_reply(&mut one, &team).expect("one cell of a CSV");
+        assert!(
+            one.for_agents(&team)
+                .named
+                .contains("in the file /w/sales.xlsx, the cell B3 (given below"),
+            "{}",
+            one.for_agents(&team).named
+        );
+
+        for outside in [
+            json!({"kind": "cells", "top": 0, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 3, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 0, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 3, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 1, "bottom": 1_048_577, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 1, "bottom": 2, "right": 16_385}),
+            json!({"kind": "cells", "sheet": "  ", "top": 1, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "sheet": "a\nb", "top": 1, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "sheet": "x".repeat(256), "top": 1, "left": 1, "bottom": 2, "right": 2}),
+        ] {
+            let mut bad = cells(outside.clone());
+            assert!(check_reply(&mut bad, &team).is_err(), "{outside}");
+        }
     }
 
     /// **"Explain" answered in the chat is told the whole part, not its first line.** The answer

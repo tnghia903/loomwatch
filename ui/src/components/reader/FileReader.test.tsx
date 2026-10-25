@@ -627,6 +627,184 @@ describe('a picture in the reader', () => {
   })
 })
 
+// ADR 0091: cells of a sheet are asked about by dragging across them.
+// ADR 0091: cells of a sheet are asked about by dragging across them.
+describe('a sheet in the reader', () => {
+  const SALES = '/teams/.loomwatch/market/writer/sales.csv'
+  const BOOK = '/teams/.loomwatch/market/writer/sales.xlsx'
+  const csv = 'Region,Q1,Q2\nWest,120,140\nEast,80,95\nNorth,60,75\n'
+  const workbook = 'Sheet 1 of 3: Summary (2 rows, 2 columns)\nTotal\t570\nRegions\t3\n\nSheet 2 of 3: By region (3 rows, 2 columns, from cell B2)\nRegion\tSales\nWest\t260\nEast\t175\n\nSheet 3 of 3: Chart (not a table of cells)\n'
+  const reading = (path: string, text: string, extra: Record<string, unknown> = {}) => {
+    answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path, name: path.split('/').pop(), kind: 'spreadsheet', text, ...extra })) : respond(200, { path, exists: true, isDir: false, sizeBytes: 100, modifiedAt: '2026-10-19T01:00:00Z', kind: 'spreadsheet', folder: null, openable: true }))
+  }
+  const cell = (row: number, column: number) => document.querySelector<HTMLElement>(`[data-row="${row}"][data-column="${column}"]`)!
+  const grid = () => document.querySelector<HTMLElement>('.rd-grid')!
+  /** Presses on one place and lets go on another, as a person drags across a sheet. */
+  const dragCells = (from: HTMLElement, to: HTMLElement) => {
+    let over: Element = from
+    const was = document.elementFromPoint
+    document.elementFromPoint = () => over
+    fireEvent.pointerDown(from, { button: 0, pointerId: 1 })
+    over = to
+    fireEvent.pointerMove(grid(), { pointerId: 1 })
+    fireEvent.pointerUp(grid(), { pointerId: 1 })
+    document.elementFromPoint = was
+  }
+
+  it('marks the cells dragged across, and asks about them as their words with their column and row names', async () => {
+    reading(SALES, csv)
+    const { onAsk } = renderReader({ file: { path: SALES, runId: 'run-1', from: 'writer' } })
+    expect(await screen.findByText('Drag across any cells')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Q1' })).toBeInTheDocument()
+    dragCells(cell(2, 2), cell(3, 3))
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the cells you marked' })).toBeInTheDocument()
+    // Still marked once the browser has had its turn: nothing reads a selection of words here.
+    await act(() => new Promise((done) => { setTimeout(done, 20) }))
+    expect(screen.getByRole('toolbar', { name: 'Ask Writer about the cells you marked' })).toBeInTheDocument()
+    expect(document.querySelector('.rd-range.marking')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    const at = { kind: 'cells', top: 2, left: 2, bottom: 3, right: 3 }
+    const text = 'Region\tQ1\tQ2\nWest\t120\t140\nEast\t80\t95'
+    expect(onAsk).toHaveBeenCalledWith(
+      { runId: 'run-1', messageId: passageId(SALES, text, at as never), from: 'writer', to: null, kind: 'passage', text, file: SALES, at },
+      undefined, 'writer',
+    )
+    expect(document.querySelector('.rd-range.marking')).toBeNull()
+  })
+
+  it('marks whole columns from their names and whole rows from their numbers, by press or by drag, never the names’ row', async () => {
+    reading(SALES, csv)
+    const { onAsk } = renderReader({ file: { path: SALES, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag across any cells')
+    const q2 = screen.getByRole('columnheader', { name: 'Q2' })
+    dragCells(q2, q2)
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'Region\tQ2\nWest\t140\nEast\t95\nNorth\t75', at: { kind: 'cells', top: 2, left: 3, bottom: 4, right: 3 } }), EXPLAIN_WORDS, 'writer')
+    dragCells(screen.getByRole('columnheader', { name: 'Q1' }), q2)
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ at: { kind: 'cells', top: 2, left: 2, bottom: 4, right: 3 } }), EXPLAIN_WORDS, 'writer')
+    dragCells(screen.getByRole('rowheader', { name: '3' }), screen.getByRole('rowheader', { name: '3' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'Region\tQ1\tQ2\nEast\t80\t95', at: { kind: 'cells', top: 3, left: 1, bottom: 3, right: 3 } }), EXPLAIN_WORDS, 'writer')
+    dragCells(screen.getByRole('rowheader', { name: '2' }), screen.getByRole('rowheader', { name: '4' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ at: { kind: 'cells', top: 2, left: 1, bottom: 4, right: 3 } }), EXPLAIN_WORDS, 'writer')
+    // A drag into the column names stops at the first row under them.
+    dragCells(cell(3, 2), screen.getByRole('columnheader', { name: 'Q1' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ at: { kind: 'cells', top: 2, left: 2, bottom: 3, right: 2 } }), EXPLAIN_WORDS, 'writer')
+  })
+
+  it('marks a whole column or row from the keyboard, and copies the marked cells', async () => {
+    reading(SALES, csv)
+    renderReader({ file: { path: SALES, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag across any cells')
+    const column = within(screen.getByRole('columnheader', { name: 'Q1' })).getByRole('button', { name: 'Q1' })
+    expect(column).toHaveAttribute('title', 'Mark the whole column')
+    // A press from the keyboard is a click with no count.
+    fireEvent.click(column, { detail: 0 })
+    await screen.findByRole('toolbar', { name: 'Ask Writer about the cells you marked' })
+    let copied = ''
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as Event & { clipboardData: { setData: (type: string, value: string) => void } }
+    event.clipboardData = { setData: (_type, value) => { copied = value } }
+    document.dispatchEvent(event)
+    expect(copied).toBe('120\n80\n60')
+    expect(event.defaultPrevented).toBe(true)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.click(within(screen.getByRole('rowheader', { name: '4' })).getByRole('button', { name: '4' }), { detail: 0 })
+    await screen.findByRole('toolbar', { name: 'Ask Writer about the cells you marked' })
+    // A mouse's click is the press already handled: it marks nothing more.
+    fireEvent.click(column, { detail: 1 })
+    expect(document.querySelectorAll('.rd-range.marking')).toHaveLength(1)
+  })
+
+  it('draws each range asked about with the bubble of the agent asked beside it, in the page’s lightness, and a press on its cells opens the answer', async () => {
+    reading(SALES, csv)
+    const at = { kind: 'cells' as const, top: 2, left: 2, bottom: 3, right: 3 }
+    const asked = [part({ state: 'said', by: 'writer', text: 'West sold most.', at: null }, { file: SALES, text: 'Region\tQ1\tQ2\nWest\t120\t140\nEast\t80\t95', at })]
+    renderReader({ file: { path: SALES, runId: 'run-1', from: 'writer' }, asked })
+    // Quoted with its rows kept.
+    const bubble = await screen.findByRole('button', { name: "Writer's answer about “Region, Q1, Q2 · West, 120, 140 · East, 80, 95”" })
+    expect(document.querySelector('.rd-range[data-part]')?.contains(bubble)).toBe(true)
+    expect(document.querySelector('.rd-range[data-part] > .rd-slot')).not.toHaveClass('on-dark')
+    dragCells(cell(3, 2), cell(3, 2))
+    expect(answerCard()).toHaveTextContent('West sold most.')
+    expect(screen.queryByRole('toolbar')).toBeNull()
+  })
+
+  it('gives a range’s bubble the dark look on a dark page, as words’ bubbles have', async () => {
+    reading(SALES, csv)
+    const at = { kind: 'cells' as const, top: 2, left: 2, bottom: 2, right: 2 }
+    const asked = [part({ state: 'said', by: 'writer', text: 'Yes.', at: null }, { file: SALES, text: 'Region\tQ1\nWest\t120', at })]
+    document.body.style.backgroundColor = 'rgb(12, 12, 14)'
+    try {
+      renderReader({ file: { path: SALES, runId: 'run-1', from: 'writer' }, asked })
+      await waitFor(() => expect(document.querySelector('.rd-range[data-part] > .rd-slot')).toHaveClass('on-dark'))
+    } finally {
+      document.body.style.backgroundColor = ''
+    }
+  })
+
+  it('keeps marking the words asked about in a table before its cells could be marked', async () => {
+    reading(SALES, csv)
+    const asked = [part({ state: 'said', by: 'writer', text: 'Up.', at: null }, { file: SALES, text: 'North' })]
+    renderReader({ file: { path: SALES, runId: 'run-1', from: 'writer' }, asked })
+    await waitFor(() => expect([...document.querySelectorAll('.rd-mark')].map((mark) => mark.textContent)).toEqual(['North']))
+  })
+
+  it('draws a workbook as its sheets, each from its first cell, with its tabs above the sheet, and shows the sheet of an answer that opens', async () => {
+    reading(BOOK, workbook, { extracted: true })
+    const { onAsk, rerender } = renderReader({ file: { path: BOOK, runId: 'run-1', from: 'writer' } })
+    const summary = await screen.findByRole('tab', { name: 'Summary', selected: true })
+    // The tabs sit above the scrolling sheet, so they never scroll away.
+    expect(summary.closest('.rd-scroll')).toBeNull()
+    expect(summary.closest('.rd-sheet-bar')).not.toBeNull()
+    expect(screen.queryByText(/without its layout/)).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Chart' }))
+    expect(screen.getByText('There are no cells on this sheet to show here. Open it in its own app to see it.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'By region' }))
+    expect(screen.getByRole('columnheader', { name: 'Sales' })).toBeInTheDocument()
+    // The sheet starts at B2: its cells are named by the sheet's own rows and columns.
+    dragCells(cell(3, 2), cell(4, 3))
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    expect(onAsk).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: 'Region\tSales\nWest\t260\nEast\t175', at: { kind: 'cells', sheet: 'By region', top: 3, left: 2, bottom: 4, right: 3 } }), EXPLAIN_WORDS, 'writer',
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }))
+    // Asked about cells on the other sheet: their answer opens on their sheet.
+    const at = { kind: 'cells' as const, sheet: 'By region', top: 3, left: 2, bottom: 4, right: 3 }
+    rerender({ asked: [part({ state: 'sending' }, { file: BOOK, text: 'Region\tSales\nWest\t260\nEast\t175', at })] })
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'By region, with cells asked about', selected: true })).toBeInTheDocument())
+    expect(answerCard()).not.toBeNull()
+    // From another sheet, its tab says it holds cells asked about.
+    fireEvent.click(screen.getByRole('button', { name: 'Close the answer' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Summary' }))
+    expect(screen.getByRole('tab', { name: 'By region, with cells asked about', selected: false })).toHaveAttribute('title', 'Has cells you asked about')
+    expect(screen.getByRole('tab', { name: 'Summary' }).querySelector('.rd-sheet-asked')).toBeNull()
+  })
+
+  it('shows the bubbles of cells asked about on another sheet once its tab is chosen', async () => {
+    reading(BOOK, workbook, { extracted: true })
+    const at = { kind: 'cells' as const, sheet: 'By region', top: 3, left: 2, bottom: 4, right: 3 }
+    const asked = [part({ state: 'said', by: 'writer', text: 'East sold less.', at: null }, { file: BOOK, text: 'Region\tSales\nWest\t260\nEast\t175', at })]
+    renderReader({ file: { path: BOOK, runId: 'run-1', from: 'writer' }, asked })
+    await screen.findByRole('tab', { name: 'Summary', selected: true })
+    expect(screen.queryByRole('button', { name: /^Writer's answer about/ })).toBeNull()
+    // In a tab in the background no frame is drawn: the bubbles can't wait for one.
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 0)
+    fireEvent.click(screen.getByRole('tab', { name: 'By region, with cells asked about' }))
+    const bubble = await screen.findByRole('button', { name: /^Writer's answer about “By region/ })
+    expect(document.querySelector('.rd-range[data-part]')?.contains(bubble)).toBe(true)
+  })
+
+  it('says once that a workbook too big to read whole is cut', async () => {
+    reading(BOOK, workbook, { extracted: true, truncated: true })
+    renderReader({ file: { path: BOOK, runId: 'run-1', from: 'writer' } })
+    expect(await screen.findByText('This workbook is too big to show whole here. Open it in its own app for the rest.')).toBeInTheDocument()
+    expect(screen.queryByText(/rows are shown/)).toBeNull()
+  })
+})
+
 describe('a web page in the reader', () => {
   it('runs in a sandbox with no origin, and shows its code on request', async () => {
     answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: '/w/site.html', name: 'site.html', kind: 'web', text: '<h1>Hello</h1>' })) : respond(404, {}))

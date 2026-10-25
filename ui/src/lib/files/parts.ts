@@ -1,8 +1,8 @@
-import type { PartAt } from '../chat/client'
+import type { BoxAt } from '../chat/client'
 
 /**
  * Parts of a file that aren't words (ADR 0091): a box on a picture, kept as where it is
- * (`chat::PartAt`), named in plain words for the chat's quote, and sent as the picture inside it so
+ * (`chat::PartAt::Box`), named in plain words for the chat's quote, and sent as the picture inside it so
  * the agent sees what was marked.
  */
 
@@ -19,7 +19,7 @@ const clamp = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) 
 const unit = (value: number) => Math.round(clamp(value) * WHOLE)
 
 /** The box between two corners dragged on a picture; never thinner than one ten-thousandth. */
-export function boxBetween(from: Point, to: Point, page?: number): PartAt {
+export function boxBetween(from: Point, to: Point, page?: number): BoxAt {
   const left = unit(Math.min(from.x, to.x))
   const top = unit(Math.min(from.y, to.y))
   const w = Math.max(1, Math.min(WHOLE - left, unit(Math.max(from.x, to.x)) - left))
@@ -28,7 +28,7 @@ export function boxBetween(from: Point, to: Point, page?: number): PartAt {
 }
 
 /** The whole picture, or the whole of page `page`, as a box. */
-export function wholeBox(page?: number): PartAt {
+export function wholeBox(page?: number): BoxAt {
   return { kind: 'box', x: 0, y: 0, w: WHOLE, h: WHOLE, ...(page ? { page } : {}) }
 }
 
@@ -36,7 +36,7 @@ export function wholeBox(page?: number): PartAt {
  * What a box is called in the chat's quote: where it is, in the words a person points with ("The top
  * right of the picture"). The agent is told its exact place as well, by the daemon.
  */
-export function boxLabel(at: PartAt, of = 'the picture'): string {
+export function boxLabel(at: BoxAt, of = 'the picture'): string {
   if (at.w >= WHOLE * 0.9 && at.h >= WHOLE * 0.9) return of === 'the picture' ? 'The whole picture' : `The whole of ${of}`
   if (at.w * at.h >= (WHOLE * WHOLE) / 2) return `Most of ${of}`
   const across = at.x + at.w / 2
@@ -48,14 +48,14 @@ export function boxLabel(at: PartAt, of = 'the picture'): string {
 }
 
 /** Where a box is on screen over a picture drawn at `shown`. */
-export function boxOnScreen(at: PartAt, shown: { top: number; left: number; width: number; height: number }) {
+export function boxOnScreen(at: BoxAt, shown: { top: number; left: number; width: number; height: number }) {
   const left = shown.left + (shown.width * at.x) / WHOLE
   const top = shown.top + (shown.height * at.y) / WHOLE
   return { top, left, right: left + (shown.width * at.w) / WHOLE, bottom: top + (shown.height * at.h) / WHOLE }
 }
 
 /** A box as CSS places it over its picture, in percent. */
-export function boxStyle(at: PartAt): { left: string; top: string; width: string; height: string } {
+export function boxStyle(at: BoxAt): { left: string; top: string; width: string; height: string } {
   const percent = (value: number) => `${(value / WHOLE) * 100}%`
   return { left: percent(at.x), top: percent(at.y), width: percent(at.w), height: percent(at.h) }
 }
@@ -64,7 +64,7 @@ export function boxStyle(at: PartAt): { left: string; top: string; width: string
  * The part of a picture inside a box, as a PNG file to send with the question, no longer than
  * `PICTURE_MOST` on its long side; `null` where the picture can't be drawn (not loaded yet).
  */
-export async function pictureInside(image: HTMLImageElement, at: PartAt, name: string): Promise<File | null> {
+export async function pictureInside(image: HTMLImageElement, at: BoxAt, name: string): Promise<File | null> {
   // A picture with no size of its own (an SVG without one) is taken as drawn, at twice the size.
   const width = image.naturalWidth || image.width * 2
   const height = image.naturalHeight || image.height * 2

@@ -23,12 +23,14 @@ export interface FileText {
 }
 
 /** How the reader shows a file: what it is drawn as, not what made it. */
-export type ReaderFormat = 'markdown' | 'page' | 'table' | 'code' | 'text' | 'document' | 'picture' | 'media'
+export type ReaderFormat = 'markdown' | 'page' | 'table' | 'sheet' | 'code' | 'text' | 'document' | 'picture' | 'media'
 
 const FORMATS: Array<[RegExp, ReaderFormat]> = [
   [/^(md|markdown|mdx)$/, 'markdown'],
   [/^html?$/, 'page'],
   [/^(csv|tsv)$/, 'table'],
+  // A workbook is drawn as its sheets, from the words the daemon reads out of it (ADR 0091).
+  [/^(xlsx|xlsm|xlsb|xls|ods)$/, 'sheet'],
   [/^(json|ya?ml|toml|xml|py|js|ts|tsx|jsx|rs|go|java|rb|sh|css|sql)$/, 'code'],
   [/^(txt|log)$/, 'text'],
   [/^(pdf|docx|docm|xlsx|xlsm|pptx|pptm)$/, 'document'],
