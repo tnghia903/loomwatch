@@ -228,6 +228,8 @@ const JOB_STEMS: Record<string, RegExp> = {
   researcher: /\bresearch/, writer: /\bwrit(er|e|ing)\b/, editor: /\bedit(or|ing)?\b|\bproofread/,
   reviewer: /\breview|\bcritic|\bqa\b/, coder: /\bcod(er|e|ing)\b|\bdevelop|\bengineer|\bprogramm/,
   designer: /\bdesign/, analyst: /\banaly/, lead: /\blead\b|\bsupervis/,
+  deck: /\bdecks?\b|\bslides?\b|\bpresentation/, document: /\bdocument maker\b|\bword document/, sheet: /\bspreadsheet|\bsheet maker\b|\bworkbook/,
+  chart: /\bcharts?\b|\bgraphs?\b/, dashboard: /\bdashboard/, video: /\bvideos?\b/,
 }
 
 /** The built-in job whose own instructions these are, word for word: what it is, whatever it is called. */

@@ -32,6 +32,29 @@ describe('built-in jobs', () => {
     expect(editor).toContain('headed "## Missing"')
     expect(editor).toContain('no notes about how you edited it')
   })
+
+  // ADR 0095. An agent's commands run in a sandbox that lets them write only in the work folder and
+  // the temporary ones (`agent/sandbox.rs`): LibreOffice, started as it usually is, cannot write its
+  // profile and stops with "Unspecified Application Error". Seen on this project's Mac, 2026-10-25.
+  it('has every maker that can need LibreOffice start it with its profile in the temporary folder', () => {
+    const makers = ['deck', 'document', 'sheet', 'chart', 'video'].map((id) => ROLE_PRESETS.find((preset) => preset.id === id)!)
+    for (const maker of makers) expect(maker.role, maker.id).toContain('soffice -env:UserInstallation=file://${TMPDIR:-/tmp}/lo-profile --headless')
+  })
+
+  // A part of a made file is asked about by its place (ADR 0091): the hand-back names the places,
+  // and each maker looks at what it made, or reads it back, before it replies.
+  it('has each maker check what it made and hand back its parts by name', () => {
+    const parts: Record<string, RegExp> = {
+      deck: /each slide: its number and its title/, document: /its headings in order/, sheet: /each sheet: its name, its columns/,
+      chart: /the values it draws/, dashboard: /each number and chart the page shows/, video: /each scene: its start time \(m:ss\)/,
+    }
+    for (const [id, says] of Object.entries(parts)) {
+      const role = ROLE_PRESETS.find((preset) => preset.id === id)!.role
+      expect(role, id).toMatch(says)
+      expect(role, id).toMatch(/Before you reply, (check|read|open)/)
+      expect(role, id).toMatch(/`read_file`/)
+    }
+  })
 })
 
 describe('saving an agent as a job', () => {
@@ -45,6 +68,14 @@ describe('saving an agent as a job', () => {
     expect(guessIcon('Fact checker', 'Write a summary')).toBe('review')
     expect(guessIcon('Helper', 'Analyse the sales data')).toBe('analyse')
     expect(guessIcon('Helper', 'Be nice')).toBeUndefined()
+    // A maker's word wins over the older, wider ones.
+    expect(guessIcon('Pitch deck designer')).toBe('slides')
+    expect(guessIcon('Budget spreadsheet')).toBe('sheet')
+    expect(guessIcon('Sales data dashboard')).toBe('dashboard')
+    expect(guessIcon('Helper', 'Turn the data into charts')).toBe('chart')
+    expect(guessIcon('Promo video')).toBe('video')
+    expect(guessIcon('Board pack', 'Make a Word document from the notes')).toBe('document')
+    expect(guessIcon('Data analyst')).toBe('analyse')
   })
 })
 

@@ -35,6 +35,12 @@ const JOB_WORDS: Record<string, string> = {
   coder: 'coder', developer: 'coder', engineer: 'coder', programmer: 'coder', code: 'coder',
   designer: 'designer', design: 'designer',
   analyst: 'analyst', analyse: 'analyst', analyze: 'analyst', data: 'analyst',
+  deck: 'deck', slide: 'deck', presentation: 'deck',
+  document: 'document', pdf: 'document',
+  sheet: 'sheet', spreadsheet: 'sheet', workbook: 'sheet', excel: 'sheet',
+  chart: 'chart', graph: 'chart',
+  dashboard: 'dashboard',
+  video: 'video', clip: 'video',
 }
 
 function job(word: string): string | null {

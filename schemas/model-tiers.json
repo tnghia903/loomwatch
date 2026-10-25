@@ -47,6 +47,12 @@
     "coder": { "tier": "strong", "effort": "deep" },
     "designer": { "tier": "strong", "effort": "standard" },
     "lead": { "tier": "strong", "effort": "standard" },
-    "analyst": { "tier": "strong", "effort": "deep" }
+    "analyst": { "tier": "strong", "effort": "deep" },
+    "deck": { "tier": "strong", "effort": "standard" },
+    "document": { "tier": "strong", "effort": "standard" },
+    "sheet": { "tier": "strong", "effort": "standard" },
+    "chart": { "tier": "strong", "effort": "standard" },
+    "dashboard": { "tier": "strong", "effort": "standard" },
+    "video": { "tier": "strong", "effort": "standard" }
   }
 }
