@@ -126,8 +126,11 @@ pub(crate) fn kept_for(file: &Path) -> PathBuf {
 }
 
 /// What a file's pages are kept under: its path, size and last change, so a changed file is
-/// converted again and an unchanged one never is.
+/// converted again and an unchanged one never is. The path is the file's own, however it was
+/// written (`..`, `.`, or on Windows `/` and `\` mixed), so one file has one set of pages.
 fn key(file: &Path) -> String {
+    let file = crate::platform::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let file = file.as_path();
     let metadata = std::fs::metadata(file).ok();
     let size = metadata.as_ref().map_or(0, std::fs::Metadata::len);
     let changed = metadata
@@ -359,6 +362,24 @@ mod tests {
             started.elapsed() < Duration::from_secs(10),
             "stopped, not waited for"
         );
+    }
+
+    #[test]
+    fn one_file_has_one_set_of_pages_however_its_path_is_written() {
+        let scratch = Scratch::new();
+        let folder = scratch.0.join("decks");
+        std::fs::create_dir_all(&folder).expect("the decks folder");
+        let deck = folder.join("deck.pptx");
+        std::fs::write(&deck, b"slides").expect("write the deck");
+        // As a request may name it: through a folder and back, or with `.` in it; on Windows, with
+        // `/` and `\` mixed, as a path joined from a written one is.
+        let roundabout = folder.join("..").join("decks").join(".").join("deck.pptx");
+        assert_eq!(key(&roundabout), key(&deck));
+        assert_eq!(kept_for(&roundabout), kept_for(&deck));
+        // Another file is another set.
+        let other = folder.join("other.pptx");
+        std::fs::write(&other, b"slides").expect("write another deck");
+        assert_ne!(key(&other), key(&deck));
     }
 
     #[test]
