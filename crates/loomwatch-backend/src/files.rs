@@ -591,7 +591,7 @@ pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiErr
     let Some(media_type) = media_type(&resolved) else {
         return Err(unreadable(
             &name,
-            "only pictures, recordings, and the data and fonts a page loads are shown as they are",
+            "only pictures, recordings and the files a page uses are shown here",
         ));
     };
     let size = std::fs::metadata(&resolved)

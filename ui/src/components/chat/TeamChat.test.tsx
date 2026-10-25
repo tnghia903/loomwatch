@@ -1744,6 +1744,13 @@ describe('asking about a part of a file', () => {
       await waitFor(() => expect(screen.queryByRole('list', { name: 'Going with your message' })).toBeNull())
     })
 
+    it('names a thing in a web page for what it is in the box', async () => {
+      const chart = { ...part, messageId: 'passage:chart', text: 'The chart under “Sales”', file: '/w/dash/index.html', at: { kind: 'element' as const, what: 'chart' as const, path: 'canvas#chart' } }
+      page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+      renderChat({ ask: { reply: chart, at: 11 } })
+      await waitFor(() => expect(box()).toHaveAttribute('placeholder', 'Ask Writer about this chart…'))
+    })
+
     it('quotes cells with their rows kept and their sheet first, in the box and under the message', async () => {
       const cells = { ...part, messageId: 'passage:cells', text: 'Region\tQ1\nWest\t120\nEast\t80', file: '/w/sales.xlsx', at: { kind: 'cells' as const, sheet: 'By region', top: 3, left: 2, bottom: 4, right: 2 } }
       page = [{ kind: 'work', run: run({ runId: 'run-3' }), request: message({ id: 'm-3', runId: 'run-3', text: '@Writer why?', replyTo: cells }), notes: [] }]

@@ -123,8 +123,13 @@ answer, and the marked words open the one still waiting for you, or else the new
 closes it. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
 the data, clips, pictures and fonts beside it load as they would from the page's folder (a
 dashboard's `fetch('sales.csv')` works; LoomWatch reads them for it): its own folder and the folders
-in it only, never anything above it. On a picture (ADR 0091), drag over any
-part of it to mark a box, or click to mark all of it: the bubble leans in over the box, and the part
+in it only, never anything above it. Point at a chart, a picture or a video in the page and a small
+mark shows at its top left; press it (or reach it with Tab) to ask about that thing, and the page's
+tip says so while it has one. Dragging works as the page made it, so a chart that zooms on a drag
+still does; a drag across a chart's own labels marks the chart. The agent is sent a picture of the
+thing as it is shown, when the page can draw it, and told where it is in the page's code; once
+asked, it stays outlined with the agent's bubble at its corner. On a picture (ADR 0091), drag over
+any part of it to mark a box, or click to mark all of it: the bubble leans in over the box, and the part
 goes with its picture, the box cut out of the picture, which the agent you ask sees when its model
 sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the
 chat. The agent is told where the box is as well, so it can open the file itself. The box stays on

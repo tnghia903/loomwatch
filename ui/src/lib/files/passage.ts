@@ -46,6 +46,7 @@ export function passageReply(file: { path: string; runId: string | null; from: s
 export function atKey(at: PartAt): string {
   if (at.kind === 'cells') return `cells:${at.top},${at.left},${at.bottom},${at.right}${at.sheet ? `@${at.sheet}` : ''}`
   if (at.kind === 'time') return `time:${at.start}${at.end === undefined ? '' : `-${at.end}`}`
+  if (at.kind === 'element') return `element:${at.what}@${at.path}`
   return `box:${at.x},${at.y},${at.w},${at.h}${at.page ? `@${at.page}` : ''}${at.ms === undefined ? '' : `@t${at.ms}`}`
 }
 
@@ -372,7 +373,8 @@ function quoted(passage: AskedPassage, most = 60): string {
 /** What a part's bubble says to a screen reader: its state; being a button that opens says the rest. */
 export function bubbleLabel(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
   const who = name(bubbleAgent(passage))
-  const about = quoted(passage)
+  // A thing in a page is named in words already ("The chart under “Sales”"): read on, not quoted.
+  const about = passage.at?.kind === 'element' ? passage.text.charAt(0).toLowerCase() + passage.text.slice(1) : quoted(passage)
   if (passage.answer.state === 'unsent') return `Your question about ${about} wasn't sent`
   if (look === 'busy') return `${who} is answering your question about ${about}`
   if (look === 'waiting') return `New answer from ${who} about ${about}`

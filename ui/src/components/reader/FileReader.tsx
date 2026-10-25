@@ -2,7 +2,7 @@ import { ExternalLink, FolderOpen, X } from 'lucide-react'
 import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { BoxAt, ReplyTo, TimeAt } from '../../lib/chat/client'
+import type { BoxAt, ElementAt, ReplyTo, TimeAt } from '../../lib/chat/client'
 import type { AgentFacts } from '../../lib/chat/faces'
 import { quoteLine } from '../../lib/chat/reply'
 import { baseName, extensionOf, fileLabel, fileTitle, formatBytes, withFolderPaths } from '../../lib/files/fileRefs'
@@ -68,6 +68,8 @@ const PICTURE_HINT_KEY = 'loomwatch.readerHint.picture'
 const CELLS_HINT_KEY = 'loomwatch.readerHint.cells'
 /** And for a recording, whose line is pressed or dragged along. */
 const MEDIA_HINT_KEY = 'loomwatch.readerHint.media'
+/** And for the things in a web page (a chart, a picture, a video), asked about from the mark at their corner. */
+const THING_HINT_KEY = 'loomwatch.readerHint.thing'
 /** How long "Updated" stays lit after the file changed on disk. */
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
@@ -87,6 +89,13 @@ interface Measured { page: boolean; parts: readonly PagePart[]; view: Rect; slot
 const NO_SLOTS: ReadonlyMap<string, HTMLElement> = new Map()
 const sameMeasure = (a: Measured, b: Measured) => a.page === b.page && JSON.stringify([a.parts, a.view]) === JSON.stringify([b.parts, b.view])
   && a.slots.size === b.slots.size && [...a.slots].every(([key, slot]) => b.slots.get(key) === slot)
+
+/** Whether a tip has been seen in this browser, read once for each tip. */
+function useTipSeen(key: string): boolean {
+  return useMemo(() => {
+    try { return window.localStorage.getItem(key) === 'seen' } catch { return false }
+  }, [key])
+}
 
 /**
  * A file an agent made, read inside LoomWatch beside the chat it came from (ADR 0077): a report as a
@@ -243,8 +252,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     const picture = image && at.kind === 'box' ? await pictureInside(image, at, partPictureName(baseName(path))) : null
     return picture ? [picture] : []
   }
-  const askAbout = (reply: ReplyTo, words: string | undefined, agent: string) => {
+  const askAbout = (reply: ReplyTo, words: string | undefined, agent: string, picture?: File) => {
     if (!onAsk) return
+    // A thing in a web page comes with the picture the page drew of it, when it could.
+    if (reply.at?.kind === 'element') { onAsk(reply, words, agent, ...(picture ? [[picture]] : [])); return }
     if (reply.at?.kind !== 'box' && reply.at?.kind !== 'time') { onAsk(reply, words, agent); return }
     void picturesOf(reply.at).then((pictures) => onAsk(reply, words, agent, ...(pictures.length ? [pictures] : [])))
   }
@@ -253,11 +264,12 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     if (!marked || !from || !askee || !onAsk) return
     const reply = passageReply({ path, runId: file.runId, from }, marked.text, marked.at)
     flyToMessageBox(bubble.current, marked.text)
-    askAbout(reply, words, askee)
+    askAbout(reply, words, askee, marked.picture)
     document.getSelection()?.removeAllRanges()
     setCleared((count) => count + 1)
     setMarked(null)
-    hideHint()
+    // Asking about a thing in a page is what its tip teaches; words asked about there teach words.
+    hideHint(marked.at?.kind === 'element' ? THING_HINT_KEY : hintKey === THING_HINT_KEY ? HINT_KEY : hintKey)
   }
 
   // The parts asked about: marked in the text, with a bubble after them for each agent asked, each
@@ -508,16 +520,23 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     askAbout(passageReply({ path, runId: file.runId, from }, passage.text, passage.at), undefined, bubbleAgent(passage))
   }
 
-  // The tip under a file, until a part of one has been asked about.
-  const hintKey = format === 'media' ? MEDIA_HINT_KEY : !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : HINT_KEY
-  const unseen = useMemo(() => {
-    try { return window.localStorage.getItem(hintKey) !== 'seen' } catch { return true }
-  }, [hintKey])
+  // The tip under a file, until a part of one has been asked about. A web page with a chart, a
+  // picture or a video in it has its own: someone who has marked words has not found the mark at a
+  // chart's corner, which shows only while the chart is pointed at.
+  const [thingsOf, setThingsOf] = useState<{ path: string; what: readonly ElementAt['what'][] } | null>(null)
+  const pageThings = shown === 'page' && thingsOf?.path === path ? thingsOf.what : []
+  const thingWord = pageThings.includes('chart') ? 'chart' : pageThings[0] ?? null
+  const hintKey = format === 'media' ? MEDIA_HINT_KEY : !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : thingWord ? THING_HINT_KEY : HINT_KEY
   const [hidden, setHidden] = useState<readonly string[]>([])
+  const unseen = !useTipSeen(hintKey)
+  // Whether marking words has been learnt: before the reader opened, or since, here.
+  const wordsLearnt = useTipSeen(HINT_KEY) || hidden.includes(HINT_KEY)
   const hint = unseen && !hidden.includes(hintKey)
-  const hideHint = () => {
-    setHidden((keys) => [...keys, hintKey])
-    try { window.localStorage.setItem(hintKey, 'seen') } catch { /* The tip shows again next time. */ }
+  // The mark at a thing's corner in a page, drawn small in its tip: the asked agent's face in a dashed chip.
+  const thingMark = from ? <i className="rd-hint-thing" role="img" aria-label="the mark at its corner"><AvatarFace id={from} hue={hue(from)} size={14} fontSize={6} text={initials(name(from))} /></i> : null
+  const hideHint = (key = hintKey) => {
+    setHidden((keys) => [...keys, key])
+    try { window.localStorage.setItem(key, 'seen') } catch { /* The tip shows again next time. */ }
   }
 
   // "Updated" lights for a moment each time the file changes on disk while it is open.
@@ -546,15 +565,19 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   // agent's figure as a picture it can show.
   const figures = useContext(TeamFiguresContext)
   const figureOf = (id: string) => figures.get(id) ?? figures.get(wearerOf(id)) ?? null
-  const pictures = useFigurePictures(shown === 'page' ? mine.flatMap((passage) => { const figure = figureOf(bubbleAgent(passage)); return figure ? [figureStill(figure)] : [] }) : [])
+  // The agent a page's marks ask is in them too, by its face (pageFrame.ts dressMark).
+  const askerFigure = from ? figureOf(from) : null
+  const pictures = useFigurePictures(shown === 'page' ? [...(askerFigure ? [figureStill(askerFigure)] : []), ...mine.flatMap((passage) => { const figure = figureOf(bubbleAgent(passage)); return figure ? [figureStill(figure)] : [] })] : [])
   const pageMarksSaid = JSON.stringify({
-    parts: mine.filter((passage) => !passage.at).map((passage): PageMark => {
+    // Words, and the things in the page asked about (ADR 0091), each known by its part's id.
+    parts: mine.filter((passage) => !passage.at || passage.at.kind === 'element').map((passage): PageMark => {
       const key = askKey(passage)
       const by = bubbleAgent(passage)
       const figure = figureOf(by)
       const look = lookOfAsk(passage)
       return {
-        key, text: passage.text, look, fresh: fresh.includes(key), lit: key === shownKey || key === focus, open: key === shownKey,
+        key, text: passage.at ? partId(passage) : passage.text, ...(passage.at?.kind === 'element' ? { at: passage.at } : {}),
+        look, fresh: fresh.includes(key), lit: key === shownKey || key === focus, open: key === shownKey,
         // With the agent's card to show on hover, the page's own tooltip would cover it.
         label: bubbleLabel(passage, look, name), title: hasCard(passage) ? '' : bubbleTitle(passage, look, name),
         // An agent with a figure shows nothing until its picture is in; one without shows its initials.
@@ -562,8 +585,9 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       }
     }),
     asking,
+    face: askerFigure ? { figure: pictures.get(figureStill(askerFigure)) ?? null } : null,
   })
-  const pageMarks = useMemo(() => JSON.parse(pageMarksSaid) as { parts: PageMark[]; asking: string | null }, [pageMarksSaid])
+  const pageMarks = useMemo(() => JSON.parse(pageMarksSaid) as { parts: PageMark[]; asking: string | null; face: { figure: string | null } | null }, [pageMarksSaid])
   // The marks move with the text: measured again on the next frame after a scroll.
   const scrolled = useRef(0)
   const onScroll = () => {
@@ -603,6 +627,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   )
   else if (text === null) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
   else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={closeAnswer} cleared={cleared}
+    onThings={(what) => setThingsOf({ path, what })}
     onHover={(key, at, now) => { const passage = key ? mine.find((item) => askKey(item) === key) : undefined; if (key && passage && hasCard(passage)) cardAt(key, at, now); else cardAt('', null, now) }} />
   else if (cellsView && sheets) body = (
     // Drawn afresh when the file changes. Words asked about in a table before it could be marked by
@@ -674,7 +699,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           slot, slot.dataset.part,
         ))}
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>
@@ -729,8 +754,11 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
             {format === 'media' ? <span><mark className="box">Click or drag the bar</mark> to ask <b>{name(from)}</b> about a moment</span>
               : !words ? <span><mark className="box">Drag over any part</mark> to ask <b>{name(from)}</b> about it</span>
               : cellsView ? <span><mark className="box">Drag across any cells</mark> to ask <b>{name(from)}</b> about them</span>
-                : <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>}
-            <button type="button" className="rd-hint-close" onClick={hideHint} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>
+                : hintKey === THING_HINT_KEY && thingWord ? (wordsLearnt
+                  ? <span>Click {thingMark} on a {thingWord} to ask <b>{name(from)}</b> about it</span>
+                  : <span><mark>Mark any words</mark> or click {thingMark} on a {thingWord} to ask <b>{name(from)}</b></span>)
+                  : <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>}
+            <button type="button" className="rd-hint-close" onClick={() => hideHint()} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>
           </p>
         )}
       </div>

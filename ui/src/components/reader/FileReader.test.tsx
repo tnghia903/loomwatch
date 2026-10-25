@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { AgentFacts } from '../../lib/chat/faces'
 import { forgetAnswersRead } from '../../lib/files/answersRead'
-import { askKey, passageId, type AskedPassage, type PassageAnswer } from '../../lib/files/passage'
+import { askKey, partId, passageId, type AskedPassage, type PassageAnswer } from '../../lib/files/passage'
 import { EXPLAIN_WORDS, FileReader } from './FileReader'
 
 const REPORT = '/teams/.loomwatch/market/writer/market-report.md'
@@ -976,6 +976,67 @@ describe('a web page in the reader', () => {
     expect(frame.getAttribute('srcdoc')).toContain('<h1>Hello</h1>')
     fireEvent.click(screen.getByRole('tab', { name: 'Code' }))
     expect(await screen.findByText('<h1>Hello</h1>')).toBeInTheDocument()
+  })
+
+  it('asks about a chart the page says was marked, with the picture the page drew of it, and has the page outline it once asked', async () => {
+    const SITE = '/w/site/page.html'
+    answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: SITE, name: 'page.html', kind: 'web', text: '<h2>Sales</h2><canvas id="chart"></canvas>' })) : respond(404, {}))
+    const { onAsk, rerender } = renderReader({ file: { path: SITE, runId: 'run-1', from: 'writer' } })
+    const frame = await waitFor(() => {
+      const element = document.querySelector('iframe')
+      if (!element?.contentWindow) throw new Error('no frame yet')
+      return element
+    })
+    const told = vi.spyOn(frame.contentWindow!, 'postMessage')
+    const fromPage = (data: Record<string, unknown>) => act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', ...data }, source: frame.contentWindow })) })
+    fromPage({ type: 'ready' })
+    const at = { kind: 'element', what: 'chart', path: 'canvas#chart' }
+    fromPage({ type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart under “Sales”', rect: { top: 40, bottom: 190, left: 20, right: 320 }, picture: new Uint8Array([1, 2, 3]).buffer })
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the chart you marked' })).toBeInTheDocument()
+    // The page reports it moved while marked: the picture it sent is kept.
+    fromPage({ type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart under “Sales”', rect: { top: 30, bottom: 180, left: 20, right: 320 } })
+    fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
+    expect(onAsk).toHaveBeenCalledWith(
+      { runId: 'run-1', messageId: passageId(SITE, 'The chart under “Sales”', at as never), from: 'writer', to: null, kind: 'passage', text: 'The chart under “Sales”', file: SITE, at },
+      EXPLAIN_WORDS, 'writer', [expect.any(File)],
+    )
+    const [picture] = onAsk.mock.lastCall![3] as File[]
+    expect([picture.name, picture.type, picture.size]).toEqual(['page chart.png', 'image/png', 3])
+    expect(told).toHaveBeenCalledWith({ lw: 'reader', type: 'clear' }, '*')
+    // Asked: the page is told to outline it, by its path, known by its part's id; its bubble reads on.
+    rerender({ asked: [part({ state: 'said', by: 'writer', text: 'North leads.', at: null }, { file: SITE, text: 'The chart under “Sales”', at: at as never })] })
+    await waitFor(() => expect(told).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'marks', parts: [expect.objectContaining({ text: partId({ text: 'The chart under “Sales”', at: at as never }), at, look: 'read', label: "Writer's answer about the chart under “Sales”" })],
+    }), '*'))
+  })
+
+  it('tells someone in its tip that a chart in a page can be asked about, until they have', async () => {
+    const SITE = '/w/site/page.html'
+    answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: SITE, name: 'page.html', kind: 'web', text: '<p>Sales grew.</p><canvas id="chart"></canvas>' })) : respond(404, {}))
+    const { onAsk } = renderReader({ file: { path: SITE, runId: 'run-1', from: 'writer' } })
+    const frame = await waitFor(() => {
+      const element = document.querySelector('iframe')
+      if (!element?.contentWindow) throw new Error('no frame yet')
+      return element
+    })
+    const fromPage = (data: Record<string, unknown>) => act(() => { window.dispatchEvent(new MessageEvent('message', { data: { lw: 'reader', ...data }, source: frame.contentWindow })) })
+    // Before the page says what it has, the tip is about words.
+    expect(await screen.findByText('Mark any words')).toBeInTheDocument()
+    fromPage({ type: 'things', what: ['picture', 'chart'] })
+    const tip = () => document.querySelector('.rd-hint')
+    expect(tip()).toHaveTextContent(/^WRMark any words or click WR on a chart to ask Writer$/)
+    expect(screen.getByRole('img', { name: 'the mark at its corner' })).toBeInTheDocument()
+    // Words asked about teach words: the tip now speaks of the chart alone.
+    fromPage({ type: 'selection', text: 'Sales grew.', rect: { top: 10, bottom: 28, left: 20, right: 120 } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask' }))
+    expect(window.localStorage.getItem('loomwatch.readerHint')).toBe('seen')
+    expect(tip()).toHaveTextContent(/^WRClick WR on a chart to ask Writer about it$/)
+    // Asking about the chart is what it teaches.
+    fromPage({ type: 'thing', what: 'chart', path: 'canvas#chart', text: 'The chart', rect: { top: 40, bottom: 190, left: 20, right: 320 } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask' }))
+    expect(onAsk).toHaveBeenCalledTimes(2)
+    expect(window.localStorage.getItem('loomwatch.readerHint.thing')).toBe('seen')
+    expect(tip()).toBeNull()
   })
 
   it('hands the page the files beside it that it asks for as it runs, inside its own folder only', async () => {
