@@ -416,8 +416,8 @@ pub(crate) struct FileText {
 pub(crate) const READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 /// The largest picture, data or font file [`raw`] answers: a page takes them in whole, and so does
-/// a part of a picture cut out to be asked about. A recording of any size is answered, a part at a
-/// time (ADR 0091).
+/// a part of a picture cut out to be asked about. A recording or a PDF of any size is answered, a
+/// part at a time (ADR 0091).
 const WHOLE_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Kinds whose bytes are text the reader shows as they are.
@@ -550,6 +550,8 @@ fn media_type(path: &Path) -> Option<&'static str> {
         "bmp" => "image/bmp",
         "tif" | "tiff" => "image/tiff",
         "heic" => "image/heic",
+        // Drawn as its pages by the reader (ADR 0091), read a part at a time.
+        "pdf" => "application/pdf",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "m4a" => "audio/mp4",
@@ -602,8 +604,11 @@ pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiErr
             )
         })?
         .len();
-    let recording = media_type.starts_with("video/") || media_type.starts_with("audio/");
-    if !recording && size > WHOLE_MAX_BYTES {
+    // A recording and a PDF are read a part at a time, so any size will do.
+    let in_parts = media_type.starts_with("video/")
+        || media_type.starts_with("audio/")
+        || media_type == "application/pdf";
+    if !in_parts && size > WHOLE_MAX_BYTES {
         return Err(unreadable(&name, "it is larger than 50 MB"));
     }
     Ok(RawFile {
@@ -801,7 +806,13 @@ mod tests {
             file.path.file_name().and_then(|name| name.to_str()),
             Some("chart.svg")
         );
-        for name in ["page.html", "app.js", "report.md", "deck.pdf", "notes.xml"] {
+        for name in [
+            "page.html",
+            "app.js",
+            "report.md",
+            "letter.docx",
+            "notes.xml",
+        ] {
             let file = workspace.join(name);
             std::fs::write(&file, "x").expect("write file");
             assert_eq!(
@@ -848,7 +859,12 @@ mod tests {
         let root = Root::new();
         let workspace = root.0.join(".loomwatch/team/writer");
         let big = 60 * 1024 * 1024;
-        for (name, answered) in [("talk.mp4", true), ("song.mp3", true), ("huge.png", false)] {
+        for (name, answered) in [
+            ("talk.mp4", true),
+            ("song.mp3", true),
+            ("report.pdf", true),
+            ("huge.png", false),
+        ] {
             let path = workspace.join(name);
             std::fs::File::create(&path)
                 .and_then(|file| file.set_len(big))

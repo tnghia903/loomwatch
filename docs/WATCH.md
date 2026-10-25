@@ -134,7 +134,10 @@ goes with its picture, the box cut out of the picture, which the agent you ask s
 sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the
 chat. The agent is told where the box is as well, so it can open the file itself. The box stays on
 the picture with the bubble of each agent asked at its corner, and the box or its bubble opens the
-answer. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's sheets behind
+answer. A PDF is shown as its pages, and you mark its words as in any file. Drag over a picture or
+a chart on a page to mark a box there; to mark all of a page with one, press Tab until the page is
+ringed, then Enter (or tap it, on a touch screen). The agent is told the page and where the box is,
+and sent a sharp picture of the box. A PDF that can't be shown as its pages shows only its words. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's sheets behind
 tabs, the first row as the column names, the rows numbered. Drag across any cells to ask about them,
 or press (or drag across) column names or row numbers for whole columns or rows; from the keyboard,
 Enter on a column's name or a row's number does the same, and ⌘C copies the marked cells. The agent
