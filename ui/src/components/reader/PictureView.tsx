@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 
-import type { PartAt } from '../../lib/chat/client'
+import type { BoxAt } from '../../lib/chat/client'
 import { boxBetween, boxLabel, boxOnScreen, boxStyle, WHOLE, wholeBox, type Point } from '../../lib/files/parts'
 import type { Marked } from './PageFrame'
 
@@ -12,7 +12,7 @@ const BOX_MIN_PX = 12
 export interface PictureBox {
   /** The part's id (`partId`): its bubbles' slot is found by it. */
   id: string
-  at: PartAt
+  at: BoxAt
   /** How its asks look (`wordsLook`), as classes. */
   look: string
 }
@@ -25,7 +25,7 @@ interface PictureViewProps {
   /** The boxes asked about on it, each with a slot after it for its bubbles. */
   boxes: readonly PictureBox[]
   /** The box marked now and not yet asked about. */
-  marking: PartAt | null
+  marking: BoxAt | null
   /** The part in the message box now, by its id. */
   asking: string | null
   onMarked: (marked: Marked | null) => void
@@ -33,7 +33,7 @@ interface PictureViewProps {
   onOpen: (id: string) => void
 }
 
-const isWhole = (at: PartAt) => at.x === 0 && at.y === 0 && at.w === WHOLE && at.h === WHOLE
+const isWhole = (at: BoxAt) => at.x === 0 && at.y === 0 && at.w === WHOLE && at.h === WHOLE
 
 /**
  * A picture an agent made, with a part of it to ask about (ADR 0091), as words are marked in a
@@ -50,7 +50,7 @@ export function PictureView({ src, alt, askable, boxes, marking, asking, onMarke
     if (!box || !box.width || !box.height) return { x: 0, y: 0 }
     return { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height }
   }
-  const mark = (part: PartAt) => {
+  const mark = (part: BoxAt) => {
     const box = frame.current?.getBoundingClientRect()
     if (!box) return
     onMarked({ text: boxLabel(part), at: part, rect: boxOnScreen(part, box) })

@@ -1,7 +1,7 @@
 import { CornerUpLeft } from 'lucide-react'
 
 import type { ReplyTo } from '../../lib/chat/client'
-import { replyWhat } from '../../lib/chat/reply'
+import { replyWhat, replyWords } from '../../lib/chat/reply'
 import { InlineMarkdown } from '../ui/Markdown'
 
 /**
@@ -9,7 +9,7 @@ import { InlineMarkdown } from '../ui/Markdown'
  * its first words. A click shows the message itself where it was said, when the chat has it.
  */
 export function ReplyQuote({ reply, name, onShow }: { reply: ReplyTo; name: (id: string) => string; onShow?: () => void }) {
-  return <Quote what={replyWhat(reply, name)} text={reply.text} onShow={onShow} />
+  return <Quote what={replyWhat(reply, name)} text={replyWords(reply)} onShow={onShow} />
 }
 
 /**

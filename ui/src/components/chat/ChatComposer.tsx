@@ -6,7 +6,7 @@ import type { ChatTarget, ReplyTo } from '../../lib/chat/client'
 import { extensionOf } from '../../lib/files/fileRefs'
 import { fileIcon } from '../../lib/files/icons'
 import { rawFileUrl } from '../../lib/files/reader'
-import { replyWhat } from '../../lib/chat/reply'
+import { replyWhat, replyWords } from '../../lib/chat/reply'
 import { destination, findMention, mentionChoices, mentionQuery, type ChatAgent, type Destination } from '../../lib/chat/route'
 import { InlineMarkdown } from '../ui/Markdown'
 import { Swap } from './Appearing'
@@ -265,7 +265,7 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           {replyTo.kind === 'passage' ? <TextQuote size={14} aria-hidden="true" /> : <Reply size={14} aria-hidden="true" />}
           <span className="tc-replying-body">
             <span className="tc-replying-what">{replyTo.kind === 'passage' ? 'Asking about' : 'Replying to'} {replyWhat(replyTo, name)}</span>
-            <span className="tc-replying-quote"><InlineMarkdown clickable={false}>{replyTo.text}</InlineMarkdown></span>
+            <span className="tc-replying-quote"><InlineMarkdown clickable={false}>{replyWords(replyTo)}</InlineMarkdown></span>
           </span>
           {other && onAddress && <button type="button" className="tc-link" onClick={() => onAddress(other)}>To {name(other)} instead</button>}
           {onCancelReply && <button type="button" className="tc-link tc-replying-close" onClick={onCancelReply} aria-label="Don't reply to it" title="Don't reply to it (Esc)"><X size={13} aria-hidden="true" /></button>}

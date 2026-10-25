@@ -1,4 +1,7 @@
 //! Excel workbooks, sheet by sheet, each cell as Excel shows it.
+//!
+//! The reader draws these words as sheets (ADR 0091, `ui/src/lib/files/cells.ts` `parseWorkbook`):
+//! keep each sheet's first line ("Sheet 2 of 3: Sales (12 rows, 4 columns, from cell B3)") as it is.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -65,7 +68,7 @@ pub(super) fn text(path: &Path, name: &str) -> Result<String, String> {
 }
 
 /// `0` → `A`, `27` → `AB`.
-pub(super) fn column_name(index: u32) -> String {
+pub(crate) fn column_name(index: u32) -> String {
     let mut name = Vec::new();
     let mut rest = index + 1;
     while rest > 0 {

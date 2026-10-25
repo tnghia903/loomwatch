@@ -1,4 +1,4 @@
-import { quoteLine } from '../chat/reply'
+import { quoteLine, replyWords } from '../chat/reply'
 import { stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type PartAt, type ReplyTo } from '../chat/client'
 import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
@@ -42,8 +42,9 @@ export function passageReply(file: { path: string; runId: string | null; from: s
   return { runId: file.runId, messageId: passageId(file.path, text, at), from: file.from, to: null, kind: 'passage', text, file: file.path, ...(at ? { at } : {}) }
 }
 
-/** Where a part is, in a few characters that are the same each time: `box:2500,0,5000,5000`. */
+/** Where a part is, in a few characters that are the same each time: `box:2500,0,5000,5000`, `cells:2,1,9,4@Q3`. */
 export function atKey(at: PartAt): string {
+  if (at.kind === 'cells') return `cells:${at.top},${at.left},${at.bottom},${at.right}${at.sheet ? `@${at.sheet}` : ''}`
   return `box:${at.x},${at.y},${at.w},${at.h}${at.page ? `@${at.page}` : ''}`
 }
 
@@ -364,7 +365,7 @@ export function partQuote(text: string, most = 60): string {
 }
 
 function quoted(passage: AskedPassage, most = 60): string {
-  return partQuote(passage.text, most)
+  return partQuote(replyWords(passage), most)
 }
 
 /** What a part's bubble says to a screen reader: its state; being a button that opens says the rest. */

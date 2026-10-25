@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 mod email;
 mod excel;
+pub(crate) use excel::column_name;
 mod office;
 mod pdf;
 mod picture;
