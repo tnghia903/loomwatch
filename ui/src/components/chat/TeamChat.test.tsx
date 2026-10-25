@@ -1474,13 +1474,14 @@ describe('one agent’s own chat', () => {
     expect(props.prepare).toHaveBeenCalledTimes(1)
   })
 
-  // In one agent's own chat an @ goes nowhere, so it is drawn as you wrote it.
-  it('draws no @mention chips', async () => {
+  // An agent named is drawn as its chip everywhere, one agent's own chat too, though an @ there
+  // goes to that agent whatever it names.
+  it('draws the agent you @mention as its chip', async () => {
     page = [{ kind: 'work', run: run({ onlyAgent: 'ada', responder: 'ada', agentIds: ['ada'] }), request: message({ text: '@Ada sum it up for @team', route: 'agent', agentId: 'ada' }), notes: [] }]
     renderSolo()
     const log = await screen.findByRole('log')
     await waitFor(() => expect(within(log).getByText((_, element) => element?.classList.contains('chat-text') === true && element.textContent === '@Ada sum it up for @team')).toBeTruthy())
-    expect(log.querySelector('.tc-mention, .tc-mention-team')).toBeNull()
+    expect(log.querySelector('.tc-mention')?.textContent).toBe('@Ada')
   })
 
   it('makes a message a note for its turn while it works, without saving the agent again', async () => {
@@ -1963,6 +1964,23 @@ describe('finding words in the whole chat (ADR 0081)', () => {
     expect(await screen.findByText('Couldn’t search the chat just now.')).toBeInTheDocument()
     expect(screen.queryByText('Nothing in this chat matches that.')).toBeNull()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+})
+
+describe('agents named in an answer', () => {
+  it('draws an agent the team’s answer @mentions as its chip', async () => {
+    page = [{ kind: 'work', run: run({ reply: 'Ask @Writer for a shorter title.' }), request: message({ text: '@team the digest', route: 'team' }), notes: [] }]
+    renderChat()
+    const log = await screen.findByRole('log')
+    await waitFor(() => expect(log.querySelector('.tc-answer .tc-mention')?.textContent).toBe('@Writer'))
+  })
+
+  // ADR 0092: one of the person's other agents, brought in from My agents, is named as its chip too.
+  it('draws one of my agents a run may bring in as its chip', async () => {
+    page = [{ kind: 'work', run: run({ reply: 'Ask @Coder for the parser.' }), request: message({ text: '@team the digest', route: 'team' }), notes: [] }]
+    renderChat({ team: { ...team, names: new Map([...team.names, ['mine+coder', 'Coder']]), hues: new Map([...team.hues, ['mine+coder', 3]]) } })
+    const log = await screen.findByRole('log')
+    await waitFor(() => expect(log.querySelector('.tc-answer .tc-mention')?.textContent).toBe('@Coder'))
   })
 })
 

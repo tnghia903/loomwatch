@@ -20,7 +20,8 @@
       "toolAllow": { "Linear": ["create_issue"] },
       "doneWhen": ["Every figure has a source."],
       "allow": { "web": true },
-      "helpers": false
+      "helpers": false,
+      "bringsIn": false
     },
     "filled": {
       "id": "researcher",
@@ -39,7 +40,8 @@
       ],
       "doneWhen": ["Every figure has a source."],
       "allow": { "web": true },
-      "allowRecruiting": false
+      "allowRecruiting": false,
+      "allowMyAgents": false
     }
   },
   {
@@ -165,6 +167,7 @@
       "model": "fake/offline",
       "allow": { "web": true, "commands": true },
       "allowRecruiting": false,
+      "allowMyAgents": false,
       "doneWhen": ["An old item."]
     },
     "job": { "name": "Analyst", "instructions": "Compare the options." },

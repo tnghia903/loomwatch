@@ -48,6 +48,9 @@ export interface JobSpec {
   /** `false`: it does not bring in helpers for a big task (ADR 0079), and a team copies that as
       `allowRecruiting: false`. Absent, it may. */
   helpers?: false
+  /** `false`: it does not bring in other agents from My agents for a part no one on its team does
+      (ADR 0092), filled into a team as `allowMyAgents: false`. Absent, it may. */
+  bringsIn?: false
   /** Set by the daemon: which version this is. Absent means 1. */
   version?: number
   /** What changed in this version, in the operator's words. */
@@ -205,6 +208,7 @@ export function savedJobPreset(job: SavedJob): RolePreset {
     ...(job.doneWhen?.length ? { doneWhen: job.doneWhen } : {}),
     ...(allow ? { allow } : {}),
     ...(job.helpers === false ? { helpers: false as const } : {}),
+    ...(job.bringsIn === false ? { bringsIn: false as const } : {}),
     from: { agent: job.id, version: versionOf(job) },
   }
 }

@@ -10,6 +10,7 @@ import { uniqueLabel } from '../../lib/composer-layout/types'
 import { listNames, middleTruncate } from '../../lib/format'
 import { addAgentFile, addTeamFile } from '../../lib/knowledge/client'
 import type { DetectedCapability } from '../../lib/library/client'
+import { BRINGING_IN_SHIPPED } from '../../lib/library/bringIn'
 import type { AgentDraft } from '../../lib/library/draft'
 import { replyLine, replySays, replySection, withReply } from '../../lib/library/desk'
 import { knowledgeOf, readKey, type AgentRead } from '../../lib/library/reads'
@@ -326,6 +327,13 @@ export function ByHand({ draft, set: write, skills, skillsLoading, roleField, fi
               <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
               <span className="txt"><b className="t-body">Brings in helpers for big tasks</b><span className="t-meta">On a wide task it can start copies of itself on the parts at once, then put their work together. Each copy runs on its model too.</span></span>
             </button>
+            {/* ADR 0092: shown once bringing in ships (lib/library/bringIn.ts); on by default, the agent's own switch. */}
+            {BRINGING_IN_SHIPPED && (
+              <button type="button" className={`check byhand-helpers${draft.bringsIn !== false ? ' on' : ''}`} disabled={readOnly} aria-pressed={draft.bringsIn !== false} onClick={() => set('bringsIn', draft.bringsIn === false ? undefined : false)}>
+                <span className="box"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></span>
+                <span className="txt"><b className="t-body">Can bring in other agents from My agents</b><span className="t-meta">For a part no one on its team does, it can bring in another of your agents. That agent runs on its own model.</span></span>
+              </button>
+            )}
           </>)}
 
           {block('skills', <Shelf kind="skill" chosen={draft.skills} available={skills} loading={skillsLoading} onAdd={addSkill} onRemove={(skill) => set('skills', draft.skills.filter((item) => item !== skill))} onDrag={setDragging} onMarket={readOnly ? undefined : (query) => setMarket({ query })} fromMarket={fromMarket.filter((skill) => draft.skills.includes(skill))} />)}

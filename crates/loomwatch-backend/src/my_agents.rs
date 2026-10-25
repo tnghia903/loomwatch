@@ -16,7 +16,7 @@
 //! the cases in `schemas/my-agents.cases.json`.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_yaml::{Mapping, Value};
 
@@ -281,6 +281,21 @@ pub(crate) fn listed(names: &[String]) -> String {
     }
 }
 
+/// The teams folder a team file is read in: the nearest folder that holds My agents (`.jobs`), from
+/// the file's own folder upward, or the file's own folder when none does. An agent's own chat, kept
+/// in `.jobs/.bench/`, is read in the teams folder above it.
+pub(crate) fn teams_root_of(team_path: &Path) -> PathBuf {
+    let folder = team_path
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    folder
+        .ancestors()
+        .find(|candidate| candidate.join(FOLDER).is_dir())
+        .unwrap_or(folder)
+        .to_path_buf()
+}
+
 /// The agent in My agents an entry points at, when the entry holds none of the agent's own fields
 /// and so is to be filled in: not a review stop, and no `role` of its own.
 fn pointer(entry: &Mapping) -> Option<String> {
@@ -346,6 +361,11 @@ pub(crate) fn fill_entry(entry: &mut Mapping, agent: &str, spec: &JobSpec) {
         entry.remove("allowRecruiting");
     } else {
         set(entry, "allowRecruiting", false);
+    }
+    if spec.brings_in {
+        entry.remove("allowMyAgents");
+    } else {
+        set(entry, "allowMyAgents", false);
     }
     let mut from = Mapping::new();
     from.insert("agent".into(), agent.into());

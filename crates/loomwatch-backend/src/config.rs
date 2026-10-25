@@ -533,6 +533,9 @@ pub struct AgentConfig {
     pub model: String,
     pub thinking_effort: Option<String>,
     pub allow_recruiting: bool,
+    /// Whether it may bring in another of the person's agents from My agents (ADR 0092), when the
+    /// team lists any (`guards.myAgents`). Its own switch, filled in from My agents.
+    pub allow_my_agents: bool,
     pub capabilities: Vec<CapabilityRef>,
     /// Per-agent memory overrides; the team's `memory:` block applies when absent.
     pub memory: Option<AgentMemoryConfig>,
@@ -678,6 +681,8 @@ struct RawAgent {
     thinking_effort: Option<String>,
     #[serde(default = "default_allow_recruiting")]
     allow_recruiting: bool,
+    #[serde(default = "default_allow_recruiting")]
+    allow_my_agents: bool,
     #[serde(default)]
     capabilities: Vec<CapabilityRef>,
     #[serde(default)]
@@ -776,6 +781,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     model: String::new(),
                     thinking_effort: None,
                     allow_recruiting: false,
+                    allow_my_agents: false,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
                     allow: AgentAllow::default(),
@@ -808,6 +814,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                     model,
                     thinking_effort: raw.thinking_effort,
                     allow_recruiting: raw.allow_recruiting,
+                    allow_my_agents: raw.allow_my_agents,
                     capabilities: raw.capabilities,
                     memory: raw.memory,
                     allow: raw.allow.unwrap_or_default(),
@@ -1108,6 +1115,11 @@ pub struct GuardsConfig {
     /// helpers off for the team.
     #[serde(default = "default_max_helpers")]
     pub max_helpers: u32,
+    /// How many of the person's agents in My agents the `my_agents` tool lists for an agent that
+    /// may bring one in (ADR 0092), most recently saved first. `0`, the default until the bench
+    /// shows it helps, turns bringing in off for the team.
+    #[serde(default)]
+    pub my_agents: u32,
 }
 
 impl Default for GuardsConfig {
@@ -1116,6 +1128,7 @@ impl Default for GuardsConfig {
             max_dispatch_depth: default_max_dispatch_depth(),
             max_concurrent_dispatches: default_max_concurrent_dispatches(),
             max_helpers: default_max_helpers(),
+            my_agents: 0,
         }
     }
 }
@@ -1487,15 +1500,7 @@ impl TeamConfig {
     ///
     /// As [`Self::load_in`].
     pub fn load_beside(path: &Path) -> Result<Self> {
-        let folder = path
-            .parent()
-            .filter(|folder| !folder.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        let root = folder
-            .ancestors()
-            .find(|candidate| candidate.join(crate::my_agents::FOLDER).is_dir())
-            .unwrap_or(folder);
-        Self::load_in(path, root)
+        Self::load_in(path, &crate::my_agents::teams_root_of(path))
     }
 
     /// [`Self::parse`] for a team in the teams folder `teams_root`: an agent that points at one of

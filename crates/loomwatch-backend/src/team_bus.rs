@@ -111,6 +111,9 @@ struct TeamBusState {
     copies: std::sync::Mutex<BTreeMap<String, HelperCopy>>,
     /// The number the next helper is given, counted from 1 across the run.
     next_copy: AtomicU64,
+    /// The person's agents brought in from My agents in this run, by id (`mine+<id>`), each as it
+    /// was saved when it was first brought in ([`crate::bring_in`], ADR 0092).
+    guests: std::sync::Mutex<BTreeMap<String, AgentConfig>>,
 }
 
 /// The agent working alone that may bring in helpers, and what its helpers work with: its own
@@ -410,6 +413,7 @@ impl TeamBus {
             helper_home: std::sync::Mutex::new(None),
             copies: std::sync::Mutex::new(BTreeMap::new()),
             next_copy: AtomicU64::new(1),
+            guests: std::sync::Mutex::new(BTreeMap::new()),
         });
         Ok(Self { state })
     }
@@ -1242,12 +1246,162 @@ impl TeamBus {
             .find(|agent| agent.id == agent_id)
             .cloned()
             .or_else(|| self.copy(agent_id))
+            .or_else(|| self.guest(agent_id))
             .with_context(|| format!("agent {agent_id:?} is not on this team"))
     }
 
-    /// The id of the agent a Team Bus call's `agent` argument names. See [`resolve_agent`].
+    /// The id of the agent a Team Bus call's `agent` argument names. See [`resolve_agent`]. One of
+    /// the person's agents brought in earlier in this run is found by the id it was brought in by.
     fn resolve(&self, reference: &str) -> Result<String> {
-        resolve_agent(&self.state.team.agents, reference)
+        resolve_agent(&self.state.team.agents, reference).or_else(|error| {
+            let reference = reference.trim();
+            if self.guest(reference).is_some() {
+                Ok(reference.to_owned())
+            } else {
+                Err(error)
+            }
+        })
+    }
+
+    /// One of the person's agents brought in from My agents in this run.
+    fn guest(&self, agent_id: &str) -> Option<AgentConfig> {
+        self.state
+            .guests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(agent_id)
+            .cloned()
+    }
+
+    /// Where the person's agents in My agents are, beside this team's file (ADR 0094).
+    fn teams_root(&self) -> PathBuf {
+        crate::my_agents::teams_root_of(&self.state.team_path)
+    }
+
+    /// Whether `agent` of My agents may be brought in here: its file was reviewed, when the run
+    /// has a person to review it (ADR 0048), and its model's source is connected on this computer,
+    /// or it is the offline demo.
+    fn may_run(&self, teams_root: &Path, agent: &str, model: &str) -> bool {
+        let reviewed = self
+            .state
+            .operator
+            .as_ref()
+            .and_then(|desk| desk.registry().approvals())
+            .is_none_or(|approvals| {
+                crate::jobs::job_bytes(teams_root, agent).is_some_and(|bytes| {
+                    approvals.is_agent_approved(agent, &crate::approvals::revision(&bytes))
+                })
+            });
+        let model = crate::ai::ModelRef::parse(model);
+        let offline = model.id == crate::agent::OFFLINE_MODEL || model.id.starts_with("demo/");
+        reviewed
+            && (offline
+                || crate::ai::installed()
+                    .is_some_and(|ai| ai.connected_sources().contains(&model.source)))
+    }
+
+    /// Whether the agent behind `session` may bring in the person's other agents now: the run's
+    /// starting agent, in a team with no fixed order, in a run that lists them
+    /// ([`crate::bring_in::may_bring_in`]), and not answering a question.
+    fn brings_in(&self, session: &AgentSession) -> Option<AgentConfig> {
+        if self.state.mode != TeamBusMode::Team || session.answering {
+            return None;
+        }
+        self.state
+            .team
+            .agents
+            .iter()
+            .find(|agent| agent.id == session.agent_id)
+            .filter(|agent| crate::bring_in::may_bring_in(&self.state.team, agent))
+            .cloned()
+    }
+
+    /// `my_agents`: the person's agents the caller may bring in, as `dispatch` takes them.
+    async fn my_agents(&self, session: &AgentSession) -> Result<Value> {
+        let Some(lead) = self.brings_in(session) else {
+            return Err(refused(
+                "not_bringing_in",
+                "only the agent this team's work starts with may bring in the person's other \
+                 agents"
+                    .to_owned(),
+            ));
+        };
+        let bus = self.clone();
+        let listing = tokio::task::spawn_blocking(move || {
+            let teams_root = bus.teams_root();
+            crate::bring_in::listing(
+                &teams_root,
+                &bus.state.team,
+                bus.state.team.guards.my_agents,
+                &lead.model,
+                |agent, model| bus.may_run(&teams_root, agent, model),
+            )
+        })
+        .await
+        .context("listing My agents stopped")?;
+        let mut answer = json!({"agents": listing.agents});
+        if listing.more > 0 {
+            answer["more"] = json!(listing.more);
+        }
+        if listing.agents.is_empty() {
+            answer["note"] = json!(MY_AGENTS_NONE.text());
+        }
+        Ok(answer)
+    }
+
+    /// The guest `reference` names, brought in for the caller when it may bring one in: `None`
+    /// when `reference` names no agent of My agents. One the team points at already works here,
+    /// as the team's own, so that is the one it reaches.
+    async fn bring_in(&self, session: &AgentSession, reference: &str) -> Result<Option<String>> {
+        let Some(agent) = crate::bring_in::agent_of(reference.trim()) else {
+            return Ok(None);
+        };
+        let id = crate::bring_in::guest_id(agent);
+        if self.guest(&id).is_some() {
+            return Ok(Some(id));
+        }
+        if let Some(own) = self
+            .state
+            .team
+            .agents
+            .iter()
+            .find(|candidate| candidate.from_agent.as_deref() == Some(agent))
+        {
+            return Ok(Some(own.id.clone()));
+        }
+        let Some(lead) = self.brings_in(session) else {
+            return Err(refused(
+                "not_bringing_in",
+                "only the agent this team's work starts with may bring in the person's other \
+                 agents"
+                    .to_owned(),
+            ));
+        };
+        let bus = self.clone();
+        let agent = agent.to_owned();
+        let guest = tokio::task::spawn_blocking(move || {
+            let teams_root = bus.teams_root();
+            let guest = crate::bring_in::guest(&teams_root, &agent, &lead.model)?;
+            if !bus.may_run(&teams_root, &agent, &guest.model) {
+                return Err(format!(
+                    "{} can't be brought in here: its file in My agents waits for the person's \
+                     review, or the model it runs on isn't connected on this computer. Go on \
+                     without it.",
+                    guest.name
+                ));
+            }
+            Ok(guest)
+        })
+        .await
+        .context("bringing in one of My agents stopped")?
+        .map_err(|message| refused("cannot_bring_in", message))?;
+        self.state
+            .guests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(id.clone())
+            .or_insert(guest);
+        Ok(Some(id))
     }
 
     async fn call_tool(&self, token: &str, request: &Value) -> Result<Value> {
@@ -1448,13 +1602,24 @@ impl TeamBus {
                 }))
             }
             "ask_team" => self.ask_team(session, event_log, arguments).await,
+            "my_agents" => self.my_agents(session).await,
             "dispatch" => {
-                let target = self.resolve(&required_string(arguments, "agent")?)?;
+                let reference = required_string(arguments, "agent")?;
+                // The team's own agents first: a name one of them has is theirs (ADR 0092).
+                let target = match self.resolve(&reference) {
+                    Ok(target) => target,
+                    Err(error) => self.bring_in(session, &reference).await?.ok_or(error)?,
+                };
                 let task = required_string(arguments, "task")?;
                 self.refuse_new_agent(session, &target, "dispatch")?;
                 let context = self.guard_delegation(session, &target)?;
                 let reach = self.reach(&target).await;
                 let mut accepted = json!({"accepted": true, "agent": target, "mode": "dispatch"});
+                // One of the person's agents: its name, and where it came from, for the chat.
+                if let Some(guest) = self.guest(&target) {
+                    accepted["name"] = json!(guest.name);
+                    accepted["from"] = json!({"agent": guest.from_agent});
+                }
                 self.say_reach(&mut accepted, &reach, &target);
                 self.spawn_background(
                     &target,
@@ -2146,6 +2311,12 @@ impl TeamBus {
         {
             payload["title"] = json!(copy.title);
             payload["name"] = json!(copy.config.name);
+        }
+        // One of the person's agents brought in (ADR 0092): named, and where it came from, so the
+        // run's record says which agent worked even once it is renamed or removed from My agents.
+        if let Some(guest) = self.guest(agent) {
+            payload["name"] = json!(guest.name);
+            payload["from"] = json!({"agent": guest.from_agent});
         }
         // Stopped by the operator or at a spending limit: what it came back with is what it had.
         if stopped {
@@ -3169,6 +3340,9 @@ pub(crate) struct BusSeat {
     /// The agent pinned to the notch, in its own chat, with a person to confirm: it may ask the
     /// person's teams (ADR 0083, decision 9).
     pub(crate) front_desk: bool,
+    /// The agent the work starts with, in a team with no fixed order that lists the person's other
+    /// agents: it may bring one in from My agents (ADR 0092).
+    pub(crate) my_agents: bool,
 }
 
 impl TeamBus {
@@ -3217,6 +3391,13 @@ impl TeamBus {
                 && !holder.answering
                 && self.state.operator.is_some()
                 && crate::pinned::front_desk(&self.state.team_path, &holder.agent_id).is_some(),
+            my_agents: !copy
+                && !holder.helper
+                && !holder.answering
+                && self.state.mode == TeamBusMode::Team
+                && team.agents.iter().any(|agent| {
+                    agent.id == holder.agent_id && crate::bring_in::may_bring_in(team, agent)
+                }),
         }
     }
 
@@ -3306,6 +3487,9 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
     let team = seat.mode == TeamBusMode::Team;
     let together = seat.teammates > 0;
     let hands_out = team && together && !seat.answering;
+    // ADR 0092: an agent that may bring in the person's other agents starts one with `dispatch`,
+    // alone in its own chat too.
+    let brings_in = team && seat.my_agents && !seat.answering;
     let asks = together
         && if team {
             !seat.answering
@@ -3325,10 +3509,17 @@ pub(crate) fn offered_tools(seat: &BusSeat) -> Vec<Value> {
             &json!({"type": "object", "additionalProperties": false}),
         ));
     }
+    if brings_in {
+        tools.push(tool(
+            "my_agents",
+            MY_AGENTS.text(),
+            &json!({"type": "object", "additionalProperties": false}),
+        ));
+    }
     // The descriptions carry the delegation brief because the agent reads them at the moment it
     // writes one. The agent it starts sees nothing but that text (orientation.rs `for_helper`),
     // and a vague brief is how two helpers end up doing the same search, or the wrong one.
-    if hands_out {
+    if hands_out || brings_in {
         tools.push(tool(
             "dispatch",
             DISPATCH.text(),
@@ -3399,6 +3590,21 @@ pub(crate) const DISPATCH: Block = Block::new(
      on each other together. What each one sends back reaches you in one more turn after this one \
      ends. A teammate that already finished work in this run carries on in the same conversation \
      and remembers it; one still working starts as a separate copy that does not.",
+);
+
+/// `my_agents` (ADR 0092): the person's other agents, and when to bring one in.
+pub(crate) const MY_AGENTS: Block = Block::new(
+    "bus.my_agents",
+    "List the person's other agents, from My agents: each one's id, what it does and the model it \
+     runs on. Bring one in only for a part no one here does, with `dispatch` and the id given \
+     here. It works on your brief as a teammate would, and costs what its own model costs.",
+);
+
+/// `my_agents`, when there is no one to list.
+pub(crate) const MY_AGENTS_NONE: Block = Block::new(
+    "bus.my_agents.none",
+    "None of the person's other agents can be brought in here now. Do the work with the agents you \
+     have.",
 );
 
 /// `dispatch`'s `task`: the brief.
@@ -3824,6 +4030,7 @@ mod tests {
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: true,
+            allow_my_agents: true,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
@@ -3878,6 +4085,7 @@ mod tests {
                 conversation: true,
                 helpers: 4,
                 front_desk: true,
+                my_agents: true,
             };
             for tool in offered_tools(&seat) {
                 let text = tool.to_string();
@@ -6331,6 +6539,194 @@ mod tests {
         Ok((bus, lead, log))
     }
 
+    /// A teams folder of its own, with My agents in it, removed when the test ends.
+    struct TeamsFolder(PathBuf);
+
+    impl Drop for TeamsFolder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn teams_folder_with(agents: &[(&str, String)]) -> TeamsFolder {
+        let root = std::env::temp_dir().join(format!("loomwatch-guests-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".jobs")).expect("My agents");
+        for (id, text) in agents {
+            std::fs::write(root.join(".jobs").join(format!("{id}.yaml")), text).expect("an agent");
+        }
+        TeamsFolder(crate::platform::canonicalize(&root).expect("a canonical folder"))
+    }
+
+    /// `my_agents` from the agent behind `token`.
+    async fn listed(bus: &TeamBus, token: &str) -> Result<Value> {
+        post_json(
+            bus,
+            token,
+            &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                "params": {"name": "my_agents", "arguments": {}}}),
+        )
+        .await
+    }
+
+    /// ADR 0092: the agent the work starts with lists the person's other agents and brings one in
+    /// by the id the list gives. It works as it is saved in My agents, told it isn't on the team,
+    /// and what it sends back reaches the lead like a teammate's. The run's record names it and
+    /// where it came from. A teammate may not bring one in, and a team that lists none offers none.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn the_lead_brings_in_one_of_my_agents_and_it_works_as_saved() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let researcher = demo_model(Demo::responder(|request| {
+            let prompt = request.prompt();
+            Some(says(
+                if prompt.contains("Find facts, each with its source.")
+                    && prompt.contains("You are not on this team")
+                    && prompt.contains("Find three facts about wind.")
+                {
+                    "Three facts, with sources."
+                } else {
+                    "not as saved"
+                },
+            ))
+        }));
+        let folder = teams_folder_with(&[
+            (
+                "researcher",
+                format!(
+                    "name: Researcher\ninstructions: Find facts, each with its source.\nmodel: {researcher}\n"
+                ),
+            ),
+            (
+                "writer",
+                format!("name: Writer\ninstructions: Write.\nmodel: {OFFLINE}\n"),
+            ),
+        ]);
+        let mut placed = test_agent("writer", OFFLINE);
+        placed.from_agent = Some("writer".into());
+        let mut team = TeamConfig {
+            agents: vec![test_agent("lead", OFFLINE), placed],
+            ..team_of("guests-team", "lead")
+        };
+        team.guards.my_agents = 10;
+        let archive = EventArchive::new(pool);
+        let bus = TeamBus::start(
+            Arc::new(team.clone()),
+            &folder.0.join("team.yaml"),
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = bus.connection("lead").await?;
+        let log = EventLog::new(archive.clone(), "guests-run".into());
+        lead.register(log.clone()).await;
+
+        // Offered to the lead, with `dispatch` to bring one in.
+        let tools = post_json(
+            &bus,
+            &lead.token,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        )
+        .await?;
+        let names: Vec<_> = tools["result"]["tools"]
+            .as_array()
+            .context("the lead's tools")?
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(
+            names.contains(&"my_agents") && names.contains(&"dispatch"),
+            "{names:?}"
+        );
+        // The list: Researcher, not Writer, who is on the team already.
+        let list = listed(&bus, &lead.token).await?;
+        let agents = list["result"]["structuredContent"]["agents"].clone();
+        assert_eq!(
+            agents,
+            json!([{"agent": "mine+researcher", "name": "Researcher",
+                "does": "Find facts, each with its source.", "model": researcher}]),
+            "{list}"
+        );
+
+        let accepted = hand(
+            &bus,
+            &lead.token,
+            "mine+researcher",
+            "Find three facts about wind.",
+        )
+        .await?;
+        let said = &accepted["result"]["structuredContent"];
+        assert_eq!(said["agent"], "mine+researcher", "{accepted}");
+        assert_eq!(said["name"], "Researcher", "{accepted}");
+        assert_eq!(said["from"], json!({"agent": "researcher"}), "{accepted}");
+        assert_eq!(
+            came_back(&lead).await,
+            [Ok("Three facts, with sources.".to_owned())]
+        );
+        let recorded = archive
+            .load_session("guests-run")
+            .await?
+            .into_iter()
+            .find(|event| event.payload["phase"] == "delegated_result")
+            .context("what it came back with")?;
+        assert_eq!(recorded.agent_id, "mine+researcher");
+        assert_eq!(recorded.payload["name"], "Researcher");
+        assert_eq!(recorded.payload["from"], json!({"agent": "researcher"}));
+        // Brought in, it can be asked, by the id it was brought in by.
+        let asked = ask(
+            &bus,
+            &lead.token,
+            "mine+researcher",
+            "Which source is newest?",
+        )
+        .await?;
+        assert_ne!(asked["result"]["isError"], true, "{asked}");
+        // A name one of the team's agents has is that agent's: My agents' Writer works as the team's.
+        let own = hand(&bus, &lead.token, "mine+writer", "Write it up.").await?;
+        assert_eq!(
+            own["result"]["structuredContent"]["agent"], "writer",
+            "{own}"
+        );
+        released(&bus).await?;
+
+        // The teammate may not.
+        let writer = bus.connection("writer").await?;
+        writer.register(log.clone()).await;
+        let only_the_lead = "only the agent this team's work starts with may bring in";
+        let refused = listed(&bus, &writer.token).await?;
+        assert!(refused.to_string().contains(only_the_lead), "{refused}");
+        // Researcher was brought in already, so the teammate may reach it as one more agent of the
+        // run; one of My agents not brought in yet it may not start.
+        let refused = hand(&bus, &writer.token, "mine+analyst", "Find more.").await?;
+        assert!(refused.to_string().contains(only_the_lead), "{refused}");
+
+        // A team that lists none: no tool, and no one brought in.
+        team.guards.my_agents = 0;
+        let off = TeamBus::start(
+            Arc::new(team),
+            &folder.0.join("team.yaml"),
+            archive.clone(),
+            Duration::from_secs(5),
+            TeamBusMode::Team,
+            Arc::new(TeamMemory::default()),
+            None,
+        )?;
+        let lead = off.connection("lead").await?;
+        lead.register(EventLog::new(archive.clone(), "off-run".into()))
+            .await;
+        let tools = post_json(
+            &off,
+            &lead.token,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        )
+        .await?;
+        assert!(!tools.to_string().contains("my_agents"), "{tools}");
+        let refused = hand(&off, &lead.token, "mine+researcher", "Find three facts.").await?;
+        assert!(refused.to_string().contains(only_the_lead), "{refused}");
+        Ok(())
+    }
+
     /// One `dispatch` from the agent behind `token`, as its tools make it.
     async fn hand(bus: &TeamBus, token: &str, agent: &str, task: &str) -> Result<Value> {
         post_json(
@@ -7262,8 +7658,9 @@ mod tests {
             conversation: false,
             helpers: 0,
             front_desk: false,
+            my_agents: false,
         };
-        let cases: [(&str, BusSeat, &[&str]); 13] = [
+        let cases: [(&str, BusSeat, &[&str]); 17] = [
             (
                 "one agent, team mode",
                 seat(TeamBusMode::Team, 0, false),
@@ -7362,6 +7759,47 @@ mod tests {
                     ..seat(TeamBusMode::Pipeline, 0, false)
                 },
                 &["start_helper", "ask_user", "my_teams", "ask_team"],
+            ),
+            // ADR 0092: the agent the work starts with, when it may bring in the person's others.
+            (
+                "a lead that may bring in my agents",
+                BusSeat {
+                    my_agents: true,
+                    ..seat(TeamBusMode::Team, 2, false)
+                },
+                &[
+                    "roster",
+                    "my_agents",
+                    "dispatch",
+                    "ask",
+                    "handoff",
+                    "ask_user",
+                ],
+            ),
+            (
+                "an agent alone that may bring in my agents",
+                BusSeat {
+                    my_agents: true,
+                    ..seat(TeamBusMode::Team, 0, false)
+                },
+                &["my_agents", "dispatch", "ask_user"],
+            ),
+            (
+                "a one-agent turn, where nobody else runs",
+                BusSeat {
+                    my_agents: true,
+                    ..seat(TeamBusMode::Pipeline, 0, false)
+                },
+                &["ask_user"],
+            ),
+            (
+                "answering a question, it brings in no one",
+                BusSeat {
+                    my_agents: true,
+                    answering: true,
+                    ..seat(TeamBusMode::Team, 0, false)
+                },
+                &["ask_user"],
             ),
         ];
         for (what, seat, expected) in cases {

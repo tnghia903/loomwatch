@@ -16,6 +16,9 @@ export interface SpawnConfig {
 export interface GuardsConfig {
   maxDispatchDepth?: number
   maxConcurrentDispatches?: number
+  maxHelpers?: number
+  /** How many of My agents the starting agent is shown when it may bring one in (ADR 0092). `0`, the default, is off. */
+  myAgents?: number
 }
 
 /** Where a run's answer goes once it succeeds. `$defs/Deliver`; ADR 0010 and ADR 0038. */
@@ -164,6 +167,9 @@ export interface AgentConfig {
       editor writes `sendBack` and removes this when the setting is changed. */
   sendBackOnce?: boolean
   allowRecruiting?: boolean
+  /** `false`: as the starting agent, or working alone, it brings in none of the person's other
+      agents from My agents (ADR 0092). The agent's own switch, filled in from My agents. */
+  allowMyAgents?: boolean
   /** Capabilities the daemon delivers into this agent's workspace before the run. Executable, so
       it lives in the team file and saves explicitly — unlike the card positions in the sidecar. */
   capabilities?: CapabilityRef[]

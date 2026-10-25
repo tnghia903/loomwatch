@@ -28,6 +28,8 @@ export interface LibrarySource {
   allow?: AgentAllow
   /** `false`: the agent it places brings in no helpers (ADR 0079), `allowRecruiting: false`. */
   helpers?: false
+  /** `false`: the agent it places brings in none of My agents (ADR 0092), `allowMyAgents: false`. */
+  bringsIn?: false
   /** One of Your agents: the placed agent links back to this version of it. */
   from?: AgentLink
 }

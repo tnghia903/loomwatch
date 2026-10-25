@@ -790,7 +790,7 @@ function Answer({ tour, run, answer, touched, folder, streaming, name, hue, open
           </button>
         ) : (
           <div className={`chat-bubble${streaming ? ' streaming' : ''}`} data-tick={streaming ? answer.length % 2 : undefined}>
-            <div className="chat-text"><Markdown>{shown}</Markdown></div>
+            <div className="chat-text"><SaidText text={shown} /></div>
           </div>
         ))}
         {children}

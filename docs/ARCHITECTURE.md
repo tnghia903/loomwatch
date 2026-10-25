@@ -434,7 +434,8 @@ drawn on the canvas.
 | Tool | Meaning | Recorded as |
 |---|---|---|
 | `roster()` | Who's on the team, their roles, models and live status | none — discovery |
-| `dispatch(agent, task)` | Fire-and-forget assignment (team mode only) | A → B · delegation |
+| `my_agents()` | The person's other agents in My agents the team's starting agent may bring in for a part no one on the team does, by `mine+<id>` (ADR 0092; off unless `guards.myAgents` > 0) | none — discovery |
+| `dispatch(agent, task)` | Fire-and-forget assignment (team mode only). `mine+<id>` brings in one of My agents | A → B · delegation |
 | `ask(agent, question)` | Blocking ask / reply | A ⇄ B · query |
 | `handoff(agent, task)` | Start a successor and stop (team mode only) | A ⇒ B · handoff |
 | `report(status)` | Progress signal | none — node state |

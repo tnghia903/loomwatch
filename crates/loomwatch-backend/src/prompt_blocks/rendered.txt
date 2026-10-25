@@ -665,6 +665,370 @@ Read more of a long tool output that was set aside, by the id the shortened outp
     "name": "ask_team"
   }
 ]
+===== bus: a team's lead that may bring in my agents
+[
+  {
+    "description": "List the team, capabilities, and live status",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "name": "roster"
+  },
+  {
+    "description": "List the person's other agents, from My agents: each one's id, what it does and the model it runs on. Bring one in only for a part no one here does, with `dispatch` and the id given here. It works on your brief as a teammate would, and costs what its own model costs.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "name": "my_agents"
+  },
+  {
+    "description": "Hand part of the work to a teammate without waiting for it. Hand out parts that do not depend on each other together. What each one sends back reaches you in one more turn after this one ends. A teammate that already finished work in this run carries on in the same conversation and remembers it; one still working starts as a separate copy that does not.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "description": "Target agent ID",
+          "minLength": 1,
+          "type": "string"
+        },
+        "task": {
+          "description": "The whole brief: the goal, what you already know, what to send back and where to stop. The teammate sees none of your conversation.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "task"
+      ],
+      "type": "object"
+    },
+    "name": "dispatch"
+  },
+  {
+    "description": "Ask another agent and wait for its reply. Use it when you need the answer before you can go on. A teammate that already finished work in this run answers in the same conversation and remembers it; one still working answers as a separate copy that does not.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "description": "Target agent ID",
+          "minLength": 1,
+          "type": "string"
+        },
+        "question": {
+          "description": "A question it can answer from this text alone: it does not see your conversation.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "question"
+      ],
+      "type": "object"
+    },
+    "name": "ask"
+  },
+  {
+    "description": "Pass the rest of the task to a teammate and stop: it carries on, and you end this turn.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "description": "Target agent ID",
+          "minLength": 1,
+          "type": "string"
+        },
+        "task": {
+          "description": "Everything it needs to carry on: the goal, what is done, what is left and what to send back. It sees none of your conversation.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "task"
+      ],
+      "type": "object"
+    },
+    "name": "handoff"
+  },
+  {
+    "description": "Put a question to the person running this team. Returns immediately: end your turn after calling it, and their answer arrives as your next turn. Ask only for a decision you cannot reasonably make yourself and that would change the result; otherwise make the most reasonable assumption, say which one you made, and carry on.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "description": "What they need to know to decide it",
+          "minLength": 0,
+          "type": "string"
+        },
+        "question": {
+          "description": "What you need the person to decide",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "type": "object"
+    },
+    "name": "ask_user"
+  },
+  {
+    "description": "Search the team's notebook: this run's notes, the team's kept notes, and anything it inherits. Returns bounded snippets with revision ids.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "description": "Only this kind of note",
+          "enum": [
+            "decision",
+            "finding",
+            "question",
+            "blocker",
+            "progress"
+          ],
+          "type": "string"
+        },
+        "limit": {
+          "description": "How many results, at most",
+          "maximum": 25,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "query": {
+          "description": "Words to search for",
+          "minLength": 0,
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "name": "memory_search"
+  },
+  {
+    "description": "Read one notebook revision by the id a search returned. An id outside what this session can see reads as not found.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Note revision id from memory_search",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "memory_read"
+  },
+  {
+    "description": "Record one observation in the team's notebook, attributed to you and to this run. It becomes evidence in the run story, and the operator decides whether it outlives the run.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "The observation itself",
+          "minLength": 1,
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "description": "A key unique to this observation. Retrying with the same key does not write a second note.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "description": "What kind of observation",
+          "enum": [
+            "decision",
+            "finding",
+            "question",
+            "blocker",
+            "progress"
+          ],
+          "type": "string"
+        },
+        "sources": {
+          "description": "Where the claim came from: paths, URLs, tool results",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
+        "title": {
+          "description": "One line naming what you observed",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "title",
+        "body",
+        "idempotencyKey"
+      ],
+      "type": "object"
+    },
+    "name": "memory_write"
+  },
+  {
+    "description": "Record where you are, so work that stops can be continued rather than restarted.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "description": "Paths of files you produced",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "type": "array"
+        },
+        "blockers": {
+          "description": "What is stopping you, if anything",
+          "minLength": 0,
+          "type": "string"
+        },
+        "done": {
+          "description": "What is finished",
+          "minLength": 1,
+          "type": "string"
+        },
+        "next": {
+          "description": "What the next turn would pick up",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "done",
+        "next"
+      ],
+      "type": "object"
+    },
+    "name": "checkpoint"
+  },
+  {
+    "description": "Read one earlier piece of this team's work in full: what the operator asked and the team's whole answer. Use a work id from `## Conversation so far`.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "work": {
+          "description": "The work id, such as 3f2a9c1e",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "work"
+      ],
+      "type": "object"
+    },
+    "name": "earlier_work"
+  }
+]
+===== bus: an agent alone that may bring in my agents
+[
+  {
+    "description": "Start a helper: a copy of you, with your instructions, tools and folders, that does one part of the work while you and other helpers do the rest. It starts fresh and sees only the brief you write here. Start all the helpers for a step together, in the same message, then do your own part or end your turn: what each one sends back comes to you in one more turn, once they have all finished.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "send_back": {
+          "description": "What it sends back and in what form (a list of findings with their links, a table, a draft of one section), and how far to go before it stops: a quick look or a thorough search. When it makes a file, the file's name: each helper writes its own.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "task": {
+          "description": "This part of the work, for someone who has seen none of your conversation: its goal and how it fits the request, what you already know, and which sources, files or tools to use. Say what not to cover when another helper covers it.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": {
+          "description": "The part this helper does, in two to five plain words the person reads in the chat, such as \"Rent in Hanoi\" or \"Read the 2025 reports\".",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "task",
+        "send_back"
+      ],
+      "type": "object"
+    },
+    "name": "start_helper"
+  },
+  {
+    "description": "List the person's other agents, from My agents: each one's id, what it does and the model it runs on. Bring one in only for a part no one here does, with `dispatch` and the id given here. It works on your brief as a teammate would, and costs what its own model costs.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "name": "my_agents"
+  },
+  {
+    "description": "Hand part of the work to a teammate without waiting for it. Hand out parts that do not depend on each other together. What each one sends back reaches you in one more turn after this one ends. A teammate that already finished work in this run carries on in the same conversation and remembers it; one still working starts as a separate copy that does not.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "description": "Target agent ID",
+          "minLength": 1,
+          "type": "string"
+        },
+        "task": {
+          "description": "The whole brief: the goal, what you already know, what to send back and where to stop. The teammate sees none of your conversation.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "task"
+      ],
+      "type": "object"
+    },
+    "name": "dispatch"
+  },
+  {
+    "description": "Put a question to the person running this team. Returns immediately: end your turn after calling it, and their answer arrives as your next turn. Ask only for a decision you cannot reasonably make yourself and that would change the result; otherwise make the most reasonable assumption, say which one you made, and carry on.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "description": "What they need to know to decide it",
+          "minLength": 0,
+          "type": "string"
+        },
+        "question": {
+          "description": "What you need the person to decide",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "type": "object"
+    },
+    "name": "ask_user"
+  }
+]
+===== bus: my_agents, with none to list
+None of the person's other agents can be brought in here now. Do the work with the agents you have.
 ===== stage 0
 You are Researcher, step 1 of 3 in the News desk team.
 The operator's request comes to you first.
@@ -725,6 +1089,28 @@ Reply with the result itself, condensed: what you found or made, and where (link
 ===== helper, brought in by nobody known
 You are Writer, on the News desk team. Another agent brought you in for the task below. It is one part of a larger piece of work, so do what was asked, completely, and stay within it.
 Reply with the result itself, condensed: what you found or made, and where (links, file paths), not how you worked. If you cannot do part of it, say what is missing rather than guessing.
+===== guest, brought in from My agents
+You are Writer, on the News desk team. Researcher brought you in for the task below. It is one part of a larger piece of work, so do what was asked, completely, and stay within it.
+Reply with the result itself, condensed: what you found or made, and where (links, file paths), not how you worked. If you cannot do part of it, say what is missing rather than guessing.
+You are not on this team: you are one of the person's own agents, brought in from My agents for this part alone.
+===== lead that may bring in my agents
+You are Lead, the lead of the Desk team. The operator's request comes to you first.
+Your reply is the team's final answer: the operator reads it as you write it. Make it the finished result itself, as long as the request needs and no longer, not a report on how you produced it.
+
+Your teammates, whom you can hand parts of the work to with your Team Bus tools:
+- Finder (`find`): Look things up. May search the web.
+- Editor (`edit`): Edit drafts. May change files.
+- Filer (`file`) May change files.
+
+You can't search the web yourself, but Finder can: hand it the parts that need it.
+
+You can't change files yourself, but Editor and Filer can: hand them the parts that need it.
+
+Do what you can do well yourself, and bring in a teammate only for a part that needs its job: each one you start opens a session of its own, which costs time and tokens. A teammate sees only what you send it, so give it the goal, what you already know, what to send back and where to stop. Check what comes back before you use it.
+
+When part of the work needs a job no one here does, you may bring in one of the person's other agents: `my_agents` lists them, and `dispatch` starts one by the id it gives. Hand work to your own team first.
+===== agent alone that may bring in my agents
+When part of the work needs a job no one here does, you may bring in one of the person's other agents: `my_agents` lists them, and `dispatch` starts one by the id it gives. Hand work to your own team first.
 ===== reading, in a team false, checks false
 Your role above says who you are and how you work. It is not a job to do again on every message. The task at the end is what the operator wants now: read it as a thoughtful colleague would, with the conversation so far, and give them what they meant.
 - Asked for work your role covers: do it fully.

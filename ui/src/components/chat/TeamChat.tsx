@@ -39,7 +39,7 @@ import { Learned } from './Learned'
 import { ReplyQuote } from './ReplyQuote'
 import { ChatFiles } from './ChatFiles'
 import { FixIt, WorkPiece, type TeamView } from './WorkPiece'
-import { InlineMarkdown, Markdown } from '../ui/Markdown'
+import { InlineMarkdown } from '../ui/Markdown'
 import { earlierTries, triedAgain, tryingAgain } from '../../lib/chat/tries'
 import { fetchMoveStatus, movedLine } from '../../lib/team-file/moveOntoMyAgents'
 
@@ -529,8 +529,12 @@ export function TeamChat({ teamPath, teamName, agents, team, steps, suggestion, 
       setMentioned((count) => count + 1)
     },
   }
-  // An @mention in a message shows as its agent's chip (SaidText); in one agent's own chat an @ goes nowhere.
-  const mentions = useMemo<ChatMentions | null>(() => (team.solo ? null : { agents, hue: (id) => team.hues.get(id) ?? 1 }), [agents, team.hues, team.solo])
+  // An agent @mentioned in what anyone said shows as its chip (SaidText): the chat's agents, and the
+  // person's other agents a run may bring in (ADR 0092), in an agent's own chat too.
+  const mentions = useMemo<ChatMentions>(() => ({
+    agents: [...team.names].filter(([id]) => !team.operators.has(id)).map(([id, name]) => ({ id, name })),
+    hue: (id) => team.hues.get(id) ?? 1,
+  }), [team.names, team.operators, team.hues])
   // Reply under something said: the box takes it as the message being answered, addressed with
   // the @ of whoever said it (or `to`, a teammate asked about a part of a file instead), so it goes
   // to that agent as any @ does (ADR 0051).
@@ -1081,7 +1085,7 @@ function TeamNote({ message, reactions, lessons, fixFill = null, name, hue, flas
             {face(said.from)}
             <div className="chat-stack">
               <div className={`chat-meta hue-${hue(said.from)}`}><span className="chat-name">{name(said.from)}</span><span className="tc-to">to you</span><time>{clockTime(said.at)}</time></div>
-              {reactOn(targets.reply(said.from), `${name(said.from)}'s answer`)(<div className="chat-bubble"><div className="chat-text"><Markdown>{said.text}</Markdown></div></div>)}
+              {reactOn(targets.reply(said.from), `${name(said.from)}'s answer`)(<div className="chat-bubble"><div className="chat-text"><SaidText text={said.text} /></div></div>)}
               {onReply && said.text.trim() && (
                 <p className="chat-under">
                   <button type="button" className="chat-reply" aria-label={`Reply to ${name(said.from)}'s answer`}

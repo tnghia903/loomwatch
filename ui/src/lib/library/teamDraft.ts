@@ -29,6 +29,7 @@ export function draftFromTeamAgent(agent: AgentConfig): AgentDraft {
     doneWhen: [...(agent.doneWhen ?? [])],
     allow: { ...(agent.allow ?? {}) },
     ...(agent.allowRecruiting === false ? { helpers: false as const } : {}),
+    ...(agent.allowMyAgents === false ? { bringsIn: false as const } : {}),
     // What it reads is the team's: given here or with a line in its Workflow, it is the same entry.
     reads: readsIn(agent),
     // A team's own agent wears the figure its id picks: the figure belongs to Your agents.
@@ -137,7 +138,7 @@ function toolEntry(name: string, allowed: ToolAllow): CapabilityRef {
 /** What one workbench change does to the team file. */
 export type TeamAgentEdit =
   | { kind: 'rename'; field: 'name' | 'role'; value: string }
-  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'capabilities' | 'turnedOff' | 'allow' | 'doneWhen' | 'allowRecruiting'>> }
+  | { kind: 'fields'; fields: Partial<Pick<AgentConfig, 'model' | 'thinkingEffort' | 'capabilities' | 'turnedOff' | 'allow' | 'doneWhen' | 'allowRecruiting' | 'allowMyAgents'>> }
 
 /** The team-file change for setting `key` to `value` on the workbench, or `null` when there is none. */
 export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, key: K, value: AgentDraft[K]): TeamAgentEdit | null {
@@ -186,6 +187,7 @@ export function teamAgentEdit<K extends keyof AgentDraft>(agent: AgentConfig, ke
     }
     case 'allow': return { kind: 'fields', fields: { allow: onlyOn(value as AgentDraft['allow']) } }
     case 'helpers': return { kind: 'fields', fields: { allowRecruiting: value !== false } }
+    case 'bringsIn': return { kind: 'fields', fields: { allowMyAgents: value === false ? false : undefined } }
     case 'doneWhen': {
       // Blank lines are kept while the operator types; only written items reach the file.
       const items = (value as string[]).map((item) => item.trim()).filter(Boolean)

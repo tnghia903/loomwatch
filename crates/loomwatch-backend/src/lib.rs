@@ -8,6 +8,7 @@ pub mod api;
 pub mod approvals;
 pub mod archive;
 pub mod auto_mode;
+mod bring_in;
 pub mod capabilities;
 pub mod chat;
 pub mod chat_files;
@@ -492,7 +493,16 @@ fn team_mode_surfaces(
     agent: &config::AgentConfig,
     one_agent_turn: bool,
 ) -> (BusMode, TeamBusMode) {
-    let bus = if one_agent_turn {
+    // An agent working alone, in its own chat, that may bring in the person's other agents (ADR
+    // 0092) hands work out as a team's lead does, although no one else is on its team. A one-agent
+    // turn in a team of several ("Writer only") still starts nobody.
+    let alone = team
+        .agents
+        .iter()
+        .filter(|other| !other.is_operator())
+        .count()
+        == 1;
+    let bus = if one_agent_turn && !(alone && bring_in::may_bring_in(team, agent)) {
         TeamBusMode::Pipeline
     } else {
         TeamBusMode::Team
@@ -553,14 +563,22 @@ async fn run_team_mode(
     .supply(&agent.id, vec![agent.id.clone()], None, &mut packet)
     .await?;
     let task = NodeTask {
-        place: if lineage.only.is_some() {
-            Some(orientation::for_one_agent(
-                team,
-                agent,
-                about_a_part(lineage),
-            ))
-        } else {
-            orientation::for_lead(team, agent)
+        place: {
+            let place = if lineage.only.is_some() {
+                Some(orientation::for_one_agent(
+                    team,
+                    agent,
+                    about_a_part(lineage),
+                ))
+            } else {
+                orientation::for_lead(team, agent)
+            };
+            // ADR 0092: and that it may bring in the person's other agents, after where it sits.
+            if team_bus_mode == TeamBusMode::Team && bring_in::may_bring_in(team, agent) {
+                orientation::with_my_agents(place)
+            } else {
+                place
+            }
         },
         // It is told when helpers pay, under its place in the team.
         helpers: brings_in.then(|| helpers::for_lead(team.guards.max_helpers)),
@@ -7381,6 +7399,129 @@ mod tests {
         Ok(())
     }
 
+    /// **An agent alone in its own chat brings in one of the person's other agents (ADR 0092).**
+    ///
+    /// Told it may, it lists My agents, which leaves out an agent whose file changed outside
+    /// `LoomWatch` and waits for review, brings Researcher in by the id the list gives, and answers
+    /// with what Researcher sent back. Researcher works as it is saved, told it isn't on the team.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn an_agent_alone_brings_in_one_of_my_agents_and_answers_with_its_work() -> Result<()> {
+        let pool = crate::db::Db::temp().await;
+        let demo = crate::agent::Demo::responder(move |request| {
+            let prompt = request.prompt();
+            if request.agent == "mine+researcher" {
+                return Some(crate::agent::Completion::text(
+                    if prompt.contains("Find facts, each with its source.")
+                        && prompt.contains("You are not on this team")
+                    {
+                        "Three facts about wind, each with a source."
+                    } else {
+                        "not as saved"
+                    },
+                ));
+            }
+            if prompt.contains("## What the agents you started came back with") {
+                return Some(crate::agent::Completion::text(
+                    if prompt.contains("Three facts about wind, each with a source.") {
+                        "final: three facts about wind"
+                    } else {
+                        "Researcher's work never came back"
+                    },
+                ));
+            }
+            let last_tool = request
+                .messages
+                .iter()
+                .rev()
+                .find_map(|message| match message {
+                    crate::agent::Message::Tool { content, .. } => Some(content.clone()),
+                    _ => None,
+                });
+            Some(match last_tool {
+                None => crate::agent::Completion::calls(
+                    "",
+                    vec![crate::agent::ToolCall {
+                        id: "list".to_owned(),
+                        name: "my_agents".to_owned(),
+                        arguments: "{}".to_owned(),
+                    }],
+                ),
+                Some(said) if said.contains("\"accepted\":true") => {
+                    crate::agent::Completion::text("Researcher is finding the facts.")
+                }
+                Some(said) if said.contains("mine+researcher") && !said.contains("mine+coder") => {
+                    crate::agent::Completion::calls(
+                        "",
+                        vec![crate::agent::ToolCall {
+                            id: "bring".to_owned(),
+                            name: "dispatch".to_owned(),
+                            arguments: json!({"agent": "mine+researcher", "task": "Find three facts about wind."}).to_string(),
+                        }],
+                    )
+                }
+                Some(_) => crate::agent::Completion::text("the list was wrong"),
+            })
+        });
+        let model = crate::engine::demo_model(demo.clone());
+        let root = std::env::temp_dir().join(format!("loomwatch-alone-{}", uuid::Uuid::new_v4()));
+        // An agent's own chat is kept in My agents' `.bench` folder (`jobs::bench_folder`).
+        std::fs::create_dir_all(root.join(".jobs/.bench"))?;
+        let root = platform::canonicalize(&root)?;
+        std::fs::write(
+            root.join(".jobs/researcher.yaml"),
+            format!(
+                "name: Researcher\ninstructions: Find facts, each with its source.\nmodel: {model}\n"
+            ),
+        )?;
+        let state = root.join(".state");
+        std::fs::create_dir_all(&state)?;
+        let approvals = Arc::new(crate::approvals::TeamApprovals::open(&state, &root)?);
+        // Saved outside LoomWatch after the review record was made: it waits for the person.
+        std::fs::write(
+            root.join(".jobs/coder.yaml"),
+            format!("name: Coder\ninstructions: Write the code.\nmodel: {model}\n"),
+        )?;
+        let mut team = material_team(vec![pipeline_agent("lead", &model)]);
+        team.id = "bench-ada".into();
+        team.guards.my_agents = 5;
+        let team = Arc::new(team);
+        let archive = EventArchive::new(pool);
+        let team_path = root.join(".jobs/.bench/ada.yaml");
+        let (registry, desk, run_id) = operator_desk(&team, &archive);
+        registry.set_approvals(approvals);
+        let outcome = run_team_mode(
+            &team,
+            &team_path,
+            archive.clone(),
+            "Find three facts about wind.",
+            Duration::from_secs(5),
+            Some(EventLog::new(archive.clone(), run_id.clone())),
+            &Arc::new(memory::TeamMemory::default()),
+            &RunLineage {
+                operator: Some(desk),
+                only: Some("lead".into()),
+                ..RunLineage::default()
+            },
+        )
+        .await?;
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(outcome.reply, "final: three facts about wind");
+        // It was told it may, under where it sits.
+        let told = demo.requests().into_iter().any(|request| {
+            request.agent == "lead"
+                && request.messages.iter().any(|message| match message {
+                    crate::agent::Message::System { content }
+                    | crate::agent::Message::User { content, .. } => {
+                        content.contains("`my_agents` lists them")
+                    }
+                    _ => false,
+                })
+        });
+        assert!(told, "the lead was never told it may bring one in");
+        Ok(())
+    }
+
     /// ADR 0079: an agent working alone is told of helpers, and every other seat of a team-mode run
     /// is told of what it has, as before: the lead its teammates, a one-agent turn nobody.
     #[test]
@@ -7413,6 +7554,20 @@ mod tests {
         );
         assert_eq!(
             team_mode_surfaces(&crew, &crew.agents[0], true),
+            (BusMode::Pipeline, TeamBusMode::Pipeline)
+        );
+        // ADR 0092: alone in its own chat, an agent that may bring in the person's other agents
+        // hands work out as a lead does; "Writer only" in a team of several still starts nobody.
+        let mut listing = solo.clone();
+        listing.guards.my_agents = 5;
+        assert_eq!(
+            team_mode_surfaces(&listing, &listing.agents[0], true),
+            (BusMode::Alone, TeamBusMode::Team)
+        );
+        let mut crew_listing = crew.clone();
+        crew_listing.guards.my_agents = 5;
+        assert_eq!(
+            team_mode_surfaces(&crew_listing, &crew_listing.agents[0], true),
             (BusMode::Pipeline, TeamBusMode::Pipeline)
         );
     }
@@ -9904,6 +10059,7 @@ mod tests {
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: true,
+            allow_my_agents: true,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),
@@ -9934,6 +10090,7 @@ mod tests {
             capabilities: Vec::new(),
             memory: None,
             allow_recruiting: false,
+            allow_my_agents: false,
             allow: crate::config::AgentAllow::default(),
             turned_off: Vec::new(),
             done_when: Vec::new(),

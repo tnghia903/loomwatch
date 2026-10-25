@@ -3727,6 +3727,7 @@ mod tests {
             model: "m".to_owned(),
             thinking_effort: None,
             allow_recruiting: true,
+            allow_my_agents: true,
             capabilities: Vec::new(),
             memory: None,
             allow: crate::config::AgentAllow::default(),

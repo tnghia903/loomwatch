@@ -22,7 +22,7 @@ import type { AgentConfig, CapabilityRef, TurnedOff } from './types'
 type Entry = Record<string, unknown>
 
 /** The fields that are the agent's in every team, beside its skills, tools and what it reads. */
-const AGENT_KEYS = ['name', 'role', 'doneWhen', 'allow', 'allowRecruiting'] as const
+const AGENT_KEYS = ['name', 'role', 'doneWhen', 'allow', 'allowRecruiting', 'allowMyAgents'] as const
 
 /**
  * The agent in My agents an entry points at, when it holds none of the agent's own fields and so
@@ -79,6 +79,8 @@ export function filledAgent(entry: Entry, agent: string, job: JobSpec): Entry {
   else delete filled.allow
   if (job.helpers === false) filled.allowRecruiting = false
   else delete filled.allowRecruiting
+  if (job.bringsIn === false) filled.allowMyAgents = false
+  else delete filled.allowMyAgents
   filled.from = { agent }
   return filled
 }
@@ -132,6 +134,7 @@ export function specOf(agent: AgentConfig): JobSpec {
     ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(allow ? { allow } : {}),
     ...(agent.allowRecruiting === false ? { helpers: false as const } : {}),
+    ...(agent.allowMyAgents === false ? { bringsIn: false as const } : {}),
   }
 }
 
@@ -170,6 +173,7 @@ export function editedSpec(job: JobSpec, before: AgentConfig, now: AgentConfig):
   if (!sameList(now.doneWhen, before.doneWhen)) spec.doneWhen = now.doneWhen ? [...now.doneWhen] : []
   if (JSON.stringify(onlyOn(now.allow) ?? {}) !== JSON.stringify(onlyOn(before.allow) ?? {})) spec.allow = onlyOn(now.allow)
   if ((now.allowRecruiting !== false) !== (before.allowRecruiting !== false)) spec.helpers = now.allowRecruiting === false ? false : undefined
+  if ((now.allowMyAgents !== false) !== (before.allowMyAgents !== false)) spec.bringsIn = now.allowMyAgents === false ? false : undefined
   return tidy(spec)
 }
 
@@ -182,13 +186,14 @@ function tidy(spec: JobSpec): JobSpec {
   if (!tidied.model || !tidied.thinkingEffort) delete tidied.thinkingEffort
   if (!onlyOn(tidied.allow)) delete tidied.allow
   if (tidied.helpers !== false) delete tidied.helpers
+  if (tidied.bringsIn !== false) delete tidied.bringsIn
   return tidied
 }
 
 /** The fields a team takes from an agent, to tell whether a save changes any. */
 export function agentFields(spec: JobSpec): string {
   const tidied = tidy(spec)
-  return JSON.stringify([tidied.name, tidied.instructions, tidied.model, tidied.thinkingEffort, tidied.skills, tidied.tools, tidied.toolAllow, tidied.reads, tidied.doneWhen, tidied.allow, tidied.helpers])
+  return JSON.stringify([tidied.name, tidied.instructions, tidied.model, tidied.thinkingEffort, tidied.skills, tidied.tools, tidied.toolAllow, tidied.reads, tidied.doneWhen, tidied.allow, tidied.helpers, tidied.bringsIn])
 }
 
 /**
@@ -212,6 +217,7 @@ function runsWith(agent: AgentConfig): string {
     agent.doneWhen ?? [],
     onlyOn(agent.allow) ?? {},
     agent.allowRecruiting !== false,
+    agent.allowMyAgents !== false,
   ])
 }
 

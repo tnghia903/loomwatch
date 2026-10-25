@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { figureHue } from '../../lib/library/figures'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
-import { TeamFiguresContext } from '../agents/figureContext'
+import { GuestNamesContext, TeamFiguresContext } from '../agents/figureContext'
 import type { Evidence } from '../../lib/watch/events'
 import type { MessageReply, TeamMessage } from '../../lib/watch/messages'
 import { AgentMessages } from './AgentMessages'
@@ -41,6 +41,10 @@ function setup(messages: TeamMessage[], extra: Partial<Parameters<typeof AgentMe
   render(<AgentMessages messages={messages} order={order} evidence={[fetched]} live={false} onInspectEvidence={onInspectEvidence} onInspectHandover={onInspectHandover} {...extra} />)
   return { onInspectEvidence, onInspectHandover }
 }
+/** An agent's chip, as a message draws one: "@Writer" when written to, its bare name when named in a line. */
+const mention = (name: string, at = true) => (_: string, element: Element | null) => Boolean(element?.classList.contains('tc-mention') && element.textContent === `${at ? '@' : ''}${name}`)
+/** A line of the chat's own (a notice), by its whole words: the agents it names are chips inside it. */
+const notice = (words: string) => (_: string, element: Element | null) => Boolean(element?.tagName === 'SPAN' && element.parentElement?.classList.contains('chat-notice') && element.textContent === words)
 const said = () => screen.queryAllByRole('listitem').filter((item) => item.hasAttribute('data-bubble'))
 const msg = (name: RegExp) => screen.getByRole('listitem', { name })
 
@@ -79,12 +83,12 @@ describe('Team chat', () => {
   it('addresses a question with an @mention, and the answer quotes the question instead', () => {
     setup([askBack])
     const question = msg(/Writer to Researcher: question/)
-    expect(within(question).getByText('@Researcher')).toBeInTheDocument()
+    expect(within(question).getByText(mention('Researcher'))).toBeInTheDocument()
     const reply = msg(/Researcher to Writer: answer/)
     // Quoted as a reply of yours is: what it answers, then its first words.
     expect(within(reply).getByRole('button', { name: 'Replying to Writer’s question. Show it' })).toHaveTextContent('Writer’s questionWhich spec version did you read?')
     // The quote says whom it answers, so the reply does not name them again.
-    expect(within(reply).queryByText('@Writer')).not.toBeInTheDocument()
+    expect(within(reply).queryByText(mention('Writer'))).not.toBeInTheDocument()
     // What the agent wrote is formatted, as a chat shows it.
     expect(within(reply).getByText('Version 0.4').tagName).toBe('STRONG')
     // The quote shows the question where it was asked.
@@ -95,7 +99,7 @@ describe('Team chat', () => {
   it('says a handover as any message: to whom, the work, and “handover” under it', () => {
     setup([handover])
     const handedOver = msg(/Researcher to Writer: handover/)
-    expect(within(handedOver).getByText('@Writer')).toBeInTheDocument()
+    expect(within(handedOver).getByText(mention('Writer'))).toBeInTheDocument()
     expect(within(handedOver).getByText('ACP is JSON-RPC.')).toBeInTheDocument()
     expect(within(handedOver).getByText('handover')).toBeInTheDocument()
     expect(within(handedOver).queryByText(/Handover to/)).toBeNull()
@@ -114,7 +118,7 @@ describe('Team chat', () => {
     setup([reviewed(answer('review', 'Keep it short.', 30)), direction, passedOn])
     expect(said()).toHaveLength(2)
     const approved = msg(/You to Editor: approved, with a note/)
-    expect(within(approved).getByText('@Editor')).toBeInTheDocument()
+    expect(within(approved).getByText(mention('Editor'))).toBeInTheDocument()
     expect(within(approved).getByText('approved · passed on to Editor')).toBeInTheDocument()
   })
 
@@ -178,7 +182,7 @@ describe('Team chat', () => {
     expect(within(msg(/clarifies/)).getByText('clarifies')).toBeInTheDocument()
     // The clarification quotes the question back, which names whom it answers.
     expect(within(msg(/clarifies/)).getByRole('button', { name: /^Replying to Researcher’s question back/ })).toBeInTheDocument()
-    expect(within(msg(/clarifies/)).queryByText('@Researcher')).toBeNull()
+    expect(within(msg(/clarifies/)).queryByText(mention('Researcher'))).toBeNull()
     // The answer quotes the clarification it answers.
     expect(within(msg(/Researcher to Writer: answer/)).getByRole('button', { name: /^Replying to/ })).toHaveTextContent('Writer’s answer2025.')
   })
@@ -258,7 +262,7 @@ describe('Team chat', () => {
 
   it('names who a follow-up of yours went to, and their answer', () => {
     setup([message({ id: 'note:e7', kind: 'note', from: 'operator', to: 'writer', text: 'Also check the footnotes.', state: 'answered', reply: answer('writer', 'Two links fixed.', 15) })])
-    expect(within(msg(/You to Writer: note/)).getByText('@Writer')).toBeInTheDocument()
+    expect(within(msg(/You to Writer: note/)).getByText(mention('Writer'))).toBeInTheDocument()
     expect(msg(/Writer to you: answer/)).toHaveTextContent('Two links fixed.')
   })
 
@@ -269,7 +273,7 @@ describe('Team chat', () => {
     const carriedHandover = message({ ...handover, handedBy: { from: ['review'], via: [] }, carried: true })
     const carriedReview = message({ id: 'direction:e5', kind: 'direction', from: 'operator', to: 'writer', text: 'Approved. Continue as planned.', handedBy: { from: ['review'], via: [] }, carried: true })
     setup([carriedHandover, carriedReview], { live: true, bare: true, reveal: { id: carriedHandover.id, at: 1 }, predecessors: new Map([['review', ['researcher']], ['writer', ['review']]]) })
-    const line = screen.getByText('Writer picked up Researcher’s handover and your review from earlier work')
+    const line = screen.getByText(notice('Writer picked up Researcher’s handover and your review from earlier work'))
     expect(line).toBeInTheDocument()
     // Nothing is drawn as said: no bubble from you, no handover shared now.
     expect(screen.queryByRole('listitem', { name: /You to Writer/ })).not.toBeInTheDocument()
@@ -307,7 +311,9 @@ describe('Team chat', () => {
     setup([settled('a', 'allow_once', 10), settled('b', 'allow_run', 20), settled('c', 'deny', 30), settled('d', 'timed_out', 40), settled('e', 'allow_team', 50)], { live: true, bare: true, permissionTurn: () => <button type="button">Allow</button> })
     expect(screen.getByText('You allowed it, this once')).toBeInTheDocument()
     expect(screen.getByText('You allowed it for the rest of this run')).toBeInTheDocument()
-    expect(screen.getByText('You denied it. Researcher carries on without it')).toBeInTheDocument()
+    expect(screen.getByText(notice('You denied it. Researcher carries on without it'))).toBeInTheDocument()
+    // The agent named is its chip.
+    expect(screen.getByText(notice('You denied it. Researcher carries on without it')).querySelector('.tc-mention')).toHaveTextContent('Researcher')
     expect(screen.getByText('Nobody answered in time, so it was declined')).toBeInTheDocument()
     expect(screen.getByText('You allowed the whole team to do this for the rest of this run')).toBeInTheDocument()
     // Nothing settled is asked again.
@@ -380,7 +386,7 @@ describe('a check step in the chat', () => {
     fireEvent.click(within(revised).getByRole('button', { name: 'Info' }))
     expect(within(revised).getByText(/Revised 30 seconds after it was sent back/)).toBeInTheDocument()
     // Nothing missing: a line, not a message.
-    expect(screen.getByText('Editor checked Writer’s revised work: all 2 met').closest('li')).toHaveClass('chat-notice')
+    expect(screen.getByText(notice('Editor checked Writer’s revised work: all 2 met')).closest('li')).toHaveClass('chat-notice')
   })
 
   it('quotes the work each round checked: the handover first, then the revision', () => {
@@ -393,7 +399,7 @@ describe('a check step in the chat', () => {
     expect(within(handedOver).queryByText(/Work from Writer/)).toBeNull()
     const back = msg(/Editor to Writer: sent back/)
     expect(within(back).getByRole('button', { name: /^Replying to Writer’s handover/ })).toHaveTextContent('Writer’s handoverFirst draft.')
-    expect(within(back).queryByText('@Writer')).toBeNull()
+    expect(within(back).queryByText(mention('Writer'))).toBeNull()
     expect(within(msg(/Writer to Editor: revised/)).getByRole('button', { name: /^Replying to Editor’s check/ })).toBeInTheDocument()
     const again = msg(/Editor to Writer: checked$/)
     expect(within(again).getByRole('button', { name: /^Replying to Writer’s revised work/ })).toHaveTextContent('Shorter draft.')
@@ -460,5 +466,40 @@ describe('Replying to what the agents said', () => {
   it('offers no Reply outside the team’s chat', () => {
     setup([handover, askBack])
     expect(screen.queryByRole('button', { name: /^Reply to/ })).toBeNull()
+  })
+})
+
+// ADR 0092: one of the person's other agents, brought in from My agents.
+describe('one of my agents brought in', () => {
+  const brought = (id: string, seq: number, broughtIn?: true) => message({ id, kind: 'dispatch', from: 'researcher', to: 'mine+coder', text: `Part ${seq}.`, evidenceId: id, seq, offsetMs: seq * 1000, ts: at(seq), ...(broughtIn ? { broughtIn } : {}) })
+  const guests = new Map([['mine+coder', 'Coder']])
+
+  it('says once who brought it in, named as in My agents', () => {
+    render(<GuestNamesContext.Provider value={guests}><AgentMessages messages={[brought('a', 3, true), brought('b', 4)]} order={order} evidence={[]} live={false} onInspectEvidence={vi.fn()} /></GuestNamesContext.Provider>)
+    expect(screen.getAllByRole('listitem', { name: 'Researcher brought in Coder from My agents' })).toHaveLength(1)
+    expect(screen.getAllByText(mention('Coder', false))).toHaveLength(1)
+    expect(screen.getAllByRole('listitem', { name: /Researcher to Coder/ })).toHaveLength(2)
+  })
+
+  it('says an agent working alone added it to its chat', () => {
+    render(<GuestNamesContext.Provider value={guests}><AgentMessages messages={[brought('a', 3, true)]} order={[order[0]]} evidence={[]} live={false} onInspectEvidence={vi.fn()} /></GuestNamesContext.Provider>)
+    expect(screen.getByRole('listitem', { name: 'Researcher added Coder to this chat' })).toBeInTheDocument()
+  })
+})
+
+describe('work handed out', () => {
+  it('shows what the agent sent back under the brief, with how it went', () => {
+    render(<AgentMessages messages={[message({ id: 'w:d1', kind: 'dispatch', from: 'writer', to: 'researcher', text: 'Find three facts.', evidenceId: 'w:d1', seq: 2, state: 'answered', reply: answer('researcher', 'Three facts, each with a source.', 9) })]} order={order} evidence={[]} live={false} onInspectEvidence={vi.fn()} />)
+    const back = screen.getByRole('listitem', { name: /Researcher to Writer: done/ })
+    expect(within(back).getByText('Three facts, each with a source.')).toBeInTheDocument()
+  })
+})
+
+describe('agents named in what anyone said', () => {
+  it('draws whom a message is to, and an @mention inside an agent’s words, as that agent’s chip', () => {
+    render(<AgentMessages messages={[message({ id: 'r:d1', kind: 'dispatch', from: 'researcher', to: 'editor', text: 'Check it with @Writer before you cut anything.', evidenceId: 'r:d1', seq: 2 })]} order={order} evidence={[]} live={false} onInspectEvidence={vi.fn()} />)
+    const said = screen.getByRole('listitem', { name: /Researcher to Editor/ })
+    expect(within(said).getAllByText(mention('Writer'))).toHaveLength(1)
+    expect(within(said).getAllByText(mention('Editor'))).toHaveLength(1)
   })
 })

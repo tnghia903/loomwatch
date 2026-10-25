@@ -205,6 +205,10 @@ pub(crate) struct JobSpec {
     /// `allowRecruiting`. Written only when it may not.
     #[serde(default = "brings_in_helpers", skip_serializing_if = "is_on")]
     pub(crate) helpers: bool,
+    /// Whether it may bring in other agents from My agents for a part no one on its team does
+    /// (ADR 0092), filled into a team as `allowMyAgents`. Written only when it may not.
+    #[serde(default = "brings_in_helpers", skip_serializing_if = "is_on")]
+    pub(crate) brings_in: bool,
     /// Which version this is. The daemon owns it: a save that changes anything a team copies makes
     /// the next one, and whatever a client sends here is ignored.
     #[serde(default = "first_version", skip_serializing_if = "is_first_version")]
@@ -232,6 +236,7 @@ impl JobSpec {
             || self.done_when != other.done_when
             || self.allow != other.allow
             || self.helpers != other.helpers
+            || self.brings_in != other.brings_in
     }
 }
 
@@ -437,6 +442,7 @@ pub(crate) fn normalize(spec: JobSpec) -> Result<JobSpec, String> {
         done_when,
         allow: spec.allow,
         helpers: spec.helpers,
+        brings_in: spec.brings_in,
         version: spec.version.max(1),
         note,
         saved_at: spec.saved_at,
@@ -963,6 +969,7 @@ mod tests {
             done_when: Vec::new(),
             allow: JobAllow::default(),
             helpers: true,
+            brings_in: true,
             version: 1,
             note: String::new(),
             saved_at: None,

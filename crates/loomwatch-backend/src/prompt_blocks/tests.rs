@@ -195,6 +195,7 @@ fn bus_tools(out: &mut String) {
         conversation: true,
         helpers: 0,
         front_desk: false,
+        my_agents: false,
     };
     let stage = BusSeat {
         mode: TeamBusMode::Pipeline,
@@ -213,10 +214,25 @@ fn bus_tools(out: &mut String) {
         conversation: false,
         ..lead
     };
+    // ADR 0092: the agents the work starts with, when they may bring in the person's other agents.
+    let bringing_in = BusSeat {
+        my_agents: true,
+        ..lead
+    };
+    let alone_bringing_in = BusSeat {
+        my_agents: true,
+        front_desk: false,
+        ..alone
+    };
     for (title, seat) in [
         ("a team's lead", lead),
         ("a pipeline stage", stage),
         ("an agent alone", alone),
+        ("a team's lead that may bring in my agents", bringing_in),
+        (
+            "an agent alone that may bring in my agents",
+            alone_bringing_in,
+        ),
     ] {
         section(
             out,
@@ -224,6 +240,11 @@ fn bus_tools(out: &mut String) {
             &serde_json::to_string_pretty(&offered_tools(&seat)).expect("tools"),
         );
     }
+    section(
+        out,
+        "bus: my_agents, with none to list",
+        crate::team_bus::MY_AGENTS_NONE.text(),
+    );
 }
 
 fn orientations(out: &mut String) {
@@ -280,6 +301,24 @@ fn orientations(out: &mut String) {
         out,
         "helper, brought in by nobody known",
         &for_helper(&plain, &plain.agents[2], None).expect("a helper"),
+    );
+    // ADR 0092: one of the person's agents brought in, and the lead that may bring one in.
+    let mut guest = plain.agents[2].clone();
+    guest.id = "mine+writer".to_owned();
+    section(
+        out,
+        "guest, brought in from My agents",
+        &for_helper(&plain, &guest, Some("research")).expect("a guest"),
+    );
+    section(
+        out,
+        "lead that may bring in my agents",
+        &crate::orientation::with_my_agents(for_lead(&led, &led.agents[0])).expect("a lead"),
+    );
+    section(
+        out,
+        "agent alone that may bring in my agents",
+        &crate::orientation::with_my_agents(None).expect("an agent alone"),
     );
     for (in_team, checks) in [(false, false), (true, false), (false, true), (true, true)] {
         section(

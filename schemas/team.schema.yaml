@@ -568,6 +568,15 @@ $defs:
         minimum: 0
         maximum: 8
         default: 4
+      myAgents:
+        description: >-
+          How many of the person's agents in My agents are listed to the team's starting agent, or
+          an agent working alone, when it may bring one in for a part no one on the team does (ADR
+          0092), most recently saved first. 0, the default, turns bringing in off for the team.
+        type: integer
+        minimum: 0
+        maximum: 100
+        default: 0
 
   Agent:
     description: >-
@@ -732,6 +741,14 @@ $defs:
         $ref: "#/$defs/Spend"
       allowRecruiting:
         description: Whether this agent may recruit helpers while executing its own step.
+        type: boolean
+        default: true
+      allowMyAgents:
+        description: >-
+          Whether this agent, as the team's starting agent or working alone, may bring in another
+          of the person's agents from My agents for a part no one on the team does (ADR 0092),
+          when the team lists any (`guards.myAgents`). The agent's own switch, filled in from My
+          agents (`bringsIn: false` in its file).
         type: boolean
         default: true
       capabilities:

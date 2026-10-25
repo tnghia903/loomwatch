@@ -366,12 +366,43 @@ pub fn for_helper(team: &TeamConfig, agent: &AgentConfig, caller: Option<&str>) 
     let caller = caller
         .and_then(|id| team.agents.iter().find(|other| other.id == id))
         .map_or("Another agent", |other| other.name.as_str());
-    Some(HELPER.fill(&[
+    let mut text = HELPER.fill(&[
         ("name", &agent.name),
         ("team", &team_label(team)),
         ("caller", caller),
-    ]))
+    ]);
+    // One of the person's agents brought in from My agents (ADR 0092): it isn't on the team.
+    if crate::bring_in::agent_of(&agent.id).is_some() {
+        text.push('\n');
+        text.push_str(GUEST.text());
+    }
+    Some(text)
 }
+
+/// What a guest is told after [`HELPER`]: it came from My agents, for this part (ADR 0092).
+pub(crate) const GUEST: Block = Block::new(
+    "orientation.guest",
+    "You are not on this team: you are one of the person's own agents, brought in from My agents \
+     for this part alone.",
+);
+
+/// `place` with what the agent the work starts with is told when it may bring in the person's
+/// other agents (ADR 0092), after where it sits and who its teammates are.
+#[must_use]
+pub fn with_my_agents(place: Option<String>) -> Option<String> {
+    Some(match place {
+        Some(place) => format!("{place}\n\n{}", MY_AGENTS.text()),
+        None => MY_AGENTS.text().to_owned(),
+    })
+}
+
+/// What the agent the work starts with is told when it may bring in the person's other agents.
+pub(crate) const MY_AGENTS: Block = Block::new(
+    "orientation.my_agents",
+    "When part of the work needs a job no one here does, you may bring in one of the person's \
+     other agents: `my_agents` lists them, and `dispatch` starts one by the id it gives. Hand work \
+     to your own team first.",
+);
 
 /// A teammate another agent brought in. `{caller}` is that agent's name, or "Another agent".
 ///
