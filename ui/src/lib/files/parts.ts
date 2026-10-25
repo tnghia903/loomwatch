@@ -10,7 +10,7 @@ import type { BoxAt } from '../chat/client'
 export const WHOLE = 10_000
 
 /** The longest side of a part's picture sent to the agent; the daemon shrinks larger ones anyway. */
-const PICTURE_MOST = 2_048
+export const PICTURE_MOST = 2_048
 
 /** A place on a picture as fractions of it, 0 to 1 from its top left. */
 export interface Point { x: number; y: number }
@@ -37,7 +37,7 @@ export function wholeBox(page?: number): BoxAt {
  * right of the picture"). The agent is told its exact place as well, by the daemon.
  */
 export function boxLabel(at: BoxAt, of = 'the picture'): string {
-  if (at.w >= WHOLE * 0.9 && at.h >= WHOLE * 0.9) return `The whole ${of.replace(/^the /, '')}`
+  if (at.w >= WHOLE * 0.9 && at.h >= WHOLE * 0.9) return `All of ${of}`
   if (at.w * at.h >= (WHOLE * WHOLE) / 2) return `Most of ${of}`
   const across = at.x + at.w / 2
   const down = at.y + at.h / 2
@@ -64,10 +64,12 @@ export function boxStyle(at: BoxAt): { left: string; top: string; width: string;
  * The part of a picture inside a box, as a PNG file to send with the question, no longer than
  * `PICTURE_MOST` on its long side; `null` where the picture can't be drawn (not loaded yet).
  */
-export async function pictureInside(image: HTMLImageElement, at: BoxAt, name: string): Promise<File | null> {
-  // A picture with no size of its own (an SVG without one) is taken as drawn, at twice the size.
-  const width = image.naturalWidth || image.width * 2
-  const height = image.naturalHeight || image.height * 2
+export async function pictureInside(image: HTMLImageElement | HTMLCanvasElement, at: BoxAt, name: string): Promise<File | null> {
+  // A picture with no size of its own (an SVG without one) is taken as drawn, at twice the size; a
+  // page drawn on a canvas, at the size it was drawn.
+  const drawn = image instanceof HTMLCanvasElement
+  const width = drawn ? image.width : image.naturalWidth || image.width * 2
+  const height = drawn ? image.height : image.naturalHeight || image.height * 2
   if (!width || !height) return null
   const sx = (width * at.x) / WHOLE
   const sy = (height * at.y) / WHOLE

@@ -289,4 +289,9 @@ describe('where the ask bubble sits', () => {
     expect(bubblePlace({ top: 110, bottom: 128, left: 52, right: 60 }, view, { top: 0, left: 0 }, size)).toEqual({ top: 38, left: 88, below: true })
     expect(bubblePlace({ top: 300, bottom: 318, left: 640, right: 650 }, view, { top: 0, left: 0 }, size).left).toBe(512)
   })
+  it('inside the foot of the view, over a part taller than the view', () => {
+    // All of a page, from just under the top of a view 500 high to far below it.
+    expect(bubblePlace({ top: 120, bottom: 1400, left: 60, right: 640 }, { ...view, height: 500 }, { top: 0, left: 0 }, size)).toEqual({ top: 452, left: 300, below: true })
+    expect(bubblePlace({ top: 110, bottom: 128, left: 52, right: 60 }, { ...view, height: 500 }, { top: 0, left: 0 }, size).top).toBe(38)
+  })
 })

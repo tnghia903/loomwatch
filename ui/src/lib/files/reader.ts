@@ -23,7 +23,7 @@ export interface FileText {
 }
 
 /** How the reader shows a file: what it is drawn as, not what made it. */
-export type ReaderFormat = 'markdown' | 'page' | 'table' | 'sheet' | 'code' | 'text' | 'document' | 'picture' | 'media'
+export type ReaderFormat = 'markdown' | 'page' | 'table' | 'sheet' | 'code' | 'text' | 'pdf' | 'document' | 'picture' | 'media'
 
 const FORMATS: Array<[RegExp, ReaderFormat]> = [
   [/^(md|markdown|mdx)$/, 'markdown'],
@@ -33,7 +33,9 @@ const FORMATS: Array<[RegExp, ReaderFormat]> = [
   [/^(xlsx|xlsm|xlsb|xls|ods)$/, 'sheet'],
   [/^(json|ya?ml|toml|xml|py|js|ts|tsx|jsx|rs|go|java|rb|sh|css|sql)$/, 'code'],
   [/^(txt|log)$/, 'text'],
-  [/^(pdf|docx|docm|xlsx|xlsm|pptx|pptm)$/, 'document'],
+  // A PDF is drawn as its pages, its words over them (ADR 0091); its words alone if it can't be.
+  [/^pdf$/, 'pdf'],
+  [/^(docx|docm|xlsx|xlsm|pptx|pptm)$/, 'document'],
   [/^(png|jpe?g|gif|webp|svg|bmp)$/, 'picture'],
   [/^(mp3|wav|m4a|mp4|mov|webm)$/, 'media'],
 ]

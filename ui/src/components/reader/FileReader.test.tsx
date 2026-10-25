@@ -3,8 +3,53 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { AgentFacts } from '../../lib/chat/faces'
 import { forgetAnswersRead } from '../../lib/files/answersRead'
+import { openPdf } from '../../lib/files/pdf'
 import { askKey, partId, passageId, type AskedPassage, type PassageAnswer } from '../../lib/files/passage'
 import { EXPLAIN_WORDS, FileReader } from './FileReader'
+
+// PDF.js stands in as a PDF of a few pages, each 600 by 800 at scale 1, saying which page it is.
+// A drawing waits for `hold`, and laying words out for `wordsHold`, when there is one; each is
+// handed a signal that stops it, kept in `stops` and `wordStops`. Pages let go of are in `released`.
+const pdfState = vi.hoisted(() => ({
+  pages: 2, fail: false, hang: false, sharp: true, pictured: true, drawnAgain: [] as unknown[],
+  hold: null as Promise<void> | null, stops: [] as (AbortSignal | undefined)[],
+  wordsHold: null as Promise<void> | null, wordStops: [] as (AbortSignal | undefined)[], released: [] as number[],
+  textHold: null as Promise<void> | null,
+}))
+vi.mock('../../lib/files/pdf', async (real) => ({
+  ...await real<typeof import('../../lib/files/pdf')>(),
+  openPdf: vi.fn(async () => {
+    if (pdfState.fail) throw new Error('not a PDF')
+    if (pdfState.hang) await new Promise(() => undefined)
+    return {
+      pages: pdfState.pages,
+      close: () => undefined,
+      picture: async (at: unknown) => { pdfState.drawnAgain.push(at); return pdfState.sharp ? new Blob(['sharp png'], { type: 'image/png' }) : null },
+      text: async (number: number) => {
+        if (pdfState.textHold) await pdfState.textHold
+        return `Page ${number} says sales grew.`
+      },
+      page: async (number: number) => ({
+        width: 600,
+        height: 800,
+        draw: async (canvas: HTMLCanvasElement, _scale: number, stop?: AbortSignal) => {
+          pdfState.stops.push(stop)
+          if (pdfState.hold) await pdfState.hold
+          canvas.width = 1200
+          canvas.height = 1600
+        },
+        words: async (container: HTMLElement, _scale: number, stop?: AbortSignal) => {
+          pdfState.wordStops.push(stop)
+          if (pdfState.wordsHold) await pdfState.wordsHold
+          if (stop?.aborted) return
+          container.innerHTML = `<span>Page ${number} says sales grew.</span><div class="endOfContent"></div>`
+        },
+        pictures: async () => pdfState.pictured,
+        release: () => { pdfState.released.push(number) },
+      }),
+    }
+  }),
+}))
 
 const REPORT = '/teams/.loomwatch/market/writer/market-report.md'
 const respond = (status: number, body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status }))
@@ -444,7 +489,8 @@ describe('reading a file an agent made', () => {
   it('says a document’s words are its text without its layout', async () => {
     answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: '/w/brief.docx', name: 'brief.docx', kind: 'document', text: 'Brief\n\nWe sell tea.', extracted: true })) : respond(404, {}))
     renderReader({ file: { path: '/w/brief.docx', runId: 'run-1', from: 'writer' } })
-    expect(await screen.findByText(/These are the words of the word document, as your agents read them/)).toBeInTheDocument()
+    expect(await screen.findByText(/These are the words of the Word document, as your agents read them/)).toBeInTheDocument()
+    expect(screen.getByText(/Words from a Word document/)).toBeInTheDocument()
     expect(document.querySelector('.rd-doc-heading')).toHaveTextContent('Brief')
     expect(screen.getByText('We sell tea.')).toBeInTheDocument()
   })
@@ -532,7 +578,7 @@ describe('a picture in the reader', () => {
     await screen.findByRole('toolbar', { name: 'Ask Writer about the part you marked' })
     fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
     await waitFor(() => expect(onAsk).toHaveBeenLastCalledWith(
-      expect.objectContaining({ text: 'The whole picture', at: { kind: 'box', x: 0, y: 0, w: 10000, h: 10000 } }), EXPLAIN_WORDS, 'writer', [expect.any(File)],
+      expect.objectContaining({ text: 'All of the picture', at: { kind: 'box', x: 0, y: 0, w: 10000, h: 10000 } }), EXPLAIN_WORDS, 'writer', [expect.any(File)],
     ))
     expect(drawn.at(-1)).toEqual([0, 0, 1600, 900])
   })
@@ -795,6 +841,7 @@ describe('a sheet in the reader', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'By region, with cells asked about' }))
     const bubble = await screen.findByRole('button', { name: /^Writer's answer about “By region/ })
     expect(document.querySelector('.rd-range[data-part]')?.contains(bubble)).toBe(true)
+    vi.mocked(window.requestAnimationFrame).mockRestore()
   })
 
   it('says once that a workbook too big to read whole is cut', async () => {
@@ -960,6 +1007,389 @@ describe('a recording in the reader', () => {
     renderReader({ file: { path: TALK, runId: 'run-1', from: null } })
     await waitFor(() => expect(document.querySelector('video')).not.toBeNull())
     expect(document.querySelector('.rd-media-line')).toBeNull()
+  })
+})
+
+// ADR 0091: a PDF is drawn as its pages; its words are marked as any file's, and a drag on a page
+// where there are no words marks a box there.
+describe('a PDF in the reader', () => {
+  const PDF = '/teams/.loomwatch/market/writer/report.pdf'
+  let drawn: number[][] = []
+  beforeEach(() => {
+    pdfState.pages = 2
+    pdfState.fail = false
+    pdfState.hang = false
+    pdfState.sharp = true
+    pdfState.pictured = true
+    pdfState.drawnAgain = []
+    pdfState.hold = null
+    pdfState.stops = []
+    pdfState.wordsHold = null
+    pdfState.wordStops = []
+    pdfState.released = []
+    pdfState.textHold = null
+    vi.mocked(openPdf).mockClear()
+    drawn = []
+    // Each page's line of words is at the top left, 300 by 16 at 50,40; the page is 800 by 600. A
+    // spy here would be the one every element already has, and would move every element.
+    HTMLSpanElement.prototype.getBoundingClientRect = () => new DOMRect(50, 40, 300, 16)
+    answer = (url) => (url.startsWith('/api/files/read')
+      ? respond(200, read({ path: PDF, name: 'report.pdf', kind: 'document', text: 'Page 1 says sales grew.\n\nPage 2 says sales grew.', extracted: true }))
+      : respond(200, { path: PDF, exists: true, isDir: false, sizeBytes: 9_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'document', folder: null, openable: true }))
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ drawImage: (...args: unknown[]) => { drawn.push(args.slice(1, 5) as number[]) } }) as unknown as CanvasRenderingContext2D)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => done(new Blob(['png'], { type: 'image/png' })))
+  })
+  afterEach(() => {
+    delete (HTMLSpanElement.prototype as Partial<HTMLSpanElement>).getBoundingClientRect
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockRestore()
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockRestore()
+    vi.useRealTimers()
+  })
+  const page = (number: number) => document.querySelector<HTMLElement>(`.rd-pdf-page[data-page="${number}"]`)!
+
+  it('draws a PDF as its pages with its words over them, and marks its words as in any file', async () => {
+    const { onAsk } = renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(document.querySelectorAll('.rd-pdf-page')).toHaveLength(2))
+    await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
+    expect(page(1).querySelector('canvas')!.width).toBe(1200)
+    // Opened once, at the version read, not again when the version is known.
+    expect(vi.mocked(openPdf).mock.calls).toEqual([[expect.stringMatching(/report\.pdf&v=2026-10-19T01%3A00%3A00Z$/)]])
+    expect(screen.queryByText(/Only the first 500 pages/)).toBeNull()
+    expect(screen.getByText('drag over a chart or picture')).toBeInTheDocument()
+    await mark('Page 1 says sales grew.')
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ kind: 'passage', text: 'Page 1 says sales grew.', file: PDF }), undefined, 'writer')
+  })
+
+  it('marks a box on a page where there are no words, sent drawn again sharp, or cut out of the page as drawn', async () => {
+    const { onAsk } = renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
+    // A drag that starts on words, or just beside them, is a drag over words: no box.
+    const words = page(2).querySelector('.rd-pdf-text span')!
+    fireEvent.pointerDown(words, { button: 0, pointerId: 1, clientX: 100, clientY: 45 })
+    expect(page(2).querySelector('.rd-box.drawing')).toBeNull()
+    fireEvent.pointerUp(words, { pointerId: 1, clientX: 100, clientY: 45 })
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 6, clientX: 362, clientY: 52 })
+    fireEvent.pointerMove(page(2), { pointerId: 6, clientX: 700, clientY: 300 })
+    expect(page(2).querySelector('.rd-box.drawing')).toBeNull()
+    fireEvent.pointerUp(page(2), { pointerId: 6, clientX: 700, clientY: 300 })
+    // Beside a label in a chart ("200"), not a line of words, a press starts a box, as a drag over
+    // a chart starts at its edge.
+    const label = document.createElement('span')
+    label.textContent = '200'
+    label.getBoundingClientRect = () => new DOMRect(600, 400, 20, 10)
+    page(2).querySelector('.rd-pdf-text')!.append(label)
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 11, clientX: 630, clientY: 405 })
+    expect(page(2).querySelector('.rd-box.drawing')).not.toBeNull()
+    fireEvent.pointerCancel(page(2), { pointerId: 11 })
+    const legend = document.createElement('span')
+    legend.textContent = 'Q3 2024'
+    legend.getBoundingClientRect = () => new DOMRect(600, 450, 40, 10)
+    page(2).querySelector('.rd-pdf-text')!.append(legend)
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 15, clientX: 650, clientY: 455 })
+    expect(page(2).querySelector('.rd-box.drawing')).not.toBeNull()
+    fireEvent.pointerCancel(page(2), { pointerId: 15 })
+    // On the page where there are none, it draws a box; the page is 800 by 600 in jsdom. Words
+    // marked before it are let go of, not taken for what is marked.
+    const before = document.createRange()
+    before.selectNodeContents(page(1).querySelector('.rd-pdf-text span')!)
+    document.getSelection()!.addRange(before)
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 2, clientX: 400, clientY: 0 })
+    expect(String(document.getSelection())).toBe('')
+    fireEvent.pointerMove(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
+    expect(page(2).querySelector('.rd-box.drawing')).not.toBeNull()
+    fireEvent.pointerUp(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
+    // No words selected after it lets go of words, not of the box.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 10)))
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    const at = { kind: 'box', x: 5000, y: 0, w: 5000, h: 5000, page: 2 }
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ text: 'The top right of page 2', at }), EXPLAIN_WORDS, 'writer', [expect.any(File)]))
+    const [sharp] = onAsk.mock.lastCall![3] as File[]
+    expect([sharp.name, await sharp.text()]).toEqual(['report part.png', 'sharp png'])
+    expect(pdfState.drawnAgain).toEqual([at])
+    expect(drawn).toEqual([])
+    // Where it can't be drawn again, it is cut out of the page as the screen shows it.
+    pdfState.sharp = false
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 3, clientX: 400, clientY: 0 })
+    fireEvent.pointerMove(page(2), { pointerId: 3, clientX: 800, clientY: 300 })
+    fireEvent.pointerUp(page(2), { pointerId: 3, clientX: 800, clientY: 300 })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 10)))
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(onAsk).toHaveBeenCalledTimes(2))
+    expect(drawn.at(-1)).toEqual([600, 0, 600, 800])
+  })
+
+  it('draws each box asked about on its page with the bubble of the agent asked, which opens the answer', async () => {
+    const at = { kind: 'box' as const, x: 5000, y: 0, w: 5000, h: 5000, page: 2 }
+    const asked = [part({ state: 'said', by: 'writer', text: 'That is the total.', at: null }, { file: PDF, text: 'The top right of page 2', at })]
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' }, asked })
+    const bubble = await screen.findByRole('button', { name: "Writer's answer about “The top right of page 2”" })
+    const box = page(2).querySelector<HTMLElement>('.rd-box[data-part]')!
+    expect(box.contains(bubble)).toBe(true)
+    expect(page(1).querySelector('.rd-box[data-part]')).toBeNull()
+    fireEvent.click(bubble)
+    expect(answerCard()).toHaveTextContent('That is the total.')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(answerCard()).toBeNull()
+    // A right click, for the menu, opens nothing.
+    fireEvent.pointerDown(box, { button: 2, pointerId: 12, clientX: 500, clientY: 100 })
+    fireEvent.pointerUp(box, { button: 2, pointerId: 12, clientX: 500, clientY: 100 })
+    expect(answerCard()).toBeNull()
+    // A click on the box opens its answer; a drag that starts on it draws a new box.
+    fireEvent.pointerDown(box, { button: 0, pointerId: 4, clientX: 500, clientY: 100 })
+    fireEvent.pointerUp(box, { pointerId: 4, clientX: 500, clientY: 100 })
+    expect(answerCard()).toHaveTextContent('That is the total.')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.pointerDown(box, { button: 0, pointerId: 5, clientX: 500, clientY: 100 })
+    fireEvent.pointerMove(page(2), { pointerId: 5, clientX: 700, clientY: 400 })
+    fireEvent.pointerUp(page(2), { pointerId: 5, clientX: 700, clientY: 400 })
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the part you marked' })).toBeInTheDocument()
+  })
+
+  it('shows its words when it can’t be drawn', async () => {
+    pdfState.fail = true
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    expect(await screen.findByText(/Page 2 says sales grew\./)).toBeInTheDocument()
+    expect(document.querySelector('.rd-pdf-page')).toBeNull()
+  })
+
+  it('shows its words when it doesn’t open in time', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    pdfState.hang = true
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    // One line for the whole wait, the reader's own, said on by the PDF while it opens.
+    await waitFor(() => expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent('Reading report.pdf…'))
+    await act(async () => { vi.advanceTimersByTime(30_000) })
+    expect(await screen.findByText(/Page 2 says sales grew\./)).toBeInTheDocument()
+    expect(screen.queryByText('Reading report.pdf…')).toBeNull()
+    expect(document.querySelector('.rd-pdf-page')).toBeNull()
+  })
+
+  it('draws its pages in a tab in the background, which draws no frames', async () => {
+    const frames = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 0)
+    try {
+      renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+      await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
+    } finally {
+      frames.mockRestore()
+    }
+  })
+
+  it('shows its pages though it has no words the daemon can read, as scanned pages have none', async () => {
+    answer = (url) => (url.startsWith('/api/files/read')
+      ? respond(422, { error: 'report.pdf can’t be read in LoomWatch: it has no text in it.' })
+      : respond(200, { path: PDF, exists: true, isDir: false, sizeBytes: 9_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'document', folder: null, openable: true }))
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(document.querySelectorAll('.rd-pdf-page')).toHaveLength(2))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('speaks of boxes in its tip only when a page shows a picture or a chart', async () => {
+    pdfState.pictured = false
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
+    expect(screen.getByText('Mark any words')).toBeInTheDocument()
+    expect(screen.queryByText('drag over a chart or picture')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Ask about page/ })).toBeNull()
+    fireEvent.pointerDown(page(1), { button: 0, pointerId: 13, pointerType: 'touch', clientX: 400, clientY: 300 })
+    fireEvent.pointerUp(page(1), { pointerId: 13, pointerType: 'touch', clientX: 400, clientY: 300 })
+    expect(screen.queryByRole('button', { name: 'Explain' })).toBeNull()
+  })
+
+  it('puts the bubbles after words asked about over the page, light as the paper, and keeps them while words are selected', async () => {
+    // jsdom lays nothing out, but reads colours from a style sheet: a dark theme round white paper.
+    const theme = document.createElement('style')
+    theme.textContent = 'body { background-color: rgb(16, 16, 18); } .rd-pdf-page { background-color: rgb(255, 255, 255); }'
+    document.head.append(theme)
+    try {
+      const asked = [part({ state: 'said', by: 'writer', text: 'It grew 12%.', at: null }, { file: PDF, text: 'Page 1 says sales grew.' })]
+      renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' }, asked })
+      // Marked again once the page the part is on is known; its bubble then stays where it is.
+      await screen.findByRole('button', { name: "Writer's answer about “Page 1 says sales grew.”" })
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+      const slot = screen.getByRole('button', { name: "Writer's answer about “Page 1 says sales grew.”" }).closest<HTMLElement>('.rd-slot')!
+      // Not in the line, where it would be stretched with the words and push them off the drawing.
+      expect(page(1).querySelector('.rd-pdf-slots')!.contains(slot)).toBe(true)
+      expect(page(1).querySelector('.rd-pdf-text')!.contains(slot)).toBe(false)
+      // At the end of the last word marked, 120 + 160 across and 300 + 9 down a page of 800 by 600.
+      const row = slot.parentElement!
+      expect(row).toHaveClass('rd-pdf-row')
+      expect([row.style.left, row.style.top]).toEqual(['35%', '51.5%'])
+      // Right after the words it follows, its point points at them.
+      expect(row).not.toHaveClass('apart')
+      expect(slot).not.toHaveClass('on-dark')
+      // A drag over words in Safari moves the block after them along: the marks stay as they are.
+      const marked = page(1).querySelector('.rd-mark')!
+      const words = page(1).querySelector('.rd-pdf-text')!
+      words.prepend(words.querySelector('.endOfContent')!)
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+      expect(marked.isConnected).toBe(true)
+    } finally {
+      theme.remove()
+    }
+  })
+
+  it.each(['smaller', 'larger'])('draws a smaller box asked about over a larger one, and a click where both are opens the smaller one’s answer, the %s asked first', async (first) => {
+    const whole = { kind: 'box' as const, x: 0, y: 0, w: 10_000, h: 10_000, page: 2 }
+    const corner = { kind: 'box' as const, x: 5000, y: 0, w: 5000, h: 5000, page: 2 }
+    const both = [
+      part({ state: 'said', by: 'writer', text: 'That is the total.', at: null }, { file: PDF, text: 'The top right of page 2', at: corner }),
+      part({ state: 'said', by: 'writer', text: 'That is all of it.', at: null }, { file: PDF, text: 'All of page 2', at: whole, messageId: 'n-2' }),
+    ]
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' }, asked: first === 'smaller' ? both : [...both].reverse() })
+    await screen.findByRole('button', { name: "Writer's answer about “All of page 2”" })
+    expect([...page(2).querySelectorAll<HTMLElement>('.rd-box[data-part]')].map((box) => box.dataset.part!.split('\u0001')[0])).toEqual(['All of page 2', 'The top right of page 2'])
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 7, clientX: 600, clientY: 100 })
+    fireEvent.pointerUp(page(2), { pointerId: 7, clientX: 600, clientY: 100 })
+    expect(answerCard()).toHaveTextContent('That is the total.')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 8, clientX: 100, clientY: 500 })
+    fireEvent.pointerUp(page(2), { pointerId: 8, clientX: 100, clientY: 500 })
+    expect(answerCard()).toHaveTextContent('That is all of it.')
+    // Just beside words a press marks words; a click there that marks none opens the box's answer too.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.pointerDown(page(2), { button: 0, pointerId: 9, clientX: 362, clientY: 52 })
+    fireEvent.pointerUp(page(2), { pointerId: 9, clientX: 362, clientY: 52 })
+    expect(answerCard()).toHaveTextContent('That is all of it.')
+  })
+
+  it('asks about all of a page with a picture from the keyboard, or with a tap that doesn’t move', async () => {
+    const { onAsk } = renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    fireEvent.keyDown(await screen.findByRole('button', { name: 'Ask about page 2' }), { key: 'Enter' })
+    // All of a page is taller than the view of 600: the pill stays inside it, drawn as on paper.
+    const pill = await screen.findByRole('toolbar', { name: 'Ask Writer about the page you marked' })
+    expect(pill).toHaveClass('on-paper')
+    expect(Number.parseFloat(pill.style.top)).toBeLessThan(600)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask' }))
+    const all = (number: number) => ({ kind: 'box', x: 0, y: 0, w: 10_000, h: 10_000, page: number })
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ text: 'All of page 2', at: all(2) }), undefined, 'writer', [expect.any(File)]))
+    // A tap on words is a tap on words: the page isn't marked.
+    const line = page(1).querySelector('.rd-pdf-text span')!
+    fireEvent.pointerDown(line, { button: 0, pointerId: 14, pointerType: 'touch', clientX: 100, clientY: 45 })
+    fireEvent.pointerUp(line, { pointerId: 14, pointerType: 'touch', clientX: 100, clientY: 45 })
+    expect(screen.queryByRole('button', { name: 'Explain' })).toBeNull()
+    // A finger that moves is scrolling: nothing is marked.
+    fireEvent.pointerDown(page(1), { button: 0, pointerId: 9, pointerType: 'touch', clientX: 400, clientY: 300 })
+    fireEvent.pointerUp(page(1), { pointerId: 9, pointerType: 'touch', clientX: 400, clientY: 340 })
+    expect(screen.queryByRole('button', { name: 'Explain' })).toBeNull()
+    fireEvent.pointerDown(page(1), { button: 0, pointerId: 10, pointerType: 'touch', clientX: 400, clientY: 300 })
+    fireEvent.pointerUp(page(1), { pointerId: 10, pointerType: 'touch', clientX: 400, clientY: 300 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(onAsk).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'All of page 1', at: all(1) }), EXPLAIN_WORDS, 'writer', [expect.any(File)]))
+  })
+
+  it('draws pages ahead of the reader’s own view, and stops drawing a page at a width it no longer has', async () => {
+    const near: IntersectionObserverInit[] = []
+    vi.stubGlobal('IntersectionObserver', class {
+      seen: IntersectionObserverCallback
+      constructor(seen: IntersectionObserverCallback, options: IntersectionObserverInit) { this.seen = seen; near.push(options) }
+      observe(target: Element) { this.seen([{ isIntersecting: true, target } as unknown as IntersectionObserverEntry], this as unknown as IntersectionObserver) }
+      disconnect() {}
+    })
+    const resized: (() => void)[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(seen: () => void) { resized.push(seen) }
+      observe() {}
+      disconnect() {}
+    })
+    let release = () => {}
+    pdfState.hold = new Promise<void>((resolve) => { release = resolve })
+    let releaseWords = () => {}
+    pdfState.wordsHold = new Promise<void>((resolve) => { releaseWords = resolve })
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(pdfState.stops).toHaveLength(2))
+    expect(near.find((options) => options.rootMargin === '600px')).toEqual(expect.objectContaining({ root: document.querySelector('.rd-scroll') }))
+    // The reader is made narrower while both pages are being drawn.
+    document.querySelector('.rd-pdf')!.getBoundingClientRect = () => new DOMRect(0, 0, 600, 450)
+    act(() => resized.forEach((seen) => seen()))
+    await waitFor(() => expect(pdfState.stops).toHaveLength(4))
+    expect(pdfState.stops.map((stop) => stop?.aborted)).toEqual([true, true, false, false])
+    // And again while their words are being laid out.
+    release()
+    await waitFor(() => expect(pdfState.wordStops).toHaveLength(2))
+    document.querySelector('.rd-pdf')!.getBoundingClientRect = () => new DOMRect(0, 0, 500, 450)
+    act(() => resized.forEach((seen) => seen()))
+    await waitFor(() => expect(pdfState.wordStops).toHaveLength(4))
+    expect(pdfState.wordStops.map((stop) => stop?.aborted)).toEqual([true, true, false, false])
+    releaseWords()
+    await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
+    expect(page(2).style.getPropertyValue('--total-scale-factor')).toBe(String(500 / 600))
+  })
+
+  it('lets go of the drawing of a page far from the view, keeps its words, and draws it again once near', async () => {
+    const watchers = new Map<string, IntersectionObserverCallback>()
+    vi.stubGlobal('IntersectionObserver', class {
+      seen: IntersectionObserverCallback
+      constructor(seen: IntersectionObserverCallback, options: IntersectionObserverInit) { this.seen = seen; watchers.set(options.rootMargin ?? '', seen) }
+      observe(target: Element) { this.seen([{ isIntersecting: true, target } as unknown as IntersectionObserverEntry], this as unknown as IntersectionObserver) }
+      disconnect() {}
+    })
+    const tell = (margin: string, near: boolean) => act(() => watchers.get(margin)!([{ isIntersecting: near, target: page(2) } as unknown as IntersectionObserverEntry], {} as IntersectionObserver))
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(page(2).querySelector('canvas')!.width).toBe(1200))
+    const laid = pdfState.wordStops.length
+    tell('3000px', false)
+    await waitFor(() => expect(pdfState.released).toEqual([2]))
+    expect(page(2).querySelector('canvas')!.width).toBe(0)
+    expect(page(2)).toHaveTextContent('Page 2 says sales grew.')
+    tell('600px', true)
+    await waitFor(() => expect(page(2).querySelector('canvas')!.width).toBe(1200))
+    expect(pdfState.wordStops).toHaveLength(laid)
+  })
+
+  it('finds words asked about on a page not drawn yet, and says only of words on no page that they have changed', async () => {
+    // Only page 1 is ever near the view.
+    vi.stubGlobal('IntersectionObserver', class {
+      seen: IntersectionObserverCallback
+      constructor(seen: IntersectionObserverCallback) { this.seen = seen }
+      observe(target: Element) { if (target.getAttribute('data-page') === '1') this.seen([{ isIntersecting: true, target } as unknown as IntersectionObserverEntry], this as unknown as IntersectionObserver) }
+      disconnect() {}
+    })
+    const onPageTwo = part({ state: 'said', by: 'writer', text: 'It grew.', at: null }, { file: PDF, text: 'Page 2 says sales grew.' })
+    const { rerender } = renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' }, asked: [onPageTwo] })
+    // Its page's words are laid out, so the part is marked with its bubble; its drawing is not made.
+    const bubble = await screen.findByRole('button', { name: "Writer's answer about “Page 2 says sales grew.”" })
+    expect(page(2).querySelector('.rd-pdf-slots')!.contains(bubble)).toBe(true)
+    expect(page(2).querySelector('canvas')!.width).not.toBe(1200)
+    // Asked about words on none of its pages, the answer says they have changed.
+    rerender({ asked: [onPageTwo, part({ state: 'sending' }, { file: PDF, text: 'Words no page has.', messageId: null })] })
+    expect(await screen.findByText('The words you marked have changed.')).toBeInTheDocument()
+  })
+
+  it('doesn’t take words on a page not laid out yet for words the file no longer has', async () => {
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
+    // The file changes: its pages open again, and their words are slow to be laid out, and to be
+    // looked through for the page a part is on.
+    pdfState.wordsHold = new Promise(() => undefined)
+    let releaseText = () => {}
+    pdfState.textHold = new Promise<void>((resolve) => { releaseText = resolve })
+    cleanup()
+    const { rerender } = renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(document.querySelectorAll('.rd-pdf-page')).toHaveLength(2))
+    rerender({ asked: [part({ state: 'sending' }, { file: PDF, text: 'Page 2 says sales grew.', messageId: null })] })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(screen.queryByText('The words you marked have changed.')).toBeNull()
+    releaseText()
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(screen.queryByText('The words you marked have changed.')).toBeNull()
+  })
+
+  it('doesn’t take a box on a PDF still opening for one the file no longer has', async () => {
+    pdfState.hang = true
+    const { rerender } = renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(document.querySelector('.rd-as-pdf .rd-loading')).not.toBeNull())
+    rerender({ asked: [part({ state: 'sending' }, { file: PDF, text: 'The top right of page 2', at: { kind: 'box', x: 5000, y: 0, w: 5000, h: 5000, page: 2 }, messageId: null })] })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(screen.queryByText('The words you marked have changed.')).toBeNull()
+  })
+
+  it('says under the file’s name that only its first 500 pages are shown', async () => {
+    pdfState.pages = 501
+    renderReader({ file: { path: PDF, runId: 'run-1', from: 'writer' } })
+    const note = await screen.findByText('Only the first 500 pages are shown here. Open it in its own app for the rest.')
+    expect(note.closest('.rd-pdf')).toBeNull()
+    expect(document.querySelectorAll('.rd-pdf-page')).toHaveLength(500)
   })
 })
 

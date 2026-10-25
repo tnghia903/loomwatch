@@ -13,9 +13,9 @@ describe('a box on a picture (ADR 0091)', () => {
   })
 
   it('is named by where it is, in the words a person points with', () => {
-    expect(boxLabel(wholeBox())).toBe('The whole picture')
-    expect(boxLabel(wholeBox(), 'page 3')).toBe('The whole page 3')
-    expect(boxLabel(wholeBox(), 'the frame at 0:07')).toBe('The whole frame at 0:07')
+    expect(boxLabel(wholeBox())).toBe('All of the picture')
+    expect(boxLabel(wholeBox(), 'page 3')).toBe('All of page 3')
+    expect(boxLabel(wholeBox(), 'the frame at 0:07')).toBe('All of the frame at 0:07')
     expect(boxLabel({ kind: 'box', x: 1000, y: 1000, w: 8000, h: 7000 })).toBe('Most of the picture')
     expect(boxLabel({ kind: 'box', x: 6000, y: 0, w: 4000, h: 3000 })).toBe('The top right of the picture')
     expect(boxLabel({ kind: 'box', x: 0, y: 7000, w: 3000, h: 3000 })).toBe('The bottom left of the picture')
