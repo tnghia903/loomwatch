@@ -565,7 +565,9 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   agent is saved), as its Chat tab would send it, with anything dropped onto the notch as the
   chat's attachments. The panel takes the keyboard only while that message is written (focus may
   move on to Copy, Open in LoomWatch or Start; Escape gives it back), without bringing `LoomWatch` to
-  the front;
+  the front. `AppKit` finds what ⌘V, ⌘C, ⌘X, ⌘A, ⌘Z and ⇧⌘Z do in the app's main menu, so the app
+  has one that nobody sees, with only an Edit menu in it (`edit_keys.rs`): ⌘Q, ⌘W or ⌘H meant for
+  the app in front still find nothing in `LoomWatch`;
 - its answer is read whole before Copy can take it, and Copy carries it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
   whose links keep their addresses. In the app, Copy writes both to the clipboard

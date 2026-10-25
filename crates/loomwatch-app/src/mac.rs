@@ -29,6 +29,7 @@ use tray_icon::menu::accelerator::{Accelerator, Code, Modifiers};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
+use crate::edit_keys;
 use crate::island::{self, FromPage};
 use crate::notch_panel::{IslandEvent, NotchPanels};
 use crate::progress::{self, Ended, Mood, Progress, Row};
@@ -156,8 +157,11 @@ pub fn run() -> Result<()> {
     paths.ensure_teams()?;
 
     let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
-    // A menu-bar app: no Dock icon, no app menu.
+    // A menu-bar app: no Dock icon, no menu bar of its own. Its main menu, never shown, holds what
+    // ⌘V and the other editing keys do in the box at the notch.
     event_loop.set_activation_policy(ActivationPolicy::Accessory);
+    let _edit_keys = edit_keys::install()
+        .map_err(|error| eprintln!("LoomWatch: no editing keys at the notch: {error}"));
     let proxy = event_loop.create_proxy();
     forward_events(&proxy);
     let island_proxy = proxy.clone();
