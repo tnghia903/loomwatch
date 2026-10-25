@@ -85,6 +85,35 @@
 .rd-picture img { max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 4px color-mix(in srgb, var(--lw-ink-950) 8%, transparent), 0 16px 40px color-mix(in srgb, var(--lw-ink-950) 14%, transparent); }
 .rd-media { display: block; width: calc(100% - 48px); max-width: 720px; margin: 40px auto; }
 
+/* ---------- A part of a picture: a box (ADR 0091, PictureView.tsx) ----------
+   Dragged over the picture, or the whole of it for a click. Drawn as the marker draws words: a gold
+   tint edged in the marker's deeper gold, with a thin dark and light rim so it shows on any picture;
+   the agents' bubbles sit at its top right corner. The one marked now and the one being dragged are
+   dashed: nothing is asked yet. The part open or pointed at is told by a line round it, not by more
+   gold; the one in the message box by a dashed line, as it is not sent yet. The tint stays light: the
+   picture under it is what is being read. A smaller box sits over a larger one (PictureView). */
+.rd-as-picture { display: grid; min-height: 100%; user-select: none; -webkit-user-select: none; }
+.rd-picture-frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; border-radius: 6px; isolation: isolate; }
+.rd-picture-frame.askable { cursor: crosshair; touch-action: manipulation; }
+.rd-picture-target { display: block; border-radius: 6px; }
+.rd-picture-target:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+.rd-box {
+  --rd-a: 12%;
+  --rd-rim: 0 0 0 1px color-mix(in srgb, var(--color-black) 50%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--color-white) 40%, transparent);
+  position: absolute; box-sizing: border-box; min-width: 4px; min-height: 4px; border: 2px solid var(--color-marker-deep); border-radius: 4px;
+  background: color-mix(in srgb, var(--color-marker) var(--rd-a), transparent);
+  box-shadow: var(--rd-rim);
+}
+.rd-box.whole { border-radius: 6px; }
+.rd-box:is(.read, .failed) { --rd-a: 5%; }
+/* A dark keyline on the far side of the ring, so it shows on a light picture as on a dark one. */
+.rd-box:is(.lit, .asking) { outline: 2px solid var(--color-accent); outline-offset: 1px; box-shadow: var(--rd-rim), 0 0 0 4px color-mix(in srgb, var(--color-black) 40%, transparent); }
+.rd-box.asking:not(.lit) { outline-style: dashed; }
+.rd-box:is(.marking, .drawing) { --rd-a: 14%; border-style: dashed; border-color: var(--color-accent); pointer-events: none; }
+.rd-box > .rd-slot { position: absolute; z-index: 1; top: -11px; right: -11px; margin: 0; translate: none; }
+/* The tip's mark on a picture is the box the drag draws, still. */
+.rd-hint mark.box { padding: 0 3px; border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-marker) 14%, transparent); }
+
 /* ---------- The parts asked about: a marker stroke on the words, the agent's bubble after them ----------
    lib/files/partMarks.ts wraps each part's words in .rd-mark and leaves a .rd-slot after the last
    word, so the bubbles sit in the line and the line makes room for them: one for each agent asked
@@ -333,7 +362,7 @@
   .rd-answer { animation: rd-answer-in var(--t-move) var(--ease-out) both; }
   .rd-answer.above { animation-name: rd-answer-in-above; }
   .rd-hint { animation: rd-hint-in 420ms var(--ease-out) 600ms both; }
-  .rd-hint mark { animation: rd-mark-sweep 2.8s var(--ease-out) 900ms infinite; }
+  .rd-hint mark:not(.box) { animation: rd-mark-sweep 2.8s var(--ease-out) 900ms infinite; }
 }
 @keyframes rd-stitch { from { opacity: 1; transform: scaleX(0); } 65% { opacity: 1; transform: scaleX(1); } to { opacity: 0; transform: scaleX(1); } }
 @keyframes rd-ask-in { from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(.84); } }

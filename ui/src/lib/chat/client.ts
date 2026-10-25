@@ -170,7 +170,18 @@ export interface ReplyTo {
   text: string
   /** A `passage`'s file, by its full path: the part was marked in it while reading it (ADR 0077). */
   file?: string
+  /** Where a `passage` that isn't words is in its file (ADR 0091); none for words. */
+  at?: PartAt
 }
+
+/**
+ * Where a part that isn't words is in its file (ADR 0091), as the daemon keeps it (`chat::PartAt`).
+ * A place on a picture, page, slide or frame is in ten-thousandths of its width and height from its
+ * top left, so the part keeps its place however large it is drawn.
+ */
+export type PartAt =
+  /** A box: on a picture, or on page `page` (from 1) of a document. */
+  | { kind: 'box'; x: number; y: number; w: number; h: number; page?: number }
 
 /** One item of the chat, newest first from the daemon. */
 export type ChatItem =

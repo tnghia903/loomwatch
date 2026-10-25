@@ -483,6 +483,150 @@ describe('reading a file an agent made', () => {
   })
 })
 
+// ADR 0091: a part of a picture is a box on it, asked about as words are.
+describe('a picture in the reader', () => {
+  const CHART = '/teams/.loomwatch/market/writer/chart.png'
+  const TOP_RIGHT = { kind: 'box' as const, x: 5000, y: 0, w: 5000, h: 5000 }
+  let drawn: number[][] = []
+  beforeEach(() => {
+    drawn = []
+    vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(1600)
+    vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(900)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ drawImage: (...args: unknown[]) => { drawn.push(args.slice(1, 5) as number[]) } }) as unknown as CanvasRenderingContext2D)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => done(new Blob(['png'], { type: 'image/png' })))
+  })
+  const picture = () => document.querySelector<HTMLElement>('.rd-picture-frame')!
+  /** Presses on the picture at (x, y) and lets go at (toX, toY): the frame is 800 by 600 in jsdom. */
+  const drag = (target: Element, x: number, y: number, toX = x, toY = y) => {
+    fireEvent.pointerDown(target, { button: 0, pointerId: 1, clientX: x, clientY: y })
+    fireEvent.pointerMove(picture(), { pointerId: 1, clientX: toX, clientY: toY })
+    fireEvent.pointerUp(target, { pointerId: 1, clientX: toX, clientY: toY })
+  }
+  /** What is marked stays marked once the browser has had its turn (a click's own work runs after it). */
+  const settle = () => act(() => new Promise((done) => { setTimeout(done, 20) }))
+
+  it('marks a box dragged over it, or all of it for a click, and sends the part’s place with the picture inside it', async () => {
+    const { onAsk } = renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag over any part')
+    drag(picture(), 200, 0, 600, 300)
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the part you marked' })).toBeInTheDocument()
+    await settle()
+    expect(screen.getByRole('toolbar', { name: 'Ask Writer about the part you marked' })).toBeInTheDocument()
+    expect(document.querySelector('.rd-box.marking')).toHaveStyle({ left: '25%', top: '0%', width: '50%', height: '50%' })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    const top = { kind: 'box', x: 2500, y: 0, w: 5000, h: 5000 }
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(
+      { runId: 'run-1', messageId: passageId(CHART, 'The top of the picture', top as typeof TOP_RIGHT), from: 'writer', to: null, kind: 'passage', text: 'The top of the picture', file: CHART, at: top },
+      undefined, 'writer', [expect.any(File)],
+    ))
+    // What is sent is the box cut out of the picture at its own size: 1600 by 900 here.
+    expect(drawn).toEqual([[400, 0, 800, 450]])
+    const [sent] = onAsk.mock.lastCall![3] as File[]
+    expect(sent.name).toBe('chart part.png')
+    expect(sent.type).toBe('image/png')
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    expect(document.querySelector('.rd-box.marking')).toBeNull()
+
+    // A click marks all of it; Explain asks at once.
+    drag(picture(), 400, 300)
+    await screen.findByRole('toolbar', { name: 'Ask Writer about the part you marked' })
+    fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(onAsk).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: 'The whole picture', at: { kind: 'box', x: 0, y: 0, w: 10000, h: 10000 } }), EXPLAIN_WORDS, 'writer', [expect.any(File)],
+    ))
+    expect(drawn.at(-1)).toEqual([0, 0, 1600, 900])
+  })
+
+  it('takes a press that slips a little as a click, not a sliver of the picture', async () => {
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag over any part')
+    drag(picture(), 100, 100, 300, 108)
+    await screen.findByRole('toolbar')
+    expect(document.querySelector('.rd-box.marking')).toHaveClass('whole')
+  })
+
+  it('lets go of the marked box on Esc or a press anywhere else, and a picture with nobody to ask marks nothing', async () => {
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    await screen.findByText('Drag over any part')
+    drag(picture(), 100, 100, 300, 200)
+    await screen.findByRole('toolbar')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    expect(document.querySelector('.rd-box')).toBeNull()
+    drag(picture(), 100, 100, 300, 200)
+    await screen.findByRole('toolbar')
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    cleanup()
+    renderReader({ file: { path: CHART, runId: null, from: null } })
+    await waitFor(() => expect(picture()).toBeInTheDocument())
+    drag(picture(), 100, 100, 300, 200)
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    expect(screen.queryByText('Drag over any part')).toBeNull()
+  })
+
+  it('is marked from the keyboard, which goes on to Ask, and its bubbles are not inside the picture’s button', async () => {
+    const asked = [part({ state: 'said', by: 'writer', text: 'Yes.', at: null }, { file: CHART, text: 'The top right of the picture', at: TOP_RIGHT })]
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' }, asked })
+    const target = await screen.findByRole('button', { name: 'Ask about Chart' })
+    expect(target.querySelector('.rd-bubble')).toBeNull()
+    target.focus()
+    fireEvent.keyDown(target, { key: 'Enter' })
+    await screen.findByRole('toolbar', { name: 'Ask Writer about the part you marked' })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ask' })).toHaveFocus())
+  })
+
+  it('shows its own tip to a person who has only marked words', async () => {
+    window.localStorage.setItem('loomwatch.readerHint', 'seen')
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' } })
+    expect(await screen.findByText('Drag over any part')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide this tip' }))
+    expect(screen.queryByText('Drag over any part')).toBeNull()
+    expect(window.localStorage.getItem('loomwatch.readerHint.picture')).toBe('seen')
+  })
+
+  it('draws each box asked about, the smaller over the larger, with the bubble of the agent asked at its corner, and opens its answer from either', async () => {
+    const asked = [
+      part({ state: 'said', by: 'writer', text: 'The legend sits there.', at: null }, { file: CHART, text: 'The top right of the picture', at: TOP_RIGHT }),
+      part({ state: 'said', by: 'writer', text: 'A chart of sales.', at: null }, { file: CHART, text: 'The whole picture', at: { kind: 'box', x: 0, y: 0, w: 10000, h: 10000 }, messageId: 'n-2' }),
+    ]
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' }, asked })
+    // An answer given before this browser kept count is one you have read.
+    const bubble = await screen.findByRole('button', { name: "Writer's answer about “The top right of the picture”" })
+    const boxes = [...document.querySelectorAll<HTMLElement>('.rd-box[data-part]')]
+    expect(boxes.map((box) => box.style.width)).toEqual(['100%', '50%'])
+    const small = boxes[1]
+    expect(small).toHaveStyle({ left: '50%', top: '0%', width: '50%', height: '50%' })
+    expect(small).toHaveClass('read')
+    expect(small.contains(bubble)).toBe(true)
+    fireEvent.click(bubble)
+    expect(answerCard()).toHaveTextContent('The legend sits there.')
+    fireEvent.click(screen.getByRole('button', { name: 'Close the answer' }))
+    expect(answerCard()).toBeNull()
+    // A click on the box itself opens it too, and marks nothing.
+    drag(small, 500, 100)
+    expect(answerCard()).toHaveTextContent('The legend sits there.')
+    expect(screen.queryByRole('toolbar')).toBeNull()
+  })
+
+  it('Reply under a box’s answer asks about the same box again, with its picture', async () => {
+    const asked = [part({ state: 'said', by: 'writer', text: 'The legend sits there.', at: null }, { file: CHART, text: 'The top right of the picture', at: TOP_RIGHT })]
+    const { onAsk } = renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' }, asked })
+    fireEvent.click(await screen.findByRole('button', { name: "Writer's answer about “The top right of the picture”" }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reply to Writer' }))
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'The top right of the picture', at: TOP_RIGHT, file: CHART }), undefined, 'writer', [expect.any(File)],
+    ))
+    expect(drawn).toEqual([[800, 0, 800, 450]])
+  })
+
+  it('tells the box being written about in the message box from the others', async () => {
+    const asked = [part({ state: 'said', by: 'writer', text: 'Yes.', at: null }, { file: CHART, text: 'The top right of the picture', at: TOP_RIGHT })]
+    renderReader({ file: { path: CHART, runId: 'run-1', from: 'writer' }, asked, asking: 'The top right of the picture\u0001box:5000,0,5000,5000' })
+    await waitFor(() => expect(document.querySelector('.rd-box[data-part]')?.className).toContain('asking'))
+  })
+})
+
 describe('a web page in the reader', () => {
   it('runs in a sandbox with no origin, and shows its code on request', async () => {
     answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: '/w/site.html', name: 'site.html', kind: 'web', text: '<h1>Hello</h1>' })) : respond(404, {}))
