@@ -75,10 +75,10 @@ const THING_HINT_KEY = 'loomwatch.readerHint.thing'
 /** And for a PDF's pages, where a drag over a picture or a chart marks a box. */
 const PDF_HINT_KEY = 'loomwatch.readerHint.pdf'
 /**
- * How long a slide deck may take to open as its slides before its words are shown instead: the first
- * time, LibreOffice makes its PDF (at most two minutes, `office.rs`).
+ * How long a slide deck or a Word document may take to open as its pages before its words are shown
+ * instead: the first time, LibreOffice makes its PDF (at most two minutes, `office.rs`).
  */
-const SLIDES_OPEN_LIMIT_MS = 150_000
+const MADE_OPEN_LIMIT_MS = 150_000
 /** How long "Updated" stays lit after the file changed on disk. */
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
@@ -130,8 +130,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const [view, setView] = useState<'page' | 'code'>('page')
   // A PDF that PDF.js couldn't open is shown by its words, as before (ADR 0091).
   const [pdfFailed, setPdfFailed] = useState<string | null>(null)
-  // A slide deck is shown as the PDF LibreOffice makes of its slides, as a PDF is (ADR 0091).
-  const asPages = format === 'pdf' || format === 'slides'
+  // A slide deck or a Word document is shown as the PDF LibreOffice makes of its pages, as a PDF is
+  // (ADR 0091).
+  const madeIntoPages = format === 'slides' || format === 'document'
+  const asPages = format === 'pdf' || madeIntoPages
   const pdfPages = asPages && pdfFailed !== path
   const pageWord = format === 'slides' ? 'slide' : 'page'
   // Whether one of its pages shows a picture or a chart: only then does its tip speak of boxes.
@@ -678,9 +680,9 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     // version read. Its words are marked as any file's are; a drag on a page where there are none
     // marks a box there (ADR 0091).
     <div key={content.changes} ref={page} className="rd-page rd-as-pdf" onClick={openAt}>
-      <PdfView src={`${format === 'slides' ? pagesFileUrl(path) : rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} name={fileName} askable={askable}
-        pageWord={pageWord} openLimit={format === 'slides' ? SLIDES_OPEN_LIMIT_MS : undefined}
-        slowNote={format === 'slides' ? 'The first time can take a minute or two.' : undefined} asking={asking} open={answerShown ? partId(answerShown) : null} wanted={texts}
+      <PdfView src={`${madeIntoPages ? pagesFileUrl(path) : rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} name={fileName} askable={askable}
+        pageWord={pageWord} openLimit={madeIntoPages ? MADE_OPEN_LIMIT_MS : undefined}
+        slowNote={madeIntoPages ? 'The first time can take a minute or two.' : undefined} asking={asking} open={answerShown ? partId(answerShown) : null} wanted={texts}
         marking={marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked} onOpen={openPlace} onDrawn={measure} onFailed={() => setPdfFailed(path)} onPictures={takePdfPictures} onPictured={() => setPdfPictured(path)}
         onPages={(pages) => setPdfCount({ path, pages })} onWanted={(pages) => setPdfFound({ path, pages })}
         boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' && at.page ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
@@ -703,7 +705,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     // Drawn afresh when the file changes, never updated around the marks in it (lib/files/partMarks.ts).
     <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${asPages ? 'document' : shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
       {shown === 'markdown' ? <Markdown>{withFolderPaths(text)}</Markdown>
-          : shown === 'document' || asPages ? <DocumentView text={text} />
+          : asPages ? <DocumentView text={text} />
             : <CodeView text={text} language={shown === 'code' && format === 'page' ? 'html' : extensionOf(path)} />}
     </div>
   )

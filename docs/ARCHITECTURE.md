@@ -76,7 +76,7 @@ instructions and tools.
   is read in a short-lived `loomwatchd read-document` process with a time limit, so a damaged file
   costs nothing else. The same reader gives knowledge files their text.
 - **Slides and Word documents as their pages** (`office.rs`, ADR 0091): the reader shows a deck as
-  its slides by asking `/api/files/pages`, which has `LibreOffice` (found by
+  its slides, and a Word document as its pages, by asking `/api/files/pages`, which has `LibreOffice` (found by
   `platform::office_program`: on the search path as `soffice` or `libreoffice`, or where its
   installers and Homebrew put it) turn the file into a PDF, headless, with a profile of its own in
   `<state>/pages/profile`, one file at a time, for at most two minutes, in a process group ended

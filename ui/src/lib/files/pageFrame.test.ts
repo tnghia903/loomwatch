@@ -588,6 +588,7 @@ describe('what the reader reads', () => {
     expect(readerFormat('/w/old.ppt')).toBeNull()
     expect(readerFormat('/w/chart.png')).toBe('picture')
     expect(readerFormat('/w/old.doc')).toBeNull()
+    expect(readerFormat('/w/notes.odt')).toBeNull()
     expect(readerFormat('/w/archive.zip')).toBeNull()
   })
 })
