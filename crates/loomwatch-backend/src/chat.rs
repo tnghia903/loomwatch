@@ -340,6 +340,239 @@ pub struct ReplyTo {
     /// The file a [`ReplyKind::Passage`] is a part of, by its full path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// Where a [`ReplyKind::Passage`] that isn't words is in its file (ADR 0091); `None` for words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<PartAt>,
+}
+
+/// The whole of a picture's width or height in [`PartAt`]'s units: ten-thousandths.
+const PART_WHOLE: u16 = 10_000;
+/// The most rows and columns a sheet has, as Excel counts them.
+const SHEET_ROWS: u32 = 1_048_576;
+const SHEET_COLUMNS: u32 = 16_384;
+/// The longest sheet name a part names; Excel keeps 31 characters, other programs more.
+const SHEET_NAME_CHARS: usize = 255;
+/// The latest moment of a recording a part names: a week in, in milliseconds.
+const RECORDING_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+/// The longest path to a thing in a web page a part names.
+const ELEMENT_PATH_CHARS: usize = 1000;
+
+/// Where a part of a file that isn't words is (ADR 0091), as the reader marked it.
+///
+/// A place on a picture, page, slide or frame is in ten-thousandths of its width and height from its
+/// top left, so the part keeps its place however large the reader drew it. Cells are by the sheet's
+/// own row and column numbers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PartAt {
+    /// A box on a picture, on page `page` (from 1) of a document, or on the frame of a recording at
+    /// `ms` milliseconds.
+    Box {
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        page: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ms: Option<u64>,
+    },
+    /// A moment of a recording, `start` milliseconds from its beginning, or the span to `end`.
+    Time {
+        start: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<u64>,
+    },
+    /// A range of cells, from row `top` and column `left` to row `bottom` and column `right`, all
+    /// from 1 and included; `sheet` names its sheet in a workbook, and is `None` for a CSV or TSV.
+    Cells {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sheet: Option<String>,
+        top: u32,
+        left: u32,
+        bottom: u32,
+        right: u32,
+    },
+    /// A chart, a picture or a video in a web page (`what`), found again by `path`: a CSS selector
+    /// from the page's body or from an element with an id, each step an element's name and, where
+    /// it has siblings of its kind, its place among them (`body > main > section:nth-of-type(2) >
+    /// canvas`).
+    Element { what: String, path: String },
+    /// A kind a newer version wrote: the part reads as its words.
+    #[serde(other)]
+    Unknown,
+}
+
+impl PartAt {
+    /// Whether the place is one the reader could have marked: a box inside its picture or frame,
+    /// cells inside a sheet, a moment or a span that goes forward, a chart, picture or video in a
+    /// page by a path on one line.
+    fn usable(&self) -> bool {
+        match *self {
+            Self::Box {
+                x,
+                y,
+                w,
+                h,
+                page,
+                ms,
+            } => {
+                w > 0
+                    && h > 0
+                    && u32::from(x) + u32::from(w) <= u32::from(PART_WHOLE)
+                    && u32::from(y) + u32::from(h) <= u32::from(PART_WHOLE)
+                    && page != Some(0)
+                    && ms.is_none_or(|ms| ms <= RECORDING_MS)
+                    && !(page.is_some() && ms.is_some())
+            }
+            Self::Time { start, end } => {
+                start <= RECORDING_MS && end.is_none_or(|end| end > start && end <= RECORDING_MS)
+            }
+            Self::Cells {
+                ref sheet,
+                top,
+                left,
+                bottom,
+                right,
+            } => {
+                top >= 1
+                    && top <= bottom
+                    && bottom <= SHEET_ROWS
+                    && left >= 1
+                    && left <= right
+                    && right <= SHEET_COLUMNS
+                    && sheet.as_deref().is_none_or(|name| {
+                        !name.trim().is_empty()
+                            && name.chars().count() <= SHEET_NAME_CHARS
+                            && !name.contains(['\n', '\r'])
+                    })
+            }
+            Self::Element { ref what, ref path } => {
+                matches!(what.as_str(), "chart" | "picture" | "video")
+                    && !path.trim().is_empty()
+                    && path.chars().count() <= ELEMENT_PATH_CHARS
+                    && !path.contains(['\n', '\r', '`'])
+            }
+            Self::Unknown => false,
+        }
+    }
+
+    /// Where it is, as the agent is told: "the box from 50% to 100% of the way across from the
+    /// left, and 0% to 50% of the way down from the top". On a slide deck, a page is a slide.
+    fn described(&self, slides: bool) -> Option<String> {
+        match *self {
+            Self::Box {
+                x,
+                y,
+                w,
+                h,
+                page,
+                ms,
+            } => {
+                let on = match (page, ms) {
+                    (Some(page), _) if slides => format!("on slide {page}, "),
+                    (Some(page), _) => format!("on page {page}, "),
+                    (None, Some(ms)) => {
+                        format!(
+                            "on the frame at {} ({} seconds in), ",
+                            clock(ms),
+                            seconds(ms)
+                        )
+                    }
+                    (None, None) => String::new(),
+                };
+                Some(format!(
+                    "{on}the box from {} to {} of the way across from the left, and {} to {} of \
+                     the way down from the top",
+                    percent(x),
+                    percent(x.saturating_add(w)),
+                    percent(y),
+                    percent(y.saturating_add(h)),
+                ))
+            }
+            // The exact seconds too, as the person marked them: a change asked for ("cut this")
+            // needs the cut where they put it, not at the nearest second.
+            Self::Time { start, end } => Some(match end {
+                None => format!(
+                    "the moment at {} ({} seconds in)",
+                    clock(start),
+                    seconds(start)
+                ),
+                Some(end) => format!(
+                    "from {} to {} ({} to {} seconds in)",
+                    clock(start),
+                    clock(end),
+                    seconds(start),
+                    seconds(end)
+                ),
+            }),
+            Self::Cells {
+                ref sheet,
+                top,
+                left,
+                bottom,
+                right,
+            } => {
+                let cell = |row: u32, column: u32| {
+                    format!(
+                        "{}{row}",
+                        crate::documents::column_name(column.saturating_sub(1))
+                    )
+                };
+                let cells = if top == bottom && left == right {
+                    format!("the cell {}", cell(top, left))
+                } else {
+                    format!("the cells {} to {}", cell(top, left), cell(bottom, right))
+                };
+                let sheet = sheet
+                    .as_deref()
+                    .map(|name| format!(" on the sheet \u{201c}{name}\u{201d}"))
+                    .unwrap_or_default();
+                // The reader shows no letters: an answer that says "C4" sends the person hunting.
+                Some(format!(
+                    "{cells}{sheet} (given below with the sheet's column and row names; the person \
+                     sees columns by their names and rows by number, not by letter)"
+                ))
+            }
+            Self::Element { ref what, ref path } => {
+                Some(format!("the {what} in the page at `{path}`"))
+            }
+            Self::Unknown => None,
+        }
+    }
+}
+
+/// Milliseconds as a player shows time, to the second: `42_000` is "0:42", `3_723_000` "1:02:03".
+fn clock(ms: u64) -> String {
+    let seconds = ms.saturating_add(500) / 1000;
+    let (hours, minutes, rest) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{rest:02}")
+    } else {
+        format!("{minutes}:{rest:02}")
+    }
+}
+
+/// Milliseconds as seconds, exact and with no trailing zeros: `36_480` is "36.48", `42_000` "42".
+fn seconds(ms: u64) -> String {
+    let (whole, rest) = (ms / 1000, ms % 1000);
+    if rest == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{rest:03}")
+            .trim_end_matches('0')
+            .to_owned()
+    }
+}
+
+/// Ten-thousandths as a percent with at most one decimal: `1250` is "12.5%".
+fn percent(units: u16) -> String {
+    let tenths = (u32::from(units) + 5) / 10;
+    if tenths % 10 == 0 {
+        format!("{}%", tenths / 10)
+    } else {
+        format!("{}.{}%", tenths / 10, tenths % 10)
+    }
 }
 
 impl ReplyTo {
@@ -379,8 +612,21 @@ impl ReplyTo {
             (ReplyKind::Passage, Some(path)) => format!(", in the file {path}"),
             _ => String::new(),
         };
+        // A part that isn't words is told by its place too: its words only name it ("The top right
+        // of the picture"), and its picture, when it has one, goes with the message (ADR 0091).
+        let slides = self
+            .file
+            .as_deref()
+            .is_some_and(|path| crate::office::is_slides(Path::new(path)));
+        let place = match (
+            self.kind,
+            self.at.as_ref().and_then(|at| at.described(slides)),
+        ) {
+            (ReplyKind::Passage, Some(place)) => format!(", {place}"),
+            _ => String::new(),
+        };
         crate::Replied {
-            named: format!("{}{work}{file}", capitalized(&self.described(team))),
+            named: format!("{}{work}{file}{place}", capitalized(&self.described(team))),
             text: crate::cap_middle_text(self.text.trim(), QUOTE_HANDED_CHARS),
             of_file: self.kind == ReplyKind::Passage,
         }
@@ -2130,6 +2376,14 @@ fn check_reply(reply: &mut ReplyTo, team: &TeamConfig) -> Result<(), ApiError> {
     reply.file = named_file
         .filter(|_| reply.kind == ReplyKind::Passage)
         .map(str::to_owned);
+    // Only a passage has a place (ADR 0091); one this version can't read is left out, and the part
+    // reads as its words.
+    if reply.kind != ReplyKind::Passage || reply.at == Some(PartAt::Unknown) {
+        reply.at = None;
+    }
+    if reply.at.as_ref().is_some_and(|at| !at.usable()) {
+        return bad("A part of a file is marked inside it.");
+    }
     let yours = reply.from == crate::config::RESERVED_OPERATOR_ID
         || team
             .agents
@@ -2290,7 +2544,7 @@ async fn send_message(
     }
     // "hi @team" asks for no work: the agent it would have started says hello back, and the
     // message stays a note rather than sending the team off to do its standing job.
-    if answers_in_chat(request.work, &message.files) {
+    if answers_in_chat(request.work, &message.files, message.reply_to.as_ref()) {
         answer_instead(&state, &team, &mut decided, text, &mut message).await;
     }
     match decided {
@@ -2579,9 +2833,18 @@ async fn learn_from_words(
 
 /// Whether a message may be answered in the chat instead of starting work ([`answer_instead`]):
 /// not when it was sent as work, and not when it carries files, which that answer, read from the
-/// words alone with no tools, could not open (ADR 0082).
-fn answers_in_chat(work: bool, files: &[ChatFile]) -> bool {
-    !work && files.is_empty()
+/// words alone with no tools, could not open (ADR 0082). Nor when it is about a part of a file
+/// that its words don't hold, a box, a moment or a thing in a page, which only the file shows
+/// (ADR 0091): a moment of a recording of sound goes with no picture, and that answer could only
+/// guess at it.
+fn answers_in_chat(work: bool, files: &[ChatFile], reply: Option<&ReplyTo>) -> bool {
+    let only_in_the_file = reply.is_some_and(|reply| {
+        matches!(
+            reply.at,
+            Some(PartAt::Box { .. } | PartAt::Time { .. } | PartAt::Element { .. })
+        )
+    });
+    !work && files.is_empty() && !only_in_the_file
 }
 
 /// A message that was going to start the workflow but needs none is answered by the agents
@@ -2612,10 +2875,7 @@ async fn answer_instead(
         whole_team,
     };
     let (conversation, newest_work) = conversation_now(state, team, &message.team_path).await;
-    let context = crate::intent::Context {
-        conversation,
-        replying: message.reply_to.as_ref().map(|reply| reply.mentioned(team)),
-    };
+    let context = in_chat_context(conversation, message.reply_to.as_ref(), team);
     let task = task_text(text, team);
     let model = crate::control::tier_model("fast");
     let Some(who) = crate::intent::read(
@@ -2649,6 +2909,23 @@ async fn answer_instead(
         Answering::new(state, team, whole_team, task, context, newest_work),
         message.clone(),
     ));
+}
+
+/// What an answer in the chat is told around the message: the conversation, the message it
+/// replies to by name, and a part of a file quoted whole, as a run is handed it. "Explain" on a
+/// part is mostly answered here, with no tools to open the file.
+fn in_chat_context(
+    conversation: Option<String>,
+    reply: Option<&ReplyTo>,
+    team: &TeamConfig,
+) -> crate::intent::Context {
+    crate::intent::Context {
+        conversation,
+        replying: reply.map(|reply| reply.mentioned(team)),
+        part: reply
+            .filter(|reply| reply.kind == ReplyKind::Passage)
+            .map(|reply| reply.for_agents(team).quoted()),
+    }
 }
 
 /// Why an agent did not answer, when `LoomWatch` itself failed part way through its answer.
@@ -5040,9 +5317,86 @@ mod tests {
             bytes: 1,
             picture: true,
         };
-        assert!(answers_in_chat(false, &[]));
-        assert!(!answers_in_chat(true, &[]));
-        assert!(!answers_in_chat(false, &[shot]));
+        assert!(answers_in_chat(false, &[], None));
+        assert!(!answers_in_chat(true, &[], None));
+        assert!(!answers_in_chat(false, &[shot], None));
+    }
+
+    /// **A part only the file shows goes to work (ADR 0091).** A moment of a song is sent with no
+    /// picture, and a box whose picture couldn't be cut with none: an answer from the words alone
+    /// would guess. Words and cells carry what they say, and may still be answered in the chat.
+    #[test]
+    fn a_part_only_the_file_shows_goes_to_work() {
+        let part = |text: &str, at: Option<serde_json::Value>| -> ReplyTo {
+            let mut reply = json!({
+                "messageId": "passage:p", "from": "researcher", "kind": "passage", "text": text,
+                "file": "/w/song.mp3"
+            });
+            if let Some(at) = at {
+                reply["at"] = at;
+            }
+            serde_json::from_value(reply).expect("a part reads")
+        };
+        let moment = part(
+            "The moment at 0:42",
+            Some(json!({"kind": "time", "start": 42_000})),
+        );
+        let box_ = part(
+            "The top right of the picture",
+            Some(json!({"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000})),
+        );
+        let cells = part(
+            "Region · Q1\nNorth · 120",
+            Some(json!({"kind": "cells", "top": 1, "left": 1, "bottom": 2, "right": 2})),
+        );
+        let words = part("Sales grew 12% in Q3.", None);
+        let chart = part(
+            "The chart under “Sales by region”",
+            Some(json!({"kind": "element", "what": "chart", "path": "canvas#chart"})),
+        );
+        assert!(!answers_in_chat(false, &[], Some(&moment)));
+        assert!(!answers_in_chat(false, &[], Some(&box_)));
+        assert!(!answers_in_chat(false, &[], Some(&chart)));
+        assert!(answers_in_chat(false, &[], Some(&cells)));
+        assert!(answers_in_chat(false, &[], Some(&words)));
+    }
+
+    /// **A chart, picture or video in a web page is a part of its own (ADR 0091).** It keeps the
+    /// path that finds it again in the page, and the agent is told what it is and that path; one
+    /// that isn't a chart, picture or video, or whose path is empty, runs over lines or would close
+    /// the quote it is told in, is refused.
+    #[test]
+    fn a_thing_in_a_page_keeps_its_path_and_the_agent_is_told_it() {
+        let team = team();
+        let part = |at: serde_json::Value| -> ReplyTo {
+            serde_json::from_value(json!({
+                "messageId": "passage:e", "from": "researcher", "kind": "passage",
+                "text": "The chart under “Sales by region”", "file": "/w/dash/index.html", "at": at
+            }))
+            .expect("a part reads")
+        };
+        let path = "body > main > section:nth-of-type(2) > canvas";
+        let mut chart = part(json!({"kind": "element", "what": "chart", "path": path}));
+        check_reply(&mut chart, &team).expect("usable");
+        assert_eq!(
+            serde_json::to_value(&chart).expect("written")["at"],
+            json!({"kind": "element", "what": "chart", "path": path})
+        );
+        assert_eq!(
+            chart.for_agents(&team).named,
+            "A part of index.html from Researcher, in the file /w/dash/index.html, the chart in the \
+             page at `body > main > section:nth-of-type(2) > canvas`"
+        );
+        for bad in [
+            json!({"kind": "element", "what": "table", "path": "table"}),
+            json!({"kind": "element", "what": "chart", "path": "  "}),
+            json!({"kind": "element", "what": "chart", "path": "body >\ncanvas"}),
+            json!({"kind": "element", "what": "chart", "path": "canvas`"}),
+            json!({"kind": "element", "what": "picture", "path": "a".repeat(1001)}),
+        ] {
+            let mut reply = part(bad.clone());
+            assert!(check_reply(&mut reply, &team).is_err(), "{bad}");
+        }
     }
 
     #[tokio::test]
@@ -5137,6 +5491,7 @@ mod tests {
             kind,
             text: text.to_owned(),
             file: None,
+            at: None,
         };
         assert_eq!(
             reply(ReplyKind::Handover, Some("writer"), "x").described(&team),
@@ -5175,6 +5530,7 @@ mod tests {
         // A part of a file read in LoomWatch names the file, and the agent is told where it is.
         let passage = ReplyTo {
             file: Some("/Users/mai/reports/market.md".to_owned()),
+            at: None,
             ..reply(ReplyKind::Passage, None, "Sales grew 12%\nin Q3.")
         };
         assert_eq!(
@@ -5211,6 +5567,7 @@ mod tests {
             kind: ReplyKind::Passage,
             text: "Sales grew".to_owned(),
             file: None,
+            at: None,
         };
         assert!(check_reply(&mut passage.clone(), &team).is_err());
         passage.file = Some(" /a/market.md ".to_owned());
@@ -5222,6 +5579,264 @@ mod tests {
         };
         check_reply(&mut answer, &team).expect("an answer");
         assert_eq!(answer.file, None);
+    }
+
+    /// **A box on a picture is a part of its own (ADR 0091).** It keeps its place, the agent is
+    /// told exactly where it is, and a place outside the picture is refused.
+    #[test]
+    fn a_box_on_a_picture_keeps_its_place_and_the_agent_is_told_it() {
+        let team = team();
+        let parsed: ReplyTo = serde_json::from_value(json!({
+            "runId": "3f2a9c1e-0000", "messageId": "passage:b", "from": "researcher", "kind": "passage",
+            "text": "The top right of the picture", "file": "/w/chart.png",
+            "at": {"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000}
+        }))
+        .expect("a box reads");
+        assert_eq!(
+            parsed.at,
+            Some(PartAt::Box {
+                x: 5000,
+                y: 0,
+                w: 5000,
+                h: 5000,
+                page: None,
+                ms: None
+            })
+        );
+        let mut checked = parsed.clone();
+        check_reply(&mut checked, &team).expect("a box inside its picture");
+        assert_eq!(checked.at, parsed.at, "kept as it was marked");
+        assert_eq!(
+            serde_json::to_value(&checked).expect("written")["at"],
+            json!({"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000})
+        );
+        let handed = checked.for_agents(&team);
+        assert_eq!(
+            handed.named,
+            "A part of chart.png from Researcher (work 3f2a9c1e), in the file /w/chart.png, the box \
+             from 50% to 100% of the way across from the left, and 0% to 50% of the way down from \
+             the top"
+        );
+        assert_eq!(
+            handed.quoted(),
+            format!("{}:\n> The top right of the picture", handed.named)
+        );
+
+        // Percents to the nearest tenth: 12.55% is 12.6%, 3.35% is 3.4%.
+        let on_a_page = PartAt::Box {
+            x: 1250,
+            y: 335,
+            w: 5,
+            h: 9665,
+            page: Some(3),
+            ms: None,
+        };
+        assert_eq!(
+            on_a_page.described(false).as_deref(),
+            Some(
+                "on page 3, the box from 12.5% to 12.6% of the way across from the left, and 3.4% \
+                 to 100% of the way down from the top"
+            )
+        );
+        // A deck's pages are its slides, as the reader names them.
+        let mut on_a_slide = checked.clone();
+        on_a_slide.file = Some("/w/deck.pptx".to_owned());
+        on_a_slide.at = Some(on_a_page.clone());
+        assert!(
+            on_a_slide
+                .for_agents(&team)
+                .named
+                .ends_with("in the file /w/deck.pptx, on slide 3, the box from 12.5% to 12.6% of the way across from the left, and 3.4% to 100% of the way down from the top"),
+            "{}",
+            on_a_slide.for_agents(&team).named
+        );
+
+        for outside in [
+            json!({"kind": "box", "x": 6000, "y": 0, "w": 5000, "h": 100}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 0, "h": 100}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 100, "h": 0}),
+            json!({"kind": "box", "x": 0, "y": 9000, "w": 100, "h": 1001}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 100, "h": 100, "page": 0}),
+        ] {
+            let mut bad = parsed.clone();
+            bad.at = serde_json::from_value(outside.clone()).expect("reads");
+            assert!(check_reply(&mut bad, &team).is_err(), "{outside}");
+        }
+
+        // A kind a newer version wrote still reads, as the part's words.
+        let mut newer: ReplyTo = serde_json::from_value(json!({
+            "messageId": "passage:m", "from": "researcher", "kind": "passage", "text": "0:42",
+            "file": "/w/talk.mp4", "at": {"kind": "moment", "ms": 42000}
+        }))
+        .expect("an unknown place still reads");
+        assert_eq!(newer.at, Some(PartAt::Unknown));
+        check_reply(&mut newer, &team).expect("read as words");
+        assert_eq!(newer.at, None);
+        assert!(!newer.for_agents(&team).named.contains("box"));
+
+        // Only a part of a file has a place.
+        let mut answer = ReplyTo {
+            kind: ReplyKind::Answer,
+            ..parsed
+        };
+        check_reply(&mut answer, &team).expect("an answer");
+        assert_eq!(answer.at, None);
+    }
+
+    /// **Cells of a sheet are a part of their own (ADR 0091).** The agent is told which cells, as a
+    /// spreadsheet names them, and on which sheet; cells outside any sheet are refused.
+    #[test]
+    fn cells_of_a_sheet_keep_their_place_and_the_agent_is_told_them() {
+        let team = team();
+        let cells = |at: serde_json::Value| -> ReplyTo {
+            serde_json::from_value(json!({
+                "runId": "3f2a9c1e-0000", "messageId": "passage:c", "from": "researcher",
+                "kind": "passage", "text": "Region\tSales\nWest\t120", "file": "/w/sales.xlsx", "at": at
+            }))
+            .expect("cells read")
+        };
+        let mut range = cells(
+            json!({"kind": "cells", "sheet": "Q3 (sales)", "top": 2, "left": 1, "bottom": 9, "right": 28}),
+        );
+        check_reply(&mut range, &team).expect("cells inside a sheet");
+        assert_eq!(
+            range.at,
+            Some(PartAt::Cells {
+                sheet: Some("Q3 (sales)".to_owned()),
+                top: 2,
+                left: 1,
+                bottom: 9,
+                right: 28
+            })
+        );
+        assert_eq!(
+            range.for_agents(&team).named,
+            "A part of sales.xlsx from Researcher (work 3f2a9c1e), in the file /w/sales.xlsx, the \
+             cells A2 to AB9 on the sheet \u{201c}Q3 (sales)\u{201d} (given below with the sheet's column and \
+             row names; the person sees columns by their names and rows by number, not by letter)"
+        );
+        let mut one = cells(json!({"kind": "cells", "top": 3, "left": 2, "bottom": 3, "right": 2}));
+        check_reply(&mut one, &team).expect("one cell of a CSV");
+        assert!(
+            one.for_agents(&team)
+                .named
+                .contains("in the file /w/sales.xlsx, the cell B3 (given below"),
+            "{}",
+            one.for_agents(&team).named
+        );
+
+        for outside in [
+            json!({"kind": "cells", "top": 0, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 3, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 0, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 3, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 1, "bottom": 1_048_577, "right": 2}),
+            json!({"kind": "cells", "top": 1, "left": 1, "bottom": 2, "right": 16_385}),
+            json!({"kind": "cells", "sheet": "  ", "top": 1, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "sheet": "a\nb", "top": 1, "left": 1, "bottom": 2, "right": 2}),
+            json!({"kind": "cells", "sheet": "x".repeat(256), "top": 1, "left": 1, "bottom": 2, "right": 2}),
+        ] {
+            let mut bad = cells(outside.clone());
+            assert!(check_reply(&mut bad, &team).is_err(), "{outside}");
+        }
+    }
+
+    /// **A moment, a span, or a box on a frame of a recording is a part of its own (ADR 0091).** The
+    /// agent is told the time as a player shows it and the exact seconds marked, so a cut it is
+    /// asked for lands where the person put it; a span that runs backwards is refused.
+    #[test]
+    fn a_moment_of_a_recording_keeps_its_time_and_the_agent_is_told_it() {
+        let team = team();
+        let part = |text: &str, at: serde_json::Value| -> ReplyTo {
+            serde_json::from_value(json!({
+                "messageId": "passage:t", "from": "researcher", "kind": "passage", "text": text,
+                "file": "/w/talk.mp4", "at": at
+            }))
+            .expect("a part reads")
+        };
+        let named = |mut reply: ReplyTo| {
+            check_reply(&mut reply, &team).expect("usable");
+            reply.for_agents(&team).named
+        };
+        assert_eq!(
+            named(part(
+                "The moment at 0:42",
+                json!({"kind": "time", "start": 42_400})
+            )),
+            "A part of talk.mp4 from Researcher, in the file /w/talk.mp4, the moment at 0:42 \
+             (42.4 seconds in)"
+        );
+        assert!(
+            named(part(
+                "From 0:42 to 1:02:03",
+                json!({"kind": "time", "start": 42_000, "end": 3_723_005})
+            ))
+            .ends_with("from 0:42 to 1:02:03 (42 to 3723.005 seconds in)")
+        );
+        let frame = part(
+            "The top right of the frame at 0:07",
+            json!({"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000, "ms": 7250}),
+        );
+        assert_eq!(
+            serde_json::to_value(&frame).expect("written")["at"]["ms"],
+            7250
+        );
+        assert!(named(frame).ends_with(
+            "on the frame at 0:07 (7.25 seconds in), the box from 50% to 100% of the way across \
+             from the left, and 0% to 50% of the way down from the top"
+        ));
+
+        for bad in [
+            json!({"kind": "time", "start": 5000, "end": 5000}),
+            json!({"kind": "time", "start": 5000, "end": 4000}),
+            json!({"kind": "time", "start": 604_800_001_u64}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 10, "h": 10, "page": 2, "ms": 10}),
+        ] {
+            let mut reply = part("x", bad.clone());
+            assert!(check_reply(&mut reply, &team).is_err(), "{bad}");
+        }
+    }
+
+    /// **"Explain" answered in the chat is told the whole part, not its first line.** The answer
+    /// has no tools to open the file, and the reply's name in the conversation keeps only the first
+    /// 100 characters of its first line, so a paragraph or a table was explained by its opening.
+    #[test]
+    fn an_answer_in_the_chat_is_told_the_whole_part_of_a_file() {
+        let team = team();
+        let passage = ReplyTo {
+            run_id: Some("3f2a9c1e-0000-0000-0000-000000000000".to_owned()),
+            message_id: "passage:1".to_owned(),
+            from: "researcher".to_owned(),
+            to: None,
+            kind: ReplyKind::Passage,
+            text: "Region\tSales\nWest\t120\nEast\t80".to_owned(),
+            file: Some("/teams/.loomwatch/news/researcher/sales.md".to_owned()),
+            at: None,
+        };
+        let context = in_chat_context(Some("You: hi".to_owned()), Some(&passage), &team);
+        assert_eq!(context.conversation.as_deref(), Some("You: hi"));
+        assert_eq!(
+            context.replying.as_deref(),
+            Some("a part of sales.md from Researcher (\u{201c}Region\tSales\u{201d})")
+        );
+        assert_eq!(
+            context.part.as_deref(),
+            Some(
+                "A part of sales.md from Researcher (work 3f2a9c1e), in the file \
+                 /teams/.loomwatch/news/researcher/sales.md:\n\
+                 > Region\tSales\n> West\t120\n> East\t80"
+            )
+        );
+
+        let answer = ReplyTo {
+            kind: ReplyKind::Answer,
+            file: None,
+            ..passage
+        };
+        let context = in_chat_context(None, Some(&answer), &team);
+        assert_eq!(context.part, None, "only a part of a file is quoted whole");
+        assert!(context.replying.is_some());
+        assert_eq!(in_chat_context(None, None, &team).part, None);
     }
 
     /// What the person told their agents (ADR 0074) reaches every agent a message reaches: each

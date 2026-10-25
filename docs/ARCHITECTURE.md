@@ -75,6 +75,14 @@ instructions and tools.
   `function_call_output`, and on OpenRouter in a user message after the tool results. Every file
   is read in a short-lived `loomwatchd read-document` process with a time limit, so a damaged file
   costs nothing else. The same reader gives knowledge files their text.
+- **Slides and Word documents as their pages** (`office.rs`, ADR 0091): the reader shows a deck as
+  its slides, and a Word document as its pages, by asking `/api/files/pages`, which has `LibreOffice` (found by
+  `platform::office_program`: on the search path as `soffice` or `libreoffice`, or where its
+  installers and Homebrew put it) turn the file into a PDF, headless, with a profile of its own in
+  `<state>/pages/profile`, one file at a time, for at most two minutes, in a process group ended
+  whole if it takes longer. The PDF is kept in `<state>/pages/`, named by the file's path, size and
+  last change, so a file is laid out once until it changes; the route answers it as `raw` answers
+  a PDF. Without `LibreOffice` the route answers 404 and the reader shows the file's words.
 - **Files sent in the chat** (`chat_files.rs`, ADR 0082) are kept in `<team>.files/chat/`, a
   folder `PermissionPolicy::for_run_agent` lets every agent of the team read. The run carries them
   on `RunLineage::files` (a note on `QueuedNote::files`), and they are listed by path under the
@@ -558,7 +566,9 @@ at a little desk, whose workbench opens while it is pointed at. For the agent in
   agent is saved), as its Chat tab would send it, with anything dropped onto the notch as the
   chat's attachments. The panel takes the keyboard only while that message is written (focus may
   move on to Copy, Open in LoomWatch or Start; Escape gives it back), without bringing `LoomWatch` to
-  the front;
+  the front. `AppKit` finds what ⌘V, ⌘C, ⌘X, ⌘A, ⌘Z and ⇧⌘Z do in the app's main menu, so the app
+  has one that nobody sees, with only an Edit menu in it (`edit_keys.rs`): ⌘Q, ⌘W or ⌘H meant for
+  the app in front still find nothing in `LoomWatch`;
 - its answer is read whole before Copy can take it, and Copy carries it twice: as HTML
   (`island/answerHtml.ts`, loaded only then) for apps that paste formatting, and as plain text
   whose links keep their addresses. In the app, Copy writes both to the clipboard

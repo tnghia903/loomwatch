@@ -65,9 +65,9 @@ export function extensionOf(path: string): string {
 }
 
 const LABELS: Record<string, string> = {
-  doc: 'Word document', docx: 'Word document', odt: 'Document', pages: 'Pages document', rtf: 'Rich text',
-  xls: 'Spreadsheet', xlsx: 'Spreadsheet', ods: 'Spreadsheet', numbers: 'Numbers spreadsheet', csv: 'CSV table', tsv: 'Table',
-  ppt: 'Slides', pptx: 'Slides', odp: 'Slides', key: 'Keynote slides',
+  doc: 'Word document', docx: 'Word document', docm: 'Word document', odt: 'Document', pages: 'Pages document', rtf: 'Rich text',
+  xls: 'Spreadsheet', xlsx: 'Spreadsheet', xlsm: 'Spreadsheet', ods: 'Spreadsheet', numbers: 'Numbers spreadsheet', csv: 'CSV table', tsv: 'Table',
+  ppt: 'Slides', pptx: 'Slides', pptm: 'Slides', odp: 'Slides', key: 'Keynote slides',
   pdf: 'PDF',
   png: 'Image', jpg: 'Image', jpeg: 'Image', gif: 'Image', webp: 'Image', svg: 'Image', heic: 'Image',
   mp3: 'Audio', wav: 'Audio', m4a: 'Audio', mp4: 'Video', mov: 'Video', webm: 'Video',
@@ -81,6 +81,15 @@ const LABELS: Record<string, string> = {
 export function fileLabel(path: string): string {
   const extension = extensionOf(path)
   return LABELS[extension] ?? (extension ? `${extension.toUpperCase()} file` : 'File')
+}
+
+/** The file's kind inside a sentence, after `article`: "a Word document", "a PDF", "an image", but "slides". */
+export function fileKindIn(path: string, article: 'a' | 'the'): string {
+  const label = fileLabel(path)
+  // The names of apps, and kinds said by their letters, keep their capitals.
+  const kind = /^(Word|Pages|Numbers|Keynote|[A-Z]{2,})\b/.test(label) ? label : label.toLowerCase()
+  if (article === 'a' && /slides$/.test(kind)) return kind
+  return `${article === 'a' && /^[aeiou]/i.test(kind) ? 'an' : article} ${kind}`
 }
 
 const NOUNS: Array<[RegExp, string]> = [

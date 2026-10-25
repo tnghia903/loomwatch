@@ -1,3 +1,4 @@
+import { cellsLine } from '../files/cells'
 import { baseName } from '../files/paths'
 import type { ReplyKind, ReplyTo } from './client'
 
@@ -44,6 +45,14 @@ export function replyWhat(reply: Pick<ReplyTo, 'from' | 'to' | 'kind' | 'file'>,
   if (reply.kind === 'task') return `the task ${from} sent${to ? ` to ${to}` : ''}`
   if (reply.kind === 'check') return `${from}'s check${to ? ` of ${to}'s work` : ''}`
   return `${from}'s ${SAID[reply.kind]}${to ? ` to ${to}` : ''}`
+}
+
+/**
+ * A reply's words as its quote shows them: cells of a sheet (ADR 0091) on one line, their sheet
+ * first, so the numbers keep their rows ("By region · Q1, Q2 · 120, 140"); anything else as it is.
+ */
+export function replyWords(reply: Pick<ReplyTo, 'text' | 'at'>): string {
+  return reply.at?.kind === 'cells' ? cellsLine(reply.text, reply.at.sheet) : reply.text
 }
 
 /** The quote in one line: Markdown marks off, whitespace run together. CSS cuts it to fit. */

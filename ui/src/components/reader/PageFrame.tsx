@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { PAGE_SANDBOX, pageDocument, pageMessage, type PageMark, type PagePart } from '../../lib/files/pageFrame'
+import type { ElementAt, PartAt } from '../../lib/chat/client'
+import { PAGE_SANDBOX, pageDocument, pageFile, pageMessage, type PageMark, type PagePart } from '../../lib/files/pageFrame'
 
 export interface Marked {
+  /** The marked words, or what a part that isn't words is called ("The top right of the picture"). */
   text: string
-  /** Where the marked words are on screen. */
+  /** Where the marked part is on screen. */
   rect: { top: number; bottom: number; left: number; right: number }
+  /** Where a part that isn't words is in its file (ADR 0091). */
+  at?: PartAt
+  /** A thing in a web page as it was shown, drawn by the page, sent with the question. */
+  picture?: File
 }
 
 interface PageFrameProps {
@@ -13,7 +19,7 @@ interface PageFrameProps {
   name: string
   html: string
   /** The asks about parts of the page, marked in it with their bubbles, and the part in the message box. */
-  marks: { parts: readonly PageMark[]; asking: string | null }
+  marks: { parts: readonly PageMark[]; asking: string | null; face?: { figure: string | null } | null }
   onMarked: (marked: Marked | null) => void
   /** Where the parts asked about are, line by line on screen, as the page scrolls. */
   onParts?: (parts: PagePart[], frame: Marked['rect']) => void
@@ -25,15 +31,22 @@ interface PageFrameProps {
   onHover?: (key: string | null, at: Marked['rect'] | null, now: boolean) => void
   /** Changes when the marked words have been asked about, so the page lets go of them. */
   cleared: number
+  /** The kinds of thing in the page that can be asked about (a chart, a picture, a video), as found. */
+  onThings?: (what: ElementAt['what'][]) => void
 }
 
 /**
  * A web page an agent made, running in its own sandbox inside the reader (lib/files/pageFrame.ts).
  * What is marked in it reaches the reader through the page's script, by message, in the reader's own
- * coordinates; the parts asked about go back the same way.
+ * coordinates; the parts asked about go back the same way, and so do the files beside it that the
+ * page asks for as it runs, read inside its own folder.
  */
-export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, onEscape, onHover, cleared }: PageFrameProps) {
+export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, onEscape, onHover, cleared, onThings }: PageFrameProps) {
   const frame = useRef<HTMLIFrameElement>(null)
+  const page = useRef(path)
+  useEffect(() => { page.current = path }, [path])
+  // The picture of the thing marked now: the page sends it once, and only where the thing is as it moves.
+  const thing = useRef<{ path: string; picture: File | undefined } | null>(null)
   const [doc, setDoc] = useState<{ html: string; ready: string } | null>(null)
   const [ready, setReady] = useState(0)
   useEffect(() => {
@@ -47,13 +60,15 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
   const opened = useRef(onOpen)
   const escaped = useRef(onEscape)
   const hovered = useRef(onHover)
+  const found = useRef(onThings)
   useEffect(() => {
     marked.current = onMarked
     placed.current = onParts
     opened.current = onOpen
     escaped.current = onEscape
     hovered.current = onHover
-  }, [onMarked, onParts, onOpen, onEscape, onHover])
+    found.current = onThings
+  }, [onMarked, onParts, onOpen, onEscape, onHover, onThings])
   useEffect(() => {
     const listen = (event: MessageEvent) => {
       const element = frame.current
@@ -63,6 +78,14 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
       if (message.type === 'ready') { setReady((count) => count + 1); return }
       if (message.type === 'open') { opened.current?.(message.key); return }
       if (message.type === 'escape') { escaped.current?.(); return }
+      if (message.type === 'things') { found.current?.(message.what); return }
+      if (message.type === 'load') {
+        const asking = element.contentWindow
+        void pageFile(page.current, message.url).then((file) => {
+          asking?.postMessage({ lw: 'reader', type: 'loaded', id: message.id, ...file }, '*', file.body ? [file.body] : [])
+        })
+        return
+      }
       const box = element.getBoundingClientRect()
       const onScreen = (rect: Marked['rect']) => ({ top: box.top + rect.top, bottom: box.top + rect.bottom, left: box.left + rect.left, right: box.left + rect.right })
       if (message.type === 'hover') {
@@ -74,8 +97,19 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
         return
       }
       const rect = message.rect
+      const inView = Boolean(rect && rect.bottom >= 0 && rect.top <= box.height)
+      if (message.type === 'thing') {
+        const stem = page.current.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'page'
+        if (message.picture || thing.current?.path !== message.path) {
+          thing.current = { path: message.path, picture: message.picture ? new File([message.picture], `${stem} ${message.what}.png`, { type: 'image/png' }) : undefined }
+        }
+        const picture = thing.current.picture
+        marked.current(inView ? { text: message.text, rect: onScreen(message.rect), at: { kind: 'element', what: message.what, path: message.path }, ...(picture ? { picture } : {}) } : null)
+        return
+      }
+      thing.current = null
       // Words scrolled out of the frame's view have nothing to point at.
-      marked.current(message.text.trim() && rect && rect.bottom >= 0 && rect.top <= box.height ? { text: message.text, rect: onScreen(rect) } : null)
+      marked.current(message.text.trim() && inView ? { text: message.text, rect: onScreen(rect!) } : null)
     }
     window.addEventListener('message', listen)
     return () => window.removeEventListener('message', listen)

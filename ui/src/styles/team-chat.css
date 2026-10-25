@@ -1260,7 +1260,8 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
 }
 .tc-sent-picture img { display: block; width: 112px; height: 112px; object-fit: cover; }
 /* One picture alone is the message's picture: drawn bigger, still a thumbnail. */
-.tc-sent-picture:only-child img { width: min(240px, 60cqi); height: 160px; }
+/* A picture sent alone shows whole, at its own shape: it may be the part of a picture asked about (ADR 0091). */
+.tc-sent-picture:only-child img { width: auto; height: auto; max-width: min(240px, 60cqi); max-height: 160px; object-fit: contain; }
 .tc-sent-picture:hover, .tc-sent-picture:focus-visible { border-color: var(--color-accent); }
 @media (pointer: coarse) {
   .tc-attached-remove { width: 28px; height: 28px; top: 8px; right: 6px; }
