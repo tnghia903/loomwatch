@@ -23,7 +23,7 @@ export interface FileText {
 }
 
 /** How the reader shows a file: what it is drawn as, not what made it. */
-export type ReaderFormat = 'markdown' | 'page' | 'table' | 'sheet' | 'code' | 'text' | 'pdf' | 'document' | 'picture' | 'media'
+export type ReaderFormat = 'markdown' | 'page' | 'table' | 'sheet' | 'code' | 'text' | 'pdf' | 'slides' | 'document' | 'picture' | 'media'
 
 const FORMATS: Array<[RegExp, ReaderFormat]> = [
   [/^(md|markdown|mdx)$/, 'markdown'],
@@ -35,7 +35,11 @@ const FORMATS: Array<[RegExp, ReaderFormat]> = [
   [/^(txt|log)$/, 'text'],
   // A PDF is drawn as its pages, its words over them (ADR 0091); its words alone if it can't be.
   [/^pdf$/, 'pdf'],
-  [/^(docx|docm|xlsx|xlsm|pptx|pptm)$/, 'document'],
+  // A slide deck is drawn as its slides, from the PDF LibreOffice makes of it (ADR 0091); its words
+  // alone where it can't be. An old .ppt or a LibreOffice deck has no words LoomWatch reads, so
+  // without LibreOffice it would show nothing: it opens in its own app.
+  [/^(pptx|pptm)$/, 'slides'],
+  [/^(docx|docm|xlsx|xlsm)$/, 'document'],
   [/^(png|jpe?g|gif|webp|svg|bmp)$/, 'picture'],
   [/^(mp3|wav|m4a|mp4|mov|webm)$/, 'media'],
 ]
@@ -61,6 +65,11 @@ export async function readFile(path: string, signal?: AbortSignal): Promise<File
 /** Where a picture or a recording is answered as it is. */
 export function rawFileUrl(path: string): string {
   return `/api/files/raw?path=${encodeURIComponent(path)}`
+}
+
+/** Where a slide deck or a Word document is answered as the PDF of its pages (ADR 0091). */
+export function pagesFileUrl(path: string): string {
+  return `/api/files/pages?path=${encodeURIComponent(path)}`
 }
 
 /** A file to read, and who to ask about it: the agent whose work named it, in that piece of work. */
