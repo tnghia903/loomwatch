@@ -37,7 +37,7 @@ export function wholeBox(page?: number): BoxAt {
  * right of the picture"). The agent is told its exact place as well, by the daemon.
  */
 export function boxLabel(at: BoxAt, of = 'the picture'): string {
-  if (at.w >= WHOLE * 0.9 && at.h >= WHOLE * 0.9) return of === 'the picture' ? 'The whole picture' : `The whole of ${of}`
+  if (at.w >= WHOLE * 0.9 && at.h >= WHOLE * 0.9) return `The whole ${of.replace(/^the /, '')}`
   if (at.w * at.h >= (WHOLE * WHOLE) / 2) return `Most of ${of}`
   const across = at.x + at.w / 2
   const down = at.y + at.h / 2
