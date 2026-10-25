@@ -1071,6 +1071,9 @@ describe('the box: any of My agents, and its workbench', () => {
       place()
       await waitFor(() => expect(container.querySelector('.island-pinned-head')).toBeTruthy())
       expect(view(container)).toBe('rest')
+      // ⌃⌥Space comes once the app knows whom the box opens with, as in the app: her head is drawn a
+      // moment before the box knows her, and on a busy machine a ⌃⌥Space between the two opens nothing.
+      await waitFor(() => expect(toApp).toContainEqual({ kind: 'agent', name: 'Maya' }))
       tellPage({ kind: 'compose' })
       await within(container).findByRole('textbox', { name: 'Message Maya' })
       // Her figure in the row starts where she stood beside the notch, and comes down on the spring.
