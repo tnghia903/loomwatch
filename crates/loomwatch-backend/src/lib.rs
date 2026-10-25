@@ -30,6 +30,7 @@ pub mod marketplace;
 pub mod memory;
 pub mod notebook_api;
 pub mod notion;
+pub mod office;
 pub mod operator;
 pub mod orientation;
 pub mod permissions;
