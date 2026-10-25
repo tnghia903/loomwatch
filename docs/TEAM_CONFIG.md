@@ -411,6 +411,28 @@ depend on the document as a whole:
     told, and does that part itself.
   - `POST /api/runs/{id}/agents/{helper}/stop` stops one helper; "Allow for this run" given to the
     agent or any of its helpers covers all of them.
+- **One of My agents brought in (ADR 0092).** In a team with no connections, the `entrypoint`,
+  which is also an agent working alone in its own chat, may bring in another of the person's
+  agents from My agents for a part no one on the team does. It lists them with the Team Bus tool
+  `my_agents` and starts one with `dispatch`, by the id the list gives (`mine+<id>`, which no
+  team-file id can be). Nobody else is offered it: not its teammates, not a stage, a helper, an
+  agent answering a question, or an agent brought in this way.
+  - `guards.myAgents` is how many of the person's agents the list holds, most recently saved
+    first, with a count of the rest. It defaults to `0`, which turns bringing in off, until the
+    bench shows it helps. `Agent.allowMyAgents: false`, filled in from the agent's own
+    `bringsIn: false` in My agents, turns it off for that agent.
+  - The list leaves out the agents the team already points at (`from.agent`: the team's own
+    comes first), an agent whose file waits for the person's review (ADR 0048), and one whose
+    model's source isn't connected. A name a team agent has resolves to that agent.
+  - The agent brought in works as it is saved in My agents, filled in as a team's pointer is,
+    on the lead's model when it names none. It has a folder of its own in the team's workspace
+    (`.loomwatch/<team>/mine+<id>`), reads its own reads and what the whole team is given (not
+    what the team gave particular agents), learns into its one list (`agent:<id>`), and is kept
+    open for more work like a teammate. It counts against `maxConcurrentDispatches` and
+    `maxDispatchDepth`, and the run's `spend.perRun` covers it.
+  - The `dispatch` answer and its `delegated_result` carry its `name` and `from: {agent}`, so the
+    chat names it and says once who brought it in. "Always allow" given to it turns on its own
+    switch in My agents, for every team.
 - `handoff` starts the target as a background task and marks the caller's roster status as
   `stopped`, but it does not end the caller's current turn. The caller must return after a
   successful handoff; its model calls go on until that turn ends.

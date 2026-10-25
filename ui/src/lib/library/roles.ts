@@ -60,6 +60,8 @@ export interface RolePreset {
   allow?: AgentAllow
   /** `false` on one of Your agents that brings in no helpers (ADR 0079). */
   helpers?: false
+  /** `false` on one of Your agents that brings in none of My agents (ADR 0092). */
+  bringsIn?: false
   /** Set on one of Your agents: the agent it places links back to this version of it. */
   from?: AgentLink
 }
@@ -269,6 +271,7 @@ export function roleSource(preset: RolePreset): LibrarySource {
     ...(preset.doneWhen?.length ? { doneWhen: [...preset.doneWhen] } : {}),
     ...(preset.allow ? { allow: { ...preset.allow } } : {}),
     ...(preset.helpers === false ? { helpers: false as const } : {}),
+    ...(preset.bringsIn === false ? { bringsIn: false as const } : {}),
     ...(preset.from ? { from: { ...preset.from } } : {}),
   }
 }

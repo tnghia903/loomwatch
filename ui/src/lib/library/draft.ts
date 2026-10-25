@@ -39,6 +39,9 @@ export interface AgentDraft {
   /** `false`: it does its work alone and brings in no helpers for a big task (ADR 0079). Absent,
       it may: what its chat and every team it joins run it with. */
   helpers?: false
+  /** `false`: it brings in none of your other agents from My agents (ADR 0092). Absent, it may,
+      when its team lists them. */
+  bringsIn?: false
   /** The figure it wears in Your agents; `null` wears the one its id picks. A team never copies it. */
   figure: FigureChoice | null
 }
@@ -71,6 +74,7 @@ export function draftFromJob(job: JobSpec): AgentDraft {
     doneWhen: [...(job.doneWhen ?? [])],
     allow: { ...(onlyOn(job.allow) ?? {}) },
     ...(job.helpers === false ? { helpers: false as const } : {}),
+    ...(job.bringsIn === false ? { bringsIn: false as const } : {}),
     figure: isFigureChoice(job.figure) ? { ...job.figure } : null,
   }
 }
@@ -91,6 +95,7 @@ export function draftFromPreset(preset: RolePreset): AgentDraft {
     doneWhen: [...(preset.doneWhen ?? [])],
     allow: { ...(onlyOn(preset.allow) ?? {}) },
     ...(preset.helpers === false ? { helpers: false as const } : {}),
+    ...(preset.bringsIn === false ? { bringsIn: false as const } : {}),
     figure: null,
   }
 }
@@ -113,6 +118,7 @@ export function specFromDraft(draft: AgentDraft, note = ''): JobSpec {
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(draft.helpers === false ? { helpers: false as const } : {}),
+    ...(draft.bringsIn === false ? { bringsIn: false as const } : {}),
     ...(note.trim() ? { note: note.trim() } : {}),
   }
 }
@@ -137,6 +143,7 @@ export function makesNewVersion(draft: AgentDraft, saved: AgentDraft): boolean {
     || doneWhenOf(draft).join('\n') !== doneWhenOf(saved).join('\n')
     || SWITCHES.some((key) => Boolean(draft.allow[key]) !== Boolean(saved.allow[key]))
     || (draft.helpers !== false) !== (saved.helpers !== false)
+    || (draft.bringsIn !== false) !== (saved.bringsIn !== false)
 }
 
 /** Whether there is anything to save at all, including the palette's line and the figure it wears. */
@@ -164,6 +171,7 @@ export function agentFromDraft(draft: AgentDraft, model = draft.model, link?: { 
     ...(doneWhenOf(draft).length ? { doneWhen: doneWhenOf(draft) } : {}),
     ...(allow ? { allow } : {}),
     ...(draft.helpers === false ? { allowRecruiting: false } : {}),
+    ...(draft.bringsIn === false ? { allowMyAgents: false } : {}),
     ...(link?.job ? { from: { agent: link.id, version: versionOf(link.job) } } : {}),
   }
 }

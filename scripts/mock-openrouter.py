@@ -25,6 +25,8 @@ Replies are scripted from what the request says, so a run exercises real tool ca
 - "MOCK-HELPERS: <n>" in the task     -> n start_helper calls at once (ADR 0079); each helper lists
   its folder, waits a few seconds ("MOCK-WAIT: <s>" in its brief) and sends back its findings, and
   the agent then answers with what they found
+- "MOCK-MY-AGENTS: <name>" in the task -> a my_agents call (ADR 0092), then a dispatch to the listed
+  agent whose id holds <name> (the first listed when none does), then an answer from what it sent
 - a Research lead (its role says so)  -> two dispatch calls at once, then ask the Writer
 - a Researcher / a Writer             -> findings / a cited report
 - anything else                       -> a short text reply
@@ -155,6 +157,19 @@ def plan(body):
             return ("text", f"{reply}\n\n## Not confirmed\n- Nothing: both sources agreed.")
         if call_name.endswith("start_helper"):
             return ("text", "I started helpers on the parts. Their work comes back next.")
+        if call_name.endswith("my_agents"):
+            # ADR 0092: bring in the listed agent the task names, or the first one listed.
+            try:
+                listed = [entry.get("agent", "") for entry in json.loads(said).get("agents", [])]
+            except (ValueError, AttributeError):
+                listed = []
+            brief = latest_task(messages)
+            wanted = brief.rsplit("MOCK-MY-AGENTS:", 1)[1].split()[0].lower() if "MOCK-MY-AGENTS:" in brief else ""
+            chosen = next((agent for agent in listed if wanted and wanted in agent.lower()), listed[0] if listed else "")
+            dispatch = find_tool(names, "dispatch")
+            if chosen and dispatch:
+                return ("calls", [(dispatch, {"agent": chosen, "task": "The part no one on this team does: find three facts with a source for each."})])
+            return ("text", "None of your other agents can help here, so I did it myself.")
         if call_name.endswith("list_files") and "MOCK-WAIT:" in latest_task(messages):
             brief = latest_task(messages)
             time.sleep(float(brief.rsplit("MOCK-WAIT:", 1)[1].split()[0]))
@@ -186,6 +201,10 @@ def plan(body):
         return ("text", "- First point, short.\n- Second point, short.\n- Third point, short.")
 
     task = latest.rsplit("## Task", 1)[-1]
+    if "## What the agents you started came back with" in latest:
+        return ("text", "# What the team found\n\nThe agent I brought in sent back three facts, each with a source, and I checked them against the request.")
+    if "MOCK-MY-AGENTS" in task and find_tool(names, "my_agents"):
+        return ("calls", [(find_tool(names, "my_agents"), {})])
     if "## What your helpers came back with" in latest:
         parts = [line.split(":", 1)[0].lstrip("- ").strip() for line in latest.splitlines() if line.startswith("- Part ")]
         return ("text", "# What I found\n\nI split this into " + str(len(parts)) + " parts and checked what came back.\n\n"

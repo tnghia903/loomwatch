@@ -48,6 +48,7 @@ export function teamAgentSource(agent: AgentConfig): LibrarySource {
     ...(agent.doneWhen?.length ? { doneWhen: [...agent.doneWhen] } : {}),
     ...(agent.allow ? { allow: { ...agent.allow } } : {}),
     ...(agent.allowRecruiting === false ? { helpers: false as const } : {}),
+    ...(agent.allowMyAgents === false ? { bringsIn: false as const } : {}),
   }
 }
 

@@ -22,6 +22,12 @@ export function useAgentFigure(agent: Pick<AgentConfig, 'id' | 'from'>): FigureC
  */
 export const TeamFiguresContext = createContext<ReadonlyMap<string, FigureChoice>>(new Map())
 
+/**
+ * The names the person's other agents go by when a run of the open team brings one in from My
+ * agents (ADR 0092), by their id there (`mine+<id>`): for the places that name agents by id.
+ */
+export const GuestNamesContext = createContext<ReadonlyMap<string, string>>(new Map())
+
 /** The figure the open team's agent `id` wears, or `null` for you or an agent the team doesn't list. */
 export function useTeamFigure(id: string): FigureChoice | null {
   const figures = useContext(TeamFiguresContext)

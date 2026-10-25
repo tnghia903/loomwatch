@@ -1,7 +1,7 @@
 import { FileSearch, FileText, Info, Reply, ShieldQuestionMark } from 'lucide-react'
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { bubbles as layOut, callsWhileWaiting, converse, fold, waited, type Bubble, type Party } from '../../lib/story/conversation'
+import { bubbles as layOut, callsWhileWaiting, converse, fold, handedWork, waited, type Bubble, type Party } from '../../lib/story/conversation'
 import { APPROVAL_TEXT } from '../../lib/story/needsYou'
 import { clockTime } from '../../lib/chat/format'
 import type { ReplyKind, ReplyTo } from '../../lib/chat/client'
@@ -10,11 +10,13 @@ import { autoNote, permissionAsks, permissionWhat } from '../../lib/runs/permiss
 import { clock, describeEvidence } from '../../lib/story/weft'
 import type { Evidence } from '../../lib/watch/events'
 import { REACHED_WORD, reachedLine, type AskRefusal, type PermissionOutcome, type TeamMessage } from '../../lib/watch/messages'
+import { broughtInLine } from '../../lib/chat/guests'
+import { MentionChip, MentionedText } from '../chat/SaidText'
 import { useAgentFaces } from '../../lib/chat/faces'
 import { AgentFace } from '../chat/AgentFace'
 import { Quote } from '../chat/ReplyQuote'
 import { AvatarFace } from '../agents/AvatarFace'
-import { TeamFiguresContext } from '../agents/figureContext'
+import { GuestNamesContext, TeamFiguresContext } from '../agents/figureContext'
 import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
 import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { helperOf, wearerOf } from '../../lib/chat/helpers'
@@ -86,10 +88,11 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
   // than drawn as a handover and a review sent just now (ADR 0051).
   const { carried, fresh } = useMemo(() => ({ carried: messages.filter((message) => message.carried), fresh: messages.filter((message) => !message.carried) }), [messages])
   const [carriedOpen, setCarriedOpen] = useState(false)
+  const guests = useContext(GuestNamesContext)
   const { lanes, said } = useMemo(() => {
-    const conversation = converse(fresh, order, predecessors)
+    const conversation = converse(fresh, order, predecessors, guests)
     return { lanes: conversation.lanes, said: layOut(fold(conversation.lines, conversation.lanes), conversation.lanes, live, APPROVAL_TEXT) }
-  }, [fresh, order, predecessors, live])
+  }, [fresh, order, predecessors, live, guests])
   // Whatever answers an earlier message quotes it, as a reply of yours does.
   const quotes = useMemo(() => repliesTo(said), [said])
   const figures = useContext(TeamFiguresContext)
@@ -127,7 +130,28 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
   // Inside the team's chat every message wears the time of day, as the chat's own do; the record
   // beside it keeps the time since the run started.
   const when = (bubble: Bubble) => (bare ? clockTime(bubble.ts) : clock(bubble.offsetMs))
-  const member = (id: string): Member => members.get(id) ?? { id, name: id, you: false, number: null, initials: initialsOf(id), hue: 1 }
+  // Someone not in this run (a handover picked up from earlier work) still has the team's name and colour.
+  const member = (id: string): Member => {
+    const known = members.get(id)
+    if (known) return known
+    const name = order.find((party) => party.id === id)?.name ?? guests.get(id) ?? id
+    const worn = figures.get(id)
+    return { id, name, you: false, number: null, initials: initialsOf(name), hue: worn ? figureHue(worn) : 1 }
+  }
+  // Whom an @ in what anyone said names, drawn as that agent's chip: the run's agents, never you.
+  // The team's agents, the person's other agents a run may bring in, and whoever took part.
+  const mentionable = useMemo<Mentionable>(() => {
+    const named = new Map<string, string>(guests)
+    for (const party of order) if (!party.operator) named.set(party.id, party.name)
+    for (const person of members.values()) if (!person.you) named.set(person.id, person.name)
+    return {
+      agents: [...named].map(([id, name]) => ({ id, name })),
+      hue: (id) => {
+        const worn = figures.get(id)
+        return members.get(id)?.hue ?? (worn ? figureHue(worn) : 1)
+      },
+    }
+  }, [members, order, guests, figures])
   const count = said.filter((bubble) => bubble.part !== 'waiting').length
   if (count === 0 && carried.length === 0) {
     return live && !bare ? <p className="chat-none">Nothing has passed between the agents yet. When they talk, it shows here as a chat.</p> : null
@@ -145,7 +169,7 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
         </header>
       )}
       <ol ref={log} className="chat-log">
-        {carried.length > 0 && <PickedUp messages={carried} order={order} predecessors={predecessors} open={carriedOpen} flash={flash === PICKED_UP} onToggle={() => setCarriedOpen((value) => !value)} />}
+        {carried.length > 0 && <PickedUp messages={carried} order={order} member={member} predecessors={predecessors} open={carriedOpen} flash={flash === PICKED_UP} onToggle={() => setCarriedOpen((value) => !value)} />}
         {said.map((bubble, index) => {
           if (isNotice(bubble)) return <Notice key={bubble.key} bubble={bubble} member={member} flash={flash === bubble.key} when={when} />
           const previous = said[index - 1]
@@ -157,6 +181,8 @@ export function AgentMessages({ messages, order, predecessors, evidence, live, o
               key={bubble.key}
               bubble={bubble}
               member={member}
+              mentionable={mentionable}
+              alone={order.filter((party) => !party.operator).length <= 1}
               continued={continued}
               open={opened.has(bubble.key)}
               flash={flash === bubble.key}
@@ -193,7 +219,7 @@ const PICKED_UP = 'picked-up'
  * turn given the earlier handover and your earlier review (ADR 0051). One quiet line, so it does
  * not read as if those were sent just now; what it was given is a click away.
  */
-function PickedUp({ messages, order, predecessors, open, flash, onToggle }: { messages: readonly TeamMessage[]; order: readonly Party[]; predecessors?: ReadonlyMap<string, readonly string[]>; open: boolean; flash: boolean; onToggle: () => void }) {
+function PickedUp({ messages, order, member, predecessors, open, flash, onToggle }: { messages: readonly TeamMessage[]; order: readonly Party[]; member: (id: string) => Member; predecessors?: ReadonlyMap<string, readonly string[]>; open: boolean; flash: boolean; onToggle: () => void }) {
   const party = (id: string) => order.find((candidate) => candidate.id === id)
   const name = (id: string) => party(id)?.name ?? id
   const agents = (ids: readonly (string | null)[]) => [...new Set(ids.filter((id): id is string => id !== null && !party(id)?.operator))]
@@ -203,10 +229,10 @@ function PickedUp({ messages, order, predecessors, open, flash, onToggle }: { me
   const receivers = agents(messages.map((message) => message.to))
   const handovers = messages.filter((message) => message.kind === 'handover')
   const writers = [...new Set(handovers.flatMap(writersOf))]
-  const things = [
-    handovers.length > 0 ? (writers.length > 0 ? `${nameList(writers.map(name))}’s handover` : 'the handover') : null,
+  const things: ReactNode[] = [
+    handovers.length > 0 ? (writers.length > 0 ? <>{named(writers.map(member))}’s handover</> : 'the handover') : null,
     messages.some((message) => message.kind === 'direction') ? 'your review' : null,
-  ].filter((thing): thing is string => thing !== null)
+  ].filter((thing) => thing !== null)
   const title = (message: TeamMessage) => {
     if (message.kind === 'direction') return 'Your review'
     const from = writersOf(message)
@@ -214,7 +240,7 @@ function PickedUp({ messages, order, predecessors, open, flash, onToggle }: { me
   }
   return (
     <li className={`chat-notice chat-picked ${flash ? 'flash' : ''}`} data-bubble={PICKED_UP} tabIndex={-1}>
-      <span>{receivers.length > 0 ? nameList(receivers.map(name)) : 'The team'} picked up {nameList(things)} from earlier work</span>
+      <span>{receivers.length > 0 ? named(receivers.map(member)) : 'The team'} picked up {joined(things)} from earlier work</span>
       <button type="button" className="chat-picked-toggle" aria-expanded={open} onClick={onToggle}>{open ? 'Hide' : 'Read it'}</button>
       {open && (
         <div className="chat-picked-body">
@@ -241,20 +267,20 @@ function isNotice(bubble: Bubble): boolean {
 }
 
 /** Why a question was not put, as a line in the chat. The Team Bus's own words are under it. */
-const REFUSED: Record<AskRefusal, (asker: string, asked: string) => string> = {
-  finished: (asker, asked) => `${asker} asked ${asked}, but ${asked} had already finished its part of this run`,
-  limit: (asker, asked) => `${asker} had already asked ${asked} as many questions as this team allows, so this one wasn’t sent`,
-  asking_back: (asker, asked) => `${asker} couldn’t ask ${asked} back while answering its question`,
-  cannot_start: (asker, asked) => `${asker} couldn’t bring in ${asked} while answering a question`,
-  not_recruiting: (asker, asked) => `${asker} may not bring in helpers, so ${asked} wasn’t asked`,
+const REFUSED: Record<AskRefusal, (asker: ReactNode, asked: ReactNode) => ReactNode> = {
+  finished: (asker, asked) => <>{asker} asked {asked}, but {asked} had already finished its part of this run</>,
+  limit: (asker, asked) => <>{asker} had already asked {asked} as many questions as this team allows, so this one wasn’t sent</>,
+  asking_back: (asker, asked) => <>{asker} couldn’t ask {asked} back while answering its question</>,
+  cannot_start: (asker, asked) => <>{asker} couldn’t bring in {asked} while answering a question</>,
+  not_recruiting: (asker, asked) => <>{asker} may not bring in helpers, so {asked} wasn’t asked</>,
 }
 
 /** How a permission request was settled, as a line in the chat. What you typed instead shows its Markdown. */
-const SETTLED: Record<PermissionOutcome, (agent: string, written: string) => ReactNode> = {
+const SETTLED: Record<PermissionOutcome, (agent: ReactNode, written: string) => ReactNode> = {
   allow_once: () => 'You allowed it, this once',
   allow_run: () => 'You allowed it for the rest of this run',
   allow_team: () => 'You allowed the whole team to do this for the rest of this run',
-  deny: (agent) => `You denied it. ${agent} carries on without it`,
+  deny: (agent) => <>You denied it. {agent} carries on without it</>,
   edited: (_agent, written) => `You changed it, then allowed it: ${written}`,
   answered: (agent, written) => <>You answered instead: “<InlineMarkdown>{written}</InlineMarkdown>”. {agent} carries on with that</>,
   timed_out: () => 'Nobody answered in time, so it was declined',
@@ -265,20 +291,19 @@ function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: 
   const { refused, error, text } = bubble.item.line.message
   if (refused) {
     const asker = writer ? member(writer).name : 'An agent'
-    const asked = bubble.to[0] ? member(bubble.to[0]).name : 'another agent'
     return (
       <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, ${asker}: not asked`} title={[text, error].filter(Boolean).join('\n\n')}>
-        <span>{REFUSED[refused](asker, asked)}</span>
+        <span>{REFUSED[refused](writer ? named([member(writer)]) : 'An agent', bubble.to[0] ? named([member(bubble.to[0])]) : 'another agent')}</span>
         <time dateTime={bubble.ts}>{when(bubble)}</time>
       </li>
     )
   }
   const check = bubble.item.line.message.check
   if (check) {
-    const checked = bubble.to[0] ? member(bubble.to[0]).name : 'the agent'
+    const checked = bubble.to[0] ? named([member(bubble.to[0])]) : 'the agent'
     return (
       <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, ${writer ? member(writer).name : 'The check'}: ${bubble.word}`}>
-        <span>{writer ? member(writer).name : 'The check'} checked {check.round > 1 ? `${checked}’s revised work` : `${checked}’s work`}: all {check.items.length} met</span>
+        <span>{writer ? named([member(writer)]) : 'The check'} checked {checked}’s {check.round > 1 ? 'revised work' : 'work'}: all {check.items.length} met</span>
         <time dateTime={bubble.ts}>{when(bubble)}</time>
       </li>
     )
@@ -287,7 +312,7 @@ function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: 
   if (outcome) {
     return (
       <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, ${bubble.word}`}>
-        <span>{SETTLED[outcome](writer ? member(writer).name : 'The agent', bubble.item.line.message.permission?.written ?? '')}</span>
+        <span>{SETTLED[outcome](writer ? named([member(writer)]) : 'The agent', bubble.item.line.message.permission?.written ?? '')}</span>
         <time dateTime={bubble.ts}>{when(bubble)}</time>
       </li>
     )
@@ -297,26 +322,35 @@ function Notice({ bubble, member, flash, when }: { bubble: Bubble; member: (id: 
     // Approved at a check step's stop (ADR 0062): the work as it was, with what was still open.
     return (
       <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, You: approved`}>
-        <span>You approved {member(stop.checked).name}’s work as it was, with {stop.open === 1 ? '1 check' : `${stop.open} checks`} not met</span>
+        <span>You approved {named([member(stop.checked)])}’s work as it was, with {stop.open === 1 ? '1 check' : `${stop.open} checks`} not met</span>
         <time dateTime={bubble.ts}>{when(bubble)}</time>
       </li>
     )
   }
-  const onward = bubble.to.map((id) => member(id).name)
+  const onward = bubble.to.map(member)
   return (
     <li className={`chat-notice ${flash ? 'flash' : ''}`} data-bubble={bubble.key} tabIndex={-1} aria-label={`${when(bubble)}, You: approved`}>
       <span>
-        You approved {writer ? `${member(writer).name}’s handover` : 'the handover'}
-        {onward.length > 0 && <> · passed on to {nameList(onward)}</>}
+        You approved {writer ? <>{named([member(writer)])}’s handover</> : 'the handover'}
+        {onward.length > 0 && <> · passed on to {named(onward)}</>}
       </span>
       <time dateTime={bubble.ts}>{when(bubble)}</time>
     </li>
   )
 }
 
+/** The agents an @ in the chat's words can name, with each one's colour. */
+interface Mentionable {
+  agents: readonly { id: string; name: string }[]
+  hue: (id: string) => number
+}
+
 interface ChatMessageProps {
   bubble: Bubble
   member: (id: string) => Member
+  mentionable: Mentionable
+  /** An agent's own chat: one agent and you, no team. */
+  alone: boolean
   continued: boolean
   open: boolean
   flash: boolean
@@ -337,7 +371,7 @@ interface ChatMessageProps {
   reactions?: (bubble: Bubble, said: ReactNode) => ReactNode
 }
 
-function ChatMessage({ bubble, member, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when, quote, onShowQuote, bare, onReply, reactions }: ChatMessageProps) {
+function ChatMessage({ bubble, member, mentionable, alone, continued, open, flash, live, calls, onToggle, onInspectEvidence, onInspectHandover, yourTurn, when, quote, onShowQuote, bare, onReply, reactions }: ChatMessageProps) {
   const { item, part, text } = bubble
   const { message } = item.line
   const speaker = bubble.from[0] ? member(bubble.from[0]) : null
@@ -369,13 +403,27 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
     ? bubble.word === 'sent back' ? 'sent back' : `approved${item.passedOn.length ? ` · passed on to ${nameList(item.passedOn.map((passed) => member(passed.to).name))}` : ''}`
     : message.kind === 'check' && part !== 'waiting'
       ? `${bubble.word}${message.check && message.check.round > 1 ? ` · round ${message.check.round}` : ''}`
-      : handover || bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' || (message.kind === 'helper' && part === 'reply') ? bubble.word : null
+      : handover || bubble.word === 'task' || bubble.word === 'direction' || bubble.word === 'asks back' || bubble.word === 'clarifies' || (handedWork(message.kind) && part === 'reply') ? bubble.word : null
   // In a team with no fixed order: whether the teammate carried on in its conversation or a fresh
   // copy took it, said under the work handed out, and under a teammate's answer.
   const reach = message.reached && (message.kind === 'ask' ? part === 'reply' : part === 'said') ? REACHED_WORD[message.reached] : null
   const caption = reach ? `${kindWord ?? bubble.word} · ${reach}` : kindWord
 
+  // ADR 0092: the first time one of the person's other agents is brought in, a quiet line of its
+  // own above the message says who chose whom, as the chat's other events are said.
+  const broughtIn = part === 'said' && message.broughtIn && speaker && mentions[0] ? { by: speaker, guest: mentions[0], words: broughtInLine(name(speaker), mentions[0].name, alone) } : null
   return (
+    <>
+    {broughtIn && (
+      <li className="chat-notice chat-brought-in" aria-label={broughtIn.words}>
+        <span aria-hidden="true">
+          <MentionChip id={broughtIn.by.id} name={name(broughtIn.by)} hue={broughtIn.by.hue} bare />
+          {alone ? ' added ' : ' brought in '}
+          <MentionChip id={broughtIn.guest.id} name={broughtIn.guest.name} hue={broughtIn.guest.hue} bare />
+          {alone ? ' to this chat' : ' from My agents'}
+        </span>
+      </li>
+    )}
     <li
       className={`chat-msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''} ${flash ? 'flash' : ''} ${failed ? 'failed' : ''} hue-${speaker?.hue ?? 0}`}
       data-bubble={bubble.key}
@@ -410,7 +458,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
               // A handover is said as any message is: to whom, then the work, with "handover" under it.
               <>
                 {addressed.length > 0 && <Mentions people={addressed} />}
-                {words && <Body text={words} long={long} more={more} />}
+                {words && <Body text={words} long={long} more={more} mentionable={mentionable} />}
               </>
             )}
             {failed && <p className="chat-failed" role="note">Not delivered{message.error ? `: ${message.error}` : ''}</p>}
@@ -461,6 +509,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
         )}
       </div>
     </li>
+    </>
   )
 }
 
@@ -544,13 +593,16 @@ function typing(word: string, speaker: Member | null, live: boolean): string {
 }
 
 /** Who a message is for, as a chat names them. */
+/** Whom a message is to: each agent as its chip, as in your own words; you by name. */
 function Mentions({ people }: { people: Member[] }) {
-  return <span className="chat-mentions">{people.map((person) => <span key={person.id} className={`chat-mention hue-${person.hue}`}>@{person.you ? 'You' : person.name}</span>)}</span>
+  return <span className="chat-mentions">{people.map((person) => person.you
+    ? <span key={person.id} className={`chat-mention hue-${person.hue}`}>@You</span>
+    : <MentionChip key={person.id} id={person.id} name={person.name} hue={person.hue} />)}</span>
 }
 
 /** A message's words, formatted as the agent wrote them, cut to its first lines when long. */
-function Body({ text, long, more }: { text: string; long: boolean; more: boolean }) {
-  return <div className={`chat-text selectable ${long && !more ? 'cut' : ''}`}><Markdown>{text}</Markdown></div>
+function Body({ text, long, more, mentionable }: { text: string; long: boolean; more: boolean; mentionable: Mentionable }) {
+  return <div className={`chat-text selectable ${long && !more ? 'cut' : ''}`}><MentionedText text={text} agents={mentionable.agents} hue={mentionable.hue} /></div>
 }
 
 /**
@@ -598,6 +650,19 @@ function initialsOf(name: string): string {
 }
 
 /** Names joined as a person would say them: "A", "A and B", "A, B and C". */
+/**
+ * People named in a line of the chat's own: each agent as its chip, you as "You", joined as a
+ * person would say them (the owner's ruling, 2026-10-25: an agent named is its chip, everywhere).
+ */
+function named(people: readonly Member[]): ReactNode {
+  return joined(people.map((person) => (person.you ? 'You' : <MentionChip key={person.id} id={person.id} name={person.name} hue={person.hue} bare />)))
+}
+
+/** Parts joined as a person would say them: "A", "A and B", "A, B and C". */
+function joined(parts: readonly ReactNode[]): ReactNode {
+  return parts.map((part, index) => <Fragment key={index}>{index === 0 ? '' : index === parts.length - 1 ? ' and ' : ', '}{part}</Fragment>)
+}
+
 function nameList(names: readonly string[]): string {
   return names.length <= 1 ? names[0] ?? '' : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 }

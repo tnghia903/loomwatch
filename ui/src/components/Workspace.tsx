@@ -122,9 +122,11 @@ import { APPROVAL_TEXT } from '../lib/story/needsYou'
 import { DEPTH_LABEL, DEPTH_ZOOM, STORY_MAX_ZOOM } from '../lib/story/depth'
 import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
-import { SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
+import { GuestNamesContext, SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
+import { alwaysAllowGuest } from '../lib/library/bringIn'
 import { savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
 import { readKey } from '../lib/library/reads'
+import { guestsOf } from '../lib/chat/guests'
 import { teamAgentEdit } from '../lib/library/teamDraft'
 import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../lib/tools/client'
@@ -261,6 +263,8 @@ function useWideScreen(): boolean {
 export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities = () => {}, onDocumentOpen, initialRunId }: WorkspaceProps) {
   const doc = useTeamDocument()
   const { jobs: savedJobs, loaded: savedJobsLoaded } = useSavedJobs()
+  // ADR 0092: the person's other agents a run may bring in, named and drawn as in My agents.
+  const guests = useMemo(() => guestsOf(savedJobs, doc.nodes.map((node) => node.data.agent.name || node.id)), [savedJobs, doc.nodes])
   // One of the agent's own reads in My agents (ADR 0094): knowledge isn't turned off for one team,
   // so taking it off a team's canvas takes it off the agent, and the canvas says so.
   const isOwnRead = useCallback((agent: AgentConfig, capability: Pick<CapabilityRef, 'kind' | 'path' | 'notion'>) => {
@@ -1063,7 +1067,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // The run's agents, each with what the run says of it, for Details and the agent panel it opens.
   const runAgents = useRunAgents(runView, {
     doc, session, projection, record, phase, orderedAgentIds, evidenceByAgent, leadId, waiting, packetAgentIds,
-    synthMeasurements, capabilityCards, allWiringEdges,
+    synthMeasurements, capabilityCards, allWiringEdges, guestNames: guests.names,
   })
 
   // Agents an Ask proposal adds or changes wear its dashes until it is applied (styles/ask.css).
@@ -1551,7 +1555,10 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Details' timeline asks to read a message: the chat shows it, in the piece it belongs to.
   const [chatReveal, setChatReveal] = useState<{ runId: string; id: string; at: number } | null>(null)
   // Each agent's figure, the one it wears in Your agents (lib/library/figures.ts agentFigure).
-  const agentFigures = useMemo(() => new Map(doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => [node.id, agentFigure(node.data.agent, savedJobs)])), [doc.nodes, savedJobs])
+  const agentFigures = useMemo(() => new Map([
+    ...guests.figures,
+    ...doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => [node.id, agentFigure(node.data.agent, savedJobs)] as const),
+  ]), [doc.nodes, savedJobs, guests])
   const chatAgents = useMemo(() => {
     const step = (id: string) => stepById.get(id)?.step ?? Infinity
     return [...doc.nodes].sort((left, right) => step(left.id) - step(right.id)).map((node) => ({ id: node.id, name: node.data.agent.name || node.id, operator: node.data.agent.kind === 'operator' }))
@@ -1562,9 +1569,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   const chatTeam = useMemo<TeamView>(() => {
     const members = chatAgents.filter((agent) => !agent.operator)
     return {
-      names: new Map(chatAgents.map((agent) => [agent.id, agent.operator ? 'You' : agent.name])),
+      names: new Map([...guests.names, ...chatAgents.map((agent) => [agent.id, agent.operator ? 'You' : agent.name] as const)]),
       // Each agent wears its figure's colour, so its name, avatar and figure agree; you are gold.
-      hues: new Map(chatAgents.map((agent) => { const figure = agentFigures.get(agent.id); return [agent.id, agent.operator ? 0 : figure ? figureHue(figure) : (members.indexOf(agent) % FIGURE_HUES) + 1] })),
+      hues: new Map([
+        ...[...guests.figures].map(([id, figure]) => [id, figureHue(figure)] as const),
+        ...chatAgents.map((agent) => { const figure = agentFigures.get(agent.id); return [agent.id, agent.operator ? 0 : figure ? figureHue(figure) : (members.indexOf(agent) % FIGURE_HUES) + 1] as const }),
+      ]),
       parties: chatAgents.map((agent) => ({ id: agent.id, name: agent.name, operator: agent.operator })),
       predecessors: handedBy,
       order: doc.mode === 'pipeline' ? chatAgents.map((agent) => agent.id) : [],
@@ -1572,7 +1582,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       configs: new Map(doc.nodes.map((node) => [node.id, node.data.agent])),
       models: new Map(doc.nodes.map((node) => [node.id, modelLabelForAgent(node.data.agent, modelNames)])),
     }
-  }, [chatAgents, handedBy, doc.mode, doc.nodes, modelNames, agentFigures])
+  }, [chatAgents, handedBy, doc.mode, doc.nodes, modelNames, agentFigures, guests])
   /** Work starts on an exact snapshot of the file, as Run always has: save first (TNG89 §1.4). */
   const prepareChat = useCallback(async (): Promise<Prepared> => {
     if (['dirty', 'new'].includes(doc.documentChipState)) {
@@ -1724,6 +1734,17 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   // Files the answer in the pane names are read and asked about as its responder's work.
   const answerOrigin = useMemo(() => (activeRunId && answerResponder ? { runId: activeRunId, from: answerResponder } : null), [activeRunId, answerResponder])
   const allowAlways = useCallback((agentId: string, what: AlwaysAllowed) => {
+    // One of the person's agents a run brought in (ADR 0092): it is changed in My agents itself.
+    const guest = guests.names.get(agentId)
+    if (guest) {
+      alwaysAllowGuest(agentId, what).then(
+        () => setStatusAnnouncement(typeof what === 'string'
+          ? `${guest} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on, in every team it works in.`
+          : `${guest} may do “${what.label}” without asking from now on, in every team it works in.`),
+        (failed: unknown) => setStatusAnnouncement(`Couldn’t change ${guest} in My agents: ${failed instanceof Error ? failed.message : String(failed)}`),
+      )
+      return
+    }
     const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
     const name = agent?.name ?? agentId
     if (typeof what === 'string') {
@@ -1738,7 +1759,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     doc.applyAgentFields(agentId, change.fields)
     void doc.save()
     setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on, in every team it’s in.`)
-  }, [doc])
+  }, [doc, guests])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
   // again — the header button, ⌘J, the palette — clears the dock for it.
@@ -2511,6 +2532,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   return (
     <SavedAgentsContext.Provider value={savedJobs}>
     <TeamFiguresContext.Provider value={agentFigures}>
+    <GuestNamesContext.Provider value={guests.names}>
     <CanvasActionsContext.Provider value={canvasActions}>
       <div className={shellClass} style={{ '--lw-palette-w': `${paletteWidth}px`, ...(chatWidth === null ? {} : { '--tc-chat-w': `clamp(${CHAT_WIDTH.min}px, ${chatWidth}px, calc(100vw - ${CHAT_WIDTH.details}px))` }) } as CSSProperties} data-tour="workspace" data-tour-agents={doc.nodes.length} data-tour-view={runView || runSetup ? 'chat' : agentsView ? 'agents' : 'workflow'} onDragEnter={(event) => { if (event.dataTransfer.types.includes(LIBRARY_DRAG_MIME)) setLibraryDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as HTMLElement | null)) { setLibraryDragging(false); setDropAgentId(null) } }}>
         {deliveryShown ? (
@@ -2973,6 +2995,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         )}
       </div>
     </CanvasActionsContext.Provider>
+    </GuestNamesContext.Provider>
     </TeamFiguresContext.Provider>
     </SavedAgentsContext.Provider>
   )

@@ -7,7 +7,9 @@ import type { BenchFile } from '../../lib/files/useBenchFile'
 import { joinUnderRoot } from '../../lib/files/paths'
 import { agentFromDraft, chatAgentId, chatTeamYaml, type AgentDraft } from '../../lib/library/draft'
 import { figureHue, type FigureChoice } from '../../lib/library/figures'
-import { benchFolder } from '../../lib/library/jobs'
+import { alwaysAllowGuest } from '../../lib/library/bringIn'
+import { benchFolder, useSavedJobs } from '../../lib/library/jobs'
+import { guestsOf } from '../../lib/chat/guests'
 import { knowledgeForChat, type TeamKnowledge } from '../../lib/library/teamDraft'
 import { isTerminalRun, type RunRecord } from '../../lib/runs/client'
 import { useRunSession } from '../../lib/runs/useRunSession'
@@ -18,7 +20,7 @@ import { AnswerDocument } from '../chat/AnswerDocument'
 import { TeamChat, type Prepared } from '../chat/TeamChat'
 import type { TeamView } from '../chat/WorkPiece'
 import { FileReader } from '../reader/FileReader'
-import { TeamFiguresContext } from './figureContext'
+import { GuestNamesContext, TeamFiguresContext } from './figureContext'
 
 export interface AgentChatProps {
   draft: AgentDraft
@@ -114,18 +116,21 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
 
   const prepare = useCallback(async (): Promise<Prepared> => (path ? write(path) : { ok: false, error: 'The chat isn’t open yet.' }), [path, write])
 
+  // ADR 0092: the person's other agents it may add to this chat, named and drawn as in My agents.
+  const saved = useSavedJobs()
+  const guests = useMemo(() => guestsOf(saved.jobs.filter((job) => job.id !== chatId), [name]), [saved.jobs, chatId, name])
   const team = useMemo<TeamView>(() => ({
-    names: new Map([[agentId, name]]),
-    hues: new Map([[agentId, figureHue(figure)]]),
+    names: new Map([...guests.names, [agentId, name] as const]),
+    hues: new Map([...[...guests.figures].map(([id, worn]) => [id, figureHue(worn)] as const), [agentId, figureHue(figure)] as const]),
     parties: [{ id: agentId, name, operator: false }],
     predecessors: new Map(),
     order: [],
     operators: new Set(),
     configs: new Map([[agentId, { ...agentFromDraft(draft, model), id: agentId }]]),
     solo: agentId,
-  }), [agentId, name, figure, draft, model])
+  }), [agentId, name, figure, draft, model, guests])
   const agents = useMemo(() => [{ id: agentId, name }], [agentId, name])
-  const figures = useMemo(() => new Map([[agentId, figure]]), [agentId, figure])
+  const figures = useMemo(() => new Map([...guests.figures, [agentId, figure] as const]), [agentId, figure, guests])
 
   // The figure shows the newest piece while it works, and how it ended once you saw it work: a
   // chat opened on finished work leaves it at rest.
@@ -153,6 +158,7 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
   }
   return (
     <TeamFiguresContext.Provider value={figures}>
+    <GuestNamesContext.Provider value={guests.names}>
     <FileReaderContext.Provider value={file?.open ?? null}>
       <TeamChat
         key={path}
@@ -170,7 +176,18 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
         onDetails={details}
         onTeamReview={() => announce(`LoomWatch wants you to look over ${name}’s chat file before it runs. Open Details on any piece to see it.`)}
         onStale={() => announce(`${name}’s chat file changed while you were sending. Send your message again.`)}
-        onAlwaysAllow={(_, what) => {
+        onAlwaysAllow={(asked, what) => {
+          // One of your other agents it added to this chat (ADR 0092): changed in My agents itself.
+          const guest = guests.names.get(asked)
+          if (guest) {
+            alwaysAllowGuest(asked, what).then(
+              () => announce(typeof what === 'string'
+                ? `${guest} may ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on, in every team it works in.`
+                : `${guest} may do “${what.label}” without asking from now on, in every team it works in.`),
+              (failed: unknown) => announce(`Couldn’t change ${guest} in My agents: ${message(failed)}`),
+            )
+            return
+          }
           onAllow(what)
           announce(typeof what === 'string'
             ? `${name} may ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on. Save it to keep that.`
@@ -185,6 +202,7 @@ export function AgentChat({ draft, model, chatId, figure, onAllow, onRecord, ans
       />
       <p className="visually-hidden" role="status">{said}</p>
     </FileReaderContext.Provider>
+    </GuestNamesContext.Provider>
     </TeamFiguresContext.Provider>
   )
 }

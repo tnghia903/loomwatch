@@ -278,7 +278,7 @@
    faint for a colour, so its chips keep ink until it lands. The chip is laid out inline, not as a
    flex box, so its words read in line with the message's: "@Writer", not "@", a break, "Writer".
    A message with a chip takes a little more line, so chips on lines above each other keep apart. */
-.chat-text:has(.tc-mention) { line-height: 24px; }
+.chat-text :is(p, li):has(.tc-mention) { line-height: 24px; }
 .md-said-keep { white-space: nowrap; }
 .tc-mention {
   display: inline-block; max-width: calc(100% - 2px); height: 22px; margin: 0 1px; padding: 0 8px 0 3px;
@@ -292,6 +292,10 @@
 /* The @ is unseen but stays in the words, for screen readers. */
 .tc-mention-at { display: inline-block; width: 0; overflow: hidden; vertical-align: top; }
 .tc-mention-team { font-weight: 600; }
+/* An agent named in a line of the chat's own (loom.css .chat-notice), such as who brought in whom
+   (ADR 0092) or whose work was checked, wears its chip there too. The chips sit in plain words, as
+   in the team's sentence, not inside the notice's pill, so the line doesn't read as a control. */
+.chat-notice > span:has(.tc-mention) { padding: 0; background: none; line-height: 24px; text-align: center; }
 .tc-pending:not(.failed) .tc-mention { color: var(--color-ink); }
 .tc-schedule { display: inline-grid; place-items: center; }
 

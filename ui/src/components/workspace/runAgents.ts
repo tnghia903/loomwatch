@@ -14,8 +14,8 @@ type TeamDocument = ReturnType<typeof useTeamDocument>
 type RunSession = ReturnType<typeof useRunSession>
 type Point = { x: number; y: number }
 
-function syntheticAgent(id: string): AgentConfig {
-  return { id, name: id, role: 'Observed agent', spawn: { cmd: '', args: [], env: {}, cwd: '.' }, model: '' }
+function syntheticAgent(id: string, name = id): AgentConfig {
+  return { id, name, role: 'Observed agent', spawn: { cmd: '', args: [], env: {}, cwd: '.' }, model: '' }
 }
 
 /** Everything the agents a run's Details lists are worked out from. */
@@ -34,6 +34,8 @@ export interface RunAgentsInput {
   synthMeasurements: Readonly<Record<string, { width: number; height: number }>>
   capabilityCards: readonly CapabilityNodeConfig[]
   allWiringEdges: readonly CapabilityEdgeConfig[]
+  /** The person's other agents a run may bring in from My agents, by `mine+<id>` (ADR 0092). */
+  guestNames?: ReadonlyMap<string, string>
 }
 
 /**
@@ -53,7 +55,7 @@ export function runAgentNodes(input: RunAgentsInput & { helperPlacements: Readon
     const docNode = docNodeById.get(id)
     const position = historicalPositions?.[id] ?? docNode?.position ?? helperPlacements[id]
     if (!position) return []
-    const agent = docNode?.data.agent ?? syntheticAgent(id)
+    const agent = docNode?.data.agent ?? syntheticAgent(id, input.guestNames?.get(id))
     const base: AgentNode = docNode ?? { id, type: 'agent', position, selected: false, data: { label: agent.name, agent } }
     const projected = projectedById.get(id)
     const eventCount = evidenceByAgent.get(id)?.length ?? 0
@@ -120,6 +122,6 @@ export function useRunAgents(runView: boolean, input: RunAgentsInput): AgentNode
     doc: { nodes: doc.nodes, edges: doc.edges, mode: doc.mode, entrypoint: doc.entrypoint },
     session: { mode: session.mode, cursor: session.cursor },
     projection, record, phase, orderedAgentIds, evidenceByAgent, leadId, waiting, packetAgentIds, synthMeasurements, capabilityCards, allWiringEdges,
-    helperPlacements, historicalPositions,
-  }) : []), [runView, doc.nodes, doc.edges, doc.mode, doc.entrypoint, session.mode, session.cursor, projection, record, phase, orderedAgentIds, evidenceByAgent, leadId, waiting, packetAgentIds, synthMeasurements, capabilityCards, allWiringEdges, helperPlacements, historicalPositions])
+    helperPlacements, historicalPositions, guestNames: input.guestNames,
+  }) : []), [runView, doc.nodes, doc.edges, doc.mode, doc.entrypoint, session.mode, session.cursor, projection, record, phase, orderedAgentIds, evidenceByAgent, leadId, waiting, packetAgentIds, synthMeasurements, capabilityCards, allWiringEdges, helperPlacements, historicalPositions, input.guestNames])
 }

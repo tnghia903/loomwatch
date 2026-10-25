@@ -204,6 +204,11 @@ export interface TeamMessage {
    * many checks were open.
    */
   checkStop?: { checked: string; open: number }
+  /**
+   * For a `dispatch`: it brought one of the person's other agents in from My agents (ADR 0092), the
+   * first time in this run (`from` on the recorded answer). The chat says so, once, above it.
+   */
+  broughtIn?: true
 }
 
 export type Reached = 'continued' | 'busy' | 'limit'
@@ -298,6 +303,8 @@ export class Correspondence {
   private readonly reviewSteps = new Set<string>()
   /** Each agent's last ended turn, for a send-back recorded after the turn that answered it. */
   private readonly lastTurn = new Map<string, { reply: string; event: RunEvent }>()
+  /** The person's agents brought in from My agents so far in this run (ADR 0092). */
+  private readonly guests = new Set<string>()
   private readonly startMs: number
 
   constructor(startMs: number) {
@@ -376,6 +383,11 @@ export class Correspondence {
     }
     // The bus accepts a name where the id belongs and answers with the id it resolved.
     if (message.kind !== 'escalate') message.to = words(output.agent) ?? message.to
+    // One of the person's agents, brought in from My agents: said the first time in the run.
+    if (message.kind === 'dispatch' && object(output.from) && message.to && !this.guests.has(message.to)) {
+      this.guests.add(message.to)
+      message.broughtIn = true
+    }
     const reached = reachedOf(output)
     if (reached) message.reached = reached
     // A helper started; what it sends back comes later, recorded on its own (`delegatedResult`).
@@ -395,14 +407,24 @@ export class Correspondence {
   }
 
   /**
-   * `delegated_result` for a helper (ADR 0079): what it sent back to its agent, or why it couldn't
-   * finish, as the reply to the brief that started it. The bus writes it under the helper's id.
+   * `delegated_result`: what an agent handed work sent back, or why it couldn't finish, as the reply
+   * to the brief that started it, in the chat as any answer is. That is a helper (ADR 0079), and a
+   * teammate or one of My agents brought in, handed work with `dispatch` or `handoff` (ADR 0092).
+   * The bus writes it under that agent's id, with whom it was for and the task it was given.
    */
   delegatedResult(event: RunEvent) {
     const p = event.payload
-    if (p.mode !== 'helper') return
-    const message = this.messages.findLast((candidate) => candidate.kind === 'helper' && candidate.to === event.agentId)
-    if (!message || message.reply) return
+    let message: TeamMessage | undefined
+    if (p.mode === 'helper') {
+      message = this.messages.findLast((candidate) => candidate.kind === 'helper' && candidate.to === event.agentId)
+      if (message?.reply) return
+    } else if (p.mode === 'dispatch' || p.mode === 'handoff') {
+      // Each piece answers its own brief: an agent handed two may finish them in either order.
+      const caller = words(p.for)
+      const open = this.messages.filter((candidate) => candidate.kind === p.mode && candidate.to === event.agentId && !candidate.reply && (!caller || candidate.from === caller))
+      message = open.find((candidate) => candidate.text === p.task) ?? open[0]
+    }
+    if (!message) return
     const failed = p.status !== 'succeeded'
     const said = failed ? words(p.error) ?? 'It stopped before it finished.' : typeof p.reply === 'string' ? p.reply : ''
     message.state = 'answered'
