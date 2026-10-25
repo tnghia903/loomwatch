@@ -231,12 +231,14 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const name = (id: string) => names.get(id) ?? id
   const addressed = target?.kind === 'agent' ? target.agent : null
   const them = attached.length === 1 ? 'it' : 'them'
-  // A part of a file asked about says so first, though its picture is in the box too (ADR 0091).
-  const placeholder = replyTo?.kind === 'passage' && !answering ? `Ask ${name(addressed ?? replyTo.from)} about this part…`
+  // A part of a file asked about says so first, though its picture is in the box too (ADR 0091); a
+  // thing in a web page is named for what it is.
+  const thisPart = replyTo?.at?.kind === 'element' ? `this ${replyTo.at.what}` : 'this part'
+  const placeholder = replyTo?.kind === 'passage' && !answering ? `Ask ${name(addressed ?? replyTo.from)} about ${thisPart}…`
     : attached.length > 0 && !answering ? (solo || target ? `Say what to do with ${them}` : `@team, then what to do with ${them}`)
     : answering?.kind === 'question' ? `Answer ${answering.fromName}…`
     : answering ? 'A note for Approve, or what to change'
-      : replyTo?.kind === 'passage' ? `Ask ${name(addressed ?? replyTo.from)} about this part…`
+      : replyTo?.kind === 'passage' ? `Ask ${name(addressed ?? replyTo.from)} about ${thisPart}…`
         : replyTo ? `Reply to ${name(replyTo.from)}…`
         : solo ? `Message ${solo.name || solo.id}` : 'Message the team'
   // A reply about two agents — a handover, a question between them — can go to either: the other

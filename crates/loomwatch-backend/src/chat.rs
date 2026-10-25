@@ -354,6 +354,8 @@ const SHEET_COLUMNS: u32 = 16_384;
 const SHEET_NAME_CHARS: usize = 255;
 /// The latest moment of a recording a part names: a week in, in milliseconds.
 const RECORDING_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+/// The longest path to a thing in a web page a part names.
+const ELEMENT_PATH_CHARS: usize = 1000;
 
 /// Where a part of a file that isn't words is (ADR 0091), as the reader marked it.
 ///
@@ -391,6 +393,11 @@ pub enum PartAt {
         bottom: u32,
         right: u32,
     },
+    /// A chart, a picture or a video in a web page (`what`), found again by `path`: a CSS selector
+    /// from the page's body or from an element with an id, each step an element's name and, where
+    /// it has siblings of its kind, its place among them (`body > main > section:nth-of-type(2) >
+    /// canvas`).
+    Element { what: String, path: String },
     /// A kind a newer version wrote: the part reads as its words.
     #[serde(other)]
     Unknown,
@@ -398,7 +405,8 @@ pub enum PartAt {
 
 impl PartAt {
     /// Whether the place is one the reader could have marked: a box inside its picture or frame,
-    /// cells inside a sheet, a moment or a span that goes forward.
+    /// cells inside a sheet, a moment or a span that goes forward, a chart, picture or video in a
+    /// page by a path on one line.
     fn usable(&self) -> bool {
         match *self {
             Self::Box {
@@ -438,6 +446,12 @@ impl PartAt {
                             && name.chars().count() <= SHEET_NAME_CHARS
                             && !name.contains(['\n', '\r'])
                     })
+            }
+            Self::Element { ref what, ref path } => {
+                matches!(what.as_str(), "chart" | "picture" | "video")
+                    && !path.trim().is_empty()
+                    && path.chars().count() <= ELEMENT_PATH_CHARS
+                    && !path.contains(['\n', '\r', '`'])
             }
             Self::Unknown => false,
         }
@@ -518,6 +532,9 @@ impl PartAt {
                     "{cells}{sheet} (given below with the sheet's column and row names; the person \
                      sees columns by their names and rows by number, not by letter)"
                 ))
+            }
+            Self::Element { ref what, ref path } => {
+                Some(format!("the {what} in the page at `{path}`"))
             }
             Self::Unknown => None,
         }
@@ -2809,11 +2826,16 @@ async fn learn_from_words(
 /// Whether a message may be answered in the chat instead of starting work ([`answer_instead`]):
 /// not when it was sent as work, and not when it carries files, which that answer, read from the
 /// words alone with no tools, could not open (ADR 0082). Nor when it is about a part of a file
-/// that its words don't hold, a box or a moment, which only the file shows (ADR 0091): a moment
-/// of a recording of sound goes with no picture, and that answer could only guess at it.
+/// that its words don't hold, a box, a moment or a thing in a page, which only the file shows
+/// (ADR 0091): a moment of a recording of sound goes with no picture, and that answer could only
+/// guess at it.
 fn answers_in_chat(work: bool, files: &[ChatFile], reply: Option<&ReplyTo>) -> bool {
-    let only_in_the_file = reply
-        .is_some_and(|reply| matches!(reply.at, Some(PartAt::Box { .. } | PartAt::Time { .. })));
+    let only_in_the_file = reply.is_some_and(|reply| {
+        matches!(
+            reply.at,
+            Some(PartAt::Box { .. } | PartAt::Time { .. } | PartAt::Element { .. })
+        )
+    });
     !work && files.is_empty() && !only_in_the_file
 }
 
@@ -5320,10 +5342,53 @@ mod tests {
             Some(json!({"kind": "cells", "top": 1, "left": 1, "bottom": 2, "right": 2})),
         );
         let words = part("Sales grew 12% in Q3.", None);
+        let chart = part(
+            "The chart under “Sales by region”",
+            Some(json!({"kind": "element", "what": "chart", "path": "canvas#chart"})),
+        );
         assert!(!answers_in_chat(false, &[], Some(&moment)));
         assert!(!answers_in_chat(false, &[], Some(&box_)));
+        assert!(!answers_in_chat(false, &[], Some(&chart)));
         assert!(answers_in_chat(false, &[], Some(&cells)));
         assert!(answers_in_chat(false, &[], Some(&words)));
+    }
+
+    /// **A chart, picture or video in a web page is a part of its own (ADR 0091).** It keeps the
+    /// path that finds it again in the page, and the agent is told what it is and that path; one
+    /// that isn't a chart, picture or video, or whose path is empty, runs over lines or would close
+    /// the quote it is told in, is refused.
+    #[test]
+    fn a_thing_in_a_page_keeps_its_path_and_the_agent_is_told_it() {
+        let team = team();
+        let part = |at: serde_json::Value| -> ReplyTo {
+            serde_json::from_value(json!({
+                "messageId": "passage:e", "from": "researcher", "kind": "passage",
+                "text": "The chart under “Sales by region”", "file": "/w/dash/index.html", "at": at
+            }))
+            .expect("a part reads")
+        };
+        let path = "body > main > section:nth-of-type(2) > canvas";
+        let mut chart = part(json!({"kind": "element", "what": "chart", "path": path}));
+        check_reply(&mut chart, &team).expect("usable");
+        assert_eq!(
+            serde_json::to_value(&chart).expect("written")["at"],
+            json!({"kind": "element", "what": "chart", "path": path})
+        );
+        assert_eq!(
+            chart.for_agents(&team).named,
+            "A part of index.html from Researcher, in the file /w/dash/index.html, the chart in the \
+             page at `body > main > section:nth-of-type(2) > canvas`"
+        );
+        for bad in [
+            json!({"kind": "element", "what": "table", "path": "table"}),
+            json!({"kind": "element", "what": "chart", "path": "  "}),
+            json!({"kind": "element", "what": "chart", "path": "body >\ncanvas"}),
+            json!({"kind": "element", "what": "chart", "path": "canvas`"}),
+            json!({"kind": "element", "what": "picture", "path": "a".repeat(1001)}),
+        ] {
+            let mut reply = part(bad.clone());
+            assert!(check_reply(&mut reply, &team).is_err(), "{bad}");
+        }
     }
 
     #[tokio::test]

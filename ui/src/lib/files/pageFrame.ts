@@ -1,3 +1,4 @@
+import type { ElementAt } from '../chat/client'
 import { readFile, rawFileUrl } from './reader'
 
 /**
@@ -134,32 +135,285 @@ export const PAGE_BRIDGE = `(function () {
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', clips); else clips();
+  // Things in the page a part can be (ADR 0091): a chart (a canvas, a drawing, or the holder of a
+  // chart's stacked layers), a picture or a video, 48 px or more each way. A drag on a chart is the
+  // chart's own (it may zoom), so each thing has a mark at its top left corner instead, shown while the thing
+  // is pointed at or the mark has the keyboard, which marks the thing to be asked about. The marks
+  // and outlines sit in a layer of their own over the page, outside its body.
+  var THING = 'canvas, svg, img, video', NS = 'http://www.w3.org/2000/svg';
+  var layer = null, thingMarks = [], pointed = null, hideTimer = 0, markedThing = null;
+  function layerOf() {
+    if (layer && layer.isConnected) return layer;
+    layer = document.createElement('div');
+    layer.className = 'lw-things';
+    document.documentElement.appendChild(layer);
+    return layer;
+  }
+  function near(a, b) { return Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2; }
+  function thingOf(element) {
+    var found = element && element.closest ? element.closest(THING) : null;
+    if (!found || (layer && layer.contains(found))) return null;
+    for (var outer = found.parentElement && found.parentElement.closest('svg'); outer; outer = outer.parentElement && outer.parentElement.closest('svg')) found = outer;
+    var box = found.getBoundingClientRect();
+    if (box.width < 48 || box.height < 48) return null;
+    // A chart drawn in layers (Plotly's stacked drawings and canvases) is their holder.
+    var holder = found.parentElement, layers = 0, LAYER = 'canvas, svg';
+    if (holder && holder !== document.body && found.matches(LAYER)) Array.prototype.forEach.call(holder.children, function (child) { if (child.matches(LAYER) && near(child.getBoundingClientRect(), box)) layers++; });
+    return layers > 1 ? holder : found;
+  }
+  // A drawing with no words in it (a logo, an illustration) is a picture; a chart labels its axes.
+  function whatOf(thing) {
+    var name = thing.localName;
+    if (name === 'img' || (name === 'svg' && !thing.querySelector('text'))) return 'picture';
+    return name === 'video' ? 'video' : 'chart';
+  }
+  // Where the thing is in the page, as a CSS selector: from an element with an id of its own, or
+  // from the body, each step its name and, among siblings of its kind, its place.
+  function pathOf(thing) {
+    var steps = [];
+    for (var at = thing; at && at.nodeType === 1 && at !== document.body && at !== document.documentElement; at = at.parentElement) {
+      var name = at.localName.toLowerCase();
+      if (at.id && /^[A-Za-z][\\w-]*$/.test(at.id) && document.querySelectorAll('#' + at.id).length === 1) { steps.unshift(name + '#' + at.id); return steps.join(' > '); }
+      var place = 1, kin = 0;
+      for (var other = at.parentElement ? at.parentElement.firstElementChild : null; other; other = other.nextElementSibling) {
+        if (other.localName !== at.localName) continue;
+        kin++;
+        if (other === at) place = kin;
+      }
+      steps.unshift(kin > 1 ? name + ':nth-of-type(' + place + ')' : name);
+    }
+    steps.unshift('body');
+    return steps.join(' > ');
+  }
+  function said(value) { var words = String(value || '').replace(/\\s+/g, ' ').trim(); return words.length > 60 ? words.slice(0, 59) + '\\u2026' : words; }
+  // What the person sees the thing called: its own name, or the heading it is under.
+  function labelOf(thing, what) {
+    var title = thing.querySelector ? thing.querySelector(':scope > title') : null;
+    var own = said(thing.getAttribute('aria-label') || thing.getAttribute('alt') || thing.getAttribute('title') || (title ? title.textContent : ''));
+    if (own) return 'The ' + what + ' \\u201c' + own + '\\u201d';
+    var figure = thing.closest('figure'), caption = figure ? figure.querySelector('figcaption') : null, under = caption ? caption.textContent : '';
+    if (!under) Array.prototype.forEach.call(document.querySelectorAll('h1, h2, h3, h4, h5, h6'), function (heading) { if (heading.compareDocumentPosition(thing) & 4) under = heading.textContent; });
+    under = said(under);
+    // A video goes with the frame it is on: which moment, when it isn't its start.
+    var at = what === 'video' && thing.currentTime >= 1 ? ', at ' + clock(thing.currentTime) : '';
+    return (under ? 'The ' + what + ' under \\u201c' + under + '\\u201d' : 'The ' + what) + at;
+  }
+  function clock(seconds) {
+    var whole = Math.round(seconds), hours = Math.floor(whole / 3600), minutes = Math.floor(whole % 3600 / 60), rest = ('0' + whole % 60).slice(-2);
+    return hours ? hours + ':' + ('0' + minutes).slice(-2) + ':' + rest : minutes + ':' + rest;
+  }
+  // What a thing's mark is called to a screen reader: which thing, since marks come after the page.
+  function markName(thing) { var label = labelOf(thing, whatOf(thing)); return 'Ask about ' + label.charAt(0).toLowerCase() + label.slice(1); }
+  // An outline over a thing, grow pixels out from it each way.
+  function placeOver(box, thing, grow) {
+    var at = thing.getBoundingClientRect(), out = grow || 0;
+    box.style.left = (at.left - out) + 'px'; box.style.top = (at.top - out) + 'px';
+    box.style.width = (at.width + 2 * out) + 'px'; box.style.height = (at.height + 2 * out) + 'px';
+  }
+  // The agent asked: its face in the mark, as the reader's tip and Ask show it; a box without one.
+  var face = null;
+  function dressMark(button) {
+    var src = face && /^data:image\\//.test(String(face.figure || '')) ? String(face.figure) : '';
+    if (button.getAttribute('data-shows') === src) return;
+    button.setAttribute('data-shows', src);
+    button.textContent = '';
+    button.classList.toggle('lw-has-face', Boolean(src));
+    if (!src) return;
+    var image = document.createElement('img');
+    image.alt = '';
+    image.src = src;
+    button.appendChild(image);
+  }
+  var kinds = '';
+  function scan() {
+    var seen = [];
+    Array.prototype.forEach.call(document.body ? document.body.querySelectorAll(THING) : [], function (element) {
+      var thing = thingOf(element);
+      if (thing && seen.indexOf(thing) < 0 && seen.length < 60) seen.push(thing);
+    });
+    // The reader says in its tip that these can be asked about: which kinds the page has.
+    var what = [];
+    seen.forEach(function (thing) { var kind = whatOf(thing); if (what.indexOf(kind) < 0) what.push(kind); });
+    if (what.join() !== kinds) { kinds = what.join(); send({ type: 'things', what: what }); }
+    thingMarks = thingMarks.filter(function (entry) {
+      var kept = seen.indexOf(entry.thing) >= 0;
+      if (!kept && entry.button.parentNode) entry.button.parentNode.removeChild(entry.button);
+      return kept;
+    });
+    seen.forEach(function (thing) {
+      if (thingMarks.some(function (entry) { return entry.thing === thing; })) return;
+      var button = document.createElement('button'), what = whatOf(thing);
+      button.type = 'button';
+      button.className = 'lw-thing-mark';
+      button.setAttribute('aria-label', markName(thing));
+      button.title = 'Ask about this ' + what;
+      button.addEventListener('pointerdown', function (event) { event.preventDefault(); event.stopPropagation(); });
+      button.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); markThing(thing); });
+      // Reached with Tab: the thing comes into view, so its mark and its Ask are where it is.
+      button.addEventListener('focus', function () { if (thing.scrollIntoView) thing.scrollIntoView({ block: 'nearest', inline: 'nearest' }); showMark(thing); });
+      dressMark(button);
+      button.addEventListener('blur', function () { hideMarkSoon(); });
+      button.addEventListener('pointerenter', function () { clearTimeout(hideTimer); });
+      button.addEventListener('pointerleave', function () { hideMarkSoon(); });
+      layerOf().appendChild(button);
+      thingMarks.push({ thing: thing, button: button });
+    });
+  }
+  function showMark(thing) {
+    clearTimeout(hideTimer);
+    pointed = thing;
+    thingMarks.forEach(function (entry) {
+      var on = entry.thing === thing;
+      entry.button.classList.toggle('lw-on', on);
+      if (!on) return;
+      entry.button.setAttribute('aria-label', markName(thing));
+      entry.button.classList.toggle('lw-dark', dark(thing.parentElement || thing));
+      // Just outside the thing, above its top left, so it covers none of the chart, nor a video's
+      // controls; across the corner when the page's top edge leaves no room. The bubbles of the
+      // asks about it hang above its top right.
+      var box = thing.getBoundingClientRect(), size = entry.button.offsetWidth || 28;
+      var above = box.top - size - 4 >= 4;
+      entry.button.style.left = Math.max(4, Math.min(innerWidth - size - 4, above ? box.left : box.left - size / 2)) + 'px';
+      entry.button.style.top = Math.max(4, Math.min(innerHeight - size - 4, above ? box.top - size - 4 : box.top - size / 2)) + 'px';
+    });
+  }
+  function hideMarkSoon() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(function () {
+      var active = document.activeElement;
+      if (active && active.classList && active.classList.contains('lw-thing-mark')) return;
+      pointed = null;
+      thingMarks.forEach(function (entry) { entry.button.classList.remove('lw-on'); });
+    }, 400);
+  }
+  document.addEventListener('pointermove', function (event) {
+    if (event.pointerType === 'touch' || (event.target && event.target.classList && event.target.classList.contains('lw-thing-mark'))) return;
+    var thing = thingOf(event.target);
+    if (thing && thing !== pointed) {
+      if (!thingMarks.some(function (entry) { return entry.thing === thing; })) scan();
+      showMark(thing);
+    } else if (!thing && pointed) hideMarkSoon();
+  }, true);
+  // A finger has no pointing: a tap on a thing shows its mark, a tap elsewhere hides it.
+  document.addEventListener('pointerdown', function (event) {
+    if (event.pointerType !== 'touch' || (event.target && event.target.classList && event.target.classList.contains('lw-thing-mark'))) return;
+    var thing = thingOf(event.target);
+    if (thing) { scan(); showMark(thing); } else if (pointed) hideMarkSoon();
+  }, true);
+  // The thing marked now, outlined dashed, with its picture as it is shown: drawn here, in the page,
+  // where its drawings and frames can be read; one drawn from a picture another site would not
+  // share has none, and goes by its place alone.
+  function backdrop(thing) {
+    for (var at = thing; at && at.nodeType === 1; at = at.parentElement) {
+      var colour = getComputedStyle(at).backgroundColor, found = /rgba?\\(([^)]*)\\)/.exec(colour), parts = found ? found[1].split(',').map(parseFloat) : [];
+      if (parts.length >= 3 && (parts.length < 4 || parts[3] > 0.5)) return colour;
+    }
+    return '#ffffff';
+  }
+  function drawingOf(svg) {
+    return new Promise(function (resolve) {
+      try {
+        var copy = svg.cloneNode(true), at = svg.getBoundingClientRect(), rules = '';
+        copy.setAttribute('xmlns', NS);
+        copy.setAttribute('width', String(at.width));
+        copy.setAttribute('height', String(at.height));
+        Array.prototype.forEach.call(document.styleSheets, function (sheet) { try { Array.prototype.forEach.call(sheet.cssRules, function (rule) { rules += rule.cssText; }); } catch (error) {} });
+        if (rules) { var style = document.createElementNS(NS, 'style'); style.textContent = rules; copy.insertBefore(style, copy.firstChild); }
+        var image = new Image();
+        image.onload = function () { resolve(image); };
+        image.onerror = function () { resolve(null); };
+        image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(copy));
+      } catch (error) { resolve(null); }
+    });
+  }
+  function pictureOf(thing) {
+    var box = thing.getBoundingClientRect();
+    var scale = Math.min(window.devicePixelRatio || 1, 2048 / Math.max(box.width, box.height, 1));
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(box.width * scale));
+    canvas.height = Math.max(1, Math.round(box.height * scale));
+    var context = canvas.getContext('2d');
+    if (!context) return Promise.resolve(null);
+    context.scale(scale, scale);
+    context.fillStyle = backdrop(thing);
+    context.fillRect(0, 0, box.width, box.height);
+    var layers = thing.matches(THING) ? [thing] : Array.prototype.filter.call(thing.querySelectorAll(THING), function (each) { return !(each.parentElement && each.parentElement.closest('svg')); });
+    var drawn = Promise.resolve();
+    layers.forEach(function (each) {
+      drawn = drawn.then(function () {
+        var at = each.getBoundingClientRect(), x = at.left - box.left, y = at.top - box.top;
+        if (each.localName === 'svg') return drawingOf(each).then(function (image) { if (image) context.drawImage(image, x, y, at.width, at.height); });
+        try { context.drawImage(each, x, y, at.width, at.height); } catch (error) {}
+      });
+    });
+    return drawn.then(function () {
+      return new Promise(function (resolve) {
+        try {
+          canvas.toBlob(function (blob) { if (blob) blob.arrayBuffer().then(resolve, function () { resolve(null); }); else resolve(null); }, 'image/png');
+        } catch (error) { resolve(null); }
+      });
+    });
+  }
+  function unmarkThing() {
+    if (markedThing && markedThing.box.parentNode) markedThing.box.parentNode.removeChild(markedThing.box);
+    if (markedThing && sized && !Object.keys(marked.parts).some(function (text) { return marked.parts[text].thing === markedThing.thing; })) sized.unobserve(markedThing.thing);
+    markedThing = null;
+  }
+  function tellThing(withPicture) {
+    var thing = markedThing && markedThing.thing;
+    if (!thing) return;
+    var box = thing.getBoundingClientRect(), what = whatOf(thing);
+    var message = { lw: 'reader', type: 'thing', what: what, path: pathOf(thing), text: labelOf(thing, what), rect: { top: box.top, bottom: box.bottom, left: box.left, right: box.right } };
+    if (!withPicture) { parent.postMessage(message, '*'); return; }
+    pictureOf(thing).then(function (bytes) {
+      if (!markedThing || markedThing.thing !== thing) return;
+      if (bytes) message.picture = bytes;
+      parent.postMessage(message, '*', bytes ? [bytes] : []);
+    });
+  }
+  function markThing(thing) {
+    unmarkThing();
+    var box = document.createElement('div');
+    // Dashed, a little out from the thing, so it shows beside the outline of an earlier ask about it.
+    box.className = 'lw-thing-box lw-marking' + (dark(thing.parentElement || thing) ? ' lw-dark' : '');
+    layerOf().appendChild(box);
+    placeOver(box, thing, 4);
+    markedThing = { thing: thing, box: box };
+    if (sized) sized.observe(thing);
+    tellThing(true);
+  }
   var down = false, shown = false, timer = 0, queued = false;
   function report() {
     var selection = document.getSelection();
     var text = selection && selection.rangeCount && !selection.isCollapsed ? String(selection) : '';
     if (!text.trim()) { if (shown) { shown = false; send({ type: 'selection', text: '' }); } return; }
+    // A drag across a chart's own labels means the chart, not the words on its axes.
+    var common = selection.getRangeAt(0).commonAncestorContainer, inside = thingOf(common.nodeType === 1 ? common : common.parentElement);
+    if (inside) { selection.removeAllRanges(); if (shown) { shown = false; send({ type: 'selection', text: '' }); } markThing(inside); return; }
     var box = selection.getRangeAt(0).getBoundingClientRect();
     shown = true;
     send({ type: 'selection', text: text, rect: { top: box.top, bottom: box.bottom, left: box.left, right: box.right } });
   }
-  document.addEventListener('pointerdown', function () { down = true; if (shown) { shown = false; send({ type: 'selection', text: '' }); } }, true);
+  document.addEventListener('pointerdown', function () {
+    down = true;
+    if (shown || markedThing) { shown = false; unmarkThing(); send({ type: 'selection', text: '' }); }
+  }, true);
   document.addEventListener('pointerup', function () { down = false; setTimeout(report, 0); }, true);
   document.addEventListener('selectionchange', function () { if (down) return; clearTimeout(timer); timer = setTimeout(report, 120); });
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
     // With nothing marked, Escape is the reader's: it closes an answer open over the page.
-    if (!shown) { send({ type: 'escape' }); return; }
+    if (!shown && !markedThing) { send({ type: 'escape' }); return; }
     var selection = document.getSelection();
     if (selection) selection.removeAllRanges();
-    shown = false; send({ type: 'selection', text: '' });
+    shown = false; unmarkThing(); send({ type: 'selection', text: '' });
   }, true);
   // The parts asked about, marked in the page as the reader marks its own text (lib/files/partMarks.ts):
   // each part's words wrapped in a mark, and after the last word a slot with a bubble for each agent
   // asked about them, in the order asked, so the line makes room for them. Where two parts overlap,
   // the newer is marked and the older's bubbles sit with it. Every change is undone exactly, last
   // first, before the page is marked again.
-  var marked = { key: null, undo: [], parts: {}, found: {} }, wanted = [], texts = [], hovered = null, pressing = false;
+  var marked = { key: null, undo: [], parts: {}, found: {} }, wanted = [], texts = [], things = [], asking = null, hovered = null, pressing = false;
   function dark(element) {
     for (var at = element; at && at.nodeType === 1; at = at.parentElement) {
       var colour = /rgba?\\(([^)]*)\\)/.exec(getComputedStyle(at).backgroundColor);
@@ -275,7 +529,7 @@ export const PAGE_BRIDGE = `(function () {
       var any = function (name) { return at.asks.some(function (ask) { return ask[name]; }); };
       at.lit = any('lit');
       var look = ' lw-' + wordsLook(at.asks) + (at.dark ? ' lw-dark' : '') + (any('fresh') ? ' lw-fresh' : '') + (at.lit ? ' lw-lit' : '');
-      at.marks.forEach(function (element) { element.className = 'lw-mark' + look; });
+      at.marks.forEach(function (element) { element.className = (at.thing ? 'lw-thing-box' : 'lw-mark') + look; });
       // A bubble for each ask, in the order asked: kept while its ask is, so it does not pop up
       // again. Those no longer asked go first, so the rest are moved only if their order changed
       // (a moved bubble replays its animations and loses focus).
@@ -310,11 +564,59 @@ export const PAGE_BRIDGE = `(function () {
       face.appendChild(image);
     } else face.textContent = String(ask.initials || '');
   }
+  // A chart often sizes itself to the page after it is drawn, and the page reflows as its pictures
+  // load: the outlines follow the things, not only a scroll or the window.
+  // The page may also first lay out at no size at all (the reader's pane still opening), when no
+  // thing is big enough to find: they are looked for again once it has one.
+  var sized = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { later(); rescanSoon(); }) : null;
+  // A thing asked about: outlined where it is, with a slot for its bubbles at its top right corner.
+  function markThingAsked(text, thing) {
+    if (sized) { sized.observe(thing); marked.undo.push(function () { sized.unobserve(thing); }); }
+    var box = document.createElement('div'), holder = document.createElement('div');
+    holder.className = 'lw-thing-holder';
+    layerOf().appendChild(box);
+    layerOf().appendChild(holder);
+    var slot = document.createElement('span');
+    slot.className = 'lw-slot';
+    slot.setAttribute('contenteditable', 'false');
+    holder.appendChild(slot);
+    marked.undo.push(function () { [box, holder].forEach(function (element) { if (element.parentNode) element.parentNode.removeChild(element); }); });
+    marked.parts[text] = { text: text, marks: [box], slot: slot, bubbles: {}, asks: [], lit: false, dark: dark(thing.parentElement || thing), thing: thing, holder: holder };
+  }
+  function placeThings() {
+    Object.keys(marked.parts).forEach(function (text) {
+      var at = marked.parts[text];
+      if (!at.thing) return;
+      placeOver(at.marks[0], at.thing);
+      var box = at.thing.getBoundingClientRect();
+      at.holder.style.left = Math.min(innerWidth - 4, box.right) + 'px';
+      at.holder.style.top = box.top + 'px';
+    });
+    if (markedThing) placeOver(markedThing.box, markedThing.thing, 4);
+    if (askingThing) placeOver(askingThing.box, askingThing.thing, 4);
+  }
+  // A thing whose part is in the message box now is outlined dashed, as words there stay lit.
+  var askingThing = null;
+  function showAsking() {
+    if (askingThing && askingThing.box.parentNode) askingThing.box.parentNode.removeChild(askingThing.box);
+    askingThing = null;
+    var at = asking ? asking.indexOf('\\u0001element:') : -1;
+    if (at < 0) return;
+    var rest = asking.slice(at + 9), thing = null;
+    try { thing = document.querySelector(rest.slice(rest.indexOf('@') + 1)); } catch (error) {}
+    if (!thing || (layer && layer.contains(thing))) return;
+    var box = document.createElement('div');
+    box.className = 'lw-thing-box lw-asking' + (dark(thing.parentElement || thing) ? ' lw-dark' : '');
+    layerOf().appendChild(box);
+    askingThing = { thing: thing, box: box };
+    placeOver(box, thing, 4);
+  }
   function parts() {
-    send({ type: 'parts', parts: texts.map(function (text) {
+    placeThings();
+    send({ type: 'parts', parts: texts.concat(things).map(function (text) {
       var at = marked.parts[text], rects = [];
       if (!at) return { text: text, rects: rects, missing: !marked.found[text], as: text, dark: false };
-      at.marks.forEach(function (element) {
+      (at.thing ? [at.thing] : at.marks).forEach(function (element) {
         var list = element.getClientRects();
         for (var i = 0; i < list.length && rects.length < 60; i++) rects.push({ top: list[i].top, bottom: list[i].bottom, left: list[i].left, right: list[i].right });
       });
@@ -322,13 +624,20 @@ export const PAGE_BRIDGE = `(function () {
     }) });
   }
   function later() {
-    if (queued || !wanted.length) return;
+    if (queued || (!wanted.length && !markedThing && !askingThing)) return;
     queued = true;
-    requestAnimationFrame(function () { queued = false; parts(); });
+    requestAnimationFrame(function () { queued = false; if (wanted.length) parts(); else placeThings(); });
   }
-  // The agent's card belongs to where the bubble was: scrolling the page takes it away.
-  addEventListener('scroll', function () { if (shown) report(); unhover(false); later(); }, true);
-  addEventListener('resize', function () { if (shown) report(); later(); });
+  // The agent's card belongs to where the bubble was: scrolling the page takes it away. A thing
+  // marked now stays marked, and its outline and the ask bubble follow it.
+  function moved() {
+    if (shown) report();
+    if (markedThing) tellThing(false);
+    if (pointed) showMark(pointed);
+    later();
+  }
+  addEventListener('scroll', function () { moved(); unhover(false); }, true);
+  addEventListener('resize', moved);
   document.addEventListener('click', function (event) {
     var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
     if (!link) {
@@ -386,30 +695,72 @@ export const PAGE_BRIDGE = `(function () {
       answered({ status: typeof data.status === 'number' ? data.status : 0, type: String(data.mediaType || ''), body: Object.prototype.toString.call(data.body) === '[object ArrayBuffer]' ? data.body : null });
       return;
     }
-    if (data.type === 'clear') { var selection = document.getSelection(); if (selection) selection.removeAllRanges(); shown = false; }
+    if (data.type === 'clear') { var selection = document.getSelection(); if (selection) selection.removeAllRanges(); shown = false; unmarkThing(); }
     if (data.type === 'marks') {
-      wanted = (Array.isArray(data.parts) ? data.parts : []).filter(function (ask) { return ask && typeof ask.text === 'string' && typeof ask.key === 'string'; });
-      // Each part's words once, in the order of its newest ask (passage.ts partTexts).
-      texts = [];
-      wanted.forEach(function (ask) { var at = texts.indexOf(ask.text); if (at >= 0) texts.splice(at, 1); texts.push(ask.text); });
-      var key = texts.join('\\u0000');
-      if (key !== marked.key) {
-        unmark();
-        var page = index(), list = [];
-        texts.forEach(function (text) {
-          var range = find(page, text);
-          if (!range) return;
-          marked.found[text] = true;
-          list.push({ text: text, range: range });
-        });
-        mark(list);
-        marked.key = key;
-      }
-      show();
-      if (window.CSS && CSS.highlights && typeof Highlight === 'function') light('lw-read-asking', data.asking ? [find(index(), data.asking)] : []);
-      parts();
+      wanted = (Array.isArray(data.parts) ? data.parts : []).filter(function (ask) {
+        return ask && typeof ask.text === 'string' && typeof ask.key === 'string' && (!ask.at || (ask.at.kind === 'element' && typeof ask.at.path === 'string'));
+      });
+      asking = data.asking || null;
+      face = data.face && typeof data.face === 'object' ? data.face : null;
+      thingMarks.forEach(function (entry) { dressMark(entry.button); });
+      applyMarks();
     }
   });
+  function isThing(ask) { return Boolean(ask.at); }
+  function applyMarks() {
+    // Each part once, in the order of its newest ask (passage.ts partTexts): words, and things by
+    // their path (a thing's text is its part's id, as the reader knows it).
+    texts = []; things = [];
+    wanted.forEach(function (ask) { var list = isThing(ask) ? things : texts, at = list.indexOf(ask.text); if (at >= 0) list.splice(at, 1); list.push(ask.text); });
+    var key = texts.join('\\u0000') + '\\u0002' + things.join('\\u0000');
+    if (key !== marked.key) {
+      unmark();
+      var page = index(), list = [];
+      texts.forEach(function (text) {
+        var range = find(page, text);
+        if (!range) return;
+        marked.found[text] = true;
+        list.push({ text: text, range: range });
+      });
+      mark(list);
+      things.forEach(function (text) {
+        var ask = wanted.filter(function (each) { return each.text === text; })[0], thing = null;
+        try { thing = document.querySelector(ask.at.path); } catch (error) {}
+        if (!thing || (layer && layer.contains(thing))) return;
+        marked.found[text] = true;
+        markThingAsked(text, thing);
+      });
+      marked.key = key;
+    }
+    show();
+    showAsking();
+    var askingWords = asking && asking.indexOf('\\u0001') < 0 ? asking : null;
+    if (window.CSS && CSS.highlights && typeof Highlight === 'function') light('lw-read-asking', askingWords ? [find(index(), askingWords)] : []);
+    parts();
+  }
+  // Charts are often drawn after the page loads: the things are found again when one is added,
+  // and a thing asked about that the page did not have yet is looked for again.
+  var rescan = 0;
+  function rescanSoon() {
+    clearTimeout(rescan);
+    rescan = setTimeout(function () {
+      scan();
+      if (things.some(function (text) { return !marked.found[text]; })) { marked.key = null; applyMarks(); }
+    }, 300);
+  }
+  function added(records) {
+    return records.some(function (record) {
+      return Array.prototype.some.call(record.addedNodes, function (node) { return node.nodeType === 1 && !(layer && layer.contains(node)) && (node.matches(THING) || node.querySelector(THING)); });
+    });
+  }
+  function watch() {
+    if (!document.body || typeof MutationObserver !== 'function') return;
+    new MutationObserver(function (records) { if (added(records)) rescanSoon(); }).observe(document.body, { childList: true, subtree: true });
+    if (sized) sized.observe(document.body);
+    scan();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();
+  addEventListener('load', function () { scan(); later(); });
   var style = document.createElement('style');
   // The reader's own look (reader.css .rd-mark, .rd-slot, .rd-bubble), in the page's own words:
   // the page has none of the reader's colours. Keep the two alike.
@@ -466,7 +817,35 @@ export const PAGE_BRIDGE = `(function () {
     + '.lw-dots i{animation:lw-typing 1.2s ease-in-out infinite}.lw-dots i:nth-child(2){animation-delay:.15s}.lw-dots i:nth-child(3){animation-delay:.3s}}'
     + '@media (prefers-reduced-motion:reduce){.lw-mark.lw-busy,.lw-mark.lw-dark.lw-busy{' + plain + '}.lw-dots i{opacity:1}}'
     + '@keyframes lw-sweep{from{background-size:0% 74%}}@keyframes lw-shine{from{background-position:100% 62%,0 62%}to{background-position:-150% 62%,0 62%}}'
-    + '@keyframes lw-pop{from{opacity:0;scale:.3}}@keyframes lw-typing{50%{opacity:.25}}';
+    + '@keyframes lw-pop{from{opacity:0;scale:.3}}@keyframes lw-typing{50%{opacity:.25}}'
+    // Things (ADR 0091): the layer over the page; the mark above a thing's top left (shown while it is
+    // pointed at or has the keyboard): a dashed chip, as the reader's tip draws a part to mark, with
+    // the asked agent's face in it, in the lightness of the page under it; and the outline of a thing
+    // marked now or in the message box (dashed, a little out from it) or asked about (the reader's
+    // box: a gold edge on a tint), its bubbles hung above its top right, clear of a chart's own tools.
+    // The page's own rules (a transition on everything, a margin on every div) must not reach them.
+    + '.lw-things{all:initial;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483646!important;display:block!important}'
+    + '.lw-thing-mark{all:unset;position:absolute!important;box-sizing:border-box!important;width:28px!important;height:28px!important;margin:0!important;padding:0!important;border-radius:8px!important;'
+    + 'border:1.5px dashed #8A6A16!important;background:#F5F0E4!important;box-shadow:0 2px 8px rgba(0,0,0,.28)!important;cursor:pointer!important;opacity:0;pointer-events:none!important;'
+    + 'display:grid!important;place-items:center!important;overflow:visible!important;transform:none!important;translate:none!important;scale:none!important;rotate:none!important;filter:none!important;transition:none!important;animation:none!important}'
+    + '.lw-thing-mark.lw-dark{background:#1A1508!important;border-color:#E9C46A!important;box-shadow:0 2px 8px rgba(0,0,0,.5)!important}'
+    + '.lw-thing-mark:not(.lw-has-face)::before{content:"";box-sizing:content-box;width:12px;height:9px;border:1.5px solid #8A6A16;border-radius:2px;background:rgba(233,196,106,.35)}'
+    + '.lw-thing-mark.lw-dark:not(.lw-has-face)::before{border-color:#E9C46A}'
+    + '.lw-thing-mark img{all:unset;display:block!important;width:22px!important;height:22px!important;object-fit:contain!important;pointer-events:none!important}'
+    + '.lw-thing-mark.lw-on,.lw-thing-mark:focus-visible{opacity:1;pointer-events:auto!important}'
+    + '.lw-thing-mark:focus-visible{outline:2px solid #8A6A16!important;outline-offset:2px;box-shadow:0 2px 8px rgba(0,0,0,.28),0 0 0 2px #F5F0E4!important}'
+    + '.lw-thing-mark.lw-dark:focus-visible{outline-color:#E9C46A!important;box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 2px #1A1508!important}'
+    + '@media (pointer:coarse){.lw-thing-mark{width:44px!important;height:44px!important}.lw-thing-mark img{width:34px!important;height:34px!important}.lw-thing-mark:not(.lw-has-face)::before{width:18px;height:13px}}'
+    + '.lw-thing-box,.lw-thing-holder{all:initial;display:block!important;position:absolute!important;margin:0!important;padding:0!important;transition:none!important;animation:none!important;transform:none!important}'
+    + '.lw-thing-box{box-sizing:border-box!important;border:2px solid #D8A93C!important;border-radius:6px!important;background:rgba(233,196,106,.1)!important;'
+    + 'box-shadow:0 0 0 1px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.4)!important;pointer-events:none!important}'
+    + '.lw-thing-box.lw-read,.lw-thing-box.lw-failed{background:rgba(233,196,106,.04)!important}'
+    + '.lw-thing-box:is(.lw-marking,.lw-asking){border-style:dashed!important;border-color:#8A6A16!important;background:rgba(233,196,106,.14)!important;box-shadow:none!important}'
+    + '.lw-thing-box:is(.lw-marking,.lw-asking).lw-dark{border-color:#E9C46A!important}'
+    + '.lw-thing-box.lw-lit{outline:2px solid #8A6A16!important;outline-offset:1px;box-shadow:0 0 0 1px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.4),0 0 0 4px rgba(0,0,0,.4)!important}'
+    + '.lw-thing-box.lw-lit.lw-dark{outline-color:#E9C46A!important}'
+    + '.lw-thing-holder{pointer-events:auto!important;line-height:0!important;translate:-100% calc(-100% - 4px)!important}'
+    + '.lw-thing-holder>.lw-slot{margin:0!important;translate:none!important;vertical-align:top!important}.lw-thing-holder .lw-point{display:none!important}.lw-thing-holder .lw-bubble::after{inset:-4px!important}';
   (document.head || document.documentElement).appendChild(style);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { send({ type: 'ready' }); });
   else send({ type: 'ready' });
@@ -481,7 +860,10 @@ type PageRect = { top: number; bottom: number; left: number; right: number }
 export interface PageMark {
   /** Which ask it is (passage.ts `askKey`): what the page says when its bubble is pressed. */
   key: string
+  /** The part's words; for a thing in the page, its part's id (passage.ts `partId`). */
   text: string
+  /** A thing in the page (ADR 0091): found by its path, outlined, with the bubble at its corner. */
+  at?: ElementAt
   look: 'busy' | 'waiting' | 'read' | 'failed'
   /** Asked just now: its stroke sweeps on. */
   fresh: boolean
@@ -516,6 +898,13 @@ export type PageMessage =
   | { type: 'ready' }
   /** The page asked for a file beside it, by the address it wrote (`fetch`, `XMLHttpRequest`, a clip): the reader answers `loaded` with the same id. */
   | { type: 'load'; id: number; url: string }
+  /** A chart, picture or video in the page was marked (or moved while marked): what it is called, where, and its picture as shown when it could be drawn. */
+  | { type: 'thing'; what: ElementAt['what']; path: string; text: string; rect: PageRect; picture?: ArrayBuffer }
+  /** The kinds of thing the page has that can be asked about, in the order found: the reader's tip names one. */
+  | { type: 'things'; what: ElementAt['what'][] }
+
+/** The largest picture of a thing in the page taken from it. */
+const PICTURE_MAX_BYTES = 20 * 1024 * 1024
 
 const isRect = (value: unknown): value is PageRect => {
   const rect = value as Record<string, unknown> | null
@@ -530,6 +919,19 @@ export function pageMessage(data: unknown): PageMessage | null {
   if (message.type === 'load') {
     const { id, url } = data as { id?: unknown; url?: unknown }
     return Number.isSafeInteger(id) && typeof url === 'string' && url.length <= 4096 ? { type: 'load', id: id as number, url } : null
+  }
+  if (message.type === 'things') {
+    const what = (data as { what?: unknown }).what
+    if (!Array.isArray(what)) return null
+    return { type: 'things', what: [...new Set(what.filter((kind): kind is ElementAt['what'] => kind === 'chart' || kind === 'picture' || kind === 'video'))] }
+  }
+  if (message.type === 'thing') {
+    const { what, path, text, rect, picture } = data as { what?: unknown; path?: unknown; text?: unknown; rect?: unknown; picture?: unknown }
+    if (what !== 'chart' && what !== 'picture' && what !== 'video') return null
+    if (typeof path !== 'string' || !path.trim() || path.length > 1000 || /[\n\r`]/.test(path)) return null
+    if (typeof text !== 'string' || !text.trim() || text.length > 200 || !isRect(rect)) return null
+    const bytes = Object.prototype.toString.call(picture) === '[object ArrayBuffer]' && (picture as ArrayBuffer).byteLength <= PICTURE_MAX_BYTES ? picture as ArrayBuffer : undefined
+    return { type: 'thing', what, path, text, rect, ...(bytes ? { picture: bytes } : {}) }
   }
   if (message.type === 'parts') {
     const parts = (data as { parts?: unknown }).parts
