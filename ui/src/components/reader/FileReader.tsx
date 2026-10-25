@@ -19,7 +19,7 @@ import { figureStill } from '../../lib/library/figures'
 import { wearerOf } from '../../lib/chat/helpers'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { useFigurePictures } from './useFigurePictures'
-import { FileOriginContext, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
+import { FileOriginContext, pagesFileUrl, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
 import { useFileActions } from '../../lib/files/useFile'
 import { useFileText } from '../../lib/files/useFileText'
 import { relativeTime } from '../../lib/format'
@@ -74,6 +74,11 @@ const MEDIA_HINT_KEY = 'loomwatch.readerHint.media'
 const THING_HINT_KEY = 'loomwatch.readerHint.thing'
 /** And for a PDF's pages, where a drag over a picture or a chart marks a box. */
 const PDF_HINT_KEY = 'loomwatch.readerHint.pdf'
+/**
+ * How long a slide deck may take to open as its slides before its words are shown instead: the first
+ * time, LibreOffice makes its PDF (at most two minutes, `office.rs`).
+ */
+const SLIDES_OPEN_LIMIT_MS = 150_000
 /** How long "Updated" stays lit after the file changed on disk. */
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
@@ -125,7 +130,10 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const [view, setView] = useState<'page' | 'code'>('page')
   // A PDF that PDF.js couldn't open is shown by its words, as before (ADR 0091).
   const [pdfFailed, setPdfFailed] = useState<string | null>(null)
-  const pdfPages = format === 'pdf' && pdfFailed !== path
+  // A slide deck is shown as the PDF LibreOffice makes of its slides, as a PDF is (ADR 0091).
+  const asPages = format === 'pdf' || format === 'slides'
+  const pdfPages = asPages && pdfFailed !== path
+  const pageWord = format === 'slides' ? 'slide' : 'page'
   // Whether one of its pages shows a picture or a chart: only then does its tip speak of boxes.
   const [pdfPictured, setPdfPictured] = useState<string | null>(null)
   const pdfPicture = useRef<((at: BoxAt & { page: number }) => Promise<Blob | null>) | null>(null)
@@ -665,12 +673,14 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         marks={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'time' || at?.kind === 'box' ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
     </div>
   )
-  else if (format === 'pdf' && pdfFailed !== path && (content.file || content.error)) body = (
+  else if (pdfPages && (content.file || content.error)) body = (
     // Drawn afresh when the file changes, once it has been read, so it is opened once, at the
     // version read. Its words are marked as any file's are; a drag on a page where there are none
     // marks a box there (ADR 0091).
     <div key={content.changes} ref={page} className="rd-page rd-as-pdf" onClick={openAt}>
-      <PdfView src={`${rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} name={fileName} askable={askable} asking={asking} open={answerShown ? partId(answerShown) : null} wanted={texts}
+      <PdfView src={`${format === 'slides' ? pagesFileUrl(path) : rawFileUrl(path)}&v=${encodeURIComponent(modifiedAt ?? '')}`} name={fileName} askable={askable}
+        pageWord={pageWord} openLimit={format === 'slides' ? SLIDES_OPEN_LIMIT_MS : undefined}
+        slowNote={format === 'slides' ? 'The first time can take a minute or two.' : undefined} asking={asking} open={answerShown ? partId(answerShown) : null} wanted={texts}
         marking={marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked} onOpen={openPlace} onDrawn={measure} onFailed={() => setPdfFailed(path)} onPictures={takePdfPictures} onPictured={() => setPdfPictured(path)}
         onPages={(pages) => setPdfCount({ path, pages })} onWanted={(pages) => setPdfFound({ path, pages })}
         boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' && at.page ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
@@ -691,9 +701,9 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   )
   else body = (
     // Drawn afresh when the file changes, never updated around the marks in it (lib/files/partMarks.ts).
-    <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
+    <div key={content.changes} ref={page} className={`tc-document-page rd-page rd-as-${asPages ? 'document' : shown}${shown === 'markdown' ? ' delivery-response' : ''}`} onClick={openAt}>
       {shown === 'markdown' ? <Markdown>{withFolderPaths(text)}</Markdown>
-          : shown === 'document' || shown === 'pdf' ? <DocumentView text={text} />
+          : shown === 'document' || asPages ? <DocumentView text={text} />
             : <CodeView text={text} language={shown === 'code' && format === 'page' ? 'html' : extensionOf(path)} />}
     </div>
   )
@@ -728,13 +738,13 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
       {((content.file?.extracted && shown !== 'sheet' && !pdfPages) || (content.file?.truncated && !pdfPages)) && (
         <p className="rd-note">
           {content.file.extracted && shown !== 'sheet'
-            ? `These are the words of ${fileKindIn(path, 'the')}, as your agents read them, without its layout. Open it in its own app to see it as it looks.`
+            ? `These are the words of ${fileKindIn(path, 'the')}, as your agents read them, without the layout. Open the file in its own app to see how it looks.`
             : shown === 'sheet' ? 'This workbook is too big to show whole here. Open it in its own app for the rest.'
               : 'Only the start of this file is shown: it is larger than 2 MB. Open it in its own app for the rest.'}
         </p>
       )}
       {pdfPages && pdfCount?.path === path && pdfCount.pages > MOST_PAGES && (
-        <p className="rd-note">Only the first {MOST_PAGES} pages are shown here. Open it in its own app for the rest.</p>
+        <p className="rd-note">Only the first {MOST_PAGES} {pageWord}s are shown here. Open it in its own app for the rest.</p>
       )}
       {cellsView && sheets && sheets.length > 1 && <div ref={setSheetBar} className="rd-sheet-bar" />}
       <div ref={stage} className="rd-stage">
@@ -753,7 +763,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           slot, slot.dataset.part,
         ))}
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}${pdfPages ? ' on-paper' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at?.kind === 'box' && marked.at.page && isWholeBox(marked.at) ? 'page' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}${pdfPages ? ' on-paper' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at?.kind === 'element' ? marked.at.what : marked.at?.kind === 'box' && marked.at.page && isWholeBox(marked.at) ? pageWord : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>
@@ -802,7 +812,8 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
             onClose={() => setAnswerFor(null)} onShowInChat={onShowAsked && (() => onShowAsked(answerShown))}
             onReply={onAsk && from ? (button) => replyAbout(answerShown, button) : undefined} />
         )}
-        {askable && hint && !marked && from && (text !== null || !words || pdfPages) && (
+        {/* Over pages, once there are pages: a deck's can take a while, and the tip asks for what they hold. */}
+        {askable && hint && !marked && from && (pdfPages ? pdfCount?.path === path : text !== null || !words) && (
           <p className="rd-hint" data-reader-chrome>
             <AvatarFace id={from} hue={hue(from)} size={20} fontSize={8} text={initials(name(from))} />
             {format === 'media' ? <span><mark className="box">Click or drag the bar</mark> to ask <b>{name(from)}</b> about a moment</span>

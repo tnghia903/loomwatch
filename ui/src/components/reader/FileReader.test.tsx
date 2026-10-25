@@ -805,7 +805,7 @@ describe('a sheet in the reader', () => {
     // The tabs sit above the scrolling sheet, so they never scroll away.
     expect(summary.closest('.rd-scroll')).toBeNull()
     expect(summary.closest('.rd-sheet-bar')).not.toBeNull()
-    expect(screen.queryByText(/without its layout/)).toBeNull()
+    expect(screen.queryByText(/without the layout/)).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'Chart' }))
     expect(screen.getByText('There are no cells on this sheet to show here. Open it in its own app to see it.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'By region' }))
@@ -1382,6 +1382,56 @@ describe('a PDF in the reader', () => {
     rerender({ asked: [part({ state: 'sending' }, { file: PDF, text: 'The top right of page 2', at: { kind: 'box', x: 5000, y: 0, w: 5000, h: 5000, page: 2 }, messageId: null })] })
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
     expect(screen.queryByText('The words you marked have changed.')).toBeNull()
+  })
+
+  describe('a slide deck, shown as the PDF LibreOffice makes of it', () => {
+    const DECK = '/teams/.loomwatch/market/writer/deck.pptx'
+    beforeEach(() => {
+      answer = (url) => (url.startsWith('/api/files/read')
+        ? respond(200, read({ path: DECK, name: 'deck.pptx', kind: 'document', text: 'Slide 1\n\nSales grew.\n\nSlide 2\n\nNorth leads.', extracted: true }))
+        : respond(200, { path: DECK, exists: true, isDir: false, sizeBytes: 9_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'document', folder: null, openable: true }))
+    })
+
+    it('is drawn as its slides, from the PDF of them, each part named by its slide', async () => {
+      const { onAsk } = renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
+      await waitFor(() => expect(screen.getAllByRole('group', { name: /^Slide \d$/ })).toHaveLength(2))
+      expect(vi.mocked(openPdf).mock.calls).toEqual([[expect.stringMatching(/^\/api\/files\/pages\?path=.*deck\.pptx&v=/)]])
+      // Not the words alone, as a deck was shown before.
+      expect(screen.queryByText(/These are the words of the slides/)).toBeNull()
+      await waitFor(() => expect(page(2)).toHaveTextContent('Page 2 says sales grew.'))
+      fireEvent.pointerDown(page(2), { button: 0, pointerId: 2, clientX: 400, clientY: 0 })
+      fireEvent.pointerMove(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
+      fireEvent.pointerUp(page(2), { pointerId: 2, clientX: 800, clientY: 300 })
+      fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+      await waitFor(() => expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ text: 'The top right of slide 2', at: { kind: 'box', x: 5000, y: 0, w: 5000, h: 5000, page: 2 } }), EXPLAIN_WORDS, 'writer', [expect.any(File)]))
+      // All of a slide, from the keyboard.
+      fireEvent.keyDown(await screen.findByRole('button', { name: 'Ask about slide 1' }), { key: 'Enter' })
+      expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the slide you marked' })).toBeInTheDocument()
+    })
+
+    it('waits longer for its slides than a PDF is waited for, as LibreOffice makes them first', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      pdfState.hang = true
+      renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
+      await waitFor(() => expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent(/^Reading deck\.pptx…$/))
+      // Nothing to mark yet: the tip waits for the slides.
+      expect(screen.queryByText('Mark any words')).toBeNull()
+      // A long wait says why it may go on.
+      await act(async () => { vi.advanceTimersByTime(10_000) })
+      expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent('Reading deck.pptx…The first time can take a minute or two.')
+      await act(async () => { vi.advanceTimersByTime(50_000) })
+      expect(document.querySelector('.rd-as-pdf .rd-loading')).toHaveTextContent(/^Reading deck\.pptx…/)
+      await act(async () => { vi.advanceTimersByTime(100_000) })
+      expect(await screen.findByText('North leads.')).toBeInTheDocument()
+    })
+
+    it('shows its words when its slides can’t be made, as without LibreOffice', async () => {
+      pdfState.fail = true
+      renderReader({ file: { path: DECK, runId: 'run-1', from: 'writer' } })
+      expect(await screen.findByText(/These are the words of the slides, as your agents read them/)).toBeInTheDocument()
+      expect(screen.getByText('North leads.')).toBeInTheDocument()
+      expect(document.querySelector('.rd-pdf-page')).toBeNull()
+    })
   })
 
   it('says under the file’s name that only its first 500 pages are shown', async () => {

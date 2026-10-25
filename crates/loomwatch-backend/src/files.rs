@@ -618,6 +618,54 @@ pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiErr
     })
 }
 
+/// A slide deck or a Word document as its pages (ADR 0091): the PDF `LibreOffice` makes of it,
+/// answered as [`raw`] answers a PDF. Blocking: the first time, it waits for `LibreOffice`.
+pub(crate) fn pages(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiError> {
+    let resolved = existing(teams_root, requested)?;
+    let name = resolved.file_name().map_or_else(
+        || requested.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    if !crate::office::has_pages(&resolved) {
+        return Err(unreadable(
+            &name,
+            "only slides and documents are shown here as their pages",
+        ));
+    }
+    let shown = if crate::office::is_slides(&resolved) {
+        "slides"
+    } else {
+        "pages"
+    };
+    let path = crate::office::pages(&resolved).map_err(|why| match why {
+        crate::office::NoPages::NoOffice => ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!(
+                "{name} can be shown as {shown} only when LibreOffice is on this computer. Open it \
+                 in its own app instead."
+            ),
+        ),
+        crate::office::NoPages::TooSlow => ApiError::new(
+            StatusCode::GATEWAY_TIMEOUT,
+            format!("{name} took too long to show as {shown}. Open it in its own app instead."),
+        ),
+        crate::office::NoPages::Failed => unreadable(&name, "LibreOffice couldn't open it"),
+    })?;
+    let size = std::fs::metadata(&path)
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to read the pages of {name}: {error}"),
+            )
+        })?
+        .len();
+    Ok(RawFile {
+        path,
+        media_type: "application/pdf",
+        size,
+    })
+}
+
 /// Which bytes of a file of `size` bytes a `Range` header asks for (RFC 9110 §14.1.2). A player
 /// asks for a recording a part at a time, and Safari plays nothing it can't ask for so.
 #[derive(Debug, PartialEq, Eq)]

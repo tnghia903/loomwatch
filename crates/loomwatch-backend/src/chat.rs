@@ -458,8 +458,8 @@ impl PartAt {
     }
 
     /// Where it is, as the agent is told: "the box from 50% to 100% of the way across from the
-    /// left, and 0% to 50% of the way down from the top".
-    fn described(&self) -> Option<String> {
+    /// left, and 0% to 50% of the way down from the top". On a slide deck, a page is a slide.
+    fn described(&self, slides: bool) -> Option<String> {
         match *self {
             Self::Box {
                 x,
@@ -470,6 +470,7 @@ impl PartAt {
                 ms,
             } => {
                 let on = match (page, ms) {
+                    (Some(page), _) if slides => format!("on slide {page}, "),
                     (Some(page), _) => format!("on page {page}, "),
                     (None, Some(ms)) => {
                         format!(
@@ -613,7 +614,14 @@ impl ReplyTo {
         };
         // A part that isn't words is told by its place too: its words only name it ("The top right
         // of the picture"), and its picture, when it has one, goes with the message (ADR 0091).
-        let place = match (self.kind, self.at.as_ref().and_then(PartAt::described)) {
+        let slides = self
+            .file
+            .as_deref()
+            .is_some_and(|path| crate::office::is_slides(Path::new(path)));
+        let place = match (
+            self.kind,
+            self.at.as_ref().and_then(|at| at.described(slides)),
+        ) {
             (ReplyKind::Passage, Some(place)) => format!(", {place}"),
             _ => String::new(),
         };
@@ -5624,11 +5632,23 @@ mod tests {
             ms: None,
         };
         assert_eq!(
-            on_a_page.described().as_deref(),
+            on_a_page.described(false).as_deref(),
             Some(
                 "on page 3, the box from 12.5% to 12.6% of the way across from the left, and 3.4% \
                  to 100% of the way down from the top"
             )
+        );
+        // A deck's pages are its slides, as the reader names them.
+        let mut on_a_slide = checked.clone();
+        on_a_slide.file = Some("/w/deck.pptx".to_owned());
+        on_a_slide.at = Some(on_a_page.clone());
+        assert!(
+            on_a_slide
+                .for_agents(&team)
+                .named
+                .ends_with("in the file /w/deck.pptx, on slide 3, the box from 12.5% to 12.6% of the way across from the left, and 3.4% to 100% of the way down from the top"),
+            "{}",
+            on_a_slide.for_agents(&team).named
         );
 
         for outside in [
