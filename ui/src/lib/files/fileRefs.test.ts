@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fileLabel, fileNoun, filePathFrom, filePathFromLink, fileRefsIn, filesTouched, filesWritten, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
+import { fileKindIn, fileLabel, fileNoun, filePathFrom, filePathFromLink, fileRefsIn, filesTouched, filesWritten, fileTitle, folderWords, formatBytes, withFolderPaths, workspaceAgent } from './fileRefs'
 
 const REPORT = '/Users/me/loomwatch/teams/.loomwatch/launch-plan/writer/market-research-report.docx'
 
@@ -131,6 +131,19 @@ describe('describing a file in words', () => {
     expect(fileLabel(REPORT)).toBe('Word document')
     expect(fileLabel('/x/a.PDF')).toBe('PDF')
     expect(fileLabel('/x/a.weird')).toBe('WEIRD file')
+    expect(fileLabel('/x/a.docm')).toBe('Word document')
+    expect(fileLabel('/x/a.pptm')).toBe('Slides')
+  })
+
+  it('names the kind inside a sentence, keeping the names of apps and letters', () => {
+    expect(fileKindIn(REPORT, 'a')).toBe('a Word document')
+    expect(fileKindIn(REPORT, 'the')).toBe('the Word document')
+    expect(fileKindIn('/x/a.pdf', 'a')).toBe('a PDF')
+    expect(fileKindIn('/x/a.png', 'a')).toBe('an image')
+    expect(fileKindIn('/x/deck.pptx', 'a')).toBe('slides')
+    expect(fileKindIn('/x/deck.pptx', 'the')).toBe('the slides')
+    expect(fileKindIn('/x/a.odt', 'a')).toBe('a document')
+    expect(fileKindIn('/x/a.weird', 'a')).toBe('a WEIRD file')
   })
 
   it('says where a managed workspace file sits as team › agent', () => {

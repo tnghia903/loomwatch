@@ -1707,9 +1707,9 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [activeRunId, shownTab, paneTabs])
   // What is marked in the file goes to the chat; on a narrow screen the pane covers the chat, so it
   // steps aside for the message box and the file waits in its tab.
-  const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; agent: string; at: number } | null>(null)
-  const askInChat = useCallback((reply: ReplyTo, words: string | undefined, agent: string) => {
-    setChatAsk({ reply, words, agent, at: Date.now() })
+  const [chatAsk, setChatAsk] = useState<{ reply: ReplyTo; words?: string; agent: string; pictures?: readonly File[]; at: number } | null>(null)
+  const askInChat = useCallback((reply: ReplyTo, words: string | undefined, agent: string, pictures?: readonly File[]) => {
+    setChatAsk({ reply, words, agent, ...(pictures?.length ? { pictures } : {}), at: Date.now() })
     if (!wide && !words) closeDetails()
   }, [wide, closeDetails])
   const [passages, setPassages] = useState<{ asked: AskedPassage[]; asking: string | null; faces: AgentFacts[] }>({ asked: [], asking: null, faces: [] })

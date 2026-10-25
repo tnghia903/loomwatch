@@ -1,5 +1,5 @@
-import { quoteLine } from '../chat/reply'
-import { stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type ReplyTo } from '../chat/client'
+import { quoteLine, replyWords } from '../chat/reply'
+import { stillAnswering, type ChatItem, type ChatMessage, type ChatTarget, type PartAt, type ReplyTo } from '../chat/client'
 import type { RunRecord } from '../runs/client'
 import { plainRunError } from '../runs/errors'
 
@@ -28,18 +28,35 @@ export function passageOf(selected: string): string | null {
 }
 
 /** A short, stable id for a passage of a file, for the reply's `messageId` (the chat's ids are short). */
-export function passageId(path: string, text: string): string {
+export function passageId(path: string, text: string, at?: PartAt): string {
   let hash = 0x811c9dc5
-  for (const char of `${path}\n${text}`) {
+  for (const char of `${path}\n${partId({ text, at })}`) {
     hash ^= char.codePointAt(0) ?? 0
     hash = Math.imul(hash, 0x01000193) >>> 0
   }
   return `passage:${hash.toString(36)}`
 }
 
-/** The reply a marked part is asked as. */
-export function passageReply(file: { path: string; runId: string | null; from: string }, text: string): ReplyTo {
-  return { runId: file.runId, messageId: passageId(file.path, text), from: file.from, to: null, kind: 'passage', text, file: file.path }
+/** The reply a marked part is asked as: its words, and where it is when it isn't words (ADR 0091). */
+export function passageReply(file: { path: string; runId: string | null; from: string }, text: string, at?: PartAt): ReplyTo {
+  return { runId: file.runId, messageId: passageId(file.path, text, at), from: file.from, to: null, kind: 'passage', text, file: file.path, ...(at ? { at } : {}) }
+}
+
+/** Where a part is, in a few characters that are the same each time: `box:2500,0,5000,5000`, `cells:2,1,9,4@Q3`, `time:42000-51000`. */
+export function atKey(at: PartAt): string {
+  if (at.kind === 'cells') return `cells:${at.top},${at.left},${at.bottom},${at.right}${at.sheet ? `@${at.sheet}` : ''}`
+  if (at.kind === 'time') return `time:${at.start}${at.end === undefined ? '' : `-${at.end}`}`
+  if (at.kind === 'element') return `element:${at.what}@${at.path}`
+  return `box:${at.x},${at.y},${at.w},${at.h}${at.page ? `@${at.page}` : ''}${at.ms === undefined ? '' : `@t${at.ms}`}`
+}
+
+/**
+ * What tells one part of a file from another: its words, and its place when it isn't words (two
+ * boxes on a picture can say the same). For words alone it is the words, so the marks, bubbles and
+ * keys of words are what they always were.
+ */
+export function partId(part: { text: string; at?: PartAt }): string {
+  return part.at ? `${part.text}\u0001${atKey(part.at)}` : part.text
 }
 
 /**
@@ -55,6 +72,8 @@ export function answerReply(asked: ReplyTo | null | undefined, answer: ReplyTo):
 export interface AskedPassage {
   file: string
   text: string
+  /** Where it is, when it isn't words (ADR 0091). */
+  at?: PartAt
   /** Who was asked. */
   from: string
   /** What you asked: your message's words. */
@@ -103,7 +122,7 @@ export function askedPassages(items: readonly ChatItem[], pending: readonly { te
     if (reply?.kind !== 'passage' || !reply.file) return
     // Asked of one agent, it is that agent's face beside the part, whoever made the file.
     const from = message.agentId ?? reply.from
-    found.push({ at: message.createdAt ?? '', passage: { file: reply.file, text: reply.text, from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null, onItsOwn, answer: answer(from) } })
+    found.push({ at: message.createdAt ?? '', passage: { file: reply.file, text: reply.text, ...(reply.at ? { at: reply.at } : {}), from, asked: message.text, runId: runId ?? reply.runId, messageId: message.id ?? null, onItsOwn, answer: answer(from) } })
   }
   for (const item of items) {
     if (item.kind === 'note') add(item.message, item.message.runId ?? null, (from) => noteAnswer(item.message, from, now), true)
@@ -120,9 +139,9 @@ export function askedPassages(items: readonly ChatItem[], pending: readonly { te
   return found.map((item) => item.passage)
 }
 
-/** What tells one ask about a part of a file from another: its words and the agent asked. The same agent asked again about the same words is the same ask, newer. */
-export function askKey(passage: Pick<AskedPassage, 'text' | 'from'>): string {
-  return `${passage.from}\u0000${passage.text}`
+/** What tells one ask about a part of a file from another: the part (`partId`) and the agent asked. The same agent asked again about the same part is the same ask, newer. */
+export function askKey(passage: Pick<AskedPassage, 'text' | 'from' | 'at'>): string {
+  return `${passage.from}\u0000${partId(passage)}`
 }
 
 /**
@@ -237,10 +256,14 @@ export function findPassage(page: PageText, passage: string): Range | null {
   return range
 }
 
-/** Where the ask bubble sits: above the marked words, centred on them, inside the page; below them at the top of the view. */
+/**
+ * Where the ask bubble sits: above the marked words, centred on them, inside the page; below them at
+ * the top of the view. A part taller than the view (all of a PDF's page, a whole column) has its
+ * bubble held inside the view's foot, over the part, rather than out of sight below it.
+ */
 export function bubblePlace(
   marked: { top: number; bottom: number; left: number; right: number },
-  view: { top: number; left: number; width: number },
+  view: { top: number; left: number; width: number; height?: number },
   scroll: { top: number; left: number },
   size: { width: number; height: number },
   gap = 10,
@@ -251,7 +274,8 @@ export function bubblePlace(
   const above = marked.top - view.top - size.height - gap
   const below = above < 4
   const top = (below ? marked.bottom - view.top + gap : marked.top - view.top - size.height - gap) + scroll.top
-  return { top, left, below }
+  const foot = view.height === undefined ? top : view.height - size.height - 8 + scroll.top
+  return { top: Math.min(top, foot), left, below }
 }
 
 /**
@@ -348,13 +372,14 @@ export function partQuote(text: string, most = 60): string {
 }
 
 function quoted(passage: AskedPassage, most = 60): string {
-  return partQuote(passage.text, most)
+  return partQuote(replyWords(passage), most)
 }
 
 /** What a part's bubble says to a screen reader: its state; being a button that opens says the rest. */
 export function bubbleLabel(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
   const who = name(bubbleAgent(passage))
-  const about = quoted(passage)
+  // A thing in a page is named in words already ("The chart under “Sales”"): read on, not quoted.
+  const about = passage.at?.kind === 'element' ? passage.text.charAt(0).toLowerCase() + passage.text.slice(1) : quoted(passage)
   if (passage.answer.state === 'unsent') return `Your question about ${about} wasn't sent`
   if (look === 'busy') return `${who} is answering your question about ${about}`
   if (look === 'waiting') return `New answer from ${who} about ${about}`

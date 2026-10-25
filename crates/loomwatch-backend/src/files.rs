@@ -415,8 +415,10 @@ pub(crate) struct FileText {
 /// larger, and its start is what fits.
 pub(crate) const READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 
-/// The largest picture or recording [`raw`] answers.
-const RAW_MAX_BYTES: u64 = 50 * 1024 * 1024;
+/// The largest picture, data or font file [`raw`] answers: a page takes them in whole, and so does
+/// a part of a picture cut out to be asked about. A recording or a PDF of any size is answered, a
+/// part at a time (ADR 0091).
+const WHOLE_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Kinds whose bytes are text the reader shows as they are.
 const TEXT_KINDS: &[&str] = &["markdown", "text", "web", "data", "code"];
@@ -536,7 +538,8 @@ pub(crate) fn read(teams_root: &Path, requested: &Path) -> Result<FileText, ApiE
     })
 }
 
-/// The media type a picture or a recording is answered with, by its extension.
+/// The media type a picture, a recording, or the data or a font a web page loads beside it is
+/// answered with, by its extension.
 fn media_type(path: &Path) -> Option<&'static str> {
     Some(match extension(path)?.as_str() {
         "png" => "image/png",
@@ -547,23 +550,41 @@ fn media_type(path: &Path) -> Option<&'static str> {
         "bmp" => "image/bmp",
         "tif" | "tiff" => "image/tiff",
         "heic" => "image/heic",
+        // Drawn as its pages by the reader (ADR 0091), read a part at a time.
+        "pdf" => "application/pdf",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "m4a" => "audio/mp4",
         "mp4" => "video/mp4",
         "mov" => "video/quicktime",
         "webm" => "video/webm",
+        // What a web page loads beside it (ADR 0091): its data and its fonts.
+        "csv" => "text/csv; charset=utf-8",
+        "tsv" => "text/tab-separated-values; charset=utf-8",
+        "json" | "topojson" => "application/json",
+        "geojson" => "application/geo+json",
+        "txt" => "text/plain; charset=utf-8",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
         _ => return None,
     })
 }
 
-/// A picture or a recording as it is, with its media type, for the reader and for a web page's own
-/// pictures. Only those: a page, a script or a document is never answered as bytes, so nothing an
-/// agent wrote can run as this daemon's page. Blocking.
-pub(crate) fn raw(
-    teams_root: &Path,
-    requested: &Path,
-) -> Result<(&'static str, Vec<u8>), ApiError> {
+/// A file to answer as it is: where it is, its media type and its size.
+#[derive(Debug)]
+pub(crate) struct RawFile {
+    pub(crate) path: PathBuf,
+    pub(crate) media_type: &'static str,
+    pub(crate) size: u64,
+}
+
+/// A picture or a recording, to be answered as it is, for the reader and for a web page's own
+/// pictures and clips; and the data and fonts a page loads beside it. Only those: a page, a script
+/// or a document is never answered as bytes, so nothing an agent wrote can run as this daemon's
+/// page. The bytes are read by the route, all or the part a player asks for ([`wanted`]). Blocking.
+pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiError> {
     let resolved = existing(teams_root, requested)?;
     let name = resolved.file_name().map_or_else(
         || requested.display().to_string(),
@@ -572,20 +593,133 @@ pub(crate) fn raw(
     let Some(media_type) = media_type(&resolved) else {
         return Err(unreadable(
             &name,
-            "only pictures and recordings are shown as they are",
+            "only pictures, recordings and the files a page uses are shown here",
         ));
     };
-    let size = std::fs::metadata(&resolved).map_or(0, |metadata| metadata.len());
-    if size > RAW_MAX_BYTES {
+    let size = std::fs::metadata(&resolved)
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to read {name}: {error}"),
+            )
+        })?
+        .len();
+    // A recording and a PDF are read a part at a time, so any size will do.
+    let in_parts = media_type.starts_with("video/")
+        || media_type.starts_with("audio/")
+        || media_type == "application/pdf";
+    if !in_parts && size > WHOLE_MAX_BYTES {
         return Err(unreadable(&name, "it is larger than 50 MB"));
     }
-    let bytes = std::fs::read(&resolved).map_err(|error| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to read {name}: {error}"),
-        )
+    Ok(RawFile {
+        path: resolved,
+        media_type,
+        size,
+    })
+}
+
+/// A slide deck or a Word document as its pages (ADR 0091): the PDF `LibreOffice` makes of it,
+/// answered as [`raw`] answers a PDF. Blocking: the first time, it waits for `LibreOffice`.
+pub(crate) fn pages(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiError> {
+    let resolved = existing(teams_root, requested)?;
+    let name = resolved.file_name().map_or_else(
+        || requested.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    if !crate::office::has_pages(&resolved) {
+        return Err(unreadable(
+            &name,
+            "only slides and documents are shown here as their pages",
+        ));
+    }
+    let shown = if crate::office::is_slides(&resolved) {
+        "slides"
+    } else {
+        "pages"
+    };
+    let path = crate::office::pages(&resolved).map_err(|why| match why {
+        crate::office::NoPages::NoOffice => ApiError::new(
+            StatusCode::NOT_FOUND,
+            format!(
+                "{name} can be shown as {shown} only when LibreOffice is on this computer. Open it \
+                 in its own app instead."
+            ),
+        ),
+        crate::office::NoPages::TooSlow => ApiError::new(
+            StatusCode::GATEWAY_TIMEOUT,
+            format!("{name} took too long to show as {shown}. Open it in its own app instead."),
+        ),
+        crate::office::NoPages::Failed => unreadable(&name, "LibreOffice couldn't open it"),
     })?;
-    Ok((media_type, bytes))
+    let size = std::fs::metadata(&path)
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to read the pages of {name}: {error}"),
+            )
+        })?
+        .len();
+    Ok(RawFile {
+        path,
+        media_type: "application/pdf",
+        size,
+    })
+}
+
+/// Which bytes of a file of `size` bytes a `Range` header asks for (RFC 9110 §14.1.2). A player
+/// asks for a recording a part at a time, and Safari plays nothing it can't ask for so.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Wanted {
+    /// The whole file: no header, several ranges at once, or one written in a way not read here.
+    Whole,
+    /// Bytes `start` to `end`, both included.
+    Part { start: u64, end: u64 },
+    /// A range wholly past the end.
+    Unsatisfiable,
+}
+
+pub(crate) fn wanted(header: Option<&str>, size: u64) -> Wanted {
+    let Some(spec) = header.and_then(|value| value.trim().strip_prefix("bytes=")) else {
+        return Wanted::Whole;
+    };
+    if spec.contains(',') {
+        return Wanted::Whole;
+    }
+    let Some((first, last)) = spec.split_once('-') else {
+        return Wanted::Whole;
+    };
+    let (first, last) = (first.trim(), last.trim());
+    if first.is_empty() {
+        // The last `n` bytes.
+        let Ok(n) = last.parse::<u64>() else {
+            return Wanted::Whole;
+        };
+        if n == 0 || size == 0 {
+            return Wanted::Unsatisfiable;
+        }
+        return Wanted::Part {
+            start: size.saturating_sub(n),
+            end: size - 1,
+        };
+    }
+    let Ok(start) = first.parse::<u64>() else {
+        return Wanted::Whole;
+    };
+    if start >= size {
+        return Wanted::Unsatisfiable;
+    }
+    let end = if last.is_empty() {
+        size - 1
+    } else {
+        let Ok(end) = last.parse::<u64>() else {
+            return Wanted::Whole;
+        };
+        if end < start {
+            return Wanted::Whole;
+        }
+        end.min(size - 1)
+    };
+    Wanted::Part { start, end }
 }
 
 /// Open the file with its default app, or show it in its folder.
@@ -713,10 +847,20 @@ mod tests {
         let workspace = root.0.join(".loomwatch/team/writer");
         let picture = workspace.join("chart.svg");
         std::fs::write(&picture, "<svg/>").expect("write picture");
-        let (media_type, bytes) = raw(&root.0, &picture).expect("raw picture");
-        assert_eq!(media_type, "image/svg+xml");
-        assert_eq!(bytes, b"<svg/>");
-        for name in ["page.html", "app.js", "report.md"] {
+        let file = raw(&root.0, &picture).expect("raw picture");
+        assert_eq!(file.media_type, "image/svg+xml");
+        assert_eq!(file.size, 6);
+        assert_eq!(
+            file.path.file_name().and_then(|name| name.to_str()),
+            Some("chart.svg")
+        );
+        for name in [
+            "page.html",
+            "app.js",
+            "report.md",
+            "letter.docx",
+            "notes.xml",
+        ] {
             let file = workspace.join(name);
             std::fs::write(&file, "x").expect("write file");
             assert_eq!(
@@ -724,6 +868,106 @@ mod tests {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "{name}"
             );
+        }
+    }
+
+    /// **A page's data and fonts are answered as they are (ADR 0091).** A dashboard loads the sheet
+    /// beside it, whole, with the type a browser expects; past 50 MB it is refused, as a picture is.
+    #[test]
+    fn answers_the_data_and_fonts_a_page_loads_beside_it() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        for (name, expected) in [
+            ("sales.csv", "text/csv; charset=utf-8"),
+            ("sales.tsv", "text/tab-separated-values; charset=utf-8"),
+            ("sales.json", "application/json"),
+            ("map.geojson", "application/geo+json"),
+            ("words.txt", "text/plain; charset=utf-8"),
+            ("brand.woff2", "font/woff2"),
+            ("brand.ttf", "font/ttf"),
+        ] {
+            let path = workspace.join(name);
+            std::fs::write(&path, "a,b\n1,2\n").expect("write data");
+            assert_eq!(raw(&root.0, &path).expect(name).media_type, expected);
+        }
+        let big = workspace.join("huge.csv");
+        std::fs::File::create(&big)
+            .and_then(|file| file.set_len(60 * 1024 * 1024))
+            .expect("a large file");
+        assert_eq!(
+            raw(&root.0, &big).unwrap_err().status,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+
+    /// **A recording of any size is answered; a picture past 50 MB is not (ADR 0091).** A page
+    /// takes a picture in whole, but a player asks for a recording a part at a time.
+    #[test]
+    fn answers_a_recording_of_any_size_and_keeps_the_limit_for_pictures() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        let big = 60 * 1024 * 1024;
+        for (name, answered) in [
+            ("talk.mp4", true),
+            ("song.mp3", true),
+            ("report.pdf", true),
+            ("huge.png", false),
+        ] {
+            let path = workspace.join(name);
+            std::fs::File::create(&path)
+                .and_then(|file| file.set_len(big))
+                .expect("a large file");
+            match raw(&root.0, &path) {
+                Ok(file) => {
+                    assert!(answered, "{name} answered");
+                    assert_eq!(file.size, big);
+                }
+                Err(error) => {
+                    assert!(!answered, "{name} refused: {}", error.message);
+                    assert!(
+                        error.message.contains("larger than 50 MB"),
+                        "{}",
+                        error.message
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reads_which_bytes_a_player_asks_for() {
+        assert_eq!(wanted(None, 100), Wanted::Whole);
+        assert_eq!(
+            wanted(Some("bytes=10-19"), 100),
+            Wanted::Part { start: 10, end: 19 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=90-"), 100),
+            Wanted::Part { start: 90, end: 99 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=95-1000"), 100),
+            Wanted::Part { start: 95, end: 99 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=-5"), 100),
+            Wanted::Part { start: 95, end: 99 }
+        );
+        assert_eq!(
+            wanted(Some("bytes=-500"), 100),
+            Wanted::Part { start: 0, end: 99 }
+        );
+        assert_eq!(wanted(Some("bytes=100-"), 100), Wanted::Unsatisfiable);
+        assert_eq!(wanted(Some("bytes=-0"), 100), Wanted::Unsatisfiable);
+        assert_eq!(wanted(Some("bytes=0-"), 0), Wanted::Unsatisfiable);
+        for whole in [
+            "bytes=1-2,5-6",
+            "items=0-9",
+            "bytes=x-9",
+            "bytes=9-3",
+            "bytes=5",
+        ] {
+            assert_eq!(wanted(Some(whole), 100), Wanted::Whole, "{whole}");
         }
     }
 

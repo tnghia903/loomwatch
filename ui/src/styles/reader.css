@@ -34,7 +34,10 @@
 .rd-note { flex: none; margin: 0; padding: 8px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-accent-tint); font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
 
 /* ---------- The page ---------- */
-.rd-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+/* Clipped, not hidden: a box that hides what overflows can still be scrolled, and the browser
+   scrolls it to show a page taken focus that is taller than the view, leaving the view empty. */
+.rd-stage { position: relative; flex: 1; min-height: 0; overflow: clip; }
+@supports not (overflow: clip) { .rd-stage { overflow: hidden; } }
 .rd-scroll { position: absolute; inset: 0; overflow: auto; }
 .rd .rd-scroll.tc-document { overflow: auto; }
 /* The workspace turns text selection off; the reader is for marking words, so its page turns it on. */
@@ -54,7 +57,7 @@
 .rd-lines .rd-line:hover::before { opacity: 1; color: var(--color-accent); }
 
 /* A table as a sheet: its header stays as you scroll, numbers sit right, rows are counted. */
-.tc-document .tc-document-page.rd-as-table { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
+.tc-document .tc-document-page:is(.rd-as-table, .rd-as-sheet) { max-width: none; width: max-content; min-width: 100%; box-sizing: border-box; padding: 16px 16px 96px; }
 .rd-table-wrap { max-width: 100%; overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--color-hairline); border-radius: 10px; background: var(--color-panel-solid); }
 .rd-as-table .rd-table-wrap { overflow: visible; max-width: none; }
 .rd-table { min-width: 100%; border-collapse: separate; border-spacing: 0; counter-reset: row; font: 13px/1.45 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--color-ink); }
@@ -84,6 +87,158 @@
   background: repeating-conic-gradient(color-mix(in srgb, var(--color-ink) 5%, transparent) 0 25%, transparent 0 50%) 0 0 / 18px 18px; }
 .rd-picture img { max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 4px color-mix(in srgb, var(--lw-ink-950) 8%, transparent), 0 16px 40px color-mix(in srgb, var(--lw-ink-950) 14%, transparent); }
 .rd-media { display: block; width: calc(100% - 48px); max-width: 720px; margin: 40px auto; }
+
+/* ---------- A part of a recording (ADR 0091, MediaView.tsx) ----------
+   Under the recording, its bar: a press marks a moment, a drag along it a span. Each part asked
+   about is a mark on the bar (a tick, a bar, or a full-height mark for a box on a frame) with its
+   agents' bubbles above it. On a paused video a drag over the picture marks a box on that frame,
+   drawn as a picture's box is; the bottom of the picture is left to the player's own controls. */
+.rd-as-media { user-select: none; -webkit-user-select: none; }
+.rd-media-view { box-sizing: border-box; width: calc(100% - 48px); max-width: 720px; margin: 32px auto 96px; }
+.rd-media-view .rd-media { width: 100%; margin: 0; }
+.rd-media-frame { position: relative; line-height: 0; }
+/* The whole frame, where boxes are placed; only its catch above the controls takes the pointer. A
+   finger scrolls rather than draws, as on a picture. */
+.rd-media-drawing { position: absolute; inset: 0; pointer-events: none; isolation: isolate; }
+.rd-media-catch { position: absolute; top: 0; left: 0; right: 0; cursor: crosshair; pointer-events: auto; touch-action: manipulation; }
+/* Safari puts a video's mute and volume at its top right: that corner is left to them as well. */
+.rd-media-catch { clip-path: polygon(0 0, calc(100% - 200px) 0, calc(100% - 200px) 48px, 100% 48px, 100% 100%, 0 100%); }
+.rd-media-line { position: relative; height: 28px; margin-top: 32px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--color-ink) 6%, transparent); box-shadow: inset 0 0 0 1px var(--color-warp); isolation: isolate; }
+.rd-media-line.askable { cursor: pointer; touch-action: pan-y; }
+.rd-media-line.askable:hover { background: color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.rd-media-line.askable:active { background: color-mix(in srgb, var(--color-ink) 14%, transparent); }
+.rd-media-line:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-media-now { position: absolute; top: 3px; bottom: 3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--color-ink-3); pointer-events: none; }
+/* The agent asked, at the bar's start until a part of the recording has been asked about. */
+.rd-media-face { position: absolute; top: 50%; left: 6px; translate: 0 -50%; line-height: 0; pointer-events: none; }
+/* Where a press would mark, with its time above it. */
+.rd-media-hover { position: absolute; top: 3px; bottom: 3px; width: 1px; margin-left: -0.5px; background: var(--color-ink-2); pointer-events: none; }
+.rd-media-hover > span { position: absolute; bottom: calc(100% + 7px); left: 50%; translate: -50% 0; font: 400 11px/15px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-ink-2); white-space: nowrap; }
+.rd-box.rd-moment { --rd-rim: 0 0 transparent; top: 6px; bottom: 6px; min-width: 4px; min-height: 0; margin-left: -2px; border-color: var(--color-accent); border-radius: var(--r-xs); cursor: pointer; }
+/* A box on a frame stands the bar's full height: neither a span's bar nor a moment's tick. */
+.rd-box.rd-moment.frame { top: 2px; bottom: 2px; width: 12px; margin-left: -6px; }
+/* A finger's worth to press around a thin mark. */
+.rd-box.rd-moment[data-part]::after { content: ''; position: absolute; inset: -6px -8px; }
+.rd-box.rd-moment:is(.marking, .drawing) { pointer-events: none; }
+/* Above its mark, clear of the bar and of the player's controls; MediaView moves bubbles that
+   would cover one another to rows under the bar, and keeps them inside its ends. */
+.rd-box.rd-moment > .rd-slot { top: -28px; right: auto; left: 50%; translate: -50% 0; }
+/* The bubble sits over its mark: there are no words for its point to lean to. */
+.rd-box.rd-moment .rd-bubble-point { display: none; }
+@media (pointer: coarse) {
+  .rd-media-line { height: 44px; }
+  .rd-box.rd-moment { top: 10px; bottom: 10px; }
+  .rd-box.rd-moment.frame { top: 4px; bottom: 4px; }
+}
+
+/* ---------- A PDF drawn as its pages (ADR 0091, PdfView.tsx) ----------
+   Each page is paper on the reader's ground, drawn on a canvas, with its words laid over it where
+   they are: PDF.js's text layer, whose rules are copied here (pdfjs-dist web/pdf_viewer.css
+   .textLayer) and kept off the reader's own marks and slots inside its words. A drag where there are
+   no words draws a box, as on a picture. */
+.rd-as-pdf { box-sizing: border-box; padding: 24px 24px 96px; }
+.rd-pdf { display: grid; gap: 40px; max-width: 900px; margin: 0 auto; }
+/* White before it is drawn, as PDF.js draws it, in either theme. */
+.rd-pdf-page { position: relative; isolation: isolate; width: 100%; border-radius: var(--r-xs); background: var(--color-white); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-black) 12%, transparent), 0 12px 32px color-mix(in srgb, var(--color-black) 14%, transparent); --scale-round-x: 1px; --scale-round-y: 1px; }
+.rd-pdf-page.askable { cursor: crosshair; touch-action: manipulation; }
+.rd-pdf-page > canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
+.rd-pdf-text {
+  position: absolute; inset: 0; overflow: clip; z-index: 1; line-height: 1; text-align: initial; letter-spacing: normal; word-spacing: normal;
+  -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0;
+  --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.rd-pdf-text :is(span, br):not(.rd-mark, .rd-slot, .rd-slot *) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0% 0%; -webkit-user-select: text; user-select: text; }
+.rd-pdf-text > :not(.markedContent, .rd-slot), .rd-pdf-text .markedContent span:not(.markedContent, .rd-mark, .rd-slot, .rd-slot *) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.rd-pdf-text .markedContent { display: contents; }
+.rd-pdf-text ::selection { background: color-mix(in srgb, var(--color-marker-deep) 42%, transparent); color: transparent; }
+.rd-pdf-text br::selection { background: transparent; }
+.rd-pdf-text .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; -webkit-user-select: none; user-select: none; }
+.rd-pdf-text.selecting .endOfContent { top: 0; }
+/* The boxes on a page are above its words, and the bubbles after words marked on it above both, in
+   a layer of their own (placeSlotOnPage). A press goes through a box to the words under it; only
+   its bubbles are pressed (PdfView finds a box clicked by where it is). */
+.rd-pdf-page > .rd-box { z-index: 2; pointer-events: none; }
+.rd-pdf-page > .rd-box > .rd-slot { pointer-events: auto; }
+.rd-pdf-slots { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.rd-pdf-row { position: absolute; display: flex; align-items: center; gap: 4px; margin-left: 6px; translate: 0 -50%; }
+.rd-pdf-row > .rd-slot { margin: 0; translate: none; pointer-events: auto; }
+/* Away from the words it follows, a bubble is a pin in the margin: its point would point at others. */
+.rd-pdf-row.apart .rd-bubble-point { display: none; }
+/* The words lie over what the page draws, so the marker's stroke over them is blended as a
+   highlighter's ink is: the paper takes the tint and the drawn words stay black. */
+.rd-pdf-text { mix-blend-mode: multiply; }
+/* On paper, a box lit or asked about keeps its ring without the dark keyline a picture needs. */
+.rd-pdf-page > .rd-box:is(.lit, .asking) { box-shadow: var(--rd-rim); }
+/* Gold on the paper is the paper's own gold, as the page is light in either theme. */
+.rd-pdf-page > :is(.rd-pdf-text, .rd-box, .rd-pdf-slots) { --color-accent: var(--color-bubble-light-gold); }
+/* A page with a picture or a chart, as a button for the keyboard: ringed when it has focus. */
+.rd-pdf-target { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.rd-pdf-target:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+.rd-pdf-number { position: absolute; top: calc(100% + 6px); left: 0; right: 0; font-size: 12px; line-height: 16px; text-align: center; color: var(--color-ink-3); font-variant-numeric: tabular-nums; pointer-events: none; -webkit-user-select: none; user-select: none; }
+
+/* ---------- A part of a picture: a box (ADR 0091, PictureView.tsx) ----------
+   Dragged over the picture, or the whole of it for a click. Drawn as the marker draws words: a gold
+   tint edged in the marker's deeper gold, with a thin dark and light rim so it shows on any picture;
+   the agents' bubbles sit at its top right corner. The one marked now and the one being dragged are
+   dashed: nothing is asked yet. The part open or pointed at is told by a line round it, not by more
+   gold; the one in the message box by a dashed line, as it is not sent yet. The tint stays light: the
+   picture under it is what is being read. A smaller box sits over a larger one (PictureView). */
+.rd-as-picture { display: grid; min-height: 100%; user-select: none; -webkit-user-select: none; }
+.rd-picture-frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; border-radius: 6px; isolation: isolate; }
+.rd-picture-frame.askable { cursor: crosshair; touch-action: manipulation; }
+.rd-picture-target { display: block; border-radius: 6px; }
+.rd-picture-target:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+.rd-box {
+  --rd-a: 12%;
+  --rd-rim: 0 0 0 1px color-mix(in srgb, var(--color-black) 50%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--color-white) 40%, transparent);
+  position: absolute; box-sizing: border-box; min-width: 4px; min-height: 4px; border: 2px solid var(--color-marker-deep); border-radius: 4px;
+  background: color-mix(in srgb, var(--color-marker) var(--rd-a), transparent);
+  box-shadow: var(--rd-rim);
+}
+.rd-box.whole { border-radius: 6px; }
+.rd-box:is(.read, .failed) { --rd-a: 5%; }
+/* A dark keyline on the far side of the ring, so it shows on a light picture as on a dark one. */
+.rd-box:is(.lit, .asking) { outline: 2px solid var(--color-accent); outline-offset: 1px; box-shadow: var(--rd-rim), 0 0 0 4px color-mix(in srgb, var(--color-black) 40%, transparent); }
+.rd-box.asking:not(.lit) { outline-style: dashed; }
+.rd-box:is(.marking, .drawing) { --rd-a: 14%; border-style: dashed; border-color: var(--color-accent); pointer-events: none; }
+.rd-box > .rd-slot { position: absolute; z-index: 1; top: -11px; right: -11px; width: max-content; margin: 0; translate: none; }
+/* ---------- Cells of a sheet (ADR 0091, SheetView.tsx) ----------
+   A CSV or TSV file, or a workbook's sheets behind tabs, as a spreadsheet shows it: the first row
+   as the column names, the rows numbered. Cells are marked by dragging across them (no text
+   selection), a column by its name, a row by its number; a range is drawn as a box is, over its
+   cells, which stay reachable under it; the sticky column names pass over both. Words in a sheet are
+   selected only while it can't be asked about: then ⌘C copies the marked cells (SheetView). */
+.rd-as-sheet .rd-table-wrap { overflow: visible; max-width: none; }
+.rd-grid { position: relative; isolation: isolate; }
+.rd-grid.askable { user-select: none; -webkit-user-select: none; }
+.rd-grid .rd-table thead th { z-index: 3; }
+.rd-grid.askable td { cursor: cell; }
+.rd-table .rd-row-name { width: 1%; padding: 7px 8px; background: var(--color-panel); color: var(--color-ink-3); font: 11px/1.7 var(--font-mono); text-align: right; }
+/* A column's name and a row's number are buttons: a press marks the whole column or row. */
+.rd-line-name { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; font: inherit; color: inherit; text-align: inherit; border-radius: 3px; }
+.rd-line-name:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.rd-sheet-bar { flex: none; padding: 8px 16px 0; }
+.rd-sheet-bar .rd-sheet-tabs { flex-wrap: wrap; }
+/* A sheet holding cells asked about: a small box after its name, the range's own shape. */
+.rd-sheet-asked { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border: 1.5px solid var(--color-accent); border-radius: 2px; background: color-mix(in srgb, var(--color-marker) 30%, transparent); vertical-align: 0; }
+/* On a sheet the range's edge is the accent line alone: the rim was for any picture under a box. */
+.rd-box.rd-range { --rd-rim: 0 0 transparent; border-radius: 3px; border-color: var(--color-accent); pointer-events: none; }
+.rd-box.rd-range.corner { border-bottom-right-radius: 10px; }
+/* Beside the range's top row, not over its cells: a bubble at the corner would cover a number. */
+.rd-box.rd-range > .rd-slot { top: 1px; right: auto; left: calc(100% + 8px); pointer-events: auto; }
+@media (pointer: coarse) {
+  .rd-sheet-tabs button { min-height: 44px; }
+  .rd-grid.askable thead th, .rd-grid.askable .rd-row-name { min-width: 44px; height: 44px; }
+}
+
+/* The tip's mark on a picture is the box the drag draws, still. */
+.rd-hint mark.box { padding: 0 3px; border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-marker) 14%, transparent); }
+/* The mark at a thing's corner in a web page (pageFrame.ts .lw-thing-mark), drawn small in its tip:
+   the asked agent's face in a dashed chip. */
+.rd-hint-thing { display: inline-grid; place-items: center; box-sizing: border-box; width: 20px; height: 20px; margin: 0 2px; border: 1.5px dashed var(--color-accent); border-radius: 6px; vertical-align: -5px; line-height: 0; }
 
 /* ---------- The parts asked about: a marker stroke on the words, the agent's bubble after them ----------
    lib/files/partMarks.ts wraps each part's words in .rd-mark and leaves a .rd-slot after the last
@@ -134,6 +289,7 @@
 .rd-bubble-point-edge { fill: none; stroke: var(--rd-b-edge); stroke-width: 1px; stroke-linejoin: round; stroke-linecap: round; }
 .rd-bubble:is(.read, .failed) { padding-right: 2px; }
 .rd-bubble:hover, .rd-bubble:focus-visible, .rd-bubble.lit { scale: 1.08; }
+.rd-bubble:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 /* Several agents asked about the same words: their bubbles stack, each over the one before, and
    only the first points at the words. The one pointed at comes up over the rest, with its agent's
    card (FileReader); the one whose answer is open stays above the others. Inside the stack each
@@ -175,6 +331,8 @@
 }
 .rd-ask::after { content: ''; position: absolute; left: 50%; bottom: -4px; width: 10px; height: 10px; border-radius: 2px; background: inherit; transform: translateX(-50%) rotate(45deg); }
 .rd-ask.below::after { top: -4px; bottom: auto; }
+/* Over a PDF's page, which is white paper in either theme, it is drawn as on a light page. */
+.rd-ask.on-paper { --color-ink: var(--color-bubble-light-ink); --color-ground: var(--color-white); }
 .rd-ask button { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 7px; height: 32px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: 600 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: background-color var(--t-quick) var(--ease-out); }
 .rd-ask button:hover, .rd-ask button:focus-visible { background: color-mix(in srgb, var(--color-ground) 16%, transparent); }
 .rd-ask button:focus-visible { outline: 2px solid var(--lw-gold-400); outline-offset: 1px; }
@@ -309,7 +467,7 @@
 .agent-file .rd { position: relative; inset: auto; flex: 1; min-height: 0; margin-top: var(--sp-3); border-top: 1px solid var(--color-hairline); background: transparent; }
 .agent-file .rd .rd-scroll.tc-document { position: absolute; inset: 0; flex: none; }
 .agent-file .rd .tc-document .tc-document-page { padding: 28px var(--sp-5) 96px; }
-.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table) { padding: 16px 16px 96px; }
+.agent-file .rd .tc-document .tc-document-page:is(.rd-as-code, .rd-as-text, .rd-as-table, .rd-as-sheet) { padding: 16px 16px 96px; }
 
 @container details (max-width: 560px) {
   .rd-bar { padding-left: 14px; }
@@ -333,7 +491,7 @@
   .rd-answer { animation: rd-answer-in var(--t-move) var(--ease-out) both; }
   .rd-answer.above { animation-name: rd-answer-in-above; }
   .rd-hint { animation: rd-hint-in 420ms var(--ease-out) 600ms both; }
-  .rd-hint mark { animation: rd-mark-sweep 2.8s var(--ease-out) 900ms infinite; }
+  .rd-hint mark:not(.box) { animation: rd-mark-sweep 2.8s var(--ease-out) 900ms infinite; }
 }
 @keyframes rd-stitch { from { opacity: 1; transform: scaleX(0); } 65% { opacity: 1; transform: scaleX(1); } to { opacity: 0; transform: scaleX(1); } }
 @keyframes rd-ask-in { from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(.84); } }

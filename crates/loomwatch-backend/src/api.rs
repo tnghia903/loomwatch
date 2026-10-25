@@ -216,6 +216,7 @@ pub fn router_with_archive(
         // ADR 0077: a file read inside LoomWatch, to ask about a part of it.
         .route("/api/files/read", get(get_file_read))
         .route("/api/files/raw", get(get_file_raw))
+        .route("/api/files/pages", get(get_file_pages))
         .route("/api/jobs", get(get_jobs))
         .route(
             "/api/jobs/{id}",
@@ -408,32 +409,128 @@ async fn get_file_read(
         .map(Json)
 }
 
-/// A produced picture or recording as it is (ADR 0077). Answered sandboxed: opened on its own, an
-/// SVG's scripts would otherwise run as this daemon's page.
+/// A produced picture or recording as it is (ADR 0077), all of it or the part a player asks for
+/// with `Range` (ADR 0091), read from disk as it goes, so a recording of any size plays and seeks,
+/// in Safari too. Answered sandboxed: opened on its own, an SVG's scripts would otherwise run as
+/// this daemon's page.
 async fn get_file_raw(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(query): Query<TeamPath>,
 ) -> Result<Response, ApiError> {
     let teams_root = state.teams_root.clone();
-    let (media_type, bytes) =
-        tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
-            .await
-            .map_err(|error| {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
-            })??;
-    Ok((
+    let file = tokio::task::spawn_blocking(move || crate::files::raw(&teams_root, &query.path))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
+    file_answer(file, &headers).await
+}
+
+/// A slide deck or a Word document as its pages (ADR 0091): the PDF `LibreOffice` makes of it,
+/// answered as `raw` answers a PDF. The first time, it waits for `LibreOffice`; after, until the
+/// file changes, the PDF is kept.
+async fn get_file_pages(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Query(query): Query<TeamPath>,
+) -> Result<Response, ApiError> {
+    let teams_root = state.teams_root.clone();
+    let file = tokio::task::spawn_blocking(move || crate::files::pages(&teams_root, &query.path))
+        .await
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))??;
+    file_answer(file, &headers).await
+}
+
+/// A file answered as it is, all of it or the part a player asks for with `Range`.
+async fn file_answer(
+    file: crate::files::RawFile,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
+    use crate::files::Wanted;
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok());
+    let wanted = crate::files::wanted(range, file.size);
+    let (status, start, length, content_range) = match wanted {
+        Wanted::Whole => (StatusCode::OK, 0, file.size, None),
+        Wanted::Part { start, end } => (
+            StatusCode::PARTIAL_CONTENT,
+            start,
+            end - start + 1,
+            Some(format!("bytes {start}-{end}/{}", file.size)),
+        ),
+        Wanted::Unsatisfiable => (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            0,
+            0,
+            Some(format!("bytes */{}", file.size)),
+        ),
+    };
+    let body = if length == 0 {
+        axum::body::Body::empty()
+    } else {
+        file_body(&file.path, start, length).await?
+    };
+    let mut response = (
+        status,
         [
-            (header::CONTENT_TYPE, media_type),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_TYPE, file.media_type.to_owned()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
             (
                 header::CONTENT_SECURITY_POLICY,
-                "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+                "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'".to_owned(),
             ),
-            (header::CACHE_CONTROL, "no-store"),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+            (header::ACCEPT_RANGES, "bytes".to_owned()),
+            (header::CONTENT_LENGTH, length.to_string()),
         ],
-        bytes,
+        body,
     )
-        .into_response())
+        .into_response();
+    if let Some(content_range) = content_range
+        && let Ok(value) = content_range.parse()
+    {
+        response.headers_mut().insert(header::CONTENT_RANGE, value);
+    }
+    // The reader draws a PDF itself; a browser sent to it saves it rather than show it as a page
+    // of this daemon, where its own viewer would read whatever the agent put in it.
+    if file.media_type == "application/pdf" {
+        response.headers_mut().insert(
+            header::CONTENT_DISPOSITION,
+            header::HeaderValue::from_static("attachment"),
+        );
+    }
+    Ok(response)
+}
+
+/// `length` bytes of the file at `path` from byte `start`, read as they are sent, a piece at a time.
+async fn file_body(path: &Path, start: u64, length: u64) -> Result<axum::body::Body, ApiError> {
+    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+    let failed = |error: io::Error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read it: {error}"),
+        )
+    };
+    let mut file = tokio::fs::File::open(path).await.map_err(failed)?;
+    if start > 0 {
+        file.seek(io::SeekFrom::Start(start))
+            .await
+            .map_err(failed)?;
+    }
+    // After a read fails, the stream ends: the player asks again for what it still needs.
+    let pieces = futures_util::stream::unfold(Some(file.take(length)), |reader| async move {
+        let mut reader = reader?;
+        let mut piece = vec![0; 64 * 1024];
+        match reader.read(&mut piece).await {
+            Ok(0) => None,
+            Ok(read) => {
+                piece.truncate(read);
+                Some((Ok::<_, io::Error>(piece), Some(reader)))
+            }
+            Err(error) => Some((Err(error), None)),
+        }
+    });
+    Ok(axum::body::Body::from_stream(pieces))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2059,6 +2156,150 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// **A PDF is answered for the reader to draw, and for a browser to save (ADR 0091).** Sent to it
+    /// directly, a browser saves it rather than show it as a page of this daemon.
+    #[tokio::test]
+    async fn raw_answers_a_pdf_to_be_saved_never_shown_as_a_page_here() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(workspace.join("report.pdf"), b"%PDF-1.7\n").expect("write pdf");
+        fs::write(workspace.join("talk.mp4"), b"mp4").expect("write recording");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let ask = |name: &str| {
+            let request = Request::builder()
+                .uri(format!(
+                    "/api/files/raw?path={}",
+                    canonical
+                        .join(".loomwatch/team/writer")
+                        .join(name)
+                        .display()
+                ))
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request");
+            test_router(&root.0).oneshot(request)
+        };
+        let pdf = ask("report.pdf").await.expect("response");
+        assert_eq!(pdf.status(), StatusCode::OK);
+        assert_eq!(pdf.headers()[header::CONTENT_TYPE], "application/pdf");
+        assert_eq!(pdf.headers()[header::CONTENT_DISPOSITION], "attachment");
+        assert_eq!(pdf.headers()[header::ACCEPT_RANGES], "bytes");
+        let clip = ask("talk.mp4").await.expect("response");
+        assert!(clip.headers().get(header::CONTENT_DISPOSITION).is_none());
+    }
+
+    /// **A deck or a Word document is answered as its pages (ADR 0091),** the PDF `LibreOffice`
+    /// made of it, as a PDF is: to be saved, a part at a time. Other files are not.
+    #[tokio::test]
+    async fn pages_answers_a_deck_as_the_pdf_of_its_pages() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(workspace.join("deck.pptx"), b"slides").expect("write deck");
+        fs::write(workspace.join("report.pdf"), b"%PDF-1.7\n").expect("write pdf");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let deck = canonical.join(".loomwatch/team/writer/deck.pptx");
+        // Laid out before: kept, so LibreOffice isn't run here.
+        let kept = crate::office::kept_for(&deck);
+        fs::create_dir_all(kept.parent().expect("a folder")).expect("create the pages folder");
+        fs::write(&kept, b"%PDF-1.7 the slides").expect("write the pages");
+        let ask = |path: &Path, range: Option<&str>| {
+            let mut request = Request::builder()
+                .uri(format!("/api/files/pages?path={}", path.display()))
+                .header(header::HOST, "localhost");
+            if let Some(range) = range {
+                request = request.header(header::RANGE, range);
+            }
+            test_router(&root.0).oneshot(request.body(Body::empty()).expect("request"))
+        };
+        let pages = ask(&deck, None).await.expect("response");
+        assert_eq!(pages.status(), StatusCode::OK);
+        assert_eq!(pages.headers()[header::CONTENT_TYPE], "application/pdf");
+        assert_eq!(pages.headers()[header::CONTENT_DISPOSITION], "attachment");
+        let body = pages.into_body().collect().await.expect("body").to_bytes();
+        assert_eq!(&body[..], b"%PDF-1.7 the slides");
+        let part = ask(&deck, Some("bytes=0-7")).await.expect("response");
+        assert_eq!(part.status(), StatusCode::PARTIAL_CONTENT);
+        // A file that isn't a deck or a document is refused before LibreOffice is looked for.
+        let pdf = ask(&canonical.join(".loomwatch/team/writer/report.pdf"), None)
+            .await
+            .expect("response");
+        assert_eq!(pdf.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let said = pdf.into_body().collect().await.expect("body").to_bytes();
+        assert!(
+            String::from_utf8_lossy(&said).contains("only slides and documents are shown here"),
+            "{}",
+            String::from_utf8_lossy(&said)
+        );
+        let _ = fs::remove_file(&kept);
+    }
+
+    /// **A recording is answered a part at a time (ADR 0091).** Safari plays only what it can ask
+    /// for by byte range; every answer keeps the sandbox, and says the file can be asked so.
+    #[tokio::test]
+    async fn raw_answers_the_bytes_a_player_asks_for() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        let bytes: Vec<u8> = (0..200_000u32)
+            .map(|at| u8::try_from(at % 251).unwrap_or(0))
+            .collect();
+        fs::write(workspace.join("talk.mp4"), &bytes).expect("write recording");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let clip = canonical.join(".loomwatch/team/writer/talk.mp4");
+        let ask = |range: Option<&str>| {
+            let mut request = Request::builder()
+                .uri(format!("/api/files/raw?path={}", clip.display()))
+                .header(header::HOST, "localhost");
+            if let Some(range) = range {
+                request = request.header(header::RANGE, range);
+            }
+            test_router(&root.0).oneshot(request.body(Body::empty()).expect("request"))
+        };
+        let body = |response: Response| async move {
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("collect response body")
+                .to_bytes()
+                .to_vec()
+        };
+
+        let whole = ask(None).await.expect("response");
+        assert_eq!(whole.status(), StatusCode::OK);
+        assert_eq!(whole.headers()[header::CONTENT_TYPE], "video/mp4");
+        assert_eq!(whole.headers()[header::ACCEPT_RANGES], "bytes");
+        assert_eq!(whole.headers()[header::CONTENT_LENGTH], "200000");
+        assert!(
+            whole.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .expect("policy")
+                .starts_with("sandbox")
+        );
+        assert_eq!(body(whole).await, bytes, "read whole, past one piece");
+
+        let middle = ask(Some("bytes=70000-150000")).await.expect("response");
+        assert_eq!(middle.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            middle.headers()[header::CONTENT_RANGE],
+            "bytes 70000-150000/200000"
+        );
+        assert_eq!(middle.headers()[header::CONTENT_LENGTH], "80001");
+        assert_eq!(middle.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(body(middle).await, &bytes[70_000..=150_000]);
+
+        let end = ask(Some("bytes=-10")).await.expect("response");
+        assert_eq!(end.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body(end).await, &bytes[199_990..]);
+
+        let past = ask(Some("bytes=200000-")).await.expect("response");
+        assert_eq!(past.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(past.headers()[header::CONTENT_RANGE], "bytes */200000");
+        assert!(body(past).await.is_empty());
     }
 
     /// A file read inside `LoomWatch`: its text as JSON, and a picture as it is — sandboxed, so an

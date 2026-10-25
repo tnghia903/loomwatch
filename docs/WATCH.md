@@ -120,7 +120,45 @@ face in the chat does, and what you asked it. Ask about words that overlap words
 before and only the newer words keep the stroke, with the earlier bubbles beside them; an earlier
 answer then opens at the newer words and says which words it is about. A bubble opens its own
 answer, and the marked words open the one still waiting for you, or else the newest; Esc or ×
-closes it. A web page the agent made is marked the same way. Drag the edge between the
+closes it. A web page the agent made is marked the same way. It runs in a sandbox of its own, and
+the data, clips, pictures and fonts beside it load as they would from the page's folder (a
+dashboard's `fetch('sales.csv')` works; LoomWatch reads them for it): its own folder and the folders
+in it only, never anything above it. Point at a chart, a picture or a video in the page and a small
+mark shows at its top left; press it (or reach it with Tab) to ask about that thing, and the page's
+tip says so while it has one. Dragging works as the page made it, so a chart that zooms on a drag
+still does; a drag across a chart's own labels marks the chart. The agent is sent a picture of the
+thing as it is shown, when the page can draw it, and told where it is in the page's code; once
+asked, it stays outlined with the agent's bubble at its corner. On a picture (ADR 0091), drag over
+any part of it to mark a box, or click to mark all of it: the bubble leans in over the box, and the part
+goes with its picture, the box cut out of the picture, which the agent you ask sees when its model
+sees pictures. So **Explain** on a picture starts the agent's work rather than a quick answer in the
+chat. The agent is told where the box is as well, so it can open the file itself. The box stays on
+the picture with the bubble of each agent asked at its corner, and the box or its bubble opens the
+answer. A PDF is shown as its pages, and you mark its words as in any file. Drag over a picture or
+a chart on a page to mark a box there; to mark all of a page with one, press Tab until the page is
+ringed, then Enter (or tap it, on a touch screen). The agent is told the page and where the box is,
+and sent a sharp picture of the box. A PDF that can't be shown as its pages shows only its words.
+A PowerPoint deck is shown as its slides, and a Word document as its pages, in the same way when
+LibreOffice is on the computer; the first time, they can take up to two minutes to show. Without
+LibreOffice, they show only their words. A CSV or TSV file and an Excel workbook are shown as a sheet: a workbook's
+sheets behind tabs, the first row as the column names, the rows numbered. Drag across any cells to ask about them,
+or press (or drag across) column names or row numbers for whole columns or rows; from the keyboard,
+Enter on a column's name or a row's number does the same, and ⌘C copies the marked cells. The agent
+is given the cells' words under their column names and after their row names, and told which cells
+they are and on which sheet (the workbook's sheets are drawn from the words LoomWatch reads out of
+it, as the agents read them). The cells stay marked with the agent's bubble beside them; a press on
+them opens the answer, and a sheet's tab shows a small box while it holds cells asked about. The chat
+quotes cells with their rows kept ("By region · Q1, Q2 · 120, 140"). A video or a sound recording
+plays in the reader, however large, and you can skip to any point (LoomWatch sends it in pieces as
+it plays). Under it is a bar, with the agent's face at its start: click it to ask about that moment,
+or drag along it for a stretch, and the recording skips there; the arrow keys move along it and
+Enter marks where it is. On a paused video, drag over the picture to mark a box on that frame. The
+agent is told the time to the millisecond, so a cut it is asked for lands where you put it, and is
+sent the frame, a stretch's first, middle and last frames, or the box cut out of its frame (for a
+sound recording the agent gets only the time). A box or a moment always starts the agent's work, so
+it can open the file, rather than a quick answer in the chat from the words alone. Each part stays
+on the bar with the agent's bubble above it; click the bubble to open the answer and skip to that
+moment. Drag the edge between the
 chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.

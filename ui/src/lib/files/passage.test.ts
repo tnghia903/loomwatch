@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChatItem, ChatMessage, ReplyTo } from '../chat/client'
 import type { RunRecord } from '../runs/client'
-import { answerPlace, askedInChat, askedPassages, askKey, bubbleCardLine, bubblePlace, fileAsks, findPassage, pageText, partBox, partLines, partLook, partTexts, PASSAGE_MAX_CHARS, passageId, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage } from './passage'
+import { answerPlace, askedInChat, askedPassages, askKey, bubbleCardLine, bubblePlace, fileAsks, findPassage, pageText, partBox, partId, partLines, partLook, partTexts, PASSAGE_MAX_CHARS, passageId, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage } from './passage'
 
 describe('a marked part, as it is asked about', () => {
   it('keeps its lines, trims its edges and blank runs, and refuses a stray letter', () => {
@@ -24,6 +24,32 @@ describe('a marked part, as it is asked about', () => {
     expect(reply.messageId).toBe(passageId('/w/market.md', 'Sales grew'))
     expect(reply.messageId).not.toBe(passageId('/w/other.md', 'Sales grew'))
     expect(reply.messageId.length).toBeLessThan(40)
+  })
+
+  // ADR 0091: a part that isn't words is known by its place too.
+  it('keeps where a part that isn’t words is, and two boxes named alike are two parts', () => {
+    const topRight = { kind: 'box' as const, x: 5000, y: 0, w: 5000, h: 5000 }
+    const smaller = { ...topRight, w: 2500 }
+    const reply = passageReply({ path: '/w/chart.png', runId: 'run-1', from: 'writer' }, 'The top right of the picture', topRight)
+    expect(reply).toMatchObject({ kind: 'passage', file: '/w/chart.png', text: 'The top right of the picture', at: topRight })
+    expect(reply.messageId).toBe(passageId('/w/chart.png', 'The top right of the picture', topRight))
+    expect(reply.messageId).not.toBe(passageId('/w/chart.png', 'The top right of the picture', smaller))
+    expect('at' in passageReply({ path: '/w/market.md', runId: null, from: 'writer' }, 'Sales grew')).toBe(false)
+
+    expect(partId({ text: 'Sales grew' })).toBe('Sales grew')
+    expect(partId({ text: 'The top right of the picture', at: topRight })).toBe('The top right of the picture\u0001box:5000,0,5000,5000')
+    expect(partId({ text: 'x', at: { ...topRight, page: 3 } })).toBe('x\u0001box:5000,0,5000,5000@3')
+    expect(partId({ text: 'x', at: { kind: 'cells', top: 2, left: 1, bottom: 9, right: 4 } })).toBe('x\u0001cells:2,1,9,4')
+    expect(partId({ text: 'x', at: { kind: 'cells', sheet: 'Q3', top: 2, left: 1, bottom: 9, right: 4 } })).toBe('x\u0001cells:2,1,9,4@Q3')
+    expect(partId({ text: 'x', at: { kind: 'time', start: 42_000 } })).toBe('x\u0001time:42000')
+    expect(partId({ text: 'x', at: { kind: 'time', start: 42_000, end: 51_000 } })).toBe('x\u0001time:42000-51000')
+    // Two charts named alike in a page are two parts, by their paths.
+    expect(partId({ text: 'The chart', at: { kind: 'element', what: 'chart', path: 'canvas#a' } })).toBe('The chart\u0001element:chart@canvas#a')
+    expect(partId({ text: 'The chart', at: { kind: 'element', what: 'chart', path: 'canvas#b' } })).not.toBe(partId({ text: 'The chart', at: { kind: 'element', what: 'chart', path: 'canvas#a' } }))
+    expect(partId({ text: 'x', at: { ...topRight, ms: 7_000 } })).toBe('x\u0001box:5000,0,5000,5000@t7000')
+    const asked = { text: 'The top right of the picture', from: 'writer' }
+    expect(askKey({ ...asked, at: topRight })).not.toBe(askKey({ ...asked, at: smaller }))
+    expect(askKey({ text: 'Sales grew', from: 'writer' })).toBe('writer\u0000Sales grew')
   })
 })
 
@@ -61,6 +87,13 @@ describe('the parts a chat asked about', () => {
       ['Sales grew', 'researcher'],
       ['On its way', 'researcher'],
     ])
+  })
+
+  it('keeps where each part that isn’t words is', () => {
+    const at = { kind: 'box' as const, x: 0, y: 0, w: 10000, h: 10000 }
+    const found = askedPassages([{ kind: 'note', message: message('n-1', 'what is this?', { ...passage('The whole of the picture', '/w/chart.png'), at }, null) }])
+    expect(found[0]).toMatchObject({ file: '/w/chart.png', text: 'The whole of the picture', at })
+    expect('at' in askedPassages([{ kind: 'note', message: message('n-2', 'why?', passage('Sales grew'), null) }])[0]).toBe(false)
   })
 })
 
@@ -255,5 +288,10 @@ describe('where the ask bubble sits', () => {
   it('below them at the top of the view, and never past its sides', () => {
     expect(bubblePlace({ top: 110, bottom: 128, left: 52, right: 60 }, view, { top: 0, left: 0 }, size)).toEqual({ top: 38, left: 88, below: true })
     expect(bubblePlace({ top: 300, bottom: 318, left: 640, right: 650 }, view, { top: 0, left: 0 }, size).left).toBe(512)
+  })
+  it('inside the foot of the view, over a part taller than the view', () => {
+    // All of a page, from just under the top of a view 500 high to far below it.
+    expect(bubblePlace({ top: 120, bottom: 1400, left: 60, right: 640 }, { ...view, height: 500 }, { top: 0, left: 0 }, size)).toEqual({ top: 452, left: 300, below: true })
+    expect(bubblePlace({ top: 110, bottom: 128, left: 52, right: 60 }, { ...view, height: 500 }, { top: 0, left: 0 }, size).top).toBe(38)
   })
 })

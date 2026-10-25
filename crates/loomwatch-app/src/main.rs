@@ -27,6 +27,9 @@ mod progress;
 mod island;
 #[cfg(target_os = "macos")]
 mod notch_panel;
+// The editing keys of the box at the notch, in a main menu nobody sees.
+#[cfg(target_os = "macos")]
+mod edit_keys;
 // Update and restart: the app downloading the next release and putting it in its own place.
 mod update;
 

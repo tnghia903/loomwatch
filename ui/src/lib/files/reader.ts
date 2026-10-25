@@ -23,15 +23,25 @@ export interface FileText {
 }
 
 /** How the reader shows a file: what it is drawn as, not what made it. */
-export type ReaderFormat = 'markdown' | 'page' | 'table' | 'code' | 'text' | 'document' | 'picture' | 'media'
+export type ReaderFormat = 'markdown' | 'page' | 'table' | 'sheet' | 'code' | 'text' | 'pdf' | 'slides' | 'document' | 'picture' | 'media'
 
 const FORMATS: Array<[RegExp, ReaderFormat]> = [
   [/^(md|markdown|mdx)$/, 'markdown'],
   [/^html?$/, 'page'],
   [/^(csv|tsv)$/, 'table'],
+  // A workbook is drawn as its sheets, from the words the daemon reads out of it (ADR 0091).
+  [/^(xlsx|xlsm|xlsb|xls|ods)$/, 'sheet'],
   [/^(json|ya?ml|toml|xml|py|js|ts|tsx|jsx|rs|go|java|rb|sh|css|sql)$/, 'code'],
   [/^(txt|log)$/, 'text'],
-  [/^(pdf|docx|docm|xlsx|xlsm|pptx|pptm)$/, 'document'],
+  // A PDF is drawn as its pages, its words over them (ADR 0091); its words alone if it can't be.
+  [/^pdf$/, 'pdf'],
+  // A slide deck is drawn as its slides, from the PDF LibreOffice makes of it (ADR 0091); its words
+  // alone where it can't be. An old .ppt or a LibreOffice deck has no words LoomWatch reads, so
+  // without LibreOffice it would show nothing: it opens in its own app.
+  [/^(pptx|pptm)$/, 'slides'],
+  // A Word document is drawn as its pages in the same way. An old .doc, an .odt or an .rtf has no
+  // words LoomWatch reads either: it opens in its own app.
+  [/^(docx|docm)$/, 'document'],
   [/^(png|jpe?g|gif|webp|svg|bmp)$/, 'picture'],
   [/^(mp3|wav|m4a|mp4|mov|webm)$/, 'media'],
 ]
@@ -40,11 +50,6 @@ const FORMATS: Array<[RegExp, ReaderFormat]> = [
 export function readerFormat(path: string): ReaderFormat | null {
   const extension = extensionOf(path)
   return FORMATS.find(([pattern]) => pattern.test(extension))?.[1] ?? null
-}
-
-/** Whether a part of it can be marked and asked about: everything shown as words. */
-export function canMark(format: ReaderFormat): boolean {
-  return format !== 'picture' && format !== 'media'
 }
 
 async function errorMessage(response: Response): Promise<string> {
@@ -62,6 +67,11 @@ export async function readFile(path: string, signal?: AbortSignal): Promise<File
 /** Where a picture or a recording is answered as it is. */
 export function rawFileUrl(path: string): string {
   return `/api/files/raw?path=${encodeURIComponent(path)}`
+}
+
+/** Where a slide deck or a Word document is answered as the PDF of its pages (ADR 0091). */
+export function pagesFileUrl(path: string): string {
+  return `/api/files/pages?path=${encodeURIComponent(path)}`
 }
 
 /** A file to read, and who to ask about it: the agent whose work named it, in that piece of work. */
