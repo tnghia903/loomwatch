@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { PartAt } from '../../lib/chat/client'
-import { PAGE_SANDBOX, pageDocument, pageMessage, type PageMark, type PagePart } from '../../lib/files/pageFrame'
+import { PAGE_SANDBOX, pageDocument, pageFile, pageMessage, type PageMark, type PagePart } from '../../lib/files/pageFrame'
 
 export interface Marked {
   /** The marked words, or what a part that isn't words is called ("The top right of the picture"). */
@@ -34,10 +34,13 @@ interface PageFrameProps {
 /**
  * A web page an agent made, running in its own sandbox inside the reader (lib/files/pageFrame.ts).
  * What is marked in it reaches the reader through the page's script, by message, in the reader's own
- * coordinates; the parts asked about go back the same way.
+ * coordinates; the parts asked about go back the same way, and so do the files beside it that the
+ * page asks for as it runs, read inside its own folder.
  */
 export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, onEscape, onHover, cleared }: PageFrameProps) {
   const frame = useRef<HTMLIFrameElement>(null)
+  const page = useRef(path)
+  useEffect(() => { page.current = path }, [path])
   const [doc, setDoc] = useState<{ html: string; ready: string } | null>(null)
   const [ready, setReady] = useState(0)
   useEffect(() => {
@@ -67,6 +70,13 @@ export function PageFrame({ path, name, html, marks, onMarked, onParts, onOpen, 
       if (message.type === 'ready') { setReady((count) => count + 1); return }
       if (message.type === 'open') { opened.current?.(message.key); return }
       if (message.type === 'escape') { escaped.current?.(); return }
+      if (message.type === 'load') {
+        const asking = element.contentWindow
+        void pageFile(page.current, message.url).then((file) => {
+          asking?.postMessage({ lw: 'reader', type: 'loaded', id: message.id, ...file }, '*', file.body ? [file.body] : [])
+        })
+        return
+      }
       const box = element.getBoundingClientRect()
       const onScreen = (rect: Marked['rect']) => ({ top: box.top + rect.top, bottom: box.top + rect.bottom, left: box.left + rect.left, right: box.left + rect.right })
       if (message.type === 'hover') {

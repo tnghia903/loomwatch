@@ -415,9 +415,10 @@ pub(crate) struct FileText {
 /// larger, and its start is what fits.
 pub(crate) const READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 
-/// The largest picture [`raw`] answers: a page takes its pictures in whole, and so does a part of
-/// one cut out to be asked about. A recording of any size is answered, a part at a time (ADR 0091).
-const PICTURE_MAX_BYTES: u64 = 50 * 1024 * 1024;
+/// The largest picture, data or font file [`raw`] answers: a page takes them in whole, and so does
+/// a part of a picture cut out to be asked about. A recording of any size is answered, a part at a
+/// time (ADR 0091).
+const WHOLE_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Kinds whose bytes are text the reader shows as they are.
 const TEXT_KINDS: &[&str] = &["markdown", "text", "web", "data", "code"];
@@ -537,7 +538,8 @@ pub(crate) fn read(teams_root: &Path, requested: &Path) -> Result<FileText, ApiE
     })
 }
 
-/// The media type a picture or a recording is answered with, by its extension.
+/// The media type a picture, a recording, or the data or a font a web page loads beside it is
+/// answered with, by its extension.
 fn media_type(path: &Path) -> Option<&'static str> {
     Some(match extension(path)?.as_str() {
         "png" => "image/png",
@@ -554,11 +556,21 @@ fn media_type(path: &Path) -> Option<&'static str> {
         "mp4" => "video/mp4",
         "mov" => "video/quicktime",
         "webm" => "video/webm",
+        // What a web page loads beside it (ADR 0091): its data and its fonts.
+        "csv" => "text/csv; charset=utf-8",
+        "tsv" => "text/tab-separated-values; charset=utf-8",
+        "json" | "topojson" => "application/json",
+        "geojson" => "application/geo+json",
+        "txt" => "text/plain; charset=utf-8",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
         _ => return None,
     })
 }
 
-/// A picture or a recording to answer as it is: where it is, its media type and its size.
+/// A file to answer as it is: where it is, its media type and its size.
 #[derive(Debug)]
 pub(crate) struct RawFile {
     pub(crate) path: PathBuf,
@@ -567,9 +579,9 @@ pub(crate) struct RawFile {
 }
 
 /// A picture or a recording, to be answered as it is, for the reader and for a web page's own
-/// pictures. Only those: a page, a script or a document is never answered as bytes, so nothing an
-/// agent wrote can run as this daemon's page. The bytes are read by the route, all or the part a
-/// player asks for ([`wanted`]). Blocking.
+/// pictures and clips; and the data and fonts a page loads beside it. Only those: a page, a script
+/// or a document is never answered as bytes, so nothing an agent wrote can run as this daemon's
+/// page. The bytes are read by the route, all or the part a player asks for ([`wanted`]). Blocking.
 pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiError> {
     let resolved = existing(teams_root, requested)?;
     let name = resolved.file_name().map_or_else(
@@ -579,7 +591,7 @@ pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiErr
     let Some(media_type) = media_type(&resolved) else {
         return Err(unreadable(
             &name,
-            "only pictures and recordings are shown as they are",
+            "only pictures, recordings, and the data and fonts a page loads are shown as they are",
         ));
     };
     let size = std::fs::metadata(&resolved)
@@ -590,7 +602,8 @@ pub(crate) fn raw(teams_root: &Path, requested: &Path) -> Result<RawFile, ApiErr
             )
         })?
         .len();
-    if media_type.starts_with("image/") && size > PICTURE_MAX_BYTES {
+    let recording = media_type.starts_with("video/") || media_type.starts_with("audio/");
+    if !recording && size > WHOLE_MAX_BYTES {
         return Err(unreadable(&name, "it is larger than 50 MB"));
     }
     Ok(RawFile {
@@ -788,7 +801,7 @@ mod tests {
             file.path.file_name().and_then(|name| name.to_str()),
             Some("chart.svg")
         );
-        for name in ["page.html", "app.js", "report.md"] {
+        for name in ["page.html", "app.js", "report.md", "deck.pdf", "notes.xml"] {
             let file = workspace.join(name);
             std::fs::write(&file, "x").expect("write file");
             assert_eq!(
@@ -797,6 +810,35 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// **A page's data and fonts are answered as they are (ADR 0091).** A dashboard loads the sheet
+    /// beside it, whole, with the type a browser expects; past 50 MB it is refused, as a picture is.
+    #[test]
+    fn answers_the_data_and_fonts_a_page_loads_beside_it() {
+        let root = Root::new();
+        let workspace = root.0.join(".loomwatch/team/writer");
+        for (name, expected) in [
+            ("sales.csv", "text/csv; charset=utf-8"),
+            ("sales.tsv", "text/tab-separated-values; charset=utf-8"),
+            ("sales.json", "application/json"),
+            ("map.geojson", "application/geo+json"),
+            ("words.txt", "text/plain; charset=utf-8"),
+            ("brand.woff2", "font/woff2"),
+            ("brand.ttf", "font/ttf"),
+        ] {
+            let path = workspace.join(name);
+            std::fs::write(&path, "a,b\n1,2\n").expect("write data");
+            assert_eq!(raw(&root.0, &path).expect(name).media_type, expected);
+        }
+        let big = workspace.join("huge.csv");
+        std::fs::File::create(&big)
+            .and_then(|file| file.set_len(60 * 1024 * 1024))
+            .expect("a large file");
+        assert_eq!(
+            raw(&root.0, &big).unwrap_err().status,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
     }
 
     /// **A recording of any size is answered; a picture past 50 MB is not (ADR 0091).** A page
