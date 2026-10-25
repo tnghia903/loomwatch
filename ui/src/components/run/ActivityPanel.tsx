@@ -7,6 +7,7 @@ import { commandOf } from '../../lib/story/commands'
 import { mendNote, span } from '../../lib/story/weft'
 import { formatOffset, type Evidence } from '../../lib/watch/events'
 import { CrewFace } from '../chat/Reactions'
+import { Markdown } from '../ui/Markdown'
 
 function pretty(value: unknown): string {
   if (value === null || value === undefined) return '—'
@@ -99,11 +100,12 @@ export function ActivityPanel({ evidence, ownerLabel, calls, finished, onInspect
           {attempt.effect && <><dt>Effect</dt><dd>{attempt.effect}</dd></>}
         </dl>
       )}
-      {/* A message to another agent reads as what was said, before the call that carried it. */}
+      {/* A message to another agent reads as what was said, formatted as it was written, before the
+          call that carried it. */}
       {said.map(([label, text]) => (
         <div className="zone" key={label}>
           <div className="zone-head t-micro">{label}</div>
-          <p className="ent-said t-body selectable">{text}</p>
+          <div className="ent-said chat-text t-body selectable"><Markdown>{text}</Markdown></div>
         </div>
       ))}
       <details className="act-tech" open={attempt.outcome === 'unclear'} key={`tech:${evidence.id}`}>

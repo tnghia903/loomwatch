@@ -37,6 +37,14 @@ describe('runLessons', () => {
     expect(runLessons(runs.map((one) => ({ ...one, succeeded: false })), team(agents))).toEqual([])
   })
 
+  it('quotes a long question whole, Markdown and all: the line it is shown in cuts it, never a mark', () => {
+    const agents = [agent('researcher', 'Find facts.'), agent('writer', 'Write it.')]
+    const long = `Which **revenue figure** from \`q4.csv\` is the one ${'that the board will read '.repeat(5).trim()}?`
+    const asks = (id: string) => run(id, 'pipeline', ['researcher', 'writer'], [message('ask', 'writer', 'researcher', long), message('ask', 'writer', 'researcher', long)])
+    const [lesson] = runLessons([asks('a'), asks('b')], team(agents, [{ from: 'researcher', to: 'writer' }]))
+    expect(lesson.why).toContain(`such as “${long}”`)
+  })
+
   it('quotes what a later stage keeps asking an earlier one, and offers to put it in the handover', () => {
     const agents = [agent('researcher', 'Find facts.'), agent('writer', 'Write it.')]
     const runs = [

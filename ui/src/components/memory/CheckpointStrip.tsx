@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import type { Checkpoint } from '../../lib/memory/client'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /**
  * The strip on a stopped or failed run: what the work had reached, and one action.
@@ -39,15 +40,15 @@ export function CheckpointStrip({ attempt, checkpoints, names, onStart, onDismis
   const who = names.get(latest.agentId) ?? latest.agentId
   return (
     <div className="rt-strip t-meta" role="status" data-testid="checkpoint-strip">
-      <span style={{ flex: 1, minWidth: 0 }}>
+      <span style={{ flex: 1, minWidth: 0, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3, overflow: 'hidden' }}>
         <b>Run {String(attempt).padStart(2, '0')} stopped at {who}</b>
         {' · '}
         {/* A checkpoint LoomWatch put together from the run's record (a stop or a restart) has no
             "next" of its own: the new run picks up from what was done. */}
         {latest.source === 'coordinator'
-          ? <>LoomWatch kept the work up to here{plain(latest.done) ? <>: {plain(latest.done)}</> : null}. A new run carries on from it.</>
-          : <>Done: {plain(latest.done)}. Next: {plain(latest.next)}.</>}
-        {latest.blockers ? <> Blocked on: {plain(latest.blockers)}.</> : null}
+          ? <>LoomWatch kept the work up to here{plain(latest.done) ? <>: <InlineMarkdown>{plain(latest.done)}</InlineMarkdown></> : null}. A new run carries on from it.</>
+          : <>Done: <InlineMarkdown>{plain(latest.done)}</InlineMarkdown>. Next: <InlineMarkdown>{plain(latest.next)}</InlineMarkdown>.</>}
+        {latest.blockers ? <> Blocked on: <InlineMarkdown>{plain(latest.blockers)}</InlineMarkdown>.</> : null}
       </span>
       <button
         type="button"
@@ -69,8 +70,10 @@ export function CheckpointStrip({ attempt, checkpoints, names, onStart, onDismis
   )
 }
 
-/** One line of a checkpoint field, bounded — the strip is a sentence, not the record. */
+/** One line of a checkpoint field, whole and with its Markdown: the strip is a sentence, not the
+ * record, and its three lines cut it. */
 function plain(value: string): string {
   const first = value.split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? ''
-  return first.length > 140 ? `${first.slice(0, 139)}…` : first
+  // The strip's sentence ends each field itself: "Done: drafted." not "Done: drafted..".
+  return first.replace(/[.!?。]+$/, '')
 }

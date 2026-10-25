@@ -10,6 +10,7 @@ import { Markdown } from '../ui/Markdown'
 import { Sources } from '../connections/Sources'
 import { AskCardView, type CardActions } from './AskCards'
 import { AskModelPicker } from './AskModelPicker'
+import { SaidText } from '../chat/SaidText'
 
 const SUGGESTIONS: Record<AskContext['view'], string[]> = {
   home: [
@@ -172,9 +173,9 @@ export function AskPanel({ ask, view, cards, hidden = false, onHome = false }: A
         ) : (
           <ol className="ask-thread" role="log" aria-label="Conversation" aria-live="polite">
             {items.map((item) => item.kind === 'person'
-              ? <li key={item.id} className="ask-you"><p>{item.text}</p></li>
+              ? <li key={item.id} className="ask-you"><div className="ask-you-said"><SaidText text={item.text} /></div></li>
               : <Reply key={item.id} turn={item} cards={cards} />)}
-            {ask.pending && <li className="ask-you pending"><p>{ask.pending}</p></li>}
+            {ask.pending && <li className="ask-you pending"><div className="ask-you-said"><SaidText text={ask.pending} /></div></li>}
           </ol>
         )}
         {working && (

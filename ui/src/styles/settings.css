@@ -338,3 +338,6 @@
 @media (max-width: 720px) { .usage-figures { grid-template-columns: 1fr; } }
 .usage-notices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); max-width: 720px; }
 .usage-notices li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); }
+
+/* A connected tool's call, as its maker describes it: Markdown and all, two lines at most. */
+.lw-call-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; color: var(--color-ink-3); }

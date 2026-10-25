@@ -18,6 +18,7 @@ import { ByHand, type ByHandProps } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
 import { LinkedAgent } from '../canvas/LinkedAgent'
 import { withAllowed } from '../../lib/tools/allow'
+import { InlineMarkdown } from '../ui/Markdown'
 
 export interface TeamAgentsProps {
   /** The team's agents, in its order; the review step is not one of them. */
@@ -131,7 +132,7 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkfl
             return (
               <li key={job.id}>
                 <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={52} height={52} loading="lazy" decoding="async" />
-                <span><b>{job.name}</b><em>{added ? 'Already in this team' : job.does || 'One of your agents'}</em></span>
+                <span><b>{job.name}</b><em>{added ? 'Already in this team' : job.does ? <InlineMarkdown clickable={false}>{job.does}</InlineMarkdown> : 'One of your agents'}</em></span>
                 <button type="button" className="btn" onClick={() => onAdd(job)}><Plus size={13} aria-hidden="true" />{added ? 'Add again' : 'Add'}</button>
               </li>
             )

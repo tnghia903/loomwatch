@@ -4,6 +4,7 @@ import { ArrowUpCircle, ExternalLink, Unlink } from 'lucide-react'
 import { fetchJobVersions, type JobSpec, type JobVersion, type SavedJob } from '../../lib/library/jobs'
 import { changedBetween, changedHere, type AgentLinkState } from '../../lib/library/link'
 import type { AgentConfig } from '../../lib/team-file/types'
+import { InlineMarkdown } from '../ui/Markdown'
 
 export interface LinkedAgentProps {
   agent: AgentConfig
@@ -55,7 +56,7 @@ export function LinkedAgent({ agent, link, readOnly = false, onApply, onUnlink, 
       {!link.job && <p className="t-meta">It is no longer in My agents. This team keeps its copy.</p>}
       {link.behind && link.latest !== null && (
         <div className="linked-agent-update">
-          <p><b>{brings.length > 0 ? `Changed in My agents: its ${list(brings)}.` : 'Changed in My agents.'}</b>{notes.length > 0 ? ` ${notes.join(' · ')}` : ''}</p>
+          <p><b>{brings.length > 0 ? `Changed in My agents: its ${list(brings)}.` : 'Changed in My agents.'}</b>{notes.map((note, index) => <span key={index}>{index === 0 ? ' ' : ' · '}<InlineMarkdown>{note}</InlineMarkdown></span>)}</p>
           <button type="button" className="btn btn-primary" disabled={readOnly} onClick={() => link.job && onApply(link.job, pinned?.spec ?? null)}><ArrowUpCircle size={13} aria-hidden="true" />Update</button>
         </div>
       )}

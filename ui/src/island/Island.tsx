@@ -25,6 +25,7 @@ import { teamAskKey, workedFor, type TeamNow } from './teams'
 import { useIsland, type Island as IslandState } from './useIsland'
 import { useRunLimit } from './useRunLimit'
 import { ISLAND_WAITS } from './waits'
+import { InlineMarkdown } from '../components/ui/Markdown'
 
 /** Rows in the list before "N more teams in LoomWatch", as in the menu. */
 const LIST_ROWS = 5
@@ -367,8 +368,8 @@ function AskBody({ island, team, ticket, first }: { island: IslandState; team: T
     <>
       <div className="island-words">
         <small>{team.teamName}</small>
-        <p className="island-ask">{text}</p>
-        {context && <small className="island-detail">{context}</small>}
+        <p className="island-ask"><InlineMarkdown clickable={false}>{text}</InlineMarkdown></p>
+        {context && <small className="island-detail"><InlineMarkdown clickable={false}>{context}</InlineMarkdown></small>}
         {failed && <small className="island-problem" role="alert">That didn’t go through. Answer it in LoomWatch.</small>}
         {said && <small className="island-said" role="status">{said}</small>}
       </div>
@@ -426,7 +427,7 @@ function ResultBody({ island, team }: { island: IslandState; team: TeamNow }) {
     <>
       <div className="island-words">
         <small>{resultWords(team)}</small>
-        <p>{team.result}</p>
+        <p className="island-result">{team.result && <InlineMarkdown clickable={false}>{team.result}</InlineMarkdown>}</p>
       </div>
       <div className="island-acts">
         <button type="button" className="island-button" onClick={() => island.open(team)}>{resultButton(team)}</button>

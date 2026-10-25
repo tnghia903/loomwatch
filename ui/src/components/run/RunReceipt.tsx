@@ -5,8 +5,10 @@ import { figureStill, type FigureKind } from '../../lib/library/figures'
 import { isAccessory } from '../../lib/quests/catalog'
 import { RECEIPT_MARK, receiptMarkdown, type Receipt, type ReceiptOutcome, type ReceiptTokens } from '../../lib/story/receipt'
 import type { AllowSwitch } from '../../lib/team-file/types'
+import { plainWords } from '../../lib/chat/findWords'
 import { AccessoryIcon } from '../agents/AccessoryArt'
 import { LoomMark } from '../ui/glyphs'
+import { InlineMarkdown } from '../ui/Markdown'
 import type { RunEarned } from './useRunQuests'
 
 interface RunReceiptProps {
@@ -54,7 +56,8 @@ export function RunReceipt({ receipt, onInspectEvidence, onAllow, earned = [] }:
         </div>
         <hr />
         <dl className="receipt-facts">
-          <dt>Asked</dt><dd title={receipt.asked}>{receipt.asked}</dd>
+          {/* The request as the person wrote it, its Markdown shown; two lines at most. */}
+          <dt>Asked</dt><dd title={plainWords(receipt.asked)}><InlineMarkdown>{receipt.asked}</InlineMarkdown></dd>
           <dt>Team</dt><dd>{receipt.team}</dd>
           <dt>Took</dt><dd>{receipt.took}</dd>
           <dt>Ran on</dt><dd>{receipt.ranOn}</dd>

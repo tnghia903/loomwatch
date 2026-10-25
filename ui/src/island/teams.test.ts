@@ -62,9 +62,10 @@ describe('what the island shows of each team', () => {
   })
 
   it('takes the first line of an answer as its words, without the Markdown', () => {
-    expect(firstLine('\n## **Five days** in [Kyoto](https://x.test)\nmore')).toBe('Five days in Kyoto')
+    // Its own Markdown stays for the notch to show; a heading's mark goes.
+    expect(firstLine('\n## **Five days** in [Kyoto](https://x.test)\nmore')).toBe('**Five days** in [Kyoto](https://x.test)')
     expect(firstLine('---\n- one hotel')).toBe('one hotel')
-    expect(firstLine('a'.repeat(200))).toHaveLength(120)
+    expect(firstLine('a'.repeat(200))).toHaveLength(200)
     expect(firstLine(null)).toBe('')
   })
 })
@@ -76,7 +77,7 @@ describe('agents answering a message in the chat', () => {
     expect(writing).toMatchObject({ runId: 'm1', teamName: 'Trip planner', moment: 'work', agent: 'writer', agentName: 'Writer', agents: ['writer'], startedAt: iso(0), asks: [], result: null, chat: true, link: '/?path=trip.yaml&view=chat' })
     const answered = answering('m1', { answers: { waiting: [], said: [said('**Every item** keeps one number.\nMore')] }, finishedAt: iso(1) })
     const [done] = teamsNow([], at(0), none, nobody, [answered])
-    expect(done).toMatchObject({ runId: 'm1', moment: 'done', agent: 'writer', result: 'Every item keeps one number.', chat: true })
+    expect(done).toMatchObject({ runId: 'm1', moment: 'done', agent: 'writer', result: '**Every item** keeps one number.', chat: true })
     // Not news: answered before the island watched, or looked at.
     expect(teamsNow([], at(2), none, nobody, [answered])).toEqual([])
     expect(teamsNow([], 0, new Set(['m1']), nobody, [answered])).toEqual([])

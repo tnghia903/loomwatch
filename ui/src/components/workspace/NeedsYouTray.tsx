@@ -209,7 +209,7 @@ export function NeedsYouTray({ tickets, working, onAnswer, onPermission, onSpend
                   <span className="ticket-where">{ticket.teamName} · {ago(ticket.since)}</span>
                 </div>
                 <p className="ticket-text">
-                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “{ticket.text}”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text || `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
+                  {ticket.kind === 'question' ? <><b>{ticket.asker}</b> asks: “<InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown>”</> : ticket.kind === 'permission' ? <>{ticket.text}. It is paused until you answer.</> : ticket.kind === 'spend' ? <>{ticket.text}</> : ticket.kind === 'review' ? <>{ticket.text ? <InlineMarkdown clickable={false}>{ticket.text}</InlineMarkdown> : `${ticket.asker} is waiting for your approval.`}</> : <>{ticket.text}</>}
                 </p>
                 {ticket.context && <blockquote className="ticket-context" title={agentWrote(ticket) ? plainWords(ticket.context) : ticket.context}>{agentWrote(ticket) ? <InlineMarkdown clickable={false}>{ticket.context}</InlineMarkdown> : ticket.context}</blockquote>}
                 {onScreen(ticket) ? (

@@ -96,6 +96,7 @@ import type { ReceiptLine } from '../lib/story/receipt'
 import { PromptNodeCard } from './run/StoryNodes'
 import { ChipDot, LoomMark, LoomWordmark } from './ui/glyphs'
 import { SegmentThumb } from './ui/SegmentThumb'
+import { InlineMarkdown } from './ui/Markdown'
 import { AttentionAlerts } from './workspace/AttentionAlerts'
 import { BuildHeading } from './workspace/BuildHeading'
 import { TeamAgents } from './workspace/TeamAgents'
@@ -2533,7 +2534,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             <aside className="tc-details" aria-label="Details of this piece of work">
               <header className="tc-details-head">
                 {paneTabs.length ? <PaneTabs tabs={paneTabs} shown={shownTab} hue={(id) => chatTeam.hues.get(id) ?? 1} onShow={setPaneTab} onClose={closeTab} /> : <span className="tc-pane-title">Details</span>}
-                <h2>{shownFile ? '' : record?.prompt ? record.prompt.split('\n')[0] : ''}</h2>
+                <h2>{shownFile || !record?.prompt ? '' : <InlineMarkdown>{record.prompt.split('\n')[0] ?? ''}</InlineMarkdown>}</h2>
                 <button type="button" className="btn btn-icon" onClick={() => { closeDetails(); setKept([]) }} aria-label="Close details"><X size={15} aria-hidden="true" /></button>
               </header>
               <div className="tc-details-body" id="tc-pane-body" role={paneTabs.length ? 'tabpanel' : undefined} aria-labelledby={paneTabs.length ? paneTabId(paneTabs, shownTab) : undefined}>

@@ -481,7 +481,7 @@ export function WorkPiece({ item, newest = false, approveFilled = true, fixFille
       )}
       {waiting?.kind === 'question' && !onTheMessage && (
         <Appearing key={`question:${waiting.since}`} reveal className="tc-decision question" role="group" aria-label={`${name(waiting.node)}'s question`}>
-          <p><b>{name(waiting.node)}</b> asks you: {waiting.question}</p>
+          <p><b>{name(waiting.node)}</b> asks you: <InlineMarkdown>{waiting.question}</InlineMarkdown></p>
           {waiting.context && <div className="chat-text tc-context"><Markdown>{waiting.context}</Markdown></div>}
           <p className="tc-tip">Answer in the box below. {waiting.parkNote}</p>
         </Appearing>
@@ -549,14 +549,14 @@ function Writing({ id, at, name, hue }: { id: string; at: string | undefined; na
   )
 }
 
-/** Your answer to a permission request, in the line that remembers it. */
-function permitted(message: TeamMessage, agent: string): string {
+/** Your answer to a permission request, in the line that remembers it: what you typed instead shows its Markdown. */
+function permitted(message: TeamMessage, agent: string): ReactNode {
   const outcome = message.permission?.outcome
   if (outcome === 'allow_once') return `You let ${agent} do this once: ${message.text}`
   if (outcome === 'allow_run') return `You let ${agent} do this for the rest of the run: ${message.text}`
   if (outcome === 'allow_team') return `You let the whole team do this for the rest of the run: ${message.text}`
   if (outcome === 'edited') return `You changed it, then let ${agent} run it: ${message.permission?.written ?? message.text}`
-  if (outcome === 'answered') return `You answered ${agent} instead: “${message.permission?.written ?? ''}”`
+  if (outcome === 'answered') return <>You answered {agent} instead: “<InlineMarkdown>{message.permission?.written ?? ''}</InlineMarkdown>”</>
   return `You denied ${agent}: ${message.text}`
 }
 
@@ -590,14 +590,14 @@ function Decisions({ messages, autoRan = [], operators, name }: { messages: read
         const label = message.kind === 'permission'
           ? permitted(message, name(message.from ?? ''))
           : message.kind === 'question'
-          ? `You → ${name(message.from ?? '')} · your answer to “${message.text.trim().slice(0, 80)}”`
+          ? <>You → {name(message.from ?? '')} · your answer to “<InlineMarkdown clickable={false}>{message.text.trim().split('\n')[0] ?? ''}</InlineMarkdown>”</>
           : reply.sentBackTo ? `You sent it back to ${name(reply.sentBackTo)}` : `You approved ${name(whose)}'s work`
         const quiet = message.kind === 'permission' || (message.kind === 'handover' && !reply.sentBackTo && reply.text.trim() === APPROVAL_TEXT)
         return (
           <Appearing key={message.id} className="chat-msg mine tc-decided">
             <div className="chat-stack">
-              <div className="chat-meta"><span className="tc-to">{label}</span><time>{clockTime(reply.ts)}</time></div>
-              {!quiet && <div className="chat-bubble"><div className="chat-text tc-plain">{reply.text}</div></div>}
+              <div className="chat-meta"><span className="tc-to tc-to-line">{label}</span><time>{clockTime(reply.ts)}</time></div>
+              {!quiet && <div className="chat-bubble"><div className="chat-text"><SaidText text={reply.text} /></div></div>}
             </div>
           </Appearing>
         )
@@ -632,7 +632,7 @@ function Request({ run, request, flash = false, continuedFrom, name, solo, onSho
         {reactions(<div className="chat-bubble">
           {request?.replyTo && <ReplyQuote reply={request.replyTo} name={name} onShow={onShowReplied?.(request.replyTo)} />}
           {request?.files && <ChatFiles files={request.files} />}
-          <div className="chat-text tc-plain"><SaidText text={text} /></div>
+          <div className="chat-text"><SaidText text={text} /></div>
         </div>)}
       </div>
     </div>
@@ -687,7 +687,7 @@ function Note({ note, flash = false, live, name, onShowReplied, reactions }: { n
         {reactions(<div className="chat-bubble">
           {note.replyTo && <ReplyQuote reply={note.replyTo} name={name} onShow={onShowReplied?.(note.replyTo)} />}
           {note.files && <ChatFiles files={note.files} />}
-          <div className="chat-text tc-plain"><SaidText text={note.text} /></div>
+          <div className="chat-text"><SaidText text={note.text} /></div>
         </div>)}
         <div className="chat-under"><Swap key={state}>{state}</Swap></div>
       </div>

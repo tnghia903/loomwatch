@@ -16,7 +16,7 @@ import { Quote } from '../chat/ReplyQuote'
 import { AvatarFace } from '../agents/AvatarFace'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { FIGURE_HUES, figureHue, type FigureChoice } from '../../lib/library/figures'
-import { Markdown } from '../ui/Markdown'
+import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { helperOf, wearerOf } from '../../lib/chat/helpers'
 
 interface AgentMessagesProps {
@@ -249,14 +249,14 @@ const REFUSED: Record<AskRefusal, (asker: string, asked: string) => string> = {
   not_recruiting: (asker, asked) => `${asker} may not bring in helpers, so ${asked} wasn’t asked`,
 }
 
-/** How a permission request was settled, as a line in the chat. */
-const SETTLED: Record<PermissionOutcome, (agent: string, written: string) => string> = {
+/** How a permission request was settled, as a line in the chat. What you typed instead shows its Markdown. */
+const SETTLED: Record<PermissionOutcome, (agent: string, written: string) => ReactNode> = {
   allow_once: () => 'You allowed it, this once',
   allow_run: () => 'You allowed it for the rest of this run',
   allow_team: () => 'You allowed the whole team to do this for the rest of this run',
   deny: (agent) => `You denied it. ${agent} carries on without it`,
   edited: (_agent, written) => `You changed it, then allowed it: ${written}`,
-  answered: (agent, written) => `You answered instead: “${written}”. ${agent} carries on with that`,
+  answered: (agent, written) => <>You answered instead: “<InlineMarkdown>{written}</InlineMarkdown>”. {agent} carries on with that</>,
   timed_out: () => 'Nobody answered in time, so it was declined',
 }
 
@@ -442,7 +442,7 @@ function ChatMessage({ bubble, member, continued, open, flash, live, calls, onTo
                 {reply.source === 'fresh' && '. A fresh copy answered: it saw only its role and the question'}.
               </p>
             )}
-            {part === 'said' && message.context && <p><b>Context:</b> {message.context}</p>}
+            {part === 'said' && message.context && <Context text={message.context} />}
             {part === 'said' && message.reached && mentions[0] && <p>{reachedLine(message.reached, name(mentions[0]))}</p>}
             {calls.length > 0 && (
               <details className="chat-calls">
@@ -551,6 +551,15 @@ function Mentions({ people }: { people: Member[] }) {
 /** A message's words, formatted as the agent wrote them, cut to its first lines when long. */
 function Body({ text, long, more }: { text: string; long: boolean; more: boolean }) {
   return <div className={`chat-text selectable ${long && !more ? 'cut' : ''}`}><Markdown>{text}</Markdown></div>
+}
+
+/**
+ * What a question added as context, formatted as it was written: one line beside its label, or,
+ * when it runs to several lines (a list of checks not met), under it.
+ */
+function Context({ text }: { text: string }) {
+  if (!text.trim().includes('\n')) return <p><b>Context:</b> <InlineMarkdown>{text}</InlineMarkdown></p>
+  return <div className="chat-text selectable"><b>Context:</b><Markdown>{text}</Markdown></div>
 }
 
 function Avatar({ member, size, plain = false }: { member: Member; size: number; plain?: boolean }) {

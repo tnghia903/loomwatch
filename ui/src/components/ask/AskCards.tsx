@@ -3,6 +3,8 @@ import { useMemo } from 'react'
 
 import { proposalChanges } from '../../lib/ask/proposal'
 import type { AskCard, ProposalCard, ReviewNoteCard, RunRequestCard, RunStartedCard } from '../../lib/ask/thread'
+import { SaidText } from '../chat/SaidText'
+import { InlineMarkdown } from '../ui/Markdown'
 
 export interface CardActions {
   /** The proposal now on the canvas, if any. */
@@ -47,7 +49,7 @@ function ProposalView({ card, actions }: { card: ProposalCard; actions: CardActi
         <span className="ask-card-file t-mono-sm" title={card.file}>{card.file}</span>
       </header>
       <strong className="ask-card-title">{card.name}</strong>
-      {card.summary && <p className="ask-card-text">{card.summary}</p>}
+      {card.summary && <p className="ask-card-text"><InlineMarkdown>{card.summary}</InlineMarkdown></p>}
       {lines.length > 0 && <ul className="ask-card-lines">{lines.map((line) => <li key={line}>{line}</li>)}</ul>}
       {settledText ? (
         <p className={`ask-card-outcome ${card.outcome === 'applied' ? 'ok' : ''}`}>{card.outcome === 'applied' && <Check size={14} aria-hidden="true" />}{settledText}</p>
@@ -75,7 +77,7 @@ function RunRequestView({ card, actions }: { card: RunRequestCard; actions: Card
     <article className={`ask-card ask-run-request ${card.decision ? `is-${card.decision}` : 'is-open'}`} aria-label={`Run ${card.name}?`}>
       <header className="ask-card-head"><span className="t-micro">{card.decision === 'started' ? 'Run started' : card.decision === 'declined' ? 'Not run' : 'Ready to run'}</span></header>
       <strong className="ask-card-title">{card.name}</strong>
-      <blockquote className="ask-card-quote">{card.request}</blockquote>
+      <blockquote className="ask-card-quote"><SaidText text={card.request} /></blockquote>
       {uses && <p className="ask-card-meta t-meta">{uses}</p>}
       {error && <p role="alert" className="ask-card-error">{error}</p>}
       {card.decision === 'started' && card.runId ? (
@@ -96,7 +98,7 @@ function RunStartedView({ card, actions }: { card: RunStartedCard; actions: Card
   return (
     <article className="ask-card ask-run-started" aria-label="Run started">
       <header className="ask-card-head"><span className="t-micro">Run started</span><span className="ask-card-file t-mono-sm">{card.file}</span></header>
-      {card.request && <blockquote className="ask-card-quote">{card.request}</blockquote>}
+      {card.request && <blockquote className="ask-card-quote"><SaidText text={card.request} /></blockquote>}
       <div className="ask-card-acts"><button type="button" className="btn btn-act" onClick={() => actions.onOpenRun(card.runId, card.file)}>Watch the run<ArrowRight size={14} aria-hidden="true" /></button></div>
     </article>
   )
@@ -106,8 +108,8 @@ function ReviewNoteView({ card, actions }: { card: ReviewNoteCard; actions: Card
   return (
     <article className="ask-card ask-review-note" aria-label="Drafted review note">
       <header className="ask-card-head"><span className="t-micro">Waiting for you</span>{card.name && <span className="ask-card-file">at “{card.name}”</span>}</header>
-      {card.question && <p className="ask-card-text">{card.question}</p>}
-      <blockquote className="ask-card-quote">{card.text}</blockquote>
+      {card.question && <p className="ask-card-text"><InlineMarkdown>{card.question}</InlineMarkdown></p>}
+      <blockquote className="ask-card-quote"><SaidText text={card.text} /></blockquote>
       <div className="ask-card-acts">
         <button type="button" className="btn btn-act" onClick={() => actions.onUseNote(card)}><PenLine size={14} aria-hidden="true" />Put it in the review box</button>
         <span className="ask-card-hint">You read it and send it yourself.</span>

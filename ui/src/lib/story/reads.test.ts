@@ -250,6 +250,8 @@ describe('counting things, not calls', () => {
     expect(skillName(item('e', { kind: 'skill', relation: 'used skill', name: 'Skill(claude-design)' }))).toBe('claude-design')
     expect(skillName(item('f', { kind: 'skill', relation: 'used skill', name: 'Read .claude/skills/house-style/examples.md' }))).toBe('house-style')
     expect(describeEvidence('Writer', used[0])).toBe('Writer used the skill “house-style”.')
+    // Supplied in its prompt is said as given, never as used: the receipt says it was never opened.
+    expect(describeEvidence('Writer', used[3])).toBe('Writer was given the skill “brand-voice” in its prompt.')
   })
 
   it('says how a failed read was made up for, and by which call', () => {

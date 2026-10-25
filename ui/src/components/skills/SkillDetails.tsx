@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 
 import { fetchCapabilityDetails, type CapabilityDetails, type DetectedCapability } from '../../lib/library/client'
 import { describeOrigin, displayName, errorText, fetchSkills, formatSize, licenseLabel, shortPath, skillBody, type SkillRecord } from '../../lib/library/skillStore'
-import { Markdown } from '../ui/Markdown'
+import { InlineMarkdown, Markdown } from '../ui/Markdown'
 import { Sheet } from './Sheet'
 import { Glyph, NeedTags } from './SkillTags'
 
@@ -60,7 +60,7 @@ export function SkillDetails({ item, pinned, onPin, onTakeDown, onClose }: {
       <div className="lw-skills-intro">
         <Glyph name={item.name} description={item.detail} size="lg" />
         <div>
-          {item.detail && <p className="lw-skills-intro-desc">{item.detail}</p>}
+          {item.detail && <p className="lw-skills-intro-desc"><InlineMarkdown>{item.detail}</InlineMarkdown></p>}
           <p className="lw-skills-quiet">{pinned ? 'On this agent’s pegboard. It opens this card when the work calls for it.' : 'Pin it up and this agent opens it when the work calls for it.'}</p>
         </div>
       </div>

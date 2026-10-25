@@ -128,6 +128,18 @@ describe('Learned', () => {
     expect(onTellAll).not.toHaveBeenCalled()
   })
 
+  it('shows a lesson’s Markdown on its line, and reads it as words in its buttons and tooltip', async () => {
+    const marked = lesson({ aboutYou: true, text: 'Write the **digest** with `three` bullets.', feedback: 'Too **long**.' })
+    render(<Learned lessons={[marked]} name={name} onUndo={vi.fn()} onTellAll={vi.fn()} />)
+    expect(await screen.findByText('digest', { selector: 'strong' })).toBeTruthy()
+    expect(screen.getByText('three', { selector: 'code' })).toBeTruthy()
+    const line = screen.getByText(/learned:/)
+    expect(line.textContent).toBe('Writer learned: Write the digest with three bullets.')
+    expect(line.closest('p')?.getAttribute('title')).toBe('From what you said: Too long.')
+    expect(screen.getByRole('button', { name: 'Undo: Write the digest with three bullets.' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Tell all my agents: Write the digest with three bullets.' })).toBeTruthy()
+  })
+
   it('shows nothing for work nobody learned from', () => {
     const { container } = render(<Learned lessons={[]} name={name} onUndo={vi.fn()} />)
     expect(container.innerHTML).toBe('')

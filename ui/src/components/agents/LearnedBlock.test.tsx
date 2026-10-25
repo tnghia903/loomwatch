@@ -64,6 +64,27 @@ describe('LearnedBlock', () => {
     expect(screen.queryByRole('button', { name: /Tell all my agents/ })).toBeNull()
   })
 
+  it('shows a lesson’s Markdown, in the list and on the line under it, and names its buttons in words', async () => {
+    const marked = 'Write the **digest** with `three` bullets.'
+    const about = lesson('b', marked, { aboutYou: true, feedback: 'Too **long**.' })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/lessons?')) return json({ scope: 'agent:writer', learns: true, max: 12, lessons: [about] })
+      return json({ lesson: { ...about, state: 'dropped', droppedBy: 'about_you' }, lessons: [], you: { name: 'Mai', about: marked, skipped: false }, added: true })
+    }))
+    const { container } = render(<LearnedBlock of={{ savedAgent: 'writer' }} name="Writer" />)
+    expect(await screen.findByText('digest', { selector: 'strong' })).toBeTruthy()
+    expect(screen.getByText('three', { selector: 'code' })).toBeTruthy()
+    expect(container.querySelector('.learned-text')?.textContent).toBe('Write the digest with three bullets.')
+    expect(container.querySelector('.learned-from')?.getAttribute('title')).toBe('Too long.')
+    expect(screen.getByRole('button', { name: 'Forget: Write the digest with three bullets.' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Tell all my agents: Write the digest with three bullets.' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    const line = await screen.findByRole('status')
+    expect(line.textContent).toContain('All your agents know: Write the digest with three bullets.')
+    expect(within(line).getByText('digest', { selector: 'strong' })).toBeTruthy()
+    expect(within(line).getByRole('button', { name: 'Undo: Write the digest with three bullets.' })).toBeTruthy()
+  })
+
   it('moves a lesson about you to About you once you say yes, and Undo moves it back', async () => {
     const vietnamese = 'When replying to this person, always write in Vietnamese.'
     const calls: Array<{ url: string; body?: unknown; asPage: boolean }> = []

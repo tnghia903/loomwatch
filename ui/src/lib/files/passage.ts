@@ -377,6 +377,12 @@ export function bubbleTitle(passage: AskedPassage, look: PartLook, name: (id: st
 
 /** What a bubble's agent card says under who the agent is: what came of asking, and what you asked. */
 export function bubbleCardLine(passage: AskedPassage, look: PartLook, name: (id: string) => string): string {
+  const { said, words } = bubbleCardParts(passage, look, name)
+  return [said, words && `You asked: ${words}`].filter(Boolean).join(' · ')
+}
+
+/** [`bubbleCardLine`] in its parts: the app's words, and yours, shown with their Markdown. */
+export function bubbleCardParts(passage: AskedPassage, look: PartLook, name: (id: string) => string): { said: string; words: string } {
   const words = yourWords(passage.asked, name(passage.from))
   const state = passage.answer.state
   const said = state === 'unsent' ? 'Not sent'
@@ -385,7 +391,7 @@ export function bubbleCardLine(passage: AskedPassage, look: PartLook, name: (id:
         : state === 'working' ? 'Working on it'
           : look === 'waiting' ? 'New answer'
             : look === 'failed' ? 'Stopped' : ''
-  return [said, words && `You asked: ${words}`].filter(Boolean).join(' · ')
+  return { said, words }
 }
 
 /** Your words without the @ they were sent with: "@Writer why?" is "why?". */

@@ -2,6 +2,7 @@ import { CircleAlert, History, Lightbulb, Wand2 } from 'lucide-react'
 
 import { keys } from '../../lib/platform'
 import type { CheckupFinding } from '../../lib/team-file/checkup'
+import { InlineMarkdown } from '../ui/Markdown'
 import { SectionHead } from '../ui/SectionHead'
 
 /** What the panel can do with a finding. Absent actions are not offered. */
@@ -34,7 +35,7 @@ export function CheckupItem({ finding, readOnly = false, agentName, onFix, onDis
       <div className="checkup-body">
         {finding.learned !== undefined && <div className="checkup-learned"><History size={11} aria-hidden="true" />From the last {finding.learned === 1 ? 'run' : `${finding.learned} runs`}</div>}
         <b className="checkup-title">{finding.title}</b>
-        <div className="checkup-why">{finding.why}</div>
+        <div className="checkup-why"><InlineMarkdown>{finding.why}</InlineMarkdown></div>
         {(fix || ask || onOpenAgent || (!readOnly && onDismiss)) && (
           <div className="checkup-actions">
             {fix && <button type="button" className="btn checkup-fix" onClick={() => onFix(finding)}>{finding.fix?.label}</button>}

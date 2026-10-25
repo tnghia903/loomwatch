@@ -189,6 +189,19 @@ describe('ActivityPanel for a question to another agent', () => {
     expect(screen.getByText('Answer from researcher').nextElementSibling).toHaveTextContent('Version 0.4.')
   })
 
+  it('shows the words as the agent wrote them, its Markdown formatted', async () => {
+    const asked = projectRun(record([
+      { agentId: 'writer', ts: at(0), kind: 'tool_call', payload: { callId: 'q', title: 'Team Bus: ask', name: 'ask', toolKind: 'other', status: 'in_progress', rawInput: { agent: 'researcher', question: 'Is **0.4** the version `spec.md` names?\n\n- one\n- two' } } },
+    ])).evidence[0]
+    render(<ActivityPanel evidence={asked} ownerLabel="Writer" calls={[asked]} finished={false} onInspectEvidence={vi.fn()} onClose={vi.fn()} />)
+    expect(await screen.findByText('0.4', { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByText('spec.md', { selector: 'code' })).toBeInTheDocument()
+    const said = screen.getByText('Question').nextElementSibling as HTMLElement
+    expect(said).toHaveClass('selectable')
+    expect(said.querySelectorAll('li')).toHaveLength(2)
+    expect(said).not.toHaveTextContent('**')
+  })
+
   it('says the teammate had already finished, and that it went on without an answer', () => {
     const late = projectRun(record([
       { agentId: 'writer', ts: at(0), kind: 'tool_call', payload: { callId: 'q', title: 'Team Bus: ask', name: 'ask', toolKind: 'other', status: 'in_progress', rawInput: { agent: 'researcher', question: 'Which spec?' } } },

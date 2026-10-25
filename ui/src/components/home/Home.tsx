@@ -30,6 +30,7 @@ import { QuestsLink } from '../quests/QuestsLink'
 import { SkillsLink } from '../skills/SkillsLink'
 import { keys } from '../../lib/platform'
 import { dollars } from '../../lib/runs/spend'
+import { InlineMarkdown } from '../ui/Markdown'
 
 export interface HomeProps {
   /** Something the operator must know before choosing a team, e.g. a link that did not open. */
@@ -232,7 +233,7 @@ export function Home({ notice = null, onPalette, topActions, runs = [], mark, as
                   <button type="button" className={`home-card ${fabric.waiting ? 'waiting' : ''}${unread ? ' unread' : ''}`} onClick={() => openTeam(team.path, teamViewFor(team, Boolean(preview)))}>
                     <span className="home-card-name"><span className="home-card-title" title={teamDisplayName(team)}>{teamDisplayName(team)}</span>{fabric.waiting && <em className="home-card-waiting">Waiting for you</em>}{unread && <i className="home-card-unread" aria-label="New since you looked" />}</span>
                     {preview && (
-                      <span className="home-card-chat"><span className="home-card-line">{preview.line}</span><time dateTime={preview.at}>{listTime(preview.at)}</time></span>
+                      <span className="home-card-chat"><span className="home-card-line">{preview.lead}{preview.words && <InlineMarkdown clickable={false}>{preview.words}</InlineMarkdown>}</span><time dateTime={preview.at}>{listTime(preview.at)}</time></span>
                     )}
                     <span className="home-card-meta">{describeTeam(team)}</span>
                     <TeamFabric fabric={fabric} />

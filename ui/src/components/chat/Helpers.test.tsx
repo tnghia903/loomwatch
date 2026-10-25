@@ -78,6 +78,16 @@ describe('an agent’s helpers on its piece of work (ADR 0079)', () => {
     expect(screen.queryByRole('button', { name: /^Stop / })).toBeNull()
   })
 
+  it('shows the Markdown in a part’s title, with no link in its row, and names the row in words', async () => {
+    const onShow = vi.fn()
+    const { container } = show([helper(1, 'done', { title: 'Check **rent** in `prices.csv` against [the list](https://example.com)' })], true, { onShow })
+    expect(await screen.findByText('rent', { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByText('prices.csv', { selector: 'code' })).toBeInTheDocument()
+    const row = screen.getByRole('button', { name: /^Ada’s helper 1: Check rent in prices\.csv against the list, done/ })
+    expect(row.querySelector('a')).toBeNull()
+    expect(container.querySelector('.tc-helper-title')).toHaveTextContent('Check rent in prices.csv against the list')
+  })
+
   it('is nothing when the agent brought in no helpers', () => {
     const { container } = show([], true)
     expect(container).toBeEmptyDOMElement()

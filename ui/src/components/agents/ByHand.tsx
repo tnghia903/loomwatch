@@ -41,6 +41,7 @@ import { AgentFigure } from './benchFigure'
 import { benchLabels, readCount, readsSay, toolsSay, useFigureMood } from './benchOf'
 import type { BenchView } from './workbenchScene'
 import { LearnedBlock } from './LearnedBlock'
+import { InlineMarkdown } from '../ui/Markdown'
 
 /**
  * BUILD BY HAND: every setting of the agent as a block of plain words and controls, always open,
@@ -482,7 +483,7 @@ function Shelf({ kind, chosen, available, loading, onAdd, onRemove, onDrag, onMa
             <span className="byhand-card-tab" aria-hidden="true" />
             <button type="button" className="byhand-card-open" data-skill={item.name} aria-label={words.read(item.name)} aria-describedby={`${ids}-${item.id}`} onClick={() => setReading(item.name)}>
               <b>{item.name}</b>
-              <span id={`${ids}-${item.id}`}>{item.detail || item.source}</span>
+              <span id={`${ids}-${item.id}`}>{item.detail ? <InlineMarkdown clickable={false}>{item.detail}</InlineMarkdown> : item.source}</span>
             </button>
             <button type="button" className="iconbtn" aria-label={words.give(item.name)} title={words.give(item.name)} onClick={() => onAdd(item.name)}><Plus size={13} aria-hidden="true" /></button>
           </li>
