@@ -256,10 +256,14 @@ export function findPassage(page: PageText, passage: string): Range | null {
   return range
 }
 
-/** Where the ask bubble sits: above the marked words, centred on them, inside the page; below them at the top of the view. */
+/**
+ * Where the ask bubble sits: above the marked words, centred on them, inside the page; below them at
+ * the top of the view. A part taller than the view (all of a PDF's page, a whole column) has its
+ * bubble held inside the view's foot, over the part, rather than out of sight below it.
+ */
 export function bubblePlace(
   marked: { top: number; bottom: number; left: number; right: number },
-  view: { top: number; left: number; width: number },
+  view: { top: number; left: number; width: number; height?: number },
   scroll: { top: number; left: number },
   size: { width: number; height: number },
   gap = 10,
@@ -270,7 +274,8 @@ export function bubblePlace(
   const above = marked.top - view.top - size.height - gap
   const below = above < 4
   const top = (below ? marked.bottom - view.top + gap : marked.top - view.top - size.height - gap) + scroll.top
-  return { top, left, below }
+  const foot = view.height === undefined ? top : view.height - size.height - 8 + scroll.top
+  return { top: Math.min(top, foot), left, below }
 }
 
 /**

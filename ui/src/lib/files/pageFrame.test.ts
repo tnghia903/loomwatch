@@ -583,7 +583,7 @@ describe('what the reader reads', () => {
     expect(readerFormat('/w/data.json')).toBe('code')
     expect(readerFormat('/w/notes.txt')).toBe('text')
     expect(readerFormat('/w/brief.docx')).toBe('document')
-    expect(readerFormat('/w/deck.pdf')).toBe('document')
+    expect(readerFormat('/w/deck.pdf')).toBe('pdf')
     expect(readerFormat('/w/chart.png')).toBe('picture')
     expect(readerFormat('/w/old.doc')).toBeNull()
     expect(readerFormat('/w/archive.zip')).toBeNull()

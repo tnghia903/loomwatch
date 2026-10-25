@@ -462,6 +462,14 @@ async fn get_file_raw(
     {
         response.headers_mut().insert(header::CONTENT_RANGE, value);
     }
+    // The reader draws a PDF itself; a browser sent to it saves it rather than show it as a page
+    // of this daemon, where its own viewer would read whatever the agent put in it.
+    if file.media_type == "application/pdf" {
+        response.headers_mut().insert(
+            header::CONTENT_DISPOSITION,
+            header::HeaderValue::from_static("attachment"),
+        );
+    }
     Ok(response)
 }
 
@@ -1992,6 +2000,39 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// **A PDF is answered for the reader to draw, and for a browser to save (ADR 0091).** Sent to it
+    /// directly, a browser saves it rather than show it as a page of this daemon.
+    #[tokio::test]
+    async fn raw_answers_a_pdf_to_be_saved_never_shown_as_a_page_here() {
+        let root = TempDirectory::new();
+        let workspace = root.0.join(".loomwatch").join("team").join("writer");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(workspace.join("report.pdf"), b"%PDF-1.7\n").expect("write pdf");
+        fs::write(workspace.join("talk.mp4"), b"mp4").expect("write recording");
+        let canonical = crate::platform::canonicalize(&root.0).expect("canonical root");
+        let ask = |name: &str| {
+            let request = Request::builder()
+                .uri(format!(
+                    "/api/files/raw?path={}",
+                    canonical
+                        .join(".loomwatch/team/writer")
+                        .join(name)
+                        .display()
+                ))
+                .header(header::HOST, "localhost")
+                .body(Body::empty())
+                .expect("request");
+            test_router(&root.0).oneshot(request)
+        };
+        let pdf = ask("report.pdf").await.expect("response");
+        assert_eq!(pdf.status(), StatusCode::OK);
+        assert_eq!(pdf.headers()[header::CONTENT_TYPE], "application/pdf");
+        assert_eq!(pdf.headers()[header::CONTENT_DISPOSITION], "attachment");
+        assert_eq!(pdf.headers()[header::ACCEPT_RANGES], "bytes");
+        let clip = ask("talk.mp4").await.expect("response");
+        assert!(clip.headers().get(header::CONTENT_DISPOSITION).is_none());
     }
 
     /// **A recording is answered a part at a time (ADR 0091).** Safari plays only what it can ask

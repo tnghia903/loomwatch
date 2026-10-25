@@ -34,7 +34,10 @@
 .rd-note { flex: none; margin: 0; padding: 8px 18px; border-bottom: 1px solid var(--color-hairline); background: var(--color-accent-tint); font-size: 12.5px; line-height: 1.45; color: var(--color-ink-2); }
 
 /* ---------- The page ---------- */
-.rd-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+/* Clipped, not hidden: a box that hides what overflows can still be scrolled, and the browser
+   scrolls it to show a page taken focus that is taller than the view, leaving the view empty. */
+.rd-stage { position: relative; flex: 1; min-height: 0; overflow: clip; }
+@supports not (overflow: clip) { .rd-stage { overflow: hidden; } }
 .rd-scroll { position: absolute; inset: 0; overflow: auto; }
 .rd .rd-scroll.tc-document { overflow: auto; }
 /* The workspace turns text selection off; the reader is for marking words, so its page turns it on. */
@@ -127,6 +130,54 @@
   .rd-box.rd-moment { top: 10px; bottom: 10px; }
   .rd-box.rd-moment.frame { top: 4px; bottom: 4px; }
 }
+
+/* ---------- A PDF drawn as its pages (ADR 0091, PdfView.tsx) ----------
+   Each page is paper on the reader's ground, drawn on a canvas, with its words laid over it where
+   they are: PDF.js's text layer, whose rules are copied here (pdfjs-dist web/pdf_viewer.css
+   .textLayer) and kept off the reader's own marks and slots inside its words. A drag where there are
+   no words draws a box, as on a picture. */
+.rd-as-pdf { box-sizing: border-box; padding: 24px 24px 96px; }
+.rd-pdf { display: grid; gap: 40px; max-width: 900px; margin: 0 auto; }
+/* White before it is drawn, as PDF.js draws it, in either theme. */
+.rd-pdf-page { position: relative; isolation: isolate; width: 100%; border-radius: var(--r-xs); background: var(--color-white); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-black) 12%, transparent), 0 12px 32px color-mix(in srgb, var(--color-black) 14%, transparent); --scale-round-x: 1px; --scale-round-y: 1px; }
+.rd-pdf-page.askable { cursor: crosshair; touch-action: manipulation; }
+.rd-pdf-page > canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
+.rd-pdf-text {
+  position: absolute; inset: 0; overflow: clip; z-index: 1; line-height: 1; text-align: initial; letter-spacing: normal; word-spacing: normal;
+  -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0;
+  --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.rd-pdf-text :is(span, br):not(.rd-mark, .rd-slot, .rd-slot *) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0% 0%; -webkit-user-select: text; user-select: text; }
+.rd-pdf-text > :not(.markedContent, .rd-slot), .rd-pdf-text .markedContent span:not(.markedContent, .rd-mark, .rd-slot, .rd-slot *) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.rd-pdf-text .markedContent { display: contents; }
+.rd-pdf-text ::selection { background: color-mix(in srgb, var(--color-marker-deep) 42%, transparent); color: transparent; }
+.rd-pdf-text br::selection { background: transparent; }
+.rd-pdf-text .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; -webkit-user-select: none; user-select: none; }
+.rd-pdf-text.selecting .endOfContent { top: 0; }
+/* The boxes on a page are above its words, and the bubbles after words marked on it above both, in
+   a layer of their own (placeSlotOnPage). A press goes through a box to the words under it; only
+   its bubbles are pressed (PdfView finds a box clicked by where it is). */
+.rd-pdf-page > .rd-box { z-index: 2; pointer-events: none; }
+.rd-pdf-page > .rd-box > .rd-slot { pointer-events: auto; }
+.rd-pdf-slots { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.rd-pdf-row { position: absolute; display: flex; align-items: center; gap: 4px; margin-left: 6px; translate: 0 -50%; }
+.rd-pdf-row > .rd-slot { margin: 0; translate: none; pointer-events: auto; }
+/* Away from the words it follows, a bubble is a pin in the margin: its point would point at others. */
+.rd-pdf-row.apart .rd-bubble-point { display: none; }
+/* The words lie over what the page draws, so the marker's stroke over them is blended as a
+   highlighter's ink is: the paper takes the tint and the drawn words stay black. */
+.rd-pdf-text { mix-blend-mode: multiply; }
+/* On paper, a box lit or asked about keeps its ring without the dark keyline a picture needs. */
+.rd-pdf-page > .rd-box:is(.lit, .asking) { box-shadow: var(--rd-rim); }
+/* Gold on the paper is the paper's own gold, as the page is light in either theme. */
+.rd-pdf-page > :is(.rd-pdf-text, .rd-box, .rd-pdf-slots) { --color-accent: var(--color-bubble-light-gold); }
+/* A page with a picture or a chart, as a button for the keyboard: ringed when it has focus. */
+.rd-pdf-target { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.rd-pdf-target:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+.rd-pdf-number { position: absolute; top: calc(100% + 6px); left: 0; right: 0; font-size: 12px; line-height: 16px; text-align: center; color: var(--color-ink-3); font-variant-numeric: tabular-nums; pointer-events: none; -webkit-user-select: none; user-select: none; }
 
 /* ---------- A part of a picture: a box (ADR 0091, PictureView.tsx) ----------
    Dragged over the picture, or the whole of it for a click. Drawn as the marker draws words: a gold
@@ -280,6 +331,8 @@
 }
 .rd-ask::after { content: ''; position: absolute; left: 50%; bottom: -4px; width: 10px; height: 10px; border-radius: 2px; background: inherit; transform: translateX(-50%) rotate(45deg); }
 .rd-ask.below::after { top: -4px; bottom: auto; }
+/* Over a PDF's page, which is white paper in either theme, it is drawn as on a light page. */
+.rd-ask.on-paper { --color-ink: var(--color-bubble-light-ink); --color-ground: var(--color-white); }
 .rd-ask button { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 7px; height: 32px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: 600 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: background-color var(--t-quick) var(--ease-out); }
 .rd-ask button:hover, .rd-ask button:focus-visible { background: color-mix(in srgb, var(--color-ground) 16%, transparent); }
 .rd-ask button:focus-visible { outline: 2px solid var(--lw-gold-400); outline-offset: 1px; }
