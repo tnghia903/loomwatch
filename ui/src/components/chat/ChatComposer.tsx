@@ -58,6 +58,8 @@ interface ChatComposerProps {
   attachments?: ChatAttachments
   /** A line about something just done from the chat, such as a dropped folder added. */
   notice?: string | null
+  /** The line stays until it is let go here: absent, it goes by itself. */
+  onDismissNotice?: () => void
 }
 
 /**
@@ -66,7 +68,7 @@ interface ChatComposerProps {
  * after its current step", "Team note · starts nothing" — because only an @ starts work and
  * nothing is guessed from the words.
  */
-export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null }: ChatComposerProps) {
+export function ChatComposer({ agents, names, steps, live, decision, disabled = null, value: text, onChange: setText, onSend, onAnswer, mentioned = 0, solo = null, replyTo = null, onCancelReply, onAddress, answerAsked = 0, attachments, notice = null, onDismissNotice }: ChatComposerProps) {
   const [caret, setCaret] = useState(0)
   const [picked, setPicked] = useState(0)
   const [pickerClosed, setPickerClosed] = useState(false)
@@ -257,7 +259,12 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
           {answering && attached.length > 0 && <em className="tc-where-hint">Pictures and files can’t go with an answer yet. Take them out to answer.</em>}
         </div>
       )}
-      {notice && <p className="tc-notice" role="status">{notice}</p>}
+      {notice && (
+        <p className="tc-notice">
+          <span role="status">{notice}</span>
+          {onDismissNotice && <button type="button" className="iconbtn" aria-label="Dismiss this note" title="Dismiss" onClick={onDismissNotice}><X size={13} aria-hidden="true" /></button>}
+        </p>
+      )}
       {replyTo && (
         <div className={`tc-replying${replyTo.kind === 'passage' ? ' passage' : ''}`} role="group" aria-label={`${replyTo.kind === 'passage' ? 'Asking about' : 'Replying to'} ${replyWhat(replyTo, name)}`}>
           {replyTo.kind === 'passage' ? <TextQuote size={14} aria-hidden="true" /> : <Reply size={14} aria-hidden="true" />}

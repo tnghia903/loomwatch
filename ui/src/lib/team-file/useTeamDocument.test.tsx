@@ -1,9 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parse } from 'yaml'
 
 import { CHECKER_ROLE } from '../library/checker'
 import { absoluteTeamPath, slugifyTeamName, useTeamDocument } from './useTeamDocument'
 import { sendBackFields, sendBackOf } from './sendBack'
+import type { TeamDocument } from './types'
 
 const TEAM_YAML = `schemaVersion: 1
 id: research-team
@@ -119,6 +121,36 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+/**
+ * My agents as the daemon keeps them (ADR 0094): saving a team saves its agents there first.
+ * Answers `/api/jobs` from `store` and hands every other request to `next`.
+ */
+function withMyAgents(next: Fetch, store = new Map<string, Record<string, unknown>>()) {
+  const handler = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url === '/api/jobs') return jsonResponse(200, { folder: '.jobs', jobs: [...store.values()], problems: [] })
+    const saving = /^\/api\/jobs\/([^/]+)$/.exec(url)
+    if (saving && init?.method === 'PUT') {
+      const id = decodeURIComponent(saving[1])
+      const before = store.get(id)
+      const saved = { ...JSON.parse(String(init.body)) as Record<string, unknown>, id, file: `.jobs/${id}.yaml`, version: ((before?.version as number | undefined) ?? 0) + 1 }
+      store.set(id, saved)
+      return jsonResponse(200, saved)
+    }
+    return next(input, init)
+  })
+  return Object.assign(handler, { store })
+}
+
+/** The team file a save wrote, from a fetch mock's calls. */
+function teamPuts(fetchMock: { mock: { calls: unknown[][] } }): { path: string; yaml: string }[] {
+  return fetchMock.mock.calls
+    .filter(([input, init]) => String(input) === '/api/team' && (init as RequestInit | undefined)?.method === 'PUT')
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { path: string; yaml: string })
+}
+
 function setPath(path: string) {
   window.history.pushState({}, '', `/?path=${encodeURIComponent(path)}`)
 }
@@ -200,7 +232,7 @@ describe('useTeamDocument', () => {
 
   it('slugifies names and creates a new document without writing until its first save', async () => {
     window.history.pushState({}, '', '/')
-    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = withMyAgents(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
       if (init?.method === 'PUT') return jsonResponse(200, JSON.parse(init.body as string))
       return jsonResponse(404, { error: 'not found' })
@@ -221,7 +253,14 @@ describe('useTeamDocument', () => {
     await act(async () => { await result.current.save() })
 
     expect(result.current.saveState).toBe('saved')
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+    expect(teamPuts(fetchMock)).toHaveLength(1)
+    // The agent dropped from the palette joined My agents first, and the team points at it, keeping
+    // the model suggested for it here: the agent names none of its own.
+    expect(fetchMock.store.get('reviewer')).toMatchObject({ name: 'Reviewer', instructions: 'Review work' })
+    expect(fetchMock.store.get('reviewer')).not.toHaveProperty('model')
+    expect((parse(teamPuts(fetchMock)[0].yaml) as TeamDocument).agents).toEqual([
+      { id: 'reviewer', model: 'anthropic/claude-haiku-5.5', followsSuggestion: true, from: { agent: 'reviewer' } },
+    ])
   })
 
   it('opens an unknown schema version read-only', async () => {
@@ -336,7 +375,7 @@ describe('useTeamDocument', () => {
     vi.stubGlobal('crypto', {})
     const revision = 'sha256:' + 'a'.repeat(64)
     const savedRevision = 'sha256:' + 'b'.repeat(64)
-    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = withMyAgents(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
       if (init?.method === 'PUT') {
         expect(new Headers(init.headers).get('If-Match')).toBe(`"${revision}"`)
@@ -356,7 +395,7 @@ describe('useTeamDocument', () => {
   it('preserves edits when another writer wins after the preflight read', async () => {
     let raced = false
     const diskYaml = TEAM_YAML.replace('Protocol Researcher', 'Disk writer')
-    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = withMyAgents(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
       if (init?.method === 'PUT') {
         expect(new Headers(init.headers).get('If-Match')).toMatch(/^"sha256:[a-f0-9]{64}"$/)
@@ -377,7 +416,7 @@ describe('useTeamDocument', () => {
 
   it('recovers a deleted backing file by saving the in-memory document to a new path', async () => {
     let deleted = false
-    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = withMyAgents(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
       if (String(input) === '/api/teams') return jsonResponse(200, { root: '/Users/operator/.loomwatch/teams', files: [] })
       if (init?.method === 'PUT') {
@@ -405,9 +444,8 @@ describe('useTeamDocument', () => {
     expect(result.current.path).toBe('/Users/operator/.loomwatch/teams/copies/research-team.yaml')
     expect(fetchMock).toHaveBeenCalledWith('/api/team', expect.objectContaining({ method: 'PUT' }))
     // A copy is a new team with its own id, so it starts its own chat rather than the original's.
-    const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
-    expect(put).toBeDefined()
-    const written = JSON.parse(String((put![1] as RequestInit).body)) as { yaml: string }
+    const [written] = teamPuts(fetchMock)
+    expect(written).toBeDefined()
     expect(written.yaml).toMatch(/^id: copies-research-team$/m)
   })
 
@@ -652,13 +690,11 @@ describe('useTeamDocument', () => {
   })
 
   it('save() rechecks an unchanged disk revision, PUTs the mutated YAML, and settles on saved', async () => {
-    const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = withMyAgents(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (!init) {
         return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: TEAM_YAML })
       }
-      const body = JSON.parse(init.body as string) as { path: string; yaml: string }
-      expect(body.yaml).toContain('role: Investigate protocols')
-      return jsonResponse(200, body)
+      return jsonResponse(200, JSON.parse(init.body as string))
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -678,7 +714,108 @@ describe('useTeamDocument', () => {
       expect.objectContaining({ method: 'PUT' }),
     )
     expect(fetchMock.mock.calls.filter(([input, init]) => init === undefined && String(input).startsWith('/api/team'))).toHaveLength(2)
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+    expect(teamPuts(fetchMock)).toHaveLength(1)
+    // ADR 0094: the instructions are the agent's, so they went to it in My agents, and the team
+    // file points at it with only what is the team's.
+    expect(fetchMock.store.get('protocol-researcher')).toMatchObject({ name: 'Protocol Researcher', instructions: 'Investigate protocols' })
+    expect(teamPuts(fetchMock)[0].yaml).not.toContain('Investigate protocols')
+    expect((parse(teamPuts(fetchMock)[0].yaml) as TeamDocument).agents[0].from).toEqual({ agent: 'protocol-researcher' })
+    expect(result.current.nodes.find((node) => node.id === 'researcher')?.data.agent.role).toBe('Investigate protocols')
+  })
+
+  it('opens a team’s agents from My agents, and takes a change made here to the agent, for every team', async () => {
+    const pointerYaml = `schemaVersion: 1
+id: research-team
+name: Research and review
+entrypoint: researcher
+agents:
+  - id: researcher
+    # Where it works in this team.
+    spawn:
+      cwd: work
+    from:
+      agent: researcher
+edges: []
+`
+    const myAgents = new Map<string, Record<string, unknown>>([['researcher', {
+      id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find facts with sources.', model: 'anthropic/claude-sonnet-5.5', skills: ['cite'], version: 4,
+    }]])
+    const fetchMock = withMyAgents(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (!init) return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: pointerYaml })
+      return jsonResponse(200, JSON.parse(init.body as string))
+    }, myAgents)
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    const shown = result.current.nodes[0].data.agent
+    expect(shown).toMatchObject({ name: 'Researcher', role: 'Find facts with sources.', model: 'anthropic/claude-sonnet-5.5', spawn: { cwd: 'work' } })
+    expect(shown.capabilities).toEqual([{ kind: 'skill', name: 'cite' }])
+
+    act(() => result.current.renameAgent('researcher', 'role', 'Find facts with two sources.'))
+    await act(async () => { await result.current.save() })
+    expect(result.current.saveState).toBe('saved')
+    const agentPuts = fetchMock.mock.calls.filter(([input, init]) => String(input).startsWith('/api/jobs/') && init?.method === 'PUT')
+    expect(agentPuts).toHaveLength(1)
+    // Saved over the copy it was shown, so a change made elsewhere since is refused, not lost.
+    expect(new Headers(agentPuts[0][1]?.headers).get('If-Match')).toBe('"4"')
+    expect(myAgents.get('researcher')).toMatchObject({ instructions: 'Find facts with two sources.', skills: ['cite'], version: 5 })
+    const [written] = teamPuts(fetchMock)
+    expect(written.yaml).toContain('# Where it works in this team.')
+    expect(written.yaml).not.toContain('Find facts')
+    expect(written.yaml).not.toContain('name: Researcher')
+
+    // A save that changes nothing of the agent's touches no agent.
+    fetchMock.mockClear()
+    act(() => result.current.renameAgent('researcher', 'name', 'Researcher'))
+    await act(async () => { await result.current.save() })
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).startsWith('/api/jobs/'))).toHaveLength(0)
+
+    // Saved on its workbench in the Agents tab: the team shows it as it is now, and stays clean.
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+    act(() => result.current.refillAgent({ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Fact finder', instructions: 'Find facts.', model: 'anthropic/claude-sonnet-5.5', skills: ['cite'], version: 6 }))
+    expect(result.current.nodes[0].data.agent).toMatchObject({ name: 'Fact finder', role: 'Find facts.', spawn: { cwd: 'work' } })
+    expect(result.current.saveState).toBe('clean')
+    // What the team's unsaved changes are measured against moved with it: nothing waits to be saved.
+    expect(result.current.loadedYaml).toBe(result.current.yamlPreview)
+
+    // With a change of the team's own waiting, that change still waits.
+    act(() => result.current.updateAgentCwd('researcher', 'drafts'))
+    const waiting = result.current.loadedYaml
+    act(() => result.current.refillAgent({ id: 'researcher', file: '.jobs/researcher.yaml', name: 'Fact finder', instructions: 'Find facts fast.', model: 'anthropic/claude-sonnet-5.5', skills: ['cite'], version: 7 }))
+    expect(result.current.nodes[0].data.agent).toMatchObject({ role: 'Find facts fast.', spawn: { cwd: 'drafts' } })
+    expect(result.current.loadedYaml).toBe(waiting)
+    expect(result.current.saveState).toBe('dirty')
+  })
+
+  it('keeps a skill taken off or wired on the canvas in this team, and brings the agent’s own back when turned on', async () => {
+    const pointerYaml = 'schemaVersion: 1\nid: research-team\nname: Research and review\nentrypoint: researcher\nagents:\n  - id: researcher\n    from:\n      agent: researcher\nedges: []\n'
+    const myAgents = new Map<string, Record<string, unknown>>([['researcher', {
+      id: 'researcher', file: '.jobs/researcher.yaml', name: 'Researcher', instructions: 'Find facts.', model: 'fake/offline', skills: ['cite'], version: 2,
+    }]])
+    const fetchMock = withMyAgents(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config/schema') return jsonResponse(200, SCHEMA_GATE)
+      if (!init) return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: pointerYaml })
+      return jsonResponse(200, JSON.parse(init.body as string))
+    }, myAgents)
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useTeamDocument())
+    await waitFor(() => expect(result.current.saveState).toBe('clean'))
+
+    // Taken off the canvas: off in this team, as the canvas does it (ADR 0060), and a skill wired besides.
+    act(() => result.current.setAgentCapabilities('researcher', [{ kind: 'skill', name: 'slides' }]))
+    act(() => result.current.turnOff(new Map([['researcher', [{ kind: 'skill' as const, name: 'cite' }]]])))
+    await act(async () => { await result.current.save() })
+    expect(fetchMock.mock.calls.filter(([input, init]) => String(input).startsWith('/api/jobs/') && init?.method === 'PUT')).toHaveLength(0)
+    expect(myAgents.get('researcher')).toMatchObject({ skills: ['cite'] })
+    const written = parse(teamPuts(fetchMock).at(-1)!.yaml) as TeamDocument
+    expect(written.agents[0]).toEqual({ id: 'researcher', from: { agent: 'researcher' }, capabilities: [{ kind: 'skill', name: 'slides' }], turnedOff: [{ kind: 'skill', name: 'cite' }] })
+    expect(result.current.nodes[0].data.agent.capabilities).toEqual([{ kind: 'skill', name: 'slides' }])
+
+    // Turned back on: the agent's own skill is on its card again.
+    act(() => result.current.turnBackOn('researcher', { kind: 'skill', name: 'cite' }))
+    expect(result.current.nodes[0].data.agent.capabilities).toEqual([{ kind: 'skill', name: 'slides' }, { kind: 'skill', name: 'cite' }])
+    expect(result.current.nodes[0].data.agent.turnedOff).toBeUndefined()
   })
 
   it('refuses and flags a save when the file changed on disk after load', async () => {
@@ -812,11 +949,9 @@ describe('useTeamDocument', () => {
     })
 
     it('leaves entrypoint unset — not dangling — and blocks save when two or more agents remain', async () => {
-      const fetchMock = vi
-        .fn()
-        .mockImplementation(async () =>
-          jsonResponse(200, { path: '/teams/research-team.yaml', yaml: THREE_AGENT_YAML }),
-        )
+      const fetchMock = withMyAgents(async () =>
+        jsonResponse(200, { path: '/teams/research-team.yaml', yaml: THREE_AGENT_YAML }),
+      )
       vi.stubGlobal('fetch', fetchMock)
       const { result } = renderHook(() => useTeamDocument())
       await waitFor(() => expect(result.current.saveState).toBe('clean'))
@@ -854,10 +989,8 @@ describe('useTeamDocument', () => {
         await result.current.save()
       })
       expect(fetchMock).toHaveBeenCalledWith('/api/team', expect.objectContaining({ method: 'PUT' }))
-      const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
-      expect(putCall).toBeDefined()
-      const [, init] = putCall as [string, RequestInit]
-      const body = JSON.parse(init.body as string) as { yaml: string }
+      const [body] = teamPuts(fetchMock)
+      expect(body).toBeDefined()
       expect(body.yaml).toContain('entrypoint: reviewer')
       expect(body.yaml).not.toContain('entrypoint: researcher')
     })
@@ -1155,7 +1288,7 @@ edges: []
     // The canvas no longer edits `guards` (CANVAS_SPEC §8.1), so the file is their only home: a
     // limit someone wrote by hand must survive every save the canvas makes.
     it('keeps hand-written team guards through an edit and save', async () => {
-      const fetchMock = vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const fetchMock = withMyAgents(async (_input: RequestInfo | URL, init?: RequestInit) => {
         if (!init) {
           return jsonResponse(200, { path: '/teams/research-team.yaml', yaml: `${TEAM_YAML.trimEnd()}\nguards:\n  maxDispatchDepth: 3\n` })
         }
@@ -1173,9 +1306,7 @@ edges: []
       await act(async () => {
         await result.current.save()
       })
-      const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
-      const [, init] = putCall as [string, RequestInit]
-      const body = JSON.parse(init.body as string) as { yaml: string }
+      const [body] = teamPuts(fetchMock)
       expect(body.yaml).toContain('maxDispatchDepth: 3')
       expect(body.yaml).not.toContain('budget')
     })

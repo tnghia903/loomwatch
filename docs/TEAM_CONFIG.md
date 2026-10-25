@@ -86,6 +86,50 @@ agents:
   An agent may still start in a folder LoomWatch prepares for it instead. See
   [Where an agent starts](#where-an-agent-starts).
 
+### One of My agents
+
+Every agent the app saves in a team is one of My agents (ADR 0094), kept as
+`<teams root>/.jobs/<agent>.yaml`. The team file points at it with `from` and holds only what is
+the team's:
+
+```yaml
+agents:
+  - id: researcher
+    from: { agent: researcher }
+    spawn: { cwd: ../my-project }   # where it works in this team
+    capabilities:                    # what this team connects to it beyond its own
+      - { kind: knowledge, name: Notes, path: notes }
+      - { kind: skill, name: slides }
+    turnedOff:                       # its own, off in this team (ADR 0060)
+      - { kind: tool, name: Gmail }
+```
+
+- **Filled in when the team is read.** An entry with `from` and no `role` of its own is filled in
+  from the agent's file each time the daemon or the app reads the team: its `name`, `role` (the
+  file's `instructions`), `model` and `thinkingEffort` when the agent names a model, its skills,
+  its tools with their `alwaysAllow` calls, what it reads (as `knowledge`, labelled apart from the
+  team's), `doneWhen`, `allow` and `allowRecruiting`. A skill or tool the entry turns off is left
+  out. A change saved to the agent reaches every team that uses it from that team's next run; a
+  run's record keeps the agent as it ran.
+- **The team's own.** `spawn`, knowledge, skills and tools the team connects beyond the agent's own,
+  `memory`, `turnedOff`, `checks`, `sendBack`, `spend` and `learns` stay in the entry, and so does
+  `model` (with `followsSuggestion`) when the agent names none. In the app, a skill or tool wired on
+  a team's canvas is given in that team only, and taking one of the agent's own off it turns it off
+  there; the agent's own skills and tools change on its workbench. Taking one of the agent's own
+  reads off a team's canvas takes it off the agent, as knowledge isn't turned off for one team.
+- **Written out in full.** An entry that writes its own `role` runs as it is written, which is how
+  `examples/` and hand-written files work; `from` then only names whose lessons it reads. The app
+  makes it one of My agents the next time it saves the team: an agent with exactly the same setup
+  is joined, and one whose name is taken gets the team's name after it (`Writer · Market brief`).
+  `from.version`, which an earlier LoomWatch wrote, is read and ignored.
+- **Read in its teams folder.** A pointer needs its teams folder: `loomwatchd run team.yaml` uses the
+  nearest folder that holds `.jobs`, from the file's own folder upward, or the file's own folder
+  when none does. An agent file that is missing stops the team with a message that names the
+  agent.
+- **Reviewed like a team file.** An agent file that appears or changes outside LoomWatch holds every
+  team that uses it until the operator reviews it, as a team file does (ADR 0048).
+  `DELETE /api/jobs/{id}` refuses an agent that a team still uses, naming the teams.
+
 ### Older team files
 
 Team files written for an earlier LoomWatch, which started an AI app for each agent, still load
@@ -179,8 +223,9 @@ depend on the document as a whole:
   (ADR 0078, [How agents learn](LEARNING.md)). It is on when absent: the operator's words about a
   finished answer, and a check step's item that was not met and then met after the send-back,
   become short lessons in the agent's standing instructions, each shown in the chat with Undo.
-  With `false` it learns nothing new and is given none of its lessons. `from: {agent}` is also read
-  now: one of My agents keeps one list of lessons in every team that places it.
+  With `false` it learns nothing new and is given none of its lessons. One of My agents keeps one
+  list of lessons in every team that uses it (`from: {agent}`); when a team's own agent becomes one
+  of My agents, its lessons go with it.
 - **Notes set aside from the answer.** Some sections an agent ends its reply with are for the
   operator, not the answer's reader:
   - `## Not met`: the `doneWhen` items it could not meet.

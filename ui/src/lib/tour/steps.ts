@@ -179,7 +179,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
         }
       : {
           title: 'Save it to My agents',
-          body: 'Press Save to My agents. Every team you add it to keeps the copy it was given, until you press Update in that team.',
+          body: 'Press Save to My agents. Then you can add it to any team: it is the same agent in every team it’s in.',
           target: ['[data-tour="save-agent"]'],
           sides: ['bottom', 'left'],
           advance: 'action',

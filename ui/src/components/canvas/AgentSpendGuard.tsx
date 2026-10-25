@@ -30,8 +30,8 @@ export function AgentSpendGuard({ perRun, readOnly, onChange }: { perRun: number
           onChange={(event) => setText(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') commit() }} />
       </span>
       <span className="hint t-meta">{perRun === null
-        ? 'Empty: it spends from the team’s limit like the others.'
-        : `Past ${dollars(perRun)} in a run, it waits for you to add more or to stop it.`}</span>
+        ? 'For this team only. Leave it empty to share the team’s limit.'
+        : `For this team only. Past ${dollars(perRun)} in a run, it waits for you to add more or to stop it.`}</span>
     </div>
   )
 }

@@ -1028,7 +1028,7 @@ pub(crate) async fn conversation(
     let _ = archive;
     let record = registry.get(run_id)?;
     let store = registry.chat_store()?;
-    let team = TeamConfig::load(team_path).ok()?;
+    let team = TeamConfig::load_beside(team_path).ok()?;
     let team_ref = TeamRef {
         key: record.team_key.clone(),
         path: record.team_path.clone(),
@@ -1781,7 +1781,7 @@ fn open_team(teams_root: &Path, team_path: &str) -> Result<(String, TeamConfig),
             format!("team path {team_path} is not a UTF-8 path below the teams root"),
         )
     })?;
-    let team = TeamConfig::load(&resolved)
+    let team = TeamConfig::load_in(&resolved, teams_root)
         .map_err(|error| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("{error:#}")))?;
     Ok((relative, team))
 }

@@ -59,14 +59,6 @@ export interface JobSpec {
 /** A job's version number; a file written before versions existed is version 1. */
 export const versionOf = (job: Pick<JobSpec, 'version'>): number => job.version ?? 1
 
-/** One version of a saved job, newest first in `fetchJobVersions`. */
-export interface JobVersion {
-  version: number
-  savedAt?: string
-  note?: string
-  spec: JobSpec
-}
-
 /** A saved job as `GET /api/jobs` lists it. `file` is relative to the teams folder. */
 export interface SavedJob extends JobSpec {
   id: string
@@ -125,13 +117,6 @@ export async function saveJob(id: string, spec: JobSpec, { replace = false, expe
   if (!response.ok) throw await failure(response)
   window.dispatchEvent(new Event(JOBS_CHANGED_EVENT))
   return (await response.json()) as SavedJob
-}
-
-/** Every version of job `id`, newest first, each with its fields. */
-export async function fetchJobVersions(id: string): Promise<JobVersion[]> {
-  const response = await daemonFetch(`/api/jobs/${encodeURIComponent(id)}/versions`, { cache: 'no-store' })
-  if (!response.ok) throw await failure(response)
-  return ((await response.json()) as { versions: JobVersion[] }).versions
 }
 
 /** The folder agents' chats keep their one-agent teams in (`.jobs/.bench`), made when missing. */

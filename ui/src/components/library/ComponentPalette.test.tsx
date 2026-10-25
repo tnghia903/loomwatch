@@ -75,10 +75,10 @@ describe('ComponentPalette jobs', () => {
   it('removes a saved job only on a second click', async () => {
     jobs = [{ id: 'release-notes', name: 'Release notes', instructions: 'Write the notes.', file: '.jobs/release-notes.yaml' }]
     palette()
-    const remove = await screen.findByRole('button', { name: 'Remove the agent Release notes' })
+    const remove = await screen.findByRole('button', { name: 'Remove Release notes from My agents' })
     fireEvent.click(remove)
     expect(removed).toEqual([])
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm removing Release notes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removing Release notes from My agents' }))
     await waitFor(() => expect(removed).toEqual(['release-notes']))
     expect(await within(section('My agents')).findByText('None yet')).toBeInTheDocument()
   })

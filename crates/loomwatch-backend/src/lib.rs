@@ -28,6 +28,7 @@ mod jobs;
 pub mod lessons;
 pub mod marketplace;
 pub mod memory;
+pub mod my_agents;
 pub mod notebook_api;
 pub mod notion;
 pub mod operator;
@@ -138,7 +139,7 @@ pub async fn run_team_session(
     prompt: &str,
     exit_timeout: Duration,
 ) -> Result<SessionOutcome> {
-    let team = Arc::new(TeamConfig::load(team_path)?);
+    let team = Arc::new(TeamConfig::load_beside(team_path)?);
     let archive = EventArchive::open(database).await?;
     run_loaded_team(
         &team,
@@ -275,7 +276,10 @@ pub async fn run_team_session_with_session_id(
     session_id: String,
     lineage: &RunLineage,
 ) -> Result<SessionOutcome> {
-    let team = Arc::new(TeamConfig::load(team_path)?);
+    let team = Arc::new(match teams_root {
+        Some(root) => TeamConfig::load_in(team_path, root)?,
+        None => TeamConfig::load_beside(team_path)?,
+    });
     let event_log = EventLog::new(archive.clone(), session_id);
     run_loaded_team(
         &team,

@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import { createElement, useRef, type ReactNode } from 'react'
+import { createElement, useRef } from 'react'
 
 import { canonicalModel } from '../../lib/ai/modelIds'
 import type { AgentNode } from '../../lib/library/nodeFromDrop'
@@ -85,9 +85,6 @@ export interface InspectorProps {
   /** What the agent's app has of its own, and turning one off (ADR 0060). */
   appHas?: { app: string; items: readonly TurnedOff[] } | null
   onTurnOff?: (entry: TurnedOff) => void
-  /** Placed from Your agents: the link's panel, shown first. The fields the link copies (name,
-      instructions, model and effort, what it may do without asking) are then read-only here. */
-  linked?: ReactNode
 }
 
 // UX_REDESIGN §5.4: zones in the order the operator thinks — IDENTITY (what stands between a
@@ -95,9 +92,7 @@ export interface InspectorProps {
 // it), WORKS IN and ALLOWED WITHOUT ASKING (where it works and what it may do there; ADR 0039
 // replaced PROCESS, whose command, arguments and environment stay in the team file).
 // No Apply button: every edit is immediate in memory; the disk write is ⌘S and only ⌘S.
-export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, modelMove, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, suggestFor, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff, linked }: InspectorProps) {
-  // The fields a link to Your agents copies are changed there, or after unlinking.
-  const locked = readOnly || Boolean(linked)
+export function Inspector({ node, place, inheritedMemory = [], onRemoveCapability, teamPath, onAddKnowledge, onRename, onModelChange, modelMove, onSpendChange, onThinkingEffortChange, onDoneWhenChange, checkStep, suggestFor, onCwdChange, onAllowRecruitingChange, onAllowChange, onMemoryBriefChange, onDeliverAsChange, briefCount = 0, teamDeliverAs = 'native-file', onPromoteEntrypoint, onDelete, onClose, onFieldBlur, fixHint, onDismissFixHint, fieldProblems, readOnly = false, pipeline = false, checkup, usage, teamAutoMode = false, instructionUpdate, onTurnBackOn, appHas, onTurnOff }: InspectorProps) {
   const roleField = useRef<HTMLTextAreaElement>(null)
   const { agent, runtime } = node.data
   const status = runtime?.status ?? agent.status ?? 'idle'
@@ -130,7 +125,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         <span className="node-glyph">{createElement(roleGlyph(agent.role), { size: 20, 'aria-hidden': 'true' })}</span>
         <span className="insp-text">
           <div className={`insp-title t-title field ${zoneClass('name')}`}>
-            <input value={agent.name} aria-label="Name" data-agent-field="name" readOnly={locked} onChange={(event) => onRename('name', event.target.value)} onBlur={() => onFieldBlur('name')} />
+            <input value={agent.name} aria-label="Name" data-agent-field="name" readOnly={readOnly} onChange={(event) => onRename('name', event.target.value)} onBlur={() => onFieldBlur('name')} />
           </div>
           <div className="insp-id t-mono">{agent.id}</div>
           <div className="insp-status t-micro"><StatusGlyph status={status} /> {runtime ? `${runtime.taskState.toLowerCase()} · ${runtime.task}` : status}{runtime?.busUnavailable ? ' · no Team Bus access' : ''}</div>
@@ -144,27 +139,27 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
         </p>
       )}
 
-      {linked && <div className="zone">{linked}</div>}
-
       <div className="zone">
         <div className="zone-head t-micro">Identity</div>
+        {/* Every agent is one of My agents (ADR 0094): its own fields are the same in every team. */}
+        {agent.from && <p className="t-meta">Its name, instructions, Done when and the model you pick are the same in every team it’s in.</p>}
         <div className={`field ${zoneClass('role')}`}>
           <label className="t-meta" htmlFor="insp-role">Role and instructions</label>
-          <textarea ref={roleField} id="insp-role" className={instructionUpdate?.update.state === 'updated' ? 'input instructions-marked' : 'input'} data-agent-field="role" value={agent.role} readOnly={locked} placeholder="What this agent should do, which sources to use, what to pass on." onChange={(event) => onRename('role', event.target.value)} onBlur={() => onFieldBlur('role')} />
+          <textarea ref={roleField} id="insp-role" className={instructionUpdate?.update.state === 'updated' ? 'input instructions-marked' : 'input'} data-agent-field="role" value={agent.role} readOnly={readOnly} placeholder="What this agent should do, which sources to use, what to pass on." onChange={(event) => onRename('role', event.target.value)} onBlur={() => onFieldBlur('role')} />
           {instructionUpdate && <InstructionsUpdated {...instructionUpdate} agent={agent} readOnly={readOnly} />}
-          <InstructionShape role={agent.role} checksDoneWhen={Boolean(agent.doneWhen?.length)} readOnly={locked} field={roleField} onChange={(role) => onRename('role', role)} />
-          {onDoneWhenChange && <DoneWhen items={agent.doneWhen ?? []} readOnly={locked} onChange={onDoneWhenChange} />}
+          <InstructionShape role={agent.role} checksDoneWhen={Boolean(agent.doneWhen?.length)} readOnly={readOnly} field={roleField} onChange={(role) => onRename('role', role)} />
+          {onDoneWhenChange && <DoneWhen items={agent.doneWhen ?? []} readOnly={readOnly} onChange={onDoneWhenChange} />}
           {checkStep && <CheckStep {...checkStep} readOnly={readOnly} />}
           <span className="hint t-meta">{hint('role', 'Included in every turn, including delegated work.')}</span>
         </div>
         {checkup && <AgentCheckup {...checkup} readOnly={readOnly} headClassName="zone-head t-micro" />}
         <div className={`field ${zoneClass('model')}`}>
-          <ModelPicker field="model" value={canonicalModel(agent.model)} disabled={locked} suggestFor={suggestFor} follows={linked ? undefined : agent.followsSuggestion === true} moved={modelMove} onChange={(id, follow) => { onModelChange(id, follow); onFieldBlur('model') }} />
+          <ModelPicker field="model" value={canonicalModel(agent.model)} disabled={readOnly} suggestFor={suggestFor} follows={agent.followsSuggestion === true} moved={modelMove} onChange={(id, follow) => { onModelChange(id, follow); onFieldBlur('model') }} />
           <span className="hint t-meta">{runtime?.status === 'running' ? 'The model this run uses.' : hint('model', 'The model this agent thinks with, and which of your connections pays for it. Prices are per million tokens.')}</span>
         </div>
-        <EffortSlider model={canonicalModel(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={locked} onChange={onThinkingEffortChange} />
+        <EffortSlider model={canonicalModel(agent.model)} value={agent.thinkingEffort ?? splitModelSelector(agent.model ?? '').thinkingEffort} disabled={readOnly} onChange={onThinkingEffortChange} />
         {usage && <AgentUsageLine usage={usage.agent} runs={usage.runs} alone={usage.alone} />}
-        {onSpendChange && <AgentSpendGuard perRun={agent.spend?.perRun ?? null} readOnly={locked} onChange={onSpendChange} />}
+        {onSpendChange && <AgentSpendGuard perRun={agent.spend?.perRun ?? null} readOnly={readOnly} onChange={onSpendChange} />}
       </div>
 
       <div className="zone">
@@ -189,7 +184,7 @@ export function Inspector({ node, place, inheritedMemory = [], onRemoveCapabilit
       </div>
 
       <div className="zone">
-        <AgentPermissions agent={agent} readOnly={locked} onChange={onAllowChange} teamAuto={teamAutoMode} headClassName="zone-head t-micro" />
+        <AgentPermissions agent={agent} readOnly={readOnly} onChange={onAllowChange} teamAuto={teamAutoMode} headClassName="zone-head t-micro" />
       </div>
 
       {!readOnly && (

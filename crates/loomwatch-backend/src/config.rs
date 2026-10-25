@@ -706,10 +706,24 @@ struct RawAgent {
     _status: Option<String>,
 }
 
-/// `from: {agent, version}` (ADR 0071): only the agent is read; the version is the canvas's.
+/// `from: {agent}` (ADR 0071, 0094): the agent in My agents it is. A `version` an earlier
+/// `LoomWatch` wrote is ignored.
 #[derive(Debug, Deserialize)]
 struct RawFrom {
     agent: String,
+}
+
+/// An agent that is one of My agents and holds none of its own fields was filled in from its
+/// teams folder (ADR 0094); one read without it says so rather than running with no instructions.
+fn filled_in(id: &str, role: Option<&String>, from: Option<&RawFrom>) -> Result<(), String> {
+    match (role, from) {
+        (None, Some(from)) => Err(format!(
+            "agent {id:?} is {:?} from My agents, so the team has to be read in its teams \
+             folder, where `.jobs/{}.yaml` fills it in.",
+            from.agent, from.agent
+        )),
+        _ => Ok(()),
+    }
 }
 
 impl TryFrom<RawAgent> for AgentConfig {
@@ -775,6 +789,7 @@ impl TryFrom<RawAgent> for AgentConfig {
                 })
             }
             AgentKind::Harness => {
+                filled_in(&id, raw.role.as_ref(), raw.from.as_ref())?;
                 let spawn = raw.spawn.unwrap_or_default();
                 let model = raw.model.ok_or_else(|| {
                     format!("agent {id:?} is missing `model`, the model it runs on.")
@@ -1447,7 +1462,59 @@ impl TeamConfig {
     /// Returns an error when the document cannot be parsed, uses an unknown version, or
     /// fails the runtime's semantic checks.
     pub fn parse(source: &str) -> Result<Self> {
-        let mut team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
+        let team: Self = serde_yaml::from_str(source).context("invalid team YAML")?;
+        Self::checked(team)
+    }
+
+    /// Read and validate a team file in the teams folder `teams_root`, filling in each agent that
+    /// points at one of My agents from there first (ADR 0094). Every run and every check of a team
+    /// in the teams folder reads it this way.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse_in`], and when the file cannot be read.
+    pub fn load_in(path: &Path, teams_root: &Path) -> Result<Self> {
+        let source = fs::read_to_string(path)
+            .with_context(|| format!("failed to read team file {}", path.display()))?;
+        Self::parse_in(&source, teams_root)
+            .with_context(|| format!("failed to parse team file {}", path.display()))
+    }
+
+    /// [`Self::load_in`] for a team file read on its own, as `loomwatchd run` reads one: its teams
+    /// folder is the nearest folder at or above it that holds My agents (`.jobs`), or its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::load_in`].
+    pub fn load_beside(path: &Path) -> Result<Self> {
+        let folder = path
+            .parent()
+            .filter(|folder| !folder.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let root = folder
+            .ancestors()
+            .find(|candidate| candidate.join(crate::my_agents::FOLDER).is_dir())
+            .unwrap_or(folder);
+        Self::load_in(path, root)
+    }
+
+    /// [`Self::parse`] for a team in the teams folder `teams_root`: an agent that points at one of
+    /// My agents (`from: {agent}`, no `role` of its own) is filled in from
+    /// `<teams root>/.jobs/<agent>.yaml` first (ADR 0094, [`crate::my_agents`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse`], and when an agent points at one of My agents that isn't there.
+    pub fn parse_in(source: &str, teams_root: &Path) -> Result<Self> {
+        let mut document: serde_yaml::Value =
+            serde_yaml::from_str(source).context("invalid team YAML")?;
+        crate::my_agents::fill(&mut document, teams_root).map_err(anyhow::Error::msg)?;
+        let team: Self = serde_yaml::from_value(document).context("invalid team YAML")?;
+        Self::checked(team)
+    }
+
+    /// The checks every team document passes, however it was read.
+    fn checked(mut team: Self) -> Result<Self> {
         if team.schema_version != 1 {
             bail!("unsupported team schema version {}", team.schema_version);
         }

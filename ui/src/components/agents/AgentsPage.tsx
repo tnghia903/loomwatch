@@ -5,10 +5,10 @@ import { modelNameFromId } from '../../lib/ai/modelIds'
 import type { DetectedCapability } from '../../lib/library/client'
 import { draftFromJob } from '../../lib/library/draft'
 import { figureFor } from '../../lib/library/figures'
-import { useSavedJobs, versionOf } from '../../lib/library/jobs'
+import { useSavedJobs } from '../../lib/library/jobs'
 import { usePinnedAgent } from '../../lib/library/pinned'
 import { modelForPreset, ROLE_PRESETS } from '../../lib/library/roles'
-import { teamAgentHref, useAgentUses } from '../../lib/library/uses'
+import { useAgentUses } from '../../lib/library/uses'
 import { agentPresence } from '../../lib/rail/presence'
 import type { RunRecord } from '../../lib/runs/client'
 import type { LoomMarkState } from '../../lib/story/loomMark'
@@ -128,18 +128,16 @@ function AgentTemplates({ team }: { team: string | null }) {
 
 function AgentsList() {
   const { jobs, problems, available, loaded, error } = useSavedJobs()
-  const { uses, own } = useAgentUses()
+  const { uses } = useAgentUses()
   const { pinned } = usePinnedAgent()
   const usage = useMemo(() => {
-    const byAgent = new Map<string, { teams: number; scheduled: number; behind: number }>()
-    for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0, behind: 0 })
+    const byAgent = new Map<string, { teams: number; scheduled: number }>()
+    for (const job of jobs) byAgent.set(job.id, { teams: 0, scheduled: 0 })
     for (const use of uses ?? []) {
       const entry = byAgent.get(use.agent)
-      const job = jobs.find((candidate) => candidate.id === use.agent)
-      if (!entry || !job) continue
+      if (!entry) continue
       entry.teams += 1
       if (use.scheduled) entry.scheduled += 1
-      if (use.version < versionOf(job)) entry.behind += 1
     }
     return byAgent
   }, [jobs, uses])
@@ -148,7 +146,7 @@ function AgentsList() {
     <>
       <section className="home-hero agents-hero">
         <h1 className="t-display">My agents</h1>
-        <p>Build an agent once and work with it in its own chat. Then add it to any team: each team keeps the copy it was given until you update it there.</p>
+        <p>Build an agent once and work with it in its own chat. Then add it to any team: it is the same agent in every team it’s in.</p>
         <KnowYou />
         <div className="home-hero-acts">
           <button type="button" className="btn btn-primary btn-lg" onClick={() => open('/agents/new')} data-tour="new-agent"><Plus size={16} aria-hidden="true" />New agent</button>
@@ -161,10 +159,8 @@ function AgentsList() {
         {!available && <p role="alert" className="home-empty alert">This LoomWatch server is older than My agents. Restart it to use them.</p>}
         {error && <p role="alert" className="home-empty alert">Couldn’t list your agents. {error}</p>}
         {available && !loaded && <p role="status" className="home-empty">Loading your agents…</p>}
-        {available && loaded && jobs.length === 0 && own !== null && (
-          own.length > 0
-            ? <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>None kept here yet. Press <b>New agent</b> to start from a job, or keep one of the agents in your teams below.</span></div>
-            : <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Press <b>New agent</b> to start from a job such as Researcher or Writer, or from a blank page.</span></div>
+        {available && loaded && jobs.length === 0 && (
+          <div className="home-empty"><UserRound size={20} aria-hidden="true" /><span>No agents yet. Press <b>New agent</b> to start from a job such as Researcher or Writer, or from a blank page.</span></div>
         )}
         {jobs.length > 0 && (
           <ul className="home-grid agents-grid">
@@ -179,18 +175,6 @@ function AgentsList() {
         )}
         {problems.map((problem) => <p key={problem.file} className="home-empty alert" title={problem.message}>Can’t read {problem.file}: {problem.message}</p>)}
       </section>
-
-      {own && own.length > 0 && (
-        <section className="home-teams" aria-labelledby="agents-in-teams-title">
-          <div className="home-teams-head"><h2 id="agents-in-teams-title">In your teams<span className="home-section-says">Each works in its own team</span></h2></div>
-          <p className="agents-in-teams-note">These agents were made inside a team, so each one is changed there.</p>
-          <ul className="home-agents-row">
-            {own.map((agent) => (
-              <li key={`${agent.teamPath}#${agent.agentId}`}><a className="home-agent-chip" href={teamAgentHref(agent)} title={`Open ${agent.agentName} in ${agent.teamName}`}><FigureStill className="home-agent-figure" figure={figureFor(agent.agentId)} headOnly alt="" width={30} height={30} loading="lazy" decoding="async" /><b>{agent.agentName}</b><span className="home-agent-team">in {agent.teamName}</span></a></li>
-            ))}
-          </ul>
-        </section>
-      )}
     </>
   )
 }

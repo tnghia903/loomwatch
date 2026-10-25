@@ -127,10 +127,10 @@ function hereItem(agent: { id: string; name: string }, reveal?: (id: string) => 
   return { name: agent.name, detail: 'On this canvas', hint: `Show ${agent.name} on the canvas`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: !reveal, payload: {}, draggable: false, figure: figureFor(agent.id), ...(reveal ? { onActivate: () => reveal(agent.id), Trailing: LocateFixed } : {}) }
 }
 
-/** Another team's own agent: adding it gives this team a copy of its own, and leaves that team's as it is. */
+/** Another team's agent not yet in My agents: once both teams are saved, an identical one is one agent (ADR 0094). */
 function elsewhereItem(agent: TeamOwnAgent): PaletteItem {
   const source = teamAgentSource(agent.agent)
-  return { name: agent.agentName, detail: `in ${agent.teamName}`, engine: `on ${modelNameFromId(source.model ?? DEFAULT_MODEL)}`, hint: `Add a copy of ${agent.agentName} to this team. The one in ${agent.teamName} stays as it is.`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: source as object, figure: figureFor(agent.agentId) }
+  return { name: agent.agentName, detail: `in ${agent.teamName}`, engine: `on ${modelNameFromId(source.model ?? DEFAULT_MODEL)}`, hint: `Add ${agent.agentName} to this team.`, Icon: UserRound, mime: LIBRARY_DRAG_MIME, event: 'loomwatch:add-agent', disabled: false, payload: source as object, figure: figureFor(agent.agentId) }
 }
 
 /** "You": the review step that pauses the team for the operator's approval. It is a step, not an agent. */
@@ -211,7 +211,7 @@ const EXPLAIN: Record<string, ReactNode> = {
   [CONNECTIONS]: <>Services you connected in Connections. Drag <b>Notion</b> onto an agent and choose a page: the agent is given the page’s text each time the team runs. The pages this team reads are listed under it.</>,
   [FILES]: <>This team’s folders and files. Add one from an agent’s panel, with <b>Folder</b> or <b>File</b> under Given. Then drag it onto another agent to share it, or click it to find its card.</>,
   [MEMORY]: 'Other teams’ memory and imported packs. Drag one onto an agent to supply it there.',
-  [YOURS]: <>A team’s agents come from here: the ones you built, then the ones that live in your teams. A team keeps its copy of a built agent until you choose <b>Update</b> in that agent’s panel. An agent from another team comes as a copy this team owns. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
+  [YOURS]: <>A team’s agents come from here. Each is the same agent in every team it’s in. Build one in <a href="/agents">My agents</a>, starting from a job such as Researcher or Writer, and try it there first.</>,
 }
 
 /** The one add panel, beside the Workflow canvas (ADR 0041): what you can add — jobs, skills, knowledge. */
@@ -296,7 +296,7 @@ export function ComponentPalette({ capabilityInventory, capabilitiesLoading = fa
     const confirming = confirmRemove === item.jobId
     return <div key={`${item.name}-${i}`} className="palette-job" onMouseLeave={() => { if (confirming) setConfirmRemove(null) }}>
       {add}
-      <button className={confirming ? 'palette-job-remove confirming' : 'palette-job-remove icon-button'} onClick={() => remove(item)} onBlur={() => { if (confirming) setConfirmRemove(null) }} aria-label={confirming ? `Confirm removing ${item.name}` : `Remove the agent ${item.name}`} title={confirming ? 'Click again to remove. Teams that use it keep their copy.' : 'Remove this job'}>{confirming ? 'Remove' : <Trash2 size={12} />}</button>
+      <button className={confirming ? 'palette-job-remove confirming' : 'palette-job-remove icon-button'} onClick={() => remove(item)} onBlur={() => { if (confirming) setConfirmRemove(null) }} aria-label={confirming ? `Confirm removing ${item.name} from My agents` : `Remove ${item.name} from My agents`} title={confirming ? 'Click again to remove it from My agents.' : 'Remove from My agents'}>{confirming ? 'Remove' : <Trash2 size={12} />}</button>
     </div>
   }
   const section = (name: string, rows: ReactNode[], total: number, extra?: ReactNode, explain?: ReactNode) => <section key={name} aria-label={name}>

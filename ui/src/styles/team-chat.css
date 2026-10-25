@@ -1267,4 +1267,12 @@ button.tc-reply-quote:hover, button.tc-reply-quote:focus-visible { border-left-c
   .tc-attach { width: 44px; height: 44px; }
 }
 /* What happened to something done from the chat, such as a dropped folder added: a line over the box. */
-.tc-notice { margin: 0; font-size: 12.5px; color: var(--color-ink-2); }
+.tc-notice { margin: 0; font-size: 12.5px; color: var(--color-ink-2); display: flex; align-items: flex-start; gap: 6px; }
+.tc-notice > span { flex: 1; min-width: 0; }
+/* The × beside the note's first line: half a line down, less half the 32 px button. On a phone the
+   button is 44 px (app.css), which would reach into the row above, so it centres on the note. */
+.tc-notice > .iconbtn { margin-top: calc(0.5lh - 16px); }
+@media (max-width: 767px) {
+  .tc-notice { align-items: center; }
+  .tc-notice > .iconbtn { margin-top: 0; }
+}

@@ -282,8 +282,8 @@ async fn start(state: &TeamRequestsState, request: TeamRequest) -> TeamRequest {
         }
         Err(LaunchError::NeedsReview(_)) => (
             format!(
-                "{} was added or changed outside LoomWatch. Open it, press Run team once to check \
-                 it, then ask again.",
+                "{0}, or one of its agents, changed outside LoomWatch, so it didn't run. Open {0} \
+                 and press Run team to see what it will do, then ask again.",
                 request.team.name
             ),
             None,
@@ -420,7 +420,11 @@ fn handed_back(
     responder: Option<&str>,
     heading: Option<String>,
 ) -> crate::chat::HandedBack {
-    let team = crate::config::TeamConfig::load(&state.teams_root.join(&request.team.path)).ok();
+    let team = crate::config::TeamConfig::load_in(
+        &state.teams_root.join(&request.team.path),
+        &state.teams_root,
+    )
+    .ok();
     let agent = responder
         .map(str::to_owned)
         .or_else(|| team.as_ref().and_then(|team| team.responder_id().ok()));
@@ -511,7 +515,8 @@ pub(crate) fn teams(teams_root: &Path) -> Vec<(TeamRef, crate::config::TeamConfi
     files
         .into_iter()
         .filter_map(|file| {
-            let team = crate::config::TeamConfig::load(&teams_root.join(&file)).ok()?;
+            let team =
+                crate::config::TeamConfig::load_in(&teams_root.join(&file), teams_root).ok()?;
             let name = if team.name.trim().is_empty() {
                 file.trim_end_matches(".yaml")
                     .trim_end_matches(".yml")

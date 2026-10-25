@@ -6,10 +6,9 @@ import type { AgentConfig, TeamDocument } from '../team-file/types'
 import { JOBS_CHANGED_EVENT } from './jobs'
 import type { LibrarySource } from './types'
 
-/** One team agent placed from one of Your agents. */
+/** One team agent that is one of My agents (ADR 0094). */
 export interface AgentUse {
   agent: string
-  version: number
   teamPath: string
   teamName: string
   /** The agent's id and name in that team. */
@@ -78,8 +77,8 @@ export async function findTeamAgents(): Promise<{ uses: AgentUse[]; own: TeamOwn
     const teamName = doc?.name?.trim() || teamDisplayName(team)
     for (const agent of doc?.agents ?? []) {
       if (!agent?.id || agent.kind === 'operator') continue
-      if (agent.from?.agent && typeof agent.from.version === 'number') {
-        uses.push({ agent: agent.from.agent, version: agent.from.version, teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name, scheduled })
+      if (agent.from?.agent) {
+        uses.push({ agent: agent.from.agent, teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.from.agent, scheduled })
       } else {
         own.push({ teamPath: team.path, teamName, agentId: agent.id, agentName: agent.name?.trim() || agent.id, agent })
       }

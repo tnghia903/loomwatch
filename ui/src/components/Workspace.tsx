@@ -124,7 +124,7 @@ import { modelForPreset, ROLE_PRESETS, roleSource } from '../lib/library/roles'
 import { agentFigure, FIGURE_HUES, figureHue } from '../lib/library/figures'
 import { SavedAgentsContext, TeamFiguresContext } from './agents/figureContext'
 import { savedJobPreset, toolAllowOf, useSavedJobs, type SavedJob } from '../lib/library/jobs'
-import { fieldsForVersion, linkState } from '../lib/library/link'
+import { readKey } from '../lib/library/reads'
 import { teamAgentEdit } from '../lib/library/teamDraft'
 import { withAllowed, type AlwaysAllowed } from '../lib/tools/allow'
 import { actionCount, toolNamed, useConnectedTools, type ConnectedTool } from '../lib/tools/client'
@@ -260,6 +260,14 @@ function useWideScreen(): boolean {
 
 export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, capabilitiesLoading = false, capabilitiesError = null, capabilitiesScannedAt = null, onRetryCapabilities = () => {}, onDocumentOpen, initialRunId }: WorkspaceProps) {
   const doc = useTeamDocument()
+  const { jobs: savedJobs, loaded: savedJobsLoaded } = useSavedJobs()
+  // One of the agent's own reads in My agents (ADR 0094): knowledge isn't turned off for one team,
+  // so taking it off a team's canvas takes it off the agent, and the canvas says so.
+  const isOwnRead = useCallback((agent: AgentConfig, capability: Pick<CapabilityRef, 'kind' | 'path' | 'notion'>) => {
+    if (capability.kind !== 'knowledge' || !agent.from) return false
+    const job = savedJobs.find((candidate) => candidate.id === agent.from?.agent)
+    return Boolean(job?.reads?.some((read) => readKey(read) === readKey(capability)))
+  }, [savedJobs])
   const flow = useReactFlow()
   // Semantic zoom: the canvas carries its depth so every card can say more or less (lib/story/depth.ts).
   const depth = useStore((store) => depthForZoom(store.transform[2]))
@@ -803,7 +811,12 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
       doc.turnOff(new Map(working.map((agent) => [agent.id, off])))
       setTurnedOffNote({ names: off.map((entry) => entry.name), agents: working.map((agent) => agent.id), everyone: true })
     }
-  }, [capabilityCards, composerLayout, doc, docAgents, instructionUpdates])
+    const reading = working.filter((agent) => going.some((card) => isOwnRead(agent, card)))
+    if (reading.length > 0) {
+      const reads = going.filter((card) => reading.some((agent) => isOwnRead(agent, card)))
+      setTurnedOffNote({ names: reads.map((card) => card.name), agents: reading.map((agent) => agent.id), everyone: false, ownRead: true })
+    }
+  }, [capabilityCards, composerLayout, doc, docAgents, instructionUpdates, isOwnRead])
 
   /**
    * Edges into a memory card, read from `memory.inherits` — the team file, not the sidecar.
@@ -896,6 +909,8 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
         if (off && agent.kind !== 'operator') {
           doc.turnOff(new Map([[source, [off]]]))
           setTurnedOffNote({ names: [off.name], agents: [source], everyone: false })
+        } else if (isOwnRead(agent, capability)) {
+          setTurnedOffNote({ names: [capability.name], agents: [source], everyone: false, ownRead: true })
         }
       }
       // Layouts from before the kind was executable may still hold the same edge in the sidecar.
@@ -911,7 +926,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     })
     const owner = source === '__prompt' ? 'The whole team' : nodeNames.get(source) ?? source
     setStatusAnnouncement(`${owner} no longer ${RELATION[capability.kind]} ${capability.name}.`)
-  }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames, instructionUpdates])
+  }, [capabilityCards, composerLayout, doc, keepUnusedCard, nodeNames, instructionUpdates, isOwnRead])
 
   const problems = useMemo(() => reviewProblems(doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames), [doc.entrypointProblem, doc.fieldProblemsByAgent, doc.documentProblems, nodeNames])
   const scheduleProblems = useMemo(() => problems.filter((problem) => problem.yamlPath?.[0] === 'schedule'), [problems])
@@ -1535,7 +1550,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
   }, [detailsOpen, deliveryShown, clearSelection])
   // Details' timeline asks to read a message: the chat shows it, in the piece it belongs to.
   const [chatReveal, setChatReveal] = useState<{ runId: string; id: string; at: number } | null>(null)
-  const savedJobs = useSavedJobs().jobs
   // Each agent's figure, the one it wears in Your agents (lib/library/figures.ts agentFigure).
   const agentFigures = useMemo(() => new Map(doc.nodes.filter((node) => node.data.agent.kind !== 'operator').map((node) => [node.id, agentFigure(node.data.agent, savedJobs)])), [doc.nodes, savedJobs])
   const chatAgents = useMemo(() => {
@@ -1715,7 +1729,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     if (typeof what === 'string') {
       doc.updateAgentAllow(agentId, what, true)
       void doc.save()
-      setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on.`)
+      setStatusAnnouncement(`${name} is allowed to ${ALLOW_SWITCHES.find((item) => item.key === what)?.label.toLowerCase() ?? what} from now on, in every team it’s in.`)
       return
     }
     // One call of a connected tool (ADR 0069): kept on the agent's tool entry, so later runs don't ask.
@@ -1723,7 +1737,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
     if (change?.kind !== 'fields') return
     doc.applyAgentFields(agentId, change.fields)
     void doc.save()
-    setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on.`)
+    setStatusAnnouncement(`${name} may do “${what.label}” without asking from now on, in every team it’s in.`)
   }, [doc])
   const inspecting = Boolean(inspectedNode || inspectedCapability || inspectedEvidence || provenanceOpen || scheduleOpen || memoryPanelOpen)
   // Ask docks where the inspector does. It waits behind whatever holds the dock, and asking for it
@@ -2651,6 +2665,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
               skills={capabilityInventory.skills}
               skillsLoading={capabilitiesLoading}
               savedJobs={savedJobs}
+              savedJobsLoaded={savedJobsLoaded}
               onEdit={(agentId, key, value) => {
                 const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
                 const change = agent && editable ? teamAgentEdit(agent, key, value) : null
@@ -2658,17 +2673,7 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
                 if (change.kind === 'rename') doc.renameAgent(agentId, change.field, change.value)
                 else doc.applyAgentFields(agentId, change.fields)
               }}
-              onApplyVersion={(agentId, job, previous) => {
-                const agent = doc.nodes.find((node) => node.id === agentId)?.data.agent
-                if (!agent || !editable) return
-                doc.applyAgentFields(agentId, fieldsForVersion(job, agent, previous))
-                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
-              }}
-              onUnlink={(agentId) => {
-                if (!editable) return
-                doc.applyAgentFields(agentId, { from: undefined })
-                setStatusAnnouncement('It is now this team’s own. Save the team to keep it.')
-              }}
+              onAgentSaved={doc.refillAgent}
               onShowWorkflow={showWorkflow}
               onAdd={editable ? addSavedAgent : undefined}
               onPickModel={(agentId, model, follow) => doc.applyAgentFields(agentId, { model, followsSuggestion: follow ? true : undefined })}
@@ -2737,19 +2742,6 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
             figures={agentFigures} onFocusAgent={focusAgent}
             startAdvanced={forcedInspectorField?.agentId === inspectedNode.id} fixHint={forcedInspectorField?.agentId === inspectedNode.id ? forcedInspectorField.hint : undefined} onDismissFixHint={() => setForcedInspectorField(null)}
             node={inspectedNode} fieldProblems={doc.fieldProblemsByAgent.get(inspectedNode.id)} readOnly={!editable} pipeline={doc.mode === 'pipeline'}
-            link={{
-              state: linkState(inspectedNode.data.agent, savedJobs),
-              onApply: (job, previous) => {
-                if (!editable) return
-                doc.applyAgentFields(inspectedNode.id, fieldsForVersion(job, inspectedNode.data.agent, previous))
-                setStatusAnnouncement(`${job.name} is up to date in this team. Save the team to keep it.`)
-              },
-              onUnlink: () => {
-                if (!editable) return
-                doc.applyAgentFields(inspectedNode.id, { from: undefined })
-                setStatusAnnouncement(`${inspectedNode.data.agent.name} is now this team’s own. Save the team to keep it.`)
-              },
-            }}
             teamAutoMode={doc.teamPermissionMode === 'auto'}
             checkup={{ findings: teamCheckup.forAgent(inspectedNode.id), onFix: teamCheckup.apply, onDismiss: teamCheckup.dismiss, onAsk: ask.unavailable ? undefined : askFor }}
             usage={teamUsageFor(teamCheckup.usage, inspectedNode.id)}
@@ -2950,7 +2942,15 @@ export function Workspace({ capabilityInventory = EMPTY_CAPABILITY_INVENTORY, ca
 
         {paletteOpen && <CommandPalette actions={actions} interpret={interpret} fallback={askFallback} onClose={() => setPaletteOpen(false)} />}
         {discardConfirm && <InlineConfirm message="Discard changes and reload from disk?" confirmLabel="Discard changes" onConfirm={() => { setDiscardConfirm(false); void doc.reloadFromDisk() }} onCancel={() => setDiscardConfirm(false)} />}
-        {pendingNodeDelete.length > 0 && <InlineConfirm message={`Delete ${pendingNodeDelete.length === 1 ? `${nodeNames.has(pendingNodeDelete[0]) ? `“${nodeNames.get(pendingNodeDelete[0])}”` : 'this card'} and its connections` : `${pendingNodeDelete.length} cards and their connections`}?`} confirmLabel="Delete" onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />}
+        {pendingNodeDelete.length > 0 && (() => {
+          // An agent of My agents only leaves this team (ADR 0094): the confirmation says so.
+          const mine = pendingNodeDelete.every((id) => Boolean(doc.nodes.find((node) => node.id === id)?.data.agent.from))
+          const named = pendingNodeDelete.length === 1 && nodeNames.has(pendingNodeDelete[0]) ? `“${nodeNames.get(pendingNodeDelete[0])}”` : null
+          const message = mine
+            ? `Take ${named ?? `${pendingNodeDelete.length} agents`} off this team? ${pendingNodeDelete.length === 1 ? 'It stays' : 'They stay'} in My agents.`
+            : `Delete ${pendingNodeDelete.length === 1 ? `${named ?? 'this card'} and its connections` : `${pendingNodeDelete.length} cards and their connections`}?`
+          return <InlineConfirm message={message} confirmLabel={mine ? (pendingNodeDelete.length === 1 ? 'Take it off' : 'Take them off') : 'Delete'} onConfirm={() => { deleteNodes(pendingNodeDelete); setPendingNodeDelete([]) }} onCancel={() => setPendingNodeDelete([])} />
+        })()}
         {openPathOpen && <OpenTeamSheet onClose={() => setOpenPathOpen(false)} />}
         {newTeamSheet && <NewTeamSheet openTeamUnsaved={['dirty', 'invalid', 'conflict'].includes(doc.documentChipState)} onClose={() => setNewTeamSheet(false)} />}
         {saveCopyOpen && <SaveCopySheet error={doc.saveError} onClose={() => setSaveCopyOpen(false)} onSave={doc.saveCopy} />}

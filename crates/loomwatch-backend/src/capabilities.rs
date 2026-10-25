@@ -411,7 +411,7 @@ fn scan_team_memory_sources(teams_root: &Path, sources: &mut BTreeMap<String, Ca
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(team) = crate::config::TeamConfig::parse(&source) else {
+        let Ok(team) = crate::config::TeamConfig::parse_in(&source, teams_root) else {
             continue;
         };
         let Some(memory) = team.memory.as_ref().filter(|memory| memory.enabled) else {
@@ -828,7 +828,9 @@ fn memory_contents(teams_root: &Path, reference: &MemorySourceRef) -> Vec<Capabi
         }
         let Ok(team) = fs::read_to_string(&path)
             .map_err(|_| ())
-            .and_then(|source| crate::config::TeamConfig::parse(&source).map_err(|_| ()))
+            .and_then(|source| {
+                crate::config::TeamConfig::parse_in(&source, teams_root).map_err(|_| ())
+            })
         else {
             continue;
         };

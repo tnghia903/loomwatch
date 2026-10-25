@@ -2,8 +2,9 @@ import { ArrowRight, Check } from 'lucide-react'
 import { useId, useState } from 'react'
 
 import { figureFor } from '../../lib/library/figures'
-import { useSavedJobs } from '../../lib/library/jobs'
+import { fetchJobs, saveJob, useSavedJobs } from '../../lib/library/jobs'
 import { saveTeamFile } from '../../lib/team-file/client'
+import { teamOfMyAgents } from '../../lib/team-file/myAgents'
 import { teamIdForPath } from '../../lib/team-file/useTeamDocument'
 import { agentsTeamYaml, TEAM_TEMPLATES, templateTeamYaml, uniqueTeamPath, type TeamTemplateId } from '../../lib/team-file/templates'
 import { openTeam } from '../../lib/team-file/useTeamList'
@@ -56,7 +57,11 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false 
     setError(null)
     setBusy('Setting up the team…')
     try {
-      const yaml = start === 'agents' ? agentsTeamYaml(picked, trimmed, teamIdForPath(path)) : templateTeamYaml(start, trimmed, undefined, teamIdForPath(path))
+      const written = start === 'agents' ? agentsTeamYaml(picked, trimmed, teamIdForPath(path)) : templateTeamYaml(start, trimmed, undefined, teamIdForPath(path))
+      // Its agents are agents of My agents first (ADR 0094), so a change saved to one reaches this
+      // team too. My agents as they are now: a template's agent may join one saved a moment ago.
+      const mine = await fetchJobs()
+      const yaml = mine ? await teamOfMyAgents(written, mine.jobs, saveJob) : written
       await saveTeamFile(path, yaml, null)
       openTeam(path)
     } catch (caught) {
@@ -83,7 +88,7 @@ export function NewTeamDialog({ existingPaths, onClose, openTeamUnsaved = false 
                 <span className="nt-check" aria-hidden="true">{start === 'agents' && <Check size={12} />}</span>
                 <span className="nt-body">
                   <span className="nt-title">My agents{hasAgents && <em>Recommended</em>}</span>
-                  <span className="nt-desc">{!saved.loaded ? 'Loading your agents…' : hasAgents ? 'The agents you built and tried. Each joins as you saved it.' : 'You have no agents yet. Build one first, or start from a template below.'}</span>
+                  <span className="nt-desc">{!saved.loaded ? 'Loading your agents…' : hasAgents ? 'The agents you built and tried. Each is the same agent in every team it’s in.' : 'You have no agents yet. Build one first, or start from a template below.'}</span>
                 </span>
               </label>
             )}

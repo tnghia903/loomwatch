@@ -6,12 +6,13 @@
 //! folder is hidden, so the team list never mistakes a job for a team, and it sits beside the
 //! teams, so jobs travel with a teams folder that is copied or kept in version control.
 //!
-//! A saved job is one of "Your agents", and it has versions. Placing one copies the fields of its
-//! current version into the team file together with a `from: {agent, version}` link, so the team
-//! runs exactly what it was approved with. Saving a change that a team would copy makes a new
-//! version and keeps the previous one in `.jobs/.versions/<id>/`; a team reaches the new version
-//! only when the operator updates it. Removing moves the file into `.jobs/.removed/`, where it can
-//! be moved back by hand, and changes no team.
+//! A saved job is one of My agents, and every agent a team has is one of them (ADR 0094): a team
+//! file points at it with `from: {agent}` and holds only what is the team's, and its own fields
+//! are filled in from here when the team is read ([`crate::my_agents`]). There is one version of
+//! each: a change saved here reaches every team that uses it from that team's next run, and what
+//! it was is kept only in the records of the runs it worked in. Versions an earlier `LoomWatch`
+//! kept in `.jobs/.versions/<id>/` are still listed, never written. Removing moves the file into
+//! `.jobs/.removed/`, where it can be moved back by hand, and is refused while a team uses it.
 //!
 //! `.jobs/.bench/` holds the one-agent teams the agent builder's test bench runs. It is hidden, so
 //! neither the team list nor the scheduler ever sees them.
@@ -67,8 +68,8 @@ const FIGURES: &[&str] = &[
 ];
 const FIGURE_COLORS: &[&str] = &["clay", "butter", "sage", "sky", "lilac", "rose", "oat"];
 
-const FILE_HEADER: &str = "# One of your LoomWatch agents: add it to a team from \"My agents\" in the Build palette.\n\
-# A team keeps the version it was placed with until you choose Update in that team.\n";
+const FILE_HEADER: &str = "# One of your LoomWatch agents, in \"My agents\".\n\
+# Every team it is in uses it as it is here: a change you save reaches them all from their next run.\n";
 
 /// What the agent may do without asking (ADR 0037), as a team file's `allow:` block writes it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -668,6 +669,32 @@ pub(crate) fn list_jobs(teams_root: &Path) -> Result<JobList, JobError> {
     Ok(list)
 }
 
+/// The bytes of agent `id`'s file in My agents, or `None` when there is no such plain file: what
+/// its approval is taken over (ADR 0048, 0094).
+pub(crate) fn job_bytes(teams_root: &Path, id: &str) -> Option<Vec<u8>> {
+    if !is_job_id(id) || jobs_folder(teams_root).ok().flatten().is_none() {
+        return None;
+    }
+    let path = job_file(teams_root, id);
+    if !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+        return None;
+    }
+    fs::read(&path).ok()
+}
+
+/// Agent `id` as it is saved in My agents now, or `None` when there is no such agent, or its file
+/// is a link or no longer reads as one.
+pub(crate) fn read_job(teams_root: &Path, id: &str) -> Option<JobSpec> {
+    if !is_job_id(id) || jobs_folder(teams_root).ok().flatten().is_none() {
+        return None;
+    }
+    let path = job_file(teams_root, id);
+    if !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+        return None;
+    }
+    read_spec(&path).ok().map(|(spec, _)| spec)
+}
+
 /// A job file's fields and its text, or why it could not be read as a job.
 fn read_spec(path: &Path) -> Result<(JobSpec, String), String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
@@ -740,8 +767,9 @@ pub(crate) fn save_job(
                 });
             }
         }
-        Some((current, text)) => {
-            keep_version(teams_root, id, current.version, text)?;
+        // One agent, one version (ADR 0094): what it was is kept only in the records of the runs
+        // it worked in. The number still counts saves, so a save made from an older one is refused.
+        Some((current, _)) => {
             spec.version = current.version + 1;
             spec.saved_at = Some(now);
         }
@@ -771,16 +799,6 @@ fn plain_folder(path: &Path, shown: &str) -> Result<(), JobError> {
         }
         Err(error) => Err(JobError::Io(error.to_string())),
     }
-}
-
-/// Keep `text`, version `version` of job `id`, as `.jobs/.versions/<id>/v<version>.yaml`.
-fn keep_version(teams_root: &Path, id: &str, version: u32, text: &str) -> Result<(), JobError> {
-    let versions = teams_root.join(JOBS_DIR).join(VERSIONS_DIR);
-    plain_folder(&versions, &format!("{JOBS_DIR}/{VERSIONS_DIR}"))?;
-    let own = versions.join(id);
-    plain_folder(&own, &format!("{JOBS_DIR}/{VERSIONS_DIR}/{id}"))?;
-    write_replacing(&own.join(format!("v{version}.yaml")), text.as_bytes())
-        .map_err(|error| JobError::Io(error.to_string()))
 }
 
 /// Every version of job `id`, newest first: the current one, then those kept in
@@ -1206,8 +1224,10 @@ mod tests {
         );
     }
 
+    /// ADR 0094: one agent, one version. A save that changes what a team takes from it counts on,
+    /// so a save made from an older count is refused, and no earlier copy is kept.
     #[test]
-    fn a_change_a_team_would_copy_makes_the_next_version_and_keeps_the_last() {
+    fn a_change_a_team_takes_counts_on_and_keeps_no_earlier_copy() {
         let root = root();
         let first = save_job(root.path(), "notes", spec("Notes"), true, None).expect("first");
         assert_eq!(first.spec.version, 1);
@@ -1226,15 +1246,13 @@ mod tests {
         changed.note = "Shorter, and it may search the web".into();
         let second = save_job(root.path(), "notes", changed, false, Some(1)).expect("second");
         assert_eq!(second.spec.version, 2);
-        assert!(root.path().join(".jobs/.versions/notes/v1.yaml").is_file());
+        assert!(!root.path().join(".jobs/.versions").exists());
 
         let versions = list_versions(root.path(), "notes").expect("versions");
         let numbers: Vec<u32> = versions.iter().map(|version| version.version).collect();
-        assert_eq!(numbers, vec![2, 1]);
+        assert_eq!(numbers, vec![2]);
         assert_eq!(versions[0].note, "Shorter, and it may search the web");
         assert!(versions[0].spec.allow.web);
-        assert_eq!(versions[1].spec.instructions, "Write the release notes.");
-        assert!(!versions[1].spec.allow.web);
         let text = fs::read_to_string(root.path().join(".jobs/notes.yaml")).expect("file");
         assert!(
             text.contains("version: 2") && text.contains("web: true"),
@@ -1481,6 +1499,7 @@ mod tests {
         assert_ne!(saved.spec.saved_at.as_deref(), Some("2001-01-01T00:00:00Z"));
     }
 
+    /// Versions an earlier `LoomWatch` kept go with the agent when it is removed.
     #[test]
     fn removing_takes_the_earlier_versions_along() {
         let root = root();
@@ -1488,6 +1507,12 @@ mod tests {
         let mut changed = spec("Notes");
         changed.instructions = "Version two.".into();
         save_job(root.path(), "notes", changed, false, None).expect("second");
+        fs::create_dir_all(root.path().join(".jobs/.versions/notes")).expect("kept versions");
+        fs::write(
+            root.path().join(".jobs/.versions/notes/v1.yaml"),
+            "name: Notes\ninstructions: Write the release notes.\n",
+        )
+        .expect("an earlier version, as it was kept");
         let moved = remove_job(root.path(), "notes").expect("remove");
         assert!(!root.path().join(".jobs/.versions/notes").exists());
         let kept = root.path().join(moved).with_extension("versions");

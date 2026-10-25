@@ -32,6 +32,8 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
     const url = String(input)
     if (url === '/api/teams') return Promise.resolve(jsonResponse({ root: '/teams', files: ['demo.yaml', 'trip.yaml'], teams: [{ path: 'demo.yaml', name: 'Demo', agentCount: 1 }, { path: 'trip.yaml', name: 'Trip', agentCount: 1 }] }))
+    // The rail names agents from My agents (ADR 0094).
+    if (url === '/api/jobs') return Promise.resolve(jsonResponse({ folder: '.jobs', jobs: [], problems: [] }))
     if (url.startsWith('/api/team?')) {
       const path = new URLSearchParams(url.split('?')[1]).get('path')
       return Promise.resolve(jsonResponse({ path, revision: 'r1', yaml: `name: ${path === 'trip.yaml' ? 'Trip' : 'Demo'}\nagents: []\n` }))

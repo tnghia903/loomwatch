@@ -3,8 +3,7 @@ import { Network, Plus, UserRoundPlus, X } from 'lucide-react'
 
 import type { DetectedCapability } from '../../lib/library/client'
 import type { AgentDraft } from '../../lib/library/draft'
-import type { JobSpec, SavedJob } from '../../lib/library/jobs'
-import { linkState } from '../../lib/library/link'
+import type { SavedJob } from '../../lib/library/jobs'
 import { draftFromTeamAgent, readsOf, teamKnowledge, type TeamKnowledge } from '../../lib/library/teamDraft'
 import type { RunRecord } from '../../lib/runs/client'
 import type { ModelMove } from '../../lib/team-file/useModelFollowing'
@@ -16,7 +15,6 @@ import { AgentAnswer, AgentChat, AgentFile } from '../agents/AgentChat'
 import { AgentBuilder, AgentHead } from '../agents/AgentBuilder'
 import { ByHand, type ByHandProps } from '../agents/ByHand'
 import type { AgentView } from '../agents/route'
-import { LinkedAgent } from '../canvas/LinkedAgent'
 import { withAllowed } from '../../lib/tools/allow'
 import { InlineMarkdown } from '../ui/Markdown'
 
@@ -34,12 +32,12 @@ export interface TeamAgentsProps {
   skills: readonly DetectedCapability[]
   skillsLoading: boolean
   savedJobs: readonly SavedJob[]
-  /** One workbench change on a team's own agent, written into the team file. */
+  /** My agents has been read: until then, an agent's place there is unknown, not missing. */
+  savedJobsLoaded?: boolean
+  /** One workbench change on an agent this team hasn't saved to My agents yet, written into the team file. */
   onEdit: <K extends keyof AgentDraft>(agentId: string, key: K, value: AgentDraft[K]) => void
-  /** Bring a linked agent in this team to a version of its agent in Your agents, from `previous`
-      when it is known (lib/library/link.ts `fieldsForVersion`). */
-  onApplyVersion: (agentId: string, job: SavedJob, previous: Pick<JobSpec, 'reads'> | null) => void
-  onUnlink: (agentId: string) => void
+  /** One of My agents was saved here: the team shows it as it is now (ADR 0094). */
+  onAgentSaved: (job: SavedJob) => void
   onShowWorkflow: () => void
   /** Put one of Your agents in this team. Absent when the team can't be changed here. */
   onAdd?: (job: SavedJob) => void
@@ -55,14 +53,14 @@ const NO_MOVES: ReadonlyMap<string, ModelMove> = new Map()
 
 /**
  * THE TEAM'S AGENTS, the first of a team's three views (Agents, Workflow, Chat): every agent of the
- * team on its workbench. A team starts here, with the agents you built in Your agents or a new one;
- * Workflow is where they are connected. A team's own agent is edited right here and saved with the
- * team, like a canvas edit. One placed from Your agents opens its saved version: saving it makes the
- * next version and moves this team to it.
+ * team on its workbench. A team starts here, with the agents you built in My agents or a new one;
+ * Workflow is where they are connected. Every agent is one of My agents (ADR 0094), so its workbench
+ * is its own: saving it changes it in every team it's in. One the team hasn't saved yet is edited
+ * with the team and joins My agents when the team is saved.
  */
-export function TeamAgents({ agents, responder, selected, onSelect, teamName, teamPath, editable, skills, skillsLoading, savedJobs, onEdit, onApplyVersion, onUnlink, onShowWorkflow, onAdd, onPickModel, modelMoves = NO_MOVES, onUndoModelMove }: TeamAgentsProps) {
+export function TeamAgents({ agents, responder, selected, onSelect, teamName, teamPath, editable, skills, skillsLoading, savedJobs, savedJobsLoaded = true, onEdit, onAgentSaved, onShowWorkflow, onAdd, onPickModel, modelMoves = NO_MOVES, onUndoModelMove }: TeamAgentsProps) {
   const agent = agents.find((candidate) => candidate.id === selected) ?? agents[0] ?? null
-  const link = agent ? linkState(agent, savedJobs) : null
+  const mine = agent?.from ? savedJobs.find((job) => job.id === agent.from?.agent) ?? null : null
   // What the team gives it to read, kept the same list while the team file doesn't change it.
   const reads = useMemo(() => (agent ? readsOf(agent) : []), [agent])
   // The same, as its chat here is given it: it reads in its chat what it reads in the team.
@@ -74,11 +72,11 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
     <div className="team-agents">
       <nav className="team-agents-strip" aria-label={`${teamName}’s agents`}>
         {agents.map((candidate) => {
-          const linked = linkState(candidate, savedJobs)
+          const job = candidate.from ? savedJobs.find((each) => each.id === candidate.from?.agent) : undefined
           return (
             <button key={candidate.id} type="button" className="team-agents-chip" aria-pressed={candidate.id === agent?.id} onClick={() => onSelect(candidate.id)}>
               <FigureStill className="team-agents-figure" figure={agentFigure(candidate, savedJobs)} alt="" width={40} height={40} />
-              <span><b>{candidate.name}</b><em>{linked ? `From My agents${linked.behind ? ' · update ready' : ''}` : 'This team’s own'}</em></span>
+              <span><b>{candidate.name}</b><em>{!candidate.from ? 'Joins My agents when you save' : job ? (job.does?.trim() || 'One of My agents') : savedJobsLoaded ? 'Not in My agents' : ''}</em></span>
             </button>
           )
         })}
@@ -94,16 +92,20 @@ export function TeamAgents({ agents, responder, selected, onSelect, teamName, te
         </div>
       )}
 
-      {agent && link && (
+      {agent && agent.from && (
         <div className="team-agents-linked" key={agent.id}>
-          <LinkedAgent agent={agent} link={link} readOnly={!editable} onApply={(job, previous) => onApplyVersion(agent.id, job, previous)} onUnlink={() => onUnlink(agent.id)} teamPath={teamPath} headClassName="agent-section-head" showEdit={false} />
-          {link.job
-            ? <AgentBuilder id={link.job.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: (job, previous) => { if (editable) onApplyVersion(agent.id, job, previous) }, reads, knowledge, onShowWorkflow }} />
-            : <p className="t-meta">Its agent is gone from My agents. Make it this team’s own to change it here.</p>}
+          {mine
+            ? <AgentBuilder id={mine.id} skills={[...skills]} skillsLoading={skillsLoading} inTeam={{ name: teamName, onSaved: onAgentSaved, reads, knowledge, onShowWorkflow }} />
+            : savedJobsLoaded && (
+              <div className="team-agents-empty">
+                <p>This agent isn’t in My agents any more, so this team can’t run. In Workflow, select it, press Delete and save.</p>
+                <button type="button" className="btn" onClick={onShowWorkflow}><Network size={14} aria-hidden="true" />Open Workflow</button>
+              </div>
+            )}
         </div>
       )}
 
-      {agent && !link && <OwnAgent key={agent.id} agent={agent} team={{ agents, responder }} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} knowledge={knowledge} onShowWorkflow={onShowWorkflow}
+      {agent && !agent.from && <OwnAgent key={agent.id} agent={agent} team={{ agents, responder }} teamPath={teamPath} editable={editable} skills={skills} skillsLoading={skillsLoading} onEdit={onEdit} knowledge={knowledge} onShowWorkflow={onShowWorkflow}
         following={{
           follows: agent.followsSuggestion === true,
           moved: modelMoves.get(agent.id) && { from: (modelMoves.get(agent.id) as ModelMove).from, onUndo: () => onUndoModelMove?.(agent.id) },
@@ -132,7 +134,7 @@ function AddAgents({ jobs, inTeam, teamPath, first, onAdd, onClose, onShowWorkfl
             return (
               <li key={job.id}>
                 <FigureStill figure={figureFor(job.id, job.figure)} alt="" width={52} height={52} loading="lazy" decoding="async" />
-                <span><b>{job.name}</b><em>{added ? 'Already in this team' : job.does ? <InlineMarkdown clickable={false}>{job.does}</InlineMarkdown> : 'One of your agents'}</em></span>
+                <span><b>{job.name}</b><em>{added ? 'Already in this team' : job.does ? <InlineMarkdown clickable={false}>{job.does}</InlineMarkdown> : 'One of My agents'}</em></span>
                 <button type="button" className="btn" onClick={() => onAdd(job)}><Plus size={13} aria-hidden="true" />{added ? 'Add again' : 'Add'}</button>
               </li>
             )
@@ -173,7 +175,7 @@ function OwnAgent({ agent, team, teamPath, editable, skills, skillsLoading, onEd
       {/* The same head as one of My agents (AgentHead): its name, how it is kept, its tabs. */}
       <AgentHead
         name={name}
-        status={<span className="agent-builder-note">{editable ? 'This team’s own agent: what you change here is saved with the team, like a change on the canvas.' : 'This team can’t be changed here, so the bench shows it as it is.'}</span>}
+        status={<span className="agent-builder-note">{editable ? 'Saving the team adds it to My agents.' : 'This team can’t be changed here, so the bench shows it as it is.'}</span>}
         view={view} onView={setView}
       />
       <ByHand

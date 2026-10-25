@@ -612,6 +612,39 @@ describe('Workspace', () => {
   })
 
   /**
+   * ADR 0094: knowledge isn't turned off for one team, so taking one of the agent's own reads off a
+   * team's canvas takes it off the agent in every team it's in. The canvas says so; a folder the
+   * team gave it says nothing of the kind.
+   */
+  it('says when a read of the agent’s own came off it in every team it’s in', async () => {
+    const [, reviewer] = documentState.nodes
+    Object.assign(reviewer.data.agent, { from: { agent: 'reviewer' }, capabilities: [{ kind: 'knowledge', name: 'Style', path: '/Users/me/style' }, { kind: 'knowledge', name: 'Notes', path: '/Users/me/notes' }] })
+    const stubbed = vi.mocked(fetch)
+    const answer = stubbed.getMockImplementation()!
+    stubbed.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/jobs'
+      ? new Response(JSON.stringify({ folder: '.jobs', jobs: [{ id: 'reviewer', file: '.jobs/reviewer.yaml', name: 'Reviewer', instructions: 'Review it.', reads: [{ name: 'Style', path: '/Users/me/style' }] }], problems: [] }), { status: 200 })
+      : answer(input, init))
+    const view = renderWorkspace()
+    try {
+      // A folder's card is named by the folder.
+      await screen.findByText('Reviewer reads notes')
+      // My agents is read before the canvas can tell whose read it is.
+      await waitFor(() => expect(stubbed.mock.calls.some(([url]) => String(url) === '/api/jobs')).toBe(true))
+      await act(async () => {})
+      act(() => flowRuntime.onEdgesChange?.([{ id: 'capability:reviewer->knowledge@/Users/me/notes', type: 'remove' }]))
+      expect(screen.queryByText(/in every team it’s in/)).toBeNull()
+
+      act(() => flowRuntime.onEdgesChange?.([{ id: 'capability:reviewer->knowledge@/Users/me/style', type: 'remove' }]))
+      const note = (await screen.findByText(/off Reviewer in every team it’s in, since it’s one of its own reads\. To give it back, open Agents\./)).closest('[role="status"]')
+      expect(note).toHaveTextContent(/^Took style off Reviewer/)
+    } finally {
+      view.unmount()
+      Reflect.deleteProperty(reviewer.data.agent, 'from')
+      Reflect.deleteProperty(reviewer.data.agent, 'capabilities')
+    }
+  })
+
+  /**
    * ADR 0042: drawing a line from an agent to a folder card connects that agent to the same path,
    * and taking away the card's last line keeps the card where it is, saved in the sidecar.
    */
@@ -1274,7 +1307,8 @@ describe('Workspace', () => {
         fireEvent.click(routes[0])
         const panel = await screen.findByRole('region', { name: /What Researcher was given/ })
         expect(panel).toHaveTextContent('no preceding stage')
-        expect(panel).toHaveTextContent('1 entry · pinned')
+        // The stored packet is read after the panel opens ("Reading the stored packet…").
+        await waitFor(() => expect(panel).toHaveTextContent('1 entry · pinned'))
       } finally {
         HTMLDialogElement.prototype.showModal = showModal
       }

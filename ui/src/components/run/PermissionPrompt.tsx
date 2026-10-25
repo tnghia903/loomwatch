@@ -11,8 +11,9 @@ import { useNow } from '../../lib/useNow'
 interface PermissionPromptProps {
   run: Pick<RunRecord, 'runId' | 'permissionRequests'>
   /**
-   * "Always allow": switch it on for this agent in the team file (ADR 0037), or always allow that
-   * one call of a connected tool (ADR 0069), as well as letting the rest of this run through.
+   * "Always allow": switch it on for this agent (ADR 0037), or always allow that one call of a
+   * connected tool (ADR 0069), in every team it is in (ADR 0094), as well as letting the rest of
+   * this run through.
    * Absent when the team cannot be changed from here, or for a request nothing covers.
    */
   onAlwaysAllow?: (agentId: string, what: AlwaysAllowed) => void
@@ -163,10 +164,10 @@ export function PermissionActions({ runId, request, team = false, onAlwaysAllow,
           <button type="button" className="btn" disabled={busy} onClick={() => void answer('allow_team')} title={`Allow ${request.title} for every agent in this run, without asking, until the run ends. Other tools still ask.`}>Allow for the whole team</button>
         )}
         {request.tool && onAlwaysAllow && (
-          <button type="button" className="btn" disabled={busy} onClick={always} title={`${request.name} may do “${request.title}” without asking from now on. Its other actions still ask. Take it back in its Tools block.`}>Always allow this</button>
+          <button type="button" className="btn" disabled={busy} onClick={always} title={`${request.name} may do “${request.title}” without asking from now on, in every team it’s in. Its other actions still ask. Take it back in its Tools block.`}>Always allow this</button>
         )}
         {!request.tool && request.switch && onAlwaysAllow && (
-          <button type="button" className="btn" disabled={busy} onClick={always} title={`Switch on “${SWITCH_LABEL[request.switch]}” for ${request.name} in the team file, so later runs do not ask`}>Always allow {SWITCH_LABEL[request.switch]}</button>
+          <button type="button" className="btn" disabled={busy} onClick={always} title={`Switch on “${SWITCH_LABEL[request.switch]}” for ${request.name} in every team it’s in, so later runs don’t ask`}>Always allow {SWITCH_LABEL[request.switch]}</button>
         )}
         <button type="button" className="btn permission-deny" disabled={busy} onClick={() => void answer('deny')}>Deny</button>
       </div>

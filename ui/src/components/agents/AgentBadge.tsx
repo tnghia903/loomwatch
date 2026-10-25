@@ -21,8 +21,8 @@ export interface AgentBadgeProps {
   modelName?: string
   /** Its thinking effort's name, when it has one other than the model's default. */
   effortName?: string
-  /** Teams that use it, how many of those run on a schedule, and how many have an update ready. */
-  usedIn?: { teams: number; scheduled: number; behind: number }
+  /** Teams that use it, and how many of those run on a schedule. */
+  usedIn?: { teams: number; scheduled: number }
   /** Kept at the notch of a Mac, to message from the top of the screen (ADR 0083). */
   pinned?: boolean
   compact?: boolean
@@ -78,7 +78,7 @@ export function AgentBadge({ markId, figure, draft, modelName, effortName, usedI
       {usedIn && (
         <div className="agent-badge-row">
           <span className="agent-badge-label">Used in</span>
-          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}{usedIn.behind > 0 ? <em className="agent-badge-behind"> · update ready in {usedIn.behind}</em> : null}</span>
+          <span>{usedIn.teams === 0 ? 'No team yet' : `${usedIn.teams} team${usedIn.teams === 1 ? '' : 's'}`}</span>
         </div>
       )}
     </div>
