@@ -2,7 +2,7 @@ import { ExternalLink, FolderOpen, X } from 'lucide-react'
 import { createElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { BoxAt, ReplyTo } from '../../lib/chat/client'
+import type { BoxAt, ReplyTo, TimeAt } from '../../lib/chat/client'
 import type { AgentFacts } from '../../lib/chat/faces'
 import { quoteLine } from '../../lib/chat/reply'
 import { baseName, extensionOf, fileLabel, fileTitle, formatBytes, withFolderPaths } from '../../lib/files/fileRefs'
@@ -13,11 +13,12 @@ import type { PageMark, PagePart } from '../../lib/files/pageFrame'
 import { answerPlace, askKey, bubbleAgent, bubbleCardParts, bubbleLabel, bubblePlace, bubbleTitle, fileAsks, findPassage, pageText, partBox, partId, partLines, partLook, partTexts, passageOf, passageReply, wordsLook, wordsOpen, type AskedPassage, type PartLook } from '../../lib/files/passage'
 import { partPictureName, pictureInside } from '../../lib/files/parts'
 import { cellsText, parseWorkbook, tableSheet } from '../../lib/files/cells'
+import { clockTime, frameTimes, framesOf, stillCopy } from '../../lib/files/moments'
 import { figureStill } from '../../lib/library/figures'
 import { wearerOf } from '../../lib/chat/helpers'
 import { TeamFiguresContext } from '../agents/figureContext'
 import { useFigurePictures } from './useFigurePictures'
-import { canMark, FileOriginContext, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
+import { FileOriginContext, rawFileUrl, readerFormat, type FileToRead } from '../../lib/files/reader'
 import { useFileActions } from '../../lib/files/useFile'
 import { useFileText } from '../../lib/files/useFileText'
 import { relativeTime } from '../../lib/format'
@@ -32,6 +33,7 @@ import { PassageAnswer } from './PassageAnswer'
 import { PartBubble } from './PartBubble'
 import { PictureView } from './PictureView'
 import { SheetView, type MarkedCells } from './SheetView'
+import { MediaView } from './MediaView'
 
 export interface FileReaderProps {
   file: FileToRead
@@ -64,6 +66,8 @@ const HINT_KEY = 'loomwatch.readerHint'
 const PICTURE_HINT_KEY = 'loomwatch.readerHint.picture'
 /** And for a sheet, whose drag is across cells. */
 const CELLS_HINT_KEY = 'loomwatch.readerHint.cells'
+/** And for a recording, whose line is pressed or dragged along. */
+const MEDIA_HINT_KEY = 'loomwatch.readerHint.media'
 /** How long "Updated" stays lit after the file changed on disk. */
 const UPDATED_MS = 2_400
 /** The ask bubble's size before it has been measured. */
@@ -104,7 +108,8 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   const text = content.file?.text ?? null
   const [view, setView] = useState<'page' | 'code'>('page')
   const shown = format === 'page' && view === 'code' ? 'code' : format
-  const askable = Boolean(onAsk && from && canMark(format))
+  // Any part of every kind the reader draws can be asked about (ADR 0077, ADR 0091).
+  const askable = Boolean(onAsk && from)
   // Views that mark their parts themselves, by pointer, rather than by selecting words: a picture
   // (a box) and a sheet (cells). A web page reports its own marked words.
   const cellsView = shown === 'table' || shown === 'sheet'
@@ -219,16 +224,29 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
     if (marked?.at && place && page.current?.contains(document.activeElement)) bubble.current?.querySelector<HTMLButtonElement>('.rd-ask-main')?.focus()
   }, [marked, place])
 
-  // What a box is seen as, sent with the question: the picture inside it. Cells go as their words.
-  const picturesOf = async (at: BoxAt): Promise<File[]> => {
-    const image = page.current?.querySelector('img')
-    const picture = image ? await pictureInside(image, at, partPictureName(baseName(path))) : null
+  // What a part is seen as, sent with the question: the picture inside a box; the frame of a
+  // moment, a span's first, middle and last frames, or a box cut out of its frame. Cells and the
+  // moments of a recording of sound only go as their words.
+  const picturesOf = async (at: BoxAt | TimeAt): Promise<File[]> => {
+    const video = page.current?.querySelector('video')
+    if (video) {
+      const stem = baseName(path).replace(/\.[^.]+$/, '') || 'recording'
+      const times = frameTimes(at)
+      if (!times.length) return []
+      // Taken from a hidden copy, so the recording on screen stays where the person put it.
+      const copy = await stillCopy(video)
+      const frames = await framesOf(copy ?? video, times, (index) => `${stem} at ${clockTime(times[index]).replace(/:/g, '.')}.png`, at.kind === 'box' ? at : undefined)
+      copy?.removeAttribute('src')
+      return frames
+    }
+    const image = at.kind === 'box' ? page.current?.querySelector('img') : null
+    const picture = image && at.kind === 'box' ? await pictureInside(image, at, partPictureName(baseName(path))) : null
     return picture ? [picture] : []
   }
   const askAbout = (reply: ReplyTo, words: string | undefined, agent: string) => {
     if (!onAsk) return
-    if (reply.at?.kind !== 'box') { onAsk(reply, words, agent); return }
-    void picturesOf(reply.at).then((pictures) => onAsk(reply, words, agent, pictures))
+    if (reply.at?.kind !== 'box' && reply.at?.kind !== 'time') { onAsk(reply, words, agent); return }
+    void picturesOf(reply.at).then((pictures) => onAsk(reply, words, agent, ...(pictures.length ? [pictures] : [])))
   }
 
   const ask = (words?: string) => {
@@ -491,7 +509,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
   }
 
   // The tip under a file, until a part of one has been asked about.
-  const hintKey = !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : HINT_KEY
+  const hintKey = format === 'media' ? MEDIA_HINT_KEY : !words ? PICTURE_HINT_KEY : cellsView ? CELLS_HINT_KEY : HINT_KEY
   const unseen = useMemo(() => {
     try { return window.localStorage.getItem(hintKey) !== 'seen' } catch { return true }
   }, [hintKey])
@@ -575,9 +593,14 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         boxes={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'box' ? [{ id, at, look: wordsLookOf([id]) }] : [] })} onOpen={openPlace} />
     </div>
   )
-  else if (format === 'media') body = /^(mp3|wav|m4a)$/.test(extensionOf(path))
-    ? <audio className="rd-media" controls src={rawFileUrl(path)} />
-    : <video className="rd-media" controls src={rawFileUrl(path)} />
+  else if (format === 'media') body = (
+    <div ref={page} className="rd-page rd-as-media">
+      <MediaView src={rawFileUrl(path)} audio={/^(mp3|wav|m4a)$/.test(extensionOf(path))} name={fileTitle(fileName)} askable={askable} asking={asking} dark={pageDark}
+        agent={from ? name(from) : ''} face={from ? <AvatarFace id={from} hue={hue(from)} size={20} fontSize={8} text={initials(name(from))} /> : null}
+        open={answerShown ? partId(answerShown) : null} marking={marked?.at?.kind === 'time' || marked?.at?.kind === 'box' ? marked.at : null} onMarked={setMarked} onOpen={openPlace} onDrawn={measure}
+        marks={places.flatMap((id) => { const at = atOf(id); return at?.kind === 'time' || at?.kind === 'box' ? [{ id, at, look: wordsLookOf([id]) }] : [] })} />
+    </div>
+  )
   else if (text === null) body = <p className="rd-loading" role="status">Reading {fileName}…</p>
   else if (shown === 'page') body = <PageFrame path={path} name={fileName} html={text} marks={pageMarks} onMarked={setMarked} onParts={takeParts} onOpen={setAnswerFor} onEscape={closeAnswer} cleared={cleared}
     onHover={(key, at, now) => { const passage = key ? mine.find((item) => askKey(item) === key) : undefined; if (key && passage && hasCard(passage)) cardAt(key, at, now); else cardAt('', null, now) }} />
@@ -651,7 +674,7 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
           slot, slot.dataset.part,
         ))}
         {askable && marked && place && from && askee && (
-          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
+          <div ref={bubble} className={`rd-ask${place.below ? ' below' : ''}${listing ? ' listing' : ''}`} style={{ top: place.top, left: place.left }} role="toolbar" aria-label={`Ask ${name(askee)} about the ${marked.at?.kind === 'cells' ? 'cells' : marked.at?.kind === 'time' ? 'moment' : marked.at ? 'part' : 'words'} you marked`} onMouseDown={(event) => event.preventDefault()}>
             <button type="button" className="rd-ask-main" onClick={() => ask()} title={`Ask ${name(askee)} about this`}>
               <AvatarFace key={askee} id={askee} hue={hue(askee)} size={24} fontSize={9} text={initials(name(askee))} className="rd-ask-face" />
               <span>Ask</span>
@@ -703,7 +726,8 @@ export function FileReader({ file, name, hue, onAsk, team = NO_TEAM, role, asked
         {askable && hint && !marked && from && (text !== null || !words) && (
           <p className="rd-hint" data-reader-chrome>
             <AvatarFace id={from} hue={hue(from)} size={20} fontSize={8} text={initials(name(from))} />
-            {!words ? <span><mark className="box">Drag over any part</mark> to ask <b>{name(from)}</b> about it</span>
+            {format === 'media' ? <span><mark className="box">Click or drag the bar</mark> to ask <b>{name(from)}</b> about a moment</span>
+              : !words ? <span><mark className="box">Drag over any part</mark> to ask <b>{name(from)}</b> about it</span>
               : cellsView ? <span><mark className="box">Drag across any cells</mark> to ask <b>{name(from)}</b> about them</span>
                 : <span><mark>Mark any words</mark> to ask <b>{name(from)}</b> about them</span>}
             <button type="button" className="rd-hint-close" onClick={hideHint} aria-label="Hide this tip"><X size={12} aria-hidden="true" /></button>

@@ -180,15 +180,19 @@ export interface ReplyTo {
  * top left, so the part keeps its place however large it is drawn.
  */
 export type PartAt =
-  /** A box: on a picture, or on page `page` (from 1) of a document. */
-  | { kind: 'box'; x: number; y: number; w: number; h: number; page?: number }
+  /** A box: on a picture, on page `page` (from 1) of a document, or on the frame of a recording at `ms`. */
+  | { kind: 'box'; x: number; y: number; w: number; h: number; page?: number; ms?: number }
   /** A range of cells, by the sheet's own row and column numbers from 1, corners included; `sheet` names it in a workbook. */
   | { kind: 'cells'; sheet?: string; top: number; left: number; bottom: number; right: number }
+  /** A moment of a recording, in milliseconds from its start, or the span to `end`. */
+  | { kind: 'time'; start: number; end?: number }
 
-/** A box on a picture or a page. */
+/** A box on a picture, a page or a frame. */
 export type BoxAt = Extract<PartAt, { kind: 'box' }>
 /** A range of cells on a sheet. */
 export type CellsAt = Extract<PartAt, { kind: 'cells' }>
+/** A moment or a span of a recording. */
+export type TimeAt = Extract<PartAt, { kind: 'time' }>
 
 /** One item of the chat, newest first from the daemon. */
 export type ChatItem =

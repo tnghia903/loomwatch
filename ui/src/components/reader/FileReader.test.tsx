@@ -805,6 +805,164 @@ describe('a sheet in the reader', () => {
   })
 })
 
+// ADR 0091: a moment, a span or a box on a frame of a recording is asked about from its line.
+describe('a recording in the reader', () => {
+  const TALK = '/teams/.loomwatch/market/writer/talk.mp4'
+  const SONG = '/teams/.loomwatch/market/writer/song.mp3'
+  let drawn: number[][] = []
+  let times = new WeakMap<HTMLMediaElement, number>()
+  let seeks: [HTMLMediaElement, number][] = []
+  /** Where the recording on screen was sent, in seconds, in order. */
+  const seeksOf = (media: HTMLMediaElement) => seeks.filter(([each]) => each === media).map(([, value]) => value)
+  beforeEach(() => {
+    drawn = []
+    times = new WeakMap()
+    seeks = []
+    answer = (url) => respond(200, { path: TALK, exists: true, isDir: false, sizeBytes: 9_000_000, modifiedAt: '2026-10-19T01:00:00Z', kind: 'media', folder: null, openable: true, url })
+    // jsdom plays nothing: a minute-long recording that goes where it is told.
+    vi.spyOn(HTMLMediaElement.prototype, 'duration', 'get').mockReturnValue(60)
+    vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockReturnValue(true)
+    vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockReturnValue(4)
+    vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'get').mockImplementation(function (this: HTMLMediaElement) { return times.get(this) ?? 0 })
+    vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set').mockImplementation(function (this: HTMLMediaElement, value: number) {
+      times.set(this, value)
+      seeks.push([this, value])
+      queueMicrotask(() => this.dispatchEvent(new Event('seeked')))
+    })
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+    vi.spyOn(HTMLVideoElement.prototype, 'videoWidth', 'get').mockReturnValue(1280)
+    vi.spyOn(HTMLVideoElement.prototype, 'videoHeight', 'get').mockReturnValue(720)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ drawImage: (...args: unknown[]) => { drawn.push(args.slice(1, 5) as number[]) } }) as unknown as CanvasRenderingContext2D)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => done(new Blob(['png'], { type: 'image/png' })))
+  })
+  const line = () => document.querySelector<HTMLElement>('.rd-media-line')!
+  /** Presses on the line at x and lets go at toX: the line is 800 wide in jsdom, a minute long. */
+  const slide = (target: Element, x: number, toX = x) => {
+    fireEvent.pointerDown(target, { button: 0, pointerId: 1, clientX: x, clientY: 10 })
+    fireEvent.pointerMove(line(), { pointerId: 1, clientX: toX, clientY: 10 })
+    fireEvent.pointerUp(target, { pointerId: 1, clientX: toX, clientY: 10 })
+  }
+
+  it('marks the moment pressed on its line, goes there, and sends its frame with the question', async () => {
+    const { onAsk } = renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })
+    expect(await screen.findByText('Click or drag the bar')).toBeInTheDocument()
+    await waitFor(() => expect(line()).toHaveAttribute('tabindex', '0'))
+    expect(line()).toHaveAccessibleName('Ask Writer about a moment')
+    slide(line(), 200)
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the moment you marked' })).toBeInTheDocument()
+    const video = document.querySelector('video')!
+    expect(video.currentTime).toBe(15)
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    const at = { kind: 'time', start: 15_000 }
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(
+      { runId: 'run-1', messageId: passageId(TALK, 'The moment at 0:15', at as never), from: 'writer', to: null, kind: 'passage', text: 'The moment at 0:15', file: TALK, at },
+      undefined, 'writer', [expect.any(File)],
+    ))
+    expect((onAsk.mock.lastCall![3] as File[])[0].name).toBe('talk at 0.15.png')
+    expect(drawn).toEqual([[0, 0, 1280, 720]])
+  })
+
+  it('marks the span dragged along its line, and sends its first, middle and last frames, taken without moving the recording on screen', async () => {
+    const { onAsk } = renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(line()).toHaveAttribute('tabindex', '0'))
+    slide(line(), 400, 200)
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'From 0:15 to 0:30', at: { kind: 'time', start: 15_000, end: 30_000 } }), EXPLAIN_WORDS, 'writer', [expect.any(File), expect.any(File), expect.any(File)],
+    ))
+    expect((onAsk.mock.lastCall![3] as File[]).map((frame) => frame.name)).toEqual(['talk at 0.15.png', 'talk at 0.23.png', 'talk at 0.30.png'])
+    // The frames came from a copy: the recording on screen only went to the span's start.
+    expect(seeksOf(document.querySelector('video')!)).toEqual([15])
+  })
+
+  it('marks a box on the paused frame, placed on the whole frame though its bottom is left to the controls, and sent cut out of that frame', async () => {
+    const { onAsk } = renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(line()).toHaveAttribute('tabindex', '0'))
+    slide(line(), 400)
+    // The recording has gone to 0:30 once it says so.
+    await act(() => Promise.resolve())
+    fireEvent.keyDown(document, { key: 'Escape' })
+    // The frame is 800 by 600; what takes the pointer stops short of the player's controls.
+    const frame = document.querySelector<HTMLElement>('.rd-media-catch')!
+    frame.getBoundingClientRect = () => new DOMRect(0, 0, 800, 528)
+    fireEvent.pointerDown(frame, { button: 0, pointerId: 2, clientX: 400, clientY: 0 })
+    fireEvent.pointerMove(frame, { pointerId: 2, clientX: 800, clientY: 300 })
+    fireEvent.pointerUp(frame, { pointerId: 2, clientX: 800, clientY: 300 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain' }))
+    const at = { kind: 'box', x: 5000, y: 0, w: 5000, h: 5000, ms: 30_000 }
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ text: 'The top right of the frame at 0:30', at }), EXPLAIN_WORDS, 'writer', [expect.any(File)]))
+    expect(drawn.at(-1)).toEqual([640, 0, 640, 360])
+  })
+
+  it('draws each part asked about on its line with the bubble of the agent asked, which opens the answer and goes to its moment', async () => {
+    const asked = [part({ state: 'said', by: 'writer', text: 'The chart appears.', at: null }, { file: TALK, text: 'From 0:15 to 0:30', at: { kind: 'time', start: 15_000, end: 30_000 } })]
+    renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' }, asked })
+    const bubble = await screen.findByRole('button', { name: "Writer's answer about “From 0:15 to 0:30”" })
+    const mark = document.querySelector<HTMLElement>('.rd-moment[data-part]')!
+    expect(mark.contains(bubble)).toBe(true)
+    expect(mark).toHaveStyle({ left: '25%', width: '25%' })
+    slide(mark, 300)
+    expect(answerCard()).toHaveTextContent('The chart appears.')
+    expect(document.querySelector('video')!.currentTime).toBe(15)
+  })
+
+  it('asks about a moment of a recording of sound only by its time alone', async () => {
+    const { onAsk } = renderReader({ file: { path: SONG, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(line()).toHaveAttribute('tabindex', '0'))
+    expect(document.querySelector('.rd-media-drawing')).toBeNull()
+    line().focus()
+    fireEvent.keyDown(line(), { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask' }))
+    await waitFor(() => expect(onAsk).toHaveBeenCalledWith(expect.objectContaining({ text: 'The moment at 0:00', at: { kind: 'time', start: 0 } }), undefined, 'writer'))
+  })
+
+  it('moves the recording with the arrow keys on its bar, further with Shift, and Enter marks where it is', async () => {
+    renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(line()).toHaveAttribute('tabindex', '0'))
+    line().focus()
+    fireEvent.keyDown(line(), { key: 'ArrowRight', shiftKey: true })
+    await act(() => Promise.resolve())
+    fireEvent.keyDown(line(), { key: 'ArrowRight' })
+    await act(() => Promise.resolve())
+    expect(document.querySelector('video')!.currentTime).toBe(6)
+    fireEvent.keyDown(line(), { key: 'Enter' })
+    expect(await screen.findByRole('toolbar', { name: 'Ask Writer about the moment you marked' })).toBeInTheDocument()
+    expect(document.querySelector('.rd-moment.marking')).toHaveStyle({ left: '10%' })
+  })
+
+  it('shows the time a mouse over the bar would mark, and the agent asked at its start until a part is asked about', async () => {
+    renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' } })
+    await waitFor(() => expect(line()).toHaveAttribute('tabindex', '0'))
+    expect(line().querySelector('.rd-media-face')).not.toBeNull()
+    fireEvent.pointerMove(line(), { pointerId: 1, pointerType: 'mouse', clientX: 200, clientY: 10 })
+    expect(line().querySelector('.rd-media-hover')).toHaveTextContent('0:15')
+    fireEvent.pointerLeave(line(), { pointerId: 1, pointerType: 'mouse' })
+    expect(line().querySelector('.rd-media-hover')).toBeNull()
+  })
+
+  it('puts bubbles too near to sit side by side in a row of their own under the bar', async () => {
+    const asked = [
+      part({ state: 'said', by: 'writer', text: 'A title.', at: null }, { messageId: 'n-1', file: TALK, text: 'The moment at 0:15', at: { kind: 'time', start: 15_000 } }),
+      part({ state: 'said', by: 'writer', text: 'Still the title.', at: null }, { messageId: 'n-2', file: TALK, text: 'The moment at 0:16', at: { kind: 'time', start: 16_000 } }),
+      part({ state: 'said', by: 'writer', text: 'The end.', at: null }, { messageId: 'n-3', file: TALK, text: 'The moment at 0:45', at: { kind: 'time', start: 45_000 } }),
+    ]
+    renderReader({ file: { path: TALK, runId: 'run-1', from: 'writer' }, asked })
+    await waitFor(() => expect(document.querySelectorAll('.rd-moment[data-part] .rd-bubble')).toHaveLength(3))
+    const rows = [...document.querySelectorAll<HTMLElement>('.rd-moment[data-part] > .rd-slot')].map((slot) => slot.dataset.row)
+    expect(rows).toEqual(['0', '1', '0'])
+    expect(document.querySelectorAll<HTMLElement>('.rd-moment[data-part] > .rd-slot')[1].style.top).toBe('calc(100% + 6px)')
+    // A part asked about takes the agent's place at the bar's start.
+    expect(line().querySelector('.rd-media-face')).toBeNull()
+  })
+
+  it('draws no bar where nothing can be asked and nothing has been', async () => {
+    renderReader({ file: { path: TALK, runId: 'run-1', from: null } })
+    await waitFor(() => expect(document.querySelector('video')).not.toBeNull())
+    expect(document.querySelector('.rd-media-line')).toBeNull()
+  })
+})
+
 describe('a web page in the reader', () => {
   it('runs in a sandbox with no origin, and shows its code on request', async () => {
     answer = (url) => (url.startsWith('/api/files/read') ? respond(200, read({ path: '/w/site.html', name: 'site.html', kind: 'web', text: '<h1>Hello</h1>' })) : respond(404, {}))

@@ -352,6 +352,8 @@ const SHEET_ROWS: u32 = 1_048_576;
 const SHEET_COLUMNS: u32 = 16_384;
 /// The longest sheet name a part names; Excel keeps 31 characters, other programs more.
 const SHEET_NAME_CHARS: usize = 255;
+/// The latest moment of a recording a part names: a week in, in milliseconds.
+const RECORDING_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 /// Where a part of a file that isn't words is (ADR 0091), as the reader marked it.
 ///
@@ -361,7 +363,8 @@ const SHEET_NAME_CHARS: usize = 255;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PartAt {
-    /// A box on a picture, or on page `page` (from 1) of a document.
+    /// A box on a picture, on page `page` (from 1) of a document, or on the frame of a recording at
+    /// `ms` milliseconds.
     Box {
         x: u16,
         y: u16,
@@ -369,6 +372,14 @@ pub enum PartAt {
         h: u16,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         page: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ms: Option<u64>,
+    },
+    /// A moment of a recording, `start` milliseconds from its beginning, or the span to `end`.
+    Time {
+        start: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<u64>,
     },
     /// A range of cells, from row `top` and column `left` to row `bottom` and column `right`, all
     /// from 1 and included; `sheet` names its sheet in a workbook, and is `None` for a CSV or TSV.
@@ -386,16 +397,28 @@ pub enum PartAt {
 }
 
 impl PartAt {
-    /// Whether the place is one the reader could have marked: a box inside its picture, cells inside
-    /// a sheet.
+    /// Whether the place is one the reader could have marked: a box inside its picture or frame,
+    /// cells inside a sheet, a moment or a span that goes forward.
     fn usable(&self) -> bool {
         match *self {
-            Self::Box { x, y, w, h, page } => {
+            Self::Box {
+                x,
+                y,
+                w,
+                h,
+                page,
+                ms,
+            } => {
                 w > 0
                     && h > 0
                     && u32::from(x) + u32::from(w) <= u32::from(PART_WHOLE)
                     && u32::from(y) + u32::from(h) <= u32::from(PART_WHOLE)
                     && page != Some(0)
+                    && ms.is_none_or(|ms| ms <= RECORDING_MS)
+                    && !(page.is_some() && ms.is_some())
+            }
+            Self::Time { start, end } => {
+                start <= RECORDING_MS && end.is_none_or(|end| end > start && end <= RECORDING_MS)
             }
             Self::Cells {
                 ref sheet,
@@ -424,12 +447,27 @@ impl PartAt {
     /// left, and 0% to 50% of the way down from the top".
     fn described(&self) -> Option<String> {
         match *self {
-            Self::Box { x, y, w, h, page } => {
-                let page = page
-                    .map(|page| format!("on page {page}, "))
-                    .unwrap_or_default();
+            Self::Box {
+                x,
+                y,
+                w,
+                h,
+                page,
+                ms,
+            } => {
+                let on = match (page, ms) {
+                    (Some(page), _) => format!("on page {page}, "),
+                    (None, Some(ms)) => {
+                        format!(
+                            "on the frame at {} ({} seconds in), ",
+                            clock(ms),
+                            seconds(ms)
+                        )
+                    }
+                    (None, None) => String::new(),
+                };
                 Some(format!(
-                    "{page}the box from {} to {} of the way across from the left, and {} to {} of \
+                    "{on}the box from {} to {} of the way across from the left, and {} to {} of \
                      the way down from the top",
                     percent(x),
                     percent(x.saturating_add(w)),
@@ -437,6 +475,22 @@ impl PartAt {
                     percent(y.saturating_add(h)),
                 ))
             }
+            // The exact seconds too, as the person marked them: a change asked for ("cut this")
+            // needs the cut where they put it, not at the nearest second.
+            Self::Time { start, end } => Some(match end {
+                None => format!(
+                    "the moment at {} ({} seconds in)",
+                    clock(start),
+                    seconds(start)
+                ),
+                Some(end) => format!(
+                    "from {} to {} ({} to {} seconds in)",
+                    clock(start),
+                    clock(end),
+                    seconds(start),
+                    seconds(end)
+                ),
+            }),
             Self::Cells {
                 ref sheet,
                 top,
@@ -467,6 +521,29 @@ impl PartAt {
             }
             Self::Unknown => None,
         }
+    }
+}
+
+/// Milliseconds as a player shows time, to the second: `42_000` is "0:42", `3_723_000` "1:02:03".
+fn clock(ms: u64) -> String {
+    let seconds = ms.saturating_add(500) / 1000;
+    let (hours, minutes, rest) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{rest:02}")
+    } else {
+        format!("{minutes}:{rest:02}")
+    }
+}
+
+/// Milliseconds as seconds, exact and with no trailing zeros: `36_480` is "36.48", `42_000` "42".
+fn seconds(ms: u64) -> String {
+    let (whole, rest) = (ms / 1000, ms % 1000);
+    if rest == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{rest:03}")
+            .trim_end_matches('0')
+            .to_owned()
     }
 }
 
@@ -2442,7 +2519,7 @@ async fn send_message(
     }
     // "hi @team" asks for no work: the agent it would have started says hello back, and the
     // message stays a note rather than sending the team off to do its standing job.
-    if answers_in_chat(request.work, &message.files) {
+    if answers_in_chat(request.work, &message.files, message.reply_to.as_ref()) {
         answer_instead(&state, &team, &mut decided, text, &mut message).await;
     }
     match decided {
@@ -2731,9 +2808,13 @@ async fn learn_from_words(
 
 /// Whether a message may be answered in the chat instead of starting work ([`answer_instead`]):
 /// not when it was sent as work, and not when it carries files, which that answer, read from the
-/// words alone with no tools, could not open (ADR 0082).
-fn answers_in_chat(work: bool, files: &[ChatFile]) -> bool {
-    !work && files.is_empty()
+/// words alone with no tools, could not open (ADR 0082). Nor when it is about a part of a file
+/// that its words don't hold, a box or a moment, which only the file shows (ADR 0091): a moment
+/// of a recording of sound goes with no picture, and that answer could only guess at it.
+fn answers_in_chat(work: bool, files: &[ChatFile], reply: Option<&ReplyTo>) -> bool {
+    let only_in_the_file = reply
+        .is_some_and(|reply| matches!(reply.at, Some(PartAt::Box { .. } | PartAt::Time { .. })));
+    !work && files.is_empty() && !only_in_the_file
 }
 
 /// A message that was going to start the workflow but needs none is answered by the agents
@@ -5206,9 +5287,43 @@ mod tests {
             bytes: 1,
             picture: true,
         };
-        assert!(answers_in_chat(false, &[]));
-        assert!(!answers_in_chat(true, &[]));
-        assert!(!answers_in_chat(false, &[shot]));
+        assert!(answers_in_chat(false, &[], None));
+        assert!(!answers_in_chat(true, &[], None));
+        assert!(!answers_in_chat(false, &[shot], None));
+    }
+
+    /// **A part only the file shows goes to work (ADR 0091).** A moment of a song is sent with no
+    /// picture, and a box whose picture couldn't be cut with none: an answer from the words alone
+    /// would guess. Words and cells carry what they say, and may still be answered in the chat.
+    #[test]
+    fn a_part_only_the_file_shows_goes_to_work() {
+        let part = |text: &str, at: Option<serde_json::Value>| -> ReplyTo {
+            let mut reply = json!({
+                "messageId": "passage:p", "from": "researcher", "kind": "passage", "text": text,
+                "file": "/w/song.mp3"
+            });
+            if let Some(at) = at {
+                reply["at"] = at;
+            }
+            serde_json::from_value(reply).expect("a part reads")
+        };
+        let moment = part(
+            "The moment at 0:42",
+            Some(json!({"kind": "time", "start": 42_000})),
+        );
+        let box_ = part(
+            "The top right of the picture",
+            Some(json!({"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000})),
+        );
+        let cells = part(
+            "Region · Q1\nNorth · 120",
+            Some(json!({"kind": "cells", "top": 1, "left": 1, "bottom": 2, "right": 2})),
+        );
+        let words = part("Sales grew 12% in Q3.", None);
+        assert!(!answers_in_chat(false, &[], Some(&moment)));
+        assert!(!answers_in_chat(false, &[], Some(&box_)));
+        assert!(answers_in_chat(false, &[], Some(&cells)));
+        assert!(answers_in_chat(false, &[], Some(&words)));
     }
 
     #[tokio::test]
@@ -5411,7 +5526,8 @@ mod tests {
                 y: 0,
                 w: 5000,
                 h: 5000,
-                page: None
+                page: None,
+                ms: None
             })
         );
         let mut checked = parsed.clone();
@@ -5440,6 +5556,7 @@ mod tests {
             w: 5,
             h: 9665,
             page: Some(3),
+            ms: None,
         };
         assert_eq!(
             on_a_page.described().as_deref(),
@@ -5536,6 +5653,62 @@ mod tests {
         ] {
             let mut bad = cells(outside.clone());
             assert!(check_reply(&mut bad, &team).is_err(), "{outside}");
+        }
+    }
+
+    /// **A moment, a span, or a box on a frame of a recording is a part of its own (ADR 0091).** The
+    /// agent is told the time as a player shows it and the exact seconds marked, so a cut it is
+    /// asked for lands where the person put it; a span that runs backwards is refused.
+    #[test]
+    fn a_moment_of_a_recording_keeps_its_time_and_the_agent_is_told_it() {
+        let team = team();
+        let part = |text: &str, at: serde_json::Value| -> ReplyTo {
+            serde_json::from_value(json!({
+                "messageId": "passage:t", "from": "researcher", "kind": "passage", "text": text,
+                "file": "/w/talk.mp4", "at": at
+            }))
+            .expect("a part reads")
+        };
+        let named = |mut reply: ReplyTo| {
+            check_reply(&mut reply, &team).expect("usable");
+            reply.for_agents(&team).named
+        };
+        assert_eq!(
+            named(part(
+                "The moment at 0:42",
+                json!({"kind": "time", "start": 42_400})
+            )),
+            "A part of talk.mp4 from Researcher, in the file /w/talk.mp4, the moment at 0:42 \
+             (42.4 seconds in)"
+        );
+        assert!(
+            named(part(
+                "From 0:42 to 1:02:03",
+                json!({"kind": "time", "start": 42_000, "end": 3_723_005})
+            ))
+            .ends_with("from 0:42 to 1:02:03 (42 to 3723.005 seconds in)")
+        );
+        let frame = part(
+            "The top right of the frame at 0:07",
+            json!({"kind": "box", "x": 5000, "y": 0, "w": 5000, "h": 5000, "ms": 7250}),
+        );
+        assert_eq!(
+            serde_json::to_value(&frame).expect("written")["at"]["ms"],
+            7250
+        );
+        assert!(named(frame).ends_with(
+            "on the frame at 0:07 (7.25 seconds in), the box from 50% to 100% of the way across \
+             from the left, and 0% to 50% of the way down from the top"
+        ));
+
+        for bad in [
+            json!({"kind": "time", "start": 5000, "end": 5000}),
+            json!({"kind": "time", "start": 5000, "end": 4000}),
+            json!({"kind": "time", "start": 604_800_001_u64}),
+            json!({"kind": "box", "x": 0, "y": 0, "w": 10, "h": 10, "page": 2, "ms": 10}),
+        ] {
+            let mut reply = part("x", bad.clone());
+            assert!(check_reply(&mut reply, &team).is_err(), "{bad}");
         }
     }
 

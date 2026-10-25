@@ -42,10 +42,11 @@ export function passageReply(file: { path: string; runId: string | null; from: s
   return { runId: file.runId, messageId: passageId(file.path, text, at), from: file.from, to: null, kind: 'passage', text, file: file.path, ...(at ? { at } : {}) }
 }
 
-/** Where a part is, in a few characters that are the same each time: `box:2500,0,5000,5000`, `cells:2,1,9,4@Q3`. */
+/** Where a part is, in a few characters that are the same each time: `box:2500,0,5000,5000`, `cells:2,1,9,4@Q3`, `time:42000-51000`. */
 export function atKey(at: PartAt): string {
   if (at.kind === 'cells') return `cells:${at.top},${at.left},${at.bottom},${at.right}${at.sheet ? `@${at.sheet}` : ''}`
-  return `box:${at.x},${at.y},${at.w},${at.h}${at.page ? `@${at.page}` : ''}`
+  if (at.kind === 'time') return `time:${at.start}${at.end === undefined ? '' : `-${at.end}`}`
+  return `box:${at.x},${at.y},${at.w},${at.h}${at.page ? `@${at.page}` : ''}${at.ms === undefined ? '' : `@t${at.ms}`}`
 }
 
 /**

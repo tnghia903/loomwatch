@@ -134,7 +134,17 @@ is given the cells' words under their column names and after their row names, an
 they are and on which sheet (the workbook's sheets are drawn from the words LoomWatch reads out of
 it, as the agents read them). The cells stay marked with the agent's bubble beside them; a press on
 them opens the answer, and a sheet's tab shows a small box while it holds cells asked about. The chat
-quotes cells with their rows kept ("By region · Q1, Q2 · 120, 140"). Drag the edge between the
+quotes cells with their rows kept ("By region · Q1, Q2 · 120, 140"). A video or a sound recording
+plays in the reader, however large, and you can skip to any point (LoomWatch sends it in pieces as
+it plays). Under it is a bar, with the agent's face at its start: click it to ask about that moment,
+or drag along it for a stretch, and the recording skips there; the arrow keys move along it and
+Enter marks where it is. On a paused video, drag over the picture to mark a box on that frame. The
+agent is told the time to the millisecond, so a cut it is asked for lands where you put it, and is
+sent the frame, a stretch's first, middle and last frames, or the box cut out of its frame (for a
+sound recording the agent gets only the time). A box or a moment always starts the agent's work, so
+it can open the file, rather than a quick answer in the chat from the words alone. Each part stays
+on the bar with the agent's bubble above it; click the bubble to open the answer and skip to that
+moment. Drag the edge between the
 chat and the pane to resize; double-click resets it. The chat is paged from `GET /api/chat`. The magnifier in its header finds words anywhere in the
 team's chat (`GET /api/chat/find`, ADR 0081): what you asked, the answers, your notes and what the
 agents said to each other, in any order and any form of a word, with or without Vietnamese accents.
