@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 
+import type { PartAt } from '../../lib/chat/client'
 import { PAGE_SANDBOX, pageDocument, pageMessage, type PageMark, type PagePart } from '../../lib/files/pageFrame'
 
 export interface Marked {
+  /** The marked words, or what a part that isn't words is called ("The top right of the picture"). */
   text: string
-  /** Where the marked words are on screen. */
+  /** Where the marked part is on screen. */
   rect: { top: number; bottom: number; left: number; right: number }
+  /** Where a part that isn't words is in its file (ADR 0091). */
+  at?: PartAt
 }
 
 interface PageFrameProps {

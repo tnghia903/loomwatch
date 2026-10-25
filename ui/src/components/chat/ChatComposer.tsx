@@ -231,7 +231,9 @@ export function ChatComposer({ agents, names, steps, live, decision, disabled = 
   const name = (id: string) => names.get(id) ?? id
   const addressed = target?.kind === 'agent' ? target.agent : null
   const them = attached.length === 1 ? 'it' : 'them'
-  const placeholder = attached.length > 0 && !answering ? (solo || target ? `Say what to do with ${them}` : `@team, then what to do with ${them}`)
+  // A part of a file asked about says so first, though its picture is in the box too (ADR 0091).
+  const placeholder = replyTo?.kind === 'passage' && !answering ? `Ask ${name(addressed ?? replyTo.from)} about this part…`
+    : attached.length > 0 && !answering ? (solo || target ? `Say what to do with ${them}` : `@team, then what to do with ${them}`)
     : answering?.kind === 'question' ? `Answer ${answering.fromName}…`
     : answering ? 'A note for Approve, or what to change'
       : replyTo?.kind === 'passage' ? `Ask ${name(addressed ?? replyTo.from)} about this part…`

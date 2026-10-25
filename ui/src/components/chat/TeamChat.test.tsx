@@ -1685,6 +1685,76 @@ describe('asking about a part of a file', () => {
     await waitFor(() => expect(posted[0]).toMatchObject({ url: '/api/chat/messages', body: { text: '@Researcher Explain this part in plain words.', to: { kind: 'agent', agent: 'researcher' }, replyTo: part } }))
   })
 
+  // ADR 0091: a part that isn't words (a box on a picture) goes with its picture, so the agent sees it.
+  describe('a part that isn’t words', () => {
+    const place = { kind: 'box' as const, x: 5000, y: 0, w: 5000, h: 5000 }
+    const boxPart = { ...part, messageId: 'passage:box', text: 'The top right of the picture', file: '/w/chart.png', at: place }
+    const picture = () => new File(['png'], 'chart part.png', { type: 'image/png' })
+    const kept = { name: 'chart part.png', path: '/teams/news.files/chat/chart part.png', bytes: 3, picture: true }
+    let uploads: string[] = []
+    let keeps = true
+    beforeEach(() => {
+      uploads = []
+      keeps = true
+      // The box shows a picture it holds; jsdom keeps none.
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:picture')
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+      const base = globalThis.fetch
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== 'PUT') return base(input, init)
+        uploads.push(String(input))
+        return keeps ? new Response(JSON.stringify(kept), { status: 200 }) : new Response(JSON.stringify({ error: 'disk full' }), { status: 500 })
+      }))
+    })
+
+    it('Explain sends its picture with it, kept first', async () => {
+      page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+      answer = () => new Response(JSON.stringify({ error: 'later' }), { status: 500 })
+      renderChat({ ask: { reply: boxPart, words: 'Explain this part in plain words.', pictures: [picture()], at: 5 } })
+      await waitFor(() => expect(posted[0]).toMatchObject({
+        url: '/api/chat/messages',
+        body: { text: '@Writer Explain this part in plain words.', to: { kind: 'agent', agent: 'writer' }, replyTo: boxPart, files: [{ path: kept.path }] },
+      }))
+      expect(uploads).toEqual(['/api/chat/files?teamPath=news.yaml&name=chart+part.png'])
+    })
+
+    it('Ask puts its picture in the box with the part, and the reader is told which part', async () => {
+      page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+      const onPassages = vi.fn()
+      renderChat({ ask: { reply: boxPart, pictures: [picture()], at: 6 }, onPassages })
+      await waitFor(() => expect(box()).toHaveValue('@Writer '))
+      const going = await screen.findByRole('list', { name: 'Going with your message' })
+      await waitFor(() => expect(within(going).getByLabelText('chart part.png')).toHaveAttribute('aria-busy', 'false'))
+      expect(posted).toHaveLength(0)
+      // The box asks about the part, though a picture is in it too.
+      expect(box()).toHaveAttribute('placeholder', 'Ask Writer about this part…')
+      await waitFor(() => expect(onPassages).toHaveBeenLastCalledWith([], 'The top right of the picture\u0001box:5000,0,5000,5000', expect.any(Array)))
+    })
+
+    it('takes the part’s picture out of the box with its quote, or when another part replaces it', async () => {
+      page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+      const { rerender, props } = renderChat({ ask: { reply: boxPart, pictures: [picture()], at: 7 } })
+      const going = await screen.findByRole('list', { name: 'Going with your message' })
+      await waitFor(() => expect(within(going).getAllByRole('listitem')).toHaveLength(1))
+      const other = { ...boxPart, messageId: 'passage:other', text: 'The left side of the picture', at: { kind: 'box' as const, x: 0, y: 4000, w: 1000, h: 2000 } }
+      rerender(<TeamChat {...props} ask={{ reply: other, pictures: [new File(['png'], 'chart part (2).png', { type: 'image/png' })], at: 8 }} />)
+      await waitFor(() => expect(screen.getByRole('group', { name: 'Asking about a part of chart.png from Writer' })).toHaveTextContent('The left side of the picture'))
+      await waitFor(() => expect(within(screen.getByRole('list', { name: 'Going with your message' })).getAllByRole('listitem')).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: /Don.t reply/ }))
+      await waitFor(() => expect(screen.queryByRole('list', { name: 'Going with your message' })).toBeNull())
+    })
+
+    it('leaves Explain in the box, with its picture, when the picture can’t be kept', async () => {
+      page = [{ kind: 'work', run: run({}), request: message({}), notes: [] }]
+      keeps = false
+      renderChat({ ask: { reply: boxPart, words: 'Explain this part in plain words.', pictures: [picture()], at: 9 } })
+      await waitFor(() => expect(box()).toHaveValue('@Writer Explain this part in plain words.'))
+      expect(screen.getByRole('group', { name: 'Asking about a part of chart.png from Writer' })).toBeInTheDocument()
+      expect(await screen.findByRole('list', { name: 'Going with your message' })).toBeInTheDocument()
+      expect(posted).toHaveLength(0)
+    })
+  })
+
   it('says which parts were asked about, from what the chat holds', async () => {
     page = [{ kind: 'work', run: run({ runId: 'run-2' }), request: message({ id: 'm-2', runId: 'run-2', text: '@Writer why?', replyTo: part }), notes: [] }]
     const onPassages = vi.fn()

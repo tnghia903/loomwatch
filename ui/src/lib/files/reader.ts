@@ -42,9 +42,9 @@ export function readerFormat(path: string): ReaderFormat | null {
   return FORMATS.find(([pattern]) => pattern.test(extension))?.[1] ?? null
 }
 
-/** Whether a part of it can be marked and asked about: everything shown as words. */
+/** Whether a part of it can be marked and asked about: words, and a box on a picture (ADR 0091). */
 export function canMark(format: ReaderFormat): boolean {
-  return format !== 'picture' && format !== 'media'
+  return format !== 'media'
 }
 
 async function errorMessage(response: Response): Promise<string> {
